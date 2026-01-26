@@ -1,0 +1,78 @@
+#content, .content, body {
+    background-color: inherit !important;
+    max-width: none !important;
+    width: auto !important;
+    margin-left: none !important;
+}
+
+#table-of-contents {
+    background-color: inherit !important;
+    color: inherit !important;
+    border-right: 1px solid rgba(0,0,0,0.1) !important;
+}
+
+#table-of-contents h2 {
+    background-color: rgba(0, 0, 0, 0.1) !important;
+
+    color: inherit !important; /* Optional: ensures text color matches too */
+    margin-top: 0 !important;
+}
+
+/* Targets all <pre> blocks that have the 'src' class */
+pre.src {
+    background-color: rgba(0, 0, 0, 0.5) !important;
+    color: inherit !important;
+    border: 10px solid rgba(0, 0, 0, 0.1) !important;
+    padding: 1.2em !important;
+    border-radius: 4px !important;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.05) !important;
+    overflow: auto;
+    font-size: 100%;
+}
+
+h1 code {
+    background-color: inherit !important;
+}
+h2 code {
+    background-color: inherit !important;
+}
+h3 code {
+    background-color: inherit !important;
+}
+
+pre code {
+    background-color: rgba(0, 0, 0, 0.02) !important;
+
+}
+code {
+    background-color: rgba(0, 0, 0, 0.15) !important;
+
+}
+
+/* Ensure the language-specific classes (like src-jsonnet) 
+     don't override the background with white */
+pre[class*="src-"] {
+    background-color: transparent !important;
+}
+
+/* Force navigation links to use the theme's link and text colors */
+#table-of-contents ul.nav li a {
+    color: inherit !important;
+    opacity: 0.8;
+}
+
+/* Use a slightly darker/lighter version of the background for hover */
+#table-of-contents ul.nav li a:hover {
+    background-color: rgba(0,0,0,0.05) !important;
+}
+
+#postamble {
+    background-color: rgba(0, 0, 0, 0.9) !important;
+
+    color: inherit !important; /* Optional: ensures text color matches too */
+    margin-top: 0 !important;
+}
+#postamble .date {
+    color: #aaaaaa;
+}
+    

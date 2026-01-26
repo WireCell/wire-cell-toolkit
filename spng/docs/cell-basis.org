@@ -1,5 +1,39 @@
 #+title: Cell Basis
 
+* Cell basis basics
+
+Conceptually, a "cell" is a neighborhood around where a wire from each plane
+crosses.
+
+In reality, most wire crossing patterns to not allow for a single crossing point
+to be shared by three wires.  More rigorously we define a "cell" as the
+minimally distance trio of pair-wise wire crossing points.  The distance is
+minimal in the sense that one may walk between any two crossing points along the
+mutual wire and not cross any wire that is not in the cell.
+
+Now, imagine ordering all possible "cells" from one anode face to produce a
+list.  We further imaging that while this order is arbitrary, we define an
+algorithm that reproduces the order for a given anode face.
+
+The order of that list defines a *cell basis* of size =Ncell=.  
+
+We will define two objects defined on the cell basis:
+
+- cell basis vector :: A 1D vector of size =Ncell= or =(Ncell,1)= that gives a
+  scalar value for each cell.  For example, one may define a *cell basis vector*
+  to express the amount of ionized charge in each cell.
+
+- cell basis tensor :: A 2D vector of shape =(Ncell,3)= gives a scalar value for
+  each wire or each wire's channel contributing associated with each cell.  The
+  last dimension of size 3 spans the wire planes in the face for the cell basis.
+
+A cell basis is thus defined for each anode face.  For anodes with wrapped or
+jumpered wires we define two cell bases, one for each face.  In order to express
+channel level information in a cell basis tensor we must form an ordered list of
+channels on both faces for each view in order to map wire indices (a per face
+set) to channel indices (a per view, two-face) set.
+
+
 * Intro
 
 SPNG [[https://github.com/WireCell/spng/issues/9][issue #9]] resulted in =CrossViews= and =CrossViewsExtract= to produce MP2/MP3

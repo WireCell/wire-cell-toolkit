@@ -137,7 +137,7 @@ namespace WireCell::SPNG::CellBasis {
             auto col = basis.select(1, plane);
             out.push_back(indices[plane].index({col}));
         }
-        return torch::stack(out);            
+        return torch::stack(out, 1);
     }
 
 }

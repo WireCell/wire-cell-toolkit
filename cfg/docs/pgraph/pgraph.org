@@ -1,0 +1,801 @@
+#+title: Wire-Cell Toolkit Data Flow Graph Configuration
+#+SETUPFILE: https://fniessen.github.io/org-html-themes/org/html-theme-readtheorg.setup
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="http://thomasf.github.io/solarized-css/solarized-light.css" />
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="readtheorg-solarized-light.css" />
+#+LATEX_HEADER: \usepackage[margin=1.0in]{geometry}
+#+options: ':t
+#+PROPERTY: header-args:jsonnet :dir .
+#+PROPERTY: header-args :cache yes
+
+* Introduction
+
+Wire-Cell Toolkit (WCT) implements the [[https://en.wikipedia.org/wiki/Dataflow_programming][/data flow programming/]] (DFP) pattern.
+The "programming" is done by describing a graph with vertices or /nodes/
+representing operations on data objects that are transferred (flow) through
+graph /edges/.
+
+This document describes the concepts of WCT DFP, how its graphs are represented,
+how to describe graphs through a configuration language, how that configuration
+is used by the toolkit to construct, configure and connect C++ components and finally how to implement a WCT DFP graph node.
+
+
+* Concepts of WCT DFP graphs
+
+The DFP pattern is conceptually simple but there are choices in how to apply it.
+This section describes the choices and defines the terms in WCT's
+implementation of DFP.
+
+
+** Directed acyclic graph.
+
+WCT DFP uses a *directed acyclic graph* (DAG).  This simply means that data
+flows in one direction along any given edge and there is no path in the graph
+that cycles back to any given node.  A node in a DAG thus has two sets of edges:
+*output edges* carry data produced by a node and *input edges* carry data
+consumed by a node.
+
+** Port graphs
+
+WCT DFP uses a *port graph* (PG or pgraph).  In a port graph, an edge connects
+to a node via an identified "port".  Given WCT DFP graph is also a DAG, there
+are is a list of "input ports" (or /iports/) and "output ports" (/oports/).
+
+** Graph rules
+
+WCT DFP graphs have rules that govern edge connections:
+
+1. Exactly one edge may connect a pair of ports.
+
+2. Connect ports must reside in different nodes.
+
+3. Exactly one type of data object is passed by an edge.
+
+
+** Atomic nodes, incomplete subgraphs and complete graphs
+
+The number of iports and oports is predetermined by a node's definition.  A *complete graph* has all ports connected and an *incomplete subgraph* has open ports that are still available for connection.  By collecting all open ports, a subgraph can be logically considered a singe *aggregate node* of many *atomic nodes*.  We use term *pnode* ("ported node") to generically refer to atomic and aggregate nodes.  A complete graph is thus a single pnode with no open ports.  
+
+
+* Graph representation 
+
+A WCT DFP graph is represented in terms of the following objects.  The next
+section will describe the language forms to define these objects but for now, simply assume they follow the general JSON data model.
+
+** =inode=
+
+An *inode* object represents an *instance* of a WCT C++ *component class*.  A DFP node is a component but not all components are nodes and an inode represents them as well.  These others can be described as "service" or "tool" components.  As we will see, an inode is a container for component configuration, though not all components are configurable.
+
+An *inode* object is defined by these attributes:
+
+- type :: A string identifying the WCT =type name= (see description of =WIRECELL_FACTORY=).
+- *name* :: A string unique among all instance of a common *type*.  Can be empty if the instance is a singleton of the type.
+- data :: An object providing configuration to the instance.  Can be empty or omitted if the type is not configurable or its default configuration is sufficient.
+- uses :: A set of other inodes or pnodes that this inode refers to by name in a data attribute.  Can be empty or omitted.  (See section [[Uses]]).
+
+** Pnode
+
+A *pnode* represents either an *atomic inode* or an *aggregate of other pnodes*.
+It has some similarities with an inode, but the two are not interchangeable.
+A *pnode* object is defined by these attributes.
+
+- type :: The literal string ="Pnode"=.
+- name :: When representing an atomic inode, a string formed from *inode.type* and *inode.name* and may otherwise be omitted.
+- iports :: An ordered list of input ports (See section [[Port]]).
+- oports :: An ordered list of output ports.
+- edges :: A set of edge representations (See section [[Edge]]).
+- uses :: A set of other pnodes that the pnode aggregates.  (See section [[Uses]]).
+
+#+begin_note
+From here, the document will use the generic term *node* to refer to either
+*inode* or *pnode* in contexts where no distinction exists.
+#+end_note
+
+
+** Port
+
+A *port* object is represented with these two attributes
+
+- node :: The *pnode.name* of the inode that holds to port.
+- port :: The index number of the port in its port list.
+
+#+begin_note
+While the port "knows" its node, the port list in which the port resides (input or output) is not recorded.  Also, ports may only refer to atomic pnodes.   Any ports exposed by an aggregate pnode are its internal atomic pnodes.
+#+end_note
+
+** Edge
+
+An *edge* represents an ordered connection from an *output port* to an *input
+port*.  It has these attributes.
+
+- tail :: an output port object
+- head :: an input port object
+
+Think of an edge as an arrow pointing from its arrow tail to its arrow head.
+
+** Uses
+
+Both *inode* and *pnode* has a *uses* set that holds other inode or pnode
+instances for which the node references by name in the *data* object.
+
+#+begin_note
+All nodes must be reachable from the final complete graph node via *uses* lists. 
+#+end_note
+
+** Graph
+
+A WCT DFP graph has two representations: a *complete-graph pnode* and a *list of
+nodes*.  The list of nodes is derived from the complete graph pnode by applying
+a topological sort to the object dependency graph built from the *uses* lists
+and it adds a final inode which represents a *graph execution engine* component.
+This component holds the list of all edges.  The derivation of the list of nodes
+is automatic and covered in the next section.
+
+
+* Graph construction with Jsonnet
+
+This section will walk through how to construct a WCT DFP graph.  It builds up gradually starting with the basics of the configuration language Jsonnet, how to define a node, how to connect nodes, how to develop graph construction functions and how to form the final list-of-nodes result.
+
+** Jsonnet
+
+WCT DFP graphs are constructed using the Jsonnet language.  Jsonnet is a
+superset of JSON with the following additional features: modules, functions,
+comments, list and object comprehensions and a friendlier syntax.
+Jsonnet is a purely functional language in that variables can only be
+initialized to a value and never modified.
+
+#+begin_note
+WCT C++ consumes configuration in both Jsonnet and JSON syntax.  Jsonnet is used for DFP graph configuration while compressed JSON is used for larger, static configuration data ("wires" files, field responses, noise spectra, etc).
+#+end_note
+
+The Jsonnet project provides excellent documentation.  In order the reader should look through:
+
+- [[https://jsonnet.org/learning/tutorial.html][Tutorial]] walks through most of what one needs to know.
+- [[https://jsonnet.org/ref/stdlib.html][Standard library]] describes the =std= object with many useful functions.
+- [[https://jsonnet.org/ref/language.html][Language reference]] summarizes the language itself.
+
+The rest of this document assumes the information provided in these links.
+
+
+** WCT Jsonnet support
+
+WCT provides some core Jsonnet files to assist in developing configuration.
+
+- =wirecell.jsonnet= :: Wire-Cell system of units and basic utility functions that augment Jsonnet's =std=.
+- =pgraph.jsonnet= :: A full suite of functions to build directed acyclic port graphs.
+
+Typically, Jsonnet code will include both as:
+
+#+begin_src jsonnet
+  local wc = import "wirecell.jsonnet";
+  local pg = import "pgraph.jsonnet";
+#+end_src
+  
+These files reside in the source at =wire-cell-toolkit/cfg/= or may be installed by WCT under =$PREFIX/share/wirecell/=.  Jsonnet files given to the =import= operation will be located by searching an ordered path list:
+
+1. Directory holding the current Jsonnet file.
+2. Current working directory.
+3. An externally provided path list.
+
+WCT will use the colon-separated path list provided by the =WIRECELL_PATH= shell
+environment variable in a first-found-wins manner.  In addition, WCT command
+line programs (=wire-cell= and =wcsonnet=) accept optional arguments =-P/--path=
+to add search paths to the list.  The generic =jsonnet= program accepts =-J/--jpath= and =JSONNET_PATH=.
+
+#+begin_warning
+WCT walks the =WIRECELL_PATH= in the forward direction (left-to-right) while =jsonnet= walks =JSONNET_PATH= in the *reverse* direction.
+#+end_warning
+
+** Building an =inode=
+
+The most fundamental form is an *inode*.  We will use the =Drifter= component as an example.
+
+#+begin_src jsonnet
+  {
+      type: "Drifter",
+      name: "",
+      data: { /* ... */ }
+  }
+#+end_src
+
+#+begin_note
+Typically, a single =Drifter= is used and thus it does not require a name.  We must supply a unique *name* when the same *type* is used more than once in a graph.
+#+end_note
+
+This example appears simple but there are some hidden complexities:
+
+- How do we know the proper "spelling" for the *type*?
+- What attributes of *data* are supported?
+- When can we rely on default values for *data* attributes?
+
+In general, the answer to these questions is: *read the WCT C++*.  However, that
+is laborious and to help the user we develop *Jsonnet libraries*.  They provide
+reference documentation about components, provide defaults, catch typos and
+others mistakes and provide simplifying abstractions.
+
+** Building a =pnode=
+
+Here is an example of a library that helps construct a =Drifter= inode and return it as a pnode.
+
+#+include: drifter.jsonnet src jsonnet
+
+#+RESULTS:
+#+begin_src jsonq
+#+end_src
+
+For brevity, we have omitted some required parameters.  A user may then make a drifter pnode by "importing" the Jsonnet library and calling the method like:
+
+#+begin_src jsonnet :hide results :exports both :results output :wrap src json :summary "Compiled JSON"
+  local drift = import "drifter.jsonnet";
+  drift.drifter() // accept defaults
+#+end_src
+
+#+RESULTS:
+#+begin_src json
+{
+   "edges": [ ],
+   "iports": [
+      {
+         "node": "Drifter",
+         "port": 0
+      }
+   ],
+   "name": "",
+   "oports": [
+      {
+         "node": "Drifter",
+         "port": 0
+      }
+   ],
+   "type": "Pnode",
+   "uses": [
+      {
+         "_pnode": {
+            "nin": 1,
+            "nout": 1
+         },
+         "data": {
+            "drift_speed": 0.0016000000000000001,
+            "lifetime": 8000000
+         },
+         "name": "",
+         "type": "Drifter"
+      }
+   ]
+}
+#+end_src
+
+
+#+begin_note
+This one time we show the full expanded structure of just this single pnode to
+appreciate the complexity that Jsonnet saves us from manually expressing.  While
+the Jsonnet-level pnode structure is relatively simple (the *type*, *name*,
+*data* trio), we can see here structure that is rather more complex.  The user
+should not worry about this complexity as this structure is *ephemeral*.  It
+includes information and arrangements needed to implement port graphs in
+Jsonnet.  After the final list of nodes is produced, we would see structure
+closer to the apparent Jsonnet inode except in JSON syntax.
+#+end_note
+
+** Visualizing
+
+A powerful tool for developing WCT DFP graphs is to visualize them.  The =wire-cell-python= package provides the =dotify= command that will render a graph using GraphViz.  To see a summary of how to use it run:
+
+#+begin_example
+$ wcpy pgraph dotify --help
+#+end_example
+
+It requires the graph to be in the list-of-nodes form and not the pnode form.  We thus must finalize the graph as shown in:
+
+#+include: drifter-graph.jsonnet src jsonnet
+
+We can visualize that with:
+
+#+begin_src shell :file drifter-graph.png :results graphics file :exports both
+  wcpy pgraph dotify drifter-graph.jsonnet drifter-graph.png
+#+end_src
+
+#+RESULTS[af1dbe4e7391d0dbcd15ee5d7198b18107a1a7ed]:
+[[file:drifter-graph.png]]
+
+This shows a single node with the *type* and the *name* on the first two lines followed by the parameters.  The single input and output port, both numbered 0 are shown.  Note, besides being trivial, this is an incomplete subgraph as there are no edges shown.
+
+** Pipelines
+
+A common subgraph is a linear sequence of nodes called a *pipeline*.  Here is simple and abbreviated example that introduces some new node types:
+
+#+include: drifter-pipeline.jsonnet src jsonnet
+
+We visualize, while turning off the display of parameters:
+
+#+begin_src shell :file drifter-graph.png :results graphics file :exports both
+  wcpy pgraph dotify --no-params drifter-pipeline.jsonnet drifter-graph.png
+#+end_src
+
+#+RESULTS[c6a12e2f0533e9fe4bfb6bcc1fb0014a4b1a3893]:
+[[file:drifter-graph.png]]
+
+#+begin_note
+While this example graph renders properly, it is not sufficient for execution by WCT as no configuration parameters are given.  We will continue with these abbreviated examples in this section and later turn to making graphs that are correct for execution.
+#+end_note
+
+** Interning
+
+To introduce the first non-trivial graph we used =pg.pipeline()=.  Before we introduce the rest of the family of subgraph construction functions we will jump to introducing =pg.intern()=.  With this function alone, we may construct any subgraph and the remainder of the family are merely simplified wrappers on =pg.intern()=. 
+
+ Here is its function prototype, all arguments are optional:
+
+#+begin_src jsonnet
+  intern(innodes=[], outnodes=[], centernodes=[], edges=[], iports=[], oports=[], name="")
+#+end_src
+
+- =innodes= :: a list of pnodes which will have their exposed iports become the iports of the interned node.
+- =outnodes= :: ibid but for oports.
+- =centernodes= :: nodes that are in the subgraph but which do not have available ports.
+- =edges= :: any edges, but usually edges between the provided nodes.
+- =iports= :: explicit list of input ports to expose, again typically from provided nodes.
+- =oports= :: ibid but for oports.
+- =name= :: a name for the pnode, can essentially always be ignored.
+
+Here we repeat the pipeline example using =pg.intern()= instead of =pg.pipeline()=.
+
+#+include: drifter-intern.jsonnet src jsonnet
+
+Giving us the same graph.
+
+#+begin_src shell :file drifter-graph.png :results graphics file :exports results
+  wcpy pgraph dotify --no-params drifter-intern.jsonnet drifter-intern.png
+#+end_src
+
+#+RESULTS[0294c8ec836754be3a1062a9dec40df2d7f605f2]:
+[[file:drifter-graph.png]]
+
+** Fans
+
+A consequence of the graph rules given in section [[Graph rules]] is that two edges can not connect to the same port nor can an edge have branches.  When we want data to go to more than one node we need an explicit *fanout* node and when we want more than one data object to come to one node we need an explicit *fanin* node.  In general, *fan nodes* have multiple input or output ports (but not both).
+
+#+include: drifter-fans.jsonnet src jsonnet
+
+#+begin_src shell :file drifter-fans.png :results graphics file :exports results
+  wcpy pgraph dotify --no-params drifter-fans.jsonnet drifter-fans.png
+#+end_src
+
+#+RESULTS[d36a5fd5c69574c78e09ef78624db76fe4e78366]:
+[[file:drifter-fans.png]]
+
+
+It can be laborious to use =pg.intern()= and like we saw for =pg.pipeline()= there are functions to handle fans including =pg.fan.fanin()=, =pg.fan.fanout()= and =pg.fan.pipe()=.  We replace =pg.intern()= with the latter in [[file:drifter-fanpipe.jsonnet]].  The last few lines differ:
+
+#+begin_src jsonnet
+local fanpipe = pg.fan.pipe('DepoSetFanout', drifters, 'DepoSetFanin');
+local graph = pg.pipeline([source, fanpipe, sink]);
+#+end_src
+
+#+begin_src shell :file drifter-fanpipe.png :results graphics file :exports results
+  wcpy pgraph dotify --no-params drifter-fanpipe.jsonnet drifter-fanpipe.png
+#+end_src
+
+#+RESULTS[40a1e12a7452450862e7a25819a8447a7e6a04cb]:
+[[file:drifter-fanpipe.png]]
+
+
+** Crosslines
+
+** Compound endpoints
+
+
+
+
+
+
+
+** Finalizing the graph
+
+=pg.main()=
+
+* C++ configuration
+
+- tbd: loading, construction, configuration dispatch
+- tbd: ad-hoc JSON object vs Hana struct
+- tbd: issues with C++ side of things (ad-hoc vs hana, discovery of *type* and contents for *data*)
+
+* C++ DFP graph node components 
+
+Each node has a /component type/ (mapped to a C++ class, first argument to the
+~WIRECELL_FACTORY()~ CPP macro call) and an instance name and a set number of
+/input ports/ and /output ports/.  These kinds of graph are sometimes called "port
+graphs" and the "p" in "pgraph" stands for "port".  Each port allows passage of
+data objects of a specific interface type (a subclass of ~IData~) as determined by
+the C++ node class on either end of the edge.  A valid graph has exactly one
+edge between any pair of ports.
+
+WCT is described with a simple list of component configuration objects.  Many of
+these objects will configure individual nodes in the graph, but other "tool" or
+"service" components are also included.  One component is special and defines
+the edges of the graph in terms of ~<type>:<name>~" pair.  The ~<type>~ is the
+/component type/ and the ~<name>~ is an /instance name/ to make the node unique when
+multiple nodes of the same component type may exist.  If exactly one instance of
+a component type exists, it can be identified with just ~<type>~.
+
+While very simple in representation, properly forming and reasoning about
+complex graphs configurations is more difficult.  To help with this, WCT
+provides the ~pgraph.jsonnet~ library of functions.
+
+* Old content
+
+What follows is an older, more verbose draft that is being merged to the above.
+
+
+* ~pgraph~ concepts
+
+** inode
+
+In ~pgraph.jsonnet~, a configuration object for an particular instance
+of a WCT component that has an ~INode~ interface is called an *inode*.  As
+introduced above an *inode* must have a ~type~ attribute and may require a
+~name~ attribute.  If the WCT component is configurable (has an
+~IConfigurable~ interface) then the *inode* may also have a ~data~ attribute
+to supply a configuration parameters to the component instance of a
+type given by ~type~.
+
+** pnode
+
+One very useful intermediate construction which is supported by port
+graphs is that of forming a "aggregate" node from a subgraph.  This
+hides arbitrary complexity of a subgraph by conceptually presenting
+the whole as a single node.  Any unattached ports from any of the
+subgraph nodes are assigned to the aggregate node.  A user may connect
+this node into a yet larger graph without the need to understand the
+internal complexity.  This abstraction can be repeated to arbitrary
+scale.  That is one may construct an entire DFP graph as aggregates of
+aggregates of nodes, etc.
+
+The most important functions in ~pgraph.jsonnet~ are those that provide
+ways to form various types of subgraph aggregate nodes.  For this to
+work, a new type of "node" is required that can represent individual
+*inode* nodes as well as aggregates of *inode* nodes.  This is called a
+*pnode*.  A *pnode* is structured similarly to an *inode*.  It has a ~type~
+but all *pnode* has type of ~"Pnode"~.  A *pnode* may also have an instance
+~name~ with the same governing rules as for *inode*.  Additional
+attributes of a *pnode* hold the subgraph information and allow
+unattached ports of the subgraph to be enumerated as if their were on
+the *pnode* itself.
+
+* ~pgraph~ functions
+
+Here describes the most important functions.  Read the code and
+comments in ~pgraph.jsonnet~ for details.  In the examples, we will
+assume
+
+#+begin_src jsonnet
+local pg = import "pgraph.jsonnet";
+#+end_src
+
+** Atomic pnode
+
+The simplest *pnode* is one that represents a single *inode*.
+
+#+begin_src jsonnet
+  local mf = {type:"MyFilter"};
+  local pnode = pg.pnode(mf, nin=1, nout=1);
+#+end_src
+
+If the component has compile-time port cardinality, the ~nin~ and ~nout~
+arguments *must* match expectations.  For components with dynamic port
+cardinality, ~nin~ or ~nout~ will set the number to be used.
+
+** Pipeline of pnodes
+
+A very common subgraph pattern is a linear pipeline of nodes.  These
+can be aggregated as such:
+
+#+begin_src jsonnet
+  local mf1 = {type:"MyFilter", name:"foo"};
+  local mf2 = {type:"MyFilter", name:"bar"};
+  local pipe = pg.pipeline([mf1,mf2]);
+#+end_src
+
+The input ports of ~mf1~ form the input ports of ~pipe~ and likewise the
+output ports of ~mf2~.
+
+** Arbitrary subgraph aggregation
+
+An arbitrary aggregation can be formed with the ~intern()~ function.  It
+accepts zero or more *pnode* objects in three collections: ~innodes~,
+~centernodes~ and ~outnodes~ along with zero or more edges in ~edges~ array
+and input and output ports in ~iports~ and ~oports~.  In principle, all
+other *pnode* creating functions can be implemented as calls to ~intern()~
+with some restriction on which of these arguments are passed.
+
+Using the *pnode* instances created above:
+
+#+begin_src jsonnet
+  local sg = pg.intern(innodes=[pnode, pipe], outnodes=[pnode,pipe]);
+#+end_src
+
+The result would be a *pnode* with two input and two output ports taken
+from those of ~pnode~ and ~pipe~.
+
+Emulating the ~pipeline()~ function:
+
+#+begin_src jsonnet
+  local pipe2 = pg.intern(innodes=[mf1],outnodes=[mf2],
+                          edges=[pg.edge(mf1,mf2)]);
+#+end_src
+
+Or a longer pipeline with three nodes
+
+#+begin_src jsonnet
+  local pipe2 = pg.intern(innodes=[mf1],centernodes=[mf],outnodes=[mf2],
+                          edges=[pg.edge(mf1,mf), pf.edge(mf,mf2)]);
+#+end_src
+
+So far, the ports of the resulting *pnode* are calculated assuming all
+input ports of input nodes are open and likewise for output.  The
+order of these ports on the resulting *pnode* follows the order of the
+nodes in their arrays and the ports in each node.
+
+In some cases, ports may no be available for attaching or one may wish
+to expose ports in a different order.  In such cases ~iports~ and ~oports~
+can be explicitly given.
+
+For example, a common subgraph pattern is an "edge tap" whereby we
+wish to send to its nominal recipient as well as a new consumer.  We
+must have exactly one edge per port and so we may not "split an edge".
+However, there are components called "fanout" which produce a number
+of parallel outputs from each input.
+
+Here is a very contrived example:
+
+#+begin_src jsonnet
+  local fanout = pg.pnode({type:"MyFanout"}, nin=1, nout=3);
+  local tapped = pg.intern(innodes=[mf], centernodes=[fanout], outnodes=[mf1,mf2],
+                           edges=[pg.edge(mf,fanout),
+                                  pg.edge(fanout,mf1,1,0),
+                                  pg.edge(fanout,mf2,2,0)],
+                           oports=[mf2.oports[0], mf1.oports[0], fanout.oports[0]]);
+#+end_src
+
+Output port 0 of the ~fanout~ is left unconnected and output port 1 of
+the ~fanout~ connects to the input port of ~mf1~ and likewise for 2.  If
+~oports~ were not given then the output ports of the resulting ~tapped~
+*pnode* would be in order port 0 from ~[fanout,mf1,mf2]~.  For reasons
+only known to the user, the reverse ordering was explicitly wanted and
+given by ~oports~.
+
+** Fans and taps
+
+Note, ~pgraph~ provides a subobject called ~fan~ with various functions to
+construct fan in/out subgraphs: ~fanout(), fanin(), pipe(), sink()~.  It
+also provides the ~tap()~ function to make constructing "edge taps" as
+described above simple.
+
+** Edge insertion
+
+** Aggregate closed component graphs
+
+* C++ graph node classes
+
+** C++ component configuration
+
+The configuration in Jsonnet gets to an /instance/ of a C++ component that
+inherits from ~IConfigurable~ via the method
+
+#+begin_src c++
+  void configure(const Configuration& cfg);
+#+end_src
+
+The ~Configuration~ class is a C++ object equivalent to the JSON component
+configuration object described above.  The C++ ~IConfigurable~ component should
+interpret the ~Configuration~ object for a set of established attributes, handle
+type conversion, default values and raise exception if required values are
+missing or the wrong type or have illegal value.
+
+The ~configure()~ method is guaranteed to be called in a single-threaded context.
+In most WCT jobs, ~configure()~ is called once and there is no "reconfigure".  Though, generally, class implementations should assume ~configure()~ may be called more than once.
+
+An ~IConfigurable~ class may also provide default values with the method
+
+#+begin_src c++
+  Configuration default_configuration() const;
+#+end_src
+
+Any configuration provided by the user will be merged into this default object
+by the WCT's configuration manager.  This method is also called in a
+single-threaded context.
+
+** Common C++ configuration idioms
+
+An ~IConfigurable~ should use doxygen comments to state configuration parameters.
+These comments may be placed anywhere in the class definition and often located
+on attributes.  For example:
+
+#+begin_src c++
+  private:
+      /// Configuration: "nticks"
+      ///
+      /// An integer specifying the number of samples.
+      int m_nticks{6000};
+#+end_src
+
+Then in the two methods descried above:
+
+#+begin_src c++
+  Configuration MyClass::default_configuration() const {
+      Configuration cfg;
+      cfg["nticks"] = m_nticks;
+      return cfg;
+  }
+  void MyClass::configure(const Configuration& cfg) {
+      m_ticks = get(cfg, "nticks", m_ticks);
+  }
+#+end_src
+
+** C++ graph class inheritance.
+
+A C++ class inheriting from ~INode~ is a graph node class.  Almost all graph node
+classes inherit from an interface further down the inheritance tree which
+specifies the category of node (source, sink, function, fanin, fanout, etc) and
+the types of data passed by nodes.  Eg an ~IFrameFilter~ node is an
+~IFunction<IFrame,IFrame>~ node.  The reminder of this section describes
+requirements on C++ class nodes
+
+** Registration of a concrete component.
+
+Every C++ node class must be registered with the WCT "named factory".  The
+details of this factory are found elsewhere.  The node developer merely must add
+lines in the node ~.cxx~ file like:
+
+#+begin_src c++
+  #include "WireCellUtil/NamedFactory.h"
+  WIRECELL_FACTORY(<component-type-name>, <class>, <comma separated list of interfaces>)
+#+end_src
+
+For example, the "digitizer" node from the simulation is registered as:
+
+#+begin_example
+WIRECELL_FACTORY(Digitizer, WireCell::Gen::Digitizer,
+                 WireCell::INamed,
+                 WireCell::IFrameFilter,
+                 WireCell::IConfigurable)
+#+end_example
+
+If a node class inherits from a concrete class, its interfaces must also be
+listed.  For example, the ~Digitizer~ inheres from a very prolific base called
+~Aux::Logger~ which is an ~INamed~.
+
+** Callable DFP graph node operator and its return value.
+
+Every node "executes" by a graph engine calling that nodes callable operator:
+
+#+begin_src c++
+  bool operator()(/*node type-specific arguments*/) const;
+#+end_src
+
+The arguments passed depend on the node.  Except for sources and sinks that have
+a single argument, an input and an output argument are passed.  For example,
+~Digitizer~ gets an input and an output ~IFrame::pointer~.  Some nodes such as
+fanins and fanouts or queued-out types, get a vector argument.  Some special
+nodes may have a tuple.
+
+For all nodes except for source nodes, the boolean return value is ignored by a
+graph execution engine.  For a source node it is critical to return ~false~ once
+there is no more data to produce.  But, see next section about EOS.
+
+
+** End-of-stream (EOS) protocol for data flow graph nodes
+
+Every node must participate in the end-of-stream (EOS) protocol.  An EOS is used
+to indicate exactly what its name says: a stream of objects has ended.  It is
+conceptually modeled after NULL-terminated C strings.
+
+An EOS marker always starts with a source node.  After the last "real" object is
+output by a source node, it must send out exactly one EOS, still returning true.
+If the graph engine calls the source again, and that source can not start a new
+stream, then it must return ~false~.  Every other node must check for EOS on input
+and forward EOS to all output.  Thus an EOS propagates through the graph.
+
+When an EOS is encountered, the node should perform any flushing of cached data.
+Often jobs will exit after an EOS completes its passage through the graph.  But,
+if a source restarts a new stream then the graph will keep executing.
+
+An EOS is always a ~nullptr~ but its placement depends on the type of argument to
+the node's callable operator.
+
+- scalar (eg, shared pointer) marks EOS as a ~nullptr~.
+- vector (eg input to fanin, output to fanout) marks EOS as a vector full of ~nullptr~.
+- queue (eg, Drifter) places an ~nullptr~ into its output vector, usually at the end.
+
+Specifically, an empty vector for a fanin/fanout is illegal and something has
+gone horribly wrong.  A queued-out node may have an empty vector if it simply
+has not produced anything.  Asynchronous branch/merge nodes have data on just
+one port so any port with EOS means EOS.
+
+** Not-EOS
+
+Some ~IData~ is a collection of other ~IData~.  For example, an ~IFrame~ has a vector
+of ~ITrace~.  Such aggregate data types can have empty collections.  These are NOT
+EOS.  If an aggregate type with an empty collection is input to a node, it still
+must be processed and a valid output produced.  Typically, this means the output
+likewise is in some ways "empty".
+
+
+* Performance
+
+Some Jsonnet forms can contribute to drastically large Jsonnet compilation
+times.  The main cause is that Jsonnet tends to reevaluate forms that are
+repeatedly used.  The Go version does a much better job of internally caching
+objects than the C++ version, and WCT has moved to use it by default.  However,
+surprisingly long compilation times can still be encountered.  Here are some
+recommendations to avoid introducing problems.
+
+** Avoid computational complexity
+
+Be cautious of producing a function that scales poorly with the size of its
+input.  This is a general precaution but as Jsonnet is a /purely functional/
+programming language with a somewhat limited standard library it can be
+particularly easy to solve a problem with a bad algorithm.  It may be fast in
+testing and only show a problem as the configuration grows.
+
+One particular example is that an early implementation of the =unique_list()=
+function provided by =wirecell.jsonnet= used a /linear scan accumulator/.  Each
+element of the input list was compared to every element in a growing output list
+to decide if the new element should be included in the output.  Worse, this
+function is used deeply in forming the final set of edges and nodes for a DFP
+graph.  Its quadratic complexity did not cause problems... until it did.  The
+simple but flawed algorithm was initially chosen in part because of the lack of
+simple way to implement it with a hash (there is no +std.hash()+ function).  Its
+current implementation makes use of the implicit hashing of Jsonnet object keys
+and an explicit tracking or original order followed by a sort to reestablish that
+order.  Close to a 10x speedup was achieved. 
+
+
+** Use =local= to hold expensive forms
+
+Besides the direct syntactic use of =local=, it also represents a potential point
+of caching a result during Jsonnet parsing.
+
+#+begin_src jsonnet
+  {
+      // avoid this
+      bad: expensive_calculation(data),
+
+      // prefer this
+      local good = expensive_calculation(data),
+      good: good
+  }
+#+end_src
+
+** Micro optimizations
+
+In the past, a formatted string that is deeply nested has been found to be a
+significant source of compilation time.
+
+#+begin_src jsonnet
+  {
+      called_frequently(data):: {
+          bad: "bad_%d" % data.id,
+          better: "better_" + std.toString(data.id),
+      }
+  }
+#+end_src
+
+** Profiling Jsonnet compilation
+
+Unfortunately, no tools exist to perform this directly.  If that statement is
+outdated, PLEASE notify me (bv at bnl dot gov).  What is left for the intrepid
+optimizer is to apply time tested techniques.
+
+- divide-and-conquer :: Select ever smaller portions of a form for compilation.  When you remove something and the compilation speeds up, you know what you removed holds forms that may be optimized.
+
+- debug-printing :: Sprinkle your Jsonnet to wrap a =form= with =std.trace(message, form)= and observe the printed =message=.  Piping the stderr through =ts= is one easy way to get times for each printed trace.  Look for unexpectedly duplicated or numerous trace lines with suspicion.
+
+* Meta :noexport:
+
+
+#+begin_src sh :results none
+scp -r pgraph.html pgraph.pdf hierocles.bnl:public_html/wire-cell/docs/
+#+end_src
+
+# Local Variables:
+# eval: (setq-local org-babel-jsonnet-command (format "%s -J %s" (expand-file-name "./my-jsonnet" default-directory) (expand-file-name default-directory)))
+# End:

@@ -8,7 +8,7 @@
 namespace WireCell::SPNG {
 
     /** A torch tensor filter is something that applies some transformation
-     * on its input torch tensor to produce and output torch tennsor.
+     * on its input torch tensor set to produce and output torch tensor set.
      */
     class ITorchTensorSetFilter : public IFunctionNode<ITorchTensorSet, ITorchTensorSet> {
        public:

@@ -7,8 +7,8 @@ namespace WireCell::SPNG::CellBasis {
 
     /// Return a cell basis tensor.
     ///
-    /// By default this constructs in U-V-W order.
-    /// FIXME: could make the order a parameter
+    /// This constructs in U-V-W order and returns shape (Ncells, 3)
+    // FIXME: could make the order a parameter
     torch::Tensor cell_basis(IAnodeFace::pointer face);
 
     

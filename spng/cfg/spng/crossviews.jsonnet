@@ -3,7 +3,7 @@ local real_pg = import "pgraph.jsonnet";
 local util = import "spng/util.jsonnet";
 local fans_mod = import "spng/fans.jsonnet";
 
-function(control={}, pg)
+function(control={}, pg=real_pg)
 {
     local fans = fans_mod(control),
 

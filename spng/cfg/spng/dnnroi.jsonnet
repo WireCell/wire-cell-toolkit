@@ -1,3 +1,5 @@
+// This provides subgraphs related to DNNROI.
+
 local wc = import "wirecell.jsonnet";
 local pg = import "pgraph.jsonnet";
 local fans = import "fans.jsonnet";
