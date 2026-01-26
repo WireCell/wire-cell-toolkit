@@ -1,6 +1,6 @@
 # usage: wire-cell -l stdout wct-sim-check.jsonnet
 // , nanodes=4
-function(input, outname="frame.npz", style='osp') {
+function(input, outname="frame", style='osp', device='cpu', verbosity=0) {
   local g = import 'pgraph.jsonnet',
   local f = import 'pgrapher/common/funcs.jsonnet',
   local wc = import 'wirecell.jsonnet',
@@ -14,6 +14,18 @@ function(input, outname="frame.npz", style='osp') {
   local base = import 'perfect_pdhd/simparams.jsonnet',
   local sp_maker = import 'perfect_pdhd/sp.jsonnet',
   local util = import 'perfect_pdhd/funcs.jsonnet',
+
+  local tpcids = [0],
+  local control_mod = import "spng/control.jsonnet",
+
+  local controls = control_mod(device=device, verbosity=wc.intify(verbosity)),
+  local detconf = import "spng/detconf.jsonnet",
+  local det = detconf.get('pdhd', tpcids),
+
+
+  local torch_stuff = import 'torch_components.jsonnet',
+  local torch_nodes = torch_stuff(det.tpcs[0], controls, outname='sigproc-spng-%s.pt'%outname),
+  local spng_graph = torch_nodes.subgraph,
 
   // local newsim = import 'spng/sim.jsonnet';
   local params = base {
@@ -65,6 +77,7 @@ local hio_sp = g.pnode({
 local sig_reframer = g.pnode({
         type: 'Reframer',
         name: 'reframer-sig-'+tools.anodes[0].name,
+        uses: [tools.anodes[0]],
         data: {
             frame_tag: 'sigproc0',
             tags: [
@@ -77,13 +90,17 @@ local sig_reframer = g.pnode({
             nticks: 6000,
         },
     }, nin=1, nout=1),
-local reco_fork = g.pipeline([
+
+local reco_fork = if style == 'osp' then g.pipeline([
               sp_pipes[0],
               sig_reframer,
               hio_sp,
               g.pnode({ type: 'DumpFrames', name: 'reco_fork' }, nin=1, nout=0),
              ],
-             'reco_fork'),
+             'reco_fork') else g.pipeline([
+              spng_graph,
+              g.pnode({ type: 'DumpFrames', name: 'reco_fork' }, nin=1, nout=0),
+             ]),
 local graph = g.pipeline([source, reco_fork], 'graph'),
 
 local app = {
@@ -95,7 +112,7 @@ local app = {
 local cmdline = {
     type: "wire-cell",
     data: {
-        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellHio"],
+        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellSpng", "WireCellHio"],
         apps: ["Pgrapher"]
     }
 },
