@@ -316,7 +316,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     dnnroi_dense_views(scale=1.0/4000, views=[0,1], rebin=4, extra_name="")::
         pg.shuntlines([
             $.time_filter_views("dnnroi", views=views, extra_name=extra_name),
-            $.downsample_views(rebin, views=views, extra_name='_dense'+extra_name),
+            //$.downsample_views(rebin, views=views, extra_name='_dense'+extra_name),
+            $.rebin_views(rebin, views=views, extra_name='_dense'+extra_name),
             $.scale_views(scale, views, extra_name="_dnnroi_dense"+extra_name),
         ]),
 
@@ -610,6 +611,20 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                     factor: -rebin,     // FIXME: must match upstream resampler.
                     tag: tag,
                     datapath_format: "/traces/Rebinner/" + this_name+'_unbin'
+                } + control
+            }, nin=1, nout=1) for view in views]),
+            
+    rebin_views(rebin=4, views=[0,1,2], tag="", extra_name="")::
+        pg.crossline([
+            pg.pnode({
+                local this_name = $.this_name(extra_name, 'v'+std.toString(view)),
+                type: "SPNGRebinner",
+                name: this_name,
+                data: {
+                    norm: "maximum",
+                    factor: rebin,     // FIXME: must match upstream resampler.
+                    tag: tag,
+                    datapath_format: "/traces/Rebinner/" + this_name+'_rebin'
                 } + control
             }, nin=1, nout=1) for view in views]),
             

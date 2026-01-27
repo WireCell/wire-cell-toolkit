@@ -121,7 +121,7 @@ function(input,
         SPNGTransform: function(inode, pnode)
             dump_tensors_matched({dscale:"dnnroi_scale", sscale:"splat_scale"}, inode, pnode),
         SPNGKernelConvolve: function(inode, pnode)
-            dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener"}, inode, pnode),
+            dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener",decon:"_group"}, inode, pnode),
         SPNGThreshold: function(inode, pnode)
             dump_tensors_matched({wthresh:"wthresh"}, inode, pnode),
         SPNGReduce: function(inode, pnode)
