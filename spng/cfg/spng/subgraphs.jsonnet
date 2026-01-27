@@ -109,7 +109,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local fk = $.filter_kernel([tpc.filters[plane_index].channel.decon,{kind:"none"}],
                                    extra_name=extra_name);
         local rk = $.response_kernel(plane_index, extra_name=extra_name);
-        $.decon_kernel(fk, rk, extra_name=extra_name),
+        $.decon_kernel(fk, rk, extra_name='_'+group.name+extra_name),
 
     /// Return pnode convolve intput data with a given kernel
     kernel_convolve(kernel,     // the object providing the convolution kernel 
