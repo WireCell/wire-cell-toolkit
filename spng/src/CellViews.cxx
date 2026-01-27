@@ -26,9 +26,13 @@ using namespace WireCell::Aux;
 // For convenience in filter_tensor
 using Slice = torch::indexing::Slice;
 
+    
+
 namespace WireCell::SPNG {
     CellViews::CellViews()
         : TensorSetFilter("CellViews", "spng") {}
+
+    
 
     void CellViews::configure(const WireCell::Configuration& config)
     {
@@ -38,71 +42,103 @@ namespace WireCell::SPNG {
 
         auto ianode = WireCell::Factory::find_tn<IAnodePlane>(m_config.anode);
 
+        auto dump_basis = [this](const std::string& name, const torch::Tensor& ten, int face, int view=-1) {
+            if (view < 0) {
+                auto imin = torch::amin(ten, {0});
+                auto imax = torch::amax(ten, {0});
 
-        // A cell basis is defined for each anode face.  We will form a cell
-        // basis tensor for each face but since the channel indices are run over
-        // both faces for each view we will cat the two channel index cell basis
-        // tensors to form a larger one.  After that, we no longer care about
-        // faces.
+                this->log->debug("{}: face={} tensor={} min=[{} {} {}] max=[{} {} {}]",
+                                 name, face, to_string(ten),
+                                 imin[0].item<int>(), imin[1].item<int>(), imin[2].item<int>(),
+                                 imax[0].item<int>(), imax[1].item<int>(), imax[2].item<int>());
+            }
+            else {
+                auto imin = torch::amin(ten);
+                auto imax = torch::amax(ten);
 
-        // To properly build the wire index to channel index and the cell bases
-        // we have to do a pair of double loops, each in a different order.
-        // The per-view ordered channels
+                this->log->debug("{}: face={} view={} tensor={} min={} max={}",
+                                 name, face, view, to_string(ten),
+                                 imin.item<int>(), 
+                                 imax.item<int>());
+            }
+        };
+
+
+        auto dump_chans = [&,this](const std::string& name, const IChannel::vector& chans, int face, int view) {
+            std::vector<int> chids;
+            for (const auto& ich : chans) {
+                chids.push_back(ich->ident());
+            }
+            dump_basis(name, to_tensor(chids), face, view);
+            this->log->debug("first ident={} last ident={}",
+                             chans.front()->ident(), chans.back()->ident());
+        };
+
+        auto dump_wires = [&,this](const std::string& name, const IWire::vector& wires, int face, int view) {
+            this->log->debug("{}: face={} view={} chids: first={} last={}",
+                             name, face, view,
+                             wires.front()->channel(),
+                             wires.back()->channel());
+            for (const auto& iwire : wires) {
+                this->log->debug("wire index={} ident={} chid={} seg={} wpid={}",
+                                 iwire->index(), iwire->ident(), iwire->channel(), iwire->segment(), iwire->planeid());
+            }
+        };
+
+        // Channels ordered along both faces of each view.
         std::vector<IChannel::vector> channels_per_view;
-
-        // To get ordered channels we need a per view loop over faces.  We must
-        // do this first and separately because channels for a given plane
-        // (view) wrap around both faces while wire (segments) do not.  We use
-        // the same channels for the wire indices of either face.
         for (int view = 0; view < 3; ++view) {
 
             IChannel::vector all_chans;
-            IWire::vector all_wires;
 
             for (auto face_ident : m_config.face_idents) {
                 auto iface = ianode->face(face_ident);
                 auto iplane = iface->planes()[view];
                 
-                const auto& iwires = iplane->wires();
-                all_wires.insert(all_wires.end(), iwires.begin(), iwires.end());
-
                 const auto& ichans = iplane->channels();
                 all_chans.insert(all_chans.end(), ichans.begin(), ichans.end());
-            }
 
-            IChannel::vector wc_all = WireTools::wire_channels(all_wires, all_chans);
-            channels_per_view.push_back(wc_all);
+                dump_chans("face chan idents", ichans, face_ident, view);
+                log->debug("view={} face={} nchannels={}",
+                           view, face_ident, ichans.size());
+            }
+            // All chans: (400+400, 400+400, 480+480) = (800, 800, 960)
+            // All wires: (1148+1148, 1148+1148, 480+480) = (2296,2296,960)
+            // wc_all is (2296,2296,960), for each wire, its channel INDEX.
+            dump_chans("all chan idents before", all_chans, -1, view);
+            channels_per_view.push_back(all_chans);
         }
 
         std::vector<torch::Tensor> cell_channel_indices_by_face;
 
-        // Get wire indices in the cell basis for each face we need to loop over
-        // views.  We then convert to channel indices on the cell basis
+        // Get wire indices in the cell basis for each face.
         for (auto face_ident : m_config.face_idents) {
             auto iface = ianode->face(face_ident);
 
             // Get wire indices in the cell basis.
             torch::Tensor wire_basis = CellBasis::cell_basis(iface);
-            log->debug("wire basis: face={} tensor={}", face_ident, to_string(wire_basis));
+            dump_basis("wire indices", wire_basis, face_ident);
 
-            // Build tensor indexed by wire indices to return channel indices.
-            std::vector<torch::Tensor> chan_indices;
+            // Build tensor mapping wire index to channel index.
+            std::vector<torch::Tensor> w2c_per_view;
+
             auto iplanes = iface->planes();
-
             for (int view = 0; view < 3; ++view) {
                 IWire::vector wires = iplanes[view]->wires();
-                IChannel::vector chans = channels_per_view[view];
+                dump_wires("w2c wires", wires, face_ident, view);
+                const IChannel::vector& chans = channels_per_view[view];
+                dump_chans("all chan idents after", chans, face_ident, view);
 
                 // Get mapping from wire index to channel index
                 torch::Tensor w2c = CellBasis::wire_channel_index(wires, chans);
-                chan_indices.push_back(w2c); // indexed by wire 
-                log->debug("w2c: face={} view={} tensor={}", face_ident, view, to_string(w2c));
+                dump_basis("w2c indices", w2c, face_ident, view);
+                w2c_per_view.push_back(w2c); // indexed by wire 
             }
 
             // Convert wire indices to channel indices in cell basis.
-            torch::Tensor channel_basis = CellBasis::index(wire_basis, chan_indices);
-            log->debug("chan basis: face={} tensor={}", face_ident, to_string(channel_basis));
-            cell_channel_indices_by_face.push_back(channel_basis);
+            torch::Tensor chan_basis = CellBasis::index(wire_basis, w2c_per_view);
+            dump_basis("chan indices", chan_basis, face_ident);
+            cell_channel_indices_by_face.push_back(chan_basis);
         }
 
         m_cell_channel_indices = torch::cat(cell_channel_indices_by_face, 0);
@@ -185,6 +221,11 @@ namespace WireCell::SPNG {
             auto V_slice = V.narrow(2, t, actual_chunk);
             auto W_slice = W.narrow(2, t, actual_chunk);
 
+            log->debug("t={} idx={} slice={}", t, to_string(idx[0]), to_string(U_slice));
+            log->debug("t={} idx={} slice={}", t, to_string(idx[1]), to_string(V_slice));
+            log->debug("t={} idx={} slice={}", t, to_string(idx[2]), to_string(W_slice));
+
+
             // Indexing: (nbatch, ncell, actual_chunk)
             auto Uc = U_slice.index_select(1, idx[0]);
             auto Vc = V_slice.index_select(1, idx[1]);
@@ -248,7 +289,7 @@ namespace WireCell::SPNG {
         // Get U, V, W tensors using uvw_index configuration
         std::vector<torch::Tensor> uvw_tensors;
         for (int idx : m_config.uvw_index) {
-            if (idx < 0 || ntensors_in) {
+            if (idx < 0 || idx >= ntensors_in) {
                 raise<ValueError>("Invalid uvw_index %d for tensor set size %d",
                                   idx, ntensors_in);
             }

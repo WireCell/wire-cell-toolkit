@@ -541,15 +541,18 @@ auto b = torch::linspace(0, 1, 100);
 * Clamping
 
 The clamp operation (also known as "clipping" in other libraries) takes every element x in a tensor and applies the following logic:
+
+#+begin_example
 f(x)=min(max(x,min_val),max_val)
+#+end_example
 
 Constraints:
 
-    Out-of-place: clamp returns a new tensor.
+-    Out-of-place: clamp returns a new tensor.
 
-    In-place: clamp_ (with an underscore) modifies the tensor in memory without a copy.
+-    In-place: clamp_ (with an underscore) modifies the tensor in memory without a copy.
 
-    Partial clamping: You can provide only a minimum (clamping the lower bound) or only a maximum (clamping the upper bound).
+-    Partial clamping: You can provide only a minimum (clamping the lower bound) or only a maximum (clamping the upper bound).
 
 Python (PyTorch)
 
