@@ -27,7 +27,8 @@ namespace WireCell::SPNG {
         for (auto op : m_ops) {
             tensor = op(tensor);
         }
-        log->debug("filtered: {} total={}", to_string(tensor), torch::sum(tensor).item<double>());
+        log->debug("filtered: {} ops making {} total={}",
+                   m_ops.size(), to_string(tensor), torch::sum(tensor).item<double>());
         return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
 
@@ -36,6 +37,11 @@ namespace WireCell::SPNG {
         log->debug("Transform config: {}", jconfig);
         this->TensorFilter::configure(jconfig);
         from_json(m_config, jconfig);
+
+        if (m_config.operations.empty()) {
+            log->warn("null transform configured");
+            return;
+        }
 
         m_ops.clear();
         for (const auto& opcfg: m_config.operations) {

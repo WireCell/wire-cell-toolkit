@@ -91,6 +91,7 @@ namespace WireCell::SPNG {
                 raise<ValueError>("fanin unexpected multiplicity, got:%d want:%d",
                                   inv.size(), multiplicity);
             }
+
             out=nullptr;
             size_t neos = std::count(inv.begin(), inv.end(), nullptr);
             if (neos) {
@@ -100,6 +101,11 @@ namespace WireCell::SPNG {
             }
 
             auto device_inv = to_device(inv, device());
+
+            for (const auto& one : device_inv) {
+                logit(one, "fanin");
+            }
+
             fanin_combine(device_inv, out);
 
             this->next_count();

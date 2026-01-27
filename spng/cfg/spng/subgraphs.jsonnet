@@ -31,7 +31,7 @@ local fans_js = import "spng/fans.jsonnet";
  * @param context_name A name to combine with the tpc name for all pnodes made.
  */
 function(tpc, control={}, pg=real_pg, context_name="") {
-
+  
     /// The subgraphs object is mostly independent from other Jsonnet's.  The
     /// exceptions are here and they are made available to the caller.
     local fans = fans_js(control),
@@ -41,7 +41,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     fans: fans,
     frame: frame,
 
-
+    
     /**
      * A function to make a unique name in the context of a method.
      *
@@ -380,9 +380,11 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         type: 'SPNGTransform',
         name: $.this_name(extra_name, 'v'+std.toString(view) + '_'+operation),
         data: {
-            operation: operation,
-            scalar: scalar,
-            dims: dims,
+            operations: [{
+                operation: operation,
+                scalar: scalar,
+                dims: dims,
+            }]
         } + control,
     }, nin=1, nout=1) for view in views]),
         
@@ -404,7 +406,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// Note, this puts the dense as the first feature prior to the MPs.
     /// The order of the MPs depends on where they come from, eg CellViews.
     dnnroi_stack_features(views=[0,1], extra_name=""):: {
-        local features = $.transform_views("unsqueeze", dims=[1], views=views, extra_name=extra_name),
+        local features = $.transform_views("unsqueeze", dims=[-3], views=views, extra_name=extra_name),
         local stacks = $.reduce_views_list("cat", dim=-3, views=views, extra_name=extra_name),
         dense_sink: features,
         source: pg.intern(outnodes=stacks, edges=[

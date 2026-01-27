@@ -42,48 +42,48 @@ namespace WireCell::SPNG {
 
         auto ianode = WireCell::Factory::find_tn<IAnodePlane>(m_config.anode);
 
-        auto dump_basis = [this](const std::string& name, const torch::Tensor& ten, int face, int view=-1) {
-            if (view < 0) {
-                auto imin = torch::amin(ten, {0});
-                auto imax = torch::amax(ten, {0});
+        // auto dump_basis = [this](const std::string& name, const torch::Tensor& ten, int face, int view=-1) {
+        //     if (view < 0) {
+        //         auto imin = torch::amin(ten, {0});
+        //         auto imax = torch::amax(ten, {0});
 
-                this->log->debug("{}: face={} tensor={} min=[{} {} {}] max=[{} {} {}]",
-                                 name, face, to_string(ten),
-                                 imin[0].item<int>(), imin[1].item<int>(), imin[2].item<int>(),
-                                 imax[0].item<int>(), imax[1].item<int>(), imax[2].item<int>());
-            }
-            else {
-                auto imin = torch::amin(ten);
-                auto imax = torch::amax(ten);
+        //         this->log->debug("{}: face={} tensor={} min=[{} {} {}] max=[{} {} {}]",
+        //                          name, face, to_string(ten),
+        //                          imin[0].item<int>(), imin[1].item<int>(), imin[2].item<int>(),
+        //                          imax[0].item<int>(), imax[1].item<int>(), imax[2].item<int>());
+        //     }
+        //     else {
+        //         auto imin = torch::amin(ten);
+        //         auto imax = torch::amax(ten);
 
-                this->log->debug("{}: face={} view={} tensor={} min={} max={}",
-                                 name, face, view, to_string(ten),
-                                 imin.item<int>(), 
-                                 imax.item<int>());
-            }
-        };
+        //         this->log->debug("{}: face={} view={} tensor={} min={} max={}",
+        //                          name, face, view, to_string(ten),
+        //                          imin.item<int>(), 
+        //                          imax.item<int>());
+        //     }
+        // };
 
 
-        auto dump_chans = [&,this](const std::string& name, const IChannel::vector& chans, int face, int view) {
-            std::vector<int> chids;
-            for (const auto& ich : chans) {
-                chids.push_back(ich->ident());
-            }
-            dump_basis(name, to_tensor(chids), face, view);
-            this->log->debug("first ident={} last ident={}",
-                             chans.front()->ident(), chans.back()->ident());
-        };
+        // auto dump_chans = [&,this](const std::string& name, const IChannel::vector& chans, int face, int view) {
+        //     std::vector<int> chids;
+        //     for (const auto& ich : chans) {
+        //         chids.push_back(ich->ident());
+        //     }
+        //     dump_basis(name, to_tensor(chids), face, view);
+        //     this->log->debug("first ident={} last ident={}",
+        //                      chans.front()->ident(), chans.back()->ident());
+        // };
 
-        auto dump_wires = [&,this](const std::string& name, const IWire::vector& wires, int face, int view) {
-            this->log->debug("{}: face={} view={} chids: first={} last={}",
-                             name, face, view,
-                             wires.front()->channel(),
-                             wires.back()->channel());
-            for (const auto& iwire : wires) {
-                this->log->debug("wire index={} ident={} chid={} seg={} wpid={}",
-                                 iwire->index(), iwire->ident(), iwire->channel(), iwire->segment(), iwire->planeid());
-            }
-        };
+        // auto dump_wires = [&,this](const std::string& name, const IWire::vector& wires, int face, int view) {
+        //     this->log->debug("{}: face={} view={} chids: first={} last={}",
+        //                      name, face, view,
+        //                      wires.front()->channel(),
+        //                      wires.back()->channel());
+        //     for (const auto& iwire : wires) {
+        //         this->log->debug("wire index={} ident={} chid={} seg={} wpid={}",
+        //                          iwire->index(), iwire->ident(), iwire->channel(), iwire->segment(), iwire->planeid());
+        //     }
+        // };
 
         // Channels ordered along both faces of each view.
         std::vector<IChannel::vector> channels_per_view;
@@ -98,14 +98,14 @@ namespace WireCell::SPNG {
                 const auto& ichans = iplane->channels();
                 all_chans.insert(all_chans.end(), ichans.begin(), ichans.end());
 
-                dump_chans("face chan idents", ichans, face_ident, view);
-                log->debug("view={} face={} nchannels={}",
-                           view, face_ident, ichans.size());
+                // dump_chans("face chan idents", ichans, face_ident, view);
+                // log->debug("view={} face={} nchannels={}",
+                //            view, face_ident, ichans.size());
             }
             // All chans: (400+400, 400+400, 480+480) = (800, 800, 960)
             // All wires: (1148+1148, 1148+1148, 480+480) = (2296,2296,960)
             // wc_all is (2296,2296,960), for each wire, its channel INDEX.
-            dump_chans("all chan idents before", all_chans, -1, view);
+            // dump_chans("all chan idents before", all_chans, -1, view);
             channels_per_view.push_back(all_chans);
         }
 
@@ -117,7 +117,7 @@ namespace WireCell::SPNG {
 
             // Get wire indices in the cell basis.
             torch::Tensor wire_basis = CellBasis::cell_basis(iface);
-            dump_basis("wire indices", wire_basis, face_ident);
+            // dump_basis("wire indices", wire_basis, face_ident);
 
             // Build tensor mapping wire index to channel index.
             std::vector<torch::Tensor> w2c_per_view;
@@ -125,24 +125,24 @@ namespace WireCell::SPNG {
             auto iplanes = iface->planes();
             for (int view = 0; view < 3; ++view) {
                 IWire::vector wires = iplanes[view]->wires();
-                dump_wires("w2c wires", wires, face_ident, view);
+                // dump_wires("w2c wires", wires, face_ident, view);
                 const IChannel::vector& chans = channels_per_view[view];
-                dump_chans("all chan idents after", chans, face_ident, view);
+                // dump_chans("all chan idents after", chans, face_ident, view);
 
                 // Get mapping from wire index to channel index
                 torch::Tensor w2c = CellBasis::wire_channel_index(wires, chans);
-                dump_basis("w2c indices", w2c, face_ident, view);
+                // dump_basis("w2c indices", w2c, face_ident, view);
                 w2c_per_view.push_back(w2c); // indexed by wire 
             }
 
             // Convert wire indices to channel indices in cell basis.
             torch::Tensor chan_basis = CellBasis::index(wire_basis, w2c_per_view);
-            dump_basis("chan indices", chan_basis, face_ident);
+            // dump_basis("chan indices", chan_basis, face_ident);
             cell_channel_indices_by_face.push_back(chan_basis);
         }
 
-        m_cell_channel_indices = torch::cat(cell_channel_indices_by_face, 0);
-        log->debug("cell channel indices: {}", to_string(m_cell_channel_indices));
+        m_cell_channel_indices = to(torch::cat(cell_channel_indices_by_face, 0));
+        // log->debug("cell channel indices: {}", to_string(m_cell_channel_indices));
     }
 
     WireCell::Configuration CellViews::default_configuration() const
@@ -204,7 +204,7 @@ namespace WireCell::SPNG {
         std::vector<torch::Tensor> out;
         for (int view : m_config.out_views) {
             int64_t nchan = uvw_tensors[view].size(1);
-            out.push_back(torch::zeros({nbatch, 2, nchan, ntick}, torch::kBool));
+            out.push_back(to(torch::zeros({nbatch, 2, nchan, ntick}, torch::kBool)));
         }
         // auto outU = torch::zeros({nbatch, 2, nchanU, ntick}, torch::kBool);
         // auto outV = torch::zeros({nbatch, 2, nchanV, ntick}, torch::kBool);
@@ -220,11 +220,6 @@ namespace WireCell::SPNG {
             auto U_slice = U.narrow(2, t, actual_chunk);
             auto V_slice = V.narrow(2, t, actual_chunk);
             auto W_slice = W.narrow(2, t, actual_chunk);
-
-            log->debug("t={} idx={} slice={}", t, to_string(idx[0]), to_string(U_slice));
-            log->debug("t={} idx={} slice={}", t, to_string(idx[1]), to_string(V_slice));
-            log->debug("t={} idx={} slice={}", t, to_string(idx[2]), to_string(W_slice));
-
 
             // Indexing: (nbatch, ncell, actual_chunk)
             auto Uc = U_slice.index_select(1, idx[0]);
@@ -251,13 +246,16 @@ namespace WireCell::SPNG {
             for (int64_t b = 0; b < nbatch; ++b) {
 
                 // Helper to reduce and place into the correct tick-slice
-                auto scatter_chunk = [&](torch::Tensor& out_full, const torch::Tensor& data, 
+                auto scatter_chunk = [&](torch::Tensor& out_full, const torch::Tensor& data,
                                          const torch::Tensor& indices, int64_t plane_idx) {
                     // out_full.select(0, b).select(0, plane_idx) is (nchan, ntick)
                     // we narrow the ntick dimension to the current chunk
                     auto target_slice = out_full.select(0, b).select(0, plane_idx).narrow(1, t, actual_chunk);
-                
-                    target_slice.index_reduce_(0, indices, data.select(0, b), "amax", false);
+
+                    // Workaround: index_reduce_ doesn't support bool, so cast to uint8, reduce, cast back
+                    auto target_u8 = target_slice.to(torch::kUInt8);
+                    target_u8.index_reduce_(0, indices, data.select(0, b).to(torch::kUInt8), "amax", false);
+                    target_slice.copy_(target_u8.to(torch::kBool));
                 };
 
                 // Only compute requested output views.
