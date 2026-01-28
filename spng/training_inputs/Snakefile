@@ -1,11 +1,28 @@
 config.setdefault('nevents', '2')
+# container="/nfs/data/1/calcuttj/dunesw.sif"
+all_theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 )
+all_planes = [0,1,2]
 
-rule tracking:
+rule all_linedepos:
+    input:
+        depos=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz', plane=all_planes, txz=all_theta_xz_deg, ty=90),
+        meta=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json', plane=all_planes, txz=all_theta_xz_deg, ty=90)
+
+rule splat_all_lines:
+    input:
+        expand("splat-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90),
+        expand("drifted-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}-frame.npz", plane=all_planes, txz=all_theta_xz_deg, ty=90)
+    
+rule all_lines_final:
+    input:
+        expand("sigproc-spng-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90)
+
+rule linedepos:
     output:
-        depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.npz',
-        meta='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.json',
+        depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz',
+        meta='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json',
     params:
-        offset="--offset '0*m,0*m,0*m'"
+        offset="--offset '1*m,0*m,0*m'"
     shell: '''
     wcpy gen detlinegen \
     {params.offset} \
@@ -18,18 +35,29 @@ rule tracking:
     --output_meta {output.meta}
     '''
 
+rule test_container:
+    container:
+        "/nfs/data/1/calcuttj/dunesw.sif"
+    output:
+        'lartest.txt'
+    shell:
+        """
+        lar -h > {output}
+        """
+
 rule gen_cosmics:
     #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
     container:
-        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+        # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+        "/nfs/data/1/calcuttj/dunesw.sif"
     output:
         "cosmics_{sample}_gen.root"
     shell:
         """
-        set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
-        source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
-        setup dunesw v10_14_00d00 -q e26:prof
-        set -euo pipefail  # Reenable Snakemake's strict mode
+        # set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
+        # source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+        # setup dunesw v10_14_00d00 -q e26:prof
+        # set -euo pipefail  # Reenable Snakemake's strict mode
 
         lar --no-timing --no-memcheck -n {config[nevents]} -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
         rm hist_{output}
@@ -40,7 +68,8 @@ SRC_DIR = workflow.basedir
 
 rule g4:
     container:
-        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+        # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+        "/nfs/data/1/calcuttj/dunesw.sif"
     input:
         file="cosmics_{sample}_gen.root",
         fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
@@ -49,10 +78,10 @@ rule g4:
     shadow: "minimal"
     shell:
         """
-        set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
-        source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
-        setup dunesw v10_14_00d00 -q e26:prof
-        set -euo pipefail  # Reenable Snakemake's strict mode
+        # set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
+        # source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+        # setup dunesw v10_14_00d00 -q e26:prof
+        # set -euo pipefail  # Reenable Snakemake's strict mode
 
         lar --no-timing --no-memcheck -c {input.fcl} {input.file} -o {output} -T hist_{output}
         rm hist_{output} #No need to save these
@@ -60,7 +89,8 @@ rule g4:
 
 rule save_depos:
     container:
-        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+        # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+        "/nfs/data/1/calcuttj/dunesw.sif"
     input:
         inputfile="{name}_g4.root",
         fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
@@ -70,10 +100,10 @@ rule save_depos:
     shadow: "minimal" #This runs in an auto-removed tmp dir
     shell:
         """
-        set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
-        source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
-        setup dunesw v10_14_00d00 -q e26:prof
-        set -euo pipefail  # Reenable Snakemake's strict mode
+        # set +euo pipefail  # Disable Snakemake's strict mode Yay UPS
+        # source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+        # setup dunesw v10_14_00d00 -q e26:prof
+        # set -euo pipefail  # Reenable Snakemake's strict mode
 
         export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
 
@@ -81,16 +111,23 @@ rule save_depos:
         mv wct-depos.npz {output}
         """
 
+def get_sourcestyle(wildcards):
+    style='default'
+    if 'linedepo' in wildcards.name:
+        style = 'linedepo'
+    return f'-A "sourcestyle={style}"'
 rule splat_and_drift:
     input:
         "{name}_wct-depos.npz",
     output:
         "splat-{name}.h5",
         "drifted-{name}-frame.npz"
+    params:
+        extra_flag=get_sourcestyle
     shell:
         """
         wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A outname={wildcards.name} --ext-code nanodes=1 \
+        -A "input={input}" -A outname={wildcards.name} {params.extra_flag} --ext-code nanodes=1 \
         wct-sim-deposource-framesink.jsonnet
         """
 

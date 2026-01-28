@@ -1,12 +1,13 @@
 # usage: wire-cell -l stdout wct-sim-check.jsonnet
 // , nanodes=4
-function(input, outname="frame.npz") {
+function(input, outname="frame.npz", sourcestyle='default') {
   local g = import 'pgraph.jsonnet',
   local f = import 'pgrapher/common/funcs.jsonnet',
   local wc = import 'wirecell.jsonnet',
 
   // local io = import 'pgrapher/common/fileio.jsonnet',
   local fileio = import 'layers/high/fileio.jsonnet',
+  local spngio = import 'spng/io.jsonnet',
 
   local tools_maker = import 'pgrapher/common/tools.jsonnet',
 
@@ -35,10 +36,10 @@ function(input, outname="frame.npz") {
 
   local sim = sim_maker(params, tools),
 
-  local source = g.pnode({
+  local source = if sourcestyle == 'default' then g.pnode({
       type: 'NumpyDepoSetLoader',
       data: { filename: input }
-  }, nin=0, nout=1),
+  }, nin=0, nout=1) else  spngio.depo_source(input),
 
   local nanodes = std.length(tools.anodes),
   local anode_iota = std.range(0, nanodes-1),
