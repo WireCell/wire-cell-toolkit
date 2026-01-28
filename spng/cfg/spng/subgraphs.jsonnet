@@ -31,7 +31,7 @@ local fans_js = import "spng/fans.jsonnet";
  * @param context_name A name to combine with the tpc name for all pnodes made.
  */
 function(tpc, control={}, pg=real_pg, context_name="") {
-
+  
     /// The subgraphs object is mostly independent from other Jsonnet's.  The
     /// exceptions are here and they are made available to the caller.
     local fans = fans_js(control),
@@ -41,7 +41,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     fans: fans,
     frame: frame,
 
-
+    
     /**
      * A function to make a unique name in the context of a method.
      *
@@ -109,7 +109,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local fk = $.filter_kernel([tpc.filters[plane_index].channel.decon,{kind:"none"}],
                                    extra_name=extra_name);
         local rk = $.response_kernel(plane_index, extra_name=extra_name);
-        $.decon_kernel(fk, rk, extra_name=extra_name),
+        $.decon_kernel(fk, rk, extra_name='_'+group.name+extra_name),
 
     /// Return pnode convolve intput data with a given kernel
     kernel_convolve(kernel,     // the object providing the convolution kernel 
@@ -316,7 +316,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     dnnroi_dense_views(scale=1.0/4000, views=[0,1], rebin=4, extra_name="")::
         pg.shuntlines([
             $.time_filter_views("dnnroi", views=views, extra_name=extra_name),
-            $.downsample_views(rebin, views=views, extra_name='_dense'+extra_name),
+            //$.downsample_views(rebin, views=views, extra_name='_dense'+extra_name),
+            $.rebin_views(rebin, views=views, extra_name='_dense'+extra_name),
             $.scale_views(scale, views, extra_name="_dnnroi_dense"+extra_name),
         ]),
 
@@ -380,9 +381,11 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         type: 'SPNGTransform',
         name: $.this_name(extra_name, 'v'+std.toString(view) + '_'+operation),
         data: {
-            operation: operation,
-            scalar: scalar,
-            dims: dims,
+            operations: [{
+                operation: operation,
+                scalar: scalar,
+                dims: dims,
+            }]
         } + control,
     }, nin=1, nout=1) for view in views]),
         
@@ -404,7 +407,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// Note, this puts the dense as the first feature prior to the MPs.
     /// The order of the MPs depends on where they come from, eg CellViews.
     dnnroi_stack_features(views=[0,1], extra_name=""):: {
-        local features = $.transform_views("unsqueeze", dims=[1], views=views, extra_name=extra_name),
+        local features = $.transform_views("unsqueeze", dims=[-3], views=views, extra_name=extra_name),
         local stacks = $.reduce_views_list("cat", dim=-3, views=views, extra_name=extra_name),
         dense_sink: features,
         source: pg.intern(outnodes=stacks, edges=[
@@ -608,6 +611,20 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                     factor: -rebin,     // FIXME: must match upstream resampler.
                     tag: tag,
                     datapath_format: "/traces/Rebinner/" + this_name+'_unbin'
+                } + control
+            }, nin=1, nout=1) for view in views]),
+            
+    rebin_views(rebin=4, views=[0,1,2], tag="", extra_name="")::
+        pg.crossline([
+            pg.pnode({
+                local this_name = $.this_name(extra_name, 'v'+std.toString(view)),
+                type: "SPNGRebinner",
+                name: this_name,
+                data: {
+                    norm: "maximum",
+                    factor: rebin,     // FIXME: must match upstream resampler.
+                    tag: tag,
+                    datapath_format: "/traces/Rebinner/" + this_name+'_rebin'
                 } + control
             }, nin=1, nout=1) for view in views]),
             

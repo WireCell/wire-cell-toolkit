@@ -1,3 +1,9 @@
+#!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores all --snakefile
+# -*- snakemake -*-
+
+import os 
+SRC_DIR = workflow.basedir
+
 config.setdefault('nevents', '2')
 # container="/nfs/data/1/calcuttj/dunesw.sif"
 all_theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 )
@@ -44,6 +50,16 @@ rule test_container:
         """
         lar -h > {output}
         """
+rule lar_version:
+    container:
+        "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
+    output:
+        "version.txt"
+    input:
+        os.path.join(SRC_DIR, "run_larsoft.sh")
+    shell: """
+    {input} --version > {output} 2>&1
+    """
 
 rule gen_cosmics:
     #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
@@ -62,9 +78,6 @@ rule gen_cosmics:
         lar --no-timing --no-memcheck -n {config[nevents]} -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
         rm hist_{output}
         """
-
-import os 
-SRC_DIR = workflow.basedir
 
 rule g4:
     container:

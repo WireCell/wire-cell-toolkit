@@ -37,7 +37,7 @@ local tio = import "spng/torchio.jsonnet";
 local det_js = import "spng/det.jsonnet";
 local drift_js = import "spng/drift.jsonnet";
 local splatroi_js = import "spng/splatroi.jsonnet";
-local roifodder_js = import "spng/roifodder.jsonnet";
+local subgraphs_js = import "spng/subgraphs.jsonnet";
 local control_js = import "spng/control.jsonnet";
 local frame_js = import "spng/frame.jsonnet";
 local hacks = import "spng/hacks.jsonnet";
@@ -121,7 +121,7 @@ function(input,
         SPNGTransform: function(inode, pnode)
             dump_tensors_matched({dscale:"dnnroi_scale", sscale:"splat_scale"}, inode, pnode),
         SPNGKernelConvolve: function(inode, pnode)
-            dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener"}, inode, pnode),
+            dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener",decon:"_group"}, inode, pnode),
         SPNGThreshold: function(inode, pnode)
             dump_tensors_matched({wthresh:"wthresh"}, inode, pnode),
         SPNGReduce: function(inode, pnode)
@@ -153,8 +153,12 @@ function(input,
 
     local sim = detmod.inducer;
 
-    local fodder = roifodder_js(tpc, control, rebin=irebin, scale=1.0/fscale, pg=wpg);
-    local simfodder = pg.pipeline([sim, fodder]);
+
+    //local fodder = roifodder_js(tpc, control, rebin=irebin, scale=1.0/fscale, pg=wpg);
+    local sg = subgraphs_js(tpc, control, pg=wpg);
+    local to_tdm = sg.frame_to_tdm();
+    local fodder = sg.dnnroi_training_preface();
+    local simfodder = pg.pipeline([sim, to_tdm, fodder]);
 
     local body = pg.intern(innodes=[upstream], outnodes=[truth, simfodder],
                            centernodes=[depo_fan],
