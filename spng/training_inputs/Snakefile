@@ -1,3 +1,6 @@
+#!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores all --snakefile
+# -*- snakemake -*-
+
 config.setdefault('nevents', '2')
 
 rule tracking:
