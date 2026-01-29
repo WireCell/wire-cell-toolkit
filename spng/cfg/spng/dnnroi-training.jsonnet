@@ -166,11 +166,29 @@ function(input,
 
     local to_tdm = sg.frame_to_tdm();
     local dnnroi_pre = sg.dnnroi_training_preface(crossed_views, rebin, extra_name="_preface");
-    local training_pre = pg.shuntline(
+
+    // We have to have a little subgraph just to get the packed tensors into a
+    // form that the TdmToFrame can consume.
+    local final_metadata = pg.crossline([
+        pg.pnode({
+            type: 'SPNGTransform',
+            name: tpc.name + 'v'+std.toString(view) + 'f' + std.toString(feat.index) + "_final_metadata",
+            data: {
+                operation: "noop",
+                tag: "fodder",
+                datapath_format: "/traces/view/%(view)d/feature/%(feat)s" % {view:view, feat:feat.value},
+            }
+        }, nin=1, nout=1)
+        for view in [0,1]
+        for feat in wc.enumerate(["dense", "mp2", "mp3"])
+    ]);
+
+    local training_pre = pg.shuntlines([
         // 2 tensors each with dim=-3 of size 3.
         sg.expand_dimension(dnnroi_pre, "_fodder"),
+        final_metadata,
         sg.tensor_packer(multiplicity=ncrossed*3, extra_name="_fodder")
-    );
+    ]);
     local fodder = sg.wrap_bypass(training_pre);
     local fodder_frame = sg.tdm_to_frame(extra_name="_fodder");
     local fodder_sink = io.frame_array_any_sink(outpat % {tier:"fodder"});
@@ -192,5 +210,7 @@ function(input,
                            plugins=["WireCellSpng", "WireCellGen", "WireCellHio"],
                            uses=controls.uses);
     result
+
+
 
 

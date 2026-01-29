@@ -34,6 +34,9 @@ namespace WireCell::SPNG {
             - squeeze :: Apply squeeze() to the tensor on each dimension in dims.
 
             - unsqueeze :: Apply unsqueeze() to the tensor on each dimension in dims.
+
+            - noop :: Explicit no-operation on the tensor.  If you want to rely
+              on Transform to change metadata, set this operation to avoid a warning.
         */
 
         /// 

@@ -55,6 +55,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     this_name(extra_name, meth_name="") :: tpc.name+context_name+meth_name+extra_name,
 
 
+
     /// Deposet to IFrame of "true signal" aka "depo flux splat".
     splat(extra_name="")::
         local splat=pg.pnode({
@@ -690,31 +691,31 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                       if vi.value == 1]),
 
     /// 3->3 do interval space unrebin by given factor.
-    unrebin_views(rebin=4, views=[0,1,2], tag="", extra_name="")::
+    unbin_views(rebin=4, views=[0,1,2], tag="", extra_name="")::
         pg.crossline([
             pg.pnode({
-                local this_name = $.this_name(extra_name, 'v'+std.toString(view)),
+                local this_name = $.this_name(extra_name, 'v'+std.toString(view)+'_unbin'+std.toString(rebin)),
                 type: "SPNGRebinner",
                 name: this_name,
                 data: {
                     norm: "maximum",
                     factor: -rebin,     // FIXME: must match upstream resampler.
                     tag: tag,
-                    datapath_format: "/traces/Rebinner/" + this_name+'_unbin'
+                    datapath_format: "/traces/Rebinner/" + this_name
                 } + control
             }, nin=1, nout=1) for view in views]),
             
     rebin_views(rebin=4, views=[0,1,2], tag="", extra_name="")::
         pg.crossline([
             pg.pnode({
-                local this_name = $.this_name(extra_name, 'v'+std.toString(view)),
+                local this_name = $.this_name(extra_name, 'v'+std.toString(view)+'_rebin'+std.toString(rebin)),
                 type: "SPNGRebinner",
                 name: this_name,
                 data: {
                     norm: "maximum",
                     factor: rebin,     // FIXME: must match upstream resampler.
                     tag: tag,
-                    datapath_format: "/traces/Rebinner/" + this_name+'_rebin'
+                    datapath_format: "/traces/Rebinner/" + this_name
                 } + control
             }, nin=1, nout=1) for view in views]),
             
@@ -774,8 +775,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         // get the port ordering correct.  As is, it assumes dnnroi rois all come
         // before the views that have only initial rois.
         local fat_rois = pg.crossline([sg1_dnnroi, sg1_infer.rois]);
-        local unrebin = $.unrebin_views(rebin=rebin, views=all_views, extra_name="_ROIS");
-        local rois = pg.shuntline(fat_rois, unrebin);
+        local unbin = $.unbin_views(rebin=rebin, views=all_views, extra_name="_ROIS");
+        local rois = pg.shuntline(fat_rois, unbin);
 
         /// Gives .roi_sink, .dense_sink and .signal_source
         local applyrois = $.applyroi_views(views=all_views, extra_name="_APPLYROIS");
