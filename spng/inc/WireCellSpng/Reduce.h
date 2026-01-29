@@ -1,5 +1,7 @@
 #pragma once
 
+// Opposite of Expand.h
+
 #include "WireCellSpng/FanBase.h"
 #include "WireCellSpng/Torch.h"
 

@@ -55,6 +55,78 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     this_name(extra_name, meth_name="") :: tpc.name+context_name+meth_name+extra_name,
 
 
+    /// Deposet to IFrame of "true signal" aka "depo flux splat".
+    splat(extra_name="")::
+        local splat=pg.pnode({
+            type: "DepoFluxSplat",
+            name: $.this_name(extra_name),
+            data: {
+                anode: wc.tn(tpc.anode),
+                field_response: wc.tn(tpc.fr),
+                sparse: true,
+                window_start: tpc.ductor.start_time,
+                window_duration: tpc.ductor.readout_duration,
+                tick: tpc.adc.tick,
+                reference_time: 0.0,
+                // Run wirecell-gen morse-* to find these numbers that match the extra
+                // spread the sigproc induces.
+            } + tpc.splat,
+        }, nin=1, nout=1, uses=[tpc.anode, tpc.fr]);
+        local reframer = pg.pnode({
+            type: "Reframer",
+            name: $.this_name(extra_name, '_splat'),
+            data: {
+                anode: wc.tn(tpc.anode),
+                nticks: tpc.adc.readout_nticks,
+            },
+        }, nin=1, nout=1, uses=[tpc.anode]);
+        pg.pipeline([splat, reframer]),
+
+    
+    // A crossline to resample and scale.  This is probably best applied across
+    // "groups" (connected views).
+    resample_crossline(ratio=1.0/4.0, scale=1.0, multiplicity=4, extra_name="")::
+        pg.crossline([
+            local this_name = $.this_name(extra_name, "_v"+std.toString(view));
+            local res = pg.pnode({
+                type:'SPNGResampler',
+                name: this_name,
+                data: {
+                    ratio: ratio,
+                } + control
+            }, nin=1, nout=1);
+            local scaler = pg.pnode({
+                type:'SPNGTransform',
+                name: this_name,
+                data: {
+                    operations: [
+                        { operation: "scale", scalar: scale },
+                    ],                
+                } + control,
+            }, nin=1, nout=1);
+            pg.pipeline([res, scaler])
+            for view in wc.iota(multiplicity)]),
+
+    
+    /// A subgraph to splat and apply resampling and output a frame.
+    splat_frame(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
+        local splat = $.splat(extra_name=extra_name);
+        local unpack = $.tpc_group_unpacker(extra_name=extra_name);
+        local ngroups = std.length(unpack.oports);
+        local body = pg.shuntlines([
+            unpack,
+            $.resample_crossline(ratio=ratio, scale=scale, multiplicity=ngroups, extra_name=extra_name),
+            $.tensor_packer(multiplicity=ngroups, extra_name=extra_name)
+        ]);
+        local resample = $.wrap_bypass(body, extra_name);
+        pg.pipeline([
+            splat,
+            $.frame_to_tdm(extra_name=extra_name),
+            resample,
+            $.tdm_to_frame(extra_name=extra_name),
+        ]),
+        
+
     /// A kernel providing a Fourier-space filter component (not a pnode).
     /// The axis config objects are, eg, made by tpc.filter_axis().
     filter_kernel(axis_config,  // list of per-axis config objects
@@ -172,7 +244,6 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             
 
     /// Given array of nodes that span view groups, return array that span views
-    /// fixme: move this out to a more generic jsonnet.
     local collect_groups_by_view(nodes)=
         [$.tpc_group_fanin([
             nodes[gi.index]
@@ -456,6 +527,25 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         pg.intern(innodes=[sg1], outnodes=[sg5],
                   centernodes=[sg1_connection, sg23_connection, sg4_connection]),
 
+    /// Wrap each of source's oports with an "expand" operation on tensor
+    /// dimension dim of size multiplicity.
+    expand_dimension(source, dim=-3, multiplicity=3, operation="unbind", extra_name="")::
+        local nports=std.length(source.oports);
+        local unbinds = [ pg.pnode({
+            type:'SPNGExpand',
+            name: $.this_name(extra_name, 'v'+std.toString(ind)+'_'+operation),
+            data: {
+                operation: operation,
+                dim: dim,
+                multiplicity: multiplicity,
+            } + control,
+        }, nin=1, nout=multiplicity) for ind in wc.iota(nports)];
+        pg.intern(innodes=[source],
+                  outnodes=unbinds,
+                  edges=[
+                      pg.edge(source, unbinds[ind], ind, 0)
+                      for ind in wc.iota(nports)
+                  ]),
 
     /// An Nview->Nview applying the "gauss" filter and rebinning.
     ///
