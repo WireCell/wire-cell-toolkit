@@ -139,6 +139,7 @@ rule splat_and_drift:
         extra_flag=get_sourcestyle
     shell:
         """
+        export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
         wire-cell -l stdout  -L debug   \
         -A "input={input}" -A outname={wildcards.name} {params.extra_flag} --ext-code nanodes=1 \
         wct-sim-deposource-framesink.jsonnet
