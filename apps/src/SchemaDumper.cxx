@@ -6,6 +6,7 @@
 #include "WireCellUtil/Logging.h"
 
 #include "WireCellIface/INode.h"
+#include "WireCellIface/IConfigurable.h"
 
 #include <set>
 #include <map>
@@ -91,7 +92,7 @@ void SchemaDumper::execute()
             // Add this interface to the list
             factories[classname]["interfaces"].append(interface_name);
 
-            // Try to instantiate to get concrete type and INode info
+            // Try to instantiate to get concrete type, INode info, and IConfigurable info
             // We do this only once (first time we encounter this class)
             if (!factories[classname].isMember("concrete_type")) {
                 try {
@@ -136,6 +137,28 @@ void SchemaDumper::execute()
                             node_info["concurrency"] = node->concurrency();
 
                             factories[classname]["node"] = node_info;
+                        }
+
+                        // Check if this is an IConfigurable and extract default configuration
+                        auto configurable = std::dynamic_pointer_cast<IConfigurable>(instance);
+                        if (configurable) {
+                            try {
+                                auto default_cfg = configurable->default_configuration();
+                                // Only include if the default configuration is non-empty
+                                if (!default_cfg.isNull() && !default_cfg.empty()) {
+                                    factories[classname]["default_configuration"] = default_cfg;
+                                }
+                            }
+                            catch (const std::exception& e) {
+                                warn("SchemaDumper: failed to get default_configuration for {}: {}",
+                                     classname, e.what());
+                                // Continue anyway
+                            }
+                            catch (...) {
+                                warn("SchemaDumper: failed to get default_configuration for {}: unknown error",
+                                     classname);
+                                // Continue anyway
+                            }
                         }
                     }
                 }
