@@ -6,42 +6,6 @@
 #include "WireCellUtil/Logging.h"
 
 #include "WireCellIface/INode.h"
-#include "WireCellIface/ISourceNode.h"
-#include "WireCellIface/ISinkNode.h"
-#include "WireCellIface/IFunctionNode.h"
-#include "WireCellIface/IQueuedoutNode.h"
-#include "WireCellIface/IJoinNode.h"
-#include "WireCellIface/ISplitNode.h"
-#include "WireCellIface/IFaninNode.h"
-#include "WireCellIface/IFanoutNode.h"
-#include "WireCellIface/IHydraNode.h"
-
-#include "WireCellIface/IDepo.h"
-#include "WireCellIface/IDepoSource.h"
-#include "WireCellIface/IDepoSink.h"
-#include "WireCellIface/IDepoFilter.h"
-#include "WireCellIface/IDepoFramer.h"
-#include "WireCellIface/IDepoSet.h"
-#include "WireCellIface/IDepoSetSource.h"
-#include "WireCellIface/IDepoSetSink.h"
-#include "WireCellIface/IDepoSetFilter.h"
-
-#include "WireCellIface/IFrame.h"
-#include "WireCellIface/IFrameSource.h"
-#include "WireCellIface/IFrameSink.h"
-#include "WireCellIface/IFrameFilter.h"
-
-#include "WireCellIface/ICluster.h"
-#include "WireCellIface/IClusterSource.h"
-#include "WireCellIface/IClusterSink.h"
-
-#include "WireCellIface/ITensorSet.h"
-#include "WireCellIface/ITensorSetSource.h"
-#include "WireCellIface/ITensorSetSink.h"
-
-#include "WireCellIface/IBlobSet.h"
-#include "WireCellIface/IBlobSetSource.h"
-#include "WireCellIface/IBlobSetSink.h"
 
 #include <set>
 #include <map>
@@ -71,35 +35,22 @@ WireCell::Configuration SchemaDumper::default_configuration() const
     return cfg;
 }
 
-// Helper function to collect factory information for a given interface
-template<typename IType>
-void collect_factories(const std::string& interface_name,
-                      std::map<std::string, Json::Value>& factories)
+// Helper to convert INode::NodeCategory enum to string
+static std::string node_category_to_string(INode::NodeCategory cat)
 {
-    auto known = Factory::known_types<IType>();
-    for (const auto& classname : known) {
-        // Initialize factory entry if it doesn't exist
-        if (factories.find(classname) == factories.end()) {
-            factories[classname] = Json::objectValue;
-            factories[classname]["classname"] = classname;
-            factories[classname]["interfaces"] = Json::arrayValue;
-        }
-        // Add this interface to the list
-        factories[classname]["interfaces"].append(interface_name);
-
-        // Try to get type information for the concrete class
-        // We do this only once (first time we encounter this class)
-        if (!factories[classname].isMember("concrete_type")) {
-            try {
-                auto instance = Factory::lookup<IType>(classname, "", true, true);
-                if (instance) {
-                    factories[classname]["concrete_type"] = type(*instance);
-                }
-            }
-            catch (...) {
-                // If we can't instantiate, that's okay - just skip the concrete type
-            }
-        }
+    switch (cat) {
+        case INode::unknown: return "unknown";
+        case INode::sourceNode: return "sourceNode";
+        case INode::sinkNode: return "sinkNode";
+        case INode::functionNode: return "functionNode";
+        case INode::queuedoutNode: return "queuedoutNode";
+        case INode::joinNode: return "joinNode";
+        case INode::splitNode: return "splitNode";
+        case INode::faninNode: return "faninNode";
+        case INode::fanoutNode: return "fanoutNode";
+        case INode::multioutNode: return "multioutNode";
+        case INode::hydraNode: return "hydraNode";
+        default: return "unknown";
     }
 }
 
@@ -107,47 +58,98 @@ void SchemaDumper::execute()
 {
     std::map<std::string, Json::Value> factories;
 
-    // Collect factories from all major interface types
-    collect_factories<IApplication>("IApplication", factories);
-    collect_factories<IConfigurable>("IConfigurable", factories);
+    // Walk all registered interface types using the global registry
+    auto all_interfaces = Factory::all_interfaces();
 
-    // Node interfaces
-    collect_factories<INode>("INode", factories);
-    collect_factories<ISourceNodeBase>("ISourceNodeBase", factories);
-    collect_factories<ISinkNodeBase>("ISinkNodeBase", factories);
-    collect_factories<IFunctionNodeBase>("IFunctionNodeBase", factories);
-    collect_factories<IQueuedoutNodeBase>("IQueuedoutNodeBase", factories);
-    collect_factories<IJoinNodeBase>("IJoinNodeBase", factories);
-    collect_factories<ISplitNodeBase>("ISplitNodeBase", factories);
-    collect_factories<IFaninNodeBase>("IFaninNodeBase", factories);
-    collect_factories<IFanoutNodeBase>("IFanoutNodeBase", factories);
-    collect_factories<IHydraNodeBase>("IHydraNodeBase", factories);
+    info("SchemaDumper: found {} registered interface types", all_interfaces.size());
 
-    // Depo interfaces
-    collect_factories<IDepoSource>("IDepoSource", factories);
-    collect_factories<IDepoSink>("IDepoSink", factories);
-    collect_factories<IDepoFilter>("IDepoFilter", factories);
-    collect_factories<IDepoFramer>("IDepoFramer", factories);
-    collect_factories<IDepoSetSource>("IDepoSetSource", factories);
-    collect_factories<IDepoSetSink>("IDepoSetSink", factories);
-    collect_factories<IDepoSetFilter>("IDepoSetFilter", factories);
+    for (const auto& iface_info : all_interfaces) {
+        const std::string& interface_name = iface_info.interface_name;
 
-    // Frame interfaces
-    collect_factories<IFrameSource>("IFrameSource", factories);
-    collect_factories<IFrameSink>("IFrameSink", factories);
-    collect_factories<IFrameFilter>("IFrameFilter", factories);
+        // Get all known types for this interface
+        std::vector<std::string> known_types;
+        try {
+            known_types = iface_info.get_known_types();
+        }
+        catch (const std::exception& e) {
+            warn("SchemaDumper: failed to get known types for interface {}: {}",
+                 interface_name, e.what());
+            continue;
+        }
 
-    // Cluster interfaces
-    collect_factories<IClusterSource>("IClusterSource", factories);
-    collect_factories<IClusterSink>("IClusterSink", factories);
+        info("SchemaDumper: interface {} has {} known types",
+             interface_name, known_types.size());
 
-    // TensorSet interfaces
-    collect_factories<ITensorSetSource>("ITensorSetSource", factories);
-    collect_factories<ITensorSetSink>("ITensorSetSink", factories);
+        for (const auto& classname : known_types) {
+            // Initialize factory entry if it doesn't exist
+            if (factories.find(classname) == factories.end()) {
+                factories[classname] = Json::objectValue;
+                factories[classname]["classname"] = classname;
+                factories[classname]["interfaces"] = Json::arrayValue;
+            }
 
-    // BlobSet interfaces
-    collect_factories<IBlobSetSource>("IBlobSetSource", factories);
-    collect_factories<IBlobSetSink>("IBlobSetSink", factories);
+            // Add this interface to the list
+            factories[classname]["interfaces"].append(interface_name);
+
+            // Try to instantiate to get concrete type and INode info
+            // We do this only once (first time we encounter this class)
+            if (!factories[classname].isMember("concrete_type")) {
+                try {
+                    auto instance = iface_info.instantiate(classname, true);
+                    if (instance) {
+                        factories[classname]["concrete_type"] = type(*instance);
+
+                        // Check if this is an INode and extract node-specific information
+                        auto node = std::dynamic_pointer_cast<INode>(instance);
+                        if (node) {
+                            Json::Value node_info = Json::objectValue;
+
+                            // Get node category
+                            auto cat = node->category();
+                            node_info["category"] = node_category_to_string(cat);
+
+                            // Get input types
+                            auto input_types = node->input_types();
+                            if (!input_types.empty()) {
+                                node_info["input_types"] = Json::arrayValue;
+                                for (const auto& itype : input_types) {
+                                    node_info["input_types"].append(demangle(itype));
+                                }
+                            }
+
+                            // Get output types
+                            auto output_types = node->output_types();
+                            if (!output_types.empty()) {
+                                node_info["output_types"] = Json::arrayValue;
+                                for (const auto& otype : output_types) {
+                                    node_info["output_types"].append(demangle(otype));
+                                }
+                            }
+
+                            // Get signature
+                            std::string sig = node->signature();
+                            if (!sig.empty()) {
+                                node_info["signature"] = demangle(sig);
+                            }
+
+                            // Get concurrency
+                            node_info["concurrency"] = node->concurrency();
+
+                            factories[classname]["node"] = node_info;
+                        }
+                    }
+                }
+                catch (const std::exception& e) {
+                    warn("SchemaDumper: failed to instantiate {}: {}", classname, e.what());
+                    // Continue anyway - we still have the interface information
+                }
+                catch (...) {
+                    warn("SchemaDumper: failed to instantiate {}: unknown error", classname);
+                    // Continue anyway
+                }
+            }
+        }
+    }
 
     // Build the final JSON structure
     Configuration output;
@@ -161,10 +163,11 @@ void SchemaDumper::execute()
     output["metadata"] = Json::objectValue;
     output["metadata"]["generator"] = "WireCell::SchemaDumper";
     output["metadata"]["num_factories"] = (int)factories.size();
+    output["metadata"]["num_interfaces"] = (int)all_interfaces.size();
 
     // Dump to file
     Persist::dump(get<string>(m_cfg, "filename"), output);
 
-    info("SchemaDumper: dumped {} factories to {}",
-         factories.size(), get<string>(m_cfg, "filename"));
+    info("SchemaDumper: dumped {} factories across {} interfaces to {}",
+         factories.size(), all_interfaces.size(), get<string>(m_cfg, "filename"));
 }
