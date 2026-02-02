@@ -144,6 +144,8 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
         return true;
     }
 
+    log->debug("input : {}", Aux::taginfo(inframe, 1));
+
     // Get traces to consider
     ITrace::vector out_traces;
     std::unordered_map< std::string, IFrame::trace_list_t> tag_indicies;
@@ -160,12 +162,15 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
                 log->warn("will combine traces from {} trace tags in frame:{}", ttags.size(), ss.str());
             }
         }
+        log->debug("reframing monolithic frame");
         out_traces = process_one(*(inframe->traces()));
     }
     else {
         for (const auto& tag : m_input_tags) {
             const auto& isummary = inframe->trace_summary(tag);
             ITrace::vector in_traces = Aux::tagged_traces(inframe, tag);
+            log->debug("reframing tag {} with {} traces", tag, in_traces.size());
+
             auto [out_one, threshold] = process_one(in_traces, isummary);
             tag_summary[tag] = threshold;
             size_t nbeg = out_traces.size();
@@ -188,9 +193,7 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
 
     outframe = sframe;
 
-    log->debug("input : {}", Aux::taginfo(inframe));
-    log->debug("output: {}", Aux::taginfo(outframe));
-
+    log->debug("output: {}", Aux::taginfo(outframe, 1));
     ++m_count;
     return true;
 }
