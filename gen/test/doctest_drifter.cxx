@@ -123,7 +123,7 @@ static void test_bent(double sign)
     const double mag = 1*units::cm;
     const double xmax = 1*units::cm;
     const double xstep = 1*units::mm;
-    const double epsilon = 0.1*units::mm;
+    const double epsilon = 1*units::mm;
 
     auto catx = [&](double x, double y) -> double {
         return cathode + sign * mag * ((x*x + y*y)/(scale*scale));

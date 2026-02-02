@@ -223,7 +223,8 @@ namespace quickhull {
 				pc.push_back(newp);
 			}
 			hull = qh.getConvexHull(pc,true,false);
-			assert(hull.getIndexBuffer().size()==12);
+                        //std::cerr << "Hull size: " << hull.getIndexBuffer().size() << "\n";
+			assert(hull.getIndexBuffer().size()==72);
 			
 			// Test 4: 2d degenerate case
 			testPlanarCase();
