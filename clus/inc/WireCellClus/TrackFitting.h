@@ -151,7 +151,7 @@ namespace WireCell::Clus {
         std::shared_ptr<PR::Graph> get_graph() const { return m_graph; }
         void clear_graph();
 
-
+        void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
 
         // collect charge
         void prepare_data();
@@ -331,7 +331,7 @@ namespace WireCell::Clus {
          *         Each pair contains (previous_neighbor_ratio, next_neighbor_ratio)
          */
         std::vector<std::pair<double, double>> calculate_compact_matrix(Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
-        std::vector<std::pair<double, double>> calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
+        std::vector<std::vector<double>> calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
 
         void dQ_dx_fill(double dis_end_point_ext=0.45*units::cm);
 
@@ -358,6 +358,12 @@ namespace WireCell::Clus {
         std::map<int, IAnodePlane::pointer> get_all_anodes() const;
 
         /**
+         * Get the grouping associated with this TrackFitting instance
+         * @return Pointer to Grouping, or nullptr if not set
+         */
+        Facade::Grouping* grouping() const { return m_grouping; }
+
+        /**
          * Get channel number for a specific wire location
          * Uses hybrid caching for optimal performance
          * @param apa APA number
@@ -376,6 +382,8 @@ namespace WireCell::Clus {
          */
         std::vector<std::tuple<int, int, int>> get_wires_for_channel(int apa, int channel_number) const;
 
+        // map_apa_ch_plane_wires: (apa,channel) -> vector of (face, plane, wire)
+        void collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires);
         /**
          * Clear all caches (useful for memory management)
          */
@@ -429,6 +437,18 @@ namespace WireCell::Clus {
         std::vector<double> get_pt() const { return pt; }
         std::vector<std::pair<int,int>> get_paf() const {return paf;}
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
+
+        /**
+         * Get geometry information for wire plane offsets
+         * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)
+         */
+        const std::map<WirePlaneId, std::tuple<double, double, double, double>>& get_wpid_offsets() const { return wpid_offsets; }
+
+        /**
+         * Get geometry information for wire plane slopes
+         * @return Map of WirePlaneId to tuple (slope_t, slope_yu_zu, slope_yv_zv, slope_yw_zw)
+         */
+        const std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double>>>& get_wpid_slopes() const { return wpid_slopes; }
 
     private:
          // Core parameters - centralized storage

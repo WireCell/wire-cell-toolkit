@@ -65,7 +65,7 @@ namespace WireCell::Clus::PR {
     }
 
 
-    std::pair<VertexPtr, VertexPtr> find_endpoints(Graph& graph, SegmentPtr seg)
+    std::pair<VertexPtr, VertexPtr> find_vertices(Graph& graph, SegmentPtr seg)
     {
         if (! seg->descriptor_valid()) { return std::pair<VertexPtr, VertexPtr>{}; }
 
@@ -89,6 +89,48 @@ namespace WireCell::Clus::PR {
             return std::make_pair(vtx1, vtx2);
         }
         return std::make_pair(vtx2, vtx1);        
+    }
+
+    VertexPtr find_other_vertex(Graph& graph, SegmentPtr seg, VertexPtr vertex)
+    {
+        if (! seg->descriptor_valid()) { return nullptr; }
+        if (! vertex->descriptor_valid()) { return nullptr; }
+
+        auto ed = seg->get_descriptor();
+        auto vd = vertex->get_descriptor();
+
+        auto vd1 = boost::source(ed, graph);
+        auto vd2 = boost::target(ed, graph);
+
+        auto [ed2,ingraph] = boost::edge(vd1, vd2, graph);
+        if (!ingraph)  { return nullptr; }
+
+        // Check if the given vertex is connected to this segment
+        if (vd == vd1) {
+            return graph[vd2].vertex;
+        }
+        else if (vd == vd2) {
+            return graph[vd1].vertex;
+        }
+
+        // Given vertex is not connected to this segment
+        return nullptr;
+    }
+
+    SegmentPtr find_segment(Graph& graph, VertexPtr vtx1, VertexPtr vtx2)
+    {
+        if (! vtx1->descriptor_valid()) { return nullptr; }
+        if (! vtx2->descriptor_valid()) { return nullptr; }
+
+        auto vd1 = vtx1->get_descriptor();
+        auto vd2 = vtx2->get_descriptor();
+
+        // Check if edge exists between the two vertices
+        auto [ed, exists] = boost::edge(vd1, vd2, graph);
+        if (!exists) { return nullptr; }
+
+        // Return the segment associated with this edge
+        return graph[ed].segment;
     }
 
 }

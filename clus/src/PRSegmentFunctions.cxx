@@ -12,7 +12,8 @@ namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
                                 const std::vector<geo_point_t>& path_points,
                                 const IDetectorVolumes::pointer& dv,
-                                const std::string& cloud_name)
+                                const std::string& cloud_name,
+                                const std::vector<size_t>& global_indices)
     {
         if (!segment || !segment->cluster()) {
             raise<RuntimeError>("create_segment_point_cloud: invalid segment or missing cluster");
@@ -52,6 +53,11 @@ namespace WireCell::Clus::PR {
         
         // Associate with segment
         segment->dpcloud(cloud_name, dpc);
+        
+        // Store global indices if provided
+        if (!global_indices.empty()) {
+            segment->set_global_indices(cloud_name, global_indices);
+        }
     }
 
     void create_segment_fit_point_cloud(SegmentPtr segment,
@@ -381,7 +387,7 @@ namespace WireCell::Clus::PR {
 
 
 
-    bool break_segment(Graph& graph, SegmentPtr seg, Point point, double max_dist/*=1e9*/)
+    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv, double max_dist/*=1e9*/)
     {
         /// sanity checks
         if (! seg->descriptor_valid()) {
@@ -397,11 +403,24 @@ namespace WireCell::Clus::PR {
 
         const auto& fits = seg->fits();
         auto itfits = closest_point(fits, point, owp_to_point<Fit>);
+        
+        // std::cout << "Break point in system units: " << point << std::endl;
+        // std::cout << "Break point in cm: (" << point.x()/units::cm << ", " << point.y()/units::cm << ", " << point.z()/units::cm << ")" << std::endl;
+        
+        // for (size_t i = 0; i < fits.size(); ++i) {
+        //     const auto& fit = fits[i];
+        //     double dist = (fit.point - point).magnitude();
+        //     std::cout << "  Point " << i << ": position=(" 
+        //                 << fit.point.x()/units::cm << ", " << fit.point.y()/units::cm << ", " << fit.point.z()/units::cm
+        //                 << "), dQ=" << fit.dQ << ", dx=" << fit.dx/units::cm 
+        //                 << " | dist=" << dist/units::cm << " cm" << std::endl;
+        // }
+
 
         // reject if test point is at begin or end of fits.
-        if (itfits == fits.begin() || itfits+1 == fits.end()) {
-            return false;
-        }
+        // if (itfits == fits.begin() || itfits+1 == fits.end()) {
+            // return std::make_tuple(false, std::pair<SegmentPtr, SegmentPtr>(), VertexPtr());
+        // }
 
         const auto& wcpts = seg->wcpts();        
         auto itwcpts = closest_point(wcpts, point, owp_to_point<WCPoint>);
@@ -414,6 +433,8 @@ namespace WireCell::Clus::PR {
             --itwcpts;
         }
 
+        std::cout << "Closest point found: " << itfits - fits.begin() << " / " << fits.size() << " " << itwcpts - wcpts.begin() << " / " << wcpts.size() << " points in fits\n";
+
         
         // update graph
         remove_segment(graph, seg);
@@ -425,27 +446,155 @@ namespace WireCell::Clus::PR {
         // WARNING there is no "direction" in the graph.  You can not assume the
         // "source()" of a segment is closest to the segments first point.  As
         // of now, at least...
-        auto seg1 = make_segment(graph, vtx, vtx1);
+        auto seg1 = make_segment(graph, vtx1, vtx);
         auto seg2 = make_segment(graph, vtx, vtx2);
 
 
         // fill in the new objects.  All three get the middle thing
-
+        // Split wcpts - break point included in both
         seg1->wcpts(std::vector<WCPoint>(wcpts.begin(), itwcpts+1));
         seg2->wcpts(std::vector<WCPoint>(itwcpts, wcpts.end()));
         vtx->wcpt(*itwcpts);
 
-        seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
-        seg2->fits(std::vector<Fit>(itfits, fits.end()));
-        vtx->fit(*itfits);
+        seg1->cluster(seg->cluster()); 
+        seg2->cluster(seg->cluster());
 
-        //.... more for segment
-        // dir_weak
-        // flags (dir, shower traj, shower topo)
-        // particle type and mass and score
-        // points clouds
+        // Split fits - break point included in both
+        if (fits.size()>0){
+            seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
+            seg2->fits(std::vector<Fit>(itfits, fits.end()));
+            vtx->fit(*itfits);
+        }
+
+        // Copy segment properties from original to both new segments (matching WCPPID)
+        seg1->dir_weak(seg->dir_weak());
+        seg2->dir_weak(seg->dir_weak());
+        
+        seg1->dirsign(seg->dirsign());
+        seg2->dirsign(seg->dirsign());
+        
+        // Copy all flags
+        seg1->flags_set(seg->flags());
+        seg2->flags_set(seg->flags());
+
             
-        return true;
+        if (seg->has_particle_info()) {
+            // Copy particle info with 4-momentum for seg1
+            int pdg = seg->particle_info()->pdg();
+            auto four_momentum1 = segment_cal_4mom(seg1, pdg, particle_data, recomb_model);
+            auto pinfo1 = std::make_shared<Aux::ParticleInfo>(
+                pdg,
+                particle_data->get_particle_mass(pdg),
+                particle_data->pdg_to_name(pdg),
+                four_momentum1
+            );
+            seg1->particle_info(pinfo1);
+            
+            // Copy particle info with 4-momentum for seg2
+            auto four_momentum2 = segment_cal_4mom(seg2, pdg, particle_data, recomb_model);
+            auto pinfo2 = std::make_shared<Aux::ParticleInfo>(
+                pdg,
+                particle_data->get_particle_mass(pdg),
+                particle_data->pdg_to_name(pdg),
+                four_momentum2
+            );
+            seg2->particle_info(pinfo2);
+        }
+
+        // Copy dynamic point clouds if they exist
+        // The dpcloud() method returns the DynamicPointCloud associated with a given name
+        if (seg->dpcloud("fit")) {
+            create_segment_fit_point_cloud(seg1, dv, "fit");
+            create_segment_fit_point_cloud(seg2, dv, "fit");
+        }
+        
+        if (seg->dpcloud("main")) {
+            // Convert WCPoint to Point for create_segment_point_cloud
+            const auto& wcpts1 = seg1->wcpts();
+            const auto& wcpts2 = seg2->wcpts();
+            std::vector<geo_point_t> points1, points2;
+            points1.reserve(wcpts1.size());
+            points2.reserve(wcpts2.size());
+            for (const auto& wcp : wcpts1) {
+                points1.push_back(wcp.point);
+            }
+            for (const auto& wcp : wcpts2) {
+                points2.push_back(wcp.point);
+            }
+            create_segment_point_cloud(seg1, points1, dv, "main");
+            create_segment_point_cloud(seg2, points2, dv, "main");
+        }
+        
+        if (seg->dpcloud("associate_points")) {
+            // Redistribute associated points based on closest distance to seg1 vs seg2
+            // This matches WCPPID lines 123-140
+            
+            auto orig_dpc = seg->dpcloud("associate_points");
+            const auto& orig_points = orig_dpc->get_points();
+            
+            // Separate points based on which segment they're closer to
+            std::vector<Facade::DynamicPointCloud::DPCPoint> points1, points2;
+            points1.reserve(orig_points.size() / 2);  // estimate
+            points2.reserve(orig_points.size() / 2);
+            
+            // Determine which cloud to use for distance calculations
+            // Prefer "fit" points, but fall back to "main" if "fit" is not available
+            std::string ref_cloud_name = "fit";
+            if (!seg1->dpcloud("fit") || !seg2->dpcloud("fit")) {
+                ref_cloud_name = "main";
+                // Ensure main clouds exist for both segments
+                if (!seg1->dpcloud("main") || !seg2->dpcloud("main")) {
+                    raise<RuntimeError>("break_segment: cannot redistribute associate_points - neither 'fit' nor 'main' clouds available");
+                }
+            }
+            
+            // Iterate through all associated points
+            for (const auto& dpc_point : orig_points) {
+                WireCell::Point point(dpc_point.x, dpc_point.y, dpc_point.z);
+                
+                // Compute closest distance to seg1 and seg2 using reference cloud
+                auto [dist1, _1] = segment_get_closest_point(seg1, point, ref_cloud_name);
+                auto [dist2, _2] = segment_get_closest_point(seg2, point, ref_cloud_name);
+                
+                // Add point to closer segment
+                if (dist1 < dist2) {
+                    points1.push_back(dpc_point);
+                } else {
+                    points2.push_back(dpc_point);
+                }
+            }
+            
+            // Get wpid_params from the original cloud
+            auto& cluster = *seg->cluster();
+            const auto& wpids = cluster.grouping()->wpids();
+            std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_params;
+            std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir;
+            std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_V_dir;
+            std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
+            std::set<int> apas;
+            Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+
+            // Create new DynamicPointClouds for associated points if we have any
+            if (!points1.empty()) {
+                // Create and populate seg1's associate_points cloud
+                auto dpc1 = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+                dpc1->add_points(points1);
+                seg1->dpcloud("associate_points", dpc1);
+            }
+            
+            if (!points2.empty()) {
+                // Create and populate seg2's associate_points cloud
+                auto dpc2 = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
+                dpc2->add_points(points2);
+                seg2->dpcloud("associate_points", dpc2);
+            }
+            
+            // Note: KD-tree indices are automatically rebuilt when add_points() is called
+        }
+        
+       
+            
+        return std::make_tuple(true,std::make_pair(seg1, seg2), vtx);
     }
 
 
@@ -612,19 +761,33 @@ namespace WireCell::Clus::PR {
         
 
 
-    double segment_median_dQ_dx(SegmentPtr seg)
+    double segment_median_dQ_dx(SegmentPtr seg, int n1, int n2)
     {
         auto& fits = seg->fits();
         if (fits.empty()) {
             return 0.0;
         }
         
-        std::vector<double> vec_dQ_dx;
-        vec_dQ_dx.reserve(fits.size());
+        // Handle default parameters (equivalent to get_medium_dQ_dx())
+        if (n1 < 0 && n2 < 0) {
+            n1 = 0;
+            n2 = static_cast<int>(fits.size());
+        }
         
-        for (auto& fit : fits) {
+        // Clamp indices to valid range (equivalent to WCPPID bounds checking)
+        if (n1 < 0) n1 = 0;
+        if (n1 + 1 > static_cast<int>(fits.size())) n1 = static_cast<int>(fits.size()) - 1;
+        if (n2 < 0) n2 = 0;
+        if (n2 + 1 > static_cast<int>(fits.size())) n2 = static_cast<int>(fits.size()) - 1;
+        
+        std::vector<double> vec_dQ_dx;
+        vec_dQ_dx.reserve(n2 - n1 + 1);
+        
+        // Loop over specified range [n1, n2] (inclusive, matching WCPPID)
+        for (int i = n1; i <= n2 && i < static_cast<int>(fits.size()); i++) {
+            auto& fit = fits[i];
             if (fit.valid() && fit.dx > 0 && fit.dQ >= 0) {
-                // Add small epsilon to avoid division by zero (same as original)
+                // Add small epsilon to avoid division by zero (same as WCPPID: 1e-9)
                 vec_dQ_dx.push_back(fit.dQ / (fit.dx + 1e-9));
             }
         }
@@ -633,7 +796,7 @@ namespace WireCell::Clus::PR {
             return 0.0;
         }
         
-        // Use nth_element to find median (same algorithm as original)
+        // Use nth_element to find median (exact WCPPID algorithm)
         size_t median_index = vec_dQ_dx.size() / 2;
         std::nth_element(vec_dQ_dx.begin(), 
                         vec_dQ_dx.begin() + median_index, 
@@ -815,6 +978,7 @@ namespace WireCell::Clus::PR {
 
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg){
         const auto& fits = seg->fits();
+
         if (fits.size() < 2) {
             return WireCell::Vector(0, 0, 0);
         }
@@ -893,9 +1057,17 @@ namespace WireCell::Clus::PR {
             }
         } else if (direction == -1) {
             // Backward direction
-            for (int i = start; i < start + num_points - 1 && (fits.size() - i - 1) < fits.size(); i++) {
-                if (fits.size() - start < fits.size()) {
-                    p = p + (fits[fits.size() - i - 1].point - fits[fits.size() - start].point);
+             for (int i = start; i < start + num_points - 1; i++) {
+                // WCPPID's bounds check
+                if (i + 1 > static_cast<int>(fits.size())) break;
+                
+                // Ensure backward indices are valid
+                int back_idx = fits.size() - i - 1;
+                int ref_idx = fits.size() - start;
+                
+                if (back_idx >= 0 && back_idx < static_cast<int>(fits.size()) && 
+                    ref_idx >= 0 && ref_idx < static_cast<int>(fits.size())) {
+                    p = p + (fits[back_idx].point - fits[ref_idx].point);
                 }
             }
         }
@@ -975,6 +1147,10 @@ namespace WireCell::Clus::PR {
             
             // Calculate dE/dx using Box model inverse formula from original code
             double dE = recomb_model->dE(dQ, dx);
+
+            // double dQp = (*recomb_model)(dE, dx);
+
+            // std::cout << dQ << " " << dx << " " << dE << " " << units::MeV << " " << dQp << std::endl;
             
             // Apply bounds (same as original)
             if (dE < 0) dE = 0;
@@ -1012,8 +1188,8 @@ namespace WireCell::Clus::PR {
         
         for (size_t i = 0; i < count; i++) {
             muon_ref[i] = particle_data->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm) /units::cm;
-            proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm)/ units::cm;
-            electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm)/ units::cm;
+            proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm) / units::cm;
+            electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm) / units::cm;
         }
         
         // Perform KS-like tests using kslike_compare
@@ -1033,6 +1209,8 @@ namespace WireCell::Clus::PR {
         double ratio4 = std::accumulate(electron_ref.begin(), electron_ref.end(), 0.0) / 
                         (std::accumulate(vec_y.begin(), vec_y.end(), 0.0) + 1e-9);
         
+        // std::cout << ks1 << " " << ratio1 << " " << ks2 << " " << ratio2 << " " << ks3 << " " << ratio3 << " " << ks4 << " " << ratio4 << std::endl;
+
         std::vector<double> results;
         // Convert bool result to double (1.0 for true, 0.0 for false)
         results.push_back(eval_ks_ratio(ks1, ks2, ratio1, ratio2) ? 1.0 : 0.0); // direction metric
@@ -1065,15 +1243,14 @@ namespace WireCell::Clus::PR {
         
         if (!range_function) {
             // Default to muon if particle type not recognized
-            range_function = particle_data->get_range_function("muon");
+            range_function = particle_data->get_range_function("muon"); 
         }
-        
         double kine_energy = range_function->scalar_function(L/units::cm) * units::MeV;
         return kine_energy;
     }
 
     // success, flag_dir, particle_type, particle_score
-    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx){
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range , double offset_length, bool flag_force, double MIP_dQdx){
         
         if (L.size() != dQ_dx.size() || L.empty() || !segment) {
             return std::make_tuple(false, 0, 0, 0.0);
@@ -1131,7 +1308,7 @@ namespace WireCell::Clus::PR {
         // Decision logic
         int flag_dir = 0;
         int particle_type = 0;
-        double particle_score = 0.0;
+        double particle_score = 100.0;
         
         if (flag_forward == 1 && flag_backward == 0) {
             flag_dir = 1;
@@ -1172,8 +1349,10 @@ namespace WireCell::Clus::PR {
             return std::make_tuple(true, flag_dir, particle_type, particle_score);
         }
         
+        segment->dirsign(flag_dir);
+
         // Reset before return - failure case
-        return std::make_tuple(false, 0, 0, 0.0);
+        return std::make_tuple(false, 0, 0, 100.0);
     }
 
     // 4-momentum: E, px, py, pz, 
@@ -1195,8 +1374,9 @@ namespace WireCell::Clus::PR {
         double particle_mass = particle_data->get_particle_mass(pdg_code);
 
         results[0]= kine_energy + particle_mass;
-        double mom = sqrt(pow(results[3],2) - pow(particle_mass,2));
+        double mom = sqrt(pow(results[0],2) - pow(particle_mass,2));
         auto v1 = segment_cal_dir_3vector(segment);
+
         results[1] = mom * v1.x();
         results[2] = mom * v1.y();
         results[3] = mom * v1.z();
@@ -1243,14 +1423,14 @@ namespace WireCell::Clus::PR {
         }
         
         int pdg_code = 0;
-        double particle_score = 0.0;
+        double particle_score = 100.0;
         
         if (npoints >= 2) { // reasonably long
             bool tmp_flag_pid = false;
             
             if (start_n == 1 && end_n == 1 && npoints >= 15) {
                 // Can use the dQ/dx to do PID and direction
-                auto result = segment_do_track_pid(segment, L, dQ_dx, 35*units::cm, 1*units::cm, true, particle_data);
+                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 1*units::cm, true);
                 tmp_flag_pid = std::get<0>(result);
                 if (tmp_flag_pid) {
                     segment->dirsign(std::get<1>(result));
@@ -1259,7 +1439,7 @@ namespace WireCell::Clus::PR {
                 }
                 
                 if (!tmp_flag_pid) {
-                    result = segment_do_track_pid(segment, L, dQ_dx, 15*units::cm, 1*units::cm, true, particle_data);
+                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 1*units::cm, true);
                     tmp_flag_pid = std::get<0>(result);
                     if (tmp_flag_pid) {
                         segment->dirsign(std::get<1>(result));
@@ -1269,7 +1449,7 @@ namespace WireCell::Clus::PR {
                 }
             } else {
                 // Can use the dQ/dx to do PID and direction
-                auto result = segment_do_track_pid(segment, L, dQ_dx, 35*units::cm, 0*units::cm, false, particle_data);
+                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 0*units::cm, false);
                 tmp_flag_pid = std::get<0>(result);
                 if (tmp_flag_pid) {
                     segment->dirsign(std::get<1>(result));
@@ -1278,7 +1458,7 @@ namespace WireCell::Clus::PR {
                 }
                 
                 if (!tmp_flag_pid) {
-                    result = segment_do_track_pid(segment, L, dQ_dx, 15*units::cm, 0*units::cm, false, particle_data);
+                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 0*units::cm, false);
                     tmp_flag_pid = std::get<0>(result);
                     if (tmp_flag_pid) {
                         segment->dirsign(std::get<1>(result));
@@ -1346,33 +1526,40 @@ namespace WireCell::Clus::PR {
         }
         
         // Set particle mass and calculate 4-momentum
-        if (pdg_code != 0) {
+        // Only calculate if direction points toward a free end (matching WCPPID logic)
+        if (pdg_code != 0 && ((segment->dirsign() == 1 && end_n == 1) || (segment->dirsign() == -1 && start_n == 1))) {
             // Calculate 4-momentum using the identified particle type
-            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
+            auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
 
             // Create ParticleInfo with the identified particle
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
-                pdg_code,                    // PDG code
+                pdg_code,                                    // PDG code
                 particle_data->get_particle_mass(pdg_code), // mass
                 particle_data->pdg_to_name(pdg_code),       // name
-                four_momentum                     // 4-momentum
+                four_momentum                                // 4-momentum (E, px, py, pz)
             );
             
-            // Set additional properties if available
-            pinfo->set_particle_score(particle_score); // This method would need to be added
-            
-            // Store particle info in segment (this would require adding particle_info to Segment class)
+            // Store particle info in segment
             segment->particle_info(pinfo);
+            segment->particle_score(particle_score);
         }
                 
-        if (flag_print && pdg_code != 0) {
-            std::cout << "Segment PID: PDG=" << pdg_code 
-                      << ", Score=" << particle_score 
-                      << ", Length=" << length / units::cm << " cm"
-                      << ", Direction=" << segment->dirsign() 
-                      << (segment->dir_weak() ? " (weak)" : "") 
-                      << ", Medium dQ/dx=" << segment_median_dQ_dx(segment) / (MIP_dQdx) 
-                      << " MIP"
+        if (flag_print) {
+            // Match WCPPID output format: id, length, "Track", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
+            double particle_mass = pdg_code != 0 ? particle_data->get_particle_mass(pdg_code) : 0.0;
+            double kinetic_energy = 0.0;
+            
+            if (segment->has_particle_info()) {
+                kinetic_energy = segment->particle_info()->kinetic_energy();
+            }
+            
+            std::cout << "Seg " << length/units::cm << " cm Track " 
+                      << segment->dirsign() << " " 
+                      << (segment->dir_weak() ? 1 : 0) << " "
+                      << pdg_code << " " 
+                      << particle_mass/units::MeV << " MeV " 
+                      << kinetic_energy/units::MeV << " MeV "
+                      << particle_score 
                       << std::endl;
         }
     }
@@ -1382,43 +1569,61 @@ namespace WireCell::Clus::PR {
         double length = segment_track_length(segment, 0);
         
         // hack for now ...
-        int pdg_code = 11;
+        int pdg_code = 11; // electron
+        double particle_score = 100.0;
         
-        if (start_n==1 && end_n >1){
+        if (start_n == 1 && end_n > 1){
             segment->dirsign(-1);
-        }else if (start_n > 1 && end_n == 1){
+        } else if (start_n > 1 && end_n == 1){
             segment->dirsign(1);
-        }else{
+        } else {
+            // Try track PID first
             segment_determine_dir_track(segment, start_n, end_n, particle_data, recomb_model, MIP_dQdx, false);
-            if (segment->particle_info()->pdg() != 11){
+            
+            // Check if particle info was set and if it's not an electron
+            if (segment->has_particle_info() && segment->particle_info()->pdg() != 11) {
+                // Reset to electron and no direction
+                pdg_code = 11;
+                segment->dirsign(0);
+            } else if (segment->has_particle_info()) {
+                // Keep the electron identification from track PID
+                pdg_code = segment->particle_info()->pdg();
+            } else {
+                // No particle info set, default to electron with no direction
+                pdg_code = 11;
                 segment->dirsign(0);
             }
         }
-                
-        auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model);
+        
+        // Always calculate 4-momentum for shower trajectories (matching WCPPID)
+        auto four_momentum = segment_cal_4mom(segment, pdg_code, particle_data, recomb_model, MIP_dQdx);
 
         // Create ParticleInfo with the identified particle
         auto pinfo = std::make_shared<Aux::ParticleInfo>(
-            pdg_code,                    // PDG code
+            pdg_code,                                    // PDG code (electron)
             particle_data->get_particle_mass(pdg_code), // mass
             particle_data->pdg_to_name(pdg_code),       // name
-            four_momentum                     // 4-momentum
+            four_momentum                                // 4-momentum (E, px, py, pz)
         );
                 
-        // Store particle info in segment (this would require adding particle_info to Segment class)
+        // Store particle info in segment
         segment->particle_info(pinfo);
+        segment->particle_score(particle_score);
 
-         if (flag_print ) {
-            std::cout << "Segment PID: PDG=" << pdg_code 
-                      << ", Length=" << length / units::cm << " cm"
-                      << ", Direction=" << segment->dirsign() 
-                      << (segment->dir_weak() ? " (weak)" : "") 
-                      << ", Medium dQ/dx=" << segment_median_dQ_dx(segment) / (MIP_dQdx) 
-                      << " MIP"
+        if (flag_print) {
+            // Match WCPPID output format: id, length, "S_traj", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
+            double particle_mass = particle_data->get_particle_mass(pdg_code);
+            double kinetic_energy = pinfo->kinetic_energy();
+            
+            std::cout << "Seg " << length/units::cm << " cm S_traj " 
+                      << segment->dirsign() << " " 
+                      << (segment->dir_weak() ? 1 : 0) << " "
+                      << pdg_code << " " 
+                      << particle_mass/units::MeV << " MeV " 
+                      << kinetic_energy/units::MeV << " MeV "
+                      << particle_score 
                       << std::endl;
         }
-
-
      }
 
     void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
@@ -1440,6 +1645,7 @@ namespace WireCell::Clus::PR {
             const auto& graph = clus->find_graph("basic_pid");
 
             std::map<SegmentPtr, std::vector<geo_point_t>> map_segment_points;
+            std::map<SegmentPtr, std::vector<size_t>> map_segment_global_indices;
             std::map<int, std::pair<SegmentPtr, double>> map_pindex_segment;
             //std::cout << "Cluster has " << npoints << " points and " << segs.size() << " segments." << std::endl;
             //std::cout << "Number of vertices in the graph: " << boost::num_vertices(graph) << std::endl;
@@ -1571,7 +1777,7 @@ namespace WireCell::Clus::PR {
                 
                     // change the point's clustering ...
                     if (!flag_change){
-                        map_segment_points[main_sg].push_back(gp);
+                        map_segment_global_indices[main_sg].push_back(i);
                     }
                 }
             }
@@ -1580,7 +1786,9 @@ namespace WireCell::Clus::PR {
             // convert points to geo_point_t format
             // add points to segments ... 
             for (const auto& [seg, geo_points] : map_segment_points) {
-                create_segment_point_cloud(seg, geo_points, dv, cloud_name);
+                const auto& global_indices = map_segment_global_indices[seg];
+                create_segment_point_cloud(seg, geo_points, dv, cloud_name, global_indices);
+                // create_segment_point_cloud(seg, geo_points, dv, cloud_name);
             }
         }
     }
@@ -1723,6 +1931,9 @@ namespace WireCell::Clus::PR {
         // Determine direction based on spread analysis
         int flag_dir = 0;
         
+
+        // std::cout << "Shower Topology Direction: " << max_spread/units::cm << " " << large_spread_length/units::cm << " " << total_effective_length/units::cm << std::endl;
+
         // Check if this looks like a shower based on spread
         bool is_shower_like = (
             (max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 
@@ -1901,7 +2112,7 @@ namespace WireCell::Clus::PR {
         if (!dpcloud_fit) return false;
         
         // Get the associated point cloud 
-        auto dpcloud_assoc = segment->dpcloud("associated");
+        auto dpcloud_assoc = segment->dpcloud("associate_points");
         if (!dpcloud_assoc) return false;
         
         const auto& assoc_points = dpcloud_assoc->get_points();
@@ -2036,6 +2247,8 @@ namespace WireCell::Clus::PR {
             }
         }
         (void)max_cont_weighted_length; // Currently unused
+
+        // std::cout << "Shower Topology Check: " << max_spread/units::cm << " " << large_spread_length/units::cm << " " << total_effective_length/units::cm << std::endl;
         
         // Determine if this is shower topology based on spread patterns
         if ((max_spread > 0.7*units::cm && large_spread_length > 0.2 * total_effective_length && 

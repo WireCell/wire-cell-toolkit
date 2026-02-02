@@ -471,7 +471,7 @@ std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point,
     return {tind, wind};
 }
 
-std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int channel, const int apa, const int face, const int plane) const 
+std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const 
 {
     if (m_anodes.size() == 0) {
         raise<ValueError>("Anode is null");
@@ -497,7 +497,7 @@ std::pair<double,double> Grouping::convert_time_ch_2Dpoint(const int timeslice, 
     if (plane >= 0 && plane < nplanes) {
         const double pitch = pitch_mags.at(apa).at(face).at(plane);
         const double center = proj_centers.at(apa).at(face).at(plane);
-        y = pitch * (channel+0.5) + center;
+        y = pitch * (wire+0.5) + center;
     }
     else {
         raise<ValueError>("invalid plane index %d", plane);
