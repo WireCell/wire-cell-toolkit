@@ -1,5 +1,6 @@
 #include "WireCellSpng/TdmTools.h"
 #include "WireCellUtil/Fmt.h"
+#include "WireCellAux/SimpleTensor.h"
 #include <regex>
 
 namespace WireCell::SPNG::TDM {
@@ -140,6 +141,44 @@ namespace WireCell::SPNG::TDM {
             ret[dt].push_back(ten);
         }
         return ret;
+    }
+
+    WireCell::ITensor::pointer tdm_to_wct(ITorchTensor::pointer tdm)
+    {
+        // Get the tensor and move to CPU, make contiguous
+        auto tt = tdm->tensor().to(torch::kCPU).contiguous();
+
+        // Get metadata
+        auto md = tdm->metadata();
+
+        // Convert shape from int64_t to size_t
+        auto tt_shape = tt.sizes();
+        ITensor::shape_t shape(tt_shape.begin(), tt_shape.end());
+
+        // Get the torch dtype and create appropriate SimpleTensor
+        auto dtype = tt.dtype();
+
+        if (dtype == torch::kBool) {
+            return std::make_shared<Aux::SimpleTensor>(shape, tt.data_ptr<bool>(), md);
+        }
+        else if (dtype == torch::kFloat32) {
+            return std::make_shared<Aux::SimpleTensor>(shape, tt.data_ptr<float>(), md);
+        }
+        else if (dtype == torch::kFloat64) {
+            return std::make_shared<Aux::SimpleTensor>(shape, tt.data_ptr<double>(), md);
+        }
+        else if (dtype == torch::kInt16) {
+            return std::make_shared<Aux::SimpleTensor>(shape, tt.data_ptr<int16_t>(), md);
+        }
+        else if (dtype == torch::kInt32) {
+            return std::make_shared<Aux::SimpleTensor>(shape, tt.data_ptr<int32_t>(), md);
+        }
+        else if (dtype == torch::kInt64) {
+            return std::make_shared<Aux::SimpleTensor>(shape, tt.data_ptr<int64_t>(), md);
+        }
+        else {
+            throw std::runtime_error("Unsupported torch dtype in tdm_to_wct conversion");
+        }
     }
 
 }

@@ -270,9 +270,44 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
 
 
-    /// Pnode to convert between frame and TDM tensor set.
-    frame_to_tdm(extra_name=""):: frame.to_tdm(tpc, extra_name=extra_name),
-    tdm_to_frame(extra_name=""):: frame.from_tdm(tpc, extra_name=extra_name),
+    /// Convert an IFrame to a TDM tensor set.
+    frame_to_tdm(tag="", groups=null, extra_name=""):: pg.pnode({
+        local the_groups = if std.type(groups) == "null"
+                           then tpc.view_groups
+                           else groups,
+        type: 'SPNGFrameToTdm',
+        name: tpc.name + extra_name,
+        data: {
+            anode: wc.tn(tpc.anode),
+            rules: [{
+                tag: tag,
+                groups: [{
+                    wpids: g.signed_wpids(tpc.ident),
+                }, for g in the_groups]
+            }],                 // just one rule
+        } + control
+    }, nin=1, nout=1, uses=[tpc.anode]),
+
+    /// Convert a TDM tensor set to an IFrame.  This provides a simplified
+    /// configuration where a single rule is used to match traces tensors.
+    tdm_to_frame(extra_name="", traces_tag="signal", chid_tag="null"):: pg.pnode({
+        type: 'SPNGTdmToFrame',
+        name: tpc.name + extra_name,
+        data: {
+            // Locate the original frame object (just metadata)
+            frame: {datapath: "/frames/\\d+/frame"},
+            // Rules to locate tensor to include as tagged trace sets.
+            tagged_traces: [ {
+                // eg datapath of /frames/0/tags/gauss/groups/0/traces
+                traces: { tag: traces_tag },
+                // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
+                chids: { tag: chid_tag },
+            }],
+            // chmasks: ...
+            
+        } + control
+    }, nin=1, nout=1, uses=[]),
+
 
     /// An input tensor set to N-tensor outputs specifically for tpc groups.
     /// Map a tensors in a set by an iteration of a datapath pattern over a set

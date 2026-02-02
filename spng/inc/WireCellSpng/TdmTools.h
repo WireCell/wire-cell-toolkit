@@ -3,6 +3,7 @@
 
 #include "WireCellSpng/ITorchTensor.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellIface/ITensor.h"
 #include <string>
 #include <vector>
 
@@ -81,10 +82,11 @@ namespace WireCell::SPNG::TDM {
        The match is applied to each tensor metadata object via match_object()
        and all that match are returned.
 
-       The selected tenors output order is determined by the order of matches
-       (if it is an array) and the order of the tensors.  The order is
+       The selected tensors output order is determined by the order of matches
+       (if it is an array) and the order of the input tensors.  The order is
        tensor-major.  That is, each match object may produce a contiguous block
-       of tensors in the output order.
+       of tensors in the output order.  If match objects for it, tensors will be
+       duplicated in the output.
 
        Note, as match_object() is policy free the user should take care to make
        a match unique to the desired purpose.  For example, if the goal is to
@@ -102,12 +104,16 @@ namespace WireCell::SPNG::TDM {
     /**
        @brief Partition tensors by their datatype.
 
-       @param tenors A set of tensors.
+       @param tensors A set of tensors.
        @return A map from datatype to a set of tensors with that datatype.
        
        Any tensor lacking datatype will be placed in the map with an empty string key.
      */
     std::map<std::string, ITorchTensor::vector> by_datatype(const ITorchTensor::vector& tensors);
+
+    /// Return an ITensor version if the ITorchTensor.
+    ///
+    WireCell::ITensor::pointer tdm_to_wct(ITorchTensor::pointer tdm);
 
 }
 

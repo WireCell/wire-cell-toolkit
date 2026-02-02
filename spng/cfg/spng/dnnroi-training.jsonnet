@@ -167,6 +167,9 @@ function(input,
     local to_tdm = sg.frame_to_tdm();
     local dnnroi_pre = sg.dnnroi_training_preface(crossed_views, rebin, extra_name="_preface");
 
+    // This is a point of collusion between final metadata and the tdm to frame conversion.
+    local fodder_tag = "fodder";
+
     // We have to have a little subgraph just to get the packed tensors into a
     // form that the TdmToFrame can consume.
     local final_metadata = pg.crossline([
@@ -175,8 +178,9 @@ function(input,
             name: tpc.name + 'v'+std.toString(view) + 'f' + std.toString(feat.index) + "_final_metadata",
             data: {
                 operation: "noop",
-                tag: "fodder",
-                datapath_format: "/traces/view/%(view)d/feature/%(feat)s" % {view:view, feat:feat.value},
+                tag: fodder_tag,
+                datapath_format: "/frames/{ident}/tags/{tag}/view/%(view)d/feature/%(feat)s/traces"
+                                 % {view:view, feat:feat.value},
             }
         }, nin=1, nout=1)
         for view in [0,1]
@@ -190,7 +194,27 @@ function(input,
         sg.tensor_packer(multiplicity=ncrossed*3, extra_name="_fodder")
     ]);
     local fodder = sg.wrap_bypass(training_pre);
-    local fodder_frame = sg.tdm_to_frame(extra_name="_fodder");
+    //local fodder_frame = sg.tdm_to_frame(traces_tag = fodder_tag, extra_name="_fodder");
+
+    local fodder_frame = pg.pnode({
+        type: 'SPNGTdmToFrame',
+        name: tpc.name,
+        data: {
+            // Locate the original frame object (just metadata)
+            frame: {datapath: "/frames/\\d+/frame"},
+            // Rules to locate tensor to include as tagged trace sets.
+            tagged_traces: [ {
+                // eg datapath of /frames/0/tags/gauss/groups/0/traces
+                traces: { tag: traces_tag },
+                // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
+                chids: { tag: chid_tag },
+            }],
+            // chmasks: ...
+            
+        } + control
+    }, nin=1, nout=1, uses=[]),
+    
+
     local fodder_sink = io.frame_array_any_sink(outpat % {tier:"fodder"});
     local fodder_pipe = pg.pipeline([sim, to_tdm, fodder, fodder_frame, fodder_sink]);
 
