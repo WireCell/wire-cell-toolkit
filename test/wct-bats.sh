@@ -1154,8 +1154,12 @@ download_git_subdir () {
     local subdir="$1"; shift
     test -n "$subidr"
 
+    # make a URL-dependent subdir of downloads/ as git clone needs an empty target
+    local unique
+    unique=$(echo $url | sha1sum | cut -f 1 -d ' ')
+
     local path
-    path="$(downloads)"
+    path="$(downloads)/$unique"
     if [ -n "$target" ] ; then
         path="$path/$target"
     fi
@@ -1168,6 +1172,7 @@ download_git_subdir () {
         return
     fi
 
+    debug "git clone -n --depth=1 --filter=tree:0 "$url" "$path" "
     local out=$(git clone -n --depth=1 --filter=tree:0 "$url" "$path" 2>&1)
     if [ -n "$out" ] ; then debug $out ; fi
 
