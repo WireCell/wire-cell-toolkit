@@ -237,7 +237,6 @@ local fanin_tag_rules = [
             trace: {
               ['gauss%d'%ind]:'gauss%d'%ind,
               ['wiener%d'%ind]:'wiener%d'%ind,
-              ['threshold%d'%ind]:'threshold%d'%ind,
               // ['tight_lf%d'%ind]:'tight_lf%d'%ind,
               ['loose_lf%d'%ind]:'loose_lf%d'%ind,
 	      ['dnnsp%d'%ind]:'dnnsp%d'%ind,
@@ -264,7 +263,6 @@ local retagger = g.pnode({
       merge: {
         'gauss\\d': 'gauss',
         'wiener\\d': 'wiener',
-	'threshold\\d': 'threshold',
         'dnnsp\\d': 'dnnsp',
       },
     }],
