@@ -1114,7 +1114,7 @@ function download_file () {
     fi
 
     debug "downloading: $path"
-    wget -O "$path" "$url" 1>&2 || return
+    wget --no-check-certificate --quiet -O "$path" "$url" 1>&2 || return
     echo "$path"
 }
 
