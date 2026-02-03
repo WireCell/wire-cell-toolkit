@@ -29,7 +29,7 @@ local sink = g.pnode({
     name: "deposink",
     type: "DepoFileSink",
     data: {
-        // outname: output_file,
+        outname: 'wct-depos.npz',
     }
 }, nin=1, nout=0);
 
@@ -43,7 +43,8 @@ local save = g.pnode({
 local dump = g.pnode({type: 'DumpDepos', name: 'dump_depos', data: {}}, nin=1, nout=0);
 
 // local graph = g.pipeline([wcls_input.depos, save, dump], 'mygraph');
-local graph = g.pipeline([wcls_input.depos, save, bagger, sink], 'mygraph');
+// local graph = g.pipeline([wcls_input.depos, save, bagger, sink], 'mygraph');
+local graph = g.pipeline([wcls_input.depos, bagger, sink], 'mygraph');
 // g4 sim as input
 // local graph = g.intern(
 //     innodes=[wcls_input.depos], centernodes=[bagger], outnodes=[sinks],

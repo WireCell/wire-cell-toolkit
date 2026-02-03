@@ -87,7 +87,7 @@ rule g4:
         file="cosmics_{sample}_gen.root",
         fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
     output:
-        temp("cosmics_{sample}_g4.root")
+        "cosmics_{sample}_g4.root"
     shadow: "minimal"
     shell:
         """
@@ -109,7 +109,8 @@ rule save_depos:
         fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
         js=os.path.join(SRC_DIR, "wcls-save-larg4-depos.jsonnet"),
     output:
-        "{name}_wct-depos.npz",
+        npz="{name}_wct-depos.npz",
+        # bz2='{name}_wct-depos.tar.bz2'
     shadow: "minimal" #This runs in an auto-removed tmp dir
     shell:
         """
@@ -121,7 +122,9 @@ rule save_depos:
         export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
 
         lar --no-timing --no-memcheck -c {input.fcl} {input.inputfile} --no-output
-        mv wct-depos.npz {output}
+        # ls *tar.bz2
+        mv wct-depos.npz {output.npz}
+        # mv wct-depos.tar.bz2 
         """
 
 def get_sourcestyle(wildcards):
