@@ -4,43 +4,51 @@
 
 SPNG subgraphs exchange tensors following [[file:datamodel.org][SPNG tensor data model]] (SPNG TDM).
 This should not to be confused with WCT's similar but non-Torch TDM.  We will
-say simply TDM in the remainder of this document.  Also not, some older SPNG
-nodes may not follow the TDM.  The goal is to retrofit them.
+say simply TDM in the remainder of this document.  Some older SPNG nodes do not
+follow the TDM and are out of scope for this document.  
 
-An SPNG subgraph typically must reside in an outer graph context providing and
-consuming WCT ~IData~, in particular ~IFrame~.  SPNG provide two key converter node
-classes: ~FrameToTdm~ and ~TdmToFrame~.  Each of their "type" as used in Jsonnet is
-the same but with an "SPNG" prefix.
+An SPNG subgraph typically must reside inside a larger graph context that uses
+non-SPNG =IData= types, in particular =IDepoSet= and =IFrame=.  SPNG provide two key
+converter node classes: ~FrameToTdm~ and ~TdmToFrame~.  When referenced in Jsonnet
+they are spelled ={type: "SPNGFrameToTdm"}= and ={type: "SPNGTdmToFrame"}=.
 
 The ~FrameToTdm~ provides flexible, configurable rule-based extraction of ~IFrame~
-parts into TDM tensors.  ~IFrame~ structure is mapped to TDM conventions and a
-convention for TDM ~datapath~.  The class provides a sophisticated set of
-configuration parameters but defaults are often sufficient.  As ~FrameToTdm~
-defines conventions on which the configuration for many downstream SPNG
-subgraphs rely, this document provides the defaults and the details for
-customization.
+parts into a TDM tensor set (=ITorchTensorSet=).  ~IFrame~ structure is mapped to
+TDM conventions.  Of primary importance is the assignment of the TDM metadata
+attribute ~datapath~ to each tensor in the set in order to uniquely identify the
+set elements.  The =FrameToTdm= class provides a sophisticated set of
+configuration parameters but defaults are often sufficient.
+
+The =TdmToFrame= provides the inverse operation to =FrameToTdm=.  The former
+implements a "gather" pattern to latter's "scatter".  It is also based on
+applying configurable rules to map tensors in a set into elements of the =IFrame=
+structure.  This mapping largely depends on the value of the =datapath= tensor
+metadata attribute.  Inside an SPNG subgraph, =datapath= is not necessarily
+preserved an a penultimate =Transform= node may be used to define =datapath= in a
+way that allows the configured rules given to =TdmToFrame= to be written simply
+and robustly.  The =TdmToFrame= requires tensors of types ~datatype = "frame"~ and
+~datatype = "chids"~ while the core internal SPNG subgraphs pass only ~datatype =
+"traces"~ tensors.  In most cases, =frame= and =chids= tensors can be supplied by
+forwarding the original output of =TdmToFrame= to the output of the SPNG subgraph
+and merging that tensor set with the tensors resulting from the subgraph.
+
+The rest of this document gives recommendation for a =datapath= convention to for
+=FrameToTdm= and =TdmToFrame= followed by guidance to configure these two bookend
+nodes.
 
 * Datapaths
 
-The main convention that ~FrameToTdm~ addresses is the formation of the TDM
-~datapath~ metadata attribute held by each ~ITorchTensor~.  A ~datapath~ follows the
-metaphor of a slash-separated file system path consisting of directories or
-folders holding leaf "files" representing the ~ITorchTensor~ itself.
-
-The makeup of datapaths is completely configurable and a reasonable default
-supplied.  A user may customize the formation of datapaths but must assure that
-each tensor has a unique datapath in any given ~ITorchTensorSet~.  In the
-following sections, the default datapath construction is described followed by
-how to customize.
+Each =ITorchTensor= in the tensor set produced by =FrameToTdm= is given a =datapath=
+metadata attribute to provide the tensor a unique name.  We define a convention
+that encodes other metadata attributes in a specified pattern so that string
+identifies the nature of the tensor.
 
 ** Default datapath construction
 
-The default datapaths are formed as a chain of "kind/value" pairs.  The "kind"
-part is a static label marking the kind of value that follows.  The "value" part
-is dynamically determined from the ~IFrame~ data.  The "kind" is not strictly
-needed and one could simply have "valueA/valueB/..." but the marker helps humans
-understand the structure.  The leaves are named by the FDM datatype of the
-tensor.
+The default datapaths are formed as a chain or path of "kind/value" pairs.  The
+"kind" part is a static label marking kind of value that follows.  The "value"
+part is determined from the ~IFrame~ data, stored as other metadata parameters and
+then string-interpolation on a "datapath pattern" is performed.
 
 A couple examples should make this clear.  In the first case, we have datapaths
 from an ~IFrame~ that holds ADC waveforms such as produced by WCT simulation or a
@@ -172,3 +180,4 @@ output channel masks tensor.
 
 - device :: FrameToTdm implicitly uses CPU-only.  Downstream consumers that
   require GPU should inherit from ~ContextBase~ and use ~to()~ on input tensors.
+

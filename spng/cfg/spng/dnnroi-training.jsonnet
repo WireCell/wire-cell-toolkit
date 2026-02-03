@@ -70,6 +70,10 @@ function(input,
          dump="",
          verbosity=0)
 
+    /// U,V,W set to 1 if it has mp2/mp3 produced.
+    local crossed_views = [1,1,0];
+    local ncrossed = wc.sum(crossed_views);
+
     # Assure numbers
     local irebin = wc.numberify(rebin);
     local fscale = wc.numberify(scale);
@@ -86,6 +90,7 @@ function(input,
 
     local frame = frame_js(control);
 
+    ///////////for debugging
     // Wrap a tensor producing pnode with a pickle dumper.
     local dump_tensors(tier, inode, pnode) =
         local wrap="tensors-%(tier)s-%(tpcid)s-%(itype)s-%(iname)s.pkl";
@@ -127,6 +132,7 @@ function(input,
         SPNGReduce: function(inode, pnode)
             dump_tensors_matched({stack:"stack"}, inode, pnode),
     };
+    ///////////end for debugging
     local wpg = hacks.wrap_pnode(pnode_wrappers);
 
 
@@ -148,69 +154,87 @@ function(input,
     },nin=1, nout=2);
 
 
-    local truth = splatroi_js(tpc, control, rebin=irebin, scale=1.0/fscale, pg=wpg);
+    local sg = subgraphs_js(tpc, control, pg=wpg);
+
+    local truth = sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat");
+    local truth_sink = io.frame_array_any_sink(outpat % {tier:"truth"});
+    local truth_pipe = pg.pipeline([truth, truth_sink]);
+
     local detmod = det_js(det, control);
 
     local sim = detmod.inducer;
 
-
-    //local fodder = roifodder_js(tpc, control, rebin=irebin, scale=1.0/fscale, pg=wpg);
-    local sg = subgraphs_js(tpc, control, pg=wpg);
     local to_tdm = sg.frame_to_tdm();
-    local fodder = sg.dnnroi_training_preface();
-    local simfodder = pg.pipeline([sim, to_tdm, fodder]);
+    local dnnroi_pre = sg.dnnroi_training_preface(crossed_views, rebin, extra_name="_preface");
 
-    local body = pg.intern(innodes=[upstream], outnodes=[truth, simfodder],
+    // This is a point of collusion between final metadata and the tdm to frame conversion.
+    local fodder_tag = "fodder";
+
+    // We have to have a little subgraph just to get the packed tensors into a
+    // form that the TdmToFrame can consume.
+    local final_metadata = pg.crossline([
+        pg.pnode({
+            type: 'SPNGTransform',
+            name: tpc.name + 'v'+std.toString(view) + 'f' + std.toString(feat.index) + "_final_metadata",
+            data: {
+                operation: "noop",
+                tag: fodder_tag,
+                datapath_format: "/frames/{ident}/tags/{tag}/view/%(view)d/feature/%(feat)s/traces"
+                                 % {view:view, feat:feat.value},
+            }
+        }, nin=1, nout=1)
+        for view in [0,1]
+        for feat in wc.enumerate(["dense", "mp2", "mp3"])
+    ]);
+
+    local training_pre = pg.shuntlines([
+        // 2 tensors each with dim=-3 of size 3.
+        sg.expand_dimension(dnnroi_pre, "_fodder"),
+        final_metadata,
+        sg.tensor_packer(multiplicity=ncrossed*3, extra_name="_fodder")
+    ]);
+    local fodder = sg.wrap_bypass(training_pre);
+    //local fodder_frame = sg.tdm_to_frame(traces_tag = fodder_tag, extra_name="_fodder");
+
+    local fodder_frame = pg.pnode({
+        type: 'SPNGTdmToFrame',
+        name: tpc.name,
+        data: {
+            // Locate the original frame object (just metadata)
+            frame: {datapath: "/frames/\\d+/frame"},
+            // Rules to locate tensor to include as tagged trace sets.
+            tagged_traces: [ {
+                // eg datapath of /frames/0/tags/gauss/groups/0/traces
+                traces: { tag: traces_tag },
+                // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
+                chids: { tag: chid_tag },
+            }],
+            // chmasks: ...
+            
+        } + control
+    }, nin=1, nout=1, uses=[]),
+    
+
+    local fodder_sink = io.frame_array_any_sink(outpat % {tier:"fodder"});
+    local fodder_pipe = pg.pipeline([sim, to_tdm, fodder, fodder_frame, fodder_sink]);
+
+
+
+    local body = pg.intern(innodes=[upstream], 
                            centernodes=[depo_fan],
                            edges=[
                                pg.edge(upstream, depo_fan),
-                               pg.edge(depo_fan, truth, 0, 0),
-                               pg.edge(depo_fan, simfodder, 1, 0)]);
+                               pg.edge(depo_fan, truth_pipe, 0, 0),
+                               pg.edge(depo_fan, fodder_pipe, 1, 0)]);
 
+    local graph = pg.components([body, truth_pipe, fodder_pipe]); 
 
-    /// Connect a subgraph to the source's oports.  Source is interned.
-    local multi_sink(source, filename, extra_name="", prefix="") =
-        local mult = std.length(source.oports);
-        local this_name = tpc.name + extra_name;
-        local pack = pg.pnode({
-            type: 'SPNGTensorPacker',
-            name: this_name,
-            data: {
-                multiplicity: mult,
-            } + controls
-        }, nin=mult, nout=1);
-        local ttt = pg.pnode({
-            type: 'TorchToTensor',
-            name: this_name,
-            data: {},
-        }, nin=1, nout=1);
-        local sink = pg.pnode({
-            type: 'TensorFileSink',
-            name: this_name,
-            data: {
-                outname: filename,
-                prefix: prefix,
-            },
-        }, nin=1, nout=0);
-        pg.intern(centernodes=[source,pack,ttt,sink],
-                  edges=[
-                      pg.edge(source, pack, port.index, port.index)
-                      for port in wc.enumerate(source.oports)
-                  ] + [
-                      pg.edge(pack, ttt),
-                      pg.edge(ttt, sink)
-                  ]);
-        
-    local truth_sink = multi_sink(truth, outpat % {tier:"truth"}, "truth");
-    local fodder_sink = multi_sink(simfodder, outpat % {tier:"fodder"}, "fodder");
-    
-
-    local graph = pg.components([body, truth_sink, fodder_sink]); 
-    //local graph = fodder;
-    //local graph = pg.components([sim, fodder]);
-
+    // fixme: strictly, only need HIO if saving to HDF.
     local result = pg.main(graph, app=engine,
-                           plugins=["WireCellSpng", "WireCellGen"],
+                           plugins=["WireCellSpng", "WireCellGen", "WireCellHio"],
                            uses=controls.uses);
     result
+
+
+
 

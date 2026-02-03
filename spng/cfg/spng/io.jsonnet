@@ -40,7 +40,7 @@ local pg = import "pgraph.jsonnet";
     frame_array_any_sink(filename, digitize=false)::
         local parts = std.split(filename, ".");
         local ext = parts[std.length(parts)-1];
-        $.frame_sink_by_extension[ext](filename, digitize),
+        $.frame_sink_by_extension[ext](filename, digitize=digitize),
 
     // A "frame tensor file" is a "tensor file" in WCT frame tensor data model
     // (similar but different than SPNG tensor data model).  This serializes

@@ -154,8 +154,12 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
-                    
-
+            if (opcfg.operation == "noop") {
+                m_ops.push_back([](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor;
+                });
+                continue;
+            }
 
             raise<ValueError>("unknown operation: %s", opcfg.operation);
         }
