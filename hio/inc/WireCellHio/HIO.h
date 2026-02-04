@@ -42,8 +42,30 @@ namespace WireCell::Hio {
         float64
     };
 
+    /// Convert DataType enum to HDF5 native type
+    hid_t dtype_to_hid(Hio::DataType dtype);
+
+    /** Check HDF5 return value and throw IOError if error
+     *
+     * @param ret HDF5 return value (hid_t)
+     * @param msg Error message to include in exception
+     * @throws IOError if ret < 0
+     */
+    void check_h5(hid_t ret, const std::string& msg);
+
+    /** Check HDF5 error return and throw IOError if error
+     *
+     * @param ret HDF5 error return value (herr_t)
+     * @param msg Error message to include in exception
+     * @throws IOError if ret < 0
+     */
+    void check_herr(herr_t ret, const std::string& msg);
+
     /// Call to with false to turn off internal HDF5 C library error messages.  They are on by default.
     void show_errors(bool on=true);
+
+    /// Ensure all parents to datapath exist as HDF5 groups.
+    void ensure_parents(hid_t file_id, const std::string& datapath);
 
     /** Open or create an HDF5 file
      *
@@ -174,6 +196,13 @@ namespace WireCell::Hio {
     extern template void read_dataset<double>(hid_t, std::vector<double>&,
                                              std::vector<int64_t>&,
                                              const std::string&);
+
+    // Helper to write JSON value as HDF5 attribute
+    void write_json_attribute(hid_t loc_id, const std::string& attr_name,
+                             const Json::Value& value);
+
+    // Helper to read JSON value from HDF5 attribute
+    Json::Value read_json_attribute(hid_t loc_id, const std::string& attr_name);
 
 }  // namespace WireCell::Hio
 

@@ -8,7 +8,7 @@
 
 using namespace WireCell;
 
-namespace {
+namespace WireCell::Hio {
 
     // Convert DataType enum to HDF5 native type
     hid_t dtype_to_hid(Hio::DataType dtype) {
@@ -45,7 +45,7 @@ namespace {
     }
 
     // Create intermediate groups in path if needed
-    void ensure_path(hid_t file_id, const std::string& datapath) {
+    void ensure_parents(hid_t file_id, const std::string& datapath) {
         // Split path into components
         std::vector<std::string> parts;
         size_t pos = 0;
@@ -88,10 +88,6 @@ namespace {
             H5Gclose(group);
         }
     }
-
-    // Helper to write JSON value as HDF5 attribute
-    void write_json_attribute(hid_t loc_id, const std::string& attr_name,
-                             const Json::Value& value);
 
     void write_json_attribute(hid_t loc_id, const std::string& attr_name,
                              const Json::Value& value) {
@@ -232,11 +228,6 @@ namespace {
         return result;
     }
 
-}  // anonymous namespace
-
-
-namespace WireCell::Hio {
-
     void show_errors(bool on)
     {
         if (on) {
@@ -275,7 +266,7 @@ namespace WireCell::Hio {
             raise<IOError>("Dataset shape cannot be empty");
         }
 
-        ensure_path(file_id, datapath);
+        ensure_parents(file_id, datapath);
 
         // Convert shape to hsize_t
         std::vector<hsize_t> dims(shape.begin(), shape.end());
@@ -445,7 +436,7 @@ namespace WireCell::Hio {
                 data.size(), expected_size, datapath));
         }
 
-        ensure_path(file_id, datapath);
+        ensure_parents(file_id, datapath);
 
         // Convert shape to hsize_t
         std::vector<hsize_t> dims(shape.begin(), shape.end());

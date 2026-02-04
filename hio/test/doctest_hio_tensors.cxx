@@ -1,6 +1,7 @@
 #include "WireCellHio/Tensors.h"
 #include "WireCellHio/HIO.h"
 #include "WireCellAux/SimpleTensor.h"
+#include "WireCellAux/SimpleTensorSet.h"
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Configuration.h"
@@ -326,6 +327,255 @@ TEST_SUITE("hio_tensors") {
         for (size_t i = 0; i < original->size(); ++i) {
             CHECK(rest_data[i] == orig_data[i]);
         }
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    // ITensorSet tests
+
+    TEST_CASE("write and read ITensorSet with multiple tensors") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_basic.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create tensors
+        std::vector<int16_t> data1 = {1, 2, 3, 4};
+        auto tensor1 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2, 2}, data1.data());
+
+        std::vector<float> data2 = {1.1f, 2.2f, 3.3f};
+        auto tensor2 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{3}, data2.data());
+
+        std::vector<double> data3 = {10.0, 20.0, 30.0, 40.0, 50.0, 60.0};
+        auto tensor3 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2, 3}, data3.data());
+
+        // Create tensor set
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor1);
+        tensors->push_back(tensor2);
+        tensors->push_back(tensor3);
+
+        Configuration metadata;
+        metadata["description"] = "Test tensor set";
+
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(42, metadata, tensors);
+
+        // Write tensor set
+        CHECK_NOTHROW(write_itensorset(file_id, tensorset, "/tensorset/basic"));
+
+        // Read tensor set back
+        ITensorSet::pointer read_set;
+        CHECK_NOTHROW(read_set = read_itensorset(file_id, "/tensorset/basic"));
+
+        // Verify properties
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 42);
+        CHECK(read_set->metadata()["description"].asString() == "Test tensor set");
+
+        // Verify tensors
+        auto read_tensors = read_set->tensors();
+        REQUIRE(read_tensors);
+        CHECK(read_tensors->size() == 3);
+
+        // Verify first tensor
+        CHECK((*read_tensors)[0]->dtype() == "i2");
+        CHECK((*read_tensors)[0]->shape() == ITensor::shape_t{2, 2});
+
+        // Verify second tensor
+        CHECK((*read_tensors)[1]->dtype() == "f4");
+        CHECK((*read_tensors)[1]->shape() == ITensor::shape_t{3});
+
+        // Verify third tensor
+        CHECK((*read_tensors)[2]->dtype() == "f8");
+        CHECK((*read_tensors)[2]->shape() == ITensor::shape_t{2, 3});
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("write and read ITensorSet with metadata") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_metadata.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create tensor
+        std::vector<int32_t> data = {100, 200, 300};
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{3}, data.data());
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor);
+
+        // Create metadata
+        Configuration metadata;
+        metadata["experiment"] = "test";
+        metadata["run_number"] = 12345;
+        metadata["temperature"] = 273.15;
+        metadata["active"] = true;
+        metadata["tags"] = Json::arrayValue;
+        metadata["tags"].append("cosmic");
+        metadata["tags"].append("beam");
+
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(999, metadata, tensors);
+
+        // Write and read
+        write_itensorset(file_id, tensorset, "/tensorset/with_metadata");
+        auto read_set = read_itensorset(file_id, "/tensorset/with_metadata");
+
+        // Verify metadata
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 999);
+        auto read_meta = read_set->metadata();
+        CHECK(read_meta["experiment"].asString() == "test");
+        CHECK(read_meta["run_number"].asInt() == 12345);
+        CHECK(read_meta["temperature"].asDouble() == doctest::Approx(273.15));
+        CHECK(read_meta["active"].asBool() == true);
+        REQUIRE(read_meta["tags"].isArray());
+        CHECK(read_meta["tags"].size() == 2);
+        CHECK(read_meta["tags"][0].asString() == "cosmic");
+        CHECK(read_meta["tags"][1].asString() == "beam");
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("write and read empty ITensorSet") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_empty.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create empty tensor set
+        auto tensors = std::make_shared<ITensor::vector>();
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(0, Configuration(), tensors);
+
+        // Write and read
+        write_itensorset(file_id, tensorset, "/tensorset/empty");
+        auto read_set = read_itensorset(file_id, "/tensorset/empty");
+
+        // Verify
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 0);
+        auto read_tensors = read_set->tensors();
+        REQUIRE(read_tensors);
+        CHECK(read_tensors->size() == 0);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("write ITensorSet with null pointer throws error") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_null.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        ITensorSet::pointer null_set;
+        CHECK_THROWS_AS(write_itensorset(file_id, null_set, "/tensorset/null"), IOError);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("multiple ITensorSets in same file") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_multiple.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create first tensor set
+        std::vector<int16_t> data1 = {1, 2, 3};
+        auto tensor1 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{3}, data1.data());
+        auto tensors1 = std::make_shared<ITensor::vector>();
+        tensors1->push_back(tensor1);
+        auto set1 = std::make_shared<Aux::SimpleTensorSet>(1, Configuration(), tensors1);
+
+        // Create second tensor set
+        std::vector<float> data2 = {4.0f, 5.0f};
+        auto tensor2 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2}, data2.data());
+        auto tensors2 = std::make_shared<ITensor::vector>();
+        tensors2->push_back(tensor2);
+        auto set2 = std::make_shared<Aux::SimpleTensorSet>(2, Configuration(), tensors2);
+
+        // Write both
+        write_itensorset(file_id, set1, "/sets/set1");
+        write_itensorset(file_id, set2, "/sets/set2");
+
+        // Read both back
+        auto read1 = read_itensorset(file_id, "/sets/set1");
+        auto read2 = read_itensorset(file_id, "/sets/set2");
+
+        // Verify
+        CHECK(read1->ident() == 1);
+        CHECK(read2->ident() == 2);
+        CHECK(read1->tensors()->size() == 1);
+        CHECK(read2->tensors()->size() == 1);
+        CHECK((*read1->tensors())[0]->dtype() == "i2");
+        CHECK((*read2->tensors())[0]->dtype() == "f4");
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("ITensorSet roundtrip preserves all properties") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_roundtrip.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create tensor set with various properties
+        std::vector<double> data1 = {1.1, 2.2, 3.3, 4.4};
+        Configuration meta1;
+        meta1["name"] = "tensor1";
+        auto tensor1 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2, 2}, data1.data(), meta1);
+
+        std::vector<int64_t> data2 = {100, 200, 300};
+        Configuration meta2;
+        meta2["name"] = "tensor2";
+        auto tensor2 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{3}, data2.data(), meta2);
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor1);
+        tensors->push_back(tensor2);
+
+        Configuration set_metadata;
+        set_metadata["experiment"] = "roundtrip_test";
+        set_metadata["version"] = 123;
+
+        auto original = std::make_shared<Aux::SimpleTensorSet>(777, set_metadata, tensors);
+
+        // Write and read
+        write_itensorset(file_id, original, "/roundtrip_set");
+        auto restored = read_itensorset(file_id, "/roundtrip_set");
+
+        // Verify set properties
+        CHECK(restored->ident() == original->ident());
+        CHECK(restored->metadata()["experiment"].asString() == "roundtrip_test");
+        CHECK(restored->metadata()["version"].asInt() == 123);
+
+        // Verify tensors
+        auto orig_tensors = original->tensors();
+        auto rest_tensors = restored->tensors();
+        REQUIRE(rest_tensors->size() == orig_tensors->size());
+
+        // Verify first tensor
+        CHECK((*rest_tensors)[0]->shape() == (*orig_tensors)[0]->shape());
+        CHECK((*rest_tensors)[0]->dtype() == (*orig_tensors)[0]->dtype());
+        CHECK((*rest_tensors)[0]->metadata()["name"].asString() == "tensor1");
+
+        // Verify second tensor
+        CHECK((*rest_tensors)[1]->shape() == (*orig_tensors)[1]->shape());
+        CHECK((*rest_tensors)[1]->dtype() == (*orig_tensors)[1]->dtype());
+        CHECK((*rest_tensors)[1]->metadata()["name"].asString() == "tensor2");
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("read non-existent ITensorSet path throws error") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_itensorset_notfound.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        show_errors(false);
+        CHECK_THROWS_AS(read_itensorset(file_id, "/does/not/exist"), IOError);
+        show_errors(true);
 
         close(file_id);
         fs::remove(tmpfile);

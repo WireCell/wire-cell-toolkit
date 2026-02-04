@@ -1,6 +1,6 @@
-/** HDF5 serialization for ITensor
+/** HDF5 serialization for ITensor and ITensorSet
  *
- * Functions to write and read ITensor objects to/from HDF5 files.
+ * Functions to write and read ITensor and ITensorSet objects to/from HDF5 files.
  * Lives in the WireCell::Hio namespace.
  */
 
@@ -8,26 +8,11 @@
 #define WIRECELLHIO_TENSORS
 
 #include "WireCellIface/ITensor.h"
+#include "WireCellIface/ITensorSet.h"
 #include <hdf5.h>
 #include <string>
 
 namespace WireCell::Hio {
-
-    /** Check HDF5 return value and throw IOError if error
-     *
-     * @param ret HDF5 return value (hid_t)
-     * @param msg Error message to include in exception
-     * @throws IOError if ret < 0
-     */
-    void check_h5(hid_t ret, const std::string& msg);
-
-    /** Check HDF5 error return and throw IOError if error
-     *
-     * @param ret HDF5 error return value (herr_t)
-     * @param msg Error message to include in exception
-     * @throws IOError if ret < 0
-     */
-    void check_herr(herr_t ret, const std::string& msg);
 
     /** Write an ITensor to HDF5 file
      *
@@ -54,6 +39,34 @@ namespace WireCell::Hio {
      * @throws IOError on read failure or HDF5 errors
      */
     ITensor::pointer read_itensor(hid_t file_id, const std::string& datapath);
+
+    /** Write an ITensorSet to HDF5 file
+     *
+     * Saves the tensor set as an HDF5 group at the specified datapath.
+     * The set's metadata is saved as attributes on the group. Each tensor
+     * in the set is saved as a dataset within the group, named by its index
+     * (e.g., "0", "1", "2", etc.) using write_itensor().
+     *
+     * @param file_id HDF5 file identifier
+     * @param tensorset Shared pointer to ITensorSet to write
+     * @param datapath HDF5 path where tensor set will be written (e.g., "/group/tensorset")
+     * @throws IOError on write failure or HDF5 errors
+     */
+    void write_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& datapath);
+
+    /** Read an ITensorSet from HDF5 file
+     *
+     * Reads tensor set data and metadata from HDF5 and constructs a SimpleTensorSet.
+     * The group's attributes are read as metadata. Each dataset in the group is
+     * read as an ITensor using read_itensor(). The returned tensor set will have
+     * the same metadata and tensors as was written.
+     *
+     * @param file_id HDF5 file identifier
+     * @param datapath HDF5 path to tensor set group
+     * @return Shared pointer to ITensorSet (SimpleTensorSet implementation)
+     * @throws IOError on read failure or HDF5 errors
+     */
+    ITensorSet::pointer read_itensorset(hid_t file_id, const std::string& datapath);
 
 }  // namespace WireCell::Hio
 
