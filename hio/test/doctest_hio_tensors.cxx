@@ -2,9 +2,13 @@
 #include "WireCellHio/HIO.h"
 #include "WireCellAux/SimpleTensor.h"
 #include "WireCellAux/SimpleTensorSet.h"
+#include "WireCellIface/ITensorSetSink.h"
+#include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Configuration.h"
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/PluginManager.h"
 
 #include <vector>
 #include <cstdint>
@@ -309,6 +313,10 @@ TEST_SUITE("hio_tensors") {
 
         // Write and read
         write_itensor(file_id, original, "/roundtrip");
+
+        close(file_id);
+        file_id = open(tmpfile.native(), FileMode::rdonly);
+
         auto restored = read_itensor(file_id, "/roundtrip");
 
         // Verify everything matches
@@ -330,6 +338,7 @@ TEST_SUITE("hio_tensors") {
 
         close(file_id);
         fs::remove(tmpfile);
+        // std::cerr << tmpfile << "\n";
     }
 
     // ITensorSet tests
@@ -576,6 +585,230 @@ TEST_SUITE("hio_tensors") {
         show_errors(false);
         CHECK_THROWS_AS(read_itensorset(file_id, "/does/not/exist"), IOError);
         show_errors(true);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    // TensorSink tests
+
+    TEST_CASE("TensorSink basic configuration and usage") {
+        auto& pm = WireCell::PluginManager::instance();
+        pm.add("WireCellHio");
+
+        // Test the TensorSink component
+        fs::path tmpfile = fs::temp_directory_path() / "test_tensorsink_basic.h5";
+
+        // Create tensor set
+        std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f};
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2, 2}, data.data());
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor);
+
+        Configuration metadata;
+        metadata["description"] = "Test data";
+
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(42, metadata, tensors);
+
+        // Create and configure TensorSink
+        auto sink = Factory::lookup_tn<ITensorSetSink>("HioTensorSink:basic_configuration");
+        REQUIRE(sink);
+
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink", "basic_configuration");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg = cfg_iface->default_configuration();
+        cfg["filename"] = tmpfile.native();
+        cfg["datapath_pattern"] = "tensorsets/{ident}";
+
+        CHECK_NOTHROW(cfg_iface->configure(cfg));
+
+        // Write tensor set
+        std::shared_ptr<const ITensorSet> const_tensorset = tensorset;
+        CHECK((*sink)(const_tensorset));
+
+        // Send EOS
+        ITensorSet::pointer eos_ptr;
+        CHECK((*sink)(eos_ptr));
+
+        // Verify file exists and can be read
+        REQUIRE(fs::exists(tmpfile));
+
+        hid_t file_id = open(tmpfile.native(), FileMode::rdonly);
+        auto read_set = read_itensorset(file_id, "/tensorsets/42");
+
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 42);
+        CHECK(read_set->tensors()->size() == 1);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("TensorSink with compression") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_tensorsink_gzip.h5";
+
+        // Create larger tensor set for compression
+        std::vector<double> data;
+        for (int i = 0; i < 1000; ++i) {
+            data.push_back(static_cast<double>(i % 10));  // Repeating pattern
+        }
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{10, 100}, data.data());
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor);
+
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(100, Configuration(), tensors);
+
+        // Create sink with compression
+        auto sink = Factory::lookup_tn<ITensorSetSink>("HioTensorSink:with_compression");
+        REQUIRE(sink);
+
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink","with_compression");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg;
+        cfg["filename"] = tmpfile.native();
+        cfg["gzip"] = 6;
+        cfg["chunks"] = Json::arrayValue;
+        cfg["chunks"].append(100);  // Full last dimension
+
+        cfg_iface->configure(cfg);
+
+        // Write tensor set
+        std::shared_ptr<const ITensorSet> const_tensorset = tensorset;
+        CHECK((*sink)(const_tensorset));
+        ITensorSet::pointer eos_ptr2;
+        CHECK((*sink)(eos_ptr2));  // EOS
+
+        // Verify can be read back
+        hid_t file_id = open(tmpfile.native(), FileMode::rdonly);
+        auto read_set = read_itensorset(file_id, "/tensorsets/100");
+
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 100);
+
+        // Verify data
+        const double* read_data = reinterpret_cast<const double*>(
+            (*read_set->tensors())[0]->data());
+        for (size_t i = 0; i < data.size(); ++i) {
+            CHECK(read_data[i] == doctest::Approx(data[i]));
+        }
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("TensorSink with custom datapath pattern") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_tensorsink_pattern.h5";
+
+        // Create tensor set with metadata
+        std::vector<int32_t> data = {1, 2, 3, 4};
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2, 2}, data.data());
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor);
+
+        Configuration metadata;
+        metadata["experiment"] = "test";
+        metadata["run"] = 123;
+
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(5, metadata, tensors);
+
+        // Create sink with custom pattern
+        auto sink = Factory::lookup_tn<ITensorSetSink>("HioTensorSink:custom_datpath");
+        REQUIRE(sink);
+
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink","custom_datpath");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg;
+        cfg["filename"] = tmpfile.native();
+        cfg["datapath_pattern"] = "data/{experiment}/run{run}/tensorset{ident}";
+
+        cfg_iface->configure(cfg);
+
+        // Write tensor set
+        std::shared_ptr<const ITensorSet> const_tensorset = tensorset;
+        CHECK((*sink)(const_tensorset));
+        ITensorSet::pointer eos_ptr3;
+        CHECK((*sink)(eos_ptr3));
+
+        // Verify at expected path
+        hid_t file_id = open(tmpfile.native(), FileMode::rdonly);
+        auto read_set = read_itensorset(file_id, "/data/test/run123/tensorset5");
+
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 5);
+        CHECK(read_set->metadata()["experiment"].asString() == "test");
+        CHECK(read_set->metadata()["run"].asInt() == 123);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("TensorSink empty filename throws error") {
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink","empty_filename");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg;
+        cfg["filename"] = "";
+
+        CHECK_THROWS_AS(cfg_iface->configure(cfg), ValueError);
+    }
+
+    TEST_CASE("TensorSink multiple tensor sets") {
+        auto& pm = WireCell::PluginManager::instance();
+        pm.add("WireCellHio");
+        fs::path tmpfile = fs::temp_directory_path() / "test_tensorsink_multiple.h5";
+
+        auto sink = Factory::lookup_tn<ITensorSetSink>("HioTensorSink:multiple_tensor_sets");
+        REQUIRE(sink);
+
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink","multiple_tensor_sets");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg;
+        cfg["filename"] = tmpfile.native();
+
+        cfg_iface->configure(cfg);
+
+        // Write multiple tensor sets
+        for (int i = 0; i < 3; ++i) {
+            std::vector<float> data = {static_cast<float>(i),
+                                      static_cast<float>(i+1)};
+            auto tensor = std::make_shared<Aux::SimpleTensor>(
+                ITensor::shape_t{2}, data.data());
+
+            auto tensors = std::make_shared<ITensor::vector>();
+            tensors->push_back(tensor);
+
+            auto tensorset = std::make_shared<Aux::SimpleTensorSet>(i, Configuration(), tensors);
+            std::shared_ptr<const ITensorSet> const_tensorset = tensorset;
+            CHECK((*sink)(const_tensorset));
+        }
+
+        // Send EOS
+        ITensorSet::pointer eos_ptr;
+        CHECK((*sink)(eos_ptr));
+
+        REQUIRE(fs::exists(tmpfile.native()));
+        std::cerr << "Using temp file: " << tmpfile << "\n";
+
+        // Verify all tensor sets were written
+        hid_t file_id = open(tmpfile.native(), FileMode::rdonly);
+        REQUIRE(file_id >= 0);
+
+        for (int i = 0; i < 3; ++i) {
+            std::string path = "/tensorsets/" + std::to_string(i);
+            auto read_set = read_itensorset(file_id, path);
+            REQUIRE(read_set);
+            CHECK(read_set->ident() == i);
+        }
 
         close(file_id);
         fs::remove(tmpfile);
