@@ -9,6 +9,7 @@
 using namespace WireCell;
 
 namespace {
+
     // Convert DataType enum to HDF5 native type
     hid_t dtype_to_hid(Hio::DataType dtype) {
         switch(dtype) {
@@ -235,6 +236,17 @@ namespace {
 
 
 namespace WireCell::Hio {
+
+    void show_errors(bool on)
+    {
+        if (on) {
+            H5Eset_auto(H5E_DEFAULT, (H5E_auto_t)H5Eprint2, stderr);
+        }
+        else {
+            H5Eset_auto(H5E_DEFAULT, NULL, NULL);
+        }
+    }
+
 
     hid_t open(const std::string& filename, unsigned mode) {
         hid_t file_id = -1;

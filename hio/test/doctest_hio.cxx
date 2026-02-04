@@ -9,6 +9,8 @@
 #include <string>
 #include <boost/filesystem.hpp>
 
+#include <iostream>
+
 using namespace WireCell;
 using namespace WireCell::Hio;
 namespace fs = boost::filesystem;
@@ -41,8 +43,12 @@ TEST_SUITE("hio") {
         hid_t file_id = open(tmpfile.native(), FileMode::trunc);
         close(file_id);
 
+        REQUIRE(fs::exists(tmpfile));
+
         // Try to open with excl mode - should fail
+        show_errors(false);
         CHECK_THROWS_AS(open(tmpfile.native(), FileMode::excl), IOError);
+        show_errors(true);
 
         // Cleanup
         fs::remove(tmpfile);
@@ -203,6 +209,8 @@ TEST_SUITE("hio") {
         metadata["version"] = 1;
         metadata["temperature"] = 273.15;
         metadata["active"] = true;
+        metadata["nested"]["a"] = 1;
+        metadata["nested"]["b"] = 2;
 
         CHECK_NOTHROW(write_metadata(file_id, metadata, "/data_with_meta"));
 
@@ -213,7 +221,8 @@ TEST_SUITE("hio") {
         CHECK(read_meta["version"].asInt() == 1);
         CHECK(read_meta["temperature"].asDouble() == doctest::Approx(273.15));
         CHECK(read_meta["active"].asBool() == true);
-
+        CHECK(read_meta["nested"]["a"].asInt() == 1);
+        CHECK(read_meta["nested"]["b"].asInt() == 2);
         close(file_id);
         fs::remove(tmpfile);
     }
@@ -231,6 +240,8 @@ TEST_SUITE("hio") {
         Configuration metadata;
         metadata["group_name"] = "MyGroup";
         metadata["purpose"] = "Testing group metadata";
+        metadata["nested"]["a"] = 1;
+        metadata["nested"]["b"] = 2;
 
         CHECK_NOTHROW(write_metadata(file_id, metadata, "/mygroup"));
 
@@ -239,6 +250,8 @@ TEST_SUITE("hio") {
 
         CHECK(read_meta["group_name"].asString() == "MyGroup");
         CHECK(read_meta["purpose"].asString() == "Testing group metadata");
+        CHECK(read_meta["nested"]["a"].asInt() == 1);
+        CHECK(read_meta["nested"]["b"].asInt() == 2);
 
         close(file_id);
         fs::remove(tmpfile);

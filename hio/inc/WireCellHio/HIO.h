@@ -42,6 +42,9 @@ namespace WireCell::Hio {
         float64
     };
 
+    /// Call to with false to turn off internal HDF5 C library error messages.  They are on by default.
+    void show_errors(bool on=true);
+
     /** Open or create an HDF5 file
      *
      * @param filename Path to the HDF5 file
