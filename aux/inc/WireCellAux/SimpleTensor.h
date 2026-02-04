@@ -105,7 +105,12 @@ namespace WireCell::Aux {
         virtual const std::byte* data() const { return m_store.data(); }
         virtual size_t size() const { return m_store.size(); }
 
-        virtual Configuration metadata() const { return *m_mdptr; }
+        virtual Configuration metadata() const {
+            if (m_mdptr) {
+                return *m_mdptr;
+            }
+            return Configuration();
+        }
 
       private:
         const std::type_info& m_typeinfo;
