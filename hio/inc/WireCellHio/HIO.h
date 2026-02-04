@@ -67,6 +67,25 @@ namespace WireCell::Hio {
     /// Ensure all parents to datapath exist as HDF5 groups.
     void ensure_parents(hid_t file_id, const std::string& datapath);
 
+    /** Compute chunk sizes for HDF5 dataset
+     *
+     * Determines chunk sizes based on array shape and target memory limit.
+     * User-provided chunks apply to the LAST dimensions, with size-1 chunks
+     * prepended for earlier dimensions. If chunks is empty or has one element,
+     * chunks are computed to keep the last dimension whole and fill the
+     * second-to-last dimension up to the memory limit.
+     *
+     * @param chunks User-specified chunk sizes (apply to last dimensions, may be empty)
+     * @param shape Full array dimensions
+     * @param element_size Size of one array element in bytes
+     * @param target_bytes Target chunk size in bytes (default 1MB)
+     * @return Vector of chunk sizes, one per dimension
+     */
+    std::vector<hsize_t> compute_chunks(const std::vector<int>& chunks,
+                                        const std::vector<int64_t>& shape,
+                                        size_t element_size,
+                                        size_t target_bytes = 1024*1024);
+
     /** Open or create an HDF5 file
      *
      * @param filename Path to the HDF5 file
@@ -90,12 +109,16 @@ namespace WireCell::Hio {
      * @param shape Dimensions of the dataset
      * @param dtype Data type
      * @param datapath HDF5 path where dataset will be written (e.g., "/group/dataset")
+     * @param gzip Compression level 0-9 (0=no compression, 9=max compression)
+     * @param chunks User-specified chunk sizes (empty=auto, applies to last dimensions)
      * @throws IOError on write failure
      */
     void write_dataset(hid_t file_id, const std::byte* data,
                       const std::vector<int64_t>& shape,
                       DataType dtype,
-                      const std::string& datapath);
+                      const std::string& datapath,
+                      int gzip = 0,
+                      const std::vector<int>& chunks = {});
 
     /** Write a typed dataset (template version)
      *
@@ -105,12 +128,16 @@ namespace WireCell::Hio {
      * @param data Vector of typed data
      * @param shape Dimensions of the dataset
      * @param datapath HDF5 path where dataset will be written
+     * @param gzip Compression level 0-9 (0=no compression, 9=max compression)
+     * @param chunks User-specified chunk sizes (empty=auto, applies to last dimensions)
      * @throws IOError on write failure
      */
     template<typename T>
     void write_dataset(hid_t file_id, const std::vector<T>& data,
                       const std::vector<int64_t>& shape,
-                      const std::string& datapath);
+                      const std::string& datapath,
+                      int gzip = 0,
+                      const std::vector<int>& chunks = {});
 
     /** Read a dataset into raw bytes
      *
@@ -167,19 +194,24 @@ namespace WireCell::Hio {
     // Explicit instantiation declarations
     extern template void write_dataset<int16_t>(hid_t, const std::vector<int16_t>&,
                                                const std::vector<int64_t>&,
-                                               const std::string&);
+                                               const std::string&,
+                                               int, const std::vector<int>&);
     extern template void write_dataset<int32_t>(hid_t, const std::vector<int32_t>&,
                                                const std::vector<int64_t>&,
-                                               const std::string&);
+                                               const std::string&,
+                                               int, const std::vector<int>&);
     extern template void write_dataset<int64_t>(hid_t, const std::vector<int64_t>&,
                                                const std::vector<int64_t>&,
-                                               const std::string&);
+                                               const std::string&,
+                                               int, const std::vector<int>&);
     extern template void write_dataset<float>(hid_t, const std::vector<float>&,
                                              const std::vector<int64_t>&,
-                                             const std::string&);
+                                             const std::string&,
+                                             int, const std::vector<int>&);
     extern template void write_dataset<double>(hid_t, const std::vector<double>&,
                                               const std::vector<int64_t>&,
-                                              const std::string&);
+                                              const std::string&,
+                                              int, const std::vector<int>&);
 
     extern template void read_dataset<int16_t>(hid_t, std::vector<int16_t>&,
                                               std::vector<int64_t>&,

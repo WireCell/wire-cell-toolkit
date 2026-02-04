@@ -23,9 +23,12 @@ namespace WireCell::Hio {
      * @param file_id HDF5 file identifier
      * @param tensor Shared pointer to ITensor to write
      * @param datapath HDF5 path where tensor will be written (e.g., "/group/tensor")
+     * @param gzip Compression level 0-9 (0=no compression, 9=max compression)
+     * @param chunks User-specified chunk sizes (empty=auto, applies to last dimensions)
      * @throws IOError on write failure or HDF5 errors
      */
-    void write_itensor(hid_t file_id, ITensor::pointer tensor, const std::string& datapath);
+    void write_itensor(hid_t file_id, ITensor::pointer tensor, const std::string& datapath,
+                      int gzip = 0, const std::vector<int>& chunks = {});
 
     /** Read an ITensor from HDF5 file
      *
@@ -50,9 +53,12 @@ namespace WireCell::Hio {
      * @param file_id HDF5 file identifier
      * @param tensorset Shared pointer to ITensorSet to write
      * @param datapath HDF5 path where tensor set will be written (e.g., "/group/tensorset")
+     * @param gzip Compression level 0-9 (0=no compression, 9=max compression)
+     * @param chunks User-specified chunk sizes (empty=auto, applies to last dimensions)
      * @throws IOError on write failure or HDF5 errors
      */
-    void write_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& datapath);
+    void write_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& datapath,
+                         int gzip = 0, const std::vector<int>& chunks = {});
 
     /** Read an ITensorSet from HDF5 file
      *

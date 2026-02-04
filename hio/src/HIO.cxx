@@ -238,6 +238,66 @@ namespace WireCell::Hio {
         }
     }
 
+    std::vector<hsize_t> compute_chunks(const std::vector<int>& chunks,
+                                        const std::vector<int64_t>& shape,
+                                        size_t element_size,
+                                        size_t target_bytes)
+    {
+        if (shape.empty()) {
+            raise<IOError>("Cannot compute chunks for empty shape");
+        }
+
+        // Work with a mutable copy, reversed
+        std::vector<hsize_t> result;
+        for (auto it = chunks.rbegin(); it != chunks.rend(); ++it) {
+            result.push_back(static_cast<hsize_t>(*it));
+        }
+
+        // If chunks empty, push back the size of the last dimension
+        if (result.empty()) {
+            result.push_back(static_cast<hsize_t>(shape[shape.size() - 1]));
+        }
+
+        // If chunks has size 1, push back a number so that this number
+        // multiplied by the value in chunks and element_size is less than target
+        if (result.size() == 1) {
+            size_t last_chunk_bytes = result[0] * element_size;
+            if (last_chunk_bytes > 0 && shape.size() >= 2) {
+                // Calculate how many of the second-to-last dimension we can fit
+                size_t second_last_chunk = target_bytes / last_chunk_bytes;
+                // Clamp to actual dimension size
+                hsize_t dim_size = static_cast<hsize_t>(shape[shape.size() - 2]);
+                if (second_last_chunk > dim_size) {
+                    second_last_chunk = dim_size;
+                }
+                if (second_last_chunk < 1) {
+                    second_last_chunk = 1;
+                }
+                result.push_back(static_cast<hsize_t>(second_last_chunk));
+            }
+        }
+
+        // Push back 1 until result has length equal to number of dimensions
+        while (result.size() < shape.size()) {
+            result.push_back(1);
+        }
+
+        // Reverse again to get final chunk sizes
+        std::reverse(result.begin(), result.end());
+
+        // Ensure chunks don't exceed shape dimensions
+        for (size_t i = 0; i < result.size(); ++i) {
+            if (result[i] > static_cast<hsize_t>(shape[i])) {
+                result[i] = static_cast<hsize_t>(shape[i]);
+            }
+            if (result[i] < 1) {
+                result[i] = 1;
+            }
+        }
+
+        return result;
+    }
+
 
     hid_t open(const std::string& filename, unsigned mode) {
         hid_t file_id = -1;
@@ -261,7 +321,9 @@ namespace WireCell::Hio {
     void write_dataset(hid_t file_id, const std::byte* data,
                       const std::vector<int64_t>& shape,
                       DataType dtype,
-                      const std::string& datapath) {
+                      const std::string& datapath,
+                      int gzip,
+                      const std::vector<int>& chunks) {
         if (shape.empty()) {
             raise<IOError>("Dataset shape cannot be empty");
         }
@@ -278,9 +340,44 @@ namespace WireCell::Hio {
         // Get HDF5 type
         hid_t h5type = dtype_to_hid(dtype);
 
+        // Determine element size
+        size_t element_size = 0;
+        switch(dtype) {
+            case DataType::int16:   element_size = 2; break;
+            case DataType::int32:   element_size = 4; break;
+            case DataType::int64:   element_size = 8; break;
+            case DataType::float32: element_size = 4; break;
+            case DataType::float64: element_size = 8; break;
+        }
+
+        // Setup dataset creation properties
+        hid_t dcpl = H5P_DEFAULT;
+
+        // Clamp gzip to valid range [0, 9]
+        int gzip_level = gzip;
+        if (gzip_level < 0) gzip_level = 0;
+        if (gzip_level > 9) gzip_level = 9;
+
+        if (gzip_level > 0) {
+            // Compute chunk sizes
+            std::vector<hsize_t> chunk_dims = compute_chunks(chunks, shape, element_size);
+
+            // Create dataset creation property list
+            dcpl = H5Pcreate(H5P_DATASET_CREATE);
+            check_h5(dcpl, "Failed to create dataset creation property list");
+
+            // Set chunk sizes
+            check_herr(H5Pset_chunk(dcpl, chunk_dims.size(), chunk_dims.data()),
+                      "Failed to set chunk sizes");
+
+            // Set deflate (gzip) compression
+            check_herr(H5Pset_deflate(dcpl, gzip_level),
+                      "Failed to set deflate compression");
+        }
+
         // Create dataset
         hid_t dset = H5Dcreate(file_id, datapath.c_str(), h5type, space,
-                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+                              H5P_DEFAULT, dcpl, H5P_DEFAULT);
         check_h5(dset, String::format("Failed to create dataset: %s", datapath));
 
         // Write data
@@ -289,6 +386,10 @@ namespace WireCell::Hio {
 
         H5Dclose(dset);
         H5Sclose(space);
+
+        if (dcpl != H5P_DEFAULT) {
+            H5Pclose(dcpl);
+        }
     }
 
     void read_dataset(hid_t file_id, std::vector<std::byte>& data,
@@ -422,7 +523,9 @@ namespace WireCell::Hio {
     template<typename T>
     void write_dataset(hid_t file_id, const std::vector<T>& data,
                       const std::vector<int64_t>& shape,
-                      const std::string& datapath) {
+                      const std::string& datapath,
+                      int gzip,
+                      const std::vector<int>& chunks) {
         if (shape.empty()) {
             raise<IOError>("Dataset shape cannot be empty");
         }
@@ -448,9 +551,35 @@ namespace WireCell::Hio {
         // Get HDF5 type
         hid_t h5type = native_type<T>();
 
+        // Setup dataset creation properties
+        hid_t dcpl = H5P_DEFAULT;
+
+        // Clamp gzip to valid range [0, 9]
+        int gzip_level = gzip;
+        if (gzip_level < 0) gzip_level = 0;
+        if (gzip_level > 9) gzip_level = 9;
+
+        if (gzip_level > 0) {
+            // Compute chunk sizes
+            size_t element_size = sizeof(T);
+            std::vector<hsize_t> chunk_dims = compute_chunks(chunks, shape, element_size);
+
+            // Create dataset creation property list
+            dcpl = H5Pcreate(H5P_DATASET_CREATE);
+            check_h5(dcpl, "Failed to create dataset creation property list");
+
+            // Set chunk sizes
+            check_herr(H5Pset_chunk(dcpl, chunk_dims.size(), chunk_dims.data()),
+                      "Failed to set chunk sizes");
+
+            // Set deflate (gzip) compression
+            check_herr(H5Pset_deflate(dcpl, gzip_level),
+                      "Failed to set deflate compression");
+        }
+
         // Create dataset
         hid_t dset = H5Dcreate(file_id, datapath.c_str(), h5type, space,
-                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+                              H5P_DEFAULT, dcpl, H5P_DEFAULT);
         check_h5(dset, String::format("Failed to create dataset: %s", datapath));
 
         // Write data
@@ -459,6 +588,10 @@ namespace WireCell::Hio {
 
         H5Dclose(dset);
         H5Sclose(space);
+
+        if (dcpl != H5P_DEFAULT) {
+            H5Pclose(dcpl);
+        }
     }
 
     // Template explicit instantiations for read_dataset
@@ -501,19 +634,24 @@ namespace WireCell::Hio {
     // Explicit instantiations
     template void write_dataset<int16_t>(hid_t, const std::vector<int16_t>&,
                                         const std::vector<int64_t>&,
-                                        const std::string&);
+                                        const std::string&,
+                                        int, const std::vector<int>&);
     template void write_dataset<int32_t>(hid_t, const std::vector<int32_t>&,
                                         const std::vector<int64_t>&,
-                                        const std::string&);
+                                        const std::string&,
+                                        int, const std::vector<int>&);
     template void write_dataset<int64_t>(hid_t, const std::vector<int64_t>&,
                                         const std::vector<int64_t>&,
-                                        const std::string&);
+                                        const std::string&,
+                                        int, const std::vector<int>&);
     template void write_dataset<float>(hid_t, const std::vector<float>&,
                                       const std::vector<int64_t>&,
-                                      const std::string&);
+                                      const std::string&,
+                                      int, const std::vector<int>&);
     template void write_dataset<double>(hid_t, const std::vector<double>&,
                                        const std::vector<int64_t>&,
-                                       const std::string&);
+                                       const std::string&,
+                                       int, const std::vector<int>&);
 
     template void read_dataset<int16_t>(hid_t, std::vector<int16_t>&,
                                        std::vector<int64_t>&,

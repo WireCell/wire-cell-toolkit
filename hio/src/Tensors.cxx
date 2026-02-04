@@ -12,7 +12,8 @@ using namespace WireCell;
 
 namespace WireCell::Hio {
 
-    void write_itensor(hid_t file_id, ITensor::pointer tensor, const std::string& datapath) {
+    void write_itensor(hid_t file_id, ITensor::pointer tensor, const std::string& datapath,
+                      int gzip, const std::vector<int>& chunks) {
         if (!tensor) {
             raise<IOError>("Cannot write null ITensor pointer");
         }
@@ -58,8 +59,8 @@ namespace WireCell::Hio {
                 dtype_str, datapath));
         }
 
-        // Write the dataset
-        write_dataset(file_id, data_ptr, h5_shape, dtype, datapath);
+        // Write the dataset with compression and chunking
+        write_dataset(file_id, data_ptr, h5_shape, dtype, datapath, gzip, chunks);
 
         // Write metadata as attributes
         Configuration metadata = tensor->metadata();
@@ -176,7 +177,8 @@ namespace WireCell::Hio {
         return result;
     }
 
-    void write_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& datapath) {
+    void write_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& datapath,
+                         int gzip, const std::vector<int>& chunks) {
         if (!tensorset) {
             raise<IOError>("Cannot write null ITensorSet pointer");
         }
@@ -252,7 +254,7 @@ namespace WireCell::Hio {
         // Write each tensor as a dataset in the group
         for (size_t i = 0; i < tensors.size(); ++i) {
             std::string tensor_path = datapath + "/" + std::to_string(i);
-            write_itensor(file_id, tensors[i], tensor_path);
+            write_itensor(file_id, tensors[i], tensor_path, gzip, chunks);
         }
 
         H5Gclose(group_id);

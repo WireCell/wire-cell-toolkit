@@ -460,4 +460,153 @@ TEST_SUITE("hio") {
         fs::remove(tmpfile);
     }
 
+    TEST_CASE("compute_chunks basic") {
+        // Test with empty chunks - should default to full last dimension
+        std::vector<int> empty_chunks = {};
+        std::vector<int64_t> shape = {10, 1000};
+        size_t element_size = 8;
+
+        auto result = compute_chunks(empty_chunks, shape, element_size);
+
+        // Should get chunks of size [N, 1000] where N is computed to fit 1MB
+        CHECK(result.size() == 2);
+        CHECK(result[1] == 1000);  // Last dimension full
+        CHECK(result[0] <= 10);     // First dimension clamped
+        CHECK(result[0] >= 1);      // At least 1
+    }
+
+    TEST_CASE("compute_chunks with one value") {
+        // Test with one chunk value - should apply to last dimension
+        std::vector<int> chunks = {500};
+        std::vector<int64_t> shape = {10, 8, 1200, 9600};
+        size_t element_size = 8;
+
+        auto result = compute_chunks(chunks, shape, element_size);
+
+        CHECK(result.size() == 4);
+        CHECK(result[3] == 500);  // Last dimension as specified
+        // Second-to-last should be computed to fit 1MB
+        CHECK(result[2] >= 1);
+        CHECK(result[0] == 1);    // Earlier dimensions should be 1
+        CHECK(result[1] == 1);
+    }
+
+    TEST_CASE("compute_chunks preserves shape limits") {
+        // Test that chunks don't exceed shape dimensions
+        std::vector<int> chunks = {10000};  // Larger than last dimension
+        std::vector<int64_t> shape = {5, 100};
+        size_t element_size = 4;
+
+        auto result = compute_chunks(chunks, shape, element_size);
+
+        CHECK(result.size() == 2);
+        CHECK(result[1] == 100);  // Clamped to actual dimension size
+        CHECK(result[0] <= 5);
+    }
+
+    TEST_CASE("write and read compressed dataset") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_hio_gzip.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create test data with patterns that compress well
+        std::vector<double> write_data;
+        for (int i = 0; i < 1000; ++i) {
+            write_data.push_back(static_cast<double>(i % 10));  // Repeating pattern
+        }
+        std::vector<int64_t> shape = {10, 100};
+
+        // Write with compression level 5
+        CHECK_NOTHROW(write_dataset(file_id, write_data, shape, "/compressed", 5));
+
+        // Read back and verify data is unchanged
+        std::vector<double> read_data;
+        std::vector<int64_t> read_shape;
+        CHECK_NOTHROW(read_dataset(file_id, read_data, read_shape, "/compressed"));
+
+        CHECK(read_shape == shape);
+        REQUIRE(read_data.size() == write_data.size());
+        for (size_t i = 0; i < write_data.size(); ++i) {
+            CHECK(read_data[i] == doctest::Approx(write_data[i]));
+        }
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("write compressed with custom chunks") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_hio_chunks.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create 2D array
+        std::vector<float> write_data;
+        for (int i = 0; i < 100 * 200; ++i) {
+            write_data.push_back(static_cast<float>(i));
+        }
+        std::vector<int64_t> shape = {100, 200};
+
+        // Write with compression and custom chunk for last dimension
+        std::vector<int> chunks = {200};  // Full last dimension
+        CHECK_NOTHROW(write_dataset(file_id, write_data, shape, "/chunked", 6, chunks));
+
+        // Read back
+        std::vector<float> read_data;
+        std::vector<int64_t> read_shape;
+        read_dataset(file_id, read_data, read_shape, "/chunked");
+
+        CHECK(read_shape == shape);
+        CHECK(read_data.size() == write_data.size());
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("compression level clamping") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_hio_clamp.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        std::vector<int32_t> data = {1, 2, 3, 4};
+        std::vector<int64_t> shape = {2, 2};
+
+        // Test with out-of-range compression levels - should clamp to [0, 9]
+        CHECK_NOTHROW(write_dataset(file_id, data, shape, "/gzip_neg", -5));  // Clamps to 0
+        CHECK_NOTHROW(write_dataset(file_id, data, shape, "/gzip_high", 15)); // Clamps to 9
+
+        // Should be able to read back
+        std::vector<int32_t> read_data;
+        std::vector<int64_t> read_shape;
+        read_dataset(file_id, read_data, read_shape, "/gzip_neg");
+        CHECK(read_data == data);
+
+        read_dataset(file_id, read_data, read_shape, "/gzip_high");
+        CHECK(read_data == data);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("multi-dimensional with compression") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_hio_4d_gzip.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create 4D dataset
+        std::vector<double> data;
+        for (int i = 0; i < 2 * 3 * 4 * 5; ++i) {
+            data.push_back(static_cast<double>(i));
+        }
+        std::vector<int64_t> shape = {2, 3, 4, 5};
+
+        // Write with compression and auto-computed chunks
+        write_dataset(file_id, data, shape, "/data4d", 7);
+
+        std::vector<double> read_data;
+        std::vector<int64_t> read_shape;
+        read_dataset(file_id, read_data, read_shape, "/data4d");
+
+        CHECK(read_shape == shape);
+        CHECK(read_data == data);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
 }  // TEST_SUITE
