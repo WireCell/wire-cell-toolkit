@@ -108,25 +108,43 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             pg.pipeline([res, scaler])
             for view in wc.iota(multiplicity)]),
 
-    
-    /// A subgraph to splat and apply resampling and output a frame.
-    splat_frame(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
+
+    // Splat ending in TDM ITorchTensorSet.
+    splat_tdm(extra_name="_splat")::
         local splat = $.splat(extra_name=extra_name);
+        local totdm = $.frame_to_tdm(extra_name=extra_name);
+        pg.pipeline([splat, totdm]),
+
+    // Resample a TDM ITorchTensorSet, eg following depo flux splat.
+    tdm_resample(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
         local unpack = $.tpc_group_unpacker(extra_name=extra_name);
         local ngroups = std.length(unpack.oports);
-        local body = pg.shuntlines([
+        pg.shuntlines([
             unpack,
             $.resample_crossline(ratio=ratio, scale=scale, multiplicity=ngroups, extra_name=extra_name),
-            $.tensor_packer(multiplicity=ngroups, extra_name=extra_name)
-        ]);
-        local resample = $.wrap_bypass(body, extra_name);
+            $.tensor_packer(multiplicity=ngroups, extra_name=extra_name),
+        ]),
+
+    // Splat ending with ITorchTensorSet
+    splat_tensor(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
+        local splat = $.splat_tdm(extra_name=extra_name);
+        local resample = $.tdm_resample(ratio=ratio, scale=scale, extra_name=extra_name);
         pg.pipeline([
             splat,
-            $.frame_to_tdm(extra_name=extra_name),
             resample,
+        ]),
+
+    /// Splat ending with IFrame.  This uses the bypass.
+    splat_frame(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
+        local splat = $.splat(extra_name=extra_name);
+        local resample = $.tdm_resample(ratio=ratio, scale=scale, extra_name=extra_name);
+        local resample_wrapped = $.wrap_bypass(resample, extra_name);
+        pg.pipeline([
+            splat,
+            resample_wrapped,
             $.tdm_to_frame(extra_name=extra_name),
         ]),
-        
+
 
     /// A kernel providing a Fourier-space filter component (not a pnode).
     /// The axis config objects are, eg, made by tpc.filter_axis().
@@ -820,6 +838,47 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         pg.intern(innodes=[sg1_infer.decon_sink],
                   outnodes=[applyrois.signal_source],
                   centernodes=[rois_cap, dense_cap]),
+
+
+    /// Return a sink of tensor sets to a WCT tensor file in one of many "stream
+    /// type" file formats: .npz, .zip, .tar, .tar.gz, etc. (not .hdf)
+    tensor_set_sink_stream(filename, extra_name, prefix="")::
+        local this_name = tpc.name + extra_name;
+        pg.pipeline([
+            pg.pnode({
+                type: 'TorchToTensor',
+                name: this_name,
+                data: {},
+            }, nin=1, nout=1),
+            pg.pnode({
+                type: 'TensorFileSink',
+                name: this_name,
+                data: {
+                    outname: filename,
+                    prefix: prefix,
+                },
+            }, nin=1, nout=0)]),
+
+    /// Return a sink of tensor sets to a WCT tensor file in "HIO" format
+    /// (HDF5).
+    tensor_set_sink_hio(filename, extra_name, datapath_pattern="tensorsets/{ident}", gzip=0, chunks=[])::
+        local this_name = tpc.name + extra_name;
+        pg.pipeline([
+            pg.pnode({
+                type: 'TorchToTensor',
+                name: this_name,
+                data: {},
+            }, nin=1, nout=1),
+            pg.pnode({
+                type: 'HioTensorSink',
+                name: this_name,
+                data: {
+                    filename: filename,
+                    gzip: gzip,
+                    chunks: chunks,
+                    datapath_pattern: datapath_pattern,
+                },
+            }, nin=1, nout=0)]),
 
 
     // Return object that keeps source's iports and caps off its oports by

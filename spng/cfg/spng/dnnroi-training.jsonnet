@@ -47,20 +47,29 @@ local detconf = import "spng/detconf.jsonnet";
 //
 // @param input The name of a file in WCT "depo file" format, usually .npz.
 // @param outpat The output file name pattern with format variables.
+// @param schema The output file schema ("tensor" or "frame")
 // @param detname The name of a supported detector, default "pdhd".
 // @param engine The name of the graph execution engine, default Pgrapher or TbbFlow.
 // @param device The name of the device for SPNG nodes, default "cpu" or "gpu", "gpu1", etc. 
+// @param rebin The downsample factor along the time dimension.
+// @param scale The amount to scale down the dense arrays (splat and looseLF)
+// @param tpcid The TPC ID number.
+// @param dump The list of intermediates to dump to file.
+// @param verbosity The verbosity level for additional logging.
 //
 // The only required TLA is "input".  
 //
 // The outpat must include these format variables:
 // - %(tier)s will be filled with the label "input" or "truth".
 //
-// Note, this hard-wires use of TPC ID 0.  Input depos should be arranged to
-// populate this TPC.
+// Notes:
 //
+// - Input depos should be arranged to populate the given tpcid.
+//
+// - A schema of "frame" may not work.
 function(input,
          outpat="dnnroi-training-%(tier)s.npz",
+         schema="tensor",
          detname='pdhd',
          engine='Pgrapher',
          device='cpu',
@@ -68,6 +77,7 @@ function(input,
          scale=4000.0,
          tpcid=3,
          dump="",
+         gzip=1,
          verbosity=0)
 
     /// U,V,W set to 1 if it has mp2/mp3 produced.
@@ -156,9 +166,17 @@ function(input,
 
     local sg = subgraphs_js(tpc, control, pg=wpg);
 
-    local truth = sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat");
-    local truth_sink = io.frame_array_any_sink(outpat % {tier:"truth"});
-    local truth_pipe = pg.pipeline([truth, truth_sink]);
+    local truth_filename = outpat % {tier:"truth"};
+    local truth = {
+        frame: pg.pipeline([
+            sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
+            io.frame_sink(truth_filename)
+        ]),
+        tensor: pg.pipeline([
+            sg.splat_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
+            io.ttensors_sink(truth_filename, gzip=gzip, control=control),
+        ]),
+    }[schema];
 
     local detmod = det_js(det, control);
 
@@ -193,41 +211,34 @@ function(input,
         final_metadata,
         sg.tensor_packer(multiplicity=ncrossed*3, extra_name="_fodder")
     ]);
-    local fodder = sg.wrap_bypass(training_pre);
-    //local fodder_frame = sg.tdm_to_frame(traces_tag = fodder_tag, extra_name="_fodder");
 
-    local fodder_frame = pg.pnode({
-        type: 'SPNGTdmToFrame',
-        name: tpc.name,
-        data: {
-            // Locate the original frame object (just metadata)
-            frame: {datapath: "/frames/\\d+/frame"},
-            // Rules to locate tensor to include as tagged trace sets.
-            tagged_traces: [ {
-                // eg datapath of /frames/0/tags/gauss/groups/0/traces
-                traces: { tag: traces_tag },
-                // eg datapath of /frames/0/tags/null/rules/0/groups/0/chids
-                chids: { tag: chid_tag },
-            }],
-            // chmasks: ...
-            
-        } + control
-    }, nin=1, nout=1, uses=[]),
-    
+    local fodder_filename = outpat % {tier:"fodder"};
+    local fodder_body = {
+        frame: pg.pipeline([
+            sg.wrap_bypass(training_pre),
+            sg.tdm_to_frame(),  // Warning: this does not yet work
+            io.frame_sink(fodder_filename)
+        ]),
+        tensor: pg.pipeline([
+            training_pre,
+            io.ttensors_sink(fodder_filename,
+                             include_rules=[], exclude_rules=[],
+                             datapath_pattern="tensorsets/{ident}", gzip=gzip)
+        ]),
+    }[schema];
 
-    local fodder_sink = io.frame_array_any_sink(outpat % {tier:"fodder"});
-    local fodder_pipe = pg.pipeline([sim, to_tdm, fodder, fodder_frame, fodder_sink]);
+    local fodder = pg.pipeline([sim, to_tdm, fodder_body]);
 
 
 
     local body = pg.intern(innodes=[upstream], 
-                           centernodes=[depo_fan],
+                           centernodes=[depo_fan, truth, fodder],
                            edges=[
                                pg.edge(upstream, depo_fan),
-                               pg.edge(depo_fan, truth_pipe, 0, 0),
-                               pg.edge(depo_fan, fodder_pipe, 1, 0)]);
+                               pg.edge(depo_fan, truth, 0, 0),
+                               pg.edge(depo_fan, fodder, 1, 0)]);
 
-    local graph = pg.components([body, truth_pipe, fodder_pipe]); 
+    local graph = body;
 
     // fixme: strictly, only need HIO if saving to HDF.
     local result = pg.main(graph, app=engine,

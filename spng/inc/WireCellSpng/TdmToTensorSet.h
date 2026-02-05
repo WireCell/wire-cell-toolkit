@@ -8,7 +8,7 @@
 
 namespace WireCell::SPNG {
 
-    struct TdmToWctTensorSetConfig {
+    struct TdmToTensorSetConfig {
         /// An array of "match" objects to determine which tensors in the input
         /// set are included for consideration.  If empty (the default) then all
         /// are input tensors included, otherwise, only those that match are
@@ -24,17 +24,17 @@ namespace WireCell::SPNG {
     };
 }
 
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TdmToWctTensorSetConfig, include_rules, exclude_rules);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TdmToTensorSetConfig, include_rules, exclude_rules);
 
 namespace WireCell::SPNG {
 
     ///
-    struct TdmToWctTensorSet: public Logger,
+    struct TdmToTensorSet: public Logger,
                               public ContextBase,
                               public ITorchToTensorSet {
 
-        TdmToWctTensorSet();
-        virtual ~TdmToWctTensorSet();
+        TdmToTensorSet();
+        virtual ~TdmToTensorSet();
 
         // IFunction
         virtual bool operator()(const input_pointer& in, output_pointer& out);
@@ -44,7 +44,7 @@ namespace WireCell::SPNG {
         virtual WireCell::Configuration default_configuration() const;
 
     private:
-        TdmToWctTensorSetConfig m_config;
+        TdmToTensorSetConfig m_config;
     };
 
 }
