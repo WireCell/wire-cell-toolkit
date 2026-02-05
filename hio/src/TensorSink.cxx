@@ -70,6 +70,11 @@ namespace WireCell::Hio {
         write_itensorset(m_file_id, in, datapath, m_config.gzip, m_config.chunks);
         log->debug("wrote tensor set {} to {}", in->ident(), datapath);
 
+        // Create links if configured
+        if (m_config.links) {
+            link_itensorset(m_file_id, in, datapath);
+        }
+
         return true;
     }
 

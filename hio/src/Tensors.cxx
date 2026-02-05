@@ -315,4 +315,51 @@ namespace WireCell::Hio {
         return std::make_shared<Aux::SimpleTensorSet>(ident, metadata, tensors);
     }
 
+    void link_itensor(hid_t file_id, ITensor::pointer tensor, const std::string& dst) {
+        if (!tensor) {
+            return;  // No tensor to link
+        }
+
+        // Get metadata and check for datapath
+        Configuration metadata = tensor->metadata();
+        if (metadata.isNull() || !metadata.isMember("datapath")) {
+            return;  // No datapath to link from
+        }
+
+        std::string src = metadata["datapath"].asString();
+        if (src.empty()) {
+            return;  // Empty datapath
+        }
+
+        // Create the link
+        write_link(file_id, src, dst);
+    }
+
+    void link_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& dst) {
+        if (!tensorset) {
+            return;  // No tensorset to link
+        }
+
+        // Check for datapath in tensorset metadata and create link
+        Configuration metadata = tensorset->metadata();
+        if (!metadata.isNull() && metadata.isMember("datapath")) {
+            std::string src = metadata["datapath"].asString();
+            if (!src.empty()) {
+                write_link(file_id, src, dst);
+            }
+        }
+
+        // Link each tensor in the set
+        auto tensors_ptr = tensorset->tensors();
+        if (!tensors_ptr) {
+            return;  // No tensors to link
+        }
+
+        const auto& tensors = *tensors_ptr;
+        for (size_t i = 0; i < tensors.size(); ++i) {
+            std::string tensor_path = dst + "/" + std::to_string(i);
+            link_itensor(file_id, tensors[i], tensor_path);
+        }
+    }
+
 }  // namespace WireCell::Hio

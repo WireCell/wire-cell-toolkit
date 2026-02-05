@@ -519,6 +519,16 @@ namespace WireCell::Hio {
         return result;
     }
 
+    void write_link(hid_t file_id, const std::string& src, const std::string& dst) {
+        // Ensure parent groups exist for the source path
+        ensure_parents(file_id, src);
+
+        // Create a hard link from src to dst
+        check_herr(H5Lcreate_hard(file_id, dst.c_str(), file_id, src.c_str(),
+                                  H5P_DEFAULT, H5P_DEFAULT),
+                  String::format("Failed to create link from %s to %s", src, dst));
+    }
+
     // Template explicit instantiations for write_dataset
     template<typename T>
     void write_dataset(hid_t file_id, const std::vector<T>& data,

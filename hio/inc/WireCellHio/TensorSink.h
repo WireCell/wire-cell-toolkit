@@ -22,7 +22,7 @@ namespace WireCell::Hio {
         /// Gzip compression level.  0 is no compression (default) with higher
         /// compression and longer running time up to an including level 9.  The
         /// trade-off of compression factor and speed varies greatly by the
-        /// content of the data.  
+        /// content of the data.
         int gzip = 0;
 
         /// Chunk sizes for each dimension for compression.  Generally, total
@@ -34,12 +34,16 @@ namespace WireCell::Hio {
         /// may include format variables including the "ident" of the set and
         /// any that are be included in the set's metadta.
         std::string datapath_pattern = "tensorsets/{ident}";
+
+        /// Whether to create HDF5 links from metadata "datapath" entries.
+        /// Default is true.
+        bool links = true;
     };
 
 }  // namespace WireCell::Hio
 
 BOOST_HANA_ADAPT_STRUCT(WireCell::Hio::TensorSinkConfig,
-                         filename, gzip, chunks, datapath_pattern);
+                         filename, gzip, chunks, datapath_pattern, links);
 
 namespace WireCell::Hio {
 

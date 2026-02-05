@@ -191,6 +191,18 @@ namespace WireCell::Hio {
      */
     Configuration read_metadata(hid_t file_id, const std::string& datapath);
 
+    /** Create an HDF5 link from source to destination
+     *
+     * Creates a hard link in the HDF5 file from the src path to the dst path.
+     * The dst must exist; parent groups for src are created as needed.
+     *
+     * @param file_id HDF5 file identifier
+     * @param src Source path (link location)
+     * @param dst Destination path (existing object to link to)
+     * @throws IOError on link creation failure
+     */
+    void write_link(hid_t file_id, const std::string& src, const std::string& dst);
+
     // Explicit instantiation declarations
     extern template void write_dataset<int16_t>(hid_t, const std::vector<int16_t>&,
                                                const std::vector<int64_t>&,

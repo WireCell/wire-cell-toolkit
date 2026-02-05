@@ -74,6 +74,28 @@ namespace WireCell::Hio {
      */
     ITensorSet::pointer read_itensorset(hid_t file_id, const std::string& datapath);
 
+    /** Create HDF5 link for an ITensor
+     *
+     * Creates an HDF5 link if the tensor's metadata contains a "datapath" entry.
+     * The link is created from the metadata datapath to the actual storage location.
+     *
+     * @param file_id HDF5 file identifier
+     * @param tensor Shared pointer to ITensor
+     * @param dst Destination path (actual storage location of the tensor)
+     */
+    void link_itensor(hid_t file_id, ITensor::pointer tensor, const std::string& dst);
+
+    /** Create HDF5 links for an ITensorSet
+     *
+     * Creates HDF5 links if the tensor set's metadata contains a "datapath" entry.
+     * Also creates links for each tensor in the set by calling link_itensor().
+     *
+     * @param file_id HDF5 file identifier
+     * @param tensorset Shared pointer to ITensorSet
+     * @param dst Destination path (actual storage location of the tensor set)
+     */
+    void link_itensorset(hid_t file_id, ITensorSet::pointer tensorset, const std::string& dst);
+
 }  // namespace WireCell::Hio
 
 #endif

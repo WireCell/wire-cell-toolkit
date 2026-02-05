@@ -814,4 +814,220 @@ TEST_SUITE("hio_tensors") {
         fs::remove(tmpfile);
     }
 
+    // Link tests
+
+    TEST_CASE("link_itensor creates links from metadata datapath") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_link_itensor.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create tensor with datapath in metadata
+        std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f};
+        Configuration metadata;
+        metadata["datapath"] = "/my/meaningful/path";
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2, 2}, data.data(), metadata);
+
+        // Write tensor to actual location
+        std::string dst = "/actual/storage/location";
+        write_itensor(file_id, tensor, dst);
+
+        // Create link
+        link_itensor(file_id, tensor, dst);
+
+        // Verify link exists and points to correct location
+        // Try to read from the link location
+        auto read_tensor = read_itensor(file_id, "/my/meaningful/path");
+        REQUIRE(read_tensor);
+        CHECK(read_tensor->shape() == tensor->shape());
+        CHECK(read_tensor->dtype() == tensor->dtype());
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("link_itensor does nothing without datapath metadata") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_link_no_metadata.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create tensor without datapath in metadata
+        std::vector<float> data = {1.0f, 2.0f};
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2}, data.data());
+
+        // Write tensor
+        std::string dst = "/storage";
+        write_itensor(file_id, tensor, dst);
+
+        // Call link - should do nothing
+        CHECK_NOTHROW(link_itensor(file_id, tensor, dst));
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("link_itensorset creates links for set and tensors") {
+        fs::path tmpfile = fs::temp_directory_path() / "test_link_itensorset.h5";
+        hid_t file_id = open(tmpfile.native(), FileMode::trunc);
+
+        // Create tensors with datapath metadata
+        std::vector<float> data1 = {1.0f, 2.0f};
+        Configuration meta1;
+        meta1["datapath"] = "/links/tensor0";
+        auto tensor1 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2}, data1.data(), meta1);
+
+        std::vector<float> data2 = {3.0f, 4.0f};
+        Configuration meta2;
+        meta2["datapath"] = "/links/tensor1";
+        auto tensor2 = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2}, data2.data(), meta2);
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor1);
+        tensors->push_back(tensor2);
+
+        // Create tensorset with datapath
+        Configuration set_meta;
+        set_meta["datapath"] = "/links/my_tensorset";
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(42, set_meta, tensors);
+
+        // Write tensorset to actual location
+        std::string dst = "/actual/tensorset";
+        write_itensorset(file_id, tensorset, dst);
+
+        // Create links
+        link_itensorset(file_id, tensorset, dst);
+
+        // Verify tensorset link
+        auto read_set = read_itensorset(file_id, "/links/my_tensorset");
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 42);
+
+        // Verify tensor links
+        auto read_tensor0 = read_itensor(file_id, "/links/tensor0");
+        REQUIRE(read_tensor0);
+        CHECK(read_tensor0->shape() == ITensor::shape_t{2});
+
+        auto read_tensor1 = read_itensor(file_id, "/links/tensor1");
+        REQUIRE(read_tensor1);
+        CHECK(read_tensor1->shape() == ITensor::shape_t{2});
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("TensorSink with links enabled") {
+        auto& pm = WireCell::PluginManager::instance();
+        pm.add("WireCellHio");
+        fs::path tmpfile = fs::temp_directory_path() / "test_tensorsink_with_links.h5";
+
+        // Create tensor with datapath metadata
+        std::vector<float> data = {1.0f, 2.0f, 3.0f};
+        Configuration tensor_meta;
+        tensor_meta["datapath"] = "/linked/tensor";
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{3}, data.data(), tensor_meta);
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor);
+
+        // Create tensorset with datapath
+        Configuration set_meta;
+        set_meta["datapath"] = "/linked/tensorset";
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(99, set_meta, tensors);
+
+        // Create sink with links enabled (default)
+        auto sink = Factory::lookup_tn<ITensorSetSink>("HioTensorSink:with_links");
+        REQUIRE(sink);
+
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink", "with_links");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg;
+        cfg["filename"] = tmpfile.native();
+        cfg["links"] = true;  // Explicitly enable links
+
+        cfg_iface->configure(cfg);
+
+        // Write tensorset
+        std::shared_ptr<const ITensorSet> const_tensorset = tensorset;
+        CHECK((*sink)(const_tensorset));
+
+        // Send EOS
+        ITensorSet::pointer eos_ptr;
+        CHECK((*sink)(eos_ptr));
+
+        // Verify links were created
+        hid_t file_id = open(tmpfile.native(), FileMode::rdonly);
+
+        // Check tensorset link
+        auto read_set = read_itensorset(file_id, "/linked/tensorset");
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 99);
+
+        // Check tensor link
+        auto read_tensor = read_itensor(file_id, "/linked/tensor");
+        REQUIRE(read_tensor);
+        CHECK(read_tensor->shape() == ITensor::shape_t{3});
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
+    TEST_CASE("TensorSink with links disabled") {
+        auto& pm = WireCell::PluginManager::instance();
+        pm.add("WireCellHio");
+        fs::path tmpfile = fs::temp_directory_path() / "test_tensorsink_no_links.h5";
+
+        // Create tensor with datapath metadata
+        std::vector<float> data = {5.0f, 6.0f};
+        Configuration tensor_meta;
+        tensor_meta["datapath"] = "/should/not/link/tensor";
+        auto tensor = std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{2}, data.data(), tensor_meta);
+
+        auto tensors = std::make_shared<ITensor::vector>();
+        tensors->push_back(tensor);
+
+        Configuration set_meta;
+        set_meta["datapath"] = "/should/not/link/set";
+        auto tensorset = std::make_shared<Aux::SimpleTensorSet>(88, set_meta, tensors);
+
+        // Create sink with links disabled
+        auto sink = Factory::lookup_tn<ITensorSetSink>("HioTensorSink:no_links");
+        REQUIRE(sink);
+
+        auto cfg_iface = Factory::lookup<IConfigurable>("HioTensorSink", "no_links");
+        REQUIRE(cfg_iface);
+
+        Configuration cfg;
+        cfg["filename"] = tmpfile.native();
+        cfg["links"] = false;  // Explicitly disable links
+
+        cfg_iface->configure(cfg);
+
+        // Write tensorset
+        std::shared_ptr<const ITensorSet> const_tensorset = tensorset;
+        CHECK((*sink)(const_tensorset));
+
+        // Send EOS
+        ITensorSet::pointer eos_ptr;
+        CHECK((*sink)(eos_ptr));
+
+        // Verify data was written to actual location
+        hid_t file_id = open(tmpfile.native(), FileMode::rdonly);
+        auto read_set = read_itensorset(file_id, "/tensorsets/88");
+        REQUIRE(read_set);
+        CHECK(read_set->ident() == 88);
+
+        // Verify links were NOT created (should fail to open)
+        show_errors(false);
+        CHECK_THROWS_AS(read_itensorset(file_id, "/should/not/link/set"), IOError);
+        CHECK_THROWS_AS(read_itensor(file_id, "/should/not/link/tensor"), IOError);
+        show_errors(true);
+
+        close(file_id);
+        fs::remove(tmpfile);
+    }
+
 }  // TEST_SUITE
