@@ -174,7 +174,7 @@ function(input,
         ]),
         tensor: pg.pipeline([
             sg.splat_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
-            io.ttensors_sink(truth_filename, gzip=gzip, control=control),
+            io.ttensors_sink(truth_filename, gzip=wc.numberify(gzip), control=control),
         ]),
     }[schema];
 
@@ -223,7 +223,7 @@ function(input,
             training_pre,
             io.ttensors_sink(fodder_filename,
                              include_rules=[], exclude_rules=[],
-                             datapath_pattern="tensorsets/{ident}", gzip=gzip)
+                             datapath_pattern="tensorsets/{ident}", gzip=wc.numberify(gzip))
         ]),
     }[schema];
 
