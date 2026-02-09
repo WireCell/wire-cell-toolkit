@@ -816,10 +816,10 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         
         // For inference, sg1_infer is just the beginning.  Must feed .fodder to
         // dnnroi forward and then that plus .rois plus .gauss into apply_roi.
-        local sg1_infer = $.dnnroi_inference_preface(rebin=rebin, extra_name="_INFER");
+        local sg1_infer = $.dnnroi_inference_preface(rebin=rebin, extra_name=extra_name);
 
         local dnnroifwd = $.dnnroi_forward_views(modelfile=modelfile, 
-                                                  crossed_views=crossed_views, extra_name="_FORWARD");
+                                                  crossed_views=crossed_views, extra_name=extra_name);
         local sg1_dnnroi = pg.shuntline(sg1_infer.fodder, dnnroifwd);
 
         // Merge all sources of ROIs.
@@ -828,11 +828,11 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         // get the port ordering correct.  As is, it assumes dnnroi rois all come
         // before the views that have only initial rois.
         local fat_rois = pg.crossline([sg1_dnnroi, sg1_infer.rois]);
-        local unbin = $.unbin_views(rebin=rebin, views=all_views, extra_name="_ROIS");
+        local unbin = $.unbin_views(rebin=rebin, views=all_views, extra_name=extra_name);
         local rois = pg.shuntline(fat_rois, unbin);
 
         /// Gives .roi_sink, .dense_sink and .signal_source
-        local applyrois = $.applyroi_views(views=all_views, extra_name="_APPLYROIS");
+        local applyrois = $.applyroi_views(views=all_views, extra_name=extra_name);
         local rois_cap = pg.shuntline(rois, applyrois.roi_sink);
         local dense_cap = pg.shuntline(sg1_infer.gauss, applyrois.dense_sink);
         pg.intern(innodes=[sg1_infer.decon_sink],
