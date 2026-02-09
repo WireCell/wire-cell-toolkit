@@ -1,0 +1,106 @@
+#!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores all --snakefile
+# -*- snakemake -*-
+
+# This snakemake workflow runs just about every type of job that relates to SPNG.
+#
+#
+# It transforms the config into results and thus assumes to run in a --directory
+# with the context of that config.  If you change config params and reuse the
+# --directory you'll cause existing files to be regenerated.
+
+
+import os
+import json
+
+# Main configuration object defaults.  These can all be overridden on the CLI.
+# --config detector="pdhd"
+DEFAULTS = {
+    # WCT canonical detector name, also sets top level output directory.
+    "detector": "pdhd",
+
+    # Path to container that can run larsoft.
+    # You can use your own that includes "source/setup" which will speed things up.
+    # This may be one such image: "/nfs/data/1/calcuttj/dunesw.sif"
+    "container": "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest",
+
+    # The random number generateor seed
+    "seed": 12345,
+
+    # The number of "events" to produces
+    "nevents": 10,
+}
+for key, value in DEFAULTS.items():
+    config.setdefault(key, value)
+
+SRC_DIR = workflow.basedir
+FCL_DIR = os.path.join(SRC_DIR, "training_inputs")
+
+# Abstract config file paths
+LS_CONFIG_PATH = {
+    "pdhd": {
+        # Configure to generate kinematics file
+        "kine": "prod_cosmics_protodunehd.fcl",
+        # Run G4 to make depositions
+        "geant": os.path.join(FCL_DIR, "run_g4_only.fcl"),
+        # Dump out WCT depos
+        "depos": os.path.join(FCL_DIR, "pdhd_wirecell_save_depos.fcl"),
+        "depos_jsonnet": os.path.join(FCL_DIR, "wcls-save-larg4-depos.jsonnet"),
+    }
+}[config['detector']]
+
+rule save_config:
+    output:
+        f'config.json'
+    run:
+        with open(str(output[0]), 'w') as out:
+            out.write(json.dumps(config, indent=4))
+
+setup_larsoft = """
+        if [[ ! -v UPS_DIR ]] ; then
+            set +euo pipefail
+            export SHELL="/bin/bash"
+            source /cvmfs/dune.opensciencegrid.org/products/dune/setup_dune.sh
+            setup dunesw v10_14_00d00 -q e26:prof
+            set -euo pipefail
+        fi
+"""
+
+# Run art/larsoft.  Add the shell some detection logic and do setup if needed.
+rule ls_kine:
+    container: config['container']
+    input: rules.save_config.output,
+    params:
+        fhicl = LS_CONFIG_PATH['kine']
+    output: 'kine.root'
+    shell:
+        setup_larsoft + """
+        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fhicl} -o {output} -T hist_{output}
+        rm -f hist_{output}
+        """
+rule ls_geant:
+    container: config['container']
+    input: 
+        kine = rules.ls_kine.output,
+        fhicl = LS_CONFIG_PATH['geant']
+    output: 'steps.root'
+    shadow: "minimal"
+    shell:
+        setup_larsoft + """
+        lar --no-timing --no-memcheck -c {input.fhicl} {input.kine} -o {output} -T hist_{output}
+        rm -f hist_{output}
+        """
+rule ls_depos:
+    container: config['container']
+    input:
+        steps = rules.ls_geant.output,
+        fhicl = LS_CONFIG_PATH['depos'],
+        jsonnet = LS_CONFIG_PATH['depos_jsonnet']
+    output: 'depos.npz'
+    shadow: "minimal"
+    shell:
+        setup_larsoft + """
+        export WIRECELL_PATH={FCL_DIR}:$WIRECELL_PATH
+        lar --no-timing --no-memcheck -c {input.fhicl} {input.steps} --no-output
+        ls -la
+        mv wct-depos.npz {output}
+        """
