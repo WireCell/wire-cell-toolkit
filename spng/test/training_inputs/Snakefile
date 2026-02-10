@@ -87,7 +87,7 @@ rule g4:
         file="cosmics_{sample}_gen.root",
         fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
     output:
-        "cosmics_{sample}_g4.root"
+        temp("cosmics_{sample}_g4.root")
     shadow: "minimal"
     shell:
         """
@@ -128,7 +128,7 @@ rule save_depos:
         """
 
 def get_sourcestyle(wildcards):
-    style='default'
+    style='linedepo' #'default'
     if 'linedepo' in wildcards.name:
         style = 'linedepo'
     return f'-A "sourcestyle={style}"'
@@ -173,6 +173,19 @@ rule spng_sigproc:
         wct-sim-framesource-sigproc.jsonnet
         """
 
+rule spng_mpsigproc:
+    input:
+        "{name}_wct-depos.npz",
+    output:
+        temp("sigproc-spng-mp-{name}.tar")
+    shell:
+        """
+        wire-cell -l stdout -L debug ../../../cfg/spng/dnnroi-training.jsonnet -A "input={input}"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
+
 rule convert_spng_to_hdf5:
     input:
         "sigproc-spng-{name}.npz",
@@ -184,3 +197,14 @@ rule convert_spng_to_hdf5:
         }
     script:
         "scripts/convert_to_h5.py"
+
+rule convert_spng_mp_to_hdf5:
+    input:
+        "sigproc-spng-mp-{name}.tar"
+    output:
+        rec0="{name}-g4-rec-0.h5",
+        rec1="{name}-g4-rec-1.h5",
+        tru0="{name}-g4-tru-0.h5",
+        tru1="{name}-g4-tru-1.h5"
+    script:
+        "scripts/convert_to_h5mpSnake.py"
