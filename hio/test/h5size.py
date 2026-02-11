@@ -830,9 +830,14 @@ def run_repack_timed(input_file, output_file, chunk_size, chunk_method,
                     grp = fout.create_group(path)
 
                     for name, array in voxels.items():
-                        element_size = array.dtype.itemsize
-                        chunks = calculate_chunk_shape(array.shape, chunk_size,
-                                                       element_size, chunk_method)
+                        # Calculate chunks (or None for no chunking)
+                        if chunk_size is not None:
+                            element_size = array.dtype.itemsize
+                            chunks = calculate_chunk_shape(array.shape, chunk_size,
+                                                           element_size, chunk_method)
+                        else:
+                            chunks = None
+
                         grp.create_dataset(
                             name,
                             data=array,
@@ -843,9 +848,14 @@ def run_repack_timed(input_file, output_file, chunk_size, chunk_method,
                             fillvalue=fill_value
                         )
                 else:
-                    element_size = dataset.dtype.itemsize
-                    chunks = calculate_chunk_shape(dataset.shape, chunk_size,
-                                                  element_size, chunk_method)
+                    # Calculate chunks (or None for no chunking)
+                    if chunk_size is not None:
+                        element_size = dataset.dtype.itemsize
+                        chunks = calculate_chunk_shape(dataset.shape, chunk_size,
+                                                      element_size, chunk_method)
+                    else:
+                        chunks = None
+
                     fout.create_dataset(
                         path,
                         data=data,
@@ -1070,13 +1080,14 @@ def benchmark(input_file, output_dir, keep_files, results, config_file):
         # Generate all combinations using itertools.product
         benchmark_results = []
 
-        for i, (chunk_size, chunk_method, fill_value, shuffle,
-                (comp_method, comp_level), transform) in enumerate(
-            itertools.product(chunk_sizes, chunk_methods, fill_values,
-                            shuffle_opts, compression_configs, transforms), 1):
+        def run_single_benchmark(output_file, iteration_num, total_iters,
+                                chunk_size, chunk_method, fill_value, shuffle,
+                                comp_method, comp_level, transform):
+            """
+            Run a single benchmark iteration with given parameters.
 
-            output_file = work_dir / f"test_{i:04d}.h5"
-
+            Returns True if successful, False otherwise.
+            """
             try:
                 result = run_repack_timed(
                     str(baseline_file),
@@ -1173,8 +1184,11 @@ def benchmark(input_file, output_dir, keep_files, results, config_file):
                     nvme_r = result['read_energy_nvme_estimate_uj']
                     read_energy_str += f" SSD:{format_energy(nvme_r)}"
 
-                click.echo(f"[{i:4d}/{total_combinations:4d}] "
-                          f"chunk={chunk_size:6d}/{chunk_method:6s} "
+                # Format chunk info (handle None for vanilla case)
+                chunk_str = f"{chunk_size:6d}/{chunk_method:6s}" if chunk_size is not None else "  None/  None"
+
+                click.echo(f"[{iteration_num:4d}/{total_iters:4d}] "
+                          f"chunk={chunk_str} "
                           f"fill={fill_str:4s} shuffle={str(shuffle):5s} "
                           f"comp={comp_str:9s} trans={trans_str:6s} | "
                           f"ratio={result['baseline_ratio']:5.2f}x "
@@ -1186,8 +1200,42 @@ def benchmark(input_file, output_dir, keep_files, results, config_file):
                 if not keep_files:
                     output_file.unlink()
 
+                return True
+
             except Exception as e:
-                click.echo(f"[{i:4d}/{total_combinations:4d}] Error: {e}", err=True)
+                click.echo(f"[{iteration_num:4d}/{total_iters:4d}] Error: {e}", err=True)
+                return False
+
+        # Run vanilla benchmark first (no chunking, no compression, no extras)
+        click.echo("\nRunning vanilla benchmark (no chunking, no compression)...")
+        vanilla_file = work_dir / "test_0000_vanilla.h5"
+        total_with_vanilla = total_combinations + 1
+
+        run_single_benchmark(
+            vanilla_file, 1, total_with_vanilla,
+            chunk_size=None,
+            chunk_method=None,
+            fill_value=None,
+            shuffle=False,
+            comp_method=None,
+            comp_level=None,
+            transform=None
+        )
+
+        # Run all product combinations
+        click.echo("\nRunning product combinations...")
+        for i, (chunk_size, chunk_method, fill_value, shuffle,
+                (comp_method, comp_level), transform) in enumerate(
+            itertools.product(chunk_sizes, chunk_methods, fill_values,
+                            shuffle_opts, compression_configs, transforms), 2):
+
+            output_file = work_dir / f"test_{i:04d}.h5"
+
+            run_single_benchmark(
+                output_file, i, total_with_vanilla,
+                chunk_size, chunk_method, fill_value, shuffle,
+                comp_method, comp_level, transform
+            )
 
         # Sort results by compression ratio (best first)
         benchmark_results.sort(key=lambda x: x['baseline_ratio'], reverse=True)
@@ -1260,9 +1308,13 @@ def benchmark(input_file, output_dir, keep_files, results, config_file):
             read_cpu_str = format_energy(read_cpu_energy) if read_cpu_energy is not None else "N/A"
             read_ssd_str = format_energy(read_ssd_energy) if read_ssd_energy is not None else "N/A"
 
+            # Format chunk info (handle None for vanilla case)
+            chunk_size_str = f"{cfg['chunk_size']:6d}" if cfg['chunk_size'] is not None else "  None"
+            chunk_method_str = f"{cfg['chunk_method']:>8s}" if cfg['chunk_method'] is not None else "    None"
+
             click.echo(f"{rank:4d} "
-                      f"{cfg['chunk_size']:6d} "
-                      f"{cfg['chunk_method']:>8s} "
+                      f"{chunk_size_str} "
+                      f"{chunk_method_str} "
                       f"{str(cfg['compression_method']):>6s} "
                       f"{str(cfg['compression_level']):>4s} "
                       f"{str(cfg['shuffle']):>5s} "
@@ -1515,6 +1567,92 @@ def plot_bar_chart(ax, results, value_key, title, xlabel, ylabel='Configuration'
     ax.grid(axis='x', alpha=0.3)
 
 
+def plot_energy_stacked_bars(ax, results, title):
+    """
+    Create a stacked horizontal bar chart showing CPU and I/O energy for write operations.
+
+    Bars are sorted by increasing total energy. Each bar shows CPU (RAPL) and SSD (NVMe estimate)
+    energy in different colors, with text labels showing compression ratio and write time.
+
+    Args:
+        ax: Matplotlib axes
+        results: List of result dicts
+        title: Plot title
+    """
+    # Filter results that have energy data
+    energy_results = []
+    for result in results:
+        # Look for CPU energy (RAPL)
+        cpu_energy = None
+        for key in ['write_energy_package', 'write_energy_package_0', 'write_energy_psys']:
+            if key in result and result[key] is not None:
+                cpu_energy = result[key]
+                break
+        if cpu_energy is None:
+            # Try any write_energy key that's not nvme
+            for key in result:
+                if key.startswith('write_energy_') and 'nvme' not in key and result[key] is not None:
+                    cpu_energy = result[key]
+                    break
+
+        # Look for SSD energy (NVMe estimate)
+        ssd_energy = result.get('write_energy_nvme_estimate_uj')
+
+        # Need at least one energy measurement
+        if cpu_energy is not None or ssd_energy is not None:
+            energy_results.append({
+                'result': result,
+                'cpu_energy': cpu_energy if cpu_energy is not None else 0,
+                'ssd_energy': ssd_energy if ssd_energy is not None else 0,
+                'total_energy': (cpu_energy if cpu_energy is not None else 0) +
+                               (ssd_energy if ssd_energy is not None else 0)
+            })
+
+    if not energy_results:
+        # No energy data available
+        ax.text(0.5, 0.5, 'No energy data available', ha='center', va='center',
+                transform=ax.transAxes, fontsize=14)
+        ax.set_title(title)
+        return
+
+    # Sort by total energy (ascending)
+    energy_results.sort(key=lambda x: x['total_energy'])
+
+    # Extract data for plotting
+    cpu_energies = [e['cpu_energy'] / 1e6 for e in energy_results]  # Convert to Joules
+    ssd_energies = [e['ssd_energy'] / 1e6 for e in energy_results]  # Convert to Joules
+    labels = [format_config_label(e['result']['config']) for e in energy_results]
+
+    # Create stacked bars
+    y_pos = np.arange(len(labels))
+
+    # Plot CPU energy (bottom of stack)
+    bars_cpu = ax.barh(y_pos, cpu_energies, label='CPU (RAPL)', color='#1f77b4', alpha=0.8)
+
+    # Plot SSD energy (on top of CPU)
+    bars_ssd = ax.barh(y_pos, ssd_energies, left=cpu_energies, label='SSD (NVMe est.)',
+                      color='#ff7f0e', alpha=0.8)
+
+    # Add text labels on bars showing compression ratio and write time
+    for i, e in enumerate(energy_results):
+        result = e['result']
+        total_j = e['total_energy'] / 1e6
+        ratio = result.get('baseline_ratio', 0)
+        time_s = result.get('wall_time', 0)
+
+        # Place text at end of bar
+        label_text = f"{ratio:.1f}x, {time_s:.3f}s"
+        ax.text(total_j, i, f' {label_text}', va='center', fontsize=7)
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.set_xlabel('Energy (Joules)')
+    ax.set_ylabel('Configuration')
+    ax.set_title(title)
+    ax.legend(loc='lower right')
+    ax.grid(axis='x', alpha=0.3)
+
+
 def plot_scatter(ax, results, x_key, y_key, color_key, x_label, y_label,
                 color_label, title, cmap='gray'):
     """
@@ -1659,7 +1797,15 @@ def plot(json_file, output, params, cmap):
         pdf.savefig(fig)
         plt.close(fig)
 
-        # Page 4: Scatter - Write vs Read Time, colored by compression ratio
+        # Page 4: Stacked bar chart - Write Energy (CPU + SSD)
+        fig, ax = plt.subplots(figsize=(11, 8.5))
+        plot_energy_stacked_bars(ax, results,
+                                'Write Energy Consumption (CPU + SSD)')
+        plt.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
+
+        # Page 5: Scatter - Write vs Read Time, colored by compression ratio
         fig, ax = plt.subplots(figsize=(11, 8.5))
         plot_scatter(ax, results, 'wall_time', 'read_wall_time', 'baseline_ratio',
                     'Write Time (seconds)', 'Read Time (seconds)',
@@ -1670,7 +1816,7 @@ def plot(json_file, output, params, cmap):
         pdf.savefig(fig)
         plt.close(fig)
 
-        # Page 5: Scatter - Write vs Read Time, colored by chunk size
+        # Page 6: Scatter - Write vs Read Time, colored by chunk size
         fig, ax = plt.subplots(figsize=(11, 8.5))
         # Extract chunk sizes for color mapping
         for result in results:
