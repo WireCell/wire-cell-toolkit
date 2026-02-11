@@ -3,7 +3,7 @@
 local base = import 'pgrapher/experiment/iceberg/params.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
-base {
+function(params) base(params) {
   // lar: super.lar {
   //     // Longitudinal diffusion constant
   //     DL : 4.0 * wc.cm2/wc.s,
@@ -20,7 +20,7 @@ base {
     // Number of readout ticks.  See also sim.response.nticks.
     // In MB LArSoft simulation, they expect a different number of
     // ticks than acutal data.
-    nticks: 2000,
+    nticks: 8256,
   },
 
   // These parameters only make sense for running WCT simulation on
@@ -162,4 +162,9 @@ base {
     magnitude: 1.0,
     time_smear: 1.0 * wc.us,
   },
+
+  rc_resp: {
+    rc_layers: 0,
+    width: 1.1*wc.ms,
+  }
 }
