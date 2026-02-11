@@ -169,11 +169,11 @@ function(input,
     local truth_filename = outpat % {tier:"truth"};
     local truth = {
         frame: pg.pipeline([
-            sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
+            sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_SPLAT"),
             io.frame_sink(truth_filename)
         ]),
         tensor: pg.pipeline([
-            sg.splat_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_splat"),
+            sg.splat_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_SPLAT"),
             io.ttensors_sink(truth_filename, gzip=wc.numberify(gzip), control=control),
         ]),
     }[schema];

@@ -2,20 +2,31 @@
 # -*- snakemake -*-
 
 # This snakemake workflow runs just about every type of job that relates to SPNG.
-#
-#
-# It transforms the config into results and thus assumes to run in a --directory
-# with the context of that config.  If you change config params and reuse the
-# --directory you'll cause existing files to be regenerated.
 
+# You must run this from a working environment including:
+# - WIRECELL_PATH including spng/cfg/
+# - OMP_NUM_THREADS=1 or other limit on libtorch threading
+
+# CVMFS is also needed
+
+# The resulting tree under --directory is structured like
+#
+# {kine}/{tier}/{unit}/*.*
+#
+# kine in (tracks, lines)
+# tier in (kine, steps, depos, adc, splat, osp, spng)
+# unit depends on kine and is meant to define a variant.
 
 import os
 import json
+from itertools import product
 
-# Main configuration object defaults.  These can all be overridden on the CLI.
-# --config detector="pdhd"
+# Main configuration object defaults.  Some params govern a subset of the <kine>
+# parts and some govern all.  Params can be overridden on the CLI.  Eg: --config
+# detector="pdhd".  Changing parameters will invalidate any previous results
+# that depend on them.
 DEFAULTS = {
-    # WCT canonical detector name, also sets top level output directory.
+    # WCT canonical detector name
     "detector": "pdhd",
 
     # Path to container that can run larsoft.
@@ -28,6 +39,15 @@ DEFAULTS = {
 
     # The number of "events" to produces
     "nevents": 10,
+
+    # The compute device for nodes that support CPU or GPU.  Can give a GPU ID with eg "gpu0".
+    "device": "cpu",
+
+    # Matched arrays for track angles.  
+    # Angle from Y axis to track direction
+    'theta_y_deg': ( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
+    # Angle from X axis to projection of track into X-Z plane
+    'theta_xz_deg': ( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 ),
 }
 for key, value in DEFAULTS.items():
     config.setdefault(key, value)
@@ -35,27 +55,38 @@ for key, value in DEFAULTS.items():
 SRC_DIR = workflow.basedir
 FCL_DIR = os.path.join(SRC_DIR, "training_inputs")
 
-# Abstract config file paths
-LS_CONFIG_PATH = {
-    "pdhd": {
-        # Configure to generate kinematics file
-        "kine": "prod_cosmics_protodunehd.fcl",
-        # Run G4 to make depositions
-        "geant": os.path.join(FCL_DIR, "run_g4_only.fcl"),
-        # Dump out WCT depos
-        "depos": os.path.join(FCL_DIR, "pdhd_wirecell_save_depos.fcl"),
-        "depos_jsonnet": os.path.join(FCL_DIR, "wcls-save-larg4-depos.jsonnet"),
-    }
-}[config['detector']]
+# 
+track_unit = 'all'
+line_unit = 'p{plane}-txz{txz}-ty{ty}'
+expanded_line_units = [
+    line_unit.format(plane=p, txz=t[0], ty=t[1])
+    for p,t in product([0,1,2], zip(config['theta_xz_deg'], config['theta_y_deg']))]
 
-rule save_config:
-    output:
-        f'config.json'
-    run:
-        with open(str(output[0]), 'w') as out:
-            out.write(json.dumps(config, indent=4))
+STATIC_CONFIG = {
+    # Partition the monolithic configuration into subsets.
+    'params': {
+        # common to all parts
+        'base': ['detector', 'seed', 'nevents', 'device'],
+        'track': ['container'], # just track
+        'line': ['theta_y_deg', 'theta_xz_deg'], # just line
+    },
 
-setup_larsoft = """
+    # Abstract the detector away from larsoft config 
+    'track': {
+        "pdhd": {
+            # Configure to generate kinematics file
+            "kine": "prod_cosmics_protodunehd.fcl",
+            # Run G4 to make depositions
+            "geant": os.path.join(FCL_DIR, "run_g4_only.fcl"),
+            # Dump out WCT depos
+            "depos": os.path.join(FCL_DIR, "pdhd_wirecell_save_depos.fcl"),
+            "depos_jsonnet": os.path.join(FCL_DIR, "wcls-save-larg4-depos.jsonnet"),
+        }
+    }[config['detector']],
+
+    # How set up for using larsoft in the container to be robust against use of a
+    # container that does or does not include these initial source/setup commands.
+    'setup_larsoft': """
         if [[ ! -v UPS_DIR ]] ; then
             set +euo pipefail
             export SHELL="/bin/bash"
@@ -63,44 +94,211 @@ setup_larsoft = """
             setup dunesw v10_14_00d00 -q e26:prof
             set -euo pipefail
         fi
-"""
+    """,
+    
+    'spdir': {
+        "uboone": {
+            "offset": "--offset '1*m,0*m,0*m'",
+        },
+        "pdhd": {
+            "offset": "--offset '-1*m,0*m,0*m'",
+        },
+        "pdvd": {
+            "offset": "--offset '0*m,0*m,0*m'",
+        }
+    }[config['detector']],
+
+    # Thinks for the WCT portion
+    'wct': {
+        'stages': [
+            ("depos", "adc"),
+            ("depos", "splat"),
+            ("adc", "spng"),
+            ("adc", "osp")
+        ]
+    },
+}
+
+def param_keys(part):
+    "Return inclusive list of config keys for a part"
+    ps = STATIC_CONFIG['params']
+    p = ps['base']
+    if 'part' == 'base':
+        return p
+    return ps['base'] + p
+
+#
+# Rules
+# 
+
+# Default catch-all rule
+rule all:
+    input:
+        expand('{kine}/{tgt}/all/data.npz',
+               kine = ('tracks',),
+               tgt = [x[1] for x in STATIC_CONFIG['wct']['stages']])
+
+
+# These rules concretize the config into a file that all other rules in the kine derive from.
+for kine in ('track', 'line'):
+    rule:
+        name: f'kine_config_{kine}'
+        output:
+            f'{kine}s/config.txt'
+        run:
+            with open(str(output[0]), 'w') as out:
+                for key in param_keys(kine):
+                    val = config[key]
+                    out.write(f"{key} = {val}\n")
+
+
+
 
 # Run art/larsoft.  Add the shell some detection logic and do setup if needed.
-rule ls_kine:
+# This populates the "tracks/" kine directory and sets up the pipeline
+# kine->steps->depos.  We must copy-paste common parameters as the "shell" part
+# is what needs to change most and that can not be specialized with rule
+# inheritance.
+rule track_kine:
     container: config['container']
-    input: rules.save_config.output,
+    benchmark: f"tracks/kine/{track_unit}/benchmark.txt"
+    shadow: "minimal"
     params:
-        fhicl = LS_CONFIG_PATH['kine']
-    output: 'kine.root'
+        fhicl = STATIC_CONFIG['track']['kine']
+    input: rules.kine_config_track.output
+    output: f'tracks/kine/{track_unit}/data.root'
     shell:
-        setup_larsoft + """
-        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fhicl} -o {output} -T hist_{output}
-        rm -f hist_{output}
+        STATIC_CONFIG['setup_larsoft'] + """
+        mkdir -p tracks/kine
+        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fhicl} -o {output} -T hist
+        rm -f hist
         """
-rule ls_geant:
+
+rule track_geant:
     container: config['container']
-    input: 
-        kine = rules.ls_kine.output,
-        fhicl = LS_CONFIG_PATH['geant']
-    output: 'steps.root'
+    benchmark: f"tracks/steps/{track_unit}/benchmark.txt"
     shadow: "minimal"
+    params:
+        fhicl = STATIC_CONFIG['track']['geant']
+    input: rules.track_kine.output
+    output: f'tracks/steps/{track_unit}/data.root'
     shell:
-        setup_larsoft + """
-        lar --no-timing --no-memcheck -c {input.fhicl} {input.kine} -o {output} -T hist_{output}
-        rm -f hist_{output}
+        STATIC_CONFIG['setup_larsoft'] + """
+        mkdir -p tracks/steps
+        lar --no-timing --no-memcheck -c {params.fhicl} {input} -o {output} -T hist
+        rm -f hist
         """
-rule ls_depos:
+
+rule track_depos:
     container: config['container']
+    benchmark: f"tracks/depos/{track_unit}/benchmark.txt"
+    shadow: "minimal"
+    params:
+        fhicl = STATIC_CONFIG['track']['depos']
     input:
-        steps = rules.ls_geant.output,
-        fhicl = LS_CONFIG_PATH['depos'],
-        jsonnet = LS_CONFIG_PATH['depos_jsonnet']
-    output: 'depos.npz'
-    shadow: "minimal"
+        steps = rules.track_geant.output,
+        jsonnet = STATIC_CONFIG['track']['depos_jsonnet']
+    output: f'tracks/depos/{track_unit}/data.npz'
     shell:
-        setup_larsoft + """
+        STATIC_CONFIG['setup_larsoft'] + """
         export WIRECELL_PATH={FCL_DIR}:$WIRECELL_PATH
-        lar --no-timing --no-memcheck -c {input.fhicl} {input.steps} --no-output
+        lar --no-timing --no-memcheck -c {params.fhicl} {input.steps} --no-output
         ls -la
+        mkdir -p track/depos
         mv wct-depos.npz {output}
         """
+
+
+rule line_depos:
+    input: rules.kine_config_line.output
+    output:
+        depos=f'lines/depos/{line_unit}/data.npz',
+        meta=f'lines/depos/{line_unit}/meta.json'
+    params:
+        offset = STATIC_CONFIG['spdir']['offset']
+    shell: '''
+    wcpy gen detlinegen \
+    {params.offset} \
+    --detector={config[detector]} \
+    --plane={wildcards.plane} \
+    --angle-coords=wire-plane \
+    --theta_xz="{wildcards.txz}*deg" \
+    --theta_y="{wildcards.ty}*deg" \
+    --output_depos {output.depos} \
+    --output_meta {output.meta}
+    '''
+
+rule all_line_depos:
+    input:
+        expand('lines/depos/{unit}/data.npz', unit=expanded_line_units)
+        
+
+
+# Post-depo rules.
+for kine in ('lines', 'tracks'):
+    for src, tgt in STATIC_CONFIG['wct']['stages']:
+        rule:
+            name: f'{kine}_{src}_to_{tgt}'
+            benchmark: f'{kine}/{tgt}/{{unit}}/benchmark.txt'
+            input: f'{kine}/{src}/{{unit}}/data.npz'
+            output:
+                out = f'{kine}/{tgt}/{{unit}}/data.npz',
+                log = f'{kine}/{tgt}/{{unit}}/wct.log'
+            params:
+                cfg = f'spng/{src}-to-{tgt}.jsonnet'
+            benchmark:
+                f'{kine}/{tgt}/{{unit}}/benchmark.txt'
+            shell: """
+            wire-cell -l {output.log} -L debug -c {params.cfg} -A input={input} -A output={output.out}
+            """
+    
+
+# SPDIR metrics
+for sig in ('osp','spng'):
+    rule:
+        name: f'metrics_{sig}'
+        input: 
+            depos = 'lines/depos/{unit}/data.npz',
+            splat = 'lines/splat/{unit}/data.npz',
+            signals = f'lines/{sig}/{{unit}}/data.npz'
+        output:
+            metrics = f'lines/{sig}-metrics/{{unit}}/data.json'
+        shell: '''
+        LD_LIBRARY_PATH="" \
+        wcpy test ssss-metrics \
+          --output {output.metrics} \
+          --params {input.depos} \
+          {input.splat} {input.signals}
+        '''
+
+# rule all_metrics:
+#     input:
+#         expand(rules.metrics.output, kine=('lines',), unit=expanded_line_units)
+
+# def plots_args(w):
+#     'Generate additional args for plots command'
+#     args = f"""--title '{config["detector"].upper()}'"""
+#     return args
+        
+# rule plots:
+#     input:
+#         metrics = rules.all_metrics.input
+#     output:
+#         metrics = 'line/plots/metrics.pdf'
+#     params:
+#         args=plots_args
+#     shell: '''
+#     wcpy test plot-metrics {params.args} -o {output} {input}
+#     '''
+
+# rule metric_plots:
+#     input:
+#         splat = '{kine}/splat/{unit}/data.npz',
+#         signals = '{kine}/{tier}/{unit}/data.npz'
+#     wildcard_constraints:
+#         tier = "osp|spng"
+#     output:
+#         plots = '{kine}/mplots/{unit}/plots.pdf'
+#     shell: '''
+#     wcpy test plot-ssss --output {output.plots} {input.splat} {input.signals}
+#     '''

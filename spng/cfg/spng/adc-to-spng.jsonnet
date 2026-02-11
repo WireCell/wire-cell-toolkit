@@ -27,7 +27,7 @@ local sg_js = import "spng/subgraphs.jsonnet";
 // - Input depos should be arranged to populate the given tpcid.
 
 function(input,
-         output="adc.npz",
+         output="spng.npz",
          detname='pdhd',
          tpcid=3,
          engine='Pgrapher',
@@ -35,7 +35,7 @@ function(input,
          verbosity=0)
     
     local controls = control_js(device=device, verbosity=wc.intify(verbosity));
-    local det = detector.subset(detconf[detname], [wc.numerify(tpcid)]);
+    local det = detector.subset(detconf[detname], [wc.numberify(tpcid)]);
     local sg = sg_js(det.tpcs[0], controls.config, pg);
 
     // True if care about cross view info for the view.

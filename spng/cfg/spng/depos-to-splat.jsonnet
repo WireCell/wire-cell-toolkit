@@ -57,7 +57,7 @@ function(input,
 
     local sg = subgraphs_js(tpc, control);
 
-    local truth = sg.splat_frame(ratio=1.0, scale=1.0, extra_name="");
+    local truth = sg.splat(extra_name="_TRUTH");
 
     local sink = io.frame_sink(output);
     

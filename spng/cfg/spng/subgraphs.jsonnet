@@ -136,7 +136,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
     /// Splat ending with IFrame.  This uses the bypass.
     splat_frame(ratio=1.0/4.0, scale=1.0, extra_name="_splat")::
-        local splat = $.splat(extra_name=extra_name);
+        local splat = $.splat_tdm(extra_name=extra_name);
         local resample = $.tdm_resample(ratio=ratio, scale=scale, extra_name=extra_name);
         local resample_wrapped = $.wrap_bypass(resample, extra_name);
         pg.pipeline([
