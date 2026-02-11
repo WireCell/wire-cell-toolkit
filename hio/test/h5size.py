@@ -25,6 +25,7 @@ import resource
 import tempfile
 import itertools
 import json
+import subprocess
 from pathlib import Path
 import click
 import h5py
@@ -43,6 +44,220 @@ def format_bytes(num_bytes):
             return f"{num_bytes:.2f} {unit}"
         num_bytes /= 1024.0
     return f"{num_bytes:.2f} PB"
+
+
+def format_energy(microjoules):
+    """Format energy from microjoules to human-readable format."""
+    if microjoules is None:
+        return "N/A"
+
+    joules = microjoules / 1e6
+
+    if joules < 1.0:
+        return f"{microjoules / 1e3:.2f} mJ"
+    elif joules < 1000:
+        return f"{joules:.2f} J"
+    else:
+        return f"{joules / 1e3:.2f} kJ"
+
+
+def find_rapl_zones():
+    """
+    Find available RAPL zones on the system.
+
+    Returns:
+        Dict mapping zone names to paths, or empty dict if RAPL not available
+    """
+    rapl_base = Path('/sys/class/powercap')
+    zones = {}
+
+    if not rapl_base.exists():
+        return zones
+
+    # Find intel-rapl zones
+    for rapl_dir in rapl_base.glob('intel-rapl:*'):
+        # Read the name of this zone
+        name_file = rapl_dir / 'name'
+        if name_file.exists():
+            try:
+                zone_name = name_file.read_text().strip()
+                energy_file = rapl_dir / 'energy_uj'
+
+                if energy_file.exists():
+                    zones[zone_name] = str(energy_file)
+            except (PermissionError, IOError):
+                pass
+
+        # Check for subzones (e.g., dram, core, uncore)
+        for subzone_dir in rapl_dir.glob('intel-rapl:*:*'):
+            name_file = subzone_dir / 'name'
+            if name_file.exists():
+                try:
+                    zone_name = name_file.read_text().strip()
+                    energy_file = subzone_dir / 'energy_uj'
+
+                    if energy_file.exists():
+                        zones[zone_name] = str(energy_file)
+                except (PermissionError, IOError):
+                    pass
+
+    return zones
+
+
+def read_rapl_energy(energy_file):
+    """
+    Read energy counter from RAPL.
+
+    Args:
+        energy_file: Path to energy_uj file
+
+    Returns:
+        Energy in microjoules, or None if cannot read
+    """
+    try:
+        with open(energy_file, 'r') as f:
+            return int(f.read().strip())
+    except (PermissionError, FileNotFoundError, IOError, ValueError):
+        return None
+
+
+def measure_rapl_energy(func, *args, **kwargs):
+    """
+    Measure RAPL energy consumed during a function execution.
+
+    Args:
+        func: Function to execute
+        *args, **kwargs: Arguments to pass to function
+
+    Returns:
+        Tuple of (function_result, energy_dict) where energy_dict maps
+        zone names to energy consumed in microjoules (or None if unavailable)
+    """
+    zones = find_rapl_zones()
+
+    if not zones:
+        # RAPL not available
+        result = func(*args, **kwargs)
+        return result, {}
+
+    # Read initial energy values
+    energy_before = {}
+    for zone_name, energy_file in zones.items():
+        energy = read_rapl_energy(energy_file)
+        if energy is not None:
+            energy_before[zone_name] = energy
+
+    # Execute function
+    result = func(*args, **kwargs)
+
+    # Read final energy values
+    energy_after = {}
+    for zone_name, energy_file in zones.items():
+        energy = read_rapl_energy(energy_file)
+        if energy is not None:
+            energy_after[zone_name] = energy
+
+    # Calculate differences, handling counter rollover
+    energy_consumed = {}
+    max_counter = 2**32  # RAPL counters are typically 32-bit
+
+    for zone_name in energy_before:
+        if zone_name in energy_after:
+            before = energy_before[zone_name]
+            after = energy_after[zone_name]
+
+            # Handle rollover
+            if after < before:
+                diff = (max_counter - before) + after
+            else:
+                diff = after - before
+
+            energy_consumed[zone_name] = diff
+
+    return result, energy_consumed
+
+
+class NVMeEnergyEstimator:
+    """
+    Estimate NVMe SSD energy consumption during I/O operations.
+
+    Assumes the drive operates in PS0 (maximum power state) during active I/O.
+    This is a reasonable assumption for short, active I/O operations.
+    """
+
+    def __init__(self, device='/dev/nvme0'):
+        """
+        Initialize estimator by querying NVMe power state descriptors.
+
+        Args:
+            device: NVMe device path (e.g., '/dev/nvme0')
+        """
+        self.device = device
+        self.power_states = self._query_power_states()
+
+    def _query_power_states(self):
+        """
+        Query NVMe power state descriptors using nvme-cli.
+
+        Returns:
+            Dict mapping power state number to max power in milliwatts,
+            or None if query fails
+        """
+        try:
+            result = subprocess.run(
+                ['nvme', 'id-ctrl', self.device, '-o', 'json'],
+                capture_output=True, text=True, timeout=5
+            )
+
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                # Power State Descriptors are in 'psds' array
+                psds = data.get('psds', [])
+
+                states = {}
+                for i, psd in enumerate(psds):
+                    max_power_cw = psd.get('max_power', 0)  # In centiwatts
+                    if max_power_cw > 0:
+                        # Convert centiwatts to milliwatts
+                        states[i] = max_power_cw * 10.0
+
+                return states if states else None
+
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError,
+                json.JSONDecodeError, FileNotFoundError, OSError):
+            pass
+
+        return None
+
+    def estimate_energy(self, io_time_seconds):
+        """
+        Estimate energy consumed during I/O operation.
+
+        Assumes drive operates in PS0 (max power state) during active I/O.
+
+        Args:
+            io_time_seconds: Duration of I/O operation
+
+        Returns:
+            Estimated energy in microjoules, or None if unavailable
+        """
+        if self.power_states and 0 in self.power_states:
+            power_mw = self.power_states[0]  # PS0 max power in milliwatts
+            energy_millijoules = power_mw * io_time_seconds
+            energy_microjoules = energy_millijoules * 1000
+            return energy_microjoules
+
+        return None
+
+    def is_available(self):
+        """Check if NVMe power estimation is available."""
+        return self.power_states is not None
+
+    def get_ps0_power_mw(self):
+        """Get PS0 (max) power in milliwatts."""
+        if self.power_states and 0 in self.power_states:
+            return self.power_states[0]
+        return None
 
 
 def calculate_chunk_shape(dataset_shape, chunk_size_bytes, element_size, method='major'):
@@ -388,7 +603,8 @@ def run_repack_timed(input_file, output_file, chunk_size, chunk_method,
     Run repack with timing and return statistics.
 
     Returns:
-        Dict with 'wall_time' (seconds), 'core_time' (seconds), 'size' (bytes), 'ratio' (vs input)
+        Dict with 'wall_time' (seconds), 'core_time' (seconds), 'size' (bytes),
+        'ratio' (vs input), and RAPL energy measurements
     """
     # Start timing - both wall clock and CPU time
     start_wall = time.time()
@@ -407,47 +623,51 @@ def run_repack_timed(input_file, output_file, chunk_size, chunk_method,
             compression = hdf5plugin.Zstd(clevel=compression_opts)
             compression_opts = None
 
-    # Perform repack
-    with h5py.File(input_file, 'r') as fin, h5py.File(output_file, 'w') as fout:
-        def copy_dataset(path, dataset):
-            data = dataset[...]
+    # Define the write operation as a function for RAPL measurement
+    def do_repack():
+        with h5py.File(input_file, 'r') as fin, h5py.File(output_file, 'w') as fout:
+            def copy_dataset(path, dataset):
+                data = dataset[...]
 
-            if transform == 'voxels':
-                voxels = convert_to_voxels(data)
-                grp = fout.create_group(path)
+                if transform == 'voxels':
+                    voxels = convert_to_voxels(data)
+                    grp = fout.create_group(path)
 
-                for name, array in voxels.items():
-                    element_size = array.dtype.itemsize
-                    chunks = calculate_chunk_shape(array.shape, chunk_size,
-                                                   element_size, chunk_method)
-                    grp.create_dataset(
-                        name,
-                        data=array,
+                    for name, array in voxels.items():
+                        element_size = array.dtype.itemsize
+                        chunks = calculate_chunk_shape(array.shape, chunk_size,
+                                                       element_size, chunk_method)
+                        grp.create_dataset(
+                            name,
+                            data=array,
+                            chunks=chunks,
+                            compression=compression,
+                            compression_opts=compression_opts,
+                            shuffle=shuffle,
+                            fillvalue=fill_value
+                        )
+                else:
+                    element_size = dataset.dtype.itemsize
+                    chunks = calculate_chunk_shape(dataset.shape, chunk_size,
+                                                  element_size, chunk_method)
+                    fout.create_dataset(
+                        path,
+                        data=data,
                         chunks=chunks,
                         compression=compression,
                         compression_opts=compression_opts,
                         shuffle=shuffle,
-                        fillvalue=fill_value
+                        fillvalue=fill_value,
+                        dtype=dataset.dtype
                     )
-            else:
-                element_size = dataset.dtype.itemsize
-                chunks = calculate_chunk_shape(dataset.shape, chunk_size,
-                                              element_size, chunk_method)
-                fout.create_dataset(
-                    path,
-                    data=data,
-                    chunks=chunks,
-                    compression=compression,
-                    compression_opts=compression_opts,
-                    shuffle=shuffle,
-                    fillvalue=fill_value,
-                    dtype=dataset.dtype
-                )
 
-        visit_all_datasets(fin, copy_dataset)
+            visit_all_datasets(fin, copy_dataset)
 
-        for key, value in fin.attrs.items():
-            fout.attrs[key] = value
+            for key, value in fin.attrs.items():
+                fout.attrs[key] = value
+
+    # Perform repack with RAPL measurement
+    _, write_energy = measure_rapl_energy(do_repack)
 
     # Calculate elapsed times
     wall_time = time.time() - start_wall
@@ -462,14 +682,22 @@ def run_repack_timed(input_file, output_file, chunk_size, chunk_method,
     input_size = os.path.getsize(input_file)
     ratio = input_size / output_size if output_size > 0 else float('inf')
 
-    return {
+    result = {
         'wall_time': wall_time,
         'core_time': core_time,
         'user_time': user_time,
         'sys_time': sys_time,
         'size': output_size,
-        'ratio': ratio
+        'ratio': ratio,
     }
+
+    # Add RAPL energy measurements (in microjoules)
+    # Use consistent naming: write_energy_<zone>
+    for zone_name, energy_uj in write_energy.items():
+        safe_name = zone_name.lower().replace('-', '_')
+        result[f'write_energy_{safe_name}'] = energy_uj
+
+    return result
 
 
 def get_file_stats(filename):
@@ -504,19 +732,24 @@ def read_file_timed(filename):
     Read all datasets from HDF5 file into memory with timing.
 
     Returns:
-        Dict with 'read_wall_time', 'read_core_time', 'read_user_time', 'read_sys_time'
+        Dict with 'read_wall_time', 'read_core_time', 'read_user_time', 'read_sys_time',
+        and RAPL energy measurements
     """
     # Start timing - both wall clock and CPU time
     start_wall = time.time()
     start_usage = resource.getrusage(resource.RUSAGE_SELF)
 
-    # Read all datasets into memory
-    with h5py.File(filename, 'r') as f:
-        def read_dataset(path, dataset):
-            # Force full read into memory
-            _ = dataset[...]
+    # Define read operation for RAPL measurement
+    def do_read():
+        with h5py.File(filename, 'r') as f:
+            def read_dataset(path, dataset):
+                # Force full read into memory
+                _ = dataset[...]
 
-        visit_all_datasets(f, read_dataset)
+            visit_all_datasets(f, read_dataset)
+
+    # Perform read with RAPL measurement
+    _, read_energy = measure_rapl_energy(do_read)
 
     # Calculate elapsed times
     read_wall_time = time.time() - start_wall
@@ -527,12 +760,20 @@ def read_file_timed(filename):
     read_sys_time = end_usage.ru_stime - start_usage.ru_stime
     read_core_time = read_user_time + read_sys_time
 
-    return {
+    result = {
         'read_wall_time': read_wall_time,
         'read_core_time': read_core_time,
         'read_user_time': read_user_time,
         'read_sys_time': read_sys_time
     }
+
+    # Add RAPL energy measurements (in microjoules)
+    # Use consistent naming: read_energy_<zone>
+    for zone_name, energy_uj in read_energy.items():
+        safe_name = zone_name.lower().replace('-', '_')
+        result[f'read_energy_{safe_name}'] = energy_uj
+
+    return result
 
 
 @cli.command()
@@ -572,6 +813,33 @@ def benchmark(input_file, output_dir, keep_files, results):
         click.echo(f"  Baseline size: {format_bytes(baseline_size)} ({baseline_size} bytes)")
         click.echo(f"  Logical size:  {format_bytes(baseline_stats['logical_size'])}")
         click.echo(f"  Storage size:  {format_bytes(baseline_stats['storage_size'])}")
+
+        # Check RAPL availability
+        rapl_zones = find_rapl_zones()
+        if rapl_zones:
+            click.echo(f"\nRAPL energy measurement available:")
+            for zone_name in rapl_zones:
+                click.echo(f"  - {zone_name}")
+        else:
+            click.echo("\nWarning: RAPL energy measurement not available")
+            click.echo("  Energy measurements require:")
+            click.echo("  - Intel Sandy Bridge+ or AMD Zen+ CPU")
+            click.echo("  - Linux kernel with intel-rapl support")
+            click.echo("  - Read permissions on /sys/class/powercap/intel-rapl*/energy_uj")
+            click.echo("  Run with sudo or configure udev rules (see documentation)")
+
+        # Initialize NVMe energy estimator
+        nvme_estimator = NVMeEnergyEstimator('/dev/nvme0')
+        if nvme_estimator.is_available():
+            ps0_power = nvme_estimator.get_ps0_power_mw()
+            click.echo(f"\nNVMe energy estimation available:")
+            click.echo(f"  - Device: /dev/nvme0")
+            click.echo(f"  - PS0 (active) power: {ps0_power:.1f} mW")
+            click.echo(f"  - Assumes PS0 during active I/O")
+        else:
+            click.echo("\nWarning: NVMe energy estimation not available")
+            click.echo("  Requires: nvme-cli installed and /dev/nvme0 accessible")
+            click.echo("  Install with: apt install nvme-cli  (or yum/dnf)")
 
         # Define parameter space dimensions.
         chunk_sizes = [1024, 65536, 1048576]
@@ -635,6 +903,15 @@ def benchmark(input_file, output_dir, keep_files, results):
                 read_timing = read_file_timed(str(output_file))
                 result.update(read_timing)
 
+                # Estimate NVMe energy consumption
+                if nvme_estimator.is_available():
+                    write_nvme_energy = nvme_estimator.estimate_energy(result['wall_time'])
+                    read_nvme_energy = nvme_estimator.estimate_energy(result['read_wall_time'])
+                    if write_nvme_energy is not None:
+                        result['write_energy_nvme_estimate_uj'] = write_nvme_energy
+                    if read_nvme_energy is not None:
+                        result['read_energy_nvme_estimate_uj'] = read_nvme_energy
+
                 # Store configuration and results
                 config = {
                     'chunk_size': chunk_size,
@@ -659,13 +936,59 @@ def benchmark(input_file, output_dir, keep_files, results):
                 write_parallelism = result['core_time'] / result['wall_time'] if result['wall_time'] > 0 else 0
                 read_parallelism = result['read_core_time'] / result['read_wall_time'] if result['read_wall_time'] > 0 else 0
 
+                # Extract energy measurements (prefer package, fall back to first available)
+                write_energy_str = ""
+                read_energy_str = ""
+
+                # Find write energy (try package first, then any available zone)
+                write_energy = None
+                for key in ['write_energy_package', 'write_energy_package_0', 'write_energy_psys']:
+                    if key in result and result[key] is not None:
+                        write_energy = result[key]
+                        break
+                if write_energy is None:
+                    # Use first available write energy
+                    for key in result:
+                        if key.startswith('write_energy_') and result[key] is not None:
+                            write_energy = result[key]
+                            break
+
+                if write_energy is not None:
+                    write_energy_str = f" CPU:{format_energy(write_energy)}"
+
+                # Add NVMe estimate if available
+                if 'write_energy_nvme_estimate_uj' in result:
+                    nvme_w = result['write_energy_nvme_estimate_uj']
+                    write_energy_str += f" SSD:{format_energy(nvme_w)}"
+
+                # Find read energy (try package first, then any available zone)
+                read_energy = None
+                for key in ['read_energy_package', 'read_energy_package_0', 'read_energy_psys']:
+                    if key in result and result[key] is not None:
+                        read_energy = result[key]
+                        break
+                if read_energy is None:
+                    # Use first available read energy
+                    for key in result:
+                        if key.startswith('read_energy_') and result[key] is not None:
+                            read_energy = result[key]
+                            break
+
+                if read_energy is not None:
+                    read_energy_str = f" CPU:{format_energy(read_energy)}"
+
+                # Add NVMe estimate if available
+                if 'read_energy_nvme_estimate_uj' in result:
+                    nvme_r = result['read_energy_nvme_estimate_uj']
+                    read_energy_str += f" SSD:{format_energy(nvme_r)}"
+
                 click.echo(f"[{i:4d}/{total_combinations:4d}] "
                           f"chunk={chunk_size:6d}/{chunk_method:6s} "
                           f"fill={fill_str:4s} shuffle={str(shuffle):5s} "
                           f"comp={comp_str:9s} trans={trans_str:6s} | "
                           f"ratio={result['baseline_ratio']:5.2f}x "
-                          f"W:{result['wall_time']:5.3f}s/{write_parallelism:4.1f}x "
-                          f"R:{result['read_wall_time']:5.3f}s/{read_parallelism:4.1f}x "
+                          f"W:{result['wall_time']:5.3f}s/{write_parallelism:4.1f}x{write_energy_str} "
+                          f"R:{result['read_wall_time']:5.3f}s/{read_parallelism:4.1f}x{read_energy_str} "
                           f"size={format_bytes(result['size']):>10s}")
 
                 # Clean up unless keeping files
@@ -696,14 +1019,14 @@ def benchmark(input_file, output_dir, keep_files, results):
             click.echo(f"Results written to {results}")
 
         # Print summary table
-        click.echo("\n" + "=" * 145)
+        click.echo("\n" + "=" * 205)
         click.echo("BENCHMARK SUMMARY (sorted by compression ratio)")
-        click.echo("=" * 145)
+        click.echo("=" * 205)
         click.echo(f"{'Rank':>4s} {'Chunk':>6s} {'Method':>8s} {'Comp':>6s} {'Lvl':>4s} "
                   f"{'Shuf':>5s} {'Fill':>5s} {'Trans':>6s} {'Ratio':>7s} "
-                  f"{'W-Wall':>7s} {'W-Core':>7s} {'W-Para':>6s} "
-                  f"{'R-Wall':>7s} {'R-Core':>7s} {'R-Para':>6s} {'Size':>12s}")
-        click.echo("-" * 145)
+                  f"{'W-Wall':>7s} {'W-Core':>7s} {'W-Para':>6s} {'W-CPU':>8s} {'W-SSD':>8s} "
+                  f"{'R-Wall':>7s} {'R-Core':>7s} {'R-Para':>6s} {'R-CPU':>8s} {'R-SSD':>8s} {'Size':>12s}")
+        click.echo("-" * 205)
 
         # Show top 20 results
         # display_count = min(20, len(benchmark_results))
@@ -713,6 +1036,38 @@ def benchmark(input_file, output_dir, keep_files, results):
             trans_str = cfg['transform'] if cfg['transform'] else "None"
             write_parallelism = result['core_time'] / result['wall_time'] if result['wall_time'] > 0 else 0
             read_parallelism = result['read_core_time'] / result['read_wall_time'] if result['read_wall_time'] > 0 else 0
+
+            # Extract CPU energy measurements (RAPL)
+            write_cpu_energy = None
+            for key in ['write_energy_package', 'write_energy_package_0', 'write_energy_psys']:
+                if key in result and result[key] is not None:
+                    write_cpu_energy = result[key]
+                    break
+            if write_cpu_energy is None:
+                for key in result:
+                    if key.startswith('write_energy_') and 'nvme' not in key and result[key] is not None:
+                        write_cpu_energy = result[key]
+                        break
+
+            read_cpu_energy = None
+            for key in ['read_energy_package', 'read_energy_package_0', 'read_energy_psys']:
+                if key in result and result[key] is not None:
+                    read_cpu_energy = result[key]
+                    break
+            if read_cpu_energy is None:
+                for key in result:
+                    if key.startswith('read_energy_') and 'nvme' not in key and result[key] is not None:
+                        read_cpu_energy = result[key]
+                        break
+
+            # Extract SSD energy estimates (NVMe)
+            write_ssd_energy = result.get('write_energy_nvme_estimate_uj')
+            read_ssd_energy = result.get('read_energy_nvme_estimate_uj')
+
+            write_cpu_str = format_energy(write_cpu_energy) if write_cpu_energy is not None else "N/A"
+            write_ssd_str = format_energy(write_ssd_energy) if write_ssd_energy is not None else "N/A"
+            read_cpu_str = format_energy(read_cpu_energy) if read_cpu_energy is not None else "N/A"
+            read_ssd_str = format_energy(read_ssd_energy) if read_ssd_energy is not None else "N/A"
 
             click.echo(f"{rank:4d} "
                       f"{cfg['chunk_size']:6d} "
@@ -726,9 +1081,13 @@ def benchmark(input_file, output_dir, keep_files, results):
                       f"{result['wall_time']:6.3f}s "
                       f"{result['core_time']:6.3f}s "
                       f"{write_parallelism:5.2f}x "
+                      f"{write_cpu_str:>8s} "
+                      f"{write_ssd_str:>8s} "
                       f"{result['read_wall_time']:6.3f}s "
                       f"{result['read_core_time']:6.3f}s "
                       f"{read_parallelism:5.2f}x "
+                      f"{read_cpu_str:>8s} "
+                      f"{read_ssd_str:>8s} "
                       f"{format_bytes(result['size']):>12s}")
 
         if len(benchmark_results) > display_count:
@@ -741,6 +1100,26 @@ def benchmark(input_file, output_dir, keep_files, results):
             best_write_parallelism = best['core_time'] / best['wall_time'] if best['wall_time'] > 0 else 0
             best_read_parallelism = best['read_core_time'] / best['read_wall_time'] if best['read_wall_time'] > 0 else 0
 
+            # Extract all energy zones for detailed reporting
+            write_energy_zones = {}
+            read_energy_zones = {}
+            write_nvme_energy = None
+            read_nvme_energy = None
+
+            for key, value in best.items():
+                if key.startswith('write_energy_') and value is not None:
+                    if 'nvme' in key:
+                        write_nvme_energy = value
+                    else:
+                        zone_name = key.replace('write_energy_', '')
+                        write_energy_zones[zone_name] = value
+                elif key.startswith('read_energy_') and value is not None:
+                    if 'nvme' in key:
+                        read_nvme_energy = value
+                    else:
+                        zone_name = key.replace('read_energy_', '')
+                        read_energy_zones[zone_name] = value
+
             click.echo("\n" + "=" * 100)
             click.echo("BEST CONFIGURATION")
             click.echo(f"  Compression ratio: {best['baseline_ratio']:.2f}x")
@@ -749,10 +1128,22 @@ def benchmark(input_file, output_dir, keep_files, results):
             click.echo(f"    Wall time: {best['wall_time']:.3f}s")
             click.echo(f"    Core time: {best['core_time']:.3f}s (user: {best['user_time']:.3f}s, sys: {best['sys_time']:.3f}s)")
             click.echo(f"    Parallelism: {best_write_parallelism:.2f}x")
+            if write_energy_zones:
+                click.echo(f"    Energy (CPU - RAPL):")
+                for zone, energy_uj in write_energy_zones.items():
+                    click.echo(f"      {zone}: {format_energy(energy_uj)}")
+            if write_nvme_energy is not None:
+                click.echo(f"    Energy (SSD - NVMe estimate): {format_energy(write_nvme_energy)}")
             click.echo(f"  Read timing:")
             click.echo(f"    Wall time: {best['read_wall_time']:.3f}s")
             click.echo(f"    Core time: {best['read_core_time']:.3f}s (user: {best['read_user_time']:.3f}s, sys: {best['read_sys_time']:.3f}s)")
             click.echo(f"    Parallelism: {best_read_parallelism:.2f}x")
+            if read_energy_zones:
+                click.echo(f"    Energy (CPU - RAPL):")
+                for zone, energy_uj in read_energy_zones.items():
+                    click.echo(f"      {zone}: {format_energy(energy_uj)}")
+            if read_nvme_energy is not None:
+                click.echo(f"    Energy (SSD - NVMe estimate): {format_energy(read_nvme_energy)}")
             click.echo(f"  Options:")
             for key, value in best['config'].items():
                 click.echo(f"    --{key.replace('_', '-')}: {value}")
