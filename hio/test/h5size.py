@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.11"
 # dependencies = [
 #     "click",
 #     "h5py",
@@ -26,6 +26,7 @@ import tempfile
 import itertools
 import json
 import subprocess
+import tomllib
 from pathlib import Path
 import click
 import h5py
@@ -260,6 +261,183 @@ class NVMeEnergyEstimator:
         return None
 
 
+def get_default_benchmark_config():
+    """
+    Get default benchmark parameter configuration.
+
+    Returns:
+        Dict with parameter lists for benchmark iterations
+    """
+    config = {
+        'chunk_sizes': [1024, 65536, 1048576],
+        'chunk_methods': ['major', 'square'],
+        'fill_values': [None],
+        'shuffle_opts': [False, True],
+        'compression_configs': [
+            [None, None],
+            ['gzip', 1],
+            ['gzip', 2],
+            ['gzip', 3],
+        ],
+        'transforms': [None],
+    }
+
+    # Add zstd if available
+    try:
+        import hdf5plugin
+        config['compression_configs'].extend([
+            ['zstd', 1],
+            ['zstd', 5],
+            ['zstd', 9],
+        ])
+    except ImportError:
+        pass
+
+    return config
+
+
+def load_benchmark_config(config_file):
+    """
+    Load benchmark configuration from TOML file and merge with defaults.
+
+    Args:
+        config_file: Path to TOML configuration file
+
+    Returns:
+        Dict with merged configuration
+    """
+    # Start with defaults
+    config = get_default_benchmark_config()
+
+    if config_file:
+        try:
+            with open(config_file, 'rb') as f:
+                toml_data = tomllib.load(f)
+
+            # Override defaults with values from [benchmark] section
+            if 'benchmark' in toml_data:
+                benchmark_config = toml_data['benchmark']
+
+                # Update each parameter list if provided
+                for key in ['chunk_sizes', 'chunk_methods', 'fill_values',
+                           'shuffle_opts', 'compression_configs', 'transforms']:
+                    if key in benchmark_config:
+                        config[key] = benchmark_config[key]
+
+        except (FileNotFoundError, tomllib.TOMLDecodeError) as e:
+            click.echo(f"Warning: Could not load config file: {e}", err=True)
+
+    return config
+
+
+def write_default_config_toml(output_file=None):
+    """
+    Write default benchmark configuration in TOML format.
+
+    Args:
+        output_file: File path to write to, or None for stdout
+    """
+    config = get_default_benchmark_config()
+
+    # Build TOML content
+    lines = [
+        "# h5size.py benchmark configuration",
+        "",
+        "[benchmark]",
+        "",
+        "# Chunk sizes in bytes",
+        f"chunk_sizes = {config['chunk_sizes']}",
+        "",
+        "# Chunk methods: 'major' prioritizes last dimensions, 'square' uses equal dimensions",
+        f"chunk_methods = {config['chunk_methods']}",
+        "",
+        "# Fill values for sparse storage (None or numeric value)",
+        "fill_values = [\"None\"]  # Use string \"None\" for null value",
+        "",
+        "# Shuffle filter options",
+        f"shuffle_opts = {config['shuffle_opts']}",
+        "",
+        "# Compression configurations: [method, level] pairs",
+        "# method can be \"None\" (string), \"gzip\", or \"zstd\"",
+        "# level is compression level (1-9 for gzip, 1-22 for zstd, ignored for None)",
+        "compression_configs = [",
+    ]
+
+    for comp_method, comp_level in config['compression_configs']:
+        if comp_method is None:
+            lines.append(f'    ["None", "None"],')
+        else:
+            lines.append(f'    ["{comp_method}", {comp_level}],')
+
+    lines.append("]")
+    lines.append("")
+    lines.append("# Data transformations: \"None\" or \"voxels\"")
+    lines.append('transforms = ["None"]')
+    lines.append("")
+
+    toml_content = '\n'.join(lines)
+
+    if output_file:
+        with open(output_file, 'w') as f:
+            f.write(toml_content)
+        click.echo(f"Configuration written to {output_file}")
+    else:
+        click.echo(toml_content)
+
+
+def parse_config_values(config):
+    """
+    Parse configuration values, converting string representations to proper types.
+
+    Args:
+        config: Configuration dict from TOML
+
+    Returns:
+        Configuration dict with parsed values
+    """
+    parsed = {}
+
+    # Parse fill_values (convert "None" string to None)
+    if 'fill_values' in config:
+        parsed['fill_values'] = []
+        for val in config['fill_values']:
+            if isinstance(val, str) and val.lower() == 'none':
+                parsed['fill_values'].append(None)
+            else:
+                parsed['fill_values'].append(val)
+    else:
+        parsed['fill_values'] = config.get('fill_values', [None])
+
+    # Parse compression_configs (convert "None" strings to None)
+    if 'compression_configs' in config:
+        parsed['compression_configs'] = []
+        for method, level in config['compression_configs']:
+            if isinstance(method, str) and method.lower() == 'none':
+                method = None
+            if isinstance(level, str) and level.lower() == 'none':
+                level = None
+            parsed['compression_configs'].append((method, level))
+    else:
+        parsed['compression_configs'] = [tuple(c) for c in config.get('compression_configs', [])]
+
+    # Parse transforms (convert "None" string to None)
+    if 'transforms' in config:
+        parsed['transforms'] = []
+        for val in config['transforms']:
+            if isinstance(val, str) and val.lower() == 'none':
+                parsed['transforms'].append(None)
+            else:
+                parsed['transforms'].append(val)
+    else:
+        parsed['transforms'] = config.get('transforms', [None])
+
+    # Copy over other keys as-is
+    for key in ['chunk_sizes', 'chunk_methods', 'shuffle_opts']:
+        parsed[key] = config.get(key, [])
+
+    return parsed
+
+
 def calculate_chunk_shape(dataset_shape, chunk_size_bytes, element_size, method='major'):
     """
     Calculate chunk shape based on dataset shape, target chunk size, and method.
@@ -431,6 +609,24 @@ def stats(filename):
     if physical_size > 0:
         physical_ratio = total_logical / physical_size
         click.echo(f"  Logical/Physical Ratio: {physical_ratio:.2f}x")
+
+
+@cli.command()
+@click.argument('output_file', type=click.Path(), default='-')
+def config(output_file):
+    """
+    Output default benchmark configuration in TOML format.
+
+    Writes the default parameter lists for the benchmark command to a TOML file.
+    The output can be modified and used with 'benchmark --config FILE'.
+
+    Arguments:
+        OUTPUT_FILE: Output file path, or '-' for stdout (default: -)
+    """
+    if output_file == '-':
+        write_default_config_toml(None)
+    else:
+        write_default_config_toml(output_file)
 
 
 @cli.command()
@@ -784,7 +980,9 @@ def read_file_timed(filename):
               help='Keep intermediate repacked files')
 @click.option('--results', type=click.Path(), default=None,
               help='Output JSON file for full results')
-def benchmark(input_file, output_dir, keep_files, results):
+@click.option('--config', 'config_file', type=click.Path(exists=True), default=None,
+              help='TOML configuration file for benchmark parameters')
+def benchmark(input_file, output_dir, keep_files, results, config_file):
     """
     Benchmark different repack options and report compression ratios and timing.
 
@@ -841,27 +1039,20 @@ def benchmark(input_file, output_dir, keep_files, results):
             click.echo("  Requires: nvme-cli installed and /dev/nvme0 accessible")
             click.echo("  Install with: apt install nvme-cli  (or yum/dnf)")
 
-        # Define parameter space dimensions.
-        chunk_sizes = [1024, 65536, 1048576]
-        chunk_methods = ['major', 'square']
-        #fill_values = [None, 0]
-        fill_values = [None]
-        shuffle_opts = [False, True]
-        compression_configs = [
-            (None, None),
-            ('gzip', 1),
-            ('gzip', 2),
-            ('gzip', 3),
+        # Load benchmark configuration
+        bench_config = load_benchmark_config(config_file)
+        bench_config = parse_config_values(bench_config)
 
-        ]
-        if hdf5plugin:
-            compression_configs.extend([
-                ('zstd', 1),
-                ('zstd', 5),
-                ('zstd', 9),
-            ])
-        #transforms = [None, 'voxels']
-        transforms = [None]
+        if config_file:
+            click.echo(f"\nLoaded configuration from: {config_file}")
+
+        # Extract parameter space dimensions from configuration
+        chunk_sizes = bench_config['chunk_sizes']
+        chunk_methods = bench_config['chunk_methods']
+        fill_values = bench_config['fill_values']
+        shuffle_opts = bench_config['shuffle_opts']
+        compression_configs = bench_config['compression_configs']
+        transforms = bench_config['transforms']
 
         # Calculate total combinations
         total_combinations = (len(chunk_sizes) * len(chunk_methods) * len(fill_values) *
