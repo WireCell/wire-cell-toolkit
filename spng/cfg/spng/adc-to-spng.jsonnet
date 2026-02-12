@@ -29,7 +29,7 @@ local sg_js = import "spng/subgraphs.jsonnet";
 function(input,
          output="spng.npz",
          detname='pdhd',
-         tpcid=3,
+         tpcid=0,
          engine='Pgrapher',
          device='cpu',
          verbosity=0)

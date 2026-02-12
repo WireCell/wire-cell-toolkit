@@ -55,13 +55,6 @@ for key, value in DEFAULTS.items():
 SRC_DIR = workflow.basedir
 FCL_DIR = os.path.join(SRC_DIR, "training_inputs")
 
-# 
-track_unit = 'all'
-line_unit = 'p{plane}-txz{txz}-ty{ty}'
-expanded_line_units = [
-    line_unit.format(plane=p, txz=t[0], ty=t[1])
-    for p,t in product([0,1,2], zip(config['theta_xz_deg'], config['theta_y_deg']))]
-
 STATIC_CONFIG = {
     # Partition the monolithic configuration into subsets.
     'params': {
@@ -97,11 +90,19 @@ STATIC_CONFIG = {
     """,
     
     'spdir': {
+        # Set parameters for "SPDIR" subDAG for each detector.
+        
+        # Offset is added added to the center of the plane of wires.
+        # The AnodePlane will print its sensitive volume bounds in WCT debug log.
+
         "uboone": {
             "offset": "--offset '1*m,0*m,0*m'",
         },
         "pdhd": {
-            "offset": "--offset '-1*m,0*m,0*m'",
+            # AnodePlane log for APA 0, face 1
+            # cathode=-1mm, resp=-3.4m, anode=-3.5m,
+            # sensvol: [(-3520.95 76.1 2.34345) --> (-1.5875 6060 2302.36)]mm
+            "offset": "--offset '+1*m,0*m,0*m'",
         },
         "pdvd": {
             "offset": "--offset '0*m,0*m,0*m'",
@@ -126,6 +127,15 @@ def param_keys(part):
     if 'part' == 'base':
         return p
     return ps['base'] + p
+
+# A "unit" is a variant or part of a data tier context.
+track_unit = 'all'
+line_unit = 'p{plane}-txz{txz}-ty{ty}'
+expanded_line_units = [
+    line_unit.format(plane=p, txz=t[0], ty=t[1])
+    for p,t in product([0,1,2], zip(config['theta_xz_deg'], config['theta_y_deg']))]
+
+
 
 #
 # Rules

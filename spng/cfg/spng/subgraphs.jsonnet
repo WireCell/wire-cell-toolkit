@@ -448,7 +448,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
 
     /// A subgraph with one input and one output port passing ITorchTensorSet
-    /// though CellViews.  
+    /// though CellViews.  By default this outputs a 4D BFRC tensor with an
+    /// additional Feature dimension of size 2 spanning features (mp2,mp3).
     cellviews_tensorset(out_views=[0,1],   // order and views to output
                         chunk_size=0,      // large detectors may want to set this
                         uvw_index=[0,1,2], // order of per-view Boolean tensors in set

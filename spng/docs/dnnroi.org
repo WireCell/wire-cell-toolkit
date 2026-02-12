@@ -1,0 +1,63 @@
+#+title DNNROI specification
+
+* Overview
+
+The original DNNROI model is trained and used with data from OSP according to
+hard-wired data pre and post processing in =DNNROIFinding.cxx= and in OSP itself.
+SPNG can use a pre-trained DNNROI model in a generic "forward" node by supplying
+these transformations as preceding and succeeding DFP graph nodes.  To assist in
+the replication, this file specifies the data interface to the DNNROI model.
+
+It is expected that retraining DNNROI with data produced by SPNG will result in
+a better model.  Any such retraining, or making variants of DNNROI's UNet
+architecture, must take care to preserve this data interface if the resulting
+model can be used as a drop-in replacement.
+
+* DNNROI preprocessing
+
+The =OmnibusSigProc= node performs this preprocessing:
+
+1. Form "loose_lf" image.
+2. Form "mp2" and "mp3" as 0/1 values.
+3. Multiply mp2 and mp3 by 4000.
+4. Save these three as tagged trace sets in the frame.
+
+The =DNNROIFinding= node performs this preprocessing:
+
+1. Convert tagged trace sets of a frame to array.
+2. Divide all samples by 4000.
+3. Downsample 
+4. Form stack of shape =(Nfeat, Nchan, Ntick)= with feature order (dense, mp2, mp3).
+5. Transpose =Nchan= and =Ntick= to get shape =(Nfeat, Ntick, Nchan)=.
+6. Add new dimension to get shape =(Nbatch, Nfeat, Ntick, Nchan)=.
+7. Form batched chunk views along tick dimension dim=2.
+8. Pass to model's forward function.
+
+Taken together:
+
+- Input to the DNNROI model is shaped =(Nbatch, Nfeat, Ntickchunk, Nchan)=
+- The =Nfeat= dimension is ordered ("loose_lf", "mp2", "mp3")
+- The values of samples in all three features are around unity.
+
+
+* DNNROI model output
+
+The =DNNROIFinding= node performs this postprocessing:
+
+1. Outputs are received from model's forward function as shape =(1, 1, Ntick, Nchan)=
+2. Outputs are concatenated along the tick dimension, dim=2.
+3. Tensor is converted to Eigen.
+   - *Warning* this conversion assumes ~Nbatch=1~ (and ~NFeat=1~).  Batching can not actually be done.
+4. Upsample.
+5. A threshold is applied to form a mask.
+6. The "decon charge" (Gauss filtered decon) is transposed.
+7. The mask is applied to the transposed decon charge.
+8. The =baseline_subtraction()= is applied
+9. Output scale and offset applied.
+10. Final transpose to =(Nchan, Ntick)=.
+
+
+
+* DNNROI training truth
+
+

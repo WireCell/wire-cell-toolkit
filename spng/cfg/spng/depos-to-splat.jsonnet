@@ -34,7 +34,7 @@ function(input,
          output="splat.npz",
          detname='pdhd',
          engine='Pgrapher',
-         tpcid=3)
+         tpcid=0)
 
 
     local controls = control_js();
