@@ -1,5 +1,5 @@
 bld.smplpkg('WireCellRoot',
-            use='WireCellAux ROOTSYS',
+            use='WireCellAux WireCellClus ROOTSYS',
             app_use='WireCellAux ROOTSYS',
             test_use='WireCellGen WireCellSigProc')
 
