@@ -22,21 +22,21 @@ class TaggerCheckNeutrino : public IConfigurable, public Clus::IEnsembleVisitor,
 public:
     TaggerCheckNeutrino() {
         // Initialize with default preset
-        m_track_fitter = TrackFittingPresets::create_with_current_values();
+        m_track_fitter = std::make_shared<TrackFitting>(TrackFittingPresets::create_with_current_values());
     }
     virtual ~TaggerCheckNeutrino() {}
     virtual void configure(const WireCell::Configuration& config) ;
-    
+
     virtual Configuration default_configuration() const ;
 
     virtual void visit(Ensemble& ensemble) const;
-    
+
 
     private:
         std::string m_grouping_name{"live"};
         std::string m_trackfitting_config_file;  // Path to TrackFitting config file
-        mutable TrackFitting m_track_fitter; 
-        
+        mutable std::shared_ptr<TrackFitting> m_track_fitter;
+
         void load_trackfitting_config(const std::string& config_file);
 
 };

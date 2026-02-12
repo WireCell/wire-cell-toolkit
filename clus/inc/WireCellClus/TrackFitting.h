@@ -438,6 +438,9 @@ namespace WireCell::Clus {
         std::vector<std::pair<int,int>> get_paf() const {return paf;}
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
+        // Measured 2D charge data access
+        const std::map<CoordReadout, ChargeMeasurement>& get_charge_data() const { return m_charge_data; }
+
         /**
          * Get geometry information for wire plane offsets
          * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)

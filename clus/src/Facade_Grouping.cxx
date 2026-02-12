@@ -1,6 +1,7 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/TrackFitting.h"
 #include "WireCellAux/PlaneTools.h"
 #include <boost/container_hash/hash.hpp>
 
@@ -71,6 +72,11 @@ std::string Facade::dump(const Facade::Grouping& grouping, int level)
 //     }
 //     return std::make_tuple(apa, face, plane_index);
 // }
+
+std::shared_ptr<WireCell::Clus::PR::Graph> Grouping::get_pr_graph() const
+{
+    return m_track_fitting ? m_track_fitting->get_graph() : nullptr;
+}
 
 void Grouping::on_construct(node_type* node)
 {

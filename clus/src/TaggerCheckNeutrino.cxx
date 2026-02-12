@@ -46,8 +46,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
 void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 {
     // Configure the track fitter with detector volume
-    m_track_fitter.set_detector_volume(m_dv);
-    m_track_fitter.set_pc_transforms(m_pcts); 
+    m_track_fitter->set_detector_volume(m_dv);
+    m_track_fitter->set_pc_transforms(m_pcts); 
 
     // Get the specified grouping (default: "live")
     auto groupings = ensemble.with_name(m_grouping_name);
@@ -69,14 +69,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // Create PRGraph and first segment
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
-    auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, m_track_fitter, m_dv);
-    m_track_fitter.add_graph(pr_graph);
+    auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, *m_track_fitter, m_dv);
+    m_track_fitter->add_graph(pr_graph);
 
-    m_track_fitter.do_multi_tracking(true, true, true);
+    m_track_fitter->do_multi_tracking(true, true, true);
 
 
-    // Store PRGraph in the grouping for later access by bee output
-    grouping.set_pr_graph(pr_graph);
+    // Store TrackFitting in the grouping for later access by bee output and tracking sink
+    grouping.set_track_fitting(m_track_fitter);
 }
 
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)
@@ -104,7 +104,7 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
             
             try {
                 double value = root[param_name].asDouble();
-                m_track_fitter.set_parameter(param_name, value);
+                m_track_fitter->set_parameter(param_name, value);
                 std::cout << "TaggerCheckNeutrino: Set " << param_name << " = " << value << std::endl;
             } catch (const std::exception& e) {
                 std::cerr << "TaggerCheckNeutrino: Failed to set parameter " << param_name 

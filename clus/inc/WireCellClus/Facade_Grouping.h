@@ -26,6 +26,7 @@
 namespace WireCell::Clus {
     class FiducialUtils;
     using FiducialUtilsPtr = std::shared_ptr<FiducialUtils>;
+    class TrackFitting;
 }
 
 namespace WireCell::Clus::Facade {
@@ -245,15 +246,19 @@ namespace WireCell::Clus::Facade {
         FiducialUtilsPtr get_fiducialutils() const { return m_fiducialutils; }
         void set_fiducialutils(FiducialUtilsPtr fd) { m_fiducialutils = fd; }
 
-        // PRGraph storage for pattern recognition graph data
-        // Visitors like TaggerCheckNeutrino can store their PR::Graph here
-        // for access by other components (e.g., bee output in MABC)
-        std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const { return m_pr_graph; }
-        void set_pr_graph(std::shared_ptr<WireCell::Clus::PR::Graph> graph) { m_pr_graph = graph; }
+        // TrackFitting storage for track fitting data
+        // Visitors like TaggerCheckNeutrino can store their TrackFitting here
+        // for access by other components (e.g., bee output in MABC, UbooneMagnifyTrackingSink)
+        // The PRGraph is accessible via get_track_fitting()->get_graph()
+        std::shared_ptr<WireCell::Clus::TrackFitting> get_track_fitting() const { return m_track_fitting; }
+        void set_track_fitting(std::shared_ptr<WireCell::Clus::TrackFitting> tf) { m_track_fitting = tf; }
+
+        // Convenience accessor for PRGraph (delegates to TrackFitting)
+        std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const;
 
       private:
         FiducialUtilsPtr m_fiducialutils;
-        std::shared_ptr<WireCell::Clus::PR::Graph> m_pr_graph;
+        std::shared_ptr<WireCell::Clus::TrackFitting> m_track_fitting;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;
