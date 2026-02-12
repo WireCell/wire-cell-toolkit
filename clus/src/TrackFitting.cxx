@@ -867,7 +867,67 @@ void TrackFitting::fill_global_rb_map() {
     }
     
     std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
-} 
+}
+
+void TrackFitting::fill_fitted_charge_2d(
+    const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_U,
+    const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_V,
+    const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_W,
+    const Eigen::VectorXd& pred_u, const Eigen::VectorXd& pred_v, const Eigen::VectorXd& pred_w,
+    double rel_uncer_ind, double rel_uncer_col,
+    double add_uncer_ind, double add_uncer_col)
+{
+    m_fitted_charge_2d.clear();
+
+    // Lambda to process one plane
+    auto process_plane = [&](const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& plane_map,
+                             const Eigen::VectorXd& pred_data,
+                             int plane_idx,
+                             double rel_uncer, double add_uncer) {
+        int idx = 0;
+        for (const auto& [coord_key, result] : plane_map) {
+            const auto& measurement = result.first;
+            const auto& coord_2d_set = result.second;
+
+            // Un-whiten predicted charge
+            double pred_charge = 0;
+            if (measurement.charge > 0 && measurement.flag != 0) {
+                double total_err = sqrt(pow(measurement.charge_err, 2)
+                                      + pow(measurement.charge * rel_uncer, 2)
+                                      + pow(add_uncer, 2));
+                pred_charge = pred_data(idx) * total_err;
+            }
+
+            // Get cluster associations from global_rb_map
+            std::set<Facade::Cluster*> clusters;
+            auto rb_it = global_rb_map.find(coord_key);
+            if (rb_it != global_rb_map.end()) {
+                for (auto* blob : rb_it->second) {
+                    auto* cl = blob->cluster();
+                    if (cl) clusters.insert(cl);
+                }
+            }
+
+            // Store for each Coord2D (handles wrapped wires with multiple face/wire)
+            for (const auto& c2d : coord_2d_set) {
+                APAFacePlane afp{c2d.apa, c2d.face, plane_idx};
+                WireTime wt{c2d.wire, c2d.time};
+                auto& entry = m_fitted_charge_2d[afp][wt];
+                entry.charge = measurement.charge;
+                entry.charge_err = measurement.charge_err;
+                entry.pred_charge = pred_charge;
+                entry.flag = measurement.flag;
+                entry.clusters = clusters;
+            }
+
+            idx++;
+        }
+    };
+
+    process_plane(map_U, pred_u, 0, rel_uncer_ind, add_uncer_ind);
+    process_plane(map_V, pred_v, 1, rel_uncer_ind, add_uncer_ind);
+    process_plane(map_W, pred_w, 2, rel_uncer_col, add_uncer_col);
+}
 
 // ============================================================================
 // Helper functions for organize_segments_path methods
@@ -6252,7 +6312,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     pred_data_u_2D = RU * pos_3D;
     pred_data_v_2D = RV * pos_3D;
     pred_data_w_2D = RW * pos_3D;
-    
+
+    // Persist fitted 2D charge results
+    fill_fitted_charge_2d(map_U_charge_2D, map_V_charge_2D, map_W_charge_2D,
+                          pred_data_u_2D, pred_data_v_2D, pred_data_w_2D,
+                          rel_uncer_ind, rel_uncer_col, add_uncer_ind, add_uncer_col);
+
     // Calculate reduced chi2
     traj_reduced_chi2.clear();
     // std::vector<int> traj_ndf(n_3D_pos, 0);
@@ -6990,7 +7055,12 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     pred_data_u_2D = RU * pos_3D;
     pred_data_v_2D = RV * pos_3D;
     pred_data_w_2D = RW * pos_3D;
-    
+
+    // Persist fitted 2D charge results
+    fill_fitted_charge_2d(map_U_charge_2D, map_V_charge_2D, map_W_charge_2D,
+                          pred_data_u_2D, pred_data_v_2D, pred_data_w_2D,
+                          rel_uncer_ind, rel_uncer_col, add_uncer_ind, add_uncer_col);
+
     // Calculate reduced chi-squared for each 3D point
     reduced_chi2.resize(n_3D_pos);
     for (int k = 0; k < n_3D_pos; k++) {

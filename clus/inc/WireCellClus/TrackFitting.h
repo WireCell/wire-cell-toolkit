@@ -281,12 +281,31 @@ namespace WireCell::Clus {
         struct ChargeMeasurement {
             double charge, charge_err;
             int flag;
-            
-            ChargeMeasurement(double q = 0.0, double qe = 0.0, int f = 0) 
+
+            ChargeMeasurement(double q = 0.0, double qe = 0.0, int f = 0)
                 : charge(q), charge_err(qe), flag(f) {}
         };
 
+        /// Fitted 2D charge result: measured + predicted + cluster association
+        struct FittedCharge2D {
+            double charge;        // original measurement charge
+            double charge_err;    // original measurement uncertainty
+            double pred_charge;   // predicted charge (un-whitened, same units as charge)
+            int flag;             // 0=dead, 1=live, 2=bad
+            std::set<Facade::Cluster*> clusters;
+        };
 
+        using WireTime = std::pair<int, int>;            // (wire_index, time_slice)
+        using APAFacePlane = std::tuple<int, int, int>;   // (apa, face, plane);
+
+        // Fill fitted 2D charge results after dQ/dx fitting
+        void fill_fitted_charge_2d(
+            const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_U,
+            const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_V,
+            const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_W,
+            const Eigen::VectorXd& pred_u, const Eigen::VectorXd& pred_v, const Eigen::VectorXd& pred_w,
+            double rel_uncer_ind, double rel_uncer_col,
+            double add_uncer_ind, double add_uncer_col);
 
         // point associations
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
@@ -441,6 +460,9 @@ namespace WireCell::Clus {
         // Measured 2D charge data access
         const std::map<CoordReadout, ChargeMeasurement>& get_charge_data() const { return m_charge_data; }
 
+        // Fitted 2D charge data organized by (apa, face, plane) -> (wire, time)
+        const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& get_fitted_charge_2d() const { return m_fitted_charge_2d; }
+
         /**
          * Get geometry information for wire plane offsets
          * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)
@@ -517,6 +539,9 @@ namespace WireCell::Clus {
     
         // Global (apa, time, channel) to blobs
         std::map<CoordReadout, std::set<Facade::Blob* > > global_rb_map;
+
+        // Fitted 2D charge organized by (apa, face, plane) -> (wire, time)
+        std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> m_fitted_charge_2d;
 
         // global geometry
 
