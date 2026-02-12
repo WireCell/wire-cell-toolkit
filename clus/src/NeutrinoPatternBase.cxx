@@ -267,20 +267,20 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         if (!chi2_vec.empty()) v2->fit().reduced_chi2 = chi2_vec.back();
 
         // Set fit information for segment
-        std::vector<Fit> fits;
-        for (size_t i = 0; i < fine_path.size(); ++i) {
-            Fit fit;
-            fit.point = fine_path[i].first;
-            if (i < dQ_vec.size()) fit.dQ = dQ_vec[i];
-            if (i < dx_vec.size()) fit.dx = dx_vec[i];
-            if (i < pu_vec.size()) fit.pu = pu_vec[i];
-            if (i < pv_vec.size()) fit.pv = pv_vec[i];
-            if (i < pw_vec.size()) fit.pw = pw_vec[i];
-            if (i < pt_vec.size()) fit.pt = pt_vec[i];
-            if (i < chi2_vec.size()) fit.reduced_chi2 = chi2_vec[i];
-            fits.push_back(fit);
-        }
-        seg->fits(fits);
+        // std::vector<Fit> fits;
+        // for (size_t i = 0; i < fine_path.size(); ++i) {
+        //     Fit fit;
+        //     fit.point = fine_path[i].first;
+        //     if (i < dQ_vec.size()) fit.dQ = dQ_vec[i];
+        //     if (i < dx_vec.size()) fit.dx = dx_vec[i];
+        //     if (i < pu_vec.size()) fit.pu = pu_vec[i];
+        //     if (i < pv_vec.size()) fit.pv = pv_vec[i];
+        //     if (i < pw_vec.size()) fit.pw = pw_vec[i];
+        //     if (i < pt_vec.size()) fit.pt = pt_vec[i];
+        //     if (i < chi2_vec.size()) fit.reduced_chi2 = chi2_vec[i];
+        //     fits.push_back(fit);
+        // }
+        // seg->fits(fits);
     }else{
         // Tracking failed, clean up
         remove_segment(graph, seg);

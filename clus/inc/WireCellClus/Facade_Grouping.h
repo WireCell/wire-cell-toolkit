@@ -18,6 +18,9 @@
 #include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
+// Include PRGraphType for PR::Graph (it's a type alias, not a class, so can't forward declare)
+#include "WireCellClus/PRGraphType.h"
+
 
 // forward declare
 namespace WireCell::Clus {
@@ -241,8 +244,16 @@ namespace WireCell::Clus::Facade {
         // FiducialUtils.
         FiducialUtilsPtr get_fiducialutils() const { return m_fiducialutils; }
         void set_fiducialutils(FiducialUtilsPtr fd) { m_fiducialutils = fd; }
+
+        // PRGraph storage for pattern recognition graph data
+        // Visitors like TaggerCheckNeutrino can store their PR::Graph here
+        // for access by other components (e.g., bee output in MABC)
+        std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const { return m_pr_graph; }
+        void set_pr_graph(std::shared_ptr<WireCell::Clus::PR::Graph> graph) { m_pr_graph = graph; }
+
       private:
         FiducialUtilsPtr m_fiducialutils;
+        std::shared_ptr<WireCell::Clus::PR::Graph> m_pr_graph;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;

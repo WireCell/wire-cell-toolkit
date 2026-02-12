@@ -66,13 +66,17 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         }
     }
 
-    // tempoarary ... 
+    // Create PRGraph and first segment
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
     auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, m_track_fitter, m_dv);
     m_track_fitter.add_graph(pr_graph);
 
+    m_track_fitter.do_multi_tracking(true, true, true);
 
+
+    // Store PRGraph in the grouping for later access by bee output
+    grouping.set_pr_graph(pr_graph);
 }
 
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)

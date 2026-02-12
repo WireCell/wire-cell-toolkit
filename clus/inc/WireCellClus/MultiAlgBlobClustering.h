@@ -87,9 +87,10 @@ namespace WireCell::Clus {
         // New helper function to fill bee points
         void fill_bee_points(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_points_from_cluster(
-            Bee::Points& bpts, const Facade::Cluster& cluster, 
+            Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
             int filter);
+        void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
 
         void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
         void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);

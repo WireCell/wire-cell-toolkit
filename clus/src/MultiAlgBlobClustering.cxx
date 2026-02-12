@@ -1,5 +1,6 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade_Summary.h"
+#include "WireCellClus/PRSegment.h"
 
 
 #include "WireCellAux/TensorDMpointtree.h"
@@ -14,6 +15,7 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/GraphTools.h"
 
 #include <map>
 #include <fstream>
@@ -27,6 +29,7 @@ using namespace WireCell::Aux;
 using namespace WireCell::Aux::TensorDM;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+using WireCell::GraphTools::mir;
 
 MultiAlgBlobClustering::MultiAlgBlobClustering()
   : Aux::Logger("MultiAlgBlobClustering", "clus")
@@ -415,6 +418,119 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
     }
 }
 
+// Fill bee points from PRGraph track trajectories
+void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& name, const Grouping& grouping)
+{
+    if (m_bee_points.find(name) == m_bee_points.end()) {
+        log->warn("Bee points set '{}' not found for PR graph, skipping", name);
+        return;
+    }
+
+    auto& apa_bpts = m_bee_points[name];
+
+    // Find the configuration for this name
+    auto it = std::find_if(m_bee_points_configs.begin(), m_bee_points_configs.end(),
+                          [&name](const BeePointsConfig& cfg) { return cfg.name == name; });
+
+    if (it == m_bee_points_configs.end()) {
+        log->warn("Configuration for bee points set '{}' not found, skipping", name);
+        return;
+    }
+
+    const auto& config = *it;
+
+    // Reset RSE values for all points objects
+    if (m_use_config_rse) {
+        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+        for (auto& [apa, face_map] : apa_bpts.by_apa_face) {
+            for (auto& [face, bpts] : face_map) {
+                bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+            }
+        }
+    } else {
+        // Use the default approach with ident
+        int run = 0, evt = 0;
+        if (m_last_ident > 0) {
+            run = (m_last_ident >> 16) & 0x7fff;
+            evt = (m_last_ident) & 0xffff;
+        }
+        apa_bpts.global.reset(evt, 0, run);
+        for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
+            for (auto& [face, bpts] : face_map) {
+                bpts.reset(evt, 0, run);
+            }
+        }
+    }
+
+    // Get the PRGraph from the grouping
+    auto pr_graph = grouping.get_pr_graph();
+    if (!pr_graph) {
+        log->warn("No PR graph found in grouping for bee points set '{}'", name);
+        return;
+    }
+
+    log->debug("Filling bee points '{}' from PR graph with {} vertices and {} edges",
+               name, boost::num_vertices(*pr_graph), boost::num_edges(*pr_graph));
+
+    // Iterate through all segments (edges) in the graph
+    int segment_id = 0;
+    for (auto edge_desc : mir(boost::edges(*pr_graph))) {
+        const auto& edge_bundle = (*pr_graph)[edge_desc];
+        auto segment = edge_bundle.segment;
+
+        if (!segment) continue;
+
+        // Get the fitted points from this segment
+        const auto& fits = segment->fits();
+
+        if (fits.empty()) continue;
+
+        // std::cout << "Segment " << segment_id << " has " << fits.size() << " fitted points." << std::endl;
+
+        log->debug("Segment {} has {} fitted points", segment_id, fits.size());
+
+        // Process each fitted point
+        for (const auto& fit : fits) {
+            if (!fit.valid()) continue;  // Skip invalid fits
+
+            // Extract 3D point from fit
+            const auto& point = fit.point;
+
+            // std::cout << "Test: Segment: " << segment_id << " Point: " << point << " Fit valid: " << fit.valid() << " " << fit.index << " " << fit.range << std::endl;
+
+
+            // Get charge (dQ) from fit
+            double charge = fit.dQ;
+            if (charge < 0) charge = 0;  // Use 0 if charge is invalid
+
+            if (config.individual) {
+                // Fill individual APA/face bee points
+                if (fit.paf.first >= 0 && fit.paf.second >= 0) {
+                    int apa = fit.paf.first;
+                    int face = fit.paf.second;
+
+                    auto it_apa = apa_bpts.by_apa_face.find(apa);
+                    if (it_apa != apa_bpts.by_apa_face.end()) {
+                        auto it_face = it_apa->second.find(face);
+                        if (it_face != it_apa->second.end()) {
+                            // Append point: (position, charge, cluster_id, type)
+                            it_face->second.append(point, charge, segment_id, 0);
+                        }
+                    }
+                }
+            } else {
+                // Fill global bee points
+                // Append point: (position, charge, cluster_id, type)
+                apa_bpts.global.append(point, charge, segment_id, 0);
+            }
+        }
+
+        segment_id++;
+    }
+
+    log->debug("Filled bee points '{}' from {} segments", name, segment_id);
+}
+
 
 // Helper function to fill bee points from a single cluster
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
@@ -799,15 +915,31 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             grouping->enumerate_idents(m_clusters_id_order);
         }
 
-        // for (const auto& config : m_bee_points_configs) {
-        //     if (config.name == "img") continue;
-        //     if (config.visitor != cmeth.name) continue;
-        //     auto gs = ensemble.with_name(config.grouping);
-        //     if (gs.empty()) {
-        //         continue;
-        //     }
-        //     fill_bee_points(config.name, *gs[0]);
-        // }
+        // Dump bee points right after specific visitor runs
+        for (const auto& config : m_bee_points_configs) {
+            if (config.name == "img") continue;
+            if (config.visitor.empty() || config.visitor != cmeth.name) continue;
+
+            auto gs = ensemble.with_name(config.grouping);
+            if (gs.empty()) {
+                continue;
+            }
+
+            // Check if this visitor produced a PRGraph that we should save
+            auto pr_graph = gs[0]->get_pr_graph();
+
+            // std::cout << "Test: Visitor: " << cmeth.name << " Grouping: " << config.grouping << " " << pr_graph << std::endl;
+
+            if (pr_graph) {
+                // Fill bee points from PRGraph (for track trajectories)
+                fill_bee_points_from_pr_graph(config.name, *gs[0]);
+                // std::cout << "Filled bee points from PR graph for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
+            } else {
+                // Fill bee points from clusters normally
+                fill_bee_points(config.name, *gs[0]);
+                // std::cout << "Filled bee points from clusters for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
+            }
+        }
     }
 
     //
@@ -818,9 +950,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     //
     
 
-    // Fill all configured bee points sets
+    // Fill all configured bee points sets (except those with visitor-specific handling)
     for (const auto& config : m_bee_points_configs) {
         if(config.name == "img") continue;
+
+        // Skip configs with visitor specified - they were already handled in the visitor loop
+        if (!config.visitor.empty()) continue;
 
         auto gs = ensemble.with_name(config.grouping);
         if (gs.empty()) {
