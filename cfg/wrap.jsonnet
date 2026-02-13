@@ -5,7 +5,7 @@ local real_pg = import "pgraph.jsonnet";
 
 {
     replace_pnode(labels, finder, make_wrapper, pg = real_pg)::
-        real_pg + { pnode:: $.wrap_pnode(labels, finder, make_wrapper) },
+        pg + { pnode:: $.wrap_pnode(labels, finder, make_wrapper) },
 
     // Create a wrapped pnode function that selectively wraps nodes based on finder rules
     //
