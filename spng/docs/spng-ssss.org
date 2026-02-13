@@ -1,0 +1,44 @@
+#+title The spng-ssss Snakemake workflow script
+
+* Overview
+
+Basic DAG:
+
+#+begin_example
+ kine -> depos -> {splat, {adc -> {osp, spng}} -> metrics -> plots
+#+end_example
+
+Two sources of kinematics:
+
+- tracks :: cosmic muon kinematics sent through Geant4.
+- lines :: ideal MIP lines at fixed angles for SPDIR metrics
+
+These also name sub-directories in the output directory.
+
+* Basic usage
+
+#+begin_example
+./spng/test/spng-ssss all
+#+end_example
+
+There are many configuration parameters.
+
+Default container requires loading from CVMFS and each larsoft job to do lengthy
+UPS source/setup.  You can bake these into a local container and override:
+
+#+begin_example
+--config container=/nfs/data/1/calcuttj/dunesw.sif
+#+end_example
+
+* Detailed example targets
+
+Quick test to make depo flux splat file.
+
+#+begin_example
+./spng/test/spng-ssss  lines/splat/p2-txz84-ty90/data.npz 
+#+end_example
+
+* Extending to new detectors
+
+- [ ] Modify/add the =spdir.offset= option to place line MIP tracks in TPC 0.
+- [ ] ...

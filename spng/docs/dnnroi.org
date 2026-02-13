@@ -19,19 +19,19 @@ The =OmnibusSigProc= node performs this preprocessing:
 
 1. Form "loose_lf" image.
 2. Form "mp2" and "mp3" as 0/1 values.
-3. Multiply mp2 and mp3 by 4000.
+3. MULTIPLY: scale up mp2 and mp3 by 4000.
 4. Save these three as tagged trace sets in the frame.
 
 The =DNNROIFinding= node performs this preprocessing:
 
 1. Convert tagged trace sets of a frame to array.
-2. Divide all samples by 4000.
-3. Downsample 
-4. Form stack of shape =(Nfeat, Nchan, Ntick)= with feature order (dense, mp2, mp3).
-5. Transpose =Nchan= and =Ntick= to get shape =(Nfeat, Ntick, Nchan)=.
-6. Add new dimension to get shape =(Nbatch, Nfeat, Ntick, Nchan)=.
-7. Form batched chunk views along tick dimension dim=2.
-8. Pass to model's forward function.
+2. DIVIDE: scale down all feature samples by 4000.
+3. DOWNSAMPLE: rebin by eg 4.
+4. STACK: Form stack of shape =(Nfeat, Nchan, Ntick)= with feature order (dense, mp2, mp3).
+5. TRANSPOSE: =Nchan= and =Ntick= to get shape =(Nfeat, Ntick, Nchan)=.
+6. UNSQUEEZE: Add new dimension to get shape =(Nbatch, Nfeat, Ntick, Nchan)=.
+7. CHUNK: form chunk views along tick dimension dim=2.
+8. FORWARD: Pass to model's forward function.
 
 Taken together:
 
@@ -44,17 +44,17 @@ Taken together:
 
 The =DNNROIFinding= node performs this postprocessing:
 
-1. Outputs are received from model's forward function as shape =(1, 1, Ntick, Nchan)=
-2. Outputs are concatenated along the tick dimension, dim=2.
+1. Outputs are received from model's forward function.
+2. UNCHUNK: outputs are concatenated along the tick dimension, dim=2.
 3. Tensor is converted to Eigen.
    - *Warning* this conversion assumes ~Nbatch=1~ (and ~NFeat=1~).  Batching can not actually be done.
-4. Upsample.
-5. A threshold is applied to form a mask.
+4. UPSAMPLE.  The previous downsample is undone.
+5. THRESHOLD: a threshold is applied to form a mask.
 6. The "decon charge" (Gauss filtered decon) is transposed.
-7. The mask is applied to the transposed decon charge.
+7. MASK: the mask is applied to the transposed decon charge.
 8. The =baseline_subtraction()= is applied
 9. Output scale and offset applied.
-10. Final transpose to =(Nchan, Ntick)=.
+10. UNTRANSPOSE: Final transpose to =(Nchan, Ntick)=.
 
 
 
