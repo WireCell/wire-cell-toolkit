@@ -1,5 +1,8 @@
 #include "WireCellClus/TaggerCheckNeutrino.h"
 #include "WireCellClus/NeutrinoPatternBase.h" // pattern recognition ...
+#include "WireCellClus/PatternDebugIO.h"      // debug dump/load
+
+#include <cstdlib>
 
 class TaggerCheckNeutrino;
 WIRECELL_FACTORY(TaggerCheckNeutrino, TaggerCheckNeutrino,
@@ -63,6 +66,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     for (auto* cluster : grouping.children()) {
         if (cluster->get_flag(Flags::main_cluster)) {
             main_cluster = cluster;
+        }
+    }
+
+    // Debug dump (only when env var is set)
+    if (main_cluster) {
+        if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
+            DebugIO::dump_init_first_segment_inputs(
+                dump_path, *main_cluster, main_cluster, true, *m_track_fitter);
         }
     }
 
