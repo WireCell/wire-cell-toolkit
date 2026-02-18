@@ -130,4 +130,36 @@ On a whim, I looked into fans.jsonnet. I think this might be useful here but I'm
 </pre>
 
 Here's an attempt at me drawing this to try to understand it
-![image](fanout_cross.png)
+![image](fanout_cross_whitebg.png)
+
+So I think I could take the list of sinks (3), and the 2 list of targets (each 3) and use them. Could I put them in this shuntline? Looking further down, I see similar nodes being used in a very unintuitive way, so I'm just going to replicate this and hope the 'centernodes' portion takes care of everything. Still means I have to break up my shuntlines, which is a bummer and speaks to how fragile this is (IMO)
+<pre>
+        dnnroi_training_preface(crossed_views = [1,1,0], rebin=4, extra_name="")::
+        local sg1 = $.frame_decon(extra_name=extra_name);
+
+        local decon_fan = $.fanout_for_dnnroi_training(crossed_views,extra_name=extra_name);
+        local sg1_connection = pg.shuntline(sg1, decon_fan.sink);
+
+        // [3]tensor -> tensor[3]
+        local sg2 = $.tight_roi(rebin=rebin, extra_name=extra_name);
+
+        local dnnroi_views = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
+
+        // [3]tensor -> tensor[2]
+        local sg3 = $.cellviews_tensors(out_views=dnnroi_views, chunk_size=0, extra_name=extra_name);
+
+        // [3]tensor -> tensor[2] combo of two above
+        local sg23 = pg.shuntline(sg2, sg3);
+        local sg23_connection = pg.shuntline(decon_fan.targets.wiener, sg23);
+
+        // [2]tensor -> tensor[2]
+        local sg4 = $.dnnroi_dense_views(views=dnnroi_views, rebin=rebin, extra_name=extra_name);
+        local sg4_connection = pg.shuntline(decon_fan.targets.dense, sg4);
+
+        // mp_sink:[3]tensor + dense_sink:[2]tensor(decon) -> source:tensor[2]
+        local sg5 = $.connect_dnnroi_stack(sg3, sg4, views=dnnroi_views, extra_name=extra_name);
+
+        pg.intern(innodes=[sg1], outnodes=[sg5],
+                  centernodes=[sg1_connection, sg23_connection, sg4_connection]),
+</pre>
+
