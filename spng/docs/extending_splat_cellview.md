@@ -51,4 +51,83 @@ Below is the relevant portion of the config. I resample each group (U, V, W0, W1
             stack,
         ]),
 </pre>
-Option 1 seeks to fanout the TensorSet immediately before the CellViews node. However, when I wrote this, I thought I'd save some space and take the 3 view tensors as input to the 'cellviews_tensors' function (it handles packing -> cellviews -> unpacking for me). Turns out, it would actually be nice to access the Packed TensorSet and fan it out. I could do that, and write packing/unpacking nodes explicitly here.
+Option 1 seeks to fanout the TensorSet immediately before the CellViews node. However, when I wrote this, I thought I'd save some space and take the 3 view tensors as input to the 'cellviews_tensors' function (it handles packing -> cellviews -> unpacking for me). Turns out, it would actually be nice to access the Packed TensorSet and fan it out. I could do that, and write packing/unpacking nodes explicitly here. That's not too hard. 
+<pre>
+    threshold_cellviews_for_splat(out_views=[0,1,2], chunk_size=0, extra_name="_splat"):: 
+        local this_name = $.this_name(extra_name, '_threshold_cellviews');
+
+        local n = std.length(out_views);
+        local packer = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: this_name + '_precellview',
+            data: {
+                multiplicity: n
+            } + control
+        }, nin=n, nout=1);
+        local cellviews = $.cellviews_tensorset(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local unpacker = pg.pnode({
+            type: 'SPNGTorchSetUnpacker',
+            name: this_name + '_postcellview',
+            data: {
+                selections: [{index: ind} for ind in wc.iota(n)],
+            } + control
+        }, nin=1, nout=n);
+
+        local cellviews_byhand = pg.pipeline([packer, cellviews, unpacker]);
+
+        local stack = pg.pnode({
+            type: 'SPNGReduce',
+            name: $.this_name(extra_name, '_stack'),
+            data: {
+                multiplicity: 3,
+                operation: "cat",
+                dim: -2,
+            } + control,
+        }, nin=3, nout=1);
+
+        pg.shuntlines([
+            $.resample_group_to_views(extra_name=extra_name),
+            pg.crossline($.thresholds_for_splat(extra_name=extra_name)),
+            cellviews_byhand,
+            stack,
+        ]),
+</pre>
+I went ahead and split it up, checked it by rendering and also running wire-cell. It seems good, now to add the fanout functionality. Here's where I run into some conceptual issues. If I add in the fanout here, then both the 'cellviews_byhand' pipeline and the shuntlines doesn't seem so easy to fit into.. 
+
+On a whim, I looked into fans.jsonnet. I think this might be useful here but I'm not sure 
+<pre>
+    /// Forward N ports M ways.
+    ///
+    /// It returns a list like:
+    ///
+    /// [N-sink, [N-source]*M]
+    ///
+    ///
+    /// Each of N iports of the N-sink should be connected to upstream.
+    ///
+    /// Each of the N iports to each of the M N-sources should be connected to
+    /// downstream.
+    ///
+    /// N is typically number of detector views in a TPC or number of TPCs in a
+    /// detector.  M is whatever fanout number you want from each.
+    fanout_cross(name, N, M, type='Tensor')::
+        local fans = [pg.pnode({
+            type: "SPNGFanout"+type+"s",
+            name: name + "f" + std.toString(num),
+            data: { multiplicity: M } + control
+        }, nin=1, nout=M) for num in wc.iota(N)];
+        local sink = pg.intern(innodes=fans); // sets their iports
+        local sources = [
+            pg.intern(centernodes=fans, // fixme, even give this?
+                      oports=[
+                          fans[fnum].oports[mnum]
+                          for fnum in wc.iota(N)
+                      ])
+            for mnum in wc.iota(M)
+        ];
+        [sink, sources],
+
+</pre>
+
+Here's an attempt at me drawing this to try to understand it
+insert image here
