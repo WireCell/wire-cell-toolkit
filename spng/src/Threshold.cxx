@@ -86,7 +86,7 @@ namespace WireCell::SPNG {
 
     ITorchTensor::pointer Threshold::filter_tensor(const ITorchTensor::pointer& in)
     {
-        auto tensor = to(in->tensor());
+        auto tensor = in->tensor();
         if (m_config.rms_nsigma == 0.0) {
             tensor = nominal_threshold(tensor);
         }

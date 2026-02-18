@@ -134,7 +134,7 @@ namespace WireCell::SPNG {
 
         // fixme: md["tbin"] should not be ignored....
 
-        auto tensor = to(in->tensor());
+        auto tensor = in->tensor();
         if (has_nan(tensor)) {
             log->critical("input tensor has NaNs {}", to_string(tensor));
             raise<ValueError>("input tensor has NaNs");
