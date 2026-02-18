@@ -86,8 +86,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     
     // A crossline to resample and scale.  This is probably best applied across
     // "groups" (connected views).
-    resample_crossline(ratio=1.0/4.0, scale=1.0, multiplicity=4, extra_name="")::
-        pg.crossline([
+    resample_crossline_nodes(ratio=1.0/4.0, scale=1.0, multiplicity=4, extra_name="")::
+    [
             local this_name = $.this_name(extra_name, "_v"+std.toString(view));
             local res = pg.pnode({
                 type:'SPNGResampler',
@@ -106,7 +106,12 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 } + control,
             }, nin=1, nout=1);
             pg.pipeline([res, scaler])
-            for view in wc.iota(multiplicity)]),
+            for view in wc.iota(multiplicity)
+    ],
+    resample_crossline(ratio=1.0/4.0, scale=1.0, multiplicity=4, extra_name="")::
+        pg.crossline(
+            $.resample_crossline_nodes(ratio=ratio, scale=scale, multiplicity=multiplicity, extra_name=extra_name)
+        ),
 
 
     // Splat ending in TDM ITorchTensorSet.
@@ -143,6 +148,117 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             splat,
             resample_wrapped,
             $.tdm_to_frame(extra_name=extra_name),
+        ]),
+    /// Produce an ngroup (4)->nview (3) subgraph doing thresholding
+    tpc_group_resample(ratio=1.0/4.0, scale=1.0, extra_name=""):
+        local groups = tpc.view_groups;
+        local ngroups = std.length(groups);
+
+        local cross_resample = $.resample_crossline_nodes(ratio, scale, multiplicity=ngroups, extra_name=extra_name);
+        local view_resample = collect_groups_by_view(cross_resample);
+        pg.intern(innodes=cross_resample, outnodes=view_resample),
+
+    /// A 1->[4]->3 Unpacks the TDM input, sends through group->view resampling
+    resample_group_to_views(extra_name=""):: pg.shuntlines([
+        $.tpc_group_unpacker(extra_name=extra_name),
+        $.tpc_group_resample(extra_name=extra_name),
+    ]),
+
+    /// 3->3 thresholding
+    thresholds_for_splat(multiplicity=3, extra_name=""):: [
+        pg.pnode({
+            local meth_name = "_cross_v" + std.toString(view),
+            type: 'SPNGThreshold',
+            name: $.this_name(extra_name, meth_name),
+            data: {
+                nominal: 0.5,
+            } + control,
+        }, nin=1, nout=1)
+        for view in wc.iota(multiplicity)
+    ],
+
+    /// Put some of the previously-defined things together 
+    /// This is one sticking point in the UI schema that I don't really like or at least
+    /// took me a second to wrap my head around. What we're is defining progressively larger
+    /// portions of the subgraph. The way we define that is by choosing some set of edges
+    /// in the existing graph that we then have to splice and graft into in a way.
+    threshold_cellviews_for_splat(out_views=[0,1,2], chunk_size=0, extra_name="_splat"):: 
+        local this_name = $.this_name(extra_name, '_threshold_cellviews');
+
+        local cellviews = $.cellviews_tensors(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        
+        local name = $.this_name(extra_name, "_split");
+
+        local stack = pg.pnode({
+            type: 'SPNGReduce',
+            name: $.this_name(extra_name, '_stack'),
+            data: {
+                multiplicity: 3,
+                operation: "cat",
+                dim: -2,
+            } + control,
+        }, nin=3, nout=1);
+
+        pg.shuntlines([
+            $.resample_group_to_views(extra_name=extra_name),
+            pg.crossline($.thresholds_for_splat(extra_name=extra_name)),
+            cellviews,
+            stack,
+        ]),
+
+    cellviews_split_and_pack_mp2_mp3(out_views=[0,1,2], chunk_size=0, extra_name='_splat')::
+        local name = $.this_name(extra_name, '_split');
+            
+        local cellviews = $.threshold_cellviews_for_splat(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local packer = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: name + '_repack',
+            data: {
+                multiplicity: 2
+            } + control
+        }, nin=2, nout=1);
+        local cellviews_split = pg.pipeline([cellviews, fans.fanout(name)]);
+        local slicers = pg.crossline([
+            pg.pnode({
+                local meth_name = 'v'+std.toString(i)+"_split",
+                local name = $.this_name(extra_name, meth_name),
+                type:'SPNGTransform',
+                name: name,
+                data: {
+                    operations: [
+                        {operation: "slice", dims: [-3, i, i+1]},
+                        {operation: "squeeze", dims: [0]}
+                        {operation: "to", dtype: "int32"}
+                    ],
+                    tag: if i == 0 then 'mp2' else 'mp3', // Is this the right order?
+                } + control,
+            }, nin=1, nout=1) for i in wc.iota(2)
+        ]);
+        pg.shuntlines([
+            cellviews_split,
+            slicers,
+            packer,
+        ]),
+
+    // Splat ending with ITorchTensorSet
+    splat_cellview_tensor(ratio=1.0/4.0, scale=1.0, out_views=[0,1,2], chunk_size=0, extra_name="_splat")::
+        local splat = $.splat_tdm(extra_name=extra_name);
+        local cellviews = $.cellviews_split_and_pack_mp2_mp3(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+
+        pg.pipeline([
+            splat,
+            cellviews,
+        ]),
+
+    /// Splat ending with IFrame.  This uses the bypass.
+    splat_cellview_frame(ratio=1.0/4.0, scale=1.0, out_views=[0,1,2], chunk_size=0, extra_name="_splat")::
+        local splat = $.splat_tdm(extra_name=extra_name);
+        local cellviews = $.cellviews_split_and_pack_mp2_mp3(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local cellviews_wrapped = $.wrap_bypass(cellviews, extra_name);
+        pg.pipeline([
+            splat,
+            cellviews_wrapped,
+            $.tdm_to_frame(extra_name=extra_name, traces_tag='mp3'),
         ]),
 
 
@@ -405,12 +521,19 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
 
     /// A 3->3 subgraph that applies a tpc cross view thresholds
-    cross_threshold_views(extra_name=""):: pg.crossline([pg.pnode({
-        local meth_name = "_cross_v" + std.toString(it.index),
-        type: 'SPNGThreshold',
-        name: $.this_name(extra_name, meth_name),
-        data: it.value + control,
-    }, nin=1, nout=1) for it in wc.enumerate(tpc.crossview_thresholds)]),
+    /// For ease-of-use above I moved the nodes definitions outside
+    /// Another small irritant. Might speak to a need for
+    /// a slight change to this pattern.
+    cross_threshold_views_nodes(extra_name=""):: [
+        pg.pnode({
+            local meth_name = "_cross_v" + std.toString(it.index),
+            type: 'SPNGThreshold',
+            name: $.this_name(extra_name, meth_name),
+            data: it.value + control,
+        }, nin=1, nout=1)
+        for it in wc.enumerate(tpc.crossview_thresholds)
+    ],
+    cross_threshold_views(extra_name=""):: pg.crossline($.cross_threshold_views_nodes),
 
 
     /// A 3->3 subgraph that performs tight ROI finding on decon inputs and
