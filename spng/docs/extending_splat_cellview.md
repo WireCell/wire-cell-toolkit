@@ -342,3 +342,4 @@ So I can get both branches, then I also need to increase my packer rank in the o
         ),
 </pre>
 I've added what needs to be done. Had to add a couple of config structures + change from the neat shuntlines to an intern (oh well. I also had to add in another transform to change the dtype that I forgot about when planning this. Here is the completed graph:
+![image](mp_splat_final.png)
