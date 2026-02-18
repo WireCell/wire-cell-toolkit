@@ -20,7 +20,9 @@ namespace WireCell::Fmt {
                     args.push_back(fmt::arg(key.c_str(), value.asBool()));
                 } else {
                     throw std::invalid_argument(
-                        "Object values must be scalar (string, int, double, bool).");
+                        "Object values must be scalar (string, int, double, bool). Offending key: "
+                        + key
+                    );
                 }
             }
             return fmt::vformat(pattern, args);
