@@ -48,13 +48,39 @@ namespace WireCell::SPNG {
         /// Specify which dimension(s) to operate on.
         std::vector<int> dims = {};
 
+        std::string dtype = "";
     };
 
     struct TransformConfig {
         std::vector<TransformOpConfig> operations;
     };
+
+    torch::Dtype resolve_dtype(std::string dtype) {
+        if (dtype == "int64") {
+            return torch::kInt64;
+        } else if (dtype == "int32") {
+            return torch::kInt32;
+        } else if (dtype == "int16") {
+            return torch::kInt16;
+        } else if (dtype == "int8") {
+            return torch::kInt8;
+        } else if (dtype == "float64") {
+            return torch::kFloat64;
+        } else if (dtype == "float32") {
+            return torch::kFloat32;
+        } else if (dtype == "float16") {
+            return torch::kFloat16;
+        } else if (dtype == "bool") {
+            return torch::kBool;
+        } else {
+            raise<ValueError>("unknown dtype: %s", dtype);
+        }
+        //Default value that will never be reached 
+        //In order to quiet compiler warnings
+        return torch::kUInt8; 
+    };
 }
-BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TransformOpConfig, operation, scalar, dims);
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TransformOpConfig, operation, scalar, dims, dtype);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::TransformConfig, operations);
 
 namespace WireCell::SPNG {
