@@ -163,3 +163,182 @@ So I think I could take the list of sinks (3), and the 2 list of targets (each 3
                   centernodes=[sg1_connection, sg23_connection, sg4_connection]),
 </pre>
 
+I made a small mistake in that last paragraph, I forgot I was intending to fanout the packer! So it's really a 1x2 cross not 3x2. Thought this slip-up was interesting to put in here.
+
+I emulated what I saw in the last codeblock here:
+<pre>
+    
+    /// Put some of the previously-defined things together 
+    /// This is one sticking point in the UI schema that I don't really like or at least
+    /// took me a second to wrap my head around. What we're is defining progressively larger
+    /// portions of the subgraph. The way we define that is by choosing some set of edges
+    /// in the existing graph that we then have to splice and graft into in a way.
+    threshold_cellviews_for_splat(out_views=[0,1,2], chunk_size=0, extra_name="_splat"):: 
+        local this_name = $.this_name(extra_name, '_threshold_cellviews');
+
+        local n = std.length(out_views);
+        local packer = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: this_name + '_precellview',
+            data: {
+                multiplicity: n
+            } + control
+        }, nin=n, nout=1);
+        local cellviews = $.cellviews_tensorset(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local unpacker = pg.pnode({
+            type: 'SPNGTorchSetUnpacker',
+            name: this_name + '_postcellview',
+            data: {
+                selections: [{index: ind} for ind in wc.iota(n)],
+            } + control
+        }, nin=1, nout=n);
+
+        local packer_fanout = fans.fanout_cross(this_name, 1, 2, type='TensorSet');
+
+        local stack = pg.pnode({
+            type: 'SPNGReduce',
+            name: $.this_name(extra_name, '_stack'),
+            data: {
+                multiplicity: 3,
+                operation: "cat",
+                dim: -2,
+            } + control,
+        }, nin=3, nout=1);
+        local up_to_packer = pg.shuntlines([
+            $.resample_group_to_views(extra_name=extra_name),
+            pg.crossline($.thresholds_for_splat(extra_name=extra_name)),
+            packer,
+        ]);
+        local packer_into_fanout = pg.pipeline([up_to_packer, packer_fanout[0]]);
+        //Connect one packer branch to cellviews and unpacker
+        local cellviews_byhand = pg.pipeline([
+            packer_fanout[1][0],
+            cellviews, unpacker
+        ]);
+        local connect_cv_to_stack = pg.shuntlines([cellviews_byhand, stack]);
+        pg.intern(innodes=[up_to_packer], outnodes=[connect_cv_to_stack],
+                  centernodes=[packer_into_fanout]),
+</pre>
+
+The graph looks ok up to now. I'll note that I'm still not returning the second packer branch. Because this was intended to be called in another function (I thought it'd be good to keep things separate), I have to start modifying that. Returning just this cellview branch results in a drawable graph (there is probably unconneted oports etc).
+
+Here's where I call the above block (I apologize for my unclear naming)
+<pre>
+        cellviews_split_and_pack_mp2_mp3(out_views=[0,1,2], chunk_size=0, extra_name='_splat')::
+        local name = $.this_name(extra_name, '_split');
+            
+        local cellviews = $.threshold_cellviews_for_splat(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local packer = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: name + '_repack',
+            data: {
+                multiplicity: 2
+            } + control
+        }, nin=2, nout=1);
+        local cellviews_split = pg.pipeline([cellviews, fans.fanout(name)]);
+        local slicers = pg.crossline([
+            pg.pnode({
+                local meth_name = 'v'+std.toString(i)+"_split",
+                local name = $.this_name(extra_name, meth_name),
+                type:'SPNGTransform',
+                name: name,
+                data: {
+                    operations: [
+                        {operation: "slice", dims: [-3, i, i+1]},
+                        {operation: "squeeze", dims: [0]}
+                        {operation: "to", dtype: "int32"}
+                    ],
+                    tag: if i == 0 then 'mp2' else 'mp3', // Is this the right order?
+                } + control,
+            }, nin=1, nout=1) for i in wc.iota(2)
+        ]);
+        pg.shuntlines([
+            cellviews_split,
+            slicers,
+            packer,
+        ]),
+</pre>
+
+I'll need to change how I'm handling what's returned from 'threshold_cellviews_for_splat'. I intend to change what's returned from there to:
+<pre>
+        {
+            cellviews_branch: pg.intern(innodes=[up_to_packer], outnodes=[connect_cv_to_stack],
+                  centernodes=[packer_into_fanout]),
+            packer_branch: packer_fanout[1][1]
+        },
+</pre>
+So I can get both branches, then I also need to increase my packer rank in the outer block and reformat the shuntlines.
+
+<pre>
+    cellviews_split_and_pack_mp2_mp3(out_views=[0,1,2], chunk_size=0, extra_name='_splat')::
+        local name = $.this_name(extra_name, '_split');
+            
+        local cellviews_packer = $.threshold_cellviews_for_splat(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local unpacker = pg.pnode({
+            type: 'SPNGTorchSetUnpacker',
+            name: name + '_unpack_for_chancat',
+            data: {
+                selections: [{index: ind} for ind in wc.iota(3)],
+            } + control
+        }, nin=1, nout=3);
+        local chancat = pg.pnode({
+            type: 'SPNGReduce',
+            name: $.this_name(extra_name, '_chancat'),
+            data: {
+                multiplicity: 3,
+                operation: "cat",
+                dim: -2,
+            } + control,
+        }, nin=3, nout=1);
+        local toint = pg.pnode({
+            type: 'SPNGTransform',
+            name: $.this_name(extra_name, '_nobool'),
+            data: {
+                operations: [
+                    { operation: "to", dtype: "int32"}
+                ],
+                tag: 'splat'
+            } + control,
+        }, nin=3, nout=1);
+        local unpack_for_chancat = pg.shuntlines([unpacker, chancat]);
+        local do_unpack_and_chancat = pg.pipeline([cellviews_packer.packer_branch, unpack_for_chancat, toint]);
+        local packer = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: name + '_repack',
+            data: {
+                multiplicity: 3
+            } + control
+        }, nin=3, nout=1);
+        local cellviews_split = pg.pipeline([cellviews_packer.cellviews_branch, fans.fanout(name)]);
+        local slicers = pg.crossline([
+            pg.pnode({
+                local meth_name = 'v'+std.toString(i)+"_split",
+                local name = $.this_name(extra_name, meth_name),
+                type:'SPNGTransform',
+                name: name,
+                data: {
+                    operations: [
+                        {operation: "slice", dims: [-3, i, i+1]},
+                        {operation: "squeeze", dims: [0]}
+                        {operation: "to", dtype: "int32"}
+                    ],
+                    tag: if i == 0 then 'mp2' else 'mp3', // Is this the right order?
+                } + control,
+            }, nin=1, nout=1) for i in wc.iota(2)
+        ]);
+        local cellviews_split_and_slice = pg.shuntlines([
+            cellviews_split,
+            slicers,
+        ]);
+
+        pg.intern(
+            innodes=[cellviews_split_and_slice, do_unpack_and_chancat],
+            outnodes=[packer],
+            edges=[
+                pg.edge(cellviews_split_and_slice, packer, 0, 0),
+                pg.edge(cellviews_split_and_slice, packer, 1, 1),
+                pg.edge(do_unpack_and_chancat, packer, 0, 2),
+            ]
+        ),
+</pre>
+I've added what needs to be done. Had to add a couple of config structures + change from the neat shuntlines to an intern (oh well. I also had to add in another transform to change the dtype that I forgot about when planning this. Here is the completed graph:
