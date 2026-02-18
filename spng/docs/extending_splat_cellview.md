@@ -130,4 +130,4 @@ On a whim, I looked into fans.jsonnet. I think this might be useful here but I'm
 </pre>
 
 Here's an attempt at me drawing this to try to understand it
-insert image here
+![image](fanout_cross.png)
