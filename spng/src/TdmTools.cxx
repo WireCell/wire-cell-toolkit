@@ -1,6 +1,9 @@
 #include "WireCellSpng/TdmTools.h"
 #include "WireCellUtil/Fmt.h"
 #include "WireCellAux/SimpleTensor.h"
+#include "WireCellUtil/Exceptions.h"
+using WireCell::raise;
+
 #include <regex>
 
 namespace WireCell::SPNG::TDM {
@@ -10,6 +13,10 @@ namespace WireCell::SPNG::TDM {
                                   const std::string& datapath_format,
                                   const std::string& tag)
     {
+        if (!from.isMember("datapath")) {
+            raise<KeyError>("'datapath' is missing from incoming metadata.");
+        }
+        
         auto df = from["datapath"];
         md = update(from, md);  // want md to take precedence
         if (! tag.empty()) {
@@ -33,6 +40,9 @@ namespace WireCell::SPNG::TDM {
         Configuration dmd;
         Configuration dfs;
         for (const auto& one : froms) {
+            if (!one.isMember("datapath")) {
+                raise<KeyError>("'datapath' is missing from incoming metadata.");
+            }
             auto from = one["datapath"];
             if (! from.isNull()) {
                 dfs.append(from);

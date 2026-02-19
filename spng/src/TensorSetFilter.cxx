@@ -1,5 +1,6 @@
 #include "WireCellSpng/TensorSetFilter.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
+#include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/HanaConfigurable.h"
 
 using namespace WireCell::HanaJsonCPP;
@@ -24,7 +25,20 @@ namespace WireCell::SPNG {
 
         TorchSemaphore sem(context());
 
-        out = filter_tensor(in);
+        // Move all tensors to the configured device before filtering
+        auto in_tensors = in->tensors();
+        ITorchTensor::vector contextual_tensors;
+        for (const auto& tensor_ptr : *in_tensors) {
+            auto contextual_tensor = to(tensor_ptr->tensor());
+            contextual_tensors.push_back(
+                std::make_shared<SimpleTorchTensor>(contextual_tensor, tensor_ptr->metadata())
+            );
+        }
+        auto in_contextual = std::make_shared<SimpleTorchTensorSet>(
+            in->ident(), in->metadata(), contextual_tensors
+        );
+
+        out = filter_tensor(in_contextual);
 
         logit(out, "output");
         next_count();

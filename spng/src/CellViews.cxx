@@ -5,7 +5,6 @@
 #include "WireCellSpng/Util.h"
 
 #include "WireCellAux/WireTools.h"
-
 #include "WireCellIface/IAnodePlane.h"
 
 #include "WireCellUtil/NamedFactory.h"
@@ -117,12 +116,14 @@ namespace WireCell::SPNG {
 
         // Get U, V, W tensors using uvw_index configuration
         std::vector<torch::Tensor> uvw_tensors;
+        std::vector<WireCell::Configuration> input_configs;
         for (int idx : m_config.uvw_index) {
             if (idx < 0 || idx >= ntensors_in) {
                 raise<ValueError>("Invalid uvw_index %d for tensor set size %d",
                                   idx, ntensors_in);
             }
             uvw_tensors.push_back((*tensors)[idx]->tensor().to(torch::kBool));
+            input_configs.push_back((*tensors)[idx]->metadata());
         }
 
         // Check if batched: shape is either (nchan, ntick) or (nbatch, nchan, ntick)
@@ -138,11 +139,13 @@ namespace WireCell::SPNG {
         auto got = process_chunked(uvw_tensors);
 
         ITorchTensor::vector output_tensors;
+        size_t output_count = 0;
         for (auto one : got) {
             if (!batched) {
                 one = one.squeeze(0);
             }
-            output_tensors.push_back(std::make_shared<SimpleTorchTensor>(one));
+            output_tensors.push_back(std::make_shared<SimpleTorchTensor>(one, input_configs[output_count]));
+            ++output_count;
         }
 
         // Create output tensor set

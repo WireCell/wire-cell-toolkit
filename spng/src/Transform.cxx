@@ -160,6 +160,14 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
+            if (opcfg.operation == "to") {
+                auto dtype = opcfg.dtype;
+                m_ops.push_back([dtype](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto output_tensor = tensor;
+                    return output_tensor.to(resolve_dtype(dtype));
+                });
+                continue;
+            }
 
             raise<ValueError>("unknown operation: %s", opcfg.operation);
         }

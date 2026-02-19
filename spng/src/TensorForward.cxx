@@ -24,7 +24,7 @@ namespace WireCell::SPNG {
 
     ITorchTensor::pointer TensorForward::filter_tensor(const ITorchTensor::pointer& in)
     {
-        auto inten = to(in->tensor());
+        auto inten = in->tensor();
         auto md = in->metadata();
 
         const int ndims = inten.dim();

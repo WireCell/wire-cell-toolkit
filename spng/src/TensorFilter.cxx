@@ -36,8 +36,11 @@ namespace WireCell::SPNG {
 
         TorchSemaphore sem(context());
 
+        // Move the tensor to the configured device before filtering
+        auto contextual_tensor = std::make_shared<SimpleTorchTensor>(to(in->tensor()), in->metadata());
+
         m_to_save.clear();
-        out = filter_tensor(in);
+        out = filter_tensor(contextual_tensor);
 
         auto md = TDM::derive_metadata(in->metadata(), out->metadata(), m_config.datapath_format, m_config.tag);
         out = std::make_shared<SimpleTorchTensor>(out->tensor(), md);
