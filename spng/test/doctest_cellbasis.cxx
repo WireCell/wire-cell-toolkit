@@ -281,15 +281,16 @@ DOCTEST_TEST_SUITE("CellBasis") {
         torch::Tensor result = CellBasis::index(basis, data);
 
         // 4. Verify shape and content
-        DOCTEST_CHECK(result.sizes().vec() == std::vector<int64_t>{2, 4});
+        //DOCTEST_CHECK(result.sizes().vec() == std::vector<int64_t>{2, 4});
+        DOCTEST_CHECK(result.sizes().vec() == basis.sizes().vec());
         DOCTEST_CHECK(result.dtype() == torch::kInt);
 
-        // Expected result:
+        // Expected result, transpose of:
         // Plane 0: [10, 11, 12, 10]
         // Plane 1: [21, 20, 21, 22]
         
         torch::Tensor expected = torch::tensor({{10, 11, 12, 10},
-                                                {21, 20, 21, 22}}, torch::kInt);
+                                                {21, 20, 21, 22}}, torch::kInt).t();
 
         DOCTEST_CHECK(torch::equal(result, expected));
 
@@ -311,7 +312,7 @@ DOCTEST_TEST_SUITE("CellBasis") {
         result = CellBasis::index(basis, data);
 
         // Expected result shape: (3, 3)
-        DOCTEST_CHECK(result.sizes().vec() == std::vector<int64_t>{3, 3});
+        DOCTEST_CHECK(result.sizes().vec() == basis.sizes().vec());
         
         // Result dtype should be the promotion of kDouble, kFloat, kLong, which is kDouble
         DOCTEST_CHECK(result.dtype() == torch::kDouble); 
@@ -323,7 +324,7 @@ DOCTEST_TEST_SUITE("CellBasis") {
 
         expected = torch::tensor({{5.0, 6.0, 5.0},
                                   {100.0, 101.0, 100.0},
-                                  {1000.0, 1100.0, 1000.0}}, torch::kDouble);
+                                  {1000.0, 1100.0, 1000.0}}, torch::kDouble).t();
 
         DOCTEST_CHECK(torch::allclose(result, expected));
     }

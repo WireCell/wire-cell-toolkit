@@ -43,7 +43,7 @@ function(input,
 
     local dump_finders = {
         SPNGThreshold: {
-            "cross": "_cross_"
+            "cross": "_cross_",
         },
         SPNGTransform: {
             "scale": "_scale_dnnroi",
@@ -53,9 +53,13 @@ function(input,
         SPNGKernelConvolve: {
             "looself": "_dnnroi",
             "wiener": "_wiener",
+            "decon": "_group_",
         },
         SPNGCellViews: {
             "cellviews": "tpc"
+        },
+        SPNGResampler: {
+            "wresample": "_tight"
         },
     };
     local is_set(itype) = std.get({'SPNGCellViews': true}, itype, false);
