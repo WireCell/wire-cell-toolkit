@@ -533,7 +533,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         }, nin=1, nout=1)
         for it in wc.enumerate(tpc.crossview_thresholds)
     ],
-    cross_threshold_views(extra_name=""):: pg.crossline($.cross_threshold_views_nodes),
+    cross_threshold_views(extra_name=""):: pg.crossline($.cross_threshold_views_nodes(extra_name)),
 
 
     /// A 3->3 subgraph that performs tight ROI finding on decon inputs and
