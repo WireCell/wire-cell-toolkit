@@ -399,10 +399,13 @@ namespace WireCell::SPNG {
                 // Build chids tensor
                 {
                     torch::Tensor ten = torch::zeros({nrows}, torch::kInt);
+                    //std::stringstream ss;
                     for (const auto& tir : group_tirs) {
                         int chid = tir.trace->channel();
                         ten.index_put_({tir.row}, chid); // no accumulate
+                        //ss << " " << chid;
                     }
+                    //log->debug("{} chids: {}", group_tirs.size(), ss.str());
                     tensors.push_back(make_datatype("chids", group.relpath, ten, common_md));
                 }                
             } // groups

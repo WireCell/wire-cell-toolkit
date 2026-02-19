@@ -41,6 +41,19 @@ namespace WireCell::SPNG {
 
         auto ianode = WireCell::Factory::find_tn<IAnodePlane>(m_config.anode);
 
+        // This horrendous log output is for checking that we get the right
+        // channel ordering.  It's probably best to be commented out after initial debugging.
+        // if (verbosity() > 2) {
+        //     std::vector<IChannel::vector> cpv = CellBasis::channels_per_view(ianode, m_config.face_idents);
+        //     for (const auto& ichans : cpv) {
+        //         std::stringstream ss;
+        //         for (const auto& ichan : ichans) {
+        //             ss << " " << ichan->ident();
+        //         }
+        //         log->debug("{} chids: {}", ichans.size(), ss.str());
+        //     }
+        // }
+
         // auto dump_basis = [this](const std::string& name, const torch::Tensor& ten, int face, int view=-1) {
         //     if (view < 0) {
         //         auto imin = torch::amin(ten, {0});

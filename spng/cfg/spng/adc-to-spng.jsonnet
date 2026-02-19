@@ -95,4 +95,3 @@ function(input,
 
     pg.main(graph, engine, plugins=["WireCellSpng"])
 
-
