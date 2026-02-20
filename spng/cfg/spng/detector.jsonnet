@@ -438,7 +438,9 @@ local known_detectors = import "detectors.jsonnet";
         splat=null,
         adc=null, fr=null, er=null, rcs=[],
         pirs=null, noise=null,
-        view_groups=null, filters=null,
+        view_groups=null,
+        view_wpids=null,
+        filters=null,
         crossview_thresholds=null,
         // FIXME: temporary! function called on tcp to produce a full original
         // signal processing subgraph.  FIXME: factor this out so that a
@@ -482,8 +484,11 @@ local known_detectors = import "detectors.jsonnet";
             ident: anode.data.ident,
             name: $.tpc_name(self.ident),
 
-            // The view groups
+            // The view groups control how to split up a full frame into groups for proper deconvolution.
             view_groups: view_groups,
+
+            // The view groups describe channel order into CellViews.
+            view_wpids: view_wpids,
 
             // all faces
             faces: std.set(wc.flatten([vg.face_idents for vg in view_groups])),

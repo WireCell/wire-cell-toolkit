@@ -2,6 +2,7 @@
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/TensorTools.h"
+#include "WireCellSpng/TdmTools.h"
 #include "WireCellSpng/Util.h"
 #include "WireCellAux/FrameTools.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -38,21 +39,6 @@ namespace WireCell::SPNG {
         return cfg;
     }
     
-    /// Return IChannels spanning wpid in anode in order of increasing
-    /// IChannel::index().  If wpid_num is negative, reverse the order.
-    static IChannel::vector get_ordered_channels(IAnodePlane::pointer anode, int wpid_num)
-    {
-        WirePlaneId wpid(std::abs(wpid_num));
-        auto face = anode->face(wpid.face());
-        auto plane = face->planes()[wpid.index()];
-        IChannel::vector chans = plane->channels(); // already ordered by IChannel::index().
-        
-        if (wpid_num < 0) {
-            std::reverse(chans.begin(), chans.end());
-        }
-        return chans;
-    }
-
     void FrameToTdm::configure(const WireCell::Configuration& cfg)
     {
         this->Logger::configure(cfg);
@@ -106,7 +92,7 @@ namespace WireCell::SPNG {
                 }
                 auto wpids = get<std::vector<int>>(jgroup, "wpids", {});
                 for (int wpid : wpids) {
-                    auto ichans = get_ordered_channels(anode, wpid);
+                    auto ichans = TDM::get_ordered_channels(anode, wpid);
 
                     log->debug("rule {}, group {}, wpid {}, chids:{}->{}, wire0head:{}->{}",
                                rule_num, group_num, WirePlaneId(std::abs(wpid)),

@@ -54,50 +54,27 @@ namespace WireCell::SPNG {
         //     }
         // }
 
-        // auto dump_basis = [this](const std::string& name, const torch::Tensor& ten, int face, int view=-1) {
-        //     if (view < 0) {
-        //         auto imin = torch::amin(ten, {0});
-        //         auto imax = torch::amax(ten, {0});
+        if (m_config.view_wpids.size() != 3) {
+            raise<ValueError>("view_wpids must have exactly 3 entries, one per view got %d",
+                              m_config.view_wpids.size());
+        }
 
-        //         this->log->debug("{}: face={} tensor={} min=[{} {} {}] max=[{} {} {}]",
-        //                          name, face, to_string(ten),
-        //                          imin[0].item<int>(), imin[1].item<int>(), imin[2].item<int>(),
-        //                          imax[0].item<int>(), imax[1].item<int>(), imax[2].item<int>());
-        //     }
-        //     else {
-        //         auto imin = torch::amin(ten);
-        //         auto imax = torch::amax(ten);
-
-        //         this->log->debug("{}: face={} view={} tensor={} min={} max={}",
-        //                          name, face, view, to_string(ten),
-        //                          imin.item<int>(), 
-        //                          imax.item<int>());
-        //     }
-        // };
-
-
-        // auto dump_chans = [&,this](const std::string& name, const IChannel::vector& chans, int face, int view) {
-        //     std::vector<int> chids;
-        //     for (const auto& ich : chans) {
-        //         chids.push_back(ich->ident());
-        //     }
-        //     dump_basis(name, to_tensor(chids), face, view);
-        //     this->log->debug("first ident={} last ident={}",
-        //                      chans.front()->ident(), chans.back()->ident());
-        // };
-
-        // auto dump_wires = [&,this](const std::string& name, const IWire::vector& wires, int face, int view) {
-        //     this->log->debug("{}: face={} view={} chids: first={} last={}",
-        //                      name, face, view,
-        //                      wires.front()->channel(),
-        //                      wires.back()->channel());
-        //     for (const auto& iwire : wires) {
-        //         this->log->debug("wire index={} ident={} chid={} seg={} wpid={}",
-        //                          iwire->index(), iwire->ident(), iwire->channel(), iwire->segment(), iwire->planeid());
-        //     }
-        // };
-
-        m_cell_channel_indices = to(CellBasis::cell_channel_indices(ianode, m_config.face_idents));
+        m_uvw_index.resize(3);
+        for (int index=0; index<3; ++index) {
+            const auto& wpids = m_config.view_wpids[index];
+            if (wpids.empty()) {
+                raise<ValueError>("view_wpids index %d is empty", index);
+            }
+            WirePlaneId wpid(std::abs(wpids[0]));
+            m_uvw_index[index] = wpid.index();
+        }
+        if (m_uvw_index[0] == m_uvw_index[1] ||
+            m_uvw_index[1] == m_uvw_index[2] ||
+            m_uvw_index[2] == m_uvw_index[0]) {
+            raise<ValueError>("view_wpids duplicate plane index across views");
+        }
+        
+        m_cell_channel_indices = to(CellBasis::cell_channels(ianode, m_config.view_wpids));
     }
 
     WireCell::Configuration CellViews::default_configuration() const
@@ -130,7 +107,7 @@ namespace WireCell::SPNG {
         // Get U, V, W tensors using uvw_index configuration
         std::vector<torch::Tensor> uvw_tensors;
         std::vector<WireCell::Configuration> input_configs;
-        for (int idx : m_config.uvw_index) {
+        for (int idx : m_uvw_index) {
             if (idx < 0 || idx >= ntensors_in) {
                 raise<ValueError>("Invalid uvw_index %d for tensor set size %d",
                                   idx, ntensors_in);

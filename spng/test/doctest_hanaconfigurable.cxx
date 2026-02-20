@@ -262,5 +262,47 @@ TEST_CASE("spng hana helper functions")
     auto cfg = default_configuration_types(sc, sc2, ac, hc);
     std::cout << "cfg from many types: " << cfg << "\n";
     configure_types(cfg, sc, sc2, ac, hc);
-        
+
+}
+
+// Config struct with a nested vector<vector<int>> field.
+struct VVIntConfig {
+    std::vector<std::vector<int>> matrix = {{1, 2, 3}, {4, 5, 6}};
+};
+BOOST_HANA_ADAPT_STRUCT(VVIntConfig, matrix);
+
+struct HCVVInt : HanaConfigurable<HCVVInt, VVIntConfig> {
+    virtual void configured() { }
+};
+
+TEST_CASE("spng hana configurable nested vector round-trip")
+{
+    HCVVInt hc;
+
+    // Serialize defaults to JSON.
+    auto cfg = hc.default_configuration();
+
+    REQUIRE(cfg["matrix"].isArray());
+    REQUIRE(cfg["matrix"].size() == 2);
+    REQUIRE(cfg["matrix"][0].isArray());
+    CHECK(cfg["matrix"][0][0u].asInt() == 1);
+    CHECK(cfg["matrix"][0][1u].asInt() == 2);
+    CHECK(cfg["matrix"][0][2u].asInt() == 3);
+    REQUIRE(cfg["matrix"][1].isArray());
+    CHECK(cfg["matrix"][1][0u].asInt() == 4);
+    CHECK(cfg["matrix"][1][1u].asInt() == 5);
+    CHECK(cfg["matrix"][1][2u].asInt() == 6);
+
+    // Round-trip: configure from the serialized JSON and check values.
+    hc.configure(cfg);
+    const auto& m = hc.hana_config().matrix;
+    REQUIRE(m.size() == 2);
+    REQUIRE(m[0].size() == 3);
+    CHECK(m[0][0] == 1);
+    CHECK(m[0][1] == 2);
+    CHECK(m[0][2] == 3);
+    REQUIRE(m[1].size() == 3);
+    CHECK(m[1][0] == 4);
+    CHECK(m[1][1] == 5);
+    CHECK(m[1][2] == 6);
 }

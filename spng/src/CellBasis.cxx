@@ -1,6 +1,7 @@
 #include "WireCellSpng/CellBasis.h"
 #include "WireCellSpng/RayGridOG.h"
 #include "WireCellSpng/Ragged.h"
+#include "WireCellSpng/TdmTools.h"
 #include "WireCellSpng/Util.h"
 
 using namespace torch::indexing;
@@ -159,50 +160,48 @@ namespace WireCell::SPNG::CellBasis {
     }
 
     
-    std::vector<IChannel::vector> channels_per_view(IAnodePlane::pointer ianode,
-                                                    const std::vector<int>& face_idents)
+    IChannel::vector channels_in_view(IAnodePlane::pointer ianode,
+                                      const std::vector<int>& wpids)
     {
         // Channels ordered along both faces of each view.
-        std::vector<IChannel::vector> cpv;
-        for (int view = 0; view < 3; ++view) {
-
-            IChannel::vector all_chans;
-
-            for (auto face_ident : face_idents) {
-                auto iface = ianode->face(face_ident);
-                auto iplane = iface->planes()[view];
-                
-                const auto& ichans = iplane->channels();
-                all_chans.insert(all_chans.end(), ichans.begin(), ichans.end());
-
-                // dump_chans("face chan idents", ichans, face_ident, view);
-                // log->debug("view={} face={} nchannels={}",
-                //            view, face_ident, ichans.size());
-            }
-            // All chans: (400+400, 400+400, 480+480) = (800, 800, 960)
-            // All wires: (1148+1148, 1148+1148, 480+480) = (2296,2296,960)
-            // wc_all is (2296,2296,960), for each wire, its channel INDEX.
-            // dump_chans("all chan idents before", all_chans, -1, view);
-            cpv.push_back(all_chans);
-        }
-        return cpv;
+        IChannel::vector civ;
+        for (auto wpid_num : wpids) {
+            auto ichans = TDM::get_ordered_channels(ianode, wpid_num);
+            civ.insert(civ.end(), ichans.begin(), ichans.end());
+        }            
+        return civ;
     }
 
-    torch::Tensor cell_channel_indices(IAnodePlane::pointer ianode,
-                                       const std::vector<int>& face_idents)
+    
+
+    torch::Tensor cell_channels(IAnodePlane::pointer ianode,
+                                const std::vector< std::vector<int> >& view_wpids)
+
     {
         // Channels ordered along both faces of each view.
-        std::vector<IChannel::vector> cpv = channels_per_view(ianode, face_idents);
+        std::vector<IChannel::vector> civ;
+        // Find ordered face indices populated by the views.
+        std::set<int> face_indices;
+        for (const auto& wpids : view_wpids) {
+            if (wpids.empty()) {
+                raise<ValueError>("cell_channels: view has no wpids");
+            }
+
+            for (const auto& wpid_num : wpids) {
+                WirePlaneId wpid(std::abs(wpid_num));
+                face_indices.insert(wpid.face());
+            }
+
+            civ.push_back(channels_in_view(ianode, wpids));
+        }
 
         std::vector<torch::Tensor> cell_channel_indices_by_face;
+        for (const auto& face_index : face_indices) {
 
-        // Get wire indices in the cell basis for each face.
-        for (auto face_ident : face_idents) {
-            auto iface = ianode->face(face_ident);
+            auto iface = ianode->faces()[face_index];
 
             // Get wire indices in the cell basis.
             torch::Tensor wire_basis = cell_basis(iface);
-            // dump_basis("wire indices", wire_basis, face_ident);
 
             // Build tensor mapping wire index to channel index.
             std::vector<torch::Tensor> w2c_per_view;
@@ -210,19 +209,15 @@ namespace WireCell::SPNG::CellBasis {
             auto iplanes = iface->planes();
             for (int view = 0; view < 3; ++view) {
                 IWire::vector wires = iplanes[view]->wires();
-                // dump_wires("w2c wires", wires, face_ident, view);
-                const IChannel::vector& chans = cpv[view];
-                // dump_chans("all chan idents after", chans, face_ident, view);
+                const IChannel::vector& chans = civ[view];
 
                 // Get mapping from wire index to channel index
                 torch::Tensor w2c = wire_channel_index(wires, chans);
-                // dump_basis("w2c indices", w2c, face_ident, view);
                 w2c_per_view.push_back(w2c); // indexed by wire 
             }
 
             // Convert wire indices to channel indices in cell basis.
             torch::Tensor chan_basis = index(wire_basis, w2c_per_view);
-            // dump_basis("chan indices", chan_basis, face_ident);
             cell_channel_indices_by_face.push_back(chan_basis);
         }
 

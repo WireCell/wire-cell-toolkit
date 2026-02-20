@@ -4,6 +4,8 @@
 #include "WireCellSpng/ITorchTensor.h"
 #include "WireCellUtil/Configuration.h"
 #include "WireCellIface/ITensor.h"
+#include "WireCellIface/IChannel.h"
+#include "WireCellIface/IAnodePlane.h"
 #include <string>
 #include <vector>
 
@@ -114,6 +116,11 @@ namespace WireCell::SPNG::TDM {
     /// Return an ITensor version if the ITorchTensor.
     ///
     WireCell::ITensor::pointer tdm_to_wct(ITorchTensor::pointer tdm);
+
+
+    /// Return IChannels spanning wpid in anode in order of increasing
+    /// IChannel::index().  If wpid_num is negative, reverse the order.
+    IChannel::vector get_ordered_channels(IAnodePlane::pointer anode, int wpid_num);
 
 }
 

@@ -582,8 +582,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             name: tpc.name + extra_name,
             data: {
                 anode: wc.tn(tpc.anode),
-                face_idents: tpc.faces,
-                uvw_index: uvw_index,
+                view_wpids: [v.signed_wpids(tpc.ident) for v in tpc.view_wpids],
                 out_views: out_views,
                 chunk_size: chunk_size,
             } + control,
