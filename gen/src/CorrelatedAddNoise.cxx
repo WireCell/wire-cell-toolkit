@@ -60,8 +60,8 @@ static constexpr const char* kComponentVersion = "1.0.0";
 //
 // NOTE on naming: SQRT_PI_OVER_2 == sqrt(pi)/2, *not* sqrt(pi/2).
 // -----------------------------------------------------------------------------
-static constexpr double SQRT_PI_OVER_2 = 0.5 * std::sqrt(M_PI);     // E|CN(0,1)|
-static constexpr double SQRT_2_OVER_PI = std::sqrt(2.0 / M_PI);     // E|N(0,1)|
+static const double SQRT_PI_OVER_2 = 0.5 * std::sqrt(M_PI);     // E|CN(0,1)|
+static const double SQRT_2_OVER_PI = std::sqrt(2.0 / M_PI);     // E|N(0,1)|
 
 // -----------------------------------------------------------------------------
 // Utility helpers (kept local; mirrored in UncorrelatedAddNoise for symmetry)

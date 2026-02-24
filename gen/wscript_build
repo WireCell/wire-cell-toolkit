@@ -1,5 +1,4 @@
 # -*- python -*-
-bld.smplpkg('WireCellGen', use='WireCellAux')
+bld.smplpkg('WireCellGen', use='WireCellAux BZIP2')
 #            test_use='JSONCPP JSONNET BOOST')
-
 

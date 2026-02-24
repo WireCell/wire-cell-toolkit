@@ -24,6 +24,7 @@ package_descriptions = [
     ('spdlog',   dict(incs=['spdlog/spdlog.h'], libs=['spdlog'], pcname='spdlog')),
 
     ('ZLib',     dict(incs=['zlib.h'], libs=['z'], pcname='zlib')),
+    ('BZIP2',    dict(incs=['bzlib.h'], libs=['bz2'])),
     ('FFTW',     dict(incs=['fftw3.h'], libs=['fftw3f'], pcname='fftw3f')),
     ('FFTWThreads', dict(libs=['fftw3f_threads'], pcname='fftw3f', mandatory=False)),
     ('JsonCpp',  dict(incs=["json/json.h"], libs=['jsoncpp'], pcname='jsoncpp')),
