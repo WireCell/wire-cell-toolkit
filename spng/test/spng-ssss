@@ -3,19 +3,21 @@
 
 # This snakemake workflow runs just about every type of job that relates to SPNG.
 
-# You must run this from a working environment including:
-# - WIRECELL_PATH including spng/cfg/
-# - OMP_NUM_THREADS=1 or other limit on libtorch threading
+# You must run this from a working WCT environment.  Some special attention:
+# - WIRECELL_PATH should include the path to spng/cfg/
+# - OMP_NUM_THREADS=1 or other value if you want to limit libtorch threading
 
-# CVMFS is also needed
+# CVMFS is also needed for running larsoft rules.
 
 # The resulting tree under --directory is structured like
 #
 # {kine}/{tier}/{unit}/*.*
 #
-# kine in (tracks, lines)
-# tier in (kine, steps, depos, adc, splat, osp, spng)
-# unit depends on kine and is meant to define a variant.
+# {kine} is one in (tracks, lines)
+# {tier} is one in (kine, steps, depos, adc, splat, osp, spng)
+# {unit} depends on kine and is meant to define a variant.
+#  - In tracks it is a seed that governs the cosmic muon sim
+#  - In lines it is the angle
 
 import os
 import json
@@ -34,8 +36,8 @@ DEFAULTS = {
     # This may be one such image: "/nfs/data/1/calcuttj/dunesw.sif"
     "container": "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest",
 
-    # The random number generateor seed
-    "seed": 12345,
+    # The random number generator seeds to expand as track "units"
+    "seeds": [12345],
 
     # The number of "events" to produces
     "nevents": 10,
@@ -43,7 +45,7 @@ DEFAULTS = {
     # The compute device for nodes that support CPU or GPU.  Can give a GPU ID with eg "gpu0".
     "device": "cpu",
 
-    # Matched arrays for track angles.  
+    # Matched arrays for track angles that expand as lines "units".
     # Angle from Y axis to track direction
     'theta_y_deg': ( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
     # Angle from X axis to projection of track into X-Z plane
@@ -59,7 +61,7 @@ STATIC_CONFIG = {
     # Partition the monolithic configuration into subsets.
     'params': {
         # common to all parts
-        'base': ['detector', 'seed', 'nevents', 'device'],
+        'base': ['detector', 'nevents', 'device'],
         'track': ['container'], # just track
         'line': ['theta_y_deg', 'theta_xz_deg'], # just line
     },
@@ -129,7 +131,7 @@ def param_keys(part):
     return ps['base'] + p
 
 # A "unit" is a variant or part of a data tier context.
-track_unit = 'all'
+track_unit = '{seed}'            # default seed
 line_unit = 'p{plane}-txz{txz}-ty{ty}'
 expanded_line_units = [
     line_unit.format(plane=p, txz=t[0], ty=t[1])
@@ -144,9 +146,10 @@ expanded_line_units = [
 # Default catch-all rule
 rule all:
     input:
-        expand('{kine}/{tgt}/all/data.npz',
+        expand('{kine}/{tgt}/{unit}/data.npz',
                kine = ('tracks',),
-               tgt = [x[1] for x in STATIC_CONFIG['wct']['stages']])
+               tgt = [x[1] for x in STATIC_CONFIG['wct']['stages']],
+               unit = config['seeds'])
 
 
 # These rules concretize the config into a file that all other rules in the kine derive from.
@@ -174,13 +177,15 @@ rule track_kine:
     benchmark: f"tracks/kine/{track_unit}/benchmark.txt"
     shadow: "minimal"
     params:
-        fhicl = STATIC_CONFIG['track']['kine']
+        fhicl = STATIC_CONFIG['track']['kine'],
     input: rules.kine_config_track.output
-    output: f'tracks/kine/{track_unit}/data.root'
+    output:
+        data=f'tracks/kine/{track_unit}/data.root',
+        log=f'tracks/kine/{track_unit}/lar.log',
     shell:
         STATIC_CONFIG['setup_larsoft'] + """
-        mkdir -p tracks/kine
-        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fhicl} -o {output} -T hist
+        mkdir -p tracks/kine/{wildcards.seed}
+        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fhicl} -o {output.data} -T hist > {output.log} 2>&1
         rm -f hist
         """
 
@@ -189,13 +194,15 @@ rule track_geant:
     benchmark: f"tracks/steps/{track_unit}/benchmark.txt"
     shadow: "minimal"
     params:
-        fhicl = STATIC_CONFIG['track']['geant']
-    input: rules.track_kine.output
-    output: f'tracks/steps/{track_unit}/data.root'
+        fhicl = STATIC_CONFIG['track']['geant'],
+    input: rules.track_kine.output.data
+    output:
+        data = f'tracks/steps/{track_unit}/data.root',
+        log = f'tracks/steps/{track_unit}/lar.log'
     shell:
         STATIC_CONFIG['setup_larsoft'] + """
-        mkdir -p tracks/steps
-        lar --no-timing --no-memcheck -c {params.fhicl} {input} -o {output} -T hist
+        mkdir -p tracks/steps/{wildcards.seed}
+        lar --no-timing --no-memcheck -c {params.fhicl} {input} -o {output.data} -T hist > {output.log} 2>&1
         rm -f hist
         """
 
@@ -204,28 +211,30 @@ rule track_depos:
     benchmark: f"tracks/depos/{track_unit}/benchmark.txt"
     shadow: "minimal"
     params:
-        fhicl = STATIC_CONFIG['track']['depos']
+        fhicl = STATIC_CONFIG['track']['depos'],
     input:
-        steps = rules.track_geant.output,
+        steps = rules.track_geant.output.data,
         jsonnet = STATIC_CONFIG['track']['depos_jsonnet']
-    output: f'tracks/depos/{track_unit}/data.npz'
+    output:
+        data = f'tracks/depos/{track_unit}/data.npz',
+        log = f'tracks/depos/{track_unit}/lar.log'
     shell:
         STATIC_CONFIG['setup_larsoft'] + """
         export WIRECELL_PATH={FCL_DIR}:$WIRECELL_PATH
-        lar --no-timing --no-memcheck -c {params.fhicl} {input.steps} --no-output
+        mkdir -p tracks/depos/{wildcards.seed}
+        lar --no-timing --no-memcheck -c {params.fhicl} {input.steps} --no-output > {output.log} 2>&1
         ls -la
-        mkdir -p track/depos
-        mv wct-depos.npz {output}
+        mv wct-depos.npz {output.data}
         """
 
 
 rule line_depos:
     input: rules.kine_config_line.output
     output:
-        depos=f'lines/depos/{line_unit}/data.npz',
-        meta=f'lines/depos/{line_unit}/meta.json'
+        depos=f'lines/depos/{line_unit}//data.npz',
+        meta=f'lines/depos/{line_unit}//meta.json'
     params:
-        offset = STATIC_CONFIG['spdir']['offset']
+        offset = STATIC_CONFIG['spdir']['offset'],
     shell: '''
     wcpy gen detlinegen \
     {params.offset} \
@@ -267,7 +276,7 @@ for kine in ('lines', 'tracks'):
 for sig in ('osp','spng'):
     rule:
         name: f'metrics_{sig}'
-        input: 
+        input:
             depos = 'lines/depos/{unit}/data.npz',
             splat = 'lines/splat/{unit}/data.npz',
             signals = f'lines/{sig}/{{unit}}/data.npz'
@@ -312,3 +321,5 @@ for sig in ('osp','spng'):
 #     shell: '''
 #     wcpy test plot-ssss --output {output.plots} {input.splat} {input.signals}
 #     '''
+
+
