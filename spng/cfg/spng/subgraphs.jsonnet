@@ -185,9 +185,24 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     threshold_cellviews_for_splat(out_views=[0,1,2], chunk_size=0, extra_name="_splat"):: 
         local this_name = $.this_name(extra_name, '_threshold_cellviews');
 
-        local cellviews = $.cellviews_tensors(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
-        
-        local name = $.this_name(extra_name, "_split");
+        local n = std.length(out_views);
+        local packer = pg.pnode({
+            type: 'SPNGTensorPacker',
+            name: this_name + '_precellview',
+            data: {
+                multiplicity: n
+            } + control
+        }, nin=n, nout=1);
+        local cellviews = $.cellviews_tensorset(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local unpacker = pg.pnode({
+            type: 'SPNGTorchSetUnpacker',
+            name: this_name + '_postcellview',
+            data: {
+                selections: [{index: ind} for ind in wc.iota(n)],
+            } + control
+        }, nin=1, nout=n);
+
+        local packer_fanout = fans.fanout_cross(this_name, 1, 2, type='TensorSet');
 
         local stack = pg.pnode({
             type: 'SPNGReduce',
@@ -198,26 +213,65 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 dim: -2,
             } + control,
         }, nin=3, nout=1);
-
-        pg.shuntlines([
+        local up_to_packer = pg.shuntlines([
             $.resample_group_to_views(extra_name=extra_name),
             pg.crossline($.thresholds_for_splat(extra_name=extra_name)),
-            cellviews,
-            stack,
-        ]),
+            packer,
+        ]);
+        local packer_into_fanout = pg.pipeline([up_to_packer, packer_fanout[0]]);
+        //Connect one packer branch to cellviews and unpacker
+        local cellviews_byhand = pg.pipeline([
+            packer_fanout[1][0],
+            cellviews, unpacker
+        ]);
+        local connect_cv_to_stack = pg.shuntlines([cellviews_byhand, stack]);
+        {
+            cellviews_branch: pg.intern(innodes=[up_to_packer], outnodes=[connect_cv_to_stack],
+                  centernodes=[packer_into_fanout]),
+            packer_branch: packer_fanout[1][1]
+        },
+
 
     cellviews_split_and_pack_mp2_mp3(out_views=[0,1,2], chunk_size=0, extra_name='_splat')::
         local name = $.this_name(extra_name, '_split');
             
-        local cellviews = $.threshold_cellviews_for_splat(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local cellviews_packer = $.threshold_cellviews_for_splat(out_views=out_views, chunk_size=chunk_size, extra_name=extra_name);
+        local unpacker = pg.pnode({
+            type: 'SPNGTorchSetUnpacker',
+            name: name + '_unpack_for_chancat',
+            data: {
+                selections: [{index: ind} for ind in wc.iota(3)],
+            } + control
+        }, nin=1, nout=3);
+        local chancat = pg.pnode({
+            type: 'SPNGReduce',
+            name: $.this_name(extra_name, '_chancat'),
+            data: {
+                multiplicity: 3,
+                operation: "cat",
+                dim: -2,
+            } + control,
+        }, nin=3, nout=1);
+        local toint = pg.pnode({
+            type: 'SPNGTransform',
+            name: $.this_name(extra_name, '_nobool'),
+            data: {
+                operations: [
+                    { operation: "to", dtype: "int32"}
+                ],
+                tag: 'splat'
+            } + control,
+        }, nin=3, nout=1);
+        local unpack_for_chancat = pg.shuntlines([unpacker, chancat]);
+        local do_unpack_and_chancat = pg.pipeline([cellviews_packer.packer_branch, unpack_for_chancat, toint]);
         local packer = pg.pnode({
             type: 'SPNGTensorPacker',
             name: name + '_repack',
             data: {
-                multiplicity: 2
+                multiplicity: 3
             } + control
-        }, nin=2, nout=1);
-        local cellviews_split = pg.pipeline([cellviews, fans.fanout(name)]);
+        }, nin=3, nout=1);
+        local cellviews_split = pg.pipeline([cellviews_packer.cellviews_branch, fans.fanout(name)]);
         local slicers = pg.crossline([
             pg.pnode({
                 local meth_name = 'v'+std.toString(i)+"_split",
@@ -234,11 +288,20 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 } + control,
             }, nin=1, nout=1) for i in wc.iota(2)
         ]);
-        pg.shuntlines([
+        local cellviews_split_and_slice = pg.shuntlines([
             cellviews_split,
             slicers,
-            packer,
-        ]),
+        ]);
+
+        pg.intern(
+            innodes=[cellviews_split_and_slice, do_unpack_and_chancat],
+            outnodes=[packer],
+            edges=[
+                pg.edge(cellviews_split_and_slice, packer, 0, 0),
+                pg.edge(cellviews_split_and_slice, packer, 1, 1),
+                pg.edge(do_unpack_and_chancat, packer, 0, 2),
+            ]
+        ),
 
     // Splat ending with ITorchTensorSet
     splat_cellview_tensor(ratio=1.0/4.0, scale=1.0, out_views=[0,1,2], chunk_size=0, extra_name="_splat")::
