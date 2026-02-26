@@ -596,7 +596,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         }, nin=1, nout=1)
         for it in wc.enumerate(tpc.crossview_thresholds)
     ],
-    cross_threshold_views(extra_name=""):: pg.crossline($.cross_threshold_views_nodes),
+    cross_threshold_views(extra_name=""):: pg.crossline($.cross_threshold_views_nodes(extra_name)),
 
 
     /// A 3->3 subgraph that performs tight ROI finding on decon inputs and
@@ -645,8 +645,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             name: tpc.name + extra_name,
             data: {
                 anode: wc.tn(tpc.anode),
-                face_idents: tpc.faces,
-                uvw_index: uvw_index,
+                view_wpids: [v.signed_wpids(tpc.ident) for v in tpc.view_wpids],
                 out_views: out_views,
                 chunk_size: chunk_size,
             } + control,

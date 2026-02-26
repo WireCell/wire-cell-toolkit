@@ -16,11 +16,11 @@ namespace WireCell::SPNG {
      * @return The rebaselined tensor.
      */
     torch::Tensor rebaseline( const torch::Tensor& tensor, 
+                              int64_t dim, float threshold,
                               int64_t min_roi_size,
                               int64_t expand_size,
                               bool remove_small,
-                              bool remove_negative,
-                              int64_t dim, float threshold) 
+                              bool remove_negative) 
     {
         // Make a copy to modify to allow modify in place
         torch::Tensor output = tensor.clone();
@@ -101,7 +101,7 @@ namespace WireCell::SPNG {
             
                 // Handle "small" ROIs.  If equal, they represent an ROI of size
                 // 1 so subtract one from the provided min size.
-                if (end_idx - start_idx < min_roi_size-1) { 
+                if (end_idx - start_idx <= min_roi_size-1) { 
                     if (remove_small) {
                         const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
                         wave.index_put_({roi}, 0.0);
@@ -112,8 +112,10 @@ namespace WireCell::SPNG {
                 // Expand to include the first sample below threshold.  These
                 // will form the anchors for the rebaseline.
                 // Note: may want to make this expansion size be configurable.
-                start_idx = std::max(start_idx-1, 0L);
-                end_idx = std::min(end_idx+1, nticks-1);
+                if (expand_size) {
+                    start_idx = std::max(start_idx-expand_size, 0L);
+                    end_idx = std::min(end_idx+1, nticks-expand_size);
+                }
 
                 // Get the first and last values of the fragment
                 float start_val = wave[start_idx].item<float>();

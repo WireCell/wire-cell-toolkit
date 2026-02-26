@@ -5,17 +5,45 @@
 
 namespace WireCell::SPNG {
 
+    struct CellViewsWpids {
+        /// The wpids list defines the order of channels for one input tensor in
+        /// two ways:
+        ///
+        /// Each wpid defines one block of channels in the matching face ordered
+        /// by increasing IChannel::index() number (wire-attachment number).
+        ///
+        /// A negative sign on wpid inverts the order.
+        ///
+        std::vector<int> wpids;
+    };
+
     struct CellViewsConfig {
+
+        /// This vector-of-vector-of packed WPID numbers defines three things:
+        ///
+        /// - The views for each of the three input tensors
+        /// - The order of faces worth of channels in one tensor
+        /// - The order of channels in each face.
+        ///
+        /// When the wpid is positive the order of channels in face is
+        /// increasing IChannel::index() number.  If the wpid number is
+        /// negative, this flips to decreasing.
+        ///
+        /// Undefined behavior occurs if the same plane is given to different
+        /// inputs, different planes given to same input, or repeated faces for
+        /// one input.
+        std::vector< std::vector<int> > view_wpids;
+
         /// The face IDENT numbers.  enumerating one or two per-face blocks of
         /// channels spanned by the input tensors.  These are face IDENT number
         /// as given in a wires-file and not necessarily face index no "which"
         /// numbers.  They are as consumed by IAnodePlane::face(face_ident).
         ///
         /// The resulting channel order MUST match the input per-plane row order.
-        std::vector<int> face_idents = {0,1};
+        // std::vector<int> face_idents = {0,1};
 
         /// The indices for the U, V and W tensors in the input tensor set.
-        std::vector<int> uvw_index = {0,1,2};
+        // std::vector<int> uvw_index = {0,1,2};
 
         /// Enumerate the views (plane indices) for which output tensors will be
         /// produced.
@@ -34,9 +62,9 @@ namespace WireCell::SPNG {
     };
 }
 
+BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::CellViewsWpids, wpids);
 BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::CellViewsConfig,
-                        face_idents, uvw_index, out_views,
-                        anode, cell_views, chunk_size);
+                        view_wpids, out_views, anode, cell_views, chunk_size);
 
 namespace WireCell::SPNG {
 
@@ -88,5 +116,7 @@ namespace WireCell::SPNG {
         // (3, ncell) holding channel dimension indices, one column for each view.
         torch::Tensor m_cell_channel_indices;
 
+        // Derived from view_wpids to learn which view is in which input
+        std::vector<int> m_uvw_index;
     };
 }

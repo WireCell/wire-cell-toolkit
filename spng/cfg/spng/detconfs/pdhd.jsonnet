@@ -78,6 +78,15 @@ local view_groups = [
     // Other W face
     api.view_group(2, 0, [1,]),
 ];
+// This describes the ordering after view groups are concatenated back into 3 per-view tensors.
+local view_wpids = [
+    // The wrapped U
+    api.view_group(0, 2, [1, 0], [-1, 1]),
+    // The wrapped V
+    api.view_group(1, 2, [1, 0], [-1, 1]),
+    // The W faces - this must be in order of concatenation of W0+W1 view group
+    api.view_group(2, 0, [0, 1]),
+];
 
 local pirs(anode) = [
     api.plane_impact_response("", plane,
@@ -153,7 +162,9 @@ local cvts = api.crossview_thresholds(cvt_ind, cvt_ind, cvt_col);
 local tpcs = [
     api.tpc(anode, lar=lar, ductor=ductor, splat=splat, adc=adc, fr=fr, er=er_spng,
             pirs=pirs(anode), noise=noise,
-            view_groups=view_groups, filters=filters,
+            view_groups=view_groups,
+            view_wpids=view_wpids,
+            filters=filters,
             crossview_thresholds=cvts,
             osp_subgraphs=osp)
     for anode in anodes ];

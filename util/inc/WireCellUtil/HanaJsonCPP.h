@@ -48,6 +48,59 @@ namespace WireCell::HanaJsonCPP {
     template <typename T>
     Json::Value from_json(T& obj, const Json::Value& root);
 
+    /// Convert a single element value (scalar, nested vector, or Hana struct) to JSON.
+    template <typename T>
+    Json::Value elem_to_json(const T& val);
+
+    /// Deserialize a single element value from JSON. Returns true on success.
+    template <typename T>
+    bool elem_from_json(T& val, const Json::Value& j);
+
+    // --- Element-level helpers (handle scalars, nested vectors, and Hana structs) ---
+
+    template <typename T>
+    Json::Value elem_to_json(const T& val) {
+        if constexpr (is_hana_struct_v<T>) {
+            return to_json(val);
+        } else if constexpr (is_vector_v<T>) {
+            Json::Value arr(Json::arrayValue);
+            for (const auto& item : val) {
+                arr.append(elem_to_json(item));
+            }
+            return arr;
+        } else if constexpr (std::is_arithmetic_v<T> || std::is_same_v<T, std::string>) {
+            return Json::Value(val);
+        }
+        return Json::Value();
+    }
+
+    template <typename T>
+    bool elem_from_json(T& val, const Json::Value& j) {
+        if constexpr (is_hana_struct_v<T>) {
+            from_json(val, j);
+            return true;
+        } else if constexpr (is_vector_v<T>) {
+            if (!j.isArray()) return false;
+            val.clear();
+            using Item = typename T::value_type;
+            bool all_ok = true;
+            for (Json::Value::ArrayIndex i = 0; i < j.size(); ++i) {
+                Item item{};
+                if (!elem_from_json(item, j[i])) all_ok = false;
+                val.push_back(std::move(item));
+            }
+            return all_ok;
+        } else if constexpr (std::is_same_v<T, int>) {
+            if (j.isInt()) { val = j.asInt(); return true; }
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            if (j.isString()) { val = j.asString(); return true; }
+        } else if constexpr (std::is_same_v<T, bool>) {
+            if (j.isBool()) { val = j.asBool(); return true; }
+        } else if constexpr (std::is_same_v<T, double>) {
+            if (j.isNumeric()) { val = j.asDouble(); return true; }
+        }
+        return false;
+    }
 
     // --- Generic JSON Serialization ---
     template <typename T>
@@ -63,23 +116,11 @@ namespace WireCell::HanaJsonCPP {
                 // Case 1: Nested Hana Struct -> Recursive call
                 root[name_cstr] = to_json(value);
             } else if constexpr (is_vector_v<ValueType>) {
-                // Case 2: Vector
+                // Case 2: Vector (scalars, nested vectors, or Hana structs)
                 if (value.empty()) return;
 
-                using InnerType = typename ValueType::value_type;
-            
-                if constexpr (is_hana_struct_v<InnerType>) {
-                    // Case 2a: Vector of Hana Structs -> Iterate and recurse
-                    for (const auto& item : value) {
-                        root[name_cstr].append(to_json(item));
-                    }
-                } else {
-                    // Case 2b: Vector of Primitives
-                    for (const auto& item : value) {
-                        if constexpr (std::is_arithmetic_v<InnerType> || std::is_same_v<InnerType, std::string>) {
-                            root[name_cstr].append(item);
-                        }
-                    }
+                for (const auto& item : value) {
+                    root[name_cstr].append(elem_to_json(item));
                 }
             } else if constexpr (std::is_same_v<ValueType, Json::Value>) {
                 // Json::Value attribute -> copy the entire JSON tree
@@ -128,80 +169,22 @@ namespace WireCell::HanaJsonCPP {
                 }
 
             } else if constexpr (is_vector_v<ValueType>) {
-                // Case 2: Vector
+                // Case 2: Vector (scalars, nested vectors, or Hana structs)
                 if (!json_field.isArray()) {
-                    // If the field exists but is not an array, we skip conversion,
-                    // leaving it in 'unused'.
+                    // Field exists but is not an array; leave it in 'unused'.
                     return;
                 }
-            
+
                 value.clear();
                 using InnerType = typename ValueType::value_type;
-                Json::Value array_unused(Json::arrayValue);
-            
-                if constexpr (is_hana_struct_v<InnerType>) {
-                    // Case 2a: Vector of Hana Structs -> Iterate and recurse
-                    bool all_consumed = true;
-                    for (Json::Value::ArrayIndex i = 0; i < json_field.size(); ++i) {
-                        InnerType temp_item{};
-                        // Recurse on the item
-                        Json::Value item_unused = from_json(temp_item, json_field[i]);
-                        value.push_back(std::move(temp_item));
-
-                        if (!item_unused.empty()) {
-                            array_unused.append(std::move(item_unused));
-                            all_consumed = false;
-                        } else {
-                            // Use null placeholder to maintain index sync if needed,
-                            // although JsonCPP arrays skip nulls on output unless asked otherwise.
-                            // For simplicity, we track only real unused parts.
-                            // However, we track if *anything* was left unused.
-                            array_unused.append(Json::nullValue); 
-                        }
-                    }
-
-                    if (all_consumed) {
-                        unused.removeMember(name_cstr); // Entire array was fully consumed
-                    } else {
-                        // Clean up null placeholders before assigning array_unused back
-                        Json::Value cleaned_array_unused(Json::arrayValue);
-                        for (const auto& item : array_unused) {
-                            if (!item.isNull()) {
-                                cleaned_array_unused.append(item);
-                            }
-                        }
-                        
-                        // Assign the cleaned list of unused fragments
-                        unused[name_cstr] = std::move(cleaned_array_unused);
-                    }
-
-                } else {
-                    // Case 2b: Vector of Primitives
-                    bool all_consumed = true;
-                    for (Json::Value::ArrayIndex i = 0; i < json_field.size(); ++i) {
-                        // Assuming primitives are always consumed if they match the type check
-                        if constexpr (std::is_same_v<InnerType, int>) {
-                            if (json_field[i].isInt()) {
-                                value.push_back(json_field[i].asInt());
-                            } else { all_consumed = false; }
-                        } else if constexpr (std::is_same_v<InnerType, std::string>) {
-                            if (json_field[i].isString()) {
-                                value.push_back(json_field[i].asString());
-                            } else { all_consumed = false; }
-                        } else if constexpr (std::is_same_v<InnerType, bool>) {
-                            if (json_field[i].isBool()) {
-                                value.push_back(json_field[i].asBool());
-                            } else { all_consumed = false; }
-                        } else if constexpr (std::is_same_v<InnerType, double>) {
-                            if (json_field[i].isNumeric()) {
-                                value.push_back(json_field[i].asDouble());
-                            } else { all_consumed = false; }
-                        }
-                    }
-                    if (all_consumed) {
-                        // Primitive vectors are fully consumed if the type was an array
-                        unused.removeMember(name_cstr);
-                    }
+                bool all_consumed = true;
+                for (Json::Value::ArrayIndex i = 0; i < json_field.size(); ++i) {
+                    InnerType item{};
+                    if (!elem_from_json(item, json_field[i])) all_consumed = false;
+                    value.push_back(std::move(item));
+                }
+                if (all_consumed) {
+                    unused.removeMember(name_cstr);
                 }
             } else if constexpr (std::is_same_v<ValueType, Json::Value>) {
                 // Json::Value attribute -> copy the parsed JSON data. Fully consumed.

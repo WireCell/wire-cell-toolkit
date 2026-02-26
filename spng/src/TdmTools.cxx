@@ -191,4 +191,19 @@ namespace WireCell::SPNG::TDM {
         }
     }
 
+    /// Return IChannels spanning wpid in anode in order of increasing
+    /// IChannel::index().  If wpid_num is negative, reverse the order.
+    IChannel::vector get_ordered_channels(IAnodePlane::pointer anode, int wpid_num)
+    {
+        WirePlaneId wpid(std::abs(wpid_num));
+        auto face = anode->face(wpid.face());
+        auto plane = face->planes()[wpid.index()];
+        IChannel::vector chans = plane->channels(); // already ordered by IChannel::index().
+        
+        if (wpid_num < 0) {
+            std::reverse(chans.begin(), chans.end());
+        }
+        return chans;
+    }
+
 }

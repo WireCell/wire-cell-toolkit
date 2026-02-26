@@ -42,7 +42,7 @@ TEST_SUITE("spng rebaseline") {
         // Index 3: 10 - 5 = 5
         // Index 4: 5 - 5 = 0
         
-        torch::Tensor actual_output = rebaseline(input, -1, threshold);
+        torch::Tensor actual_output = rebaseline(input, -1, threshold, 1, 0, false, false);
 
         spdlog::debug("Input: {}", to_string(input));
         spdlog::debug("Expected: {}", to_string(expected_output));
@@ -75,7 +75,7 @@ TEST_SUITE("spng rebaseline") {
         // Index 4: 6.0 - 6.0 = 0.0
         torch::Tensor expected_output = torch::tensor({1.0f, 2.0f, 0.0f, 3.0f, 0.0f, 0.0f}, torch::kFloat32);
         
-        torch::Tensor actual_output = rebaseline(input, -1, threshold);
+        torch::Tensor actual_output = rebaseline(input, -1, threshold, 1, 0, false, false);
 
         spdlog::debug("Input: {}", to_string(input));
         spdlog::debug("Expected: {}", to_string(expected_output));
@@ -98,7 +98,7 @@ TEST_SUITE("spng rebaseline") {
         
         torch::Tensor expected_output = torch::tensor({0.0f, 0.0f, 0.0f, 0.0f, 0.0f}, torch::kFloat32);
         
-        torch::Tensor actual_output = rebaseline(input, -1, threshold);
+        torch::Tensor actual_output = rebaseline(input, -1, threshold, 1, 0, false, false);
 
         spdlog::debug("Input: {}", to_string(input));
         spdlog::debug("Expected: {}", to_string(expected_output));
@@ -128,7 +128,7 @@ TEST_SUITE("spng rebaseline") {
             {0.0f, 0.0f, 0.0f}
         }, torch::kFloat32);
         
-        torch::Tensor actual_output = rebaseline(input, dim, threshold);
+        torch::Tensor actual_output = rebaseline(input, dim, threshold, 1, 0, false, false);
 
         spdlog::debug("Input:\n{}", to_string(input));
         spdlog::debug("Expected:\n{}", to_string(expected_output));
@@ -155,7 +155,7 @@ TEST_SUITE("spng rebaseline") {
             {0.0f, 0.0f, 0.0f, 0.0f}  // Row 1: 10-10=0, 10-10=0
         }, torch::kFloat32);
         
-        torch::Tensor actual_output = rebaseline(input, dim, threshold);
+        torch::Tensor actual_output = rebaseline(input, dim, threshold, 1, 0, false, false);
 
         spdlog::debug("Input:\n{}", to_string(input));
         spdlog::debug("Expected:\n{}", to_string(expected_output));
@@ -169,12 +169,104 @@ TEST_SUITE("spng rebaseline") {
 
         // All values are below the threshold
         torch::Tensor input = torch::tensor({0.5f, 1.0f, -2.0f, 0.0f}, torch::kFloat32);
-        float threshold = 2.0f; 
+        float threshold = 2.0f;
 
         // Output should be identical to input
         torch::Tensor expected_output = input.clone();
-        torch::Tensor actual_output = rebaseline(input, -1, threshold);
+        torch::Tensor actual_output = rebaseline(input, -1, threshold, 1, 0, false, false);
 
         CHECK(tensors_are_close(actual_output, expected_output));
+    }
+
+    // The following four tests share input [12, 3, 12, 0, 5, 0] with threshold=2
+    // and min_roi_size=1.  Two fragments are present:
+    //   Fragment 1: indices 0-2 (size 3, not small)
+    //   Fragment 2: index  4   (size 1, small under min_roi_size=1)
+    // Each test changes one (or all three) of the nominal values
+    // expand_size=0, remove_small=false, remove_negative=false.
+
+    TEST_CASE("1D_ExpandSize_One") {
+        spdlog::debug("--- Testing 1D with expand_size=1 ---");
+
+        // Fragment 1 expanded to [0,3]: start_val=12, end_val=0, slope=-4.
+        //   baseline=[12,8,4,0], wave[0:4]=[12,3,12,0]-[12,8,4,0]=[0,-5,8,0]
+        // Fragment 2: size 1 (small), remove_small=false -> skipped, stays 5.
+        // Expected: [0, -5, 8, 0, 5, 0]
+
+        torch::Tensor input = torch::tensor({12.0f, 3.0f, 12.0f, 0.0f, 5.0f, 0.0f}, torch::kFloat32);
+        float threshold = 2.0f;
+
+        torch::Tensor expected = torch::tensor({0.0f, -5.0f, 8.0f, 0.0f, 5.0f, 0.0f}, torch::kFloat32);
+        torch::Tensor actual = rebaseline(input, -1, threshold, 1, 1, false, false);
+
+        spdlog::debug("Input: {}", to_string(input));
+        spdlog::debug("Expected: {}", to_string(expected));
+        spdlog::debug("Actual: {}", to_string(actual));
+
+        CHECK(tensors_are_close(actual, expected));
+    }
+
+    TEST_CASE("1D_RemoveSmall_True") {
+        spdlog::debug("--- Testing 1D with remove_small=true ---");
+
+        // Fragment 1: no expand, start_val=12, end_val=12, slope=0.
+        //   baseline=[12,12,12], wave[0:3]=[12,3,12]-[12,12,12]=[0,-9,0]
+        // Fragment 2: size 1 (small), remove_small=true -> zeroed.
+        // Expected: [0, -9, 0, 0, 0, 0]
+
+        torch::Tensor input = torch::tensor({12.0f, 3.0f, 12.0f, 0.0f, 5.0f, 0.0f}, torch::kFloat32);
+        float threshold = 2.0f;
+
+        torch::Tensor expected = torch::tensor({0.0f, -9.0f, 0.0f, 0.0f, 0.0f, 0.0f}, torch::kFloat32);
+        torch::Tensor actual = rebaseline(input, -1, threshold, 1, 0, true, false);
+
+        spdlog::debug("Input: {}", to_string(input));
+        spdlog::debug("Expected: {}", to_string(expected));
+        spdlog::debug("Actual: {}", to_string(actual));
+
+        CHECK(tensors_are_close(actual, expected));
+    }
+
+    TEST_CASE("1D_RemoveNegative_True") {
+        spdlog::debug("--- Testing 1D with remove_negative=true ---");
+
+        // Fragment 1: no expand, baseline=[12,12,12], yields [0,-9,0].
+        // Fragment 2: size 1 (small), remove_small=false -> skipped, stays 5.
+        // Before clamp: [0,-9,0,0,5,0].  After clamp_min(0): [0,0,0,0,5,0].
+        // Expected: [0, 0, 0, 0, 5, 0]
+
+        torch::Tensor input = torch::tensor({12.0f, 3.0f, 12.0f, 0.0f, 5.0f, 0.0f}, torch::kFloat32);
+        float threshold = 2.0f;
+
+        torch::Tensor expected = torch::tensor({0.0f, 0.0f, 0.0f, 0.0f, 5.0f, 0.0f}, torch::kFloat32);
+        torch::Tensor actual = rebaseline(input, -1, threshold, 1, 0, false, true);
+
+        spdlog::debug("Input: {}", to_string(input));
+        spdlog::debug("Expected: {}", to_string(expected));
+        spdlog::debug("Actual: {}", to_string(actual));
+
+        CHECK(tensors_are_close(actual, expected));
+    }
+
+    TEST_CASE("1D_All_Three_Options") {
+        spdlog::debug("--- Testing 1D with expand_size=1, remove_small=true, remove_negative=true ---");
+
+        // Fragment 1 expanded to [0,3]: start_val=12, end_val=0, slope=-4.
+        //   baseline=[12,8,4,0], wave[0:4]=[12,3,12,0]-[12,8,4,0]=[0,-5,8,0]
+        // Fragment 2: size 1 (small), remove_small=true -> zeroed.
+        // Before clamp: [0,-5,8,0,0,0].  After clamp_min(0): [0,0,8,0,0,0].
+        // Expected: [0, 0, 8, 0, 0, 0]
+
+        torch::Tensor input = torch::tensor({12.0f, 3.0f, 12.0f, 0.0f, 5.0f, 0.0f}, torch::kFloat32);
+        float threshold = 2.0f;
+
+        torch::Tensor expected = torch::tensor({0.0f, 0.0f, 8.0f, 0.0f, 0.0f, 0.0f}, torch::kFloat32);
+        torch::Tensor actual = rebaseline(input, -1, threshold, 1, 1, true, true);
+
+        spdlog::debug("Input: {}", to_string(input));
+        spdlog::debug("Expected: {}", to_string(expected));
+        spdlog::debug("Actual: {}", to_string(actual));
+
+        CHECK(tensors_are_close(actual, expected));
     }
 }

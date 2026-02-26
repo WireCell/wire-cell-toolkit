@@ -29,7 +29,7 @@ namespace WireCell::SPNG {
         ///
         /// - "flat" :: all filter values are given by "scale" and ignore_baseline is applied.
         ///
-        std::string kind{""};
+        std::string kind = "";
 
         /// Required, the "scale" parameter in units of frequency.
         ///

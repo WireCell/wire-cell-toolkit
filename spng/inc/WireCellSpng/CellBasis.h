@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WireCellSpng/RayGrid.h"
+#include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
 
 namespace WireCell::SPNG::CellBasis {
@@ -21,12 +22,15 @@ namespace WireCell::SPNG::CellBasis {
     torch::Tensor channel_idents(const IChannel::vector& chans);
 
     /// Return a 1D tensor holding the index into chans for each in wires.
+    ///
+    /// An index value in the output of -1 indicates a wire in wires had no channel in chans.
     torch::Tensor wire_channel_index(IWire::vector wires, const IChannel::vector& chans);
 
     /// Use a cell basis index tensor to index a set of data tensors.
     ///
-    /// @param basis A cell basis tensor holding indices.
-    /// @param data A vector of tensors indexed by the indices.
+    /// @param basis A cell basis tensor holding indices.  Shape (Ncells, Nviews)
+    /// @param data A vector of Nviews tensors indexed by the indices.
+    /// @return A tensor of shape (Ncells, Nviews) holding values from data.
     ///
     /// This works by indexing each vector in indices with the corresponding
     /// column in basis.
@@ -43,5 +47,51 @@ namespace WireCell::SPNG::CellBasis {
     /// tensors hold charge for each channel.  The result is a basis tensor
     /// holding a trio of charge for each cell.
     torch::Tensor index(torch::Tensor basis, std::vector<torch::Tensor>& data);
+
+    /// Return canonical channel ordering for one group of wpid numbers (one view).
+    ///
+    /// This calls TDM::get_ordered_channels() on each wpid and concatenates the
+    /// result.  See that function for details.  Indices into this canonical
+    /// ordering are used for the cell views algorithm.  See cell_channels().
+    ///
+    /// CAUTION: the input tensors to cell_views() MUST be produced with this
+    /// same ordering or you will get back garbage, guaranteed!
+    IChannel::vector channels_in_view(IAnodePlane::pointer ianode,
+                                      const std::vector<int>& wpids);
+
+
+    /// Make a cell basis tensor holding indices into the canonical channel
+    /// order for the given wpids for each view.
+    ///
+    /// The view_wpids span the views and each of its vectors may have one or
+    /// two wpids.
+    ///
+    /// See channels_in_view() for the ordering and interpretation of wpids in
+    /// each view
+    ///
+    /// Returned tensor is shaped (Ncells,3).
+    ///
+    /// See cell_views() where this tensor can be provided as "indices".
+    torch::Tensor cell_channels(IAnodePlane::pointer ianode,
+                                const std::vector< std::vector<int> >& view_wpids);
+
+
+
+    /// The core CellViews algorithm
+    ///
+    /// @param uvw_roi The input ROIs as a vector of tensors.  Each tensor is shaped (nbatch, nchan, ntick)
+    /// @param indices Output such as from cell_channels(). A cell basis tensor shape (ncells, 3)
+    /// @param out_views A vector of view indices to output cell view info.
+    /// @param cell_views A vector of cell view information type.
+    /// @param chunk_size The size along the tick dimension to process.  Default value of zero will use full tick domain.  Use a finite chunk size if you face memory pressure in large detectors.
+    /// @return A vector spanning out_views of tensors shaped (nbatch, nfeat, nchan, ntick) where nfeat spans cell_views.
+    ///
+    /// The device of the cell_channel_indices is used.  The uvw_roi will be
+    /// moved to that device and the result wil be on that device.
+    std::vector<torch::Tensor> cell_views(const std::vector<torch::Tensor>& uvw_roi,
+                                          const torch::Tensor& indices,
+                                          const std::vector<int>& out_views = {0,1},
+                                          const std::vector<std::string>& cell_views = {"mp2", "mp3"},
+                                          int64_t chunk_size = 0);
 
 }

@@ -165,16 +165,19 @@ TEST_SUITE("spng filter kernel") {
 
         // Actual default config is empty.
         REQUIRE(recovered_cfg.axis.empty());
+
         // fake having one axis 
         recovered_cfg.axis.resize(1);
+        REQUIRE(recovered_cfg.axis.size() == 1);
 
         // Check if recovered config matches the struct's default values
         // Note: initial FilterKernelConfig defaults are:
         // kind{""}, period=-1.0, scale=-1.0, power=2.0, ignore_baseline=true
-        CHECK(recovered_cfg.axis[0].filters[0].kind == "");
+        //CHECK(recovered_cfg.axis[0].filters[0].kind == "");
+        CHECK(recovered_cfg.axis[0].filters.empty());
         CHECK(almost_equal_float(recovered_cfg.axis[0].period, -1.0f));
-        CHECK(almost_equal_float(recovered_cfg.axis[0].filters[0].scale, -1.0f));
-        CHECK(almost_equal_float(recovered_cfg.axis[0].filters[0].power, 2.0f));
+        // CHECK(almost_equal_float(recovered_cfg.axis[0].filters[0].scale, -1.0f));
+        // CHECK(almost_equal_float(recovered_cfg.axis[0].filters[0].power, 2.0f));
         CHECK(recovered_cfg.axis[0].ignore_baseline == true);
     }
 
