@@ -9,62 +9,111 @@
 
 # CVMFS is also needed for running larsoft rules.
 
-# The resulting tree under --directory is structured like
+# Files are produced in a tree relative to the directory given by --directory and 
+# with this wildcard pattern:
 #
-# {kine}/{tier}/{unit}/*.*
+path_base = '{det}/{kind}/{tier}/{unit}/{nevent}'
+
+# {det} names the detector.  One in {pdhd,} (for now).
+# {kind} states what kind of processing the file comes from.  One in: {"track", "line"}
+# {tier} depends on "kind" and defines the stage that produced the files.
+# - Some tiers are common to all kinds such as: {kine, step, depo, adc, splat, osp, spng}
+# - Unique tiers for "line" are include: {metric, plot, mplot}"
+# {unit} depends the "kind" and names some variant.
+
+# Note: all labels are singular, not plural.
+
+kind_unit = {
+    #  - In "tracks", for individual sets of tracks, it is defined as:
+    'track': '{seed}',
+    #  - In "line", for individual lines, it is defined as:
+    'line': 'p{plane}-txz{txz}-ty{ty}',
+}
+
+# Files under path_base are named simply and generically just enough to
+# distinguish them inside that context and to allow symmetry across some rules.
+# Examples include, "data.npz", "lar.log".
 #
-# {kine} is one in (tracks, lines)
-# {tier} is one in (kine, steps, depos, adc, splat, osp, spng)
-# {unit} depends on kine and is meant to define a variant.
-#  - In tracks it is a seed that governs the cosmic muon sim
-#  - In lines it is the angle
+# A set of configuration parameters can be provided and they fall into two
+# distinct roles:
+#
+# 1. Provide list of values over which a wildcard parameter is expanded in an
+# "all_*" rule.  These values may be general or depend on the "kind" of
+# processing.
+#
+# For example, this would expand the "unit" for "track" kind.
+#
+#   --config seeds=[12345,23456]
+#
+# While this expands to produce two kinds of output
+#
+#   --config kinds=["track","line"]
+#
+# Note: these expansions only make sense for running Snakemake with a named
+# "all_*" target.  If running Snakemake to produce a specific path, these
+# configuration parameters are fully vestigial.
+#
+# 2. Provide implicit and scalar values for parameters that are not reflected
+# into the output paths.  These are parameters whose values generally should not
+# change the output results.  They include "device" and "container".
+#
+# All configuration parameters have minimal working defaults.
+#
 
 import os
 import json
 from itertools import product
 
-# Main configuration object defaults.  Some params govern a subset of the <kine>
-# parts and some govern all.  Params can be overridden on the CLI.  Eg: --config
-# detector="pdhd".  Changing parameters will invalidate any previous results
-# that depend on them.
-DEFAULTS = {
-    # WCT canonical detector name
-    "detector": "pdhd",
+# Default values to expand over in all_* rules.
+EXPANSIONS = {
+    # List of WCT canonical detector names to expand over.
+    "det": ["pdhd"],
+
+    # Note: we do not list 'kind' nor 'tier' here as the two span a non
+    # rectangular configuration space.  Only some tier for all kind.
+
+    # The number of "events" to produce.  Technically, this could be given as a
+    # list of length greater than one, eg [10,100], generally one wants only one
+    # value.  We put it here because nevents goes into the path rather than
+    # being something we'd want to expand upon.
+    "nevent": [10],
+
+    # The random number generator seeds to expand as track "units"
+    "seed": [12345],
+
+    # Plane index arrays form outer product with matched arrays of track angles
+    # in the expansion for line units.
+    # The plane indices
+    "plane": [0, 1, 2],
+    # Angle from Y axis to track direction
+    'theta_y_deg': ( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
+    # Angle from X axis to projection of track into X-Z plane
+    'theta_xz_deg': ( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 ),
+}
+
+IMPLICIT = {
 
     # Path to container that can run larsoft.
     # You can use your own that includes "source/setup" which will speed things up.
     # This may be one such image: "/nfs/data/1/calcuttj/dunesw.sif"
     "container": "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest",
 
-    # The random number generator seeds to expand as track "units"
-    "seeds": [12345],
-
-    # The number of "events" to produces
-    "nevents": 10,
-
     # The compute device for nodes that support CPU or GPU.  Can give a GPU ID with eg "gpu0".
     "device": "cpu",
 
-    # Matched arrays for track angles that expand as lines "units".
-    # Angle from Y axis to track direction
-    'theta_y_deg': ( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
-    # Angle from X axis to projection of track into X-Z plane
-    'theta_xz_deg': ( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 ),
 }
-for key, value in DEFAULTS.items():
+for key, value in EXPANSIONS.items():
     config.setdefault(key, value)
+for key, value in IMPLICIT.items():
+    config.setdefault(key, value)
+implicit_config = {key:config[key] for key in IMPLICIT}
+expansions_config = {key:config[key] for key in EXPANSIONS}
+    
 
 SRC_DIR = workflow.basedir
 FCL_DIR = os.path.join(SRC_DIR, "training_inputs")
 
-STATIC_CONFIG = {
-    # Partition the monolithic configuration into subsets.
-    'params': {
-        # common to all parts
-        'base': ['detector', 'nevents', 'device'],
-        'track': ['container'], # just track
-        'line': ['theta_y_deg', 'theta_xz_deg'], # just line
-    },
+STATIC = {
 
     # Abstract the detector away from larsoft config 
     'track': {
@@ -72,12 +121,12 @@ STATIC_CONFIG = {
             # Configure to generate kinematics file
             "kine": "prod_cosmics_protodunehd.fcl",
             # Run G4 to make depositions
-            "geant": os.path.join(FCL_DIR, "run_g4_only.fcl"),
+            "step": os.path.join(FCL_DIR, "run_g4_only.fcl"),
             # Dump out WCT depos
-            "depos": os.path.join(FCL_DIR, "pdhd_wirecell_save_depos.fcl"),
-            "depos_jsonnet": os.path.join(FCL_DIR, "wcls-save-larg4-depos.jsonnet"),
+            "depo": os.path.join(FCL_DIR, "pdhd_wirecell_save_depos.fcl"),
+            "depo_jsonnet": os.path.join(FCL_DIR, "wcls-save-larg4-depos.jsonnet"),
         }
-    }[config['detector']],
+    },
 
     # How set up for using larsoft in the container to be robust against use of a
     # container that does or does not include these initial source/setup commands.
@@ -109,136 +158,174 @@ STATIC_CONFIG = {
         "pdvd": {
             "offset": "--offset '0*m,0*m,0*m'",
         }
-    }[config['detector']],
+    },
 
-    # Thinks for the WCT portion
+    'tiers': {
+        'track': 'kine step depo adc splat spng ops'.split(),
+        'line': 'depo adc splat spng ops'.split()
+    },
+
+
+    # Translations performed by wire-cell.
     'wct': {
         'stages': [
-            ("depos", "adc"),
-            ("depos", "splat"),
+            ("depo", "adc"),
+            ("depo", "splat"),
             ("adc", "spng"),
             ("adc", "osp")
         ]
     },
 }
 
-def param_keys(part):
-    "Return inclusive list of config keys for a part"
-    ps = STATIC_CONFIG['params']
-    p = ps['base']
-    if 'part' == 'base':
-        return p
-    return ps['base'] + p
+# Some helpers to generate paths in consistent way.
+class FailsafeDict(dict):
+    'Allow incomplete string formatting'
+    def __getitem__(self, item):
+        try:
+            return super().__getitem__(item)
+        except KeyError:
+            return "{" + str(item) + "}"
+def format_partial(string, **params):
+    'String formatting where missing params are left in place'
+    return string.format_map(FailsafeDict(params))
+def format_path(path=path_base, filename=None, **params):
+    if filename:
+        path = path + "/" + filename
+    if params.get('kind', None) in kind_unit:
+        params.setdefault('unit', kind_unit[params['kind']])
+    path = format_partial(path, **params)
+    return path
+def format_track(fname, **params):
+    params.setdefault('kind', 'track')
+    return format_path(filename=fname, **params)
+def format_line(fname, **params):
+    params.setdefault('kind', 'line')
+    return format_path(filename=fname, **params)
 
-# A "unit" is a variant or part of a data tier context.
-track_unit = '{seed}'            # default seed
-line_unit = 'p{plane}-txz{txz}-ty{ty}'
-expanded_line_units = [
-    line_unit.format(plane=p, txz=t[0], ty=t[1])
-    for p,t in product([0,1,2], zip(config['theta_xz_deg'], config['theta_y_deg']))]
+def expand_path(path=path_base, filename=None, **params):
+    d = dict(expansions_config)
+    d.update(params)
+    if filename:
+        path = path + "/" + filename
+    return expand(path, **d)
 
+def expand_track(fname, **params):
+    path = format_path(filename=fname, kind='track', unit='{unit}')
+    d = dict(expansions_config)
+    d.update(params)
+    d.setdefault('unit', expansions_config['seed'])
+    d.setdefault('tier', STATIC['tiers']['track'])
+    return expand(path, **d)
+
+def expand_line(fname, **params):
+    path = format_path(filename=fname, kind='line', unit='{unit}')
+    d = dict(expansions_config)
+    d.update(params)
+    unit = kind_unit['line']
+    d.setdefault('unit', [
+        unit.format(plane=p, txz=t[0], ty=t[1])
+        for p,t in product(expansions_config['plane'],
+                           zip(expansions_config['theta_xz_deg'], expansions_config['theta_y_deg']))])
+    d.setdefault('tier', STATIC['tiers']['line'])
+    ret = expand(path, **d)
+    return ret
 
 
 #
 # Rules
 # 
 
-# Default catch-all rule
-rule all:
-    input:
-        expand('{kine}/{tgt}/{unit}/data.npz',
-               kine = ('tracks',),
-               tgt = [x[1] for x in STATIC_CONFIG['wct']['stages']],
-               unit = config['seeds'])
+
+# In any output path we can write the implicit config for record keeping and to
+# trigger rerun when someone changes any parameter.  This is used as input to
+# the beginning to each kind of processing.
+rule bake_implicit:
+    output: path_base + '/config.txt'
+    run:
+        open(str(output[0]), 'w').write(json.dumps(implicit_config))
 
 
-# These rules concretize the config into a file that all other rules in the kine derive from.
-for kine in ('track', 'line'):
-    rule:
-        name: f'kine_config_{kine}'
-        output:
-            f'{kine}s/config.txt'
-        run:
-            with open(str(output[0]), 'w') as out:
-                for key in param_keys(kine):
-                    val = config[key]
-                    out.write(f"{key} = {val}\n")
+rule all_bake_implicit:
+    input: expand_line('config.txt'),
+           expand_track('config.txt')
 
+#
+# The track kinds run art/larsoft in a container.
+#
 
-
-
-# Run art/larsoft.  Add the shell some detection logic and do setup if needed.
-# This populates the "tracks/" kine directory and sets up the pipeline
-# kine->steps->depos.  We must copy-paste common parameters as the "shell" part
-# is what needs to change most and that can not be specialized with rule
-# inheritance.
 rule track_kine:
     container: config['container']
-    benchmark: f"tracks/kine/{track_unit}/benchmark.txt"
+    benchmark:
+        format_track("benchmark.txt", tier='kine')
     shadow: "minimal"
     params:
-        fhicl = STATIC_CONFIG['track']['kine'],
-    input: rules.kine_config_track.output
+        fhicl = lambda w: STATIC['track'][w.det]['kine'],
+    input:
+        format_track('config.txt', tier='kine')
     output:
-        data=f'tracks/kine/{track_unit}/data.root',
-        log=f'tracks/kine/{track_unit}/lar.log',
+        data = format_track('data.root', tier='kine'),
+        log = format_track('lar.log', tier='kine')
     shell:
-        STATIC_CONFIG['setup_larsoft'] + """
-        mkdir -p tracks/kine/{wildcards.seed}
-        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fhicl} -o {output.data} -T hist > {output.log} 2>&1
+        STATIC['setup_larsoft'] + """
+        mkdir -p $(dirname {output.data})
+        lar --no-timing --no-memcheck -n {wildcards.nevent} -c {params.fhicl} -o {output.data} -T hist > {output.log} 2>&1
         rm -f hist
         """
 
-rule track_geant:
+rule track_step:
     container: config['container']
-    benchmark: f"tracks/steps/{track_unit}/benchmark.txt"
+    benchmark:
+        format_track("benchmark.txt", tier='step')
     shadow: "minimal"
     params:
-        fhicl = STATIC_CONFIG['track']['geant'],
+        fhicl = lambda w: STATIC['track'][w.det]['step'],
     input: rules.track_kine.output.data
     output:
-        data = f'tracks/steps/{track_unit}/data.root',
-        log = f'tracks/steps/{track_unit}/lar.log'
+        data = format_track('data.root', tier='step'),
+        log = format_track('lar.log', tier='step')
     shell:
-        STATIC_CONFIG['setup_larsoft'] + """
-        mkdir -p tracks/steps/{wildcards.seed}
+        STATIC['setup_larsoft'] + """
+        mkdir -p $(dirname {output.data})
         lar --no-timing --no-memcheck -c {params.fhicl} {input} -o {output.data} -T hist > {output.log} 2>&1
         rm -f hist
         """
 
-rule track_depos:
+rule track_depo:
     container: config['container']
-    benchmark: f"tracks/depos/{track_unit}/benchmark.txt"
+    benchmark:
+        format_track("benchmark.txt", tier='depo')
     shadow: "minimal"
     params:
-        fhicl = STATIC_CONFIG['track']['depos'],
+        fhicl = lambda w: STATIC['track'][w.det]['depo'],
     input:
-        steps = rules.track_geant.output.data,
-        jsonnet = STATIC_CONFIG['track']['depos_jsonnet']
+        steps = rules.track_step.output.data,
+        jsonnet = lambda w: STATIC['track'][w.det]['depo_jsonnet']
     output:
-        data = f'tracks/depos/{track_unit}/data.npz',
-        log = f'tracks/depos/{track_unit}/lar.log'
+        data = format_track('data.npz', tier='depo'),
+        log = format_track('lar.log', tier='depo')
     shell:
-        STATIC_CONFIG['setup_larsoft'] + """
+        STATIC['setup_larsoft'] + """
         export WIRECELL_PATH={FCL_DIR}:$WIRECELL_PATH
-        mkdir -p tracks/depos/{wildcards.seed}
+        mkdir -p $(dirname {output.data})
         lar --no-timing --no-memcheck -c {params.fhicl} {input.steps} --no-output > {output.log} 2>&1
-        ls -la
         mv wct-depos.npz {output.data}
         """
 
-
-rule line_depos:
-    input: rules.kine_config_line.output
+#
+# The line kinds run use wcpy to make depos directly
+# 
+rule line_depo:
+    input:
+        format_line('config.txt', tier='depo')
     output:
-        depos=f'lines/depos/{line_unit}//data.npz',
-        meta=f'lines/depos/{line_unit}//meta.json'
+        depos=format_line('data.npz', tier='depo'),
+        meta=format_line('meta.json', tier='depo')
     params:
-        offset = STATIC_CONFIG['spdir']['offset'],
+        offset = lambda w: STATIC['spdir'][w.det]['offset'],
     shell: '''
     wcpy gen detlinegen \
     {params.offset} \
-    --detector={config[detector]} \
+    --detector={wildcards.det} \
     --plane={wildcards.plane} \
     --angle-coords=wire-plane \
     --theta_xz="{wildcards.txz}*deg" \
@@ -247,26 +334,29 @@ rule line_depos:
     --output_meta {output.meta}
     '''
 
-rule all_line_depos:
+rule all_line_depo:
     input:
-        expand('lines/depos/{unit}/data.npz', unit=expanded_line_units)
+        expand_line('data.npz', tier=['depo'])
+
         
 
-
+#
+# Both track and line kinds process depos through some common bits.
+#
 # Post-depo rules.
-for kine in ('lines', 'tracks'):
-    for src, tgt in STATIC_CONFIG['wct']['stages']:
+for kind in ('line', 'track'):
+    for src, tgt in STATIC['wct']['stages']:
+        src_path = format_path(kind=kind, tier=src)
+        tgt_path = format_path(kind=kind, tier=tgt)
         rule:
-            name: f'{kine}_{src}_to_{tgt}'
-            benchmark: f'{kine}/{tgt}/{{unit}}/benchmark.txt'
-            input: f'{kine}/{src}/{{unit}}/data.npz'
+            name: f'{kind}_{src}_to_{tgt}'
+            benchmark: tgt_path + '/benchmark.txt'
+            input: src_path + '/data.npz'
             output:
-                out = f'{kine}/{tgt}/{{unit}}/data.npz',
-                log = f'{kine}/{tgt}/{{unit}}/wct.log'
+                out = tgt_path + '/data.npz',
+                log = tgt_path + '/wct.log'
             params:
                 cfg = f'spng/{src}-to-{tgt}.jsonnet'
-            benchmark:
-                f'{kine}/{tgt}/{{unit}}/benchmark.txt'
             shell: """
             wire-cell -l {output.log} -L debug -c {params.cfg} -A input={input} -A output={output.out}
             """
@@ -274,25 +364,50 @@ for kine in ('lines', 'tracks'):
 
 # SPDIR metrics
 for sig in ('osp','spng'):
+    # print(format_line('data.json', tier=f'{sig}-metrics'))
+    print(format_path(filename='metrics.pdf', kind='line', tier=sig, unit='summary'))
+
     rule:
         name: f'metrics_{sig}'
         input:
-            depos = 'lines/depos/{unit}/data.npz',
-            splat = 'lines/splat/{unit}/data.npz',
-            signals = f'lines/{sig}/{{unit}}/data.npz'
+            depos = rules.line_depo.output.meta,
+            splats = format_line('data.npz', tier='splat'),
+            signals = format_line('data.npz', tier=sig)
         output:
-            metrics = f'lines/{sig}-metrics/{{unit}}/data.json'
+            metrics = format_line('metrics.json', tier=sig)
         shell: '''
         LD_LIBRARY_PATH="" \
         wcpy test ssss-metrics \
           --output {output.metrics} \
           --params {input.depos} \
-          {input.splat} {input.signals}
+          {input.splats} {input.signals}
         '''
+
+    checkpoint:
+        name: f'collect_metrics_{sig}'
+        input:
+            expand_line('metrics.json', tier=sig)
+        output:
+            format_path('metrics.done', kind='line', tier=sig, unit='summary')
+        shell: """
+        mkdir -p $(dirname {output}
+        touch {output}
+        """
+
+    rule:
+        name: f'metric_plots_{sig}'
+        input:
+            ready = getattr(rules, f'collect_metrics_{sig}').output,
+            metrics = getattr(rules, f'metrics_{sig}').output
+        output:
+            format_path('metrics.pdf', kind='line', tier=sig, unit='summary')
+        shell: """
+        wcpy test plot-metrics -o {output} {input.metrics}
+        """
 
 # rule all_metrics:
 #     input:
-#         expand(rules.metrics.output, kine=('lines',), unit=expanded_line_units)
+#         expand(rules.metrics.output, kine=('line',), unit=expanded_line_units)
 
 # def plots_args(w):
 #     'Generate additional args for plots command'
