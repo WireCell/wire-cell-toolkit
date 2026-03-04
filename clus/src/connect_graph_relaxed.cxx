@@ -69,41 +69,18 @@ void Graphs::connect_graph_relaxed(
     
     if (num <= 1) return;
 
-    // Create point clouds using connected components
-    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
-    std::vector<std::vector<size_t>> pt_clouds_global_indices;
-    
-    // Create ordered components  
-    std::vector<ComponentInfo> ordered_components;
-    ordered_components.reserve(component.size());
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components.emplace_back(i);
-    }
-    
-    // Assign vertices to components
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components[component[i]].add_vertex(i);
+    // Allocate exactly num point clouds (one per component)
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds(num);
+    std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
+    for (size_t c = 0; c < num; ++c) {
+        pt_clouds[c] = std::make_shared<Simple3DPointCloud>();
     }
 
-    // Sort components by minimum vertex index
-    std::sort(ordered_components.begin(), ordered_components.end(),
-        [](const ComponentInfo& a, const ComponentInfo& b) {
-            return a.min_vertex < b.min_vertex;
-        });
-
-    // Create point clouds for each component
     const auto& points = cluster.points();
-    for (const auto& comp : ordered_components) {
-        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
-
-        std::vector<size_t> global_indices;
-        
-        for (size_t vertex_idx : comp.vertex_indices) {
-            pt_cloud->add({points[0][vertex_idx], points[1][vertex_idx], points[2][vertex_idx]});
-            global_indices.push_back(vertex_idx);
-        }
-        pt_clouds.push_back(pt_cloud);
-        pt_clouds_global_indices.push_back(global_indices);
+    for (size_t i = 0; i < component.size(); ++i) {
+        size_t c = component[i];
+        pt_clouds[c]->add({points[0][i], points[1][i], points[2][i]});
+        pt_clouds_global_indices[c].push_back(i);
     }
 
     // Initialize distance metrics 
@@ -123,6 +100,11 @@ void Graphs::connect_graph_relaxed(
             index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
         }
     }
+
+    // Hoist scope-transform and cluster_t0 out of all per-step CTPC loops
+    const bool needs_transform = (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash());
+    const auto ctpc_transform = needs_transform ? pcts->pc_transform(cluster.get_scope_transform()) : nullptr;
+    const double cluster_t0 = needs_transform ? cluster.get_cluster_t0() : 0.0;
 
     // Calculate distances between components
     for (size_t j = 0; j != num; j++) {
@@ -194,10 +176,8 @@ void Graphs::connect_graph_relaxed(
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
-                            if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()){
-                                const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_cluster_t0();
-                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            if (needs_transform) {
+                                test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             
@@ -348,11 +328,9 @@ void Graphs::connect_graph_relaxed(
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
-                            if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()){
-                                const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_cluster_t0();
-                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                            }                            
+                            if (needs_transform) {
+                                test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) {
                                 num_bad++;
@@ -436,10 +414,8 @@ void Graphs::connect_graph_relaxed(
                         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
                         if (test_wpid.apa()!=-1){
                             geo_point_t test_p_raw = test_p;
-                            if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()){
-                                const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-                                double cluster_t0 = cluster.get_cluster_t0();
-                                test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                            if (needs_transform) {
+                                test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) {
@@ -673,6 +649,11 @@ void Graphs::connect_graph_relaxed(
     
     double radius_cut = 0.6 * units::cm;
     if (step_size < radius_cut) radius_cut = step_size;
+
+    // Hoist scope-transform out of the per-step loop
+    const bool cc_needs_transform = (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash());
+    const auto cc_ctpc_transform = cc_needs_transform ? pcts->pc_transform(cluster.get_scope_transform()) : nullptr;
+    const double cc_cluster_t0 = cc_needs_transform ? cluster.get_cluster_t0() : 0.0;
     
     // Check points along the path
     for (int i = 0; i != num_steps; i++) {
@@ -689,10 +670,8 @@ void Graphs::connect_graph_relaxed(
         
         // Transform point if needed
         geo_point_t test_p_raw = test_p;
-        if (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash()) {
-            const auto transform = pcts->pc_transform(cluster.get_scope_transform());
-            double cluster_t0 = cluster.get_cluster_t0();
-            test_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+        if (cc_needs_transform) {
+            test_p_raw = cc_ctpc_transform->backward(test_p, cc_cluster_t0, test_wpid.face(), test_wpid.apa());
         }
         
         // Test point quality with appropriate radius
@@ -783,40 +762,18 @@ void Graphs::connect_graph_relaxed_pid(
     
     if (num <= 1) return;
     
-    // Create point clouds using connected components
-    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
-    std::vector<std::vector<size_t>> pt_clouds_global_indices;
-    
-    // Create ordered components
-    std::vector<ComponentInfo> ordered_components;
-    ordered_components.reserve(component.size());
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components.emplace_back(i);
+    // Allocate exactly num point clouds (one per component)
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds(num);
+    std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
+    for (size_t c = 0; c < num; ++c) {
+        pt_clouds[c] = std::make_shared<Simple3DPointCloud>();
     }
-    
-    // Assign vertices to components
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components[component[i]].add_vertex(i);
-    }
-    
-    // Sort components by minimum vertex index
-    std::sort(ordered_components.begin(), ordered_components.end(),
-        [](const ComponentInfo& a, const ComponentInfo& b) {
-            return a.min_vertex < b.min_vertex;
-        });
-    
-    // Create point clouds for each component
+
     const auto& points = cluster.points();
-    for (const auto& comp : ordered_components) {
-        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
-        std::vector<size_t> global_indices;
-        
-        for (size_t vertex_idx : comp.vertex_indices) {
-            pt_cloud->add({points[0][vertex_idx], points[1][vertex_idx], points[2][vertex_idx]});
-            global_indices.push_back(vertex_idx);
-        }
-        pt_clouds.push_back(pt_cloud);
-        pt_clouds_global_indices.push_back(global_indices);
+    for (size_t i = 0; i < component.size(); ++i) {
+        size_t c = component[i];
+        pt_clouds[c]->add({points[0][i], points[1][i], points[2][i]});
+        pt_clouds_global_indices[c].push_back(i);
     }
     
     // Initialize distance metrics

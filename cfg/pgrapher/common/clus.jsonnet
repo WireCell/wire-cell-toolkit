@@ -303,7 +303,7 @@ local wc = import "wirecell.jsonnet";
 
         // This configures ImproveCluster_2, which inherits from ImproveCluster_1
         // and adds advanced Steiner tree improvements.
-        improve_cluster_2(name="", anodes=[], samplers=[], verbose=false) :: {
+        improve_cluster_2(name="", anodes=[], samplers=[], verbose=true) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_2",
@@ -338,13 +338,14 @@ local wc = import "wirecell.jsonnet";
         },
 
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
-        steiner(name="", retiler={}, grouping="live", graph="steiner") :: {
+        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
                 grouping: grouping,
                 graph: graph,
                 retiler: wc.tn(retiler),
+                perf: perf,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms, retiler]
         },

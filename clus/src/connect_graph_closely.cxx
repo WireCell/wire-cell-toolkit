@@ -112,19 +112,18 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
             else {
                 index_min_wire = winds[2][pind1];
             }
+            // use O(log W) bounds instead of full linear scan
             std::vector<std::set<int>*> max_wcps_set;
-            std::vector<std::set<int>*> min_wcps_set;
-            // go through the first map and find the ones satisfying the condition
-            for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
-                    max_wcps_set.push_back(&(it2->second));
-                }
+            {
+                auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
+                auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&(it2->second));
             }
-            // go through the second map and find the ones satisfying the condition
-            for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
-                    min_wcps_set.push_back(&(it2->second));
-                }
+            std::vector<std::set<int>*> min_wcps_set;
+            {
+                auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
+                auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&(it2->second));
             }
 
             std::set<int> wcps_set1;
@@ -289,24 +288,22 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
             else {
                 index_min_wire = winds[2][pind1];
             }
+            // use O(log W) bounds instead of full linear scan
             std::vector<std::set<int>*> max_wcps_set;
-            std::vector<std::set<int>*> min_wcps_set;
-            // go through the first map and find the ones satisfying the condition
-            for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
-                    max_wcps_set.push_back(&(it2->second));
-                }
+            {
+                auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
+                auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&(it2->second));
             }
-            // go through the second map and find the ones satisfying the condition
-            for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
-                    min_wcps_set.push_back(&(it2->second));
-                }
+            std::vector<std::set<int>*> min_wcps_set;
+            {
+                auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
+                auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&(it2->second));
             }
 
             std::set<int> wcps_set1;
             std::set<int> wcps_set2;
-
             for (auto it2 = max_wcps_set.begin(); it2 != max_wcps_set.end(); it2++) {
                 wcps_set1.insert((*it2)->begin(), (*it2)->end());
             }
@@ -390,24 +387,22 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
             else {
                 index_min_wire = winds[2][pind1];
             }
+            // use O(log W) bounds instead of full linear scan
             std::vector<std::set<int>*> max_wcps_set;
-            std::vector<std::set<int>*> min_wcps_set;
-            // go through the first map and find the ones satisfying the condition
-            for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
-                    max_wcps_set.push_back(&(it2->second));
-                }
+            {
+                auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
+                auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&(it2->second));
             }
-            // go through the second map and find the ones satisfying the condition
-            for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
-                    min_wcps_set.push_back(&(it2->second));
-                }
+            std::vector<std::set<int>*> min_wcps_set;
+            {
+                auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
+                auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&(it2->second));
             }
 
             std::set<int> wcps_set1;
             std::set<int> wcps_set2;
-
             for (auto it2 = max_wcps_set.begin(); it2 != max_wcps_set.end(); it2++) {
                 wcps_set1.insert((*it2)->begin(), (*it2)->end());
             }
@@ -581,22 +576,18 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
                 index_min_wire = winds[2][pind1];
             }
 
-            // Find candidate points within wire intervals
+            // Find candidate points within wire intervals using O(log W) bounds
             std::vector<std::set<int>*> max_wcps_set;
-            std::vector<std::set<int>*> min_wcps_set;
-
-            // Find points within max wire interval
-            for (auto& wire_pair : *map_max_index_wcps) {
-                if (std::abs(wire_pair.first - index_max_wire) <= max_wire_interval) {
-                    max_wcps_set.push_back(&wire_pair.second);
-                }
+            {
+                auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
+                auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&it2->second);
             }
-
-            // Find points within min wire interval
-            for (auto& wire_pair : *map_min_index_wcps) {
-                if (std::abs(wire_pair.first - index_min_wire) <= min_wire_interval) {
-                    min_wcps_set.push_back(&wire_pair.second);
-                }
+            std::vector<std::set<int>*> min_wcps_set;
+            {
+                auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
+                auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&it2->second);
             }
 
             // Create candidate sets
@@ -721,12 +712,16 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
         const Facade::Blob* mcell1 = mcell_pair.first;
         const Facade::Blob* mcell2 = mcell_pair.second;
         
+        // Cache blob indices outside the direction loop to avoid redundant lookups
+        std::vector<int> pinds1 = cluster.get_blob_indices(mcell1);
+        std::vector<int> pinds2 = cluster.get_blob_indices(mcell2);
+
         // Process connections in both directions
         for (int direction = 0; direction < 2; direction++) {
             const Facade::Blob* source_mcell = (direction == 0) ? mcell1 : mcell2;
             const Facade::Blob* target_mcell = (direction == 0) ? mcell2 : mcell1;
             
-            std::vector<int> source_pinds = cluster.get_blob_indices(source_mcell);
+            const std::vector<int>& source_pinds = (direction == 0) ? pinds1 : pinds2;
             
             int max_wire_interval = source_mcell->get_max_wire_interval();
             int min_wire_interval = source_mcell->get_min_wire_interval();
@@ -736,19 +731,19 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
             
             // Select appropriate wire index maps based on source mcell's wire types
             if (source_mcell->get_max_wire_type() == 0) {
-                map_max_index_wcps = &map_mcell_uindex_wcps[target_mcell];
+                map_max_index_wcps = &map_mcell_uindex_wcps.at(target_mcell);
             } else if (source_mcell->get_max_wire_type() == 1) {
-                map_max_index_wcps = &map_mcell_vindex_wcps[target_mcell];
+                map_max_index_wcps = &map_mcell_vindex_wcps.at(target_mcell);
             } else {
-                map_max_index_wcps = &map_mcell_windex_wcps[target_mcell];
+                map_max_index_wcps = &map_mcell_windex_wcps.at(target_mcell);
             }
             
             if (source_mcell->get_min_wire_type() == 0) {
-                map_min_index_wcps = &map_mcell_uindex_wcps[target_mcell];
+                map_min_index_wcps = &map_mcell_uindex_wcps.at(target_mcell);
             } else if (source_mcell->get_min_wire_type() == 1) {
-                map_min_index_wcps = &map_mcell_vindex_wcps[target_mcell];
+                map_min_index_wcps = &map_mcell_vindex_wcps.at(target_mcell);
             } else {
-                map_min_index_wcps = &map_mcell_windex_wcps[target_mcell];
+                map_min_index_wcps = &map_mcell_windex_wcps.at(target_mcell);
             }
             
             for (const int pind1 : source_pinds) {
@@ -771,20 +766,18 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
                     index_min_wire = winds[2][pind1];
                 }
                 
-                // Find candidate points within wire intervals
+                // Find candidate points within wire intervals using O(log W) bounds
                 std::vector<std::set<int>*> max_wcps_set;
-                std::vector<std::set<int>*> min_wcps_set;
-                
-                for (auto& wire_pair : *map_max_index_wcps) {
-                    if (std::abs(wire_pair.first - index_max_wire) <= max_wire_interval) {
-                        max_wcps_set.push_back(&wire_pair.second);
-                    }
+                {
+                    auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
+                    auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
+                    for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&it2->second);
                 }
-                
-                for (auto& wire_pair : *map_min_index_wcps) {
-                    if (std::abs(wire_pair.first - index_min_wire) <= min_wire_interval) {
-                        min_wcps_set.push_back(&wire_pair.second);
-                    }
+                std::vector<std::set<int>*> min_wcps_set;
+                {
+                    auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
+                    auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
+                    for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&it2->second);
                 }
                 
                 // Create candidate sets

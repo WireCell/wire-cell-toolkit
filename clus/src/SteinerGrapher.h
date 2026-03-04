@@ -37,6 +37,8 @@ namespace WireCell::Clus::Steiner {
             IPCTreeMutate::pointer retile;
             /// do we even need samplers?
             // std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> samplers;
+            /// Enable per-step timing printouts (set via grapher_config.perf = true)
+            bool perf{false};
         };
         Log::logptr_t log;
 
@@ -132,9 +134,14 @@ namespace WireCell::Clus::Steiner {
 
         vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, const std::string& graph_name,
                                    bool disable_dead_mix_cell = true, int nlevel = 1);
+        /// Overload that accepts a precomputed point set for the target blobs, avoiding a rebuild of form_cell_points_map().
+        vertex_set find_peak_point_indices(const vertex_set& blob_point_indices, const std::string& graph_name,
+                                   bool disable_dead_mix_cell = true, int nlevel = 1);
 
         blob_vertex_map form_cell_points_map();
         vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell=true);
+        /// Overload that accepts a precomputed blob->points map to avoid calling form_cell_points_map() twice.
+        vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell, const blob_vertex_map& cell_points_map);
 
         /// Establish edges between points in the same blob (mcell) with weighted connectivity
         /// This modifies the given graph and tracks added edges for later removal
@@ -211,6 +218,9 @@ namespace WireCell::Clus::Steiner {
 
         // This holds various "global" info sources
         const Config& m_config;
+
+        // Enable per-step timing printouts inside hot functions
+        bool m_perf{false};
 
 
         // XIN: add any more data and methods you need here.  

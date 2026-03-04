@@ -2,6 +2,7 @@
 #include "SteinerGrapher.h"
 
 #include "WireCellClus/Graphs.h"
+#include <chrono>
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellClus/ClusteringFuncs.h"
@@ -33,8 +34,10 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     NeedDV::configure(cfg);
     NeedPCTS::configure(cfg);
 
+    m_perf = get(cfg, "perf", m_perf);
     m_grapher_config.dv = m_dv;
     m_grapher_config.pcts = m_pcts;
+    m_grapher_config.perf = m_perf; // propagate perf flag into Grapher instances
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -49,6 +52,8 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // If true, replace any pre-existing graph with that name, else do
     // nothing if one already exists.
     cfg["replace"] = m_replace;
+    // If true, print per-step timing to stdout.
+    cfg["perf"] = m_perf;
 
     return cfg;
 }
@@ -56,6 +61,11 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
 
 void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 {
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_visit_start = Clock::now();
+    auto t0 = Clock::now();
+
     auto& grouping = *ensemble.with_name(m_grouping_name).at(0);
     
     // Container to hold clusters after the initial filter
@@ -79,6 +89,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     }
 
     std::cout << "CreateSteinerGraph: " << filtered_clusters.size() << " clusters with beam_flash flag." << " " << main_cluster->ident() << std::endl;
+    if (m_perf) std::cout << "CreateSteinerGraph timing: filter clusters took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
 
     if (main_cluster != nullptr){
         // // test steiner ...
@@ -101,46 +112,65 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 
         if (m_grapher_config.retile ) {
             // Call the mutate function with the appropriate configuration, create new cluster
+            t0 = Clock::now();
             auto new_node = m_grapher_config.retile->mutate(*main_cluster->node());
             auto new_cluster_1 = new_node->value.facade<Cluster>();
             auto& new_cluster = grouping.make_child();
             new_cluster.take_children(*new_cluster_1);  // Move all blobs from improved cluster
             new_cluster.from(*main_cluster);
+            if (m_perf) std::cout << "CreateSteinerGraph timing: retile->mutate took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
 
-            // create the new graph 
+            // create the new graph
+            t0 = Clock::now();
             new_cluster.find_graph("ctpc_ref_pid", *main_cluster, m_dv, m_pcts);
+            if (m_perf) std::cout << "CreateSteinerGraph timing: find_graph(ctpc_ref_pid) took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
 
 
+            t0 = Clock::now();
             Steiner::Grapher sg(new_cluster, m_grapher_config, log);
+            if (m_perf) std::cout << "CreateSteinerGraph timing: Grapher construction took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+
             auto& graph = sg.get_graph("ctpc_ref_pid");
             std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
                       << boost::num_vertices(graph) << " vertices and "
                       << boost::num_edges(graph) << " edges." << std::endl;
 
+            t0 = Clock::now();
             sg.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
+            if (m_perf) std::cout << "CreateSteinerGraph timing: establish_same_blob_steiner_edges took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
             std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
                       << boost::num_vertices(graph) << " vertices and "
                       << boost::num_edges(graph) << " edges." << std::endl;
+
+            t0 = Clock::now();
             auto pair_points = new_cluster.get_two_boundary_wcps();
+            if (m_perf) std::cout << "CreateSteinerGraph timing: get_two_boundary_wcps took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
             std::cout << "CreateSteinerGraph: " << pair_points.first.x() << " " 
                     << pair_points.first.y() << " " 
                     << pair_points.first.z() << " | "
                     << pair_points.second.x() << " " 
                     << pair_points.second.y() << " " 
                     << pair_points.second.z() << std::endl;
+
+            t0 = Clock::now();
             auto first_index  =   new_cluster.get_closest_point_index(pair_points.first);
             auto second_index =   new_cluster.get_closest_point_index(pair_points.second);
             std::vector<size_t> path_point_indices = new_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
+            if (m_perf) std::cout << "CreateSteinerGraph timing: shortest_path took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
             std::cout << "CreateSteinerGraph: " << first_index << " " << second_index << " # of points along path: " << path_point_indices.size() << std::endl;
             
+            t0 = Clock::now();
             sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
+            if (m_perf) std::cout << "CreateSteinerGraph timing: remove_same_blob_steiner_edges took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
             std::cout << "CreateSteinerGraph: " << "ctpc_ref_pid with " 
                       << boost::num_vertices(graph) << " vertices and "
                       << boost::num_edges(graph) << " edges." << std::endl;
 
             // path_point_indices belong to new_cluster, on which sg is based
             // main_cluster is a reference to filter points ...
+            t0 = Clock::now();
             sg.create_steiner_tree(main_cluster, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
+            if (m_perf) std::cout << "CreateSteinerGraph timing: create_steiner_tree took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
             const auto& steiner_graph = sg.get_graph("steiner_graph");
             auto& flag_terminals = sg.get_flag_steiner_terminal();
@@ -151,9 +181,11 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
                       << boost::num_edges(steiner_graph) << " edges." << " " << steiner_point_cloud.size() << " " << flag_terminals.size() << " " << num_true_terminals << std::endl;
 
             // pass the new_cluster's steiner_graph and stener_pc to the main cluster
+            t0 = Clock::now();
             Steiner::Grapher main_sg(*main_cluster, m_grapher_config, log);
             main_sg.transfer_pc(sg, "steiner_pc", "steiner_pc");
             main_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
+            if (m_perf) std::cout << "CreateSteinerGraph timing: transfer_pc/graph took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
 
             // test ... 
             auto pair_idx = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
@@ -163,10 +195,13 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             std::cout << "Xin4: " << kd_points.size() << " " << (*kd_points.begin()).first << " " << (*kd_points.begin()).second.first << " " << (*kd_points.begin()).second.second << std::endl;
 
             // delete new cluster from grouping after usage ...
+            t0 = Clock::now();
             auto* new_cluster_ptr = &new_cluster;
             grouping.destroy_child(new_cluster_ptr, true);
+            if (m_perf) std::cout << "CreateSteinerGraph timing: destroy_child took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
         }
     } 
+    if (m_perf) std::cout << "CreateSteinerGraph timing: visit() TOTAL took " << MS(Clock::now() - t_visit_start).count() << " ms" << std::endl;
    
     // for (auto* cluster : filtered_clusters) {
         // bool already = cluster->has_graph(m_graph_name);
