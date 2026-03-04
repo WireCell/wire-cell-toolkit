@@ -18,7 +18,7 @@ path_base = '{det}/{kind}/{tier}/{unit}/{nevent}'
 # {kind} states what kind of processing the file comes from.  One in: {"track", "line"}
 # {tier} depends on "kind" and defines the stage that produced the files.
 # - Some tiers are common to all kinds such as: {kine, step, depo, adc, splat, osp, spng}
-# - Unique tiers for "line" are include: {metric, plot, mplot}"
+# - Unique tiers for "line" include: {metric, plot, mplot}
 # {unit} depends the "kind" and names some variant.
 
 # Note: all labels are singular, not plural.
@@ -48,6 +48,10 @@ kind_unit = {
 # For example, this would expand the "unit" for "track" kind.
 #
 #   --config seeds=[12345,23456]
+#
+# Note, special seeds for producing training fodder are 6 digits in [1e6,2e6).
+# Avoid using this seeds range to produce input for inference.
+
 #
 # While this expands to produce two kinds of output
 #
@@ -301,6 +305,7 @@ rule track_step:
         rm -f hist
         """
 
+# {det}/track/depo/{seed}/{nevent}/*
 rule track_depo:
     container: config['container']
     benchmark:
@@ -443,32 +448,29 @@ rule all_each_metrics:
     input:
         expand_line('metrics.pdf', nevent=[1], tier=('osp', 'spng'))
 
-# def plots_args(w):
-#     'Generate additional args for plots command'
-#     args = f"""--title '{config["detector"].upper()}'"""
-#     return args
-        
-# rule plots:
-#     input:
-#         metrics = rules.all_metrics.input
-#     output:
-#         metrics = 'line/plots/metrics.pdf'
-#     params:
-#         args=plots_args
-#     shell: '''
-#     wcpy test plot-metrics {params.args} -o {output} {input}
-#     '''
-
-# rule metric_plots:
-#     input:
-#         splat = '{kine}/splat/{unit}/data.npz',
-#         signals = '{kine}/{tier}/{unit}/data.npz'
-#     wildcard_constraints:
-#         tier = "osp|spng"
-#     output:
-#         plots = '{kine}/mplots/{unit}/plots.pdf'
-#     shell: '''
-#     wcpy test plot-ssss --output {output.plots} {input.splat} {input.signals}
-#     '''
 
 
+#
+# Making fodder for DNNROI training, only from track and spng.
+# 
+# This requires a 6 digit seed starting with 1 to separate from 5 digit seeds
+# allowed for "track" or "line".
+TRAINING_OUTPAT = 'training-{wctier}.hdf'
+
+rule training_fodder:
+    benchmark: format_track('benchmark.txt', tier='fodder')
+    input:
+        format_track('data.npz', tier='depo', unit='{seed}')
+    output:
+        fodder = format_track(TRAINING_OUTPAT.format(wctier='fodder'), tier='fodder'),
+        truth = format_track(TRAINING_OUTPAT.format(wctier='truth'), tier='fodder'),
+        log = format_track('wct.log', tier='fodder') 
+    params:
+        cfg = f'spng/dnnroi-training.jsonnet',
+        outpat = format_track(TRAINING_OUTPAT.format(wctier='%(tier)s'), tier='fodder')
+    wildcard_constraints:
+        seed="1[0-9]{5}"
+    shell:"""
+    wire-cell -l {output.log} -L debug -c {params.cfg} -A input={input} -A 'outpat={params.outpat}'
+    """
+    
