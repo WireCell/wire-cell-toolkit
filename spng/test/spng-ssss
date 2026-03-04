@@ -1,4 +1,4 @@
-#!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores all --snakefile
+#!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores 16 --snakefile
 # -*- snakemake -*-
 
 # This snakemake workflow runs just about every type of job that relates to SPNG.
@@ -22,6 +22,10 @@ path_base = '{det}/{kind}/{tier}/{unit}/{nevent}'
 # {unit} depends the "kind" and names some variant.
 
 # Note: all labels are singular, not plural.
+
+# Note: there is some non-orthogonal use of these path labels.
+# - kind=line: nevent is not meaningful and will take whatever value.
+# - kind=line: the 'unit" names each line direction and a 'unit=summary' folds over these.
 
 kind_unit = {
     #  - In "tracks", for individual sets of tracks, it is defined as:
@@ -60,6 +64,10 @@ kind_unit = {
 # All configuration parameters have minimal working defaults.
 #
 
+# Example calls:
+# $ ./spng/test/spng-ssss all_metrics
+
+
 import os
 import json
 from itertools import product
@@ -75,19 +83,22 @@ EXPANSIONS = {
     # The number of "events" to produce.  Technically, this could be given as a
     # list of length greater than one, eg [10,100], generally one wants only one
     # value.  We put it here because nevents goes into the path rather than
-    # being something we'd want to expand upon.
-    "nevent": [10],
+    # being something we'd want to expand upon.  Note, something besides 1 only
+    # matters for output under {det}/track/.
+    "nevent": [1],
 
-    # The random number generator seeds to expand as track "units"
+    # The random number generator seeds to expand as track "units".  This is
+    # used in an outer product with nevent so we can balance how many and how
+    # large jobs should be.
     "seed": [12345],
 
     # Plane index arrays form outer product with matched arrays of track angles
     # in the expansion for line units.
     # The plane indices
     "plane": [0, 1, 2],
-    # Angle from Y axis to track direction
+    # Wire-plane angle from Y axis to track direction
     'theta_y_deg': ( 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90, 90 ),
-    # Angle from X axis to projection of track into X-Z plane
+    # Wire-plane angle from X axis to projection of track into X-Z plane
     'theta_xz_deg': ( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 ),
 }
 
@@ -361,11 +372,27 @@ for kind in ('line', 'track'):
             wire-cell -l {output.log} -L debug -c {params.cfg} -A input={input} -A output={output.out}
             """
     
+def expand_metrics(sig):
+    return lambda w: expand(
+        format_path(filename='metrics.json', kind='line', tier=sig, unit='{unit}'),
+        unit=[
+            f"p{int(w.plane)}-txz{txz}-ty{ty}"
+            for txz, ty in zip(
+                    expansions_config['theta_xz_deg'],
+                    expansions_config['theta_y_deg']
+            )
+        ],
+        nevent=expansions_config['nevent'],
+        det=expansions_config['det']
+    )
 
 # SPDIR metrics
 for sig in ('osp','spng'):
+    # print(format_path(filename='metrics.done', kind='line', tier=sig, unit='summary-p{plane}'))
     # print(format_line('data.json', tier=f'{sig}-metrics'))
-    print(format_path(filename='metrics.pdf', kind='line', tier=sig, unit='summary'))
+    # print(format_path(filename='metrics.pdf', kind='line', tier=sig, unit='summary'))
+    # # print(expand_line('metrics.json', tier=sig))
+    # print(format_path(filename='metrics.done', kind='line', tier=sig, unit='summary'))
 
     rule:
         name: f'metrics_{sig}'
@@ -377,6 +404,7 @@ for sig in ('osp','spng'):
             metrics = format_line('metrics.json', tier=sig)
         shell: '''
         LD_LIBRARY_PATH="" \
+        QT_QPA_PLATFORM=offscreen \
         wcpy test ssss-metrics \
           --output {output.metrics} \
           --params {input.depos} \
@@ -385,12 +413,11 @@ for sig in ('osp','spng'):
 
     checkpoint:
         name: f'collect_metrics_{sig}'
-        input:
-            expand_line('metrics.json', tier=sig)
+        input: expand_line('metrics.json', tier=sig)
         output:
-            format_path('metrics.done', kind='line', tier=sig, unit='summary')
+            format_path(filename='metrics.done', kind='line', tier=sig, unit='summary')
         shell: """
-        mkdir -p $(dirname {output}
+        mkdir -p $(dirname {output})
         touch {output}
         """
 
@@ -398,16 +425,20 @@ for sig in ('osp','spng'):
         name: f'metric_plots_{sig}'
         input:
             ready = getattr(rules, f'collect_metrics_{sig}').output,
-            metrics = getattr(rules, f'metrics_{sig}').output
+            metrics = getattr(rules, f'collect_metrics_{sig}').input
         output:
-            format_path('metrics.pdf', kind='line', tier=sig, unit='summary')
+            format_path(filename='metrics-wp{wplane}.pdf', kind='line', tier=sig, unit='summary')
         shell: """
-        wcpy test plot-metrics -o {output} {input.metrics}
+        LD_LIBRARY_PATH="" \
+        QT_QPA_PLATFORM=offscreen \
+        wcpy test plot-metrics --coordinate-plane={wildcards.wplane} -o {output} {input.metrics}
         """
 
-# rule all_metrics:
-#     input:
-#         expand(rules.metrics.output, kine=('line',), unit=expanded_line_units)
+rule all_metrics:
+    input:
+        expand(format_path(filename='metrics-wp{wplane}.pdf', kind='line', unit='summary', nevent=1),
+               det=config['det'], tier=('osp', 'spng'), wplane=config['plane'])
+        
 
 # def plots_args(w):
 #     'Generate additional args for plots command'
