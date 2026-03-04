@@ -570,6 +570,8 @@ std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const
     
     for (auto& [test_point, wpid_test_point] : points_info) {
         // std::cout << test_point << " " <<  wpid_test_point << std::endl;
+        // Skip points outside the detector volume (apa=-1) or with unknown wpid
+        if (wpid_test_point.apa() == -1) continue;
         if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
         }

@@ -310,6 +310,9 @@ void Graphs::connect_graph_with_reference(
 
     for (size_t j=0;j!=num;j++){
       for (size_t k=j+1;k!=num;k++){
+            // Skip pairs where reference filtering emptied a component
+            if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
+
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
 
             int index1 = j;
@@ -324,6 +327,9 @@ void Graphs::connect_graph_with_reference(
 
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
+            // Skip pairs where reference filtering emptied a component
+            if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
+
             if (std::get<2>(index_index_dis[j][k])<3*units::cm){
                 index_index_dis_mst[j][k] = index_index_dis[j][k];
             }

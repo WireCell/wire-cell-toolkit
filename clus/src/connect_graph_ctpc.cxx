@@ -426,6 +426,9 @@ void Graphs::connect_graph_ctpc_with_reference(
     // DISTANCE CALCULATION AND CTPC PATH VALIDATION
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
+            // Skip pairs where reference filtering emptied a component
+            if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
+
             // Find closest points between components
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
 
