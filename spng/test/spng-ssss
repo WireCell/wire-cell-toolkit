@@ -372,26 +372,13 @@ for kind in ('line', 'track'):
             wire-cell -l {output.log} -L debug -c {params.cfg} -A input={input} -A output={output.out}
             """
     
-def expand_metrics(sig):
-    return lambda w: expand(
-        format_path(filename='metrics.json', kind='line', tier=sig, unit='{unit}'),
-        unit=[
-            f"p{int(w.plane)}-txz{txz}-ty{ty}"
-            for txz, ty in zip(
-                    expansions_config['theta_xz_deg'],
-                    expansions_config['theta_y_deg']
-            )
-        ],
-        nevent=expansions_config['nevent'],
-        det=expansions_config['det']
-    )
 
 # SPDIR metrics
 for sig in ('osp','spng'):
     # print(format_path(filename='metrics.done', kind='line', tier=sig, unit='summary-p{plane}'))
     # print(format_line('data.json', tier=f'{sig}-metrics'))
     # print(format_path(filename='metrics.pdf', kind='line', tier=sig, unit='summary'))
-    # # print(expand_line('metrics.json', tier=sig))
+    # print(expand_line('metrics.json', tier=sig))
     # print(format_path(filename='metrics.done', kind='line', tier=sig, unit='summary'))
 
     rule:
@@ -409,6 +396,19 @@ for sig in ('osp','spng'):
           --output {output.metrics} \
           --params {input.depos} \
           {input.splats} {input.signals}
+        '''
+        
+    rule:
+        name: f'metric_plots_each_{sig}'
+        input:
+            splats = format_line('data.npz', tier='splat'),
+            signals = format_line('data.npz', tier=sig)
+        output:
+            plots = format_line('metrics.pdf', tier=sig)
+        shell: '''
+        LD_LIBRARY_PATH="" \
+        QT_QPA_PLATFORM=offscreen \
+        wcpy test plot-ssss --output {output.plots} {input.splats} {input.signals}
         '''
 
     checkpoint:
@@ -439,6 +439,9 @@ rule all_metrics:
         expand(format_path(filename='metrics-wp{wplane}.pdf', kind='line', unit='summary', nevent=1),
                det=config['det'], tier=('osp', 'spng'), wplane=config['plane'])
         
+rule all_each_metrics:
+    input:
+        expand_line('metrics.pdf', nevent=[1], tier=('osp', 'spng'))
 
 # def plots_args(w):
 #     'Generate additional args for plots command'
