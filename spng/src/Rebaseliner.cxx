@@ -22,7 +22,13 @@ namespace WireCell::SPNG {
     {
         auto tensor = in->tensor();
 
-        tensor = rebaseline(tensor, m_config.dim, m_config.threshold);
+        tensor = rebaseline_zero(tensor,
+                                 m_config.dim,
+                                 m_config.consequtive_zeros,
+                                 m_config.min_roi_size,
+                                 m_config.shrink_size,
+                                 m_config.remove_small,
+                                 m_config.remove_negative);
 
         return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
     }
