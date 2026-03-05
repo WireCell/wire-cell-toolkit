@@ -5,9 +5,46 @@ import os
 SRC_DIR = workflow.basedir
 
 config.setdefault('nevents', '2')
+config.setdefault('fodder_style', 'mp') #set to dense to run dnnroi-training-dense-only.jsonnet
 # container="/nfs/data/1/calcuttj/dunesw.sif"
 all_theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 )
 all_planes = [0,1,2]
+
+def same_thetaxz_plane_norm(txz, tyy):
+    import numpy as np
+    txz = txz*np.pi/180.
+    tyy = tyy*np.pi/180.
+    ret = np.array([1.,0.,0.])
+    Ry = np.array([
+        [np.cos(txz), 0, np.sin(txz)],
+        [0.,1.,0.],
+        [-np.sin(txz), 0, np.cos(txz)],
+    ])
+    Rx =  np.array([
+        [1., 0., 0.],
+        [0., np.cos(tyy), np.sin(tyy)],
+        [0., -np.sin(tyy), np.cos(tyy)]
+    ])
+
+    return Rx @ (Ry @ ret)
+def xz_y_from_xzu_xzv_hyu(xzu, xzv, tyy=-35.7):
+    import numpy as np
+    vu = same_thetaxz_plane_norm(xzu, tyy)
+    vv = same_thetaxz_plane_norm(xzv, -tyy)
+    v = np.linalg.cross(vu, vv)
+    v /= np.linalg.norm(v)
+
+    y = np.acos(v[1])
+    xz = np.asin(v[0]/np.sin(y))
+    return xz*180./np.pi, y*180./np.pi
+
+high_end_xzu_xzv_deg=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 87])
+high_end_xz_y_deg=(
+    xz_y_from_xzu_xzv_hyu(xzu, xzv)
+    for xzu, xzv in high_end_xzu_xzv_deg
+)
+# for xz, y in high_end_xz_y_deg:
+#     print(xz, y)
 
 rule all_linedepos:
     input:
@@ -23,6 +60,8 @@ rule all_lines_final:
     input:
         expand("sigproc-spng-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90)
 
+
+
 rule linedepos:
     output:
         depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz',
@@ -37,6 +76,27 @@ rule linedepos:
     --angle-coords=wire-plane \
     --theta_xz="{wildcards.txz}*deg" \
     --theta_y="{wildcards.ty}*deg" \
+    --output_depos {output.depos} \
+    --output_meta {output.meta}
+    '''
+
+rule linedepos_xzu_xzv:
+    output:
+        depos='linedepos-pdhd-plane{plane}-txzu{txzu}-txzv{txzv}_wct-depos.npz',
+        meta='linedepos-pdhd-plane{plane}-txzu{txzu}-txzv{txzv}_wct-depos.json',
+    params:
+        offset="--offset '1*m,0*m,0*m'",
+        xz_y = lambda w: xz_y_from_xzu_xzv_hyu(float(w.txzu), float(w.txzv)),
+        
+    shell: '''
+
+    wcpy gen detlinegen \
+    {params.offset} \
+    --detector=pdhd \
+    --plane={wildcards.plane} \
+    --angle-coords=wire-plane \
+    --theta_xz="{params.xz_y[0]}*deg" \
+    --theta_y="{params.xz_y[1]}*deg" \
     --output_depos {output.depos} \
     --output_meta {output.meta}
     '''
@@ -173,14 +233,38 @@ rule spng_sigproc:
         wct-sim-framesource-sigproc.jsonnet
         """
 
+config.setdefault('tpcid', '0')
 rule spng_mpsigproc:
     input:
         "{name}_wct-depos.npz",
     output:
         temp("sigproc-spng-mp-{name}.tar")
+    params:
+        jsonnet='dnnroi-training.jsonnet',
+        tpcid=config['tpcid']
+    shadow: "minimal"
     shell:
         """
-        wire-cell -l stdout -L debug ../../../cfg/spng/dnnroi-training.jsonnet -A "input={input}"
+        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+            -A "tpcid={params.tpcid}"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
+
+rule spng_densesigproc:
+    input:
+        "{name}_wct-depos.npz",
+    output:
+        temp("sigproc-spng-dense-{name}.tar")
+        # "sigproc-spng-dense-{name}.tar"
+    shadow: "minimal"
+    params:
+        jsonnet='dnnroi-training-dense-only.jsonnet'
+    shell:
+        """
+        wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
+            -A "tpcid=0"
         # tar the output files
         tar -cf {output} dnnroi-training-truth.npz \
         dnnroi-training-fodder.npz
@@ -208,3 +292,124 @@ rule convert_spng_mp_to_hdf5:
         tru1="{name}-g4-tru-1.h5"
     script:
         "scripts/convert_to_h5mpSnake.py"
+
+rule high_end_mp_hdf5:
+    input:
+        rec = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5" for xzu, xzv in high_end_xzu_xzv_deg],
+        tru = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5" for xzu, xzv in high_end_xzu_xzv_deg]
+
+
+rule convert_spng_dense_to_hdf5:
+    input:
+        "sigproc-spng-dense-{name}.tar"
+    output:
+        rec="{name}-g4-rec-dense-0.h5",
+        tru="{name}-g4-tru-dense-0.h5",
+    script:
+        "scripts/convert_to_h5denseSnake.py"
+
+rule high_end_dense_hdf5:
+    input:
+        rec = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-dense-0.h5" for xzu, xzv in high_end_xzu_xzv_deg],
+        tru = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-dense-0.h5" for xzu, xzv in high_end_xzu_xzv_deg]
+
+
+config.setdefault('test_input', 'blah')
+config.setdefault('test_tpcs', [1])
+test_tpcs = [int(i) for i in config['test_tpcs']]
+import os
+rule plot_eff_pur:
+    input:
+        [os.path.join(config['test_input'], f'test_line_txzu{txzu}-txzv{txzv}.pt') for txzu, txzv in high_end_xzu_xzv_deg]
+    output:
+        'all_eff_pur.png'
+    run:
+        import torch
+        import matplotlib.pyplot as plt
+        all_effs = []
+        all_purs = []
+
+        xlabels = [f'{u},{v}' for u,v in high_end_xzu_xzv_deg]
+        xpos = [i for i in range(len(xlabels))]
+
+        ranges = [[0,800], [800,1600], [1600,2560]]
+        for f in input:
+            t = torch.load(f)
+            labels = t['labels'][0].detach().cpu()
+            y = t['y'][0].detach().cpu()
+
+            for plane in test_tpcs:
+                this_range = ranges[plane]
+                real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+                eff = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/labels[this_range[0]:this_range[1]].sum()
+                all_effs.append(eff)
+
+                pur = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/(y[this_range[0]:this_range[1]] > .5).sum()
+                all_purs.append(pur)
+        print(all_effs)
+        print(all_purs)
+    
+        plt.subplot(2, 1, 1)
+        plt.plot(all_effs, label='Efficiency')
+        plt.xticks(xpos, xlabels)
+        plt.ylim(0., 1.5)
+        plt.subplot(2, 1, 2)
+        plt.plot(all_purs)
+        plt.xticks(xpos, xlabels, label='Purity')
+        plt.ylim(0., 1.5)
+        f = output[0]
+        print(type(f))
+        print(f)
+        plt.savefig(f)
+
+
+def get_input(wildcards):
+    return os.path.join(config['test_input'], f'test_line_txzu{wildcards.txzu}-txzv{wildcards.txzv}.pt') 
+
+
+rule plot_feat_y_labels:
+    input:
+        # 'test_line_txzu82-txzv82.pt'
+        get_input
+    output:
+        temp('line-display-txzu{txzu}-txzv{txzv}.pickle')
+    run:
+        import torch
+        import matplotlib
+        import matplotlib.pyplot as plt
+        import warnings
+
+        # 1. Force TrueType fonts (Type 42) instead of Type 3
+        matplotlib.rcParams['pdf.fonttype'] = 42
+        matplotlib.rcParams['ps.fonttype'] = 42
+
+        # 2. Aggressively suppress the warning that triggers the crash
+        # This prevents the 'warn_on_missing_glyph' function from ever running
+        warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
+        # 3. Use a standard font that is widely available on Linux
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+        t = torch.load(input[0])
+        feat = t['feat']; y = t['y']; labels = t['labels']
+        fig, axs = plt.subplots(3,1)
+        for i, f in enumerate([feat, y >.5, labels]):
+            im = axs[i].imshow(f[0].detach().cpu(), aspect='auto'); plt.colorbar(im)
+        # plt.title(f'XZu:{wildcards.txzu}, XZv:{wildcards.txzv}')
+
+        f = output[0]
+        # print(f)
+        # plt.savefig(f)
+        import pickle
+        pickle.dump(fig, open(f, 'wb'))
+rule plot_feat_y_labels_all:
+    input:
+        [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in high_end_xzu_xzv_deg]
+    output:
+        'line-displays.tar'
+    shell:
+        'tar -cf {output} {input}'
+
+rule all_plots:
+    input:
+        tar='line-displays.tar',
+        effpur='all_eff_pur.png'
