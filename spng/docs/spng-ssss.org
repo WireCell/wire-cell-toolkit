@@ -1,44 +1,87 @@
-#+title The spng-ssss Snakemake workflow script
+#+title The spng-ssss 🐍 Snakemake workflow script
 
 * Overview
 
-Basic DAG:
+The [[file:../test/spng-ssss][spng-ssss]] file provides a Snakemake workflow script that will exercise
+various pipelines involving SPNG.  The weird name is historical and somewhat
+silly standing for simple sim sig smeared splat something something.  That it is
+now in the form of a Snakemake file is extra fitting/silly.
+
+* Getting started
 
 #+begin_example
- kine -> depos -> {splat, {adc -> {osp, spng}} -> metrics -> plots
+$ ./spng/test/spng-ssss help
+Main Entry Points (Suggested Commands):
+  ...
+Rule Output Patterns:
+  ...
 #+end_example
 
-Two sources of kinematics:
+You can replace =help= with a concrete output target file path or one of the =all_*=
+targets to get some hard-wired output target file path expansions.
 
-- tracks :: cosmic muon kinematics sent through Geant4.
-- lines :: ideal MIP lines at fixed angles for SPDIR metrics
+* Structure of workflow output
 
-These also name sub-directories in the output directory.
-
-* Basic usage
+All output targets follow a common file path naming scheme under the output directory.
 
 #+begin_example
-./spng/test/spng-ssss all
+{det}/{kind}/{tier}/{unit}/{nevent}/*
 #+end_example
 
-There are many configuration parameters.
+- det :: the name of a supported detector (fixme: so far just "pdhd")
+- kind :: a high-level context name describing what is produced.
+  - *line* uses ideal line segments
+  - *track* uses cosmic muon simulation 
+- tier :: defines the nature of the file content.  Not all content is provided for all *kind*.
+  - Some tiers: kine, step, depo, splat, adc, osp, spng, fodder
+- unit :: further categorizes the nature of the file content.  It's syntax depends on kind
+  - ={seed}= is the unit for most output from *track* kind but *fodder* holds dnnroi training files.
+  - =p{plane}-txz{xzangle}-ty{yangle}= is the unit for most *line* kind and is a per track angle and wire plane label but *summary* holds results from a fold over the tracks.
+- nevent :: is the number of "events" in the output files.  This matters only for *track* kind as *line* kind is hard-wired to have one "event" (line) per file.  For *line* it is best to use ~nevent=1~ to avoid confusion.
 
-Default container requires loading from CVMFS and each larsoft job to do lengthy
-UPS source/setup.  You can bake these into a local container and override:
+
+The leaf files take general names.  You can find these:
+
+- =data.{root,npz}= gives the primary product for most leaves.
+- =training-{truth,fodder}.hdf= is special case for the *fodder* tier of *track*.
+- ={lar,wct}.log= are log files from larsoft / wire-cell jobs.
+- =metrics.{pdf,json}= give per-line and summary SPDIR metric data and plots.
+
+
+The =spng-ssss= workflow implements these basic sub-DAGs which we can label:
+
+- cosmics :: fills *track* kind with files related to cosmic simulation.
+- training :: fills *track* kind with files for training DNNROI.
+- spdir :: fills *line* kind with files for SPDIR.
+
+
+* Configuration
+
+There are two types of configuration parameters:
+
+- implicit :: scalar values to set underlying parameters such as *device* and *container*.
+
+- expansion :: list values over which expansion in =all_*= rules such as det, seeds, nevent, plane, line angles.  
+
+Implicit parameters are not reflected in file path names. However, they are
+saved to a =config.txt= file so changing them will lead to rules being rerun.
+
+Changing expansion parameters should not (fixme: check) cause rule rerunning.  A
+novel expansion may reuse existing upstream results.
+
+** Container
+
+The default container is loaded from CVMFS and each larsoft job will do a
+lengthy UPS source/setup.  You can bake these into a local container for some
+speed up and provide that container with, eg:
 
 #+begin_example
 --config container=/nfs/data/1/calcuttj/dunesw.sif
 #+end_example
 
-* Detailed example targets
+* TODO:
 
-Quick test to make depo flux splat file.
+- [ ] Add PDVD support.  Mostly requires work in =spng/cfg/spng/detconfs/=
+- [ ] Extend the "training" subgraph to include running =wcpy dnn= to train DNNROI and have the resulting model be an input to "cosmics" and "spdir" subgraphs.  This dependency should be added in a Snakemake "branch" that first tries to download the named model, eg from huggingface, before attempting to run training.
+- [ ] Extend the "cosmics" subgraph to include more metrics and plots.  To start, the "spdir" per-event =metrics.json= files can be used to plot distributions of eff/bias/res.  These plots should be added to `wcpy`. 
 
-#+begin_example
-./spng/test/spng-ssss  lines/splat/p2-txz84-ty90/data.npz 
-#+end_example
-
-* Extending to new detectors
-
-- [ ] Modify/add the =spdir.offset= option to place line MIP tracks in TPC 0.
-- [ ] ...

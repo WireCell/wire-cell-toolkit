@@ -474,3 +474,27 @@ rule training_fodder:
     wire-cell -l {output.log} -L debug -c {params.cfg} -A input={input} -A 'outpat={params.outpat}'
     """
     
+rule help:
+    """Show available targets and rule patterns."""
+    run:
+        print("\n" + "="*40)
+        print("SNAKEMAKE WORKFLOW SUMMARY")
+        print("="*40 + "\n")
+
+        # 1. Emphasize user entry points (rules starting with 'all_')
+        print("Main Entry Points (Suggested Commands):")
+        all_rules = [r.name for r in workflow.rules if r.name.startswith("all")]
+        for name in sorted(all_rules):
+            print(f"  * snakemake {name}")
+        
+        # 2. List all rules and their output patterns
+        print("\nRule Output Patterns:")
+        for r in sorted(workflow.rules, key=lambda x: x.name):
+            if r.output:
+                # Join multiple outputs if they exist
+                outputs = ", ".join(str(o) for o in r.output)
+                print(f"  {r.name:25} -> {outputs}")
+            else:
+                print(f"  {r.name:25} -> (no file output)")
+        
+        print("\n" + "="*40 + "\n")
