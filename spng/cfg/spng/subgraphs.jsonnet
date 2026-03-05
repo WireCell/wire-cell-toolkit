@@ -767,6 +767,17 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         pg.intern(innodes=[sg1], outnodes=[sg5],
                   centernodes=[sg1_connection, sg23_connection, sg4_connection]),
 
+
+    /// TODO FILL OUT DESC
+    /// Input is TDM frame tensor set.  Output is the 3-feature tensors for input to dnnroi training.
+    ///
+    dnnroi_dense_training_preface(rebin=4, extra_name="")::
+        local sg1 = $.frame_decon(extra_name=extra_name);
+        local sg4 =  $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name);
+        pg.shuntline(sg1, sg4),
+        // pg.intern(innodes=[sg1], outnodes=[sg4],
+        //           centernodes=[sg1_connection, sg23_connection, sg4_connection]),
+
     /// Wrap each of source's oports with an "expand" operation on tensor
     /// dimension dim of size multiplicity.
     expand_dimension(source, dim=-3, multiplicity=3, operation="unbind", extra_name="")::
