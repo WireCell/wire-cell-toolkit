@@ -1,4 +1,4 @@
-#+title The spng-ssss 🐍 Snakemake workflow script
+#+title: The spng-ssss 🐍 Snakemake workflow script
 
 * Overview
 
@@ -16,6 +16,8 @@ Main Entry Points (Suggested Commands):
 Rule Output Patterns:
   ...
 #+end_example
+
+See full, possibly outdated output at end of this doc.
 
 You can replace =help= with a concrete output target file path or one of the =all_*=
 targets to get some hard-wired output target file path expansions.
@@ -85,3 +87,51 @@ speed up and provide that container with, eg:
 - [ ] Extend the "training" subgraph to include running =wcpy dnn= to train DNNROI and have the resulting model be an input to "cosmics" and "spdir" subgraphs.  This dependency should be added in a Snakemake "branch" that first tries to download the named model, eg from huggingface, before attempting to run training.
 - [ ] Extend the "cosmics" subgraph to include more metrics and plots.  To start, the "spdir" per-event =metrics.json= files can be used to plot distributions of eff/bias/res.  These plots should be added to `wcpy`. 
 
+* Appendix: help output example
+
+
+#+begin_example
+$ ./spng/test/spng-ssss help
+...
+========================================
+SNAKEMAKE WORKFLOW SUMMARY
+========================================
+
+Main Entry Points (Suggested Commands):
+  * snakemake all_bake_implicit
+  * snakemake all_each_metrics
+  * snakemake all_line_depo
+  * snakemake all_metrics
+
+Rule Output Patterns:
+  all_bake_implicit         -> (no file output)
+  all_each_metrics          -> (no file output)
+  all_line_depo             -> (no file output)
+  all_metrics               -> (no file output)
+  bake_implicit             -> {det}/{kind}/{tier}/{unit}/{nevent}/config.txt
+  collect_metrics_osp       -> {det}/line/osp/summary/{nevent}/metrics.done
+  collect_metrics_spng      -> {det}/line/spng/summary/{nevent}/metrics.done
+  help                      -> (no file output)
+  line_adc_to_osp           -> {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  line_adc_to_spng          -> {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  line_depo                 -> {det}/line/depo/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/depo/p{plane}-txz{txz}-ty{ty}/{nevent}/meta.json
+  line_depo_to_adc          -> {det}/line/adc/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/adc/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  line_depo_to_splat        -> {det}/line/splat/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/splat/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  metric_plots_each_osp     -> {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.pdf
+  metric_plots_each_spng    -> {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.pdf
+  metric_plots_osp          -> {det}/line/osp/summary/{nevent}/metrics-wp{wplane}.pdf
+  metric_plots_spng         -> {det}/line/spng/summary/{nevent}/metrics-wp{wplane}.pdf
+  metrics_osp               -> {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.json
+  metrics_spng              -> {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.json
+  track_adc_to_osp          -> {det}/track/osp/{seed}/{nevent}/data.npz, {det}/track/osp/{seed}/{nevent}/wct.log
+  track_adc_to_spng         -> {det}/track/spng/{seed}/{nevent}/data.npz, {det}/track/spng/{seed}/{nevent}/wct.log
+  track_depo                -> {det}/track/depo/{seed}/{nevent}/data.npz, {det}/track/depo/{seed}/{nevent}/lar.log
+  track_depo_to_adc         -> {det}/track/adc/{seed}/{nevent}/data.npz, {det}/track/adc/{seed}/{nevent}/wct.log
+  track_depo_to_splat       -> {det}/track/splat/{seed}/{nevent}/data.npz, {det}/track/splat/{seed}/{nevent}/wct.log
+  track_kine                -> {det}/track/kine/{seed}/{nevent}/data.root, {det}/track/kine/{seed}/{nevent}/lar.log
+  track_step                -> {det}/track/step/{seed}/{nevent}/data.root, {det}/track/step/{seed}/{nevent}/lar.log
+  training_fodder           -> {det}/track/fodder/{seed,1[0-9]{5}}/{nevent}/training-fodder.hdf, {det}/track/fodder/{seed,1[0-9]{5}}/{nevent}/training-truth.hdf, {det}/track/fodder/{seed,1[0-9]{5}}/{nevent}/wct.log
+
+========================================
+...
+#+end_example
