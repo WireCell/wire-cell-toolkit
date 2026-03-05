@@ -60,7 +60,7 @@ local detconf = import "spng/detconf.jsonnet";
 // The only required TLA is "input".  
 //
 // The outpat must include these format variables:
-// - %(tier)s will be filled with the label "input" or "truth".
+// - %(tier)s will be filled with the label "fodder" or "truth".
 //
 // Notes:
 //

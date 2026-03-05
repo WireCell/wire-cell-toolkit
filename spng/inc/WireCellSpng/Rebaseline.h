@@ -23,11 +23,21 @@ namespace WireCell::SPNG {
      * @return The rebaselined tensor.
      */
     torch::Tensor rebaseline(const torch::Tensor& tensor,
-                             int64_t dim = -1, float threshold = 0.0f,
+                             int64_t dim = -1,
+                             float threshold = 0.0f,
                              int64_t min_roi_size = 1,
                              int64_t expand_size = 0,
                              bool remove_small = false,
                              bool remove_negative = false);
+
+
+    torch::Tensor rebaseline_zero(const torch::Tensor& tensor,
+                                  int64_t dim = -1,
+                                  int64_t consequtive_zeros = 2,
+                                  int64_t min_roi_size = 1,
+                                  int64_t shrink_size = 0,
+                                  bool remove_small = false,
+                                  bool remove_negative = false);
 
 }
 

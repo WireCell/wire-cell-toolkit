@@ -41,6 +41,8 @@ function(input,
     local controls = control_js(device=device, verbosity=wc.intify(verbosity));
     local det = detector.subset(detconf[detname], [wc.numberify(tpcid)]);
 
+    // Make a Graphviz graph to help understand what SPNGType name and what
+    // string to match against the instance name.
     local dump_finders = {
         SPNGThreshold: {
             "cross": "_cross_",
@@ -54,12 +56,19 @@ function(input,
             "looself": "_dnnroi",
             "wiener": "_wiener",
             "decon": "_group_",
+            "gauss": "_gauss",
         },
         SPNGCellViews: {
             "cellviews": "tpc"
         },
         SPNGResampler: {
             "wresample": "_tight"
+        },
+        SPNGReduce: {
+            "applyroi": "_applyroi",
+        },
+        SPNGRebaseliner: {
+            "rebaseline": "_applyroi",
         },
     };
     local is_set(itype) = std.get({'SPNGCellViews': true}, itype, false);

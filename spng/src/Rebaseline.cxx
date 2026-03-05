@@ -3,18 +3,6 @@
 
 namespace WireCell::SPNG {
 
-    /**
-     * @brief Performs local baseline subtraction on 1D fragments > threshold.
-     *
-     * The function identifies contiguous 1D fragments along the specified dimension (dim) 
-     * where values are greater than the threshold. It then subtracts a linear baseline 
-     * model connecting the fragment's first and last sample values.
-     *
-     * @param tensor The input tensor.
-     * @param dim The dimension along which to operate (default: last dimension, -1).
-     * @param threshold The value above which a fragment is considered active.
-     * @return The rebaselined tensor.
-     */
     torch::Tensor rebaseline( const torch::Tensor& tensor, 
                               int64_t dim, float threshold,
                               int64_t min_roi_size,
@@ -145,5 +133,109 @@ namespace WireCell::SPNG {
         // Reshape back to the permuted shape, and then permute back to the original shape
         return batch_view.view(permuted_output.sizes()).permute(reverse_permutation).contiguous();
     }
+
+
+    torch::Tensor rebaseline_zero(const torch::Tensor& tensor,
+                                  int64_t dim,
+                                  int64_t consequtive_zeros,
+                                  int64_t min_roi_size,
+                                  int64_t shrink_size,
+                                  bool remove_small,
+                                  bool remove_negative)
+    {
+        torch::Tensor output = tensor.clone();
+        dim = modulo(dim, output.dim());
+
+        std::vector<int64_t> permutation;
+        for (int64_t d = 0; d < output.dim(); ++d) {
+            if (d != dim) permutation.push_back(d);
+        }
+        permutation.push_back(dim);
+        torch::Tensor permuted_output = output.permute(permutation).contiguous();
+
+        const int64_t nticks = output.size(dim);
+        const int64_t nbatches = permuted_output.numel() / nticks;
+        torch::Tensor batch_view = permuted_output.view({nbatches, nticks});
+
+        for (int64_t i = 0; i < nbatches; ++i) {
+            torch::Tensor wave = batch_view[i];
+
+            // Mark separator positions: runs of exactly-zero values of length >= consequtive_zeros.
+            // These form the boundaries between ROIs (not part of any ROI).
+            std::vector<bool> is_sep(nticks, false);
+            {
+                int64_t k = 0;
+                while (k < nticks) {
+                    if (wave[k].item<float>() == 0.0f) {
+                        int64_t run_start = k;
+                        while (k < nticks && wave[k].item<float>() == 0.0f) {
+                            ++k;
+                        }
+                        if (k - run_start >= consequtive_zeros) {
+                            for (int64_t m = run_start; m < k; ++m) {
+                                is_sep[m] = true;
+                            }
+                        }
+                    } else {
+                        ++k;
+                    }
+                }
+            }
+
+            // Collect ROIs as inclusive (start, end) index pairs.
+            // Non-separator positions form ROIs; tensor edges act as implicit boundaries.
+            std::vector<std::pair<int64_t,int64_t>> rois;
+            bool in_roi = false;
+            int64_t roi_start = -1;
+            for (int64_t k = 0; k < nticks; ++k) {
+                if (!is_sep[k]) {
+                    if (!in_roi) { roi_start = k; in_roi = true; }
+                } else {
+                    if (in_roi) { rois.push_back({roi_start, k-1}); in_roi = false; }
+                }
+            }
+            if (in_roi) { rois.push_back({roi_start, nticks-1}); }
+
+            for (auto [start_idx, end_idx] : rois) {
+                // Shrink the ROI inward from both ends.
+                start_idx += shrink_size;
+                end_idx   -= shrink_size;
+
+                // Skip ROIs that collapsed under shrinking.
+                if (start_idx > end_idx) continue;
+
+                // Handle small ROIs (same logic as rebaseline()).
+                if (end_idx - start_idx <= min_roi_size - 1) {
+                    if (remove_small) {
+                        const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
+                        wave.index_put_({roi}, 0.0);
+                    }
+                    continue;
+                }
+
+                // Build a linear model anchored at the first/last sample of the ROI
+                // and subtract it from the ROI region.
+                float start_val = wave[start_idx].item<float>();
+                float end_val   = wave[end_idx].item<float>();
+                const float length = static_cast<float>(end_idx - start_idx);
+                const float slope  = (end_val - start_val) / length;
+                torch::Tensor baseline = start_val + slope * torch::arange(0, end_idx - start_idx + 1,
+                                                                            wave.options());
+                const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
+                wave.index_put_({roi}, wave.index({roi}) - baseline);
+            }
+        }
+
+        if (remove_negative) {
+            output.clamp_min_(0.0);
+        }
+
+        std::vector<int64_t> reverse_permutation(output.dim());
+        for (int64_t k = 0; k < output.dim(); ++k) {
+            reverse_permutation[permutation[k]] = k;
+        }
+        return batch_view.view(permuted_output.sizes()).permute(reverse_permutation).contiguous();
+    }
+
 }
 

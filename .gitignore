@@ -91,3 +91,8 @@ data
 *.csv
 .fuse*
 .aider*
+*.hdf5
+*.zst
+*.pt
+*.h5
+*.err

@@ -1,44 +1,137 @@
-#+title The spng-ssss Snakemake workflow script
+#+title: The spng-ssss 🐍 Snakemake workflow script
 
 * Overview
 
-Basic DAG:
+The [[file:../test/spng-ssss][spng-ssss]] file provides a Snakemake workflow script that will exercise
+various pipelines involving SPNG.  The weird name is historical and somewhat
+silly standing for simple sim sig smeared splat something something.  That it is
+now in the form of a Snakemake file is extra fitting/silly.
+
+* Getting started
 
 #+begin_example
- kine -> depos -> {splat, {adc -> {osp, spng}} -> metrics -> plots
+$ ./spng/test/spng-ssss help
+Main Entry Points (Suggested Commands):
+  ...
+Rule Output Patterns:
+  ...
 #+end_example
 
-Two sources of kinematics:
+See full, possibly outdated output at end of this doc.
 
-- tracks :: cosmic muon kinematics sent through Geant4.
-- lines :: ideal MIP lines at fixed angles for SPDIR metrics
+You can replace =help= with a concrete output target file path or one of the =all_*=
+targets to get some hard-wired output target file path expansions.
 
-These also name sub-directories in the output directory.
+* Structure of workflow output
 
-* Basic usage
+All output targets follow a common file path naming scheme under the output directory.
 
 #+begin_example
-./spng/test/spng-ssss all
+{det}/{kind}/{tier}/{unit}/{nevent}/*
 #+end_example
 
-There are many configuration parameters.
+- det :: the name of a supported detector (fixme: so far just "pdhd")
+- kind :: a high-level context name describing what is produced.
+  - *line* uses ideal line segments
+  - *track* uses cosmic muon simulation 
+- tier :: defines the nature of the file content.  Not all content is provided for all *kind*.
+  - Some tiers: kine, step, depo, splat, adc, osp, spng, fodder
+- unit :: further categorizes the nature of the file content.  It's syntax depends on kind
+  - ={seed}= is the unit for most output from *track* kind but *fodder* holds dnnroi training files.
+  - =p{plane}-txz{xzangle}-ty{yangle}= is the unit for most *line* kind and is a per track angle and wire plane label but *summary* holds results from a fold over the tracks.
+- nevent :: is the number of "events" in the output files.  This matters only for *track* kind as *line* kind is hard-wired to have one "event" (line) per file.  For *line* it is best to use ~nevent=1~ to avoid confusion.
 
-Default container requires loading from CVMFS and each larsoft job to do lengthy
-UPS source/setup.  You can bake these into a local container and override:
+
+The leaf files take general names.  You can find these:
+
+- =data.{root,npz}= gives the primary product for most leaves.
+- =training-{truth,fodder}.hdf= is special case for the *fodder* tier of *track*.
+- ={lar,wct}.log= are log files from larsoft / wire-cell jobs.
+- =metrics.{pdf,json}= give per-line and summary SPDIR metric data and plots.
+
+
+The =spng-ssss= workflow implements these basic sub-DAGs which we can label:
+
+- cosmics :: fills *track* kind with files related to cosmic simulation.
+- training :: fills *track* kind with files for training DNNROI.
+- spdir :: fills *line* kind with files for SPDIR.
+
+
+* Configuration
+
+There are two types of configuration parameters:
+
+- implicit :: scalar values to set underlying parameters such as *device* and *container*.
+
+- expansion :: list values over which expansion in =all_*= rules such as det, seeds, nevent, plane, line angles.  
+
+Implicit parameters are not reflected in file path names. However, they are
+saved to a =config.txt= file so changing them will lead to rules being rerun.
+
+Changing expansion parameters should not (fixme: check) cause rule rerunning.  A
+novel expansion may reuse existing upstream results.
+
+** Container
+
+The default container is loaded from CVMFS and each larsoft job will do a
+lengthy UPS source/setup.  You can bake these into a local container for some
+speed up and provide that container with, eg:
 
 #+begin_example
 --config container=/nfs/data/1/calcuttj/dunesw.sif
 #+end_example
 
-* Detailed example targets
+* TODO:
 
-Quick test to make depo flux splat file.
+- [ ] Add PDVD support.  Mostly requires work in =spng/cfg/spng/detconfs/=
+- [ ] Extend the "training" subgraph to include running =wcpy dnn= to train DNNROI and have the resulting model be an input to "cosmics" and "spdir" subgraphs.  This dependency should be added in a Snakemake "branch" that first tries to download the named model, eg from huggingface, before attempting to run training.
+- [ ] Extend the "cosmics" subgraph to include more metrics and plots.  To start, the "spdir" per-event =metrics.json= files can be used to plot distributions of eff/bias/res.  These plots should be added to `wcpy`. 
+
+* Appendix: help output example
+
 
 #+begin_example
-./spng/test/spng-ssss  lines/splat/p2-txz84-ty90/data.npz 
+$ ./spng/test/spng-ssss help
+...
+========================================
+SNAKEMAKE WORKFLOW SUMMARY
+========================================
+
+Main Entry Points (Suggested Commands):
+  * snakemake all_bake_implicit
+  * snakemake all_each_metrics
+  * snakemake all_line_depo
+  * snakemake all_metrics
+
+Rule Output Patterns:
+  all_bake_implicit         -> (no file output)
+  all_each_metrics          -> (no file output)
+  all_line_depo             -> (no file output)
+  all_metrics               -> (no file output)
+  bake_implicit             -> {det}/{kind}/{tier}/{unit}/{nevent}/config.txt
+  collect_metrics_osp       -> {det}/line/osp/summary/{nevent}/metrics.done
+  collect_metrics_spng      -> {det}/line/spng/summary/{nevent}/metrics.done
+  help                      -> (no file output)
+  line_adc_to_osp           -> {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  line_adc_to_spng          -> {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  line_depo                 -> {det}/line/depo/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/depo/p{plane}-txz{txz}-ty{ty}/{nevent}/meta.json
+  line_depo_to_adc          -> {det}/line/adc/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/adc/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  line_depo_to_splat        -> {det}/line/splat/p{plane}-txz{txz}-ty{ty}/{nevent}/data.npz, {det}/line/splat/p{plane}-txz{txz}-ty{ty}/{nevent}/wct.log
+  metric_plots_each_osp     -> {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.pdf
+  metric_plots_each_spng    -> {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.pdf
+  metric_plots_osp          -> {det}/line/osp/summary/{nevent}/metrics-wp{wplane}.pdf
+  metric_plots_spng         -> {det}/line/spng/summary/{nevent}/metrics-wp{wplane}.pdf
+  metrics_osp               -> {det}/line/osp/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.json
+  metrics_spng              -> {det}/line/spng/p{plane}-txz{txz}-ty{ty}/{nevent}/metrics.json
+  track_adc_to_osp          -> {det}/track/osp/{seed}/{nevent}/data.npz, {det}/track/osp/{seed}/{nevent}/wct.log
+  track_adc_to_spng         -> {det}/track/spng/{seed}/{nevent}/data.npz, {det}/track/spng/{seed}/{nevent}/wct.log
+  track_depo                -> {det}/track/depo/{seed}/{nevent}/data.npz, {det}/track/depo/{seed}/{nevent}/lar.log
+  track_depo_to_adc         -> {det}/track/adc/{seed}/{nevent}/data.npz, {det}/track/adc/{seed}/{nevent}/wct.log
+  track_depo_to_splat       -> {det}/track/splat/{seed}/{nevent}/data.npz, {det}/track/splat/{seed}/{nevent}/wct.log
+  track_kine                -> {det}/track/kine/{seed}/{nevent}/data.root, {det}/track/kine/{seed}/{nevent}/lar.log
+  track_step                -> {det}/track/step/{seed}/{nevent}/data.root, {det}/track/step/{seed}/{nevent}/lar.log
+  training_fodder           -> {det}/track/fodder/{seed,1[0-9]{5}}/{nevent}/training-fodder.hdf, {det}/track/fodder/{seed,1[0-9]{5}}/{nevent}/training-truth.hdf, {det}/track/fodder/{seed,1[0-9]{5}}/{nevent}/wct.log
+
+========================================
+...
 #+end_example
-
-* Extending to new detectors
-
-- [ ] Modify/add the =spdir.offset= option to place line MIP tracks in TPC 0.
-- [ ] ...
