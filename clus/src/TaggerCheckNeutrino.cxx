@@ -69,13 +69,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         }
     }
 
-    // Debug dump (only when env var is set)
-    if (main_cluster) {
-        if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
-            DebugIO::dump_init_first_segment_inputs(
-                dump_path, *main_cluster, main_cluster, true, *m_track_fitter);
-        }
-    }
+    // // Debug dump (only when env var is set)
+    // if (main_cluster) {
+    //     if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
+    //         DebugIO::dump_init_first_segment_inputs(
+    //             dump_path, *main_cluster, main_cluster, true, *m_track_fitter);
+    //     }
+    // }
 
     // Create PRGraph and first segment
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();

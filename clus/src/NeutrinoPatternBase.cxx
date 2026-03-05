@@ -1,9 +1,16 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellUtil/Logging.h"
 #include <Eigen/Dense>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
+
+// Named logger for this file.  At runtime set its level independently:
+//   Log::set_level("debug", "clus.NeutrinoPattern");   // this file only
+//   Log::set_level("debug", "clus");                    // whole clus subsystem
+// At build time it is compiled away entirely when --with-spdlog-active-level > debug.
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 std::set<VertexPtr> PatternAlgorithms::find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster)
 {
@@ -173,16 +180,27 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
 
     // Add the two boundary points as additional extreme point groups
     Facade::geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
-                                y_coords[boundary_indices.first], 
+                                y_coords[boundary_indices.first],  
                                 z_coords[boundary_indices.first]);
     Facade::geo_point_t boundary_point_second(x_coords[boundary_indices.second], 
                                 y_coords[boundary_indices.second], 
                                 z_coords[boundary_indices.second]);
     Facade::geo_point_t first_pt = boundary_point_first;
     Facade::geo_point_t second_pt = boundary_point_second;
-    
+
+    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: raw boundary pts  A({:.2f},{:.2f},{:.2f})  B({:.2f},{:.2f},{:.2f})  flag_back_search={}",
+                        first_pt.x(), first_pt.y(), first_pt.z(),
+                        second_pt.x(), second_pt.y(), second_pt.z(),
+                        flag_back_search);
+
     // Determine the starting point based on whether this is the main cluster or not
-    if (cluster.get_flag(Facade::Flags::main_cluster)) {
+    const bool is_main_flag = cluster.get_flag(Facade::Flags::main_cluster);
+    const bool is_main_ptr  = (&cluster == main_cluster);
+    if (is_main_flag != is_main_ptr) {
+        SPDLOG_LOGGER_WARN(s_log, "init_first_segment: main_cluster flag ({}) disagrees with pointer comparison ({}); "
+                           "using pointer comparison as authoritative", is_main_flag, is_main_ptr);
+    }
+    if (is_main_ptr) {
         // Main cluster: start from downstream (or upstream if flag_back_search)
         if (flag_back_search) {
             // Start from high z (upstream/backward)
@@ -195,6 +213,8 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
                 std::swap(first_pt, second_pt);
             }
         }
+        SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: main cluster, flag_back_search={} -> start({:.2f},{:.2f},{:.2f})",
+                            flag_back_search, first_pt.x(), first_pt.y(), first_pt.z());
     } else if (main_cluster) {
         // Non-main cluster: start from the point closest to main cluster
         // Find closest distances to main cluster's Steiner point cloud
@@ -209,6 +229,16 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
             if (dis2 < dis1) {
                 std::swap(first_pt, second_pt);
             }
+            SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: non-main cluster, dis_A={:.2f} dis_B={:.2f} -> start({:.2f},{:.2f},{:.2f})",
+                                dis1, dis2, first_pt.x(), first_pt.y(), first_pt.z());
+        }
+    } else {
+        // main_cluster is nullptr and this is not the main cluster:
+        // ordering relative to main is undefined; apply ascending-z as a deterministic fallback
+        SPDLOG_LOGGER_WARN(s_log, "init_first_segment: main_cluster is nullptr for a non-main cluster; "
+                           "point ordering is undefined, falling back to ascending-z order");
+        if (first_pt.z() > second_pt.z()) {
+            std::swap(first_pt, second_pt);
         }
     }
     
