@@ -53,12 +53,14 @@ function(input,
          rebin=4,
          scale=4000.0,
          tpcid=3,
+         /// U,V,W set to 1 if it has mp2/mp3 produced.
+         crossed_views=[1,1,0], //TLA Code, not tla str --> provide via "--tla-code"
          dump="",
          gzip=1,
          verbosity=0)
 
-    /// U,V,W set to 1 if it has mp2/mp3 produced.
-    local crossed_views = [1,1,0];
+    
+    local cross_view_ids = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
     local ncrossed = wc.sum(crossed_views);
 
     # Assure numbers
@@ -157,7 +159,7 @@ function(input,
                                  % {view:view, feat:feat.value},
             }
         }, nin=1, nout=1)
-        for view in [0,1]
+        for view in cross_view_ids
         for feat in wc.enumerate(["dense", "mp2", "mp3"])
     ]);
 

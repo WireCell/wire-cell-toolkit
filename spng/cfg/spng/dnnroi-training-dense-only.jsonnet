@@ -80,10 +80,6 @@ function(input,
          gzip=1,
          verbosity=0)
 
-    /// U,V,W set to 1 if it has mp2/mp3 produced.
-    local crossed_views = [1,1,0];
-    local ncrossed = wc.sum(crossed_views);
-
     # Assure numbers
     local irebin = wc.numberify(rebin);
     local fscale = wc.numberify(scale);
