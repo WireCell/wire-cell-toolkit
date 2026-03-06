@@ -256,6 +256,13 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         remove_vertex(graph, v2);
         return nullptr;
     }
+    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: Dijkstra path  npts={}", seg->wcpts().size());
+    for (size_t i = 0; i < seg->wcpts().size(); ++i) {
+        SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
+                            seg->wcpts()[i].point.x(), seg->wcpts()[i].point.y(), seg->wcpts()[i].point.z());
+    }
+
+
 
     // // Create Segment using the vertices to derive a path 
     // auto path_points = do_rough_path(cluster, first_pt, second_pt);
@@ -276,7 +283,12 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     const auto& pw_vec = track_fitter.get_pw();
     const auto& pt_vec = track_fitter.get_pt();
     const auto& chi2_vec = track_fitter.get_reduced_chi2();
-    
+    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: fitted path     npts={}", fine_path.size());
+    for (size_t i = 0; i < fine_path.size(); ++i) {
+        SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
+                            fine_path[i].first.x(), fine_path[i].first.y(), fine_path[i].first.z());
+    }
+
     if (fine_path.size()>1) {
         v1->fit().point = fine_path.front().first;
         if (!dQ_vec.empty()) v1->fit().dQ = dQ_vec.front();
