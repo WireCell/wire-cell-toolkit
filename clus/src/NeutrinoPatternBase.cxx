@@ -2,6 +2,7 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellUtil/Logging.h"
 #include <Eigen/Dense>
+#include <limits>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -11,6 +12,9 @@ using namespace WireCell::Clus;
 //   Log::set_level("debug", "clus");                    // whole clus subsystem
 // At build time it is compiled away entirely when --with-spdlog-active-level > debug.
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
+// Sentinel returned by proto_extend_point when no steiner point can be found.
+static constexpr size_t INVALID_STEINER_INDEX = std::numeric_limits<size_t>::max();
 
 std::set<VertexPtr> PatternAlgorithms::find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster)
 {
@@ -348,7 +352,7 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     // Find closest point in steiner point cloud
     auto curr_knn_results = cluster.kd_steiner_knn(1, p, "steiner_pc");
     if (curr_knn_results.empty()) {
-        return std::make_pair(p, -1); // No steiner point found ...
+        return std::make_pair(p, INVALID_STEINER_INDEX); // No steiner point found
     }
     
     size_t curr_index = curr_knn_results[0].first;
@@ -388,7 +392,7 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
                         flag_continue = true;
                         curr_wcp = next_wcp;
                         curr_index = next_index;
-                        dir = dir2 + dir * 5.0 * units::cm; // momentum trick
+                        dir = dir2.norm() + dir * 5.0;  // both terms are now dimensionless
                         dir = dir / dir.magnitude();
                         break;
                     }
@@ -410,16 +414,16 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
             if (mag1 != 0) {
                 double angle = std::acos(dir1.dot(dir) / mag1) / 3.1415926 * 180.0;
                 if (angle < 17.5) {
-                    flag_continue = true;
-                    curr_wcp = next_wcp;
-                    // For regular point cloud, we need to find it in steiner cloud again
-                    auto updated_knn = cluster.kd_steiner_knn(1, curr_wcp, "steiner_pc");
+                    auto updated_knn = cluster.kd_steiner_knn(1, next_wcp, "steiner_pc");
                     if (!updated_knn.empty()) {
+                        flag_continue = true;
+                        curr_wcp = next_wcp;
                         curr_index = updated_knn[0].first;
+                        dir = dir1.norm() + dir * 5.0;  // both terms are now dimensionless
+                        dir = dir / dir.magnitude();
+                        break;
                     }
-                    dir = dir1 + dir * 5.0 * units::cm; // momentum trick
-                    dir = dir / dir.magnitude();
-                    break;
+                    // Secondary steiner KNN failed — do not advance, continue loop
                 }
             }
         }
@@ -437,7 +441,7 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     return std::make_pair(curr_wcp,  curr_index);
 }
 
-bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const Facade::geo_point_t& first_wcp, const Facade::geo_point_t& curr_wcp, const Facade::geo_point_t& last_wcp, std::list<Facade::geo_point_t>& wcps_list1, std::list<Facade::geo_point_t>& wcps_list2, bool flag_pass_check){
+bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const Facade::geo_point_t& first_wcp, Facade::geo_point_t& curr_wcp, const Facade::geo_point_t& last_wcp, std::list<Facade::geo_point_t>& wcps_list1, std::list<Facade::geo_point_t>& wcps_list2, bool flag_pass_check){
     
     // Calculate distances
     double dis1 = std::sqrt(std::pow(curr_wcp.x() - first_wcp.x(), 2) + 
@@ -501,6 +505,11 @@ bool PatternAlgorithms::proto_break_tracks(const Facade::Cluster& cluster, const
                     if (!wcps_list2.empty()) wcps_list2.pop_front();
                 }
             }
+        }
+        
+        // Snap curr_wcp to the steiner-graph-resolved junction point
+        if (!wcps_list1.empty()) {
+            curr_wcp = wcps_list1.back();
         }
         
         // Check if we have valid paths
@@ -739,7 +748,8 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 break_wcp = break_pt;
                 
                 // Check if we've seen this break point before
-                if (saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
+                if (break_idx != INVALID_STEINER_INDEX &&
+                    saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
                     test_start_p = kink_geo;
                     kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
                     auto& [kink_point2, dir1_2, dir2_2, flag_continue2] = kink_tuple;
@@ -750,7 +760,9 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     break_wcp = break_pt2;
                     break_idx = break_idx2;
                 } else {
-                    saved_break_wcp_indices.insert(break_idx);
+                    if (break_idx != INVALID_STEINER_INDEX) {
+                        saved_break_wcp_indices.insert(break_idx);
+                    }
                 }
                 
                 if (ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
