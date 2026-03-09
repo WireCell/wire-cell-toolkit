@@ -624,7 +624,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     return true;
 }
 
- bool PatternAlgorithms::break_segment_into_two(Graph& graph, VertexPtr vtx1, SegmentPtr seg, VertexPtr vtx2, std::list<Facade::geo_point_t>& path_point_list1, Facade::geo_point_t& break_point, std::list<Facade::geo_point_t>& path_point_list2, IDetectorVolumes::pointer dv){
+ bool PatternAlgorithms::break_segment_into_two(Graph& graph, VertexPtr vtx1, SegmentPtr seg, VertexPtr vtx2, std::list<Facade::geo_point_t>& path_point_list1, Facade::geo_point_t& break_point, std::list<Facade::geo_point_t>& path_point_list2, IDetectorVolumes::pointer dv, SegmentPtr& out_seg2){
     // Get the cluster from the old segment
     auto cluster = seg->cluster();
     if (!cluster) {
@@ -682,6 +682,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     // Add the second new segment connecting new_vtx and vtx2
     add_segment(graph, new_seg2, new_vtx, vtx2);
     
+    out_seg2 = new_seg2;
     return true;
  }
 
@@ -822,23 +823,14 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     }
                 } else {
                     // Break segment into two
-                    if (break_segment_into_two(graph, start_v, curr_sg, end_v, wcps_list1, break_wcp, wcps_list2, dv)) {
+                    SegmentPtr out_seg2 = nullptr;
+                    if (break_segment_into_two(graph, start_v, curr_sg, end_v, wcps_list1, break_wcp, wcps_list2, dv, out_seg2)) {
                         flag_modified = true;
                         // Perform tracking
                         // track_fitter.add_graph(&graph); added already
                         track_fitter.do_multi_tracking(true, true, false);
-                        
-                        // Find the new segment connecting to end_v and add it back to remaining_segments
-                        auto [new_vtx, new_end_v] = find_vertices(graph, curr_sg);
-                        // The new segment created from wcps_list2 connects new_vtx to end_v
-                        // We need to find it
-                        auto erange = boost::out_edges(end_v->get_descriptor(), graph);
-                        for (auto eit = erange.first; eit != erange.second; ++eit) {
-                            SegmentPtr seg = graph[*eit].segment;
-                            if (seg && seg->cluster() == curr_sg->cluster()) {
-                                remaining_segments.push_back(seg);
-                                break;
-                            }
+                        if (out_seg2) {
+                            remaining_segments.push_back(out_seg2);
                         }
                     }
                 }
