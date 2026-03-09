@@ -48,12 +48,22 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
             auto [vtx1, vtx2] = find_vertices(graph, sg);
             if (!vtx1 || !vtx2) continue;
             
+            // Get the original WCPoints (needed for endpoint metadata later)
             const auto& wcpts = sg->wcpts();
             if (wcpts.size() < 2) continue;
             
-            // Get start and end points
-            Facade::geo_point_t start_p = wcpts.front().point;
-            Facade::geo_point_t end_p = wcpts.back().point;
+            // Use fitted points if available, fall back to wcpts otherwise
+            Facade::geo_point_t start_p, end_p;
+            const auto& fitted_fits = sg->fits();
+            if (fitted_fits.size() >= 2) {
+                // Use fitted/smoothed points
+                start_p = fitted_fits.front().point;
+                end_p = fitted_fits.back().point;
+            } else {
+                // Fall back to raw Steiner WCPoint positions
+                start_p = wcpts.front().point;
+                end_p = wcpts.back().point;
+            }
             
             // Check the track by testing points along a straight line
             double step_size = 0.6 * units::cm;
@@ -346,88 +356,94 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
             // Get the vertex position (use fit if available, otherwise wcpt)
             WireCell::Point vtx_point = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
             
-            // Calculate direction vectors at different distances
+            // Calculate direction vectors at 10cm
             WireCell::Vector dir1 = segment_cal_dir_3vector(sg1, vtx_point, 10*units::cm);
             WireCell::Vector dir2 = segment_cal_dir_3vector(sg2, vtx_point, 10*units::cm);
             
-            WireCell::Vector dir3 = segment_cal_dir_3vector(sg1, vtx_point, 3*units::cm);
-            WireCell::Vector dir4 = segment_cal_dir_3vector(sg2, vtx_point, 3*units::cm);
-            
-            // Calculate angles (180 - angle between directions)
+            if (dir1.magnitude() == 0 || dir2.magnitude() == 0) continue;
+
+            // Calculate 10cm angle (180 - angle between directions)
             double angle_10cm = (3.1415926 - std::acos(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()))) / 3.1415926 * 180.0;
-            double angle_3cm = (3.1415926 - std::acos(dir3.dot(dir4) / (dir3.magnitude() * dir4.magnitude()))) / 3.1415926 * 180.0;
             
-            // Check if segments are nearly collinear (small angles)
-            if (angle_10cm < 18 && angle_3cm < 27) {
-                std::cout << "Cluster: " << cluster.ident() << " Merge two segments into one according to angle " 
-                          << angle_10cm << "° (10cm) and " << angle_3cm << "° (3cm)" << std::endl;
+            // Only compute 3cm vectors and angle if 10cm angle passes
+            if (angle_10cm < 18) {
+                WireCell::Vector dir3 = segment_cal_dir_3vector(sg1, vtx_point, 3*units::cm);
+                WireCell::Vector dir4 = segment_cal_dir_3vector(sg2, vtx_point, 3*units::cm);
                 
-                // Merge the two segments by combining their WCPoint lists
-                const auto& wcpts1 = sg1->wcpts();
-                const auto& wcpts2 = sg2->wcpts();
+                if (dir3.magnitude() == 0 || dir4.magnitude() == 0) continue;
                 
-                std::vector<WCPoint> merged_wcpts;
-                const double distance_threshold = 0.01 * units::cm;
+                double angle_3cm = (3.1415926 - std::acos(dir3.dot(dir4) / (dir3.magnitude() * dir4.magnitude()))) / 3.1415926 * 180.0;
                 
-                // Determine how to merge based on which endpoints connect
-                double dist_front1_front2 = ray_length(Ray{wcpts1.front().point, wcpts2.front().point});
-                double dist_front1_back2 = ray_length(Ray{wcpts1.front().point, wcpts2.back().point});
-                double dist_back1_front2 = ray_length(Ray{wcpts1.back().point, wcpts2.front().point});
-                double dist_back1_back2 = ray_length(Ray{wcpts1.back().point, wcpts2.back().point});
-                
-                if (dist_front1_front2 < distance_threshold) {
-                    // front1 connects to front2: reverse wcpts2, skip duplicate, add wcpts1
-                    for (auto it = wcpts2.rbegin(); it != wcpts2.rend(); ++it) {
-                        merged_wcpts.push_back(*it);
+                // Check if segments are nearly collinear (small 3cm angle)
+                if (angle_3cm < 27) {
+                    std::cout << "Cluster: " << cluster.ident() << " Merge two segments into one according to angle " 
+                              << angle_10cm << "° (10cm) and " << angle_3cm << "° (3cm)" << std::endl;
+                    
+                    // Merge the two segments by combining their WCPoint lists
+                    const auto& wcpts1 = sg1->wcpts();
+                    const auto& wcpts2 = sg2->wcpts();
+                    
+                    std::vector<WCPoint> merged_wcpts;
+                    merged_wcpts.reserve(wcpts1.size() + wcpts2.size());
+                    const double distance_threshold = 0.01 * units::cm;
+                    
+                    // Determine how to merge based on which endpoints connect
+                    if (ray_length(Ray{wcpts1.front().point, wcpts2.front().point}) < distance_threshold) {
+                        // front1 connects to front2: reverse wcpts2, skip duplicate, add wcpts1
+                        for (auto it = wcpts2.rbegin(); it != wcpts2.rend(); ++it) {
+                            merged_wcpts.push_back(*it);
+                        }
+                        // Skip first point of wcpts1 as it's the same as last added
+                        for (size_t i = 1; i < wcpts1.size(); ++i) {
+                            merged_wcpts.push_back(wcpts1[i]);
+                        }
+                    } else if (ray_length(Ray{wcpts1.front().point, wcpts2.back().point}) < distance_threshold) {
+                        // front1 connects to back2: add wcpts2, skip duplicate, add wcpts1
+                        for (const auto& wcp : wcpts2) {
+                            merged_wcpts.push_back(wcp);
+                        }
+                        // Skip first point of wcpts1 as it's the same as last added
+                        for (size_t i = 1; i < wcpts1.size(); ++i) {
+                            merged_wcpts.push_back(wcpts1[i]);
+                        }
+                    } else if (ray_length(Ray{wcpts1.back().point, wcpts2.front().point}) < distance_threshold) {
+                        // back1 connects to front2: add wcpts1, skip duplicate, add wcpts2
+                        for (const auto& wcp : wcpts1) {
+                            merged_wcpts.push_back(wcp);
+                        }
+                        // Skip first point of wcpts2 as it's the same as last added
+                        for (size_t i = 1; i < wcpts2.size(); ++i) {
+                            merged_wcpts.push_back(wcpts2[i]);
+                        }
+                    } else if (ray_length(Ray{wcpts1.back().point, wcpts2.back().point}) < distance_threshold) {
+                        // back1 connects to back2: add wcpts1, skip duplicate, reverse wcpts2
+                        for (const auto& wcp : wcpts1) {
+                            merged_wcpts.push_back(wcp);
+                        }
+                        // Skip last point of wcpts2 (reverse order) as it's the same as last added
+                        for (auto it = wcpts2.rbegin() + 1; it != wcpts2.rend(); ++it) {
+                            merged_wcpts.push_back(*it);
+                        }
                     }
-                    // Skip first point of wcpts1 as it's the same as last added
-                    for (size_t i = 1; i < wcpts1.size(); ++i) {
-                        merged_wcpts.push_back(wcpts1[i]);
-                    }
-                } else if (dist_front1_back2 < distance_threshold) {
-                    // front1 connects to back2: add wcpts2, skip duplicate, add wcpts1
-                    for (const auto& wcp : wcpts2) {
-                        merged_wcpts.push_back(wcp);
-                    }
-                    // Skip first point of wcpts1 as it's the same as last added
-                    for (size_t i = 1; i < wcpts1.size(); ++i) {
-                        merged_wcpts.push_back(wcpts1[i]);
-                    }
-                } else if (dist_back1_front2 < distance_threshold) {
-                    // back1 connects to front2: add wcpts1, skip duplicate, add wcpts2
-                    for (const auto& wcp : wcpts1) {
-                        merged_wcpts.push_back(wcp);
-                    }
-                    // Skip first point of wcpts2 as it's the same as last added
-                    for (size_t i = 1; i < wcpts2.size(); ++i) {
-                        merged_wcpts.push_back(wcpts2[i]);
-                    }
-                } else if (dist_back1_back2 < distance_threshold) {
-                    // back1 connects to back2: add wcpts1, skip duplicate, reverse wcpts2
-                    for (const auto& wcp : wcpts1) {
-                        merged_wcpts.push_back(wcp);
-                    }
-                    // Skip last point of wcpts2 (reverse order) as it's the same as last added
-                    for (auto it = wcpts2.rbegin() + 1; it != wcpts2.rend(); ++it) {
-                        merged_wcpts.push_back(*it);
-                    }
+                    
+                    if (merged_wcpts.empty()) continue;  // or log a warning and skip
+
+                    // Create new segment with merged points
+                    auto new_seg = make_segment();
+                    new_seg->wcpts(merged_wcpts).cluster(&cluster).dirsign(0);
+                    
+                    // Add the new segment to the graph
+                    add_segment(graph, new_seg, vtx1, vtx2);
+                    
+                    // Delete the old segments and middle vertex
+                    remove_segment(graph, sg1);
+                    remove_segment(graph, sg2);
+                    remove_vertex(graph, vtx);
+                    
+                    flag_update = true;
+                    flag_continue = true;
+                    break;
                 }
-                
-                // Create new segment with merged points
-                auto new_seg = make_segment();
-                new_seg->wcpts(merged_wcpts).cluster(&cluster).dirsign(0);
-                
-                // Add the new segment to the graph
-                add_segment(graph, new_seg, vtx1, vtx2);
-                
-                // Delete the old segments and middle vertex
-                remove_segment(graph, sg1);
-                remove_segment(graph, sg2);
-                remove_vertex(graph, vtx);
-                
-                flag_update = true;
-                flag_continue = true;
-                break;
             }
         }
     }
