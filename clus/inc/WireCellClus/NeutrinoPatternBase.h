@@ -53,7 +53,8 @@ namespace WireCell::Clus::PR {
         void find_other_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv , bool flag_break_track =true, double search_range = 1.5*units::cm, double scaling_2d = 0.8);
         VertexPtr find_vertex_other_segment(Graph& graph, Facade::Cluster& cluster, SegmentPtr seg, bool flag_forwrard, Facade::geo_point_t& wcp, TrackFitting& track_fitter, IDetectorVolumes::pointer dv );
         std::tuple<VertexPtr, SegmentPtr, Facade::geo_point_t> check_end_point(Graph& graph, Facade::Cluster& cluster, std::vector<Facade::geo_point_t>& tracking_path, bool flag_front = true, double vtx_cut1 = 0.9 * units::cm, double vtx_cut2 = 2.0 * units::cm, double sg_cut1  = 2.0 * units::cm, double sg_cut2  = 1.2 * units::cm);
-        
+        bool modify_vertex_isochronous(Graph& graph, Facade::Cluster& cluster, VertexPtr vtx, VertexPtr v1, SegmentPtr sg, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        bool modify_segment_isochronous(Graph& graph, Facade::Cluster& cluster, SegmentPtr sg1, VertexPtr v1, SegmentPtr sg, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double dis_cut = 6*units::cm, double angle_cut = 15, double extend_cut = 15*units::cm);
 
         // examine segment
         void examine_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);

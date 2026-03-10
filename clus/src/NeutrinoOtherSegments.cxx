@@ -707,7 +707,7 @@ PatternAlgorithms::check_end_point(Graph& graph,
 VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Cluster& cluster, SegmentPtr seg, bool flag_forwrard, Facade::geo_point_t& wcp, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
     VertexPtr v1 = nullptr;
 
-    // Build the tracking path from the segment's fit points
+    // Build the tracking path from the segment's fit point
     // (corresponds to temp_cluster->get_fine_tracking_path() in WCP)
     std::vector<Facade::geo_point_t> tracking_path;
     for (const auto& fit : seg->fits()) {
@@ -810,4 +810,127 @@ VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Clu
     }
 
     return v1;
+}
+
+bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster& cluster, VertexPtr vtx, VertexPtr v1, SegmentPtr sg, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    bool flag = false;
+
+    // Get fit points for v1 and vtx (prefer fitted position, fall back to wcpt)
+    Facade::geo_point_t v1_fit_pt  = v1->fit().valid()  ? v1->fit().point  : v1->wcpt().point;
+    Facade::geo_point_t vtx_fit_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+
+    // Direction of sg at v1's position, reversed to point back toward vtx
+    WireCell::Vector dir = segment_cal_dir_3vector(sg, v1_fit_pt, 15 * units::cm) * (-1.0);
+    if (dir.x() == 0) return flag;
+
+    // Project v1 along the track direction to the x-plane of vtx to find the new target point
+    double dx = vtx_fit_pt.x() - v1_fit_pt.x();
+    Facade::geo_point_t test_p(
+        v1_fit_pt.x() + dx,
+        v1_fit_pt.y() + dir.y() / dir.x() * dx,
+        v1_fit_pt.z() + dir.z() / dir.x() * dx
+    );
+
+    // Find the closest steiner point to test_p
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+    auto knn_results = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
+    if (knn_results.empty()) return flag;
+    size_t vtx_new_idx = knn_results[0].first;
+    Facade::geo_point_t vtx_new_pt(x_coords[vtx_new_idx], y_coords[vtx_new_idx], z_coords[vtx_new_idx]);
+
+    // Reject if the new position is too far from v1
+    if (point_distance(vtx_new_pt, v1_fit_pt) > 5 * units::cm) return flag;
+
+    // Check connectivity between vtx (old position) and vtx_new along a straight line
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    auto grouping = cluster.grouping();
+    if (!transform || !grouping) return flag;
+
+    double step_size = 0.6 * units::cm;
+    int ncount = std::round(point_distance(vtx_fit_pt, vtx_new_pt) / step_size);
+    int n_bad = 0;
+    for (int i = 1; i < ncount; i++) {
+        Facade::geo_point_t step_p(
+            vtx_fit_pt.x() + (vtx_new_pt.x() - vtx_fit_pt.x()) / ncount * i,
+            vtx_fit_pt.y() + (vtx_new_pt.y() - vtx_fit_pt.y()) / ncount * i,
+            vtx_fit_pt.z() + (vtx_new_pt.z() - vtx_fit_pt.z()) / ncount * i
+        );
+        auto test_wpid = dv->contained_by(step_p);
+        if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+            auto temp_p_raw = transform->backward(step_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+            if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                n_bad++;
+            }
+        }
+    }
+    if (n_bad > 0) return flag;
+
+    // Update paths for all segments already connected to vtx
+    if (!vtx->descriptor_valid()) return flag;
+    auto vd = vtx->get_descriptor();
+    std::vector<SegmentPtr> vtx_segs;
+    {
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+            SegmentPtr sg1 = graph[*eit].segment;
+            if (sg1) vtx_segs.push_back(sg1);
+        }
+    }
+    for (auto sg1 : vtx_segs) {
+        const auto& wcpts = sg1->wcpts();
+        if (wcpts.empty()) continue;
+
+        // Determine the "other" endpoint of sg1 (the one that is not vtx)
+        double dis_front = point_distance(wcpts.front().point, vtx->wcpt().point);
+        double dis_back  = point_distance(wcpts.back().point,  vtx->wcpt().point);
+        Facade::geo_point_t other_pt = (dis_front < dis_back) ? wcpts.back().point : wcpts.front().point;
+
+        // Recompute path from new vtx position to the other endpoint via the steiner graph
+        auto new_path_pts = do_rough_path(cluster, vtx_new_pt, other_pt);
+        std::vector<WCPoint> new_wcpts;
+        new_wcpts.reserve(new_path_pts.size());
+        for (const auto& p : new_path_pts) {
+            WCPoint wcp;
+            wcp.point = p;
+            new_wcpts.push_back(wcp);
+        }
+        sg1->wcpts(new_wcpts);
+    }
+
+    // Shift vtx to its new steiner position
+    vtx->wcpt().point = vtx_new_pt;
+
+    // Compute path for sg from vtx_new_pt to v2 via steiner graph
+    {
+        Facade::geo_point_t v2_pt = v2->wcpt().point;
+        auto sg_path_pts = do_rough_path(cluster, vtx_new_pt, v2_pt);
+        std::vector<WCPoint> sg_new_wcpts;
+        sg_new_wcpts.reserve(sg_path_pts.size());
+        for (const auto& p : sg_path_pts) {
+            WCPoint wcp;
+            wcp.point = p;
+            sg_new_wcpts.push_back(wcp);
+        }
+        sg->wcpts(sg_new_wcpts);
+    }
+
+    // Remove the old isolated vertex v1 and connect vtx and v2 via sg
+    remove_vertex(graph, v1);
+    add_segment(graph, sg, vtx, v2);
+    flag = true;
+    std::cout << "Cluster: " << cluster.get_cluster_id()
+              << " shift a isochronous vertex with adding a segment " << sg->id() << std::endl;
+
+    return flag;
+}
+
+bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster& cluster, SegmentPtr sg1, VertexPtr v1, SegmentPtr sg, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double dis_cut, double angle_cut, double extend_cut){
+
 }
