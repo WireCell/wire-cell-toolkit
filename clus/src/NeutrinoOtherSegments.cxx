@@ -932,5 +932,129 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
 }
 
 bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster& cluster, SegmentPtr sg1, VertexPtr v1, SegmentPtr sg, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double dis_cut, double angle_cut, double extend_cut){
+    bool flag = false;
 
+    // Get fit point of v1 (prefer fitted position, fall back to wcpt)
+    Facade::geo_point_t v1_fit_pt = v1->fit().valid() ? v1->fit().point : v1->wcpt().point;
+
+    // Direction of sg at v1's position, reversed to point away from v2
+    WireCell::Vector dir1 = segment_cal_dir_3vector(sg, v1_fit_pt, extend_cut) * (-1.0);
+    if (dir1.x() == 0) return flag;
+
+    // Get steiner point cloud data
+    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+    const auto& coords = cluster.get_default_scope().coords;
+    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
+    // Transform/grouping for is_good_point check
+    const auto transform = track_fitter.get_pc_transforms()->pc_transform(
+        cluster.get_scope_transform(cluster.get_default_scope()));
+    double cluster_t0 = cluster.get_cluster_t0();
+    auto grouping = cluster.grouping();
+    if (!transform || !grouping) return flag;
+
+    // Drift direction is the x-axis
+    const WireCell::Vector drift_dir(1, 0, 0);
+
+    // Loop over the fit points of sg1 to find a valid bridge point
+    const auto& fit_pts = sg1->fits();
+    Facade::geo_point_t vtx_new_pt;
+
+    for (size_t i = 0; i != fit_pts.size(); i++) {
+        const Facade::geo_point_t& pt = fit_pts.at(i).point;
+
+        // Direction from v1's fit pt to this point (isochronous displacement)
+        WireCell::Vector dir(pt.x() - v1_fit_pt.x(),
+                             pt.y() - v1_fit_pt.y(),
+                             pt.z() - v1_fit_pt.z());
+
+        if (dir.magnitude() == 0) continue;
+        if (dir.magnitude() > dis_cut) continue;
+
+        // Skip unless this displacement is nearly perpendicular to the drift (x) direction
+        if (std::fabs(drift_dir.angle(dir) / 3.1415926 * 180.0 - 90.0) >= angle_cut) continue;
+
+        // Project v1's fit point along dir1 to the x-plane of this point
+        double dx = pt.x() - v1_fit_pt.x();
+        Facade::geo_point_t test_p(
+            v1_fit_pt.x() + dx,
+            v1_fit_pt.y() + dir1.y() / dir1.x() * dx,
+            v1_fit_pt.z() + dir1.z() / dir1.x() * dx
+        );
+
+        // Find the closest steiner point to test_p
+        auto knn_results = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
+        if (knn_results.empty()) continue;
+        size_t new_idx = knn_results[0].first;
+        Facade::geo_point_t new_pt(x_coords[new_idx], y_coords[new_idx], z_coords[new_idx]);
+
+        // Reject if the candidate point is too far from v1
+        if (point_distance(new_pt, v1_fit_pt) > 5 * units::cm) continue;
+
+        // Check connectivity between this sg1 fit point and the candidate steiner point
+        double step_size = 0.6 * units::cm;
+        int ncount = std::round(point_distance(pt, new_pt) / step_size);
+        int n_bad = 0;
+        for (int j = 1; j < ncount; j++) {
+            Facade::geo_point_t step_p(
+                pt.x() + (new_pt.x() - pt.x()) / ncount * j,
+                pt.y() + (new_pt.y() - pt.y()) / ncount * j,
+                pt.z() + (new_pt.z() - pt.z()) / ncount * j
+            );
+            auto test_wpid = dv->contained_by(step_p);
+            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
+                auto temp_p_raw = transform->backward(step_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
+                    n_bad++;
+                }
+            }
+        }
+
+        if (n_bad == 0) {
+            vtx_new_pt = new_pt;
+            flag = true;
+            break;
+        }
+    }
+
+    if (!flag) return flag;
+
+    // Shift v1 to the new steiner position
+    v1->wcpt().point = vtx_new_pt;
+
+    // Compute and set path for sg from vtx_new_pt to v2 via steiner graph
+    {
+        auto sg_path_pts = do_rough_path(cluster, vtx_new_pt, v2->wcpt().point);
+        std::vector<WCPoint> sg_new_wcpts;
+        sg_new_wcpts.reserve(sg_path_pts.size());
+        for (const auto& p : sg_path_pts) {
+            WCPoint wcp;
+            wcp.point = p;
+            sg_new_wcpts.push_back(wcp);
+        }
+        sg->wcpts(sg_new_wcpts);
+    }
+    add_segment(graph, sg, v1, v2);
+
+    // Create two new segments from v1 to each endpoint of sg1, then remove sg1
+    auto [sv, ev] = find_vertices(graph, sg1);
+
+    if (sv) {
+        auto path_pts = do_rough_path(cluster, vtx_new_pt, sv->wcpt().point);
+        auto new_seg = create_segment_for_cluster(cluster, dv, path_pts);
+        if (new_seg) add_segment(graph, new_seg, v1, sv);
+    }
+
+    if (ev) {
+        auto path_pts = do_rough_path(cluster, vtx_new_pt, ev->wcpt().point);
+        auto new_seg = create_segment_for_cluster(cluster, dv, path_pts);
+        if (new_seg) add_segment(graph, new_seg, v1, ev);
+    }
+
+    remove_segment(graph, sg1);
+
+    std::cout << "Modify segment for adding a segment in isochronous case" << std::endl;
+    return flag;
 }
