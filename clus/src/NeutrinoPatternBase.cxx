@@ -1083,7 +1083,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (steiner_pc.size() < 2) return false;
     
     // Initialize first segment
-    SegmentPtr sg1 = init_first_segment(graph, cluster, nullptr, track_fitter, dv, flag_back_search);
+    SegmentPtr sg1 = init_first_segment(graph, cluster, &cluster, track_fitter, dv, flag_back_search);
     
     if (!sg1) return false;
     

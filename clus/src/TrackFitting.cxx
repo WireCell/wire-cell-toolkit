@@ -7509,6 +7509,17 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // }
 
     }
+
+    // Update "fit" DynamicPointCloud for all segments after multi-tracking
+    {
+        auto edge_range_final = boost::edges(*m_graph);
+        for (auto e_it = edge_range_final.first; e_it != edge_range_final.second; ++e_it) {
+            auto& edge_bundle = (*m_graph)[*e_it];
+            if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
+                PR::create_segment_fit_point_cloud(edge_bundle.segment, m_dv, "fit");
+            }
+        }
+    }
 }
 
 

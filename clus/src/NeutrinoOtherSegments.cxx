@@ -1111,6 +1111,9 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
             new_wcpts.push_back(wcp);
         }
         sg1->wcpts(new_wcpts);
+        std::vector<Facade::geo_point_t> main_pts_sg1iso;
+        for (const auto& wcp : new_wcpts) main_pts_sg1iso.push_back(wcp.point);
+        create_segment_point_cloud(sg1, main_pts_sg1iso, dv, "main");
     }
 
     // Shift vtx to its new steiner position
@@ -1128,6 +1131,9 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
             sg_new_wcpts.push_back(wcp);
         }
         sg->wcpts(sg_new_wcpts);
+        std::vector<Facade::geo_point_t> main_pts_sgiso;
+        for (const auto& wcp : sg_new_wcpts) main_pts_sgiso.push_back(wcp.point);
+        create_segment_point_cloud(sg, main_pts_sgiso, dv, "main");
     }
 
     // Remove the old isolated vertex v1 and connect vtx and v2 via sg
@@ -1244,6 +1250,9 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
             sg_new_wcpts.push_back(wcp);
         }
         sg->wcpts(sg_new_wcpts);
+        std::vector<Facade::geo_point_t> main_pts_sgmod;
+        for (const auto& wcp : sg_new_wcpts) main_pts_sgmod.push_back(wcp.point);
+        create_segment_point_cloud(sg, main_pts_sgmod, dv, "main");
     }
     add_segment(graph, sg, v1, v2);
 

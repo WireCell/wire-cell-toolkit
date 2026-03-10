@@ -82,7 +82,7 @@ namespace WireCell::Clus::PR {
     }
 
 
-    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name){
+    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name, const std::string& base_cloud_name){
         double min_dist = 1e9;
         WireCell::Point closest_point(0,0,0);
         
@@ -92,7 +92,11 @@ namespace WireCell::Clus::PR {
         
         auto dpc = seg->dpcloud(cloud_name);
         if (!dpc) {
-            raise<RuntimeError>("get_closest_point: segment missing DynamicPointCloud with name " + cloud_name);
+            // Fall back to base_cloud_name (typically "main") if the requested cloud is absent
+            dpc = seg->dpcloud(base_cloud_name);
+            if (!dpc) {
+                raise<RuntimeError>("get_closest_point: segment missing DynamicPointCloud with name " + cloud_name + " and fallback " + base_cloud_name);
+            }
         }
         
         const auto& points = dpc->get_points();

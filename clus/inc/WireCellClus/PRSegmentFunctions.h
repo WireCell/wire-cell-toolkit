@@ -81,7 +81,7 @@ namespace WireCell::Clus::PR {
                                     const IDetectorVolumes::pointer& dv,
                                     const std::string& cloud_name = "fit");
 
-    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit"); // can also use main 
+    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit", const std::string& base_cloud_name = "main");
     std::tuple<double, double, double> segment_get_closest_2d_distances(SegmentPtr seg, const WireCell::Point& point, int apa, int face, const std::string& cloud_name = "fit");
 
 

@@ -147,7 +147,10 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
                 
                 // Update the segment with new points
                 sg->wcpts(new_wcpts);
-                
+                std::vector<Facade::geo_point_t> main_pts_1;
+                for (const auto& wcp : new_wcpts) main_pts_1.push_back(wcp.point);
+                create_segment_point_cloud(sg, main_pts_1, dv, "main");
+
                 flag_update = true;
                 std::cout << "Cluster: " << cluster.ident() << " replace Track Content with Straight Line for segment with length " << length/units::cm << " cm" << std::endl;
             }
@@ -299,7 +302,10 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                     // Create new segment with the straight line path
                     auto new_seg = make_segment();
                     new_seg->wcpts(new_wcpts).cluster(&cluster).dirsign(0);
-                    
+                    std::vector<Facade::geo_point_t> main_pts_2;
+                    for (const auto& wcp : new_wcpts) main_pts_2.push_back(wcp.point);
+                    create_segment_point_cloud(new_seg, main_pts_2, dv, "main");
+
                     // Add the new segment to the graph
                     add_segment(graph, new_seg, vtx1, vtx2);
                 }
@@ -431,7 +437,10 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
                     // Create new segment with merged points
                     auto new_seg = make_segment();
                     new_seg->wcpts(merged_wcpts).cluster(&cluster).dirsign(0);
-                    
+                    std::vector<Facade::geo_point_t> main_pts_3;
+                    for (const auto& wcp : merged_wcpts) main_pts_3.push_back(wcp.point);
+                    create_segment_point_cloud(new_seg, main_pts_3, dv, "main");
+
                     // Add the new segment to the graph
                     add_segment(graph, new_seg, vtx1, vtx2);
                     
@@ -640,7 +649,10 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
         // Create new segment
         auto sg1 = make_segment();
         sg1->wcpts(wcp_list).cluster(&cluster).dirsign(0);
-        
+        std::vector<Facade::geo_point_t> main_pts_4;
+        for (const auto& wcp : wcp_list) main_pts_4.push_back(wcp.point);
+        create_segment_point_cloud(sg1, main_pts_4, dv, "main");
+
         // Add segment to graph
         add_segment(graph, sg1, v1, vertex);
         
@@ -1625,11 +1637,17 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
     const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
     const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
     
-    // Iterate through all segments in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
-        if (!sg || sg->cluster() != &cluster) continue;
+    // Snapshot all segments before iterating — the loop body calls remove_segment/add_segment
+    // which would invalidate boost::edges iterators (even with listS storage the removed
+    // edge's list node is freed, making the live iterator dangle on the next ++eit).
+    std::vector<SegmentPtr> all_segments;
+    for (auto [eit, eend] = boost::edges(graph); eit != eend; ++eit) {
+        SegmentPtr s = graph[*eit].segment;
+        if (s && s->cluster() == &cluster) all_segments.push_back(s);
+    }
+
+    for (auto& sg : all_segments) {
+        if (!sg->descriptor_valid()) continue; // may have been removed in an earlier iteration
         
         const auto& pts = sg->wcpts();
         if (pts.size() < 2) continue;
@@ -1789,7 +1807,10 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                     // Update segment with new points
                     std::vector<WCPoint> new_wcpts(old_list.begin(), old_list.end());
                     sg1->wcpts(new_wcpts);
-                    
+                    std::vector<Facade::geo_point_t> main_pts_ev1;
+                    for (const auto& wcp : new_wcpts) main_pts_ev1.push_back(wcp.point);
+                    create_segment_point_cloud(sg1, main_pts_ev1, dv, "main");
+
                     // Find other vertex and update connection
                     VertexPtr v3 = find_other_vertex(graph, sg1, v1);
                     if (v3) {
@@ -1798,9 +1819,10 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                     }
                 }
                 
-                // Remove v1 and sg
-                remove_vertex(graph, v1);
+                // Remove sg first, then v1 (remove_vertex implicitly removes adjacent edges,
+                // so sg must be removed before v1 to avoid double-free on the edge descriptor)
                 remove_segment(graph, sg);
+                remove_vertex(graph, v1);
                 
                 flag_continue = true;
                 std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
@@ -1926,7 +1948,10 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                     // Update segment with new points
                     std::vector<WCPoint> new_wcpts(old_list.begin(), old_list.end());
                     sg1->wcpts(new_wcpts);
-                    
+                    std::vector<Facade::geo_point_t> main_pts_ev2;
+                    for (const auto& wcp : new_wcpts) main_pts_ev2.push_back(wcp.point);
+                    create_segment_point_cloud(sg1, main_pts_ev2, dv, "main");
+
                     // Find other vertex and update connection
                     VertexPtr v3 = find_other_vertex(graph, sg1, v2);
                     if (v3) {
@@ -1935,9 +1960,10 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                     }
                 }
                 
-                // Remove v2 and sg
-                remove_vertex(graph, v2);
+                // Remove sg first, then v2 (remove_vertex implicitly removes adjacent edges,
+                // so sg must be removed before v2 to avoid double-free on the edge descriptor)
                 remove_segment(graph, sg);
+                remove_vertex(graph, v2);
                 
                 flag_continue = true;
                 std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
@@ -2103,7 +2129,10 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                                     new_wcpts.push_back(wcp);
                                 }
                                 max_sg1->wcpts(new_wcpts);
-                                
+                                std::vector<Facade::geo_point_t> main_pts_sg1a;
+                                for (const auto& wcp : new_wcpts) main_pts_sg1a.push_back(wcp.point);
+                                create_segment_point_cloud(max_sg1, main_pts_sg1a, dv, "main");
+
                                 remove_segment(graph, max_sg1);
                                 add_segment(graph, max_sg1, min_vertex, tmp_vtx);
                             }
@@ -2125,7 +2154,10 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                                     new_wcpts.push_back(wcp);
                                 }
                                 max_sg2->wcpts(new_wcpts);
-                                
+                                std::vector<Facade::geo_point_t> main_pts_sg2a;
+                                for (const auto& wcp : new_wcpts) main_pts_sg2a.push_back(wcp.point);
+                                create_segment_point_cloud(max_sg2, main_pts_sg2a, dv, "main");
+
                                 remove_segment(graph, max_sg2);
                                 add_segment(graph, max_sg2, min_vertex, tmp_vtx);
                             }
@@ -2179,7 +2211,10 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                                         new_wcpts.push_back(wcp);
                                     }
                                     max_sg1->wcpts(new_wcpts);
-                                    
+                                    std::vector<Facade::geo_point_t> main_pts_sg1b;
+                                    for (const auto& wcp : new_wcpts) main_pts_sg1b.push_back(wcp.point);
+                                    create_segment_point_cloud(max_sg1, main_pts_sg1b, dv, "main");
+
                                     remove_segment(graph, max_sg1);
                                     add_segment(graph, max_sg1, vtx2, tmp_vtx);
                                 }
@@ -2199,7 +2234,10 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                                         new_wcpts.push_back(wcp);
                                     }
                                     max_sg2->wcpts(new_wcpts);
-                                    
+                                    std::vector<Facade::geo_point_t> main_pts_sg2b;
+                                    for (const auto& wcp : new_wcpts) main_pts_sg2b.push_back(wcp.point);
+                                    create_segment_point_cloud(max_sg2, main_pts_sg2b, dv, "main");
+
                                     remove_segment(graph, max_sg2);
                                     add_segment(graph, max_sg2, vtx2, tmp_vtx);
                                 }
@@ -2344,7 +2382,10 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
                 new_wcpts.push_back(wcp);
             }
             sg->wcpts(new_wcpts);
-            
+            std::vector<Facade::geo_point_t> main_pts_ev3;
+            for (const auto& wcp : new_wcpts) main_pts_ev3.push_back(wcp.point);
+            create_segment_point_cloud(sg, main_pts_ev3, dv, "main");
+
             flag_refit = true;
         }
     }
@@ -2696,7 +2737,10 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             new_wcpts.reserve(old_list.size());
             std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
             sg2->wcpts(new_wcpts);
-            
+            std::vector<Facade::geo_point_t> main_pts_sg2m;
+            for (const auto& wcp : new_wcpts) main_pts_sg2m.push_back(wcp.point);
+            create_segment_point_cloud(sg2, main_pts_sg2m, dv, "main");
+
             // Update main_vertex to vtx's position
             WCPoint vtx_wcp = vtx->wcpt();
             main_vertex->wcpt(vtx_wcp);
@@ -2787,7 +2831,10 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             new_wcpts.reserve(old_list.size());
             std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
             sg1->wcpts(new_wcpts);
-            
+            std::vector<Facade::geo_point_t> main_pts_sg1m;
+            for (const auto& wcp : new_wcpts) main_pts_sg1m.push_back(wcp.point);
+            create_segment_point_cloud(sg1, main_pts_sg1m, dv, "main");
+
             // Update main_vertex to vtx's position
             WCPoint vtx_wcp = vtx->wcpt();
             main_vertex->wcpt(vtx_wcp);
@@ -3249,8 +3296,11 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                         new_wcpts.reserve(old_list.size());
                         std::copy(std::begin(old_list), std::end(old_list), std::back_inserter(new_wcpts));
                         sg1->wcpts(new_wcpts);
+                        std::vector<Facade::geo_point_t> main_pts_sg1f;
+                        for (const auto& wcp : new_wcpts) main_pts_sg1f.push_back(wcp.point);
+                        create_segment_point_cloud(sg1, main_pts_sg1f, dv, "main");
                     }
-                    
+
                     // Update main_vertex to vtx1's position
                     main_vertex->wcpt(vtx1->wcpt());
                     if (vtx1->fit().valid()) {
