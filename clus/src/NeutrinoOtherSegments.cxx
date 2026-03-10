@@ -373,15 +373,17 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         }
     }
     
-    // Step 9: Process remaining segments in order of quality
-    std::vector<SegmentPtr> new_segments_for_tracking;
-    
+    // Step 9: Process remaining segments in order of quality (one-pass architecture)
+    std::vector<SegmentPtr> new_segments;    // high dQdx or long curvy segments → break
+    std::vector<SegmentPtr> new_segments_1;  // lower quality → break with 2cm cut
+    const double mip_dQdx = 43e3 / units::cm;
+
     while (!remaining_segments.empty()) {
         // Find the best segment (most non-faked points, then longest)
         double max_number_not_faked = 0;
         double max_length = 0;
         int max_length_cluster = -1;
-        
+
         for (auto it = remaining_segments.begin(); it != remaining_segments.end(); it++) {
             if (temp_segments[*it].number_not_faked > max_number_not_faked) {
                 max_length_cluster = *it;
@@ -395,133 +397,302 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 }
             }
         }
-        
+
         if (max_length_cluster == -1) break;
-        
+
         remaining_segments.erase(max_length_cluster);
-        
-        // Create new segment
+
         size_t special_A = temp_segments[max_length_cluster].special_A;
         size_t special_B = temp_segments[max_length_cluster].special_B;
-        
+
         if (special_A == SIZE_MAX || special_B == SIZE_MAX) continue;
-        
-        // Use Dijkstra to find path
-        auto path_indices = cluster.graph_algorithms("steiner_graph").shortest_path(special_A, special_B);
-        
-        std::vector<Facade::geo_point_t> path_points;
-        for (size_t idx : path_indices) {
-            path_points.emplace_back(x_coords[idx], y_coords[idx], z_coords[idx]);
-        }
-        
+
+        // Get path via Steiner graph (do_rough_path)
+        Facade::geo_point_t pt_A(x_coords[special_A], y_coords[special_A], z_coords[special_A]);
+        Facade::geo_point_t pt_B(x_coords[special_B], y_coords[special_B], z_coords[special_B]);
+        auto path_points = do_rough_path(cluster, pt_A, pt_B);
+
         if (path_points.size() <= 1) continue;
-        
-        // Create vertices
-        VertexPtr v1 = make_vertex(graph);
-        v1->wcpt().point = path_points.front();
-        v1->cluster(&cluster);
-        
-        VertexPtr v2 = make_vertex(graph);
-        v2->wcpt().point = path_points.back();
-        v2->cluster(&cluster);
-        
-        // Create segment
+
+        // Create segment (not yet in graph)
         auto new_seg = create_segment_for_cluster(cluster, dv, path_points);
-        if (!new_seg) {
-            remove_vertex(graph, v1);
-            remove_vertex(graph, v2);
-            continue;
-        }
-        
-        add_segment(graph, new_seg, v1, v2);
-        new_segments_for_tracking.push_back(new_seg);
+        if (!new_seg) continue;
+
+        // Do single tracking to get fine fit path and "fit" point cloud
+        track_fitter.add_segment(new_seg);
+        track_fitter.do_single_tracking(new_seg, true, true);
+
+        // Always add to existing_segments for 2D distance re-evaluation of remaining clusters
         existing_segments.insert(new_seg);
-        
-        // Re-evaluate remaining segments
+
+        if (new_seg->fits().size() > 1) {
+            // Find existing vertices/segments near the endpoints
+            VertexPtr v1 = find_vertex_other_segment(graph, cluster, new_seg, true,  pt_A, track_fitter, dv);
+            VertexPtr v2 = find_vertex_other_segment(graph, cluster, new_seg, false, pt_B, track_fitter, dv);
+
+            bool v1_existed = (v1 != nullptr);
+            bool v2_existed = (v2 != nullptr);
+
+            // Create new (isolated) vertices where no existing one was found
+            if (!v1) {
+                v1 = make_vertex(graph);
+                v1->wcpt().point = path_points.front();
+                v1->cluster(&cluster);
+            }
+            if (!v2) {
+                v2 = make_vertex(graph);
+                v2->wcpt().point = path_points.back();
+                v2->cluster(&cluster);
+            }
+
+            // Handle corner case: both find_vertex calls returned the same vertex
+            if (v1 == v2) {
+                double dis1 = std::sqrt(
+                    std::pow(v1->wcpt().point.x() - pt_A.x(), 2) +
+                    std::pow(v1->wcpt().point.y() - pt_A.y(), 2) +
+                    std::pow(v1->wcpt().point.z() - pt_A.z(), 2));
+                double dis2 = std::sqrt(
+                    std::pow(v1->wcpt().point.x() - pt_B.x(), 2) +
+                    std::pow(v1->wcpt().point.y() - pt_B.y(), 2) +
+                    std::pow(v1->wcpt().point.z() - pt_B.z(), 2));
+                if (dis1 < dis2) {
+                    // v1 is close to pt_A → keep v1, replace v2 with a new vertex at pt_B
+                    v2 = make_vertex(graph);
+                    v2->wcpt().point = pt_B;
+                    v2->cluster(&cluster);
+                    v2_existed = false;
+                } else {
+                    // v2 is close to pt_B → keep v2, replace v1 with a new vertex at pt_A
+                    v1 = make_vertex(graph);
+                    v1->wcpt().point = pt_A;
+                    v1->cluster(&cluster);
+                    v1_existed = false;
+                }
+            }
+
+            Facade::geo_point_t v1_fit_pt = v1->fit().valid() ? v1->fit().point : v1->wcpt().point;
+            Facade::geo_point_t v2_fit_pt = v2->fit().valid() ? v2->fit().point : v2->wcpt().point;
+            double v1v2_dist = std::sqrt(
+                std::pow(v1_fit_pt.x() - v2_fit_pt.x(), 2) +
+                std::pow(v1_fit_pt.y() - v2_fit_pt.y(), 2) +
+                std::pow(v1_fit_pt.z() - v2_fit_pt.z(), 2));
+
+            if (v1_existed || v2_existed) {
+                // At least one endpoint connects to the existing graph
+                if (v1v2_dist > 0.1 * units::cm) {
+                    add_segment(graph, new_seg, v1, v2);
+                    track_fitter.do_multi_tracking(true, true, true);
+
+                    double length        = segment_track_length(new_seg);
+                    double direct_length = segment_track_direct_length(new_seg);
+                    double medium_dQ_dx  = segment_median_dQ_dx(new_seg);
+
+                    if (length > 30 * units::cm ||
+                        (direct_length < 0.78 * length && length > 10 * units::cm &&
+                         medium_dQ_dx / mip_dQdx > 1.6)) {
+                        new_segments.push_back(new_seg);
+                    }
+                    std::cout << "Cluster: " << cluster.get_cluster_id()
+                              << " Other tracks -- connected to existing graph, length="
+                              << length / units::cm << " cm" << std::endl;
+                } else {
+                    // Endpoints at same position – discard fresh vertices
+                    if (!v1_existed) remove_vertex(graph, v1);
+                    if (!v2_existed && v2 != v1) remove_vertex(graph, v2);
+                }
+            } else {
+                // Isolated segment: try isochronous parallel-track correction.
+                // modify_vertex/segment_isochronous will call add_segment internally if successful,
+                // so do NOT call add_segment here.
+                bool flag_parallel = false;
+
+                Facade::geo_vector_t dir(v1_fit_pt.x() - v2_fit_pt.x(),
+                                        v1_fit_pt.y() - v2_fit_pt.y(),
+                                        v1_fit_pt.z() - v2_fit_pt.z());
+                double dir_mag = dir.magnitude();
+
+                if (dir_mag > 10 * units::cm ||
+                    (dir_mag > 8 * units::cm && segment_track_length(new_seg) > 13 * units::cm)) {
+
+                    // Try to snap to a nearby isochronous vertex
+                    const WireCell::Vector drift_dir(1, 0, 0);
+                    auto [vbegin, vend] = boost::vertices(graph);
+                    for (auto vit = vbegin; vit != vend && !flag_parallel; ++vit) {
+                        VertexPtr vtx = graph[*vit].vertex;
+                        if (!vtx || vtx->cluster() != &cluster) continue;
+                        if (vtx == v1 || vtx == v2) continue;
+
+                        Facade::geo_point_t vtx_fit = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                        WireCell::Vector d1(vtx_fit.x() - v1_fit_pt.x(),
+                                            vtx_fit.y() - v1_fit_pt.y(),
+                                            vtx_fit.z() - v1_fit_pt.z());
+                        WireCell::Vector d2(vtx_fit.x() - v2_fit_pt.x(),
+                                            vtx_fit.y() - v2_fit_pt.y(),
+                                            vtx_fit.z() - v2_fit_pt.z());
+
+                        if (d1.magnitude() < 6 * units::cm &&
+                            std::fabs(drift_dir.angle(d1) / 3.1415926 * 180.0 - 90.0) < 15.0) {
+                            flag_parallel = modify_vertex_isochronous(graph, cluster, vtx, v1, new_seg, v2, track_fitter, dv);
+                        }
+                        if (!flag_parallel && d2.magnitude() < 6 * units::cm &&
+                            std::fabs(drift_dir.angle(d2) / 3.1415926 * 180.0 - 90.0) < 15.0) {
+                            flag_parallel = modify_vertex_isochronous(graph, cluster, vtx, v2, new_seg, v1, track_fitter, dv);
+                        }
+                    }
+
+                    // Try to snap to a nearby isochronous segment
+                    if (!flag_parallel) {
+                        double min_dis1 = 1e9; SegmentPtr min_sg1 = nullptr;
+                        double min_dis2 = 1e9; SegmentPtr min_sg2 = nullptr;
+
+                        auto [ebegin, eend] = boost::edges(graph);
+                        for (auto eit = ebegin; eit != eend; ++eit) {
+                            SegmentPtr sg1 = graph[*eit].segment;
+                            if (!sg1 || sg1->cluster() != &cluster) continue;
+
+                            double dis1 = segment_get_closest_point(sg1, v1_fit_pt, "fit").first;
+                            double dis2 = segment_get_closest_point(sg1, v2_fit_pt, "fit").first;
+
+                            if (!flag_parallel && dis1 < 6 * units::cm) {
+                                flag_parallel = modify_segment_isochronous(graph, cluster, sg1, v1, new_seg, v2, track_fitter, dv);
+                            }
+                            if (!flag_parallel && dis2 < 6 * units::cm) {
+                                flag_parallel = modify_segment_isochronous(graph, cluster, sg1, v2, new_seg, v1, track_fitter, dv);
+                            }
+                            if (flag_parallel) break;
+
+                            if (dis1 < min_dis1) { min_dis1 = dis1; min_sg1 = sg1; }
+                            if (dis2 < min_dis2) { min_dis2 = dis2; min_sg2 = sg1; }
+                        }
+
+                        // Long track (>18 cm): widen search
+                        if (!flag_parallel && dir_mag > 18 * units::cm) {
+                            if (min_sg1 && min_dis1 <= min_dis2 && min_dis1 < 10 * units::cm) {
+                                flag_parallel = modify_segment_isochronous(graph, cluster, min_sg1, v1, new_seg, v2, track_fitter, dv, 10*units::cm, 8, 15*units::cm);
+                                if (!flag_parallel) flag_parallel = modify_segment_isochronous(graph, cluster, min_sg1, v1, new_seg, v2, track_fitter, dv, 10*units::cm, 8, 30*units::cm);
+                            } else if (min_sg2 && min_dis2 < min_dis1 && min_dis2 < 10 * units::cm) {
+                                flag_parallel = modify_segment_isochronous(graph, cluster, min_sg2, v2, new_seg, v1, track_fitter, dv, 10*units::cm, 8, 15*units::cm);
+                                if (!flag_parallel) flag_parallel = modify_segment_isochronous(graph, cluster, min_sg2, v2, new_seg, v1, track_fitter, dv, 10*units::cm, 8, 30*units::cm);
+                            }
+                        }
+
+                        // Very long track (>36 cm): widen further
+                        if (!flag_parallel && dir_mag > 36 * units::cm) {
+                            if (min_sg1 && min_dis1 <= min_dis2 && min_dis1 < 18 * units::cm) {
+                                flag_parallel = modify_segment_isochronous(graph, cluster, min_sg1, v1, new_seg, v2, track_fitter, dv, 18*units::cm, 5, 15*units::cm);
+                                if (!flag_parallel) flag_parallel = modify_segment_isochronous(graph, cluster, min_sg1, v1, new_seg, v2, track_fitter, dv, 18*units::cm, 5, 30*units::cm);
+                            } else if (min_sg2 && min_dis2 < min_dis1 && min_dis2 < 18 * units::cm) {
+                                flag_parallel = modify_segment_isochronous(graph, cluster, min_sg2, v2, new_seg, v1, track_fitter, dv, 18*units::cm, 5, 15*units::cm);
+                                if (!flag_parallel) flag_parallel = modify_segment_isochronous(graph, cluster, min_sg2, v2, new_seg, v1, track_fitter, dv, 18*units::cm, 5, 30*units::cm);
+                            }
+                        }
+                    }
+                }
+
+                if (!flag_parallel) {
+                    // Truly isolated residual – remove vertices from graph; segment was never added
+                    std::cout << "Cluster: " << cluster.get_cluster_id()
+                              << " Isolated residual segment found: "
+                              << dir_mag / units::cm << " cm" << std::endl;
+                    remove_vertex(graph, v1);
+                    remove_vertex(graph, v2);
+                } else {
+                    // Isochronous connection found (segment already added by modify_*)
+                    track_fitter.do_multi_tracking(true, true, true);
+
+                    double direct_length = segment_track_direct_length(new_seg);
+                    double length        = segment_track_length(new_seg);
+                    double medium_dQ_dx  = segment_median_dQ_dx(new_seg);
+
+                    if ((direct_length < 0.78 * length && length > 10 * units::cm &&
+                         medium_dQ_dx / mip_dQdx > 1.6) ||
+                        (direct_length < 0.6 * length && length > 10 * units::cm)) {
+                        if (medium_dQ_dx / mip_dQdx > 1.1) {
+                            new_segments.push_back(new_seg);
+                        } else {
+                            new_segments_1.push_back(new_seg);
+                        }
+                    }
+                }
+            }
+        } // if fits().size() > 1
+
+        // Re-evaluate remaining segments using the updated existing_segments set
         std::set<int> tmp_del_set;
         for (auto it = remaining_segments.begin(); it != remaining_segments.end(); it++) {
             temp_segments[*it].number_not_faked = 0;
             temp_segments[*it].max_dis_u = 0;
             temp_segments[*it].max_dis_v = 0;
             temp_segments[*it].max_dis_w = 0;
-            
+
             for (int j = 0; j < ncounts[*it]; j++) {
                 size_t idx = sep_clusters[*it][j];
                 Facade::geo_point_t p(x_coords[idx], y_coords[idx], z_coords[idx]);
                 double min_dis_u = 1e9, min_dis_v = 1e9, min_dis_w = 1e9;
-                
+
                 WirePlaneId wpid = wpid_array[idx];
                 int apa = wpid.apa();
                 int face = wpid.face();
-                
+
                 for (auto seg : existing_segments) {
                     auto closest_2d = segment_get_closest_2d_distances(seg, p, apa, face, "fit");
                     double dis_u = std::get<0>(closest_2d);
                     double dis_v = std::get<1>(closest_2d);
                     double dis_w = std::get<2>(closest_2d);
-                    
+
                     if (dis_u < min_dis_u) min_dis_u = dis_u;
                     if (dis_v < min_dis_v) min_dis_v = dis_v;
                     if (dis_w < min_dis_w) min_dis_w = dis_w;
                 }
-                
+
                 auto p_raw = transform->backward(p, cluster_t0, face, apa);
-                
+
                 int flag_num = 0;
-                if (min_dis_u > scaling_2d * search_range && 
+                if (min_dis_u > scaling_2d * search_range &&
                     !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) flag_num++;
-                if (min_dis_v > scaling_2d * search_range && 
+                if (min_dis_v > scaling_2d * search_range &&
                     !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1)) flag_num++;
-                if (min_dis_w > scaling_2d * search_range && 
+                if (min_dis_w > scaling_2d * search_range &&
                     !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2)) flag_num++;
-                
+
                 if (flag_num >= 2) temp_segments[*it].number_not_faked++;
-                
-                if (min_dis_u > temp_segments[*it].max_dis_u && 
-                    !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0)) 
+
+                if (min_dis_u > temp_segments[*it].max_dis_u &&
+                    !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0))
                     temp_segments[*it].max_dis_u = min_dis_u;
-                if (min_dis_v > temp_segments[*it].max_dis_v && 
-                    !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1)) 
+                if (min_dis_v > temp_segments[*it].max_dis_v &&
+                    !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1))
                     temp_segments[*it].max_dis_v = min_dis_v;
-                if (min_dis_w > temp_segments[*it].max_dis_w && 
-                    !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2)) 
+                if (min_dis_w > temp_segments[*it].max_dis_w &&
+                    !cluster.grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2))
                     temp_segments[*it].max_dis_w = min_dis_w;
             }
-            
+
             // Apply quality cuts again
             if ((temp_segments[*it].number_points == 1) ||
                 (temp_segments[*it].number_not_faked == 0 &&
                  ((temp_segments[*it].length < 3.5 * units::cm) || (
                   ((temp_segments[*it].number_not_faked < 0.25 * temp_segments[*it].number_points) ||
-                   (temp_segments[*it].number_not_faked < 0.4 * temp_segments[*it].number_points && 
+                   (temp_segments[*it].number_not_faked < 0.4 * temp_segments[*it].number_points &&
                     temp_segments[*it].length < 7 * units::cm)) &&
-                  temp_segments[*it].max_dis_u / units::cm < 3 && 
-                  temp_segments[*it].max_dis_v / units::cm < 3 && 
+                  temp_segments[*it].max_dis_u / units::cm < 3 &&
+                  temp_segments[*it].max_dis_v / units::cm < 3 &&
                   temp_segments[*it].max_dis_w / units::cm < 3 &&
-                  temp_segments[*it].max_dis_u + temp_segments[*it].max_dis_v + 
+                  temp_segments[*it].max_dis_u + temp_segments[*it].max_dis_v +
                   temp_segments[*it].max_dis_w < 6 * units::cm)))) {
                 tmp_del_set.insert(*it);
             }
         }
-        
+
         for (auto it = tmp_del_set.begin(); it != tmp_del_set.end(); it++) {
             remaining_segments.erase(*it);
         }
     }
-    
-    // Step 10: Perform tracking on new segments
-    if (!new_segments_for_tracking.empty()) {
-        for (auto seg : new_segments_for_tracking) {
-            track_fitter.add_segment(seg);
-        }
-        track_fitter.do_multi_tracking(true, true, true);
-        
-        // Optionally break long segments if requested
-        if (flag_break_track) {
-            std::vector<SegmentPtr> segments_to_break(new_segments_for_tracking.begin(), 
-                                                       new_segments_for_tracking.end());
-            break_segments(graph, track_fitter, dv, segments_to_break);
-        }
+
+    // Step 10: Break curvy/high-dQdx segments if requested
+    if (flag_break_track) {
+        break_segments(graph, track_fitter, dv, new_segments_1, 2.0 * units::cm);
+        break_segments(graph, track_fitter, dv, new_segments);
     }
 }
 
