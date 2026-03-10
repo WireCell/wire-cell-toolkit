@@ -691,9 +691,11 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
     const auto& seg_fits = seg->fits();
     if (seg_wcpts.size() < 2) return flag;
     
+    const auto& seg_front_point = seg_wcpts.front().point;
+    const auto& seg_back_point  = seg_wcpts.back().point;
     bool flag_start = false;
-    double dis_front = ray_length(Ray{vertex->wcpt().point, seg_wcpts.front().point});
-    double dis_back = ray_length(Ray{vertex->wcpt().point, seg_wcpts.back().point});
+    double dis_front = ray_length(Ray{vertex->wcpt().point, seg_front_point});
+    double dis_back = ray_length(Ray{vertex->wcpt().point, seg_back_point});
     
     if (dis_front < dis_back) {
         flag_start = true;
@@ -701,6 +703,7 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
     
     // Step 3: Build list of points to test (from vertex end, excluding endpoints)
     std::vector<Facade::geo_point_t> pts_to_be_tested;
+    pts_to_be_tested.reserve(seg_fits.size());
     
     if (flag_start) {
         for (size_t i = 1; i + 1 < seg_fits.size(); i++) {
@@ -744,9 +747,11 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                     if (!cluster.grouping()->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2 * units::cm, 0, 0)) {
                         n_bad++;
+                        if (n_bad > 0) break;
                     }
                 }
             }
+            if (n_bad > 0) break;
         }
         
         if (n_bad == 0) max_bin = i;
@@ -771,11 +776,11 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         Facade::geo_point_t vtx_new_point(x_coords[new_idx], y_coords[new_idx], z_coords[new_idx]);
         
         // Check if new point is valid (not the same as current endpoints)
-        if (flag_start && ray_length(Ray{vtx_new_point, seg_wcpts.back().point}) < 0.01 * units::cm) {
+        if (flag_start && ray_length(Ray{vtx_new_point, seg_back_point}) < 0.01 * units::cm) {
             max_bin--;
             continue;
         }
-        if (!flag_start && ray_length(Ray{vtx_new_point, seg_wcpts.front().point}) < 0.01 * units::cm) {
+        if (!flag_start && ray_length(Ray{vtx_new_point, seg_front_point}) < 0.01 * units::cm) {
             max_bin--;
             continue;
         }
@@ -787,28 +792,30 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         std::vector<Facade::geo_point_t> new_path;
         if (flag_start) {
             // Keep points from back to new vertex
-            double dis_limit = ray_length(Ray{vtx_new_point, seg_wcpts.back().point});
+            double dis_limit = ray_length(Ray{vtx_new_point, seg_back_point});
+            std::vector<Facade::geo_point_t> tmp_path;
             for (int idx = seg_wcpts.size() - 1; idx >= 0; idx--) {
-                double dis = ray_length(Ray{seg_wcpts[idx].point, seg_wcpts.back().point});
+                double dis = ray_length(Ray{seg_wcpts[idx].point, seg_back_point});
                 if (dis < dis_limit) {
-                    new_path.push_back(seg_wcpts[idx].point);
+                    tmp_path.push_back(seg_wcpts[idx].point);
                 }
             }
-            std::reverse(new_path.begin(), new_path.end());
-            if (new_path.size() > 1 && ray_length(Ray{new_path.front(), vtx_new_point}) < 0.01 * units::cm) {
-                new_path.erase(new_path.begin());
+            if (tmp_path.size() > 1 && ray_length(Ray{tmp_path.back(), vtx_new_point}) < 0.01 * units::cm) {
+                tmp_path.pop_back();
             }
-            new_path.insert(new_path.begin(), vtx_new_point);
+            tmp_path.push_back(vtx_new_point);
+            std::reverse(tmp_path.begin(), tmp_path.end());
+            new_path = std::move(tmp_path);
         } else {
             // Keep points from front to new vertex
-            double dis_limit = ray_length(Ray{vtx_new_point, seg_wcpts.front().point});
+            double dis_limit = ray_length(Ray{vtx_new_point, seg_front_point});
             for (size_t idx = 0; idx < seg_wcpts.size(); idx++) {
-                double dis = ray_length(Ray{seg_wcpts[idx].point, seg_wcpts.front().point});
+                double dis = ray_length(Ray{seg_wcpts[idx].point, seg_front_point});
                 if (dis < dis_limit) {
                     new_path.push_back(seg_wcpts[idx].point);
                 }
             }
-            if (new_path.size() > 1 && ray_length(Ray{new_path.back(), vtx_new_point}) < 0.01 * units::cm) {
+            if (new_path.size() > 1 ) {
                 new_path.pop_back();
             }
             new_path.push_back(vtx_new_point);
