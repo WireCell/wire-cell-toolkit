@@ -2,6 +2,9 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 // #include "WireCellClus/Graphs/Weighted.h"
 
+#include <algorithm>
+#include <cmath>
+
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
@@ -520,4 +523,187 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             break_segments(graph, track_fitter, dv, segments_to_break);
         }
     }
+}
+
+
+namespace {
+
+using WireCell::Ray;
+
+Facade::geo_vector_t make_vector(const Facade::geo_point_t& from, const Facade::geo_point_t& to)
+{
+    return Facade::geo_vector_t(to.x() - from.x(), to.y() - from.y(), to.z() - from.z());
+}
+
+double point_distance(const Facade::geo_point_t& p1, const Facade::geo_point_t& p2)
+{
+    return ray_length(Ray{p1, p2});
+}
+
+double line_distance(const Facade::geo_point_t& line_point,
+                     const Facade::geo_vector_t& line_dir_unit,
+                     const Facade::geo_point_t& test_point)
+{
+    return ray_closest_dis(Ray{line_point, line_point + line_dir_unit}, test_point);
+}
+
+double angle_degrees(const Facade::geo_vector_t& dir1, const Facade::geo_vector_t& dir2)
+{
+    return dir1.angle(dir2) / 3.1415926 * 180.0;
+}
+
+Facade::geo_vector_t tracking_direction(const std::vector<Facade::geo_point_t>& tracking_path,
+                                        const Facade::geo_point_t& test_p,
+                                        bool flag_front,
+                                        int index)
+{
+    Facade::geo_vector_t dir_p(0, 0, 0);
+    if (flag_front) {
+        if (index + 1 < tracking_path.size()) {
+            dir_p.x(test_p.x() - tracking_path.at(index + 1).x());
+            dir_p.y(test_p.y() - tracking_path.at(index + 1).y());
+            dir_p.z(test_p.z() - tracking_path.at(index + 1).z());
+        }
+        else {
+            dir_p.x(test_p.x() - tracking_path.back().x());
+            dir_p.y(test_p.y() - tracking_path.back().y());
+            dir_p.z(test_p.z() - tracking_path.back().z());
+        }
+    }
+    else {
+        if (tracking_path.size() >= index + 2) {
+            dir_p.x(test_p.x() - tracking_path.at(tracking_path.size() - 2 - index).x());
+            dir_p.y(test_p.y() - tracking_path.at(tracking_path.size() - 2 - index).y());
+            dir_p.z(test_p.z() - tracking_path.at(tracking_path.size() - 2 - index).z());
+        }
+        else {
+            dir_p.x(test_p.x() - tracking_path.front().x());
+            dir_p.x(test_p.y() - tracking_path.front().y());
+            dir_p.x(test_p.z() - tracking_path.front().z());
+        }
+    }
+    return dir_p;
+}
+
+}
+
+
+std::tuple<VertexPtr, SegmentPtr, Facade::geo_point_t>
+PatternAlgorithms::check_end_point(Graph& graph,
+                                   Facade::Cluster& cluster,
+                                   std::vector<Facade::geo_point_t>& tracking_path,
+                                   bool flag_front,
+                                   double vtx_cut1,
+                                   double vtx_cut2,
+                                   double sg_cut1,
+                                   double sg_cut2)
+{
+    if (tracking_path.size() < 2) std::cout << "vector size wrong!" << std::endl;
+
+    const int ncount = 5;
+    Facade::geo_point_t test_p = flag_front ? tracking_path.front() : tracking_path.back();
+    VertexPtr vtx = nullptr;
+    SegmentPtr seg = nullptr;
+
+    for (int i = 0; i != ncount; i++) {
+        Facade::geo_vector_t dir_p = tracking_direction(tracking_path, test_p, flag_front, i);
+        if (dir_p.magnitude() == 0.0) {
+            continue;
+        }
+
+        Facade::geo_vector_t temp_dir = dir_p.norm();
+
+        auto [vbegin, vend] = boost::vertices(graph);
+        for (auto vit = vbegin; vit != vend; ++vit) {
+            VertexPtr test_v = graph[*vit].vertex;
+            if (!test_v || test_v->cluster() != &cluster) {
+                continue;
+            }
+
+            const Facade::geo_point_t p1 = test_v->wcpt().point;
+            const Facade::geo_point_t p2 = test_v->fit().valid() ? test_v->fit().point : test_v->wcpt().point;
+
+            const double dis1 = point_distance(test_p, p1);
+            const double dis2 = line_distance(test_p, temp_dir, p1);
+            const double dis3 = point_distance(test_p, p2);
+            const double dis4 = line_distance(test_p, temp_dir, p2);
+
+            const auto degree = test_v->descriptor_valid() ? boost::out_degree(test_v->get_descriptor(), graph) : 0;
+
+            if (std::max(dis1, dis2) < 5 * units::cm &&
+                ((std::min(dis1, dis2) < vtx_cut1 && std::max(dis1, dis2) < vtx_cut2) ||
+                 (std::min(dis3, dis4) < vtx_cut1 * 1.3 && std::max(dis1, dis2) < vtx_cut2 * 2 && degree == 1))) {
+                const Facade::geo_vector_t test_dir = make_vector(test_p, p1);
+                if (angle_degrees(test_dir, temp_dir) < 90.0) {
+                    vtx = test_v;
+                    break;
+                }
+            }
+
+            if (std::max(dis3, dis4) < 5 * units::cm &&
+                ((std::min(dis3, dis4) < vtx_cut1 && std::max(dis3, dis4) < vtx_cut2) ||
+                 (std::min(dis3, dis4) < vtx_cut1 * 1.3 && std::max(dis3, dis4) < vtx_cut2 * 2 && degree == 1))) {
+                const Facade::geo_vector_t test_dir = make_vector(test_p, p2);
+                if (angle_degrees(test_dir, temp_dir) < 90.0) {
+                    vtx = test_v;
+                    break;
+                }
+            }
+        }
+
+        if (vtx != nullptr) {
+            break;
+        }
+    }
+
+    if (vtx == nullptr) {
+        SegmentPtr min_sg = nullptr;
+        Facade::geo_point_t min_point(0, 0, 0);
+        double min_dis = 1e9;
+
+        auto [ebegin, eend] = boost::edges(graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            SegmentPtr candidate_seg = graph[*eit].segment;
+            if (!candidate_seg || candidate_seg->cluster() != &cluster) {
+                continue;
+            }
+
+            auto [closest_dis, closest_pt] = segment_get_closest_point(candidate_seg, test_p, "fit");
+            if (closest_dis < sg_cut1) {
+                const auto& points = candidate_seg->fits();
+
+                for (int i = 0; i != ncount; i++) {
+                    Facade::geo_vector_t dir_p = tracking_direction(tracking_path, test_p, flag_front, i);
+                    if (dir_p.magnitude() == 0.0) {
+                        continue;
+                    }
+
+                    Facade::geo_vector_t temp_dir = dir_p.norm();
+                    for (size_t j = 0; j != points.size(); j++) {
+                        double dis1 = line_distance(test_p, temp_dir, points.at(j).point);
+                        if (dis1 < sg_cut2) {
+                            const Facade::geo_vector_t test_dir = make_vector(test_p, points.at(j).point);
+                            dis1 = std::sqrt(std::pow(dis1, 2) + std::pow(test_dir.magnitude() / 4.0, 2));
+                            if (angle_degrees(test_dir, temp_dir) < 90.0 && dis1 < min_dis) {
+                                min_dis = dis1;
+                                min_point = points.at(j).point;
+                                min_sg = candidate_seg;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (min_sg != nullptr) {
+            seg = min_sg;
+            test_p = min_point;
+        }
+    }
+
+    return std::make_tuple(vtx, seg, test_p);
+}
+
+VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Cluster& cluster, bool flag_forwrard, Facade::geo_point_t& wcp){
+
 }

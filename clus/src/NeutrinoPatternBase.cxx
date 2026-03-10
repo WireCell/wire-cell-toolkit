@@ -1,6 +1,7 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellUtil/Logging.h"
+
 #include <Eigen/Dense>
 #include <limits>
 
@@ -15,6 +16,7 @@ static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 // Sentinel returned by proto_extend_point when no steiner point can be found.
 static constexpr size_t INVALID_STEINER_INDEX = std::numeric_limits<size_t>::max();
+
 
 std::set<VertexPtr> PatternAlgorithms::find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster)
 {
@@ -168,6 +170,7 @@ SegmentPtr PatternAlgorithms::create_segment_from_vertices(Graph& graph, Facade:
     WireCell::Clus::PR::add_segment(graph, seg, v1, v2);
     return seg;
 }
+
 
 
 
