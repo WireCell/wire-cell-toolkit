@@ -1172,7 +1172,9 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
     int ncount_close = 0;
     int ncount_dead = 0;
     int ncount_line = 0;
-    
+                
+    const auto& seg_fits = sg->fits();
+
     // Check each plane (U, V, W)
     for (int pind = 0; pind < 3; pind++) {
         double v1_wire, v2_wire;
@@ -1188,7 +1190,6 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
         } else {
             // Check if segment points are all in dead region
             bool flag_dead = true;
-            const auto& seg_fits = sg->fits();
 
             for (size_t i = 0; i < seg_fits.size(); i++) {
                 auto test_wpid = dv->contained_by(seg_fits[i].point);
@@ -1298,7 +1299,7 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
     return false;
 }
 
-bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex){
     bool flag_continue = false;
     
     VertexPtr v1 = nullptr;
@@ -1314,23 +1315,23 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
         // Check if vertex has exactly 2 connections (potential candidate)
         if (boost::degree(*vit, graph) != 2) continue;
         
-        // Get the two connected segments
-        std::vector<SegmentPtr> connected_segments;
+        // Get the two connected segments and cache their neighbor vertices,
+        // avoiding redundant find_other_vertex calls later.
+        std::vector<std::pair<SegmentPtr, VertexPtr>> seg_vtx_pairs;
         auto [ebegin, eend] = boost::out_edges(*vit, graph);
         for (auto eit = ebegin; eit != eend; ++eit) {
             SegmentPtr seg = graph[*eit].segment;
-            if (seg) connected_segments.push_back(seg);
+            if (seg) seg_vtx_pairs.emplace_back(seg, graph[boost::target(*eit, graph)].vertex);
         }
         
-        if (connected_segments.size() != 2) continue;
+        if (seg_vtx_pairs.size() != 2) continue;
         
         // Check each segment
-        for (auto seg : connected_segments) {
+        for (auto& [seg, vtx1] : seg_vtx_pairs) {
             // Only consider short segments (<4cm)
             if (segment_track_length(seg) > 4.0 * units::cm) continue;
             
-            // Find the other vertex of this segment
-            VertexPtr vtx1 = find_other_vertex(graph, seg, vtx);
+            // vtx1 is the cached neighbor vertex — no graph traversal needed
             if (!vtx1) continue;
             
             // The other vertex must have at least 2 connections
@@ -1343,10 +1344,9 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
                 v1 = vtx;
                 v2 = vtx1;
                 
-                // Find v3: the vertex on the other side of v1
-                for (auto seg2 : connected_segments) {
+                // Find v3: neighbor already cached in the other pair entry
+                for (auto& [seg2, vtx_other] : seg_vtx_pairs) {
                     if (seg2 == seg) continue;
-                    VertexPtr vtx_other = find_other_vertex(graph, seg2, v1);
                     if (vtx_other) {
                         v3 = vtx_other;
                         break;
@@ -1363,6 +1363,9 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
     
     // Merge vertices if found
     if (v1 && v2 && v3) {
+        if (v1 == main_vertex) {
+          return false;
+        }
         // Find the segments to be removed
         SegmentPtr sg = find_segment(graph, v1, v2);  // segment between v1 and v2
         SegmentPtr sg1 = find_segment(graph, v1, v3); // segment between v1 and v3
@@ -1375,13 +1378,13 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
         auto path_points = do_rough_path(cluster, v3->wcpt().point, v2->wcpt().point);
         
         if (path_points.size() < 2) {
-            return false;
+            return flag_continue;
         }
         
         // Create the new segment
         auto sg2 = create_segment_for_cluster(cluster, dv, path_points, 0);
         if (!sg2) {
-            return false;
+            return flag_continue;
         }
         
         std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type I " 
@@ -1945,7 +1948,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
     return flag_continue;
 }
 
-void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex){
     bool flag_continue = true;
     
     while (flag_continue) {
@@ -1955,7 +1958,7 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
         examine_segment(graph, cluster, track_fitter, dv);
         
         // Merge vertex if the kink is not at right location (Type I)
-        flag_continue = flag_continue || examine_vertices_1(graph, cluster, track_fitter, dv);
+        flag_continue = flag_continue || examine_vertices_1(graph, cluster, track_fitter, dv, main_vertex);
         
         // Count vertices in the graph
         size_t num_vertices = boost::num_vertices(graph);

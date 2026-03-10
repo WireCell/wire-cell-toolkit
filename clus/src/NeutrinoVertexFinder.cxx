@@ -1903,7 +1903,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             flag_keep_main_vertex = true;
         }
         
-        examine_vertices(graph, cluster, track_fitter, dv);
+        examine_vertices(graph, cluster, track_fitter, dv, main_vertex);
         
         if (flag_keep_main_vertex) {
             // Check if main_vertex still exists in graph
