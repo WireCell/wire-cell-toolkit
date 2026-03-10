@@ -578,8 +578,8 @@ Facade::geo_vector_t tracking_direction(const std::vector<Facade::geo_point_t>& 
         }
         else {
             dir_p.x(test_p.x() - tracking_path.front().x());
-            dir_p.x(test_p.y() - tracking_path.front().y());
-            dir_p.x(test_p.z() - tracking_path.front().z());
+            dir_p.y(test_p.y() - tracking_path.front().y());
+            dir_p.z(test_p.z() - tracking_path.front().z());
         }
     }
     return dir_p;
