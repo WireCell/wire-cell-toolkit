@@ -1980,12 +1980,7 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
 void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     bool flag_continue = true;
     
-    // Get steiner point cloud
-    const auto& steiner_pc = cluster.get_pc("steiner_pc");
-    const auto& coords = cluster.get_default_scope().coords;
-    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    
     
     while (flag_continue) {
         flag_continue = false;
@@ -2000,30 +1995,25 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
             size_t degree = boost::degree(*vit, graph);
             if (degree <= 2) continue;
             
-            // Collect all segments connected to this vertex
-            std::vector<SegmentPtr> connected_segments;
-            auto [ebegin, eend] = boost::out_edges(*vit, graph);
-            for (auto eit = ebegin; eit != eend; ++eit) {
-                SegmentPtr seg = graph[*eit].segment;
-                if (seg) connected_segments.push_back(seg);
-            }
-            
             // Find pair of segments with maximum overlap distance
             SegmentPtr max_sg1 = nullptr;
             SegmentPtr max_sg2 = nullptr;
             double max_dis = 0;
             Facade::geo_point_t max_point;
-            
-            for (size_t i = 0; i < connected_segments.size(); i++) {
-                SegmentPtr sg1 = connected_segments[i];
+
+            auto [ebegin, eend] = boost::out_edges(*vit, graph);
+            for (auto eit1 = ebegin; eit1 != eend; ++eit1) {
+                SegmentPtr sg1 = graph[*eit1].segment;
+                if (!sg1) continue;
+
                 const auto& pts_1 = sg1->wcpts();
                 if (pts_1.empty()) continue;
-                
+
                 // Order points from vertex outward
                 std::vector<Facade::geo_point_t> test_pts;
                 bool front_is_vtx = (ray_length(Ray{pts_1.front().point, vtx->wcpt().point}) <
                                     ray_length(Ray{pts_1.back().point, vtx->wcpt().point}));
-                
+
                 if (front_is_vtx) {
                     for (const auto& pt : pts_1) {
                         test_pts.push_back(pt.point);
@@ -2033,20 +2023,23 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                         test_pts.push_back(it->point);
                     }
                 }
-                
+
+                if (test_pts.empty()) continue;
+
                 // Compare with other segments
-                for (size_t j = i + 1; j < connected_segments.size(); j++) {
-                    SegmentPtr sg2 = connected_segments[j];
-                    
+                for (auto eit2 = std::next(eit1); eit2 != eend; ++eit2) {
+                    SegmentPtr sg2 = graph[*eit2].segment;
+                    if (!sg2) continue;
+
                     // Check overlap along sg1
                     for (size_t k = 0; k < test_pts.size(); k++) {
                         auto [closest_dis, closest_pt] = segment_get_closest_point(sg2, test_pts[k], "fit");
-                        
+
                         if (closest_dis < 0.3 * units::cm) {
                             // Get position for vertex
                             Facade::geo_point_t vtx_point = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
                             double dis = ray_length(Ray{test_pts[k], vtx_point});
-                            
+
                             if (dis > max_dis) {
                                 max_dis = dis;
                                 max_point = test_pts[k];
@@ -2145,7 +2138,13 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                     
                 } else {
                     // Create new vertex at split point
-                    
+                    // Get steiner point cloud
+                    const auto& steiner_pc = cluster.get_pc("steiner_pc");
+                    const auto& coords = cluster.get_default_scope().coords;
+                    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
+                    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
+                    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+
                     // Find closest steiner point
                     auto knn_results = cluster.kd_steiner_knn(1, max_point, "steiner_pc");
                     if (!knn_results.empty()) {
@@ -2219,7 +2218,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
     }
 }
 
-Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& cluster, Facade::geo_point_t& wcp){
+Facade::geo_point_t PatternAlgorithms::get_local_extension(Facade::Cluster& cluster, const Facade::geo_point_t& wcp){
     // Determine which point cloud to use
     std::string pc_name = "steiner_pc";
     
