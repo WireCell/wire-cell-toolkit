@@ -502,6 +502,8 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         }
                         new_seg->wcpts(new_wcpts);
                         create_segment_point_cloud(new_seg, ext_path, dv, "main");
+                    } else {
+                        std::cerr << "Warning: Find_other_segments: path extension failed for cluster " << cluster.get_cluster_id() << std::endl;
                     }
                 }
             }
