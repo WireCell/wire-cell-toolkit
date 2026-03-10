@@ -1405,7 +1405,7 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
     return flag_continue;
 }
 
-bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex){
     bool flag_continue = false;
     
     VertexPtr v1 = nullptr;
@@ -1457,67 +1457,71 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
     
     // Merge vertices if found
     if (v1 && v2 && sg) {
-        std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type II" << std::endl;
-        
-        // Remove the segment between v1 and v2
-        remove_segment(graph, sg);
-        
-        // Collect all segments connected to v2 (excluding the one we just removed)
-        std::vector<SegmentPtr> v2_segments;
-        if (v2->descriptor_valid()) {
-            auto vd2 = v2->get_descriptor();
-            auto [ebegin2, eend2] = boost::out_edges(vd2, graph);
-            for (auto eit2 = ebegin2; eit2 != eend2; ++eit2) {
-                SegmentPtr seg2 = graph[*eit2].segment;
-                if (seg2) {
-                    v2_segments.push_back(seg2);
+        if (v2!= main_vertex){
+            std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type II" << std::endl;
+            
+            // Remove the segment between v1 and v2
+            remove_segment(graph, sg);
+            
+            // Collect all segments connected to v2 (excluding the one we just removed)
+            std::vector<SegmentPtr> v2_segments;
+            if (v2->descriptor_valid()) {
+                auto vd2 = v2->get_descriptor();
+                auto [ebegin2, eend2] = boost::out_edges(vd2, graph);
+                for (auto eit2 = ebegin2; eit2 != eend2; ++eit2) {
+                    SegmentPtr seg2 = graph[*eit2].segment;
+                    if (seg2) {
+                        v2_segments.push_back(seg2);
+                    }
                 }
             }
-        }
-        
-        // For each segment connected to v2, create a new segment from v3 to v1
-        for (auto old_seg : v2_segments) {
-            // Find the other vertex (v3) connected to v2 through this segment
-            VertexPtr v3 = find_other_vertex(graph, old_seg, v2);
-            if (!v3) continue;
             
-            // Create new segment from v3 to v1 using Steiner graph shortest path
-            auto path_points = do_rough_path(cluster, v3->wcpt().point, v1->wcpt().point);
+            // For each segment connected to v2, create a new segment from v3 to v1
+            for (auto old_seg : v2_segments) {
+                // Find the other vertex (v3) connected to v2 through this segment
+                VertexPtr v3 = find_other_vertex(graph, old_seg, v2);
+                if (!v3) continue;
+                
+                // Create new segment from v3 to v1 using Steiner graph shortest path
+                auto path_points = do_rough_path(cluster, v3->wcpt().point, v1->wcpt().point);
+                
+                if (path_points.size() < 2) continue;
+                
+                // Create the new segment
+                auto new_seg = create_segment_for_cluster(cluster, dv, path_points, 0);
+                if (!new_seg) continue;
+                
+                // Add new segment to graph
+                add_segment(graph, new_seg, v3, v1);
+                
+                // Remove old segment
+                remove_segment(graph, old_seg);
+            }
             
-            if (path_points.size() < 2) continue;
+            // Remove v2 vertex
+            remove_vertex(graph, v2);
             
-            // Create the new segment
-            auto new_seg = create_segment_for_cluster(cluster, dv, path_points, 0);
-            if (!new_seg) continue;
-            
-            // Add new segment to graph
-            add_segment(graph, new_seg, v3, v1);
-            
-            // Remove old segment
-            remove_segment(graph, old_seg);
-        }
-        
-        // Remove v2 vertex
-        remove_vertex(graph, v2);
-        
-        // Clean up isolated vertices (vertices with no connections)
-        std::vector<VertexPtr> isolated_vertices;
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            if (boost::degree(*vit, graph) == 0) {
-                VertexPtr vtx = graph[*vit].vertex;
-                if (vtx) {
-                    isolated_vertices.push_back(vtx);
+            // Clean up isolated vertices (vertices with no connections)
+            std::vector<VertexPtr> isolated_vertices;
+            auto [vbegin, vend] = boost::vertices(graph);
+            for (auto vit = vbegin; vit != vend; ++vit) {
+                if (boost::degree(*vit, graph) == 0) {
+                    VertexPtr vtx = graph[*vit].vertex;
+                    if (vtx) {
+                        isolated_vertices.push_back(vtx);
+                    }
                 }
             }
+            
+            for (auto vtx : isolated_vertices) {
+                remove_vertex(graph, vtx);
+            }
+            
+            // Update tracking
+            track_fitter.do_multi_tracking(true, true, true);
+        }else{
+            flag_continue = false;
         }
-        
-        for (auto vtx : isolated_vertices) {
-            remove_vertex(graph, vtx);
-        }
-        
-        // Update tracking
-        track_fitter.do_multi_tracking(true, true, true);
     }
     
     return flag_continue;
