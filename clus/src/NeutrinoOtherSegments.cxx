@@ -704,6 +704,110 @@ PatternAlgorithms::check_end_point(Graph& graph,
     return std::make_tuple(vtx, seg, test_p);
 }
 
-VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Cluster& cluster, bool flag_forwrard, Facade::geo_point_t& wcp){
+VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Cluster& cluster, SegmentPtr seg, bool flag_forwrard, Facade::geo_point_t& wcp, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
+    VertexPtr v1 = nullptr;
 
+    // Build the tracking path from the segment's fit points
+    // (corresponds to temp_cluster->get_fine_tracking_path() in WCP)
+    std::vector<Facade::geo_point_t> tracking_path;
+    for (const auto& fit : seg->fits()) {
+        tracking_path.push_back(fit.point);
+    }
+
+    if (tracking_path.size() < 2) return v1;
+
+    // First attempt with default parameters
+    auto check_results = check_end_point(graph, cluster, tracking_path, flag_forwrard);
+
+    // Second attempt with widened parameters if nothing found
+    if (std::get<0>(check_results) == nullptr && std::get<1>(check_results) == nullptr) {
+        check_results = check_end_point(graph, cluster, tracking_path, flag_forwrard,
+                                        1.2 * units::cm, 2.5 * units::cm);
+    }
+
+    // Third attempt with further widened parameters
+    if (std::get<0>(check_results) == nullptr && std::get<1>(check_results) == nullptr) {
+        check_results = check_end_point(graph, cluster, tracking_path, flag_forwrard,
+                                        1.5 * units::cm, 3.0 * units::cm);
+    }
+
+    if (std::get<0>(check_results) != nullptr) {
+        // Found a vertex directly
+        v1 = std::get<0>(check_results);
+    } else if (std::get<1>(check_results) != nullptr) {
+        // Found a segment – need to break it or snap to an endpoint
+        SegmentPtr sg1 = std::get<1>(check_results);
+        Facade::geo_point_t test_p = std::get<2>(check_results);
+
+        // Get the closest point on sg1 to test_p (using "main" point cloud)
+        auto [dist_wcpt, break_wcp] = segment_get_closest_point(sg1, test_p, "main");
+
+        // Find the two endpoint vertices of sg1
+        auto [sv, ev] = find_vertices(graph, sg1);
+        VertexPtr start_v = sv, end_v = ev;
+
+        if (start_v && end_v) {
+            const auto& wcpts = sg1->wcpts();
+            if (!wcpts.empty()) {
+                // Determine which vertex corresponds to the front of the segment
+                // by comparing positions to the first wcpt (< 0.1 cm tolerance)
+                double dis_sv_front = point_distance(start_v->wcpt().point, wcpts.front().point);
+                double dis_sv_back  = point_distance(start_v->wcpt().point, wcpts.back().point);
+                if (dis_sv_front > dis_sv_back) {
+                    std::swap(start_v, end_v);
+                }
+            }
+        }
+
+        if (!start_v || !end_v) {
+            std::cout << "Error in finding vertices for a segment" << std::endl;
+            return v1;
+        }
+
+        // Check if the break point is close enough to snap to an existing endpoint
+        double dis_start = point_distance(start_v->wcpt().point, break_wcp);
+        double dis_end   = point_distance(end_v->wcpt().point, break_wcp);
+
+        if (dis_start < 0.9 * units::cm) {
+            v1 = start_v;
+        } else if (dis_end < 0.9 * units::cm) {
+            v1 = end_v;
+        } else {
+            // Break the segment into two at break_wcp
+            std::list<Facade::geo_point_t> wcps_list1;
+            std::list<Facade::geo_point_t> wcps_list2;
+            proto_break_tracks(cluster, start_v->wcpt().point, break_wcp,
+                               end_v->wcpt().point, wcps_list1, wcps_list2, true);
+
+            // Create the new vertex at the break point
+            VertexPtr new_vtx = make_vertex(graph);
+            new_vtx->wcpt().point = break_wcp;
+            new_vtx->cluster(&cluster);
+
+            // Convert lists to vectors for segment creation
+            std::vector<Facade::geo_point_t> path1(wcps_list1.begin(), wcps_list1.end());
+            std::vector<Facade::geo_point_t> path2(wcps_list2.begin(), wcps_list2.end());
+
+            SegmentPtr sg2 = create_segment_for_cluster(cluster, dv, path1, sg1->dirsign());
+            SegmentPtr sg3 = create_segment_for_cluster(cluster, dv, path2, sg1->dirsign());
+
+            if (sg2 && sg3) {
+                add_segment(graph, sg2, start_v, new_vtx);
+                add_segment(graph, sg3, new_vtx, end_v);
+                remove_segment(graph, sg1);
+                v1 = new_vtx;
+            } else {
+                // Segment creation failed – clean up the orphaned vertex
+                remove_vertex(graph, new_vtx);
+            }
+        }
+    } else {
+        // Nothing found: create a new vertex at the provided wcp
+        VertexPtr new_vtx = make_vertex(graph);
+        new_vtx->wcpt().point = wcp;
+        new_vtx->cluster(&cluster);
+        v1 = new_vtx;
+    }
+
+    return v1;
 }

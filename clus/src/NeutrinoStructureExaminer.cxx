@@ -512,18 +512,13 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
             SegmentPtr sg = graph[*eit].segment;
             if (!sg) continue;
             
-            // Get 3D closest point distance
+            // Get closest point distance from both fitted points and wcpts
             auto [dist_3d, closest_pt] = segment_get_closest_point(sg, test_p, "fit");
             if (dist_3d < min_dis) min_dis = dist_3d;
             
-            // Get closest wcpt distance
-            const auto& wcpts = sg->wcpts();
-            for (const auto& wcp : wcpts) {
-                double tmp_dis = std::sqrt(std::pow(wcp.point.x() - test_p.x(), 2) +
-                                          std::pow(wcp.point.y() - test_p.y(), 2) +
-                                          std::pow(wcp.point.z() - test_p.z(), 2));
-                if (tmp_dis < min_dis) min_dis = tmp_dis;
-            }
+            // Also check wcpts for closest distance
+            auto [dist_wcpt, closest_wcp] = segment_get_closest_point(sg, test_p, "main");
+            if (dist_wcpt < min_dis) min_dis = dist_wcpt;
             
             // Get 2D distances - need to determine apa and face
             auto test_wpid = dv->contained_by(test_p);
