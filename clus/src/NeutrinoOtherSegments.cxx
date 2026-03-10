@@ -269,12 +269,18 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             }
         }
         
+        // If no boundary connection was found, skip this component entirely
+        if (special_A == SIZE_MAX) {
+            remaining_segments.erase(i);
+            continue;
+        }
+
         // Find furthest point (special_B)
         size_t special_B = special_A;
         double min_dis = 0;
         int number_not_faked = 0;
         double max_dis_u = 0, max_dis_v = 0, max_dis_w = 0;
-        
+
         for (int j = 0; j < ncounts[i]; j++) {
             size_t idx = sep_clusters[i][j];
             double dis = std::sqrt(
@@ -467,6 +473,36 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     v1->wcpt().point = pt_A;
                     v1->cluster(&cluster);
                     v1_existed = false;
+                }
+            }
+
+            // Path extension: if the found vertex positions differ from the rough path endpoints,
+            // re-route via do_rough_path so that new_seg's wcpts (and "main" DPC) span the actual
+            // vertex positions.  do_multi_tracking uses wcpts as its starting trajectory, so
+            // without this the fit would miss the true endpoint by up to ~vtx_cut2 (~2 cm).
+            {
+                double dist_v1 = std::sqrt(
+                    std::pow(v1->wcpt().point.x() - path_points.front().x(), 2) +
+                    std::pow(v1->wcpt().point.y() - path_points.front().y(), 2) +
+                    std::pow(v1->wcpt().point.z() - path_points.front().z(), 2));
+                double dist_v2 = std::sqrt(
+                    std::pow(v2->wcpt().point.x() - path_points.back().x(), 2) +
+                    std::pow(v2->wcpt().point.y() - path_points.back().y(), 2) +
+                    std::pow(v2->wcpt().point.z() - path_points.back().z(), 2));
+
+                if (dist_v1 > 0.1 * units::cm || dist_v2 > 0.1 * units::cm) {
+                    auto ext_path = do_rough_path(cluster, v1->wcpt().point, v2->wcpt().point);
+                    if (ext_path.size() > 1) {
+                        std::vector<PR::WCPoint> new_wcpts;
+                        new_wcpts.reserve(ext_path.size());
+                        for (const auto& p : ext_path) {
+                            PR::WCPoint wcp;
+                            wcp.point = p;
+                            new_wcpts.push_back(wcp);
+                        }
+                        new_seg->wcpts(new_wcpts);
+                        create_segment_point_cloud(new_seg, ext_path, dv, "main");
+                    }
                 }
             }
 
