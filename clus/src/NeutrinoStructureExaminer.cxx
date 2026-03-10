@@ -1056,31 +1056,24 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
             if (sg) tmp_segments.push_back(sg);
         }
         
-        // Compare all pairs of segments
+        // Build canonical key set for O(E) duplicate detection using vertex pointers
+        using SegmentKey = std::string;
+        std::unordered_set<SegmentKey> seen_keys;
+        
         for (size_t i = 0; i < tmp_segments.size(); i++) {
             auto [v1_i, v2_i] = find_vertices(graph, tmp_segments[i]);
             if (!v1_i || !v2_i) continue;
             
-            for (size_t j = i + 1; j < tmp_segments.size(); j++) {
-                auto [v1_j, v2_j] = find_vertices(graph, tmp_segments[j]);
-                if (!v1_j || !v2_j) continue;
-                
-                // Check if segments have the same endpoints
-                bool same_endpoints = false;
-                
-                double dis_v1i_v1j = ray_length(Ray{v1_i->wcpt().point, v1_j->wcpt().point});
-                double dis_v1i_v2j = ray_length(Ray{v1_i->wcpt().point, v2_j->wcpt().point});
-                double dis_v2i_v1j = ray_length(Ray{v2_i->wcpt().point, v1_j->wcpt().point});
-                double dis_v2i_v2j = ray_length(Ray{v2_i->wcpt().point, v2_j->wcpt().point});
-                
-                if ((dis_v1i_v1j < 0.01 * units::cm && dis_v2i_v2j < 0.01 * units::cm) ||
-                    (dis_v1i_v2j < 0.01 * units::cm && dis_v2i_v1j < 0.01 * units::cm)) {
-                    same_endpoints = true;
-                }
-                
-                if (same_endpoints) {
-                    segments_to_be_removed.insert(tmp_segments[j]);
-                }
+            // Build canonical key: smaller pointer address first
+            SegmentKey key = std::to_string(std::min(uintptr_t(v1_i.get()), uintptr_t(v2_i.get())))
+                           + ":"
+                           + std::to_string(std::max(uintptr_t(v1_i.get()), uintptr_t(v2_i.get())));
+            
+            if (seen_keys.count(key)) {
+                // Duplicate: a segment with the same endpoint pair was already seen
+                segments_to_be_removed.insert(tmp_segments[i]);
+            } else {
+                seen_keys.insert(key);
             }
         }
     }

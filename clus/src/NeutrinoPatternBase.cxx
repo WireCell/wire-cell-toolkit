@@ -924,22 +924,8 @@ bool PatternAlgorithms::merge_vertex_into_another(Graph& graph, VertexPtr& vtx_f
         if (same_position) {
             // Step 2: Vertices are at same position - just reconnect the segment
             // Extract the path from the old segment
-            const auto& wcpts = old_seg->wcpts();
-            std::vector<Facade::geo_point_t> path_points;
-            for (const auto& wcp : wcpts) {
-                path_points.push_back(wcp.point);
-            }
-            
-            if (path_points.size() > 1) {
-                // Create new segment with same path
-                new_seg = create_segment_for_cluster(*cluster, dv, path_points, old_seg->dirsign());
-                if (new_seg) {
-                    // Remove old segment
-                    remove_segment(graph, old_seg);
-                    // Add new segment connecting vtx_to and other_vtx
-                    add_segment(graph, new_seg, vtx_to, other_vtx);
-                }
-            }
+            remove_segment(graph, old_seg);
+            add_segment(graph, old_seg, vtx_to, other_vtx);
         } else {
             // Step 3: Vertices are not at same position - recalculate the path
             // Remove old segment first
