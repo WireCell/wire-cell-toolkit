@@ -1527,7 +1527,7 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
 bool PatternAlgorithms::examine_vertices_4p(Graph&graph, VertexPtr v1, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Find the segment between v1 and v2
     SegmentPtr sg1 = find_segment(graph, v1, v2);
-    if (!sg1) return true;
+    // if (!sg1) return true;
     
     bool flag = true;
     
@@ -1608,7 +1608,7 @@ bool PatternAlgorithms::examine_vertices_4p(Graph&graph, VertexPtr v1, VertexPtr
     return flag;
 }
 
-bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, VertexPtr main_vertex){
     bool flag_continue = false;
     
     // Drift direction (X direction)
@@ -1666,7 +1666,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
             auto vd1 = v1->get_descriptor();
             auto vd2 = v2->get_descriptor();
             
-            if (boost::degree(vd1, graph) >= 2 && examine_vertices_4p(graph, v1, v2, track_fitter, dv)) {
+            if (boost::degree(vd1, graph) >= 2 && examine_vertices_4p(graph, v1, v2, track_fitter, dv) && v1 != main_vertex) {
                 // Merge v1's segments to v2
                 
                 // Get v2 position
@@ -1803,7 +1803,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 track_fitter.do_multi_tracking(true, true, true);
                 break;
                 
-            } else if (boost::degree(vd2, graph) >= 2 && examine_vertices_4p(graph, v2, v1, track_fitter, dv)) {
+            } else if (boost::degree(vd2, graph) >= 2 && examine_vertices_4p(graph, v2, v1, track_fitter, dv) && v2 != main_vertex) {
                 // Merge v2's segments to v1 (symmetric case)
                 
                 // Get v1 position
@@ -1969,7 +1969,7 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
         }
         
         // Merge vertices if they are reasonably close (Type III/IV)
-        flag_continue = flag_continue || examine_vertices_4(graph, cluster, track_fitter, dv);
+        flag_continue = flag_continue || examine_vertices_4(graph, cluster, track_fitter, dv, main_vertex);
     }
 }
 
