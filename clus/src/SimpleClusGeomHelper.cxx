@@ -28,7 +28,7 @@ void Clus::SimpleClusGeomHelper::configure(const WireCell::Configuration& cfg)
 {
     m_tpcparams = cfg;
     Json::FastWriter fastWriter;
-    log->debug("m_tpcparams: {}", fastWriter.write(m_tpcparams));
+    SPDLOG_LOGGER_DEBUG(log, "m_tpcparams: {}", fastWriter.write(m_tpcparams));
 
     for (const auto& apaface : m_tpcparams.getMemberNames()) {
         const Json::Value& tpcparam = m_tpcparams[apaface];

@@ -25,10 +25,10 @@ Clus::PointTreeMerging::PointTreeMerging()
 
 std::vector<std::string> Clus::PointTreeMerging::input_types()
 {
-    log->debug("m_multiplicity {}", m_multiplicity);
+    SPDLOG_LOGGER_DEBUG(log, "m_multiplicity {}", m_multiplicity);
     const std::string tname = std::string(typeid(input_type).name());
     std::vector<std::string> ret(m_multiplicity, tname);
-    log->debug("input_types: ret.size() {}", ret.size());
+    SPDLOG_LOGGER_DEBUG(log, "input_types: ret.size() {}", ret.size());
     return ret;
 }
 
@@ -37,8 +37,8 @@ void Clus::PointTreeMerging::configure(const WireCell::Configuration& cfg)
     m_inpath = get(cfg, "inpath", m_inpath);
     m_outpath = get(cfg, "outpath", m_outpath);
     m_multiplicity = get<int>(cfg, "multiplicity", m_multiplicity);
-    log->debug("{}", cfg);
-    log->debug("m_multiplicity {}", m_multiplicity);
+    SPDLOG_LOGGER_DEBUG(log, "{}", cfg);
+    SPDLOG_LOGGER_DEBUG(log, "m_multiplicity {}", m_multiplicity);
 }
 
 WireCell::Configuration Clus::PointTreeMerging::default_configuration() const
@@ -94,7 +94,7 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
     }
     if (neos == invec.size()) {
         // all inputs are EOS, good.
-        log->debug("EOS at call {}", m_count++);
+        SPDLOG_LOGGER_DEBUG(log, "EOS at call {}", m_count++);
         return true;
     }
     if (neos) { raise<ValueError>("missing %d input tensors ", neos); }
@@ -108,12 +108,12 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
     }
     auto root_live = as_pctree(*invec[0]->tensors(), inpath + "/live");
     if (!root_live) {
-        log->error("Failed to get point cloud tree from \"{}\"", inpath + "/live");
+        SPDLOG_LOGGER_ERROR(log, "Failed to get point cloud tree from \"{}\"", inpath + "/live");
         return false;
     }
     auto root_dead = as_pctree(*invec[0]->tensors(), inpath + "/dead");
     if (!root_dead) {
-        log->error("Failed to get point cloud tree from \"{}\"", inpath + "/dead");
+        SPDLOG_LOGGER_ERROR(log, "Failed to get point cloud tree from \"{}\"", inpath + "/dead");
         return false;
     }
 
@@ -123,13 +123,13 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
             raise<ValueError>("missing input tensor %d", i);
         }
         merge_pct(root_live.get(), as_pctree(*invec[i]->tensors(), inpath + "/live").get());
-        // log->debug("live root node {} with {} children", i, root_live->nchildren());
+        // SPDLOG_LOGGER_DEBUG(log, "live root node {} with {} children", i, root_live->nchildren());
         merge_pct(root_dead.get(), as_pctree(*invec[i]->tensors(), inpath + "/dead").get());
     }
 
 
-    log->debug("merged live PC tree with {} children", root_live->nchildren());
-    log->debug("merged dead PC tree with {} children", root_dead->nchildren());
+    SPDLOG_LOGGER_DEBUG(log, "merged live PC tree with {} children", root_live->nchildren());
+    SPDLOG_LOGGER_DEBUG(log, "merged dead PC tree with {} children", root_dead->nchildren());
 
     // output
     std::string outpath = m_outpath;
@@ -140,7 +140,7 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
     auto outtens_dead = as_tensors(*root_dead.get(), outpath + "/dead");
     outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
     for(const auto& ten : outtens) {
-        log->debug("outtens {} {}", ten->metadata()["datapath"].asString(), ten->size());
+        SPDLOG_LOGGER_DEBUG(log, "outtens {} {}", ten->metadata()["datapath"].asString(), ten->size());
         break;
     }
     outts = as_tensorset(outtens, ident);

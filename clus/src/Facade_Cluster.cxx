@@ -1985,22 +1985,22 @@ bool Cluster::sanity(Log::logptr_t log) const
     {
         const auto* svptr = m_node->value.get_scoped(m_default_scope);
         if (!svptr) {
-            if (log) log->debug("cluster sanity: note, not yet a scoped view {}", m_default_scope);
+            if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: note, not yet a scoped view {}", m_default_scope);
         }
     }
     if (!nchildren()) {
-        if (log) log->debug("cluster sanity: no children blobs");
+        if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: no children blobs");
         return false;
     }
 
     const auto& sv = m_node->value.scoped_view(m_default_scope);
     const auto& snodes = sv.nodes();
     if (snodes.empty()) {
-        if (log) log->debug("cluster sanity: no scoped nodes");
+        if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: no scoped nodes");
         return false;
     }
     if (sv.npoints() == 0) {  // triggers a scoped view cache fill
-        if (log) log->debug("cluster sanity: no scoped points");
+        if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: no scoped points");
         return false;
     }
     // sv.force_invalid();
@@ -2013,12 +2013,12 @@ bool Cluster::sanity(Log::logptr_t log) const
     }
 
     if (skd.nblocks() != snodes.size()) {
-        if (log) log->debug("cluster sanity: k-d blocks={} scoped nodes={}", skd.nblocks(), fblobs.size());
+        if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: k-d blocks={} scoped nodes={}", skd.nblocks(), fblobs.size());
         return false;
     }
 
     if (skd.nblocks() != fblobs.size()) {
-        if (log) log->debug("cluster sanity: k-d blocks={} cluster blobs={}", skd.nblocks(), fblobs.size());
+        if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: k-d blocks={} cluster blobs={}", skd.nblocks(), fblobs.size());
         return false;
     }
 
@@ -2034,9 +2034,9 @@ bool Cluster::sanity(Log::logptr_t log) const
         const auto* sblob = snodes[ind]->value.facade<Blob>();
         if (fblob != sblob) {
             if (log) {
-                log->debug("cluster sanity: scoped node facade Blob differs from cluster child at {}", ind);
-                log->debug("cluster sanity: \tscoped blob: {}", *fblob);
-                log->debug("cluster sanity: \tfacade blob: {}", *sblob);
+                SPDLOG_LOGGER_DEBUG(log, "cluster sanity: scoped node facade Blob differs from cluster child at {}", ind);
+                SPDLOG_LOGGER_DEBUG(log, "cluster sanity: \tscoped blob: {}", *fblob);
+                SPDLOG_LOGGER_DEBUG(log, "cluster sanity: \tfacade blob: {}", *sblob);
             }
             // return false;
         }
@@ -2059,7 +2059,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         // scoped consistency
         const node_t* tnode = sv.node_with_point(ind);
         if (!tnode) {
-            if (log) log->debug("cluster sanity: scoped node facade not a Blob at majind={}", majind);
+            if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: scoped node facade not a Blob at majind={}", majind);
             return false;
         }
         const auto* tblob = tnode->value.facade<Blob>();
@@ -2069,15 +2069,14 @@ bool Cluster::sanity(Log::logptr_t log) const
         }
 
         if (minind >= spoints.size()) {
-            if (log)
-                log->debug("cluster sanity: minind={} is beyond scoped blob npts={} majind={}, blob is: {}", minind,
+            if (log) SPDLOG_LOGGER_DEBUG(log, "cluster sanity: minind={} is beyond scoped blob npts={} majind={}, blob is: {}", minind,
                            spoints.size(), majind, *sblob);
             return false;
         }
         auto spt = spoints[minind];
         if (spt != kdpt) {
             if (log)
-                log->debug("cluster sanity: scoped point mismatch at minind={} majind={} spt={} kdpt={}, blob is: {}",
+                SPDLOG_LOGGER_DEBUG(log, "cluster sanity: scoped point mismatch at minind={} majind={} spt={} kdpt={}, blob is: {}",
                            minind, majind, spt, kdpt, *sblob);
             return false;
         }
@@ -2208,7 +2207,7 @@ std::vector<geo_point_t> Cluster::get_hull() const
 
     if (npoints() > WireCell::Clus::Facade::Constants::MaxHullPoints) {
         auto log = Log::logger("clus");
-        log->warn("Cluster::get_hull number of points is too large: {} return cached points", npoints());
+        SPDLOG_LOGGER_WARN(log, "Cluster::get_hull number of points is too large: {} return cached points", npoints());
         return hull_points;
     }
 
@@ -2899,7 +2898,7 @@ void Facade::Cluster::clear_graph_algorithms_cache(const std::string& graph_name
     if (it != m_galgs.end()) {
         it->second.clear_cache();
         auto log = Log::logger("clus");
-        log->debug("Cleared cache for GraphAlgorithms '{}'", graph_name);
+        SPDLOG_LOGGER_DEBUG(log, "Cleared cache for GraphAlgorithms '{}'", graph_name);
     }
 }
 
@@ -2909,7 +2908,7 @@ void Facade::Cluster::remove_graph_algorithms(const std::string& graph_name)
     if (it != m_galgs.end()) {
         m_galgs.erase(it);
         auto log = Log::logger("clus");
-        log->debug("Removed GraphAlgorithms '{}'", graph_name);
+        SPDLOG_LOGGER_DEBUG(log, "Removed GraphAlgorithms '{}'", graph_name);
     }
 }
 
@@ -2919,7 +2918,7 @@ void Facade::Cluster::clear_all_graph_algorithms_caches()
         ga.clear_cache();
     }
     auto log = Log::logger("clus");
-    log->debug("Cleared all GraphAlgorithms caches");
+    SPDLOG_LOGGER_DEBUG(log, "Cleared all GraphAlgorithms caches");
 }
 
 std::vector<std::string> Facade::Cluster::get_cached_graph_algorithms() const

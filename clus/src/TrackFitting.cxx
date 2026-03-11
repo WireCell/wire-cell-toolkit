@@ -10,6 +10,11 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
+// Named logger for this file.  At runtime set its level independently:
+//   Log::set_level("debug", "clus.TrackFitting");   // this file only
+//   Log::set_level("debug", "clus");                 // whole clus subsystem
+static auto s_log = WireCell::Log::logger("clus.TrackFitting");
+
 using geo_point_t = WireCell::Point;
 
 
@@ -879,7 +884,7 @@ void TrackFitting::fill_global_rb_map() {
         }
     }
 
-    std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "Global RB Map filled with {} coordinate entries.", global_rb_map.size());
 
 }
 

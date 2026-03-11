@@ -13,6 +13,11 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::Clus::PR;
 
+// Named logger for this file.  At runtime set its level independently:
+//   Log::set_level("debug", "clus.TaggerCheckNeutrino");   // this file only
+//   Log::set_level("debug", "clus");                        // whole clus subsystem
+static auto s_log = WireCell::Log::logger("clus.TaggerCheckNeutrino");
+
 struct edge_base_t {
     typedef boost::edge_property_tag kind;
 };
@@ -123,14 +128,14 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
             try {
                 double value = root[param_name].asDouble();
                 m_track_fitter->set_parameter(param_name, value);
-                std::cout << "TaggerCheckNeutrino: Set " << param_name << " = " << value << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "Set {} = {}", param_name, value);
             } catch (const std::exception& e) {
                 std::cerr << "TaggerCheckNeutrino: Failed to set parameter " << param_name 
                         << ": " << e.what() << std::endl;
             }
         }
         
-        std::cout << "TaggerCheckNeutrino: Successfully loaded TrackFitting configuration" << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "Successfully loaded TrackFitting configuration");
         
     } catch (const std::exception& e) {
         std::cerr << "TaggerCheckNeutrino: Exception loading config: " << e.what() << std::endl;

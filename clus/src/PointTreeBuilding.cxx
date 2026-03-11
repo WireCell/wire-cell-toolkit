@@ -60,7 +60,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
 
     m_datapath = get(cfg, "datapath", m_datapath);
 
-    log->debug("using anode plane: {}", cfg["anode"].asString());
+    SPDLOG_LOGGER_DEBUG(log, "using anode plane: {}", cfg["anode"].asString());
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
     if (!m_anode) {
         raise<ValueError>("failed to get anode plane");
@@ -69,7 +69,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
     m_dv = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
 
     m_face = get<int>(cfg, "face", 0);
-    log->debug("using face: {}", m_face);
+    SPDLOG_LOGGER_DEBUG(log, "using face: {}", m_face);
     if (m_anode->faces()[m_face] == nullptr) {
         raise<ValueError>("failed to get face %d", m_face);
     }
@@ -87,7 +87,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         if (tn.empty()) {
             raise<ValueError>("empty type/name for sampler \"%s\"", name);
         }
-        log->debug("point cloud \"{}\" will be made by sampler \"{}\"",
+        SPDLOG_LOGGER_DEBUG(log, "point cloud \"{}\" will be made by sampler \"{}\"",
                    name, tn);
         m_samplers[name] = Factory::find_tn<IBlobSampler>(tn); 
     }
@@ -180,10 +180,10 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
 {
 
     const auto& gr = icluster->graph();
-    log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
+    SPDLOG_LOGGER_DEBUG(log, "load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
     auto clusters = blob_clusters(gr);
-    log->debug("got {} clusters", clusters.size());
+    SPDLOG_LOGGER_DEBUG(log, "got {} clusters", clusters.size());
     size_t nblobs = 0;
     size_t nskipped = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
@@ -210,18 +210,18 @@ Points::node_ptr PointTreeBuilding::sample_live(const WireCell::ICluster::pointe
     }
     
     if (nskipped) {
-        log->debug("skipped {} live blobs.  You may want to follow up with a ClusteringPointed in an MABC.  See Issue #425", nskipped);
+        SPDLOG_LOGGER_DEBUG(log, "skipped {} live blobs.  You may want to follow up with a ClusteringPointed in an MABC.  See Issue #425", nskipped);
     }
-    log->debug("sampled {} live blobs in {} clusters", nblobs, root->nchildren());
+    SPDLOG_LOGGER_DEBUG(log, "sampled {} live blobs in {} clusters", nblobs, root->nchildren());
     return root;
 }
 
 Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointer icluster, const double tick) const {
     const auto& gr = icluster->graph();
-    log->debug("load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
+    SPDLOG_LOGGER_DEBUG(log, "load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(gr));
 
     auto clusters = blob_clusters(gr);
-    log->debug("got {} clusters", clusters.size());
+    SPDLOG_LOGGER_DEBUG(log, "got {} clusters", clusters.size());
     size_t nblobs = 0;
     Points::node_ptr root = std::make_unique<Points::node_t>();
     for (auto& [cluster_id, vdescs] : clusters) {
@@ -250,7 +250,7 @@ Points::node_ptr PointTreeBuilding::sample_dead(const WireCell::ICluster::pointe
 
     // std::cout << "Xin: " << "sampled " << nblobs << " dead blobs in " << root->nchildren() << " clusters" << std::endl;
     
-    log->debug("sampled {} dead blobs to tree with {} children", nblobs, root->nchildren());
+    SPDLOG_LOGGER_DEBUG(log, "sampled {} dead blobs to tree with {} children", nblobs, root->nchildren());
     return root;
 }
 
@@ -260,7 +260,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
     using int_t = Facade::int_t;
 
     const auto& cg = icluster->graph();
-    // log->debug("add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
+    // SPDLOG_LOGGER_DEBUG(log, "add_ctpc load cluster {} at call={}: {}", icluster->ident(), m_count, dumps(cg));
 
     auto grouping = root->value.facade<Facade::Grouping>();
     const auto& proj_centers = grouping->proj_centers();
@@ -297,7 +297,7 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     const auto& x = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start());
                     const double y = pitch_mags.at(m_anode->ident()).at(face).at(plane)* (wind +0.5) + proj_centers.at(m_anode->ident()).at(face).at(plane); // the additon of 0.5 is to match with the convetion of WCP (X. Q.)
                     // if (nslices < 2) {
-                    //     log->debug("dv: time_offset {} drift_speed {} tick {}",
+                    //     SPDLOG_LOGGER_DEBUG(log, "dv: time_offset {} drift_speed {} tick {}",
                     //     get_time_offset(wpid_all),
                     //     get_drift_speed(wpid_all),
                     //     get_tick(wpid_all));
@@ -312,16 +312,16 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
                     ds_slice_index[face][plane].push_back(slice_index);
                 }
             }
-            // log->debug("ds_x.size() {}", ds_x.size());
+            // SPDLOG_LOGGER_DEBUG(log, "ds_x.size() {}", ds_x.size());
         }
     }
-    // log->debug("got {} slices", nslices);
+    // SPDLOG_LOGGER_DEBUG(log, "got {} slices", nslices);
 
     int anode_ident = m_anode->ident();
     std::vector<std::string> plane_names = {"U", "V", "W"};
     for (const auto& [face, planes] : ds_x) {
         for (const auto& [plane, x] : planes) {
-            // log->debug("ds_x {} ds_y {} ds_charge {} ds_charge_err {} ds_cident {} ds_wind {} ds_slice_index {}",
+            // SPDLOG_LOGGER_DEBUG(log, "ds_x {} ds_y {} ds_charge {} ds_charge_err {} ds_cident {} ds_wind {} ds_slice_index {}",
             //            x.size(), ds_y[face][plane].size(), ds_charge[face][plane].size(), ds_charge_err[face][plane].size(),
             //            ds_cident[face][plane].size(), ds_wind[face][plane].size(), ds_slice_index[face][plane].size());
             Dataset ds;
@@ -335,11 +335,11 @@ void PointTreeBuilding::add_ctpc(Points::node_ptr& root, const WireCell::ICluste
             const std::string ds_name = String::format("ctpc_a%df%dp%d",anode_ident, face, plane_names[plane]);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root->value.local_pcs().emplace(ds_name, ds);
-            // log->debug("added point cloud {} with {} points", ds_name, x.size());
+            // SPDLOG_LOGGER_DEBUG(log, "added point cloud {} with {} points", ds_name, x.size());
         }
     }
     // for (const auto& [name, pc] : root->value.local_pcs()) {
-    //     log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    //     SPDLOG_LOGGER_DEBUG(log, "contains point cloud {} with {} points", name, pc.get("x")->size_major());
     // }
     (void)nslices; // unused, but useful for debugging
 }
@@ -361,7 +361,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
         for (const auto& [ichan, charge] : activity) {
             // std::cout << "Test: m_dead_threshold " << m_dead_threshold << " charge.uncertainty() " << charge.uncertainty() << " " << charge.value() << " " << ichan->ident() << " " << slice->start() << std::endl;
             if(charge.uncertainty() < m_dead_threshold) continue;
-            // log->debug("m_dead_threshold {} charge.uncertainty() {}", m_dead_threshold, charge.uncertainty());
+            // SPDLOG_LOGGER_DEBUG(log, "m_dead_threshold {} charge.uncertainty() {}", m_dead_threshold, charge.uncertainty());
             // const auto& cident = ichan->ident();
             const auto& wires = ichan->wires();
             for (const auto& wire : wires) {
@@ -373,7 +373,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 const auto& xbeg = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start());
                 const auto& xend = Facade::time2drift(m_anode->faces()[face], get_time_offset(wpid_all), get_drift_speed(wpid_all), slice->start() + slice->span());
                 // if (true) {
-                //     log->debug("dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
+                //     SPDLOG_LOGGER_DEBUG(log, "dead chan {} slice_index_min {} slice_index_max {} charge {} xbeg {} xend {}", ichan->ident(),
                 //                slice_index, (slice->start() + slice->span()) / m_tick, charge, xbeg, xend);
                 // }
                 faces.insert(face);
@@ -390,7 +390,7 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
 
 
                 // if (cident == 903) {
-                //     log->debug("wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
+                //     SPDLOG_LOGGER_DEBUG(log, "wind {} xbeg {} xend {}", wind, dead_winds[wind].first, dead_winds[wind].second);
                 // }
             }
         }
@@ -399,10 +399,10 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     // for (int pind = 0; pind < 2; ++pind) {
     //     const auto& dead_winds = grouping->get_dead_winds(0, pind);
     //     for (const auto& [wind, xbeg_xend] : dead_winds) {
-    //         log->debug("dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
+    //         SPDLOG_LOGGER_DEBUG(log, "dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
     //     }
     // }
-    log->debug("got dead winds {} {} {} ", grouping->get_dead_winds(m_anode->ident(), 0, 0).size(), grouping->get_dead_winds(m_anode->ident(), 0, 1).size(),
+    SPDLOG_LOGGER_DEBUG(log, "got dead winds {} {} {} ", grouping->get_dead_winds(m_anode->ident(), 0, 0).size(), grouping->get_dead_winds(m_anode->ident(), 0, 1).size(),
                grouping->get_dead_winds(m_anode->ident(), 0, 2).size());
 
     Facade::mapfp_t<std::vector<float_t>> xbegs, xends;
@@ -428,12 +428,12 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
             // const std::string ds_name = String::format("dead_winds_f%dp%d", face, plane);
             // root->insert(Points(named_pointclouds_t{{ds_name, std::move(ds)}}));
             root->value.local_pcs().emplace(ds_name, ds);
-            // log->debug("added point cloud {} with {} points", ds_name, xbeg.size());
+            // SPDLOG_LOGGER_DEBUG(log, "added point cloud {} with {} points", ds_name, xbeg.size());
         }
     }
     for (const auto& [name, pc] : root->value.local_pcs()) {
         if (name.find("dead_winds") != std::string::npos) {
-            log->debug("contains point cloud {} with {} points", name, pc.get("xbeg")->size_major());
+            SPDLOG_LOGGER_DEBUG(log, "contains point cloud {} with {} points", name, pc.get("xbeg")->size_major());
         }
     }
 
@@ -451,7 +451,7 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     }
     if (neos == invec.size()) {
         // all inputs are EOS, good.
-        log->debug("EOS at call {}", m_count++);
+        SPDLOG_LOGGER_DEBUG(log, "EOS at call {}", m_count++);
         return true;
     }
     if (neos) {
@@ -501,13 +501,13 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
             int face_dirx = m_dv->face_dirx(wpid);
             Vector wire_direction = m_dv->wire_direction(wpid);
             Vector pitch_vector = m_dv->pitch_vector(wpid);
-            log->debug("wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
+            SPDLOG_LOGGER_DEBUG(log, "wpid.name {} face_dirx {} wire_direction {} pitch_vector {}", wpid.name(), face_dirx, wire_direction, pitch_vector);
         }
     }
     /// TODO: remove after debugging
     // {
     //     for (const auto& [name, pc] : root_live->value.local_pcs()) {
-    //         log->debug("contains point cloud {} with {} points", name, pc.get("x")->size_major());
+    //         SPDLOG_LOGGER_DEBUG(log, "contains point cloud {} with {} points", name, pc.get("x")->size_major());
     //     }
     //     /// test ctpc_f0p0 exists
     //     grouping->kd2d(0,0);
@@ -515,24 +515,24 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     //     /// find test point on ctpc
     //     const auto ctest = grouping->children().front();
     //     const auto p3ds = ctest->points();
-    //     log->debug("p3ds.size() {}", p3ds[0].size());
+    //     SPDLOG_LOGGER_DEBUG(log, "p3ds.size() {}", p3ds[0].size());
     //     {
     //         const auto winds = ctest->wire_indices();
-    //         log->debug("winds.size() {}", winds[0].size());
-    //         log->debug("ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
-    //         log->debug("ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
+    //         SPDLOG_LOGGER_DEBUG(log, "winds.size() {}", winds[0].size());
+    //         SPDLOG_LOGGER_DEBUG(log, "ctest point x {} y {} z {}", p3ds[0][0], p3ds[1][0], p3ds[2][0]);
+    //         SPDLOG_LOGGER_DEBUG(log, "ctest winds {} {} {}", winds[0][0], winds[1][0], winds[2][0]);
     //         const double radius = 0.6 * units::cm;
     //         auto ret0 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 0);
     //         auto ret1 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 1);
     //         auto ret2 = grouping->get_closest_points({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, radius, 0, 2);
-    //         log->debug("closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
+    //         SPDLOG_LOGGER_DEBUG(log, "closest points u {} v {} w {}", ret0.size(), ret1.size(), ret2.size());
     //         const auto& ctpc = root_live->value.local_pcs().at("ctpc_f0p0");
     //         const auto& x = ctpc.get("x")->elements<Facade::float_t>();
     //         const auto& y = ctpc.get("y")->elements<Facade::float_t>();
     //         const auto& slice_index = ctpc.get("slice_index")->elements<Facade::int_t>();
     //         const auto& wind = ctpc.get("wind")->elements<Facade::int_t>();
     //         for (const auto& [ind, dist] : ret0) {
-    //             log->debug("ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
+    //             SPDLOG_LOGGER_DEBUG(log, "ind {} dist {} x {} y {} slice_index {} wind {}", ind, dist, x[ind], y[ind], slice_index[ind], wind[ind]);
     //         }
     //     }
 
@@ -540,18 +540,18 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     //         const auto tw0 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 0);
     //         const auto tw1 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 1);
     //         const auto tw2 = grouping->convert_3Dpoint_time_ch({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0, 2);
-    //         log->debug("tind {} wind {}", std::get<0>(tw0), std::get<1>(tw0));
-    //         log->debug("tind {} wind {}", std::get<0>(tw1), std::get<1>(tw1));
-    //         log->debug("tind {} wind {}", std::get<0>(tw2), std::get<1>(tw2));
+    //         SPDLOG_LOGGER_DEBUG(log, "tind {} wind {}", std::get<0>(tw0), std::get<1>(tw0));
+    //         SPDLOG_LOGGER_DEBUG(log, "tind {} wind {}", std::get<0>(tw1), std::get<1>(tw1));
+    //         SPDLOG_LOGGER_DEBUG(log, "tind {} wind {}", std::get<0>(tw2), std::get<1>(tw2));
     //     }
     //     {
     //         bool d0 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 0);
     //         bool d1 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 1);
     //         bool d2 = grouping->get_closest_dead_chs({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 1, 0, 2);
-    //         log->debug("dead chs {} {} {}", d0, d1, d2);
+    //         SPDLOG_LOGGER_DEBUG(log, "dead chs {} {} {}", d0, d1, d2);
 
     //         bool is_good = grouping->is_good_point({p3ds[0][0], p3ds[1][0], p3ds[2][0]}, 0);
-    //         log->debug("is_good_point {}", is_good);
+    //         SPDLOG_LOGGER_DEBUG(log, "is_good_point {}", is_good);
     //     }
     //     // exit(0);
     // }
@@ -562,13 +562,13 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
     //     size_t count=0;
     //     for(const auto* cluster : children) {
     //         bool sane = cluster->sanity(log);
-    //         log->debug("live cluster {} {} sane:{}", count++, *cluster, sane);
+    //         SPDLOG_LOGGER_DEBUG(log, "live cluster {} {} sane:{}", count++, *cluster, sane);
     //     }
     // }
     auto tens_live = as_tensors(*root_live.get(), datapath+"/live");
-    log->debug("Made {} live tensors", tens_live.size());
+    SPDLOG_LOGGER_DEBUG(log, "Made {} live tensors", tens_live.size());
     for(const auto& ten : tens_live) {
-        log->debug("tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
+        SPDLOG_LOGGER_DEBUG(log, "tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
         break;
     }
 
@@ -588,16 +588,16 @@ bool PointTreeBuilding::operator()(const input_vector& invec, output_pointer& te
         //     // }
         // }
         auto tens_dead = as_tensors(*root_dead.get(), datapath+"/dead");
-        log->debug("Made {} dead tensors", tens_dead.size());
+        SPDLOG_LOGGER_DEBUG(log, "Made {} dead tensors", tens_dead.size());
         for(const auto& ten : tens_dead) {
-            log->debug("tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
+            SPDLOG_LOGGER_DEBUG(log, "tensor {} {}", ten->metadata()["datapath"].asString(), ten->size());
             break;
         }
         /// TODO: is make_move_iterator faster?
         tens_live.insert(tens_live.end(), tens_dead.begin(), tens_dead.end());
     }
 
-    log->debug("Total outtens {} tensors", tens_live.size());
+    SPDLOG_LOGGER_DEBUG(log, "Total outtens {} tensors", tens_live.size());
     tensorset = as_tensorset(tens_live, ident);
 
     m_count++;

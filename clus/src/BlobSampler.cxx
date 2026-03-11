@@ -306,7 +306,7 @@ struct BlobSampler::Sampler : public Aux::Logger
 
             const IWire::vector& iwires = iplane->wires();
             if (iwires.empty()) {
-                log->error("sampler={}, plane={} has no wires", my_ident, pind);
+                SPDLOG_LOGGER_ERROR(log, "sampler={}, plane={} has no wires", my_ident, pind);
                 THROW (LogicError() << errmsg{"BlobSampler plane has no wires"});
             }
 
@@ -321,13 +321,13 @@ struct BlobSampler::Sampler : public Aux::Logger
                 // std::cout << temp.second << " " << wind << " " << temp1.second << " " << temp1.first << std::endl;
                 
                 if (wind < 0) {
-                    log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
-                    log->warn("wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
+                    SPDLOG_LOGGER_DEBUG(log, "sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
+                    SPDLOG_LOGGER_WARN(log, "wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
                     wind = 0;
                 }
                 if (wind >= (int)iwires.size()) {
-                    log->debug("sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
-                    log->warn("wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
+                    SPDLOG_LOGGER_DEBUG(log, "sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
+                    SPDLOG_LOGGER_WARN(log, "wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
                     wind = (int)iwires.size() - 1;
                 }
                 wire_index[ipt] = wind;
@@ -387,7 +387,7 @@ struct BlobSampler::Sampler : public Aux::Logger
         const Binning bins(cc.tbinning.nbins(),
                            cc.tbinning.min()*dt + t0,
                            cc.tbinning.max()*dt + t0);
-        // log->debug("t0 {} dt {} bins {}", t0, dt, bins);
+        // SPDLOG_LOGGER_DEBUG(log, "t0 {} dt {} bins {}", t0, dt, bins);
         const size_t npts = points.size();
         for (int tbin : irange(bins.nbins())) {
             const double time = bins.edge(tbin);
@@ -400,7 +400,7 @@ struct BlobSampler::Sampler : public Aux::Logger
             const size_t before = ds.size_major();
             ds.append(tail);
             const size_t after = ds.size_major();
-            // log->debug("sampler {} iblob {} intern {} points, ds size {}, tail size {} with binning {}",
+            // SPDLOG_LOGGER_DEBUG(log, "sampler {} iblob {} intern {} points, ds size {}, tail size {} with binning {}";
             //            ident, iblob->ident(), npts, ds.size_major(), tail.size_major(), bins);
             if (after != before + npts) {
                 THROW(LogicError() << errmsg{"PointCloud append() is broken"});
@@ -423,7 +423,7 @@ std::tuple<PointCloud::Dataset, PointCloud::Dataset> BlobSampler::sample_blob(co
         // points_added += sampler->points_added;
         sampler->end_sample();
     }
-    // log->debug("got {} blobs, sampled {} points with {} samplers, returning {}",
+    // SPDLOG_LOGGER_DEBUG(log, "got {} blobs, sampled {} points with {} samplers, returning {}";
     //            nblobs, points_added, m_samplers.size(), ret_main.size_major());
     return {ret_main, ret_aux};
 }
@@ -445,7 +445,7 @@ std::tuple<PointCloud::Dataset, PointCloud::Dataset> BlobSampler::sample_blob(co
 //             sampler->end_sample();
 //         }
 //     }
-//     log->debug("got {} blobs, sampled {} points with {} samplers, returning {}",
+//     SPDLOG_LOGGER_DEBUG(log, "got {} blobs, sampled {} points with {} samplers, returning {}";
 //                nblobs, points_added, m_samplers.size(), ret.size_major());
 //     return ret;
 // }
@@ -812,7 +812,7 @@ struct Stepped : public BlobSampler::Sampler
             coords.pitch_location({smin.layer, 1}, {smax.layer, 1}, smid.layer) -
             coords.pitch_location({smin.layer, 0}, {smax.layer, 0}, smid.layer) ); 
 
-        // log->debug("offset={} adjust={},{},{}", offset, adjust.x(), adjust.y(), adjust.z());
+        // SPDLOG_LOGGER_DEBUG(log, "offset={} adjust={},{},{}", offset, adjust.x(), adjust.y(), adjust.z());
 
         std::set<decltype(smin.bounds.first)> min_wires_set;
         std::set<decltype(smin.bounds.first)> max_wires_set;
@@ -855,11 +855,11 @@ struct Stepped : public BlobSampler::Sampler
                 if (pitch_relative > smid.bounds.first - tolerance && pitch_relative < smid.bounds.second + tolerance){
                     const auto pt = coords.ray_crossing(cmin, cmax);
                     points.push_back(pt + adjust);
-                //     log->warn("Blob {} adding point {} prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
+                //     SPDLOG_LOGGER_WARN(log, "Blob {} adding point {} prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
                 //               iblob->ident(), pt, pitch_relative, smid.bounds.first, smid.bounds.second, tolerance, offset, pitch_adjust, adjust);
                 // }
                 // else {
-                //     log->warn("Blob {} not adding point prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
+                //     SPDLOG_LOGGER_WARN(log, "Blob {} not adding point prel={}, bounds=[{},{}], tol={}, off={} padj={} adj={}",
                 //               iblob->ident(), pitch_relative, smid.bounds.first, smid.bounds.second, tolerance, offset, pitch_adjust, adjust);
                 //     ++nrel_missed;
                 }
@@ -868,10 +868,10 @@ struct Stepped : public BlobSampler::Sampler
 
         // if (points.empty()) {
         //     int ident = iblob->ident();
-        //     log->warn("Blob {} unsampled: minsiz={} maxsiz={} nwiresmin={} nwiresmax={} nrel={} npre={}.", 
+        //     SPDLOG_LOGGER_WARN(log, "Blob {} unsampled: minsiz={} maxsiz={} nwiresmin={} nwiresmax={} nrel={} npre={}.", 
         //               ident, nmin, nmax, min_wires_set.size(), max_wires_set.size(), nrel_missed, npre_missed);
         //     for (const auto& strip : strips) {
-        //         log->warn("Blob {} strip: {}", ident, strip);
+        //         SPDLOG_LOGGER_WARN(log, "Blob {} strip: {}", ident, strip);
         //     }
         // }
 
@@ -1501,7 +1501,7 @@ void BlobSampler::add_strategy(Configuration strategy)
     for (auto key : strategy.getMemberNames()) {
         full[key] = strategy[key];
     }
-    // log->debug("making strategy: {}", full);
+    // SPDLOG_LOGGER_DEBUG(log, "making strategy: {}", full);
 
     std::string name = full["name"].asString();
     // use startswith() to be a little friendly to the user

@@ -65,7 +65,7 @@ public:
             return;
         }
         
-        std::cout << "Add FiducialUtils to grouping" << std::endl;
+        // std::cout << "Add FiducialUtils to grouping" << std::endl;
         auto fu = std::make_shared<FiducialUtils>(FiducialUtils::StaticData{m_dv, m_fiducial, m_pcts});
 
         // Feed the dynamic data (live and dead groupings)

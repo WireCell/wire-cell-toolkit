@@ -224,7 +224,7 @@ size_t Blob::nbpoints() const
 bool Blob::sanity(Log::logptr_t log) const
 {
     if (nbpoints() == (size_t) npoints()) return true;
-    if (log) log->debug("blob sanity: blob points mismatch: {}", *this);
+    if (log) SPDLOG_LOGGER_DEBUG(log, "blob sanity: blob points mismatch: {}", *this);
     return false;
 }
 

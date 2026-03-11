@@ -90,7 +90,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
 
     if (cfg.isMember("bee_dir")) {
-        log->debug("the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
+        SPDLOG_LOGGER_DEBUG(log, "the 'bee_dir' option is no longer supported, instead use 'bee_zip' to name a .zip file");
     }
     std::string bee_zip = get<std::string>(cfg, "bee_zip", "mabc.zip");
     // Add new configuration option for initial index
@@ -121,7 +121,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     for (auto jtn : cfg["pipeline"]) {
         std::string tn = jtn.asString();
-        log->debug("configuring clustering method: {}", tn);
+        SPDLOG_LOGGER_DEBUG(log, "configuring clustering method: {}", tn);
         auto imeth = Factory::find_tn<IEnsembleVisitor>(tn);
         m_pipeline.emplace_back(EnsembleVisitor{tn, imeth});
     }
@@ -189,7 +189,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                 // std::cout << "Test: Global: " << m_bee_points[bpc.name].global.algorithm() << std::endl;
             }
             
-            log->debug("Configured bee points set: {}, algorithm: {}, individual: {}", 
+            SPDLOG_LOGGER_DEBUG(log, "Configured bee points set: {}, algorithm: {}, individual: {}", 
                         bpc.name, bpc.algorithm, bpc.individual ? "true" : "false");
         }
     } 
@@ -351,7 +351,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
     // std::cout << "Test: " << name << " " << grouping.wpids().size() << std::endl;
     
     if (m_bee_points.find(name) == m_bee_points.end()) {
-        log->warn("Bee points set '{}' not found, skipping", name);
+        SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found, skipping", name);
         return;
     }
     
@@ -362,7 +362,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                           [&name](const BeePointsConfig& cfg) { return cfg.name == name; });
     
     if (it == m_bee_points_configs.end()) {
-        log->warn("Configuration for bee points set '{}' not found, skipping", name);
+        SPDLOG_LOGGER_WARN(log, "Configuration for bee points set '{}' not found, skipping", name);
         return;
     }
     
@@ -422,7 +422,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
 void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& name, const Grouping& grouping)
 {
     if (m_bee_points.find(name) == m_bee_points.end()) {
-        log->warn("Bee points set '{}' not found for PR graph, skipping", name);
+        SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found for PR graph, skipping", name);
         return;
     }
 
@@ -433,7 +433,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
                           [&name](const BeePointsConfig& cfg) { return cfg.name == name; });
 
     if (it == m_bee_points_configs.end()) {
-        log->warn("Configuration for bee points set '{}' not found, skipping", name);
+        SPDLOG_LOGGER_WARN(log, "Configuration for bee points set '{}' not found, skipping", name);
         return;
     }
 
@@ -465,11 +465,11 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
     // Get the PRGraph from the grouping
     auto pr_graph = grouping.get_pr_graph();
     if (!pr_graph) {
-        log->warn("No PR graph found in grouping for bee points set '{}'", name);
+        SPDLOG_LOGGER_WARN(log, "No PR graph found in grouping for bee points set '{}'", name);
         return;
     }
 
-    log->debug("Filling bee points '{}' from PR graph with {} vertices and {} edges",
+    SPDLOG_LOGGER_DEBUG(log, "Filling bee points '{}' from PR graph with {} vertices and {} edges",
                name, boost::num_vertices(*pr_graph), boost::num_edges(*pr_graph));
 
     // Iterate through all segments (edges) in the graph
@@ -487,7 +487,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 
         // std::cout << "Segment " << segment_id << " has " << fits.size() << " fitted points." << std::endl;
 
-        log->debug("Segment {} has {} fitted points", segment_id, fits.size());
+        SPDLOG_LOGGER_DEBUG(log, "Segment {} has {} fitted points", segment_id, fits.size());
 
         // Process each fitted point
         for (const auto& fit : fits) {
@@ -528,7 +528,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         segment_id++;
     }
 
-    log->debug("Filled bee points '{}' from {} segments", name, segment_id);
+    SPDLOG_LOGGER_DEBUG(log, "Filled bee points '{}' from {} segments", name, segment_id);
 }
 
 
@@ -555,7 +555,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
         const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
         const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
 
-        std::cout << "Steiner Test: " << x_coords.size() << " " << y_coords.size() << " " << z_coords.size() << std::endl;
+        // std::cout << "Steiner Test: " << x_coords.size() << " " << y_coords.size() << " " << z_coords.size() << std::endl;
 
          for (size_t i = 0; i < x_coords.size(); ++i) {
             // Create point from steiner point cloud
@@ -681,7 +681,7 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
     // Get the underlying node that contains this cluster
     const auto* cluster_node = cluster.node();
     if (!cluster_node) {
-        log->warn("Cannot access node for cluster");
+        SPDLOG_LOGGER_WARN(log, "Cannot access node for cluster");
         return;
     }
     
@@ -757,7 +757,7 @@ struct Perf {
     ~Perf()
     {
         if (!enable) return;
-        log->debug("MultiAlgBlobClustering performance summary:\n{}", em.summary());
+        SPDLOG_LOGGER_DEBUG(log, "MultiAlgBlobClustering performance summary:\n{}", em.summary());
     }
 
     void operator()(const std::string& ctx)
@@ -771,7 +771,7 @@ struct Perf {
         if (!enable) return;
         if (mon) (*this)(ctx);
 
-        log->debug("{} ensemble with {} groupings:", ctx, ensemble.nchildren());
+        SPDLOG_LOGGER_DEBUG(log, "{} ensemble with {} groupings:", ctx, ensemble.nchildren());
 
         for (const auto* grouping : ensemble.children()) {
 
@@ -786,14 +786,14 @@ struct Perf {
                         ++nzero;
                     }
                     npoints_total += n;
-                    // log->debug("loaded cluster {} with {} points out of {}", count, n, npoints_total);
+                    // SPDLOG_LOGGER_DEBUG(log, "loaded cluster {} with {} points out of {}", count, n, npoints_total);
                     ++count;
                     // std::cout << "Xin: " << name << " loaded cluster " << count << " with " << n << "points and " << cluster->nchildren() << "blobs" << std::endl;
                 }
 
                 
 
-                log->debug("\tgrouping \"{}\": {}, {} points and {} clusters with no points",
+                SPDLOG_LOGGER_DEBUG(log, "\tgrouping \"{}\": {}, {} points and {} clusters with no points",
                            name, *grouping, npoints_total, nzero);
                 (void)count;
             }
@@ -805,7 +805,7 @@ struct Perf {
             size_t count = 0;
             for (const auto* cluster : children) {
                 bool sane = cluster->sanity(log);
-                log->debug("\t\tcluster {} {} sane:{}", count++, *cluster, sane);
+                SPDLOG_LOGGER_DEBUG(log, "\t\tcluster {} {} sane:{}", count++, *cluster, sane);
             }
         }
     }
@@ -823,7 +823,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
         ensemble.add_grouping_node(name, as_pctree(tens, path));
     }
     catch (WireCell::KeyError& err) {
-        log->warn("No pc-tree at tensor datapath {}, making empty", path);
+        SPDLOG_LOGGER_WARN(log, "No pc-tree at tensor datapath {}, making empty", path);
         ensemble.make_grouping(name);
     }
         
@@ -843,14 +843,14 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     outts = nullptr;
     if (!ints) {
         flush();
-        log->debug("EOS at call {}", m_count++);
+        SPDLOG_LOGGER_DEBUG(log, "EOS at call {}", m_count++);
         return true;
     }
 
     Perf perf{m_perf, log};
 
     const int ident = ints->ident();
-    log->debug("loading tensor set ident={} (last={})", ident, m_last_ident);
+    SPDLOG_LOGGER_DEBUG(log, "loading tensor set ident={} (last={})", ident, m_last_ident);
     if (m_last_ident < 0) {     // first time.
         if (m_use_config_rse) {
             // Set RSE in the sink
@@ -981,7 +981,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         }
     }
 
-    log->debug("Produce pctrees with {} groupings", grouping_names.size());
+    SPDLOG_LOGGER_DEBUG(log, "Produce pctrees with {} groupings", grouping_names.size());
     
     ITensor::vector outtens;
     for (const auto& name : grouping_names) {
@@ -1001,7 +1001,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         auto node = ensemble.remove_child(grouping);
         auto tens = as_tensors(*node, outpath(name, ident));
         outtens.insert(outtens.end(), tens.begin(), tens.end());
-        log->debug("Produce {} tensors for grouping {}", tens.size(), name);
+        SPDLOG_LOGGER_DEBUG(log, "Produce {} tensors for grouping {}", tens.size(), name);
     }
     outts = as_tensorset(outtens, ident);
 

@@ -41,7 +41,7 @@ void BlobSampling::configure(const WireCell::Configuration& cfg)
         if (tn.empty()) {
             raise<ValueError>("empty type/name for sampler \"%s\"", name);
         }
-        log->debug("point cloud \"{}\" will be made by sampler \"{}\"",
+        SPDLOG_LOGGER_DEBUG(log, "point cloud \"{}\" will be made by sampler \"{}\"",
                    name, tn);
         m_samplers[name] = Factory::find_tn<IBlobSampler>(tn); 
     }
@@ -62,7 +62,7 @@ bool BlobSampling::operator()(const input_pointer& blobset, output_pointer& tens
 {
     tensorset = nullptr;
     if (!blobset) {
-        log->debug("EOS at call {}", m_count++);
+        SPDLOG_LOGGER_DEBUG(log, "EOS at call {}", m_count++);
         return true;
     }
 
@@ -73,7 +73,7 @@ bool BlobSampling::operator()(const input_pointer& blobset, output_pointer& tens
     for (size_t bind=0; bind<nblobs; ++bind) {
         auto iblob = iblobs[bind];
         if (!iblob) {
-            log->debug("skipping null blob {} of {}", bind, nblobs);
+            SPDLOG_LOGGER_DEBUG(log, "skipping null blob {} of {}", bind, nblobs);
             continue;
         }
         named_pointclouds_t pcs;
@@ -93,7 +93,7 @@ bool BlobSampling::operator()(const input_pointer& blobset, output_pointer& tens
     auto tens = as_tensors(*root.get(), datapath);
     tensorset = as_tensorset(tens, ident);
 
-    log->debug("sampled {} blobs from set {} making {} tensors at call {}",
+    SPDLOG_LOGGER_DEBUG(log, "sampled {} blobs from set {} making {} tensors at call {}",
                nblobs, ident, tens.size(), m_count++);
 
     return true;
