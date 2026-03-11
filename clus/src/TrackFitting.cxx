@@ -880,6 +880,7 @@ void TrackFitting::fill_global_rb_map() {
     }
 
     std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
+
 }
 
 void TrackFitting::fill_fitted_charge_2d(
@@ -1532,19 +1533,19 @@ void TrackFitting::organize_segments_path(double low_dis_limit, double end_point
 
 std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit, double end_point_limit) {
     std::vector<WireCell::Point> pts;
-    
+
     // Get the WCPoints from the segment
     const auto& segment_wcpts = segment->wcpts();
     if (segment_wcpts.empty()) {
         return pts;
     }
-    
+
     // Convert WCPoints to vector for easier manipulation
     std::vector<WireCell::Point> temp_wcps_vec;
     for (const auto& wcp : segment_wcpts) {
         temp_wcps_vec.push_back(wcp.point);
     }
-    
+
     // Fill in the beginning point ...
     {
         WireCell::Point p1 = temp_wcps_vec.front();
@@ -1566,16 +1567,16 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
     }
 
     // std::cout << "Test b: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.front() << std::endl;
-    
+
     // Fill in the middle part
     for (size_t i = 0; i != temp_wcps_vec.size(); i++) {
         WireCell::Point p1 = temp_wcps_vec.at(i);
-        
+
         double dis = low_dis_limit;
         if (pts.size() > 0) {
             dis = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
         }
-        
+
         if (dis < low_dis_limit * 0.8) {
             continue;
         } else if (dis < low_dis_limit * 1.6) {
@@ -1596,7 +1597,7 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
 
     // std::cout << "Test m: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.back() << std::endl;
 
-    
+
     // Fill in the end part
     {
         WireCell::Point p1 = temp_wcps_vec.back();
@@ -1619,13 +1620,13 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
 
     // std::cout << "Test e: " <<  pts.size() << " " << pts.back() << " " << temp_wcps_vec.back() << std::endl;
 
-    
+
     return pts;
 }
 
 std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
     std::list<WireCell::Point> ps_list(pts.begin(), pts.end());
-    
+
     // get the cluster from the segment
     auto cluster = segment->cluster();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
@@ -1633,9 +1634,9 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
 
     if (flag_start) {
         // test start
-        WireCell::Point temp_start = ps_list.front(); 
+        WireCell::Point temp_start = ps_list.front();
         while (ps_list.size() > 0) {
-            // figure out the wpid for ps_list.front() ... 
+            // figure out the wpid for ps_list.front() ...
             auto test_wpid = m_dv->contained_by(ps_list.front());
 
             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
@@ -1647,7 +1648,7 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             temp_start = ps_list.front();
             ps_list.pop_front();
         }
-        
+
         if (ps_list.size() > 0) {
             double dis_step = 0.2*units::cm;
             double temp_dis = sqrt(pow(temp_start.x() - ps_list.front().x(), 2) + pow(temp_start.y() - ps_list.front().y(), 2) + pow(temp_start.z() - ps_list.front().z(), 2));
@@ -1671,7 +1672,7 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             ps_list.push_front(temp_start);
         }
     }
-    
+
     if (flag_end) {
         WireCell::Point temp_end = ps_list.back();
         while (ps_list.size() > 0) {
@@ -1709,14 +1710,13 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
             ps_list.push_back(temp_end);
         }
     }
-    
+
     std::vector<WireCell::Point> tmp_pts(ps_list.begin(), ps_list.end());
     return tmp_pts;
 }
 
 
 void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit) {
-    
     std::vector<WireCell::Point> ps_vec = examine_end_ps_vec(segment, pts, true, true);
     if (ps_vec.size() <= 1) ps_vec = pts;
  
@@ -5586,6 +5586,31 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         }
     }
 
+    // Pre-build (wire, time) lookup sets keyed by (apa, face) so we don't rebuild them
+    // inside the per-point loops (which would be O(n_points * n_measurements)).
+    using WireTimePair = std::pair<int, int>;
+    using ApaFaceKey   = std::pair<int, int>;
+    std::map<ApaFaceKey, std::set<WireTimePair>> precomp_UT, precomp_VT, precomp_WT;
+    for (const auto& [coord_key, result] : map_U_charge_2D) {
+        for (const auto& coord2d : result.second) {
+            if (coord2d.plane == kUlayer)
+                precomp_UT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+        }
+    }
+    for (const auto& [coord_key, result] : map_V_charge_2D) {
+        for (const auto& coord2d : result.second) {
+            if (coord2d.plane == kVlayer)
+                precomp_VT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+        }
+    }
+    for (const auto& [coord_key, result] : map_W_charge_2D) {
+        for (const auto& coord2d : result.second) {
+            if (coord2d.plane == kWlayer)
+                precomp_WT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+        }
+    }
+    static const std::set<WireTimePair> empty_wt_set;
+
     // Build response matrices using cal_gaus_integral_seg
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
@@ -5805,9 +5830,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             // std::cout << std::endl;
 
             // Fill response matrices using Gaussian integrals - U plane
-            int n_u = 0;
-            std::set<std::pair<int, int>> set_UT;
+            ApaFaceKey af_key = {apa, face};
+            const auto& set_UT = precomp_UT.count(af_key) ? precomp_UT.at(af_key) : empty_wt_set;
+            const auto& set_VT = precomp_VT.count(af_key) ? precomp_VT.at(af_key) : empty_wt_set;
+            const auto& set_WT = precomp_WT.count(af_key) ? precomp_WT.at(af_key) : empty_wt_set;
 
+            int n_u = 0;
             for (const auto& [coord_key, result] : map_U_charge_2D) {
                 // const auto& measurement = result.first;
                 const auto& coord_2d_set = result.second;
@@ -5815,7 +5843,6 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                     if (coord_2d.plane != kUlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
                     int wire = coord_2d.wire;
                     int time = coord_2d.time;
-                    set_UT.insert(std::make_pair(wire, time));
 
                     if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                         
@@ -5840,14 +5867,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             
             // Fill response matrices using Gaussian integrals - V plane
             int n_v = 0;
-            std::set<std::pair<int, int>> set_VT;
             for (const auto& [coord_key, result] : map_V_charge_2D) {
                 const auto& coord_2d_set = result.second;
                 for (const auto& coord_2d : coord_2d_set) {
                     if (coord_2d.plane != kVlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
                     int wire = coord_2d.wire;
                     int time = coord_2d.time;
-                    set_VT.insert(std::make_pair(wire, time));
                       if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                         
                         double value = cal_gaus_integral_seg(coord_2d.time, coord_2d.wire, centers_T, sigmas_T, 
@@ -5868,14 +5893,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             
             // Fill response matrices using Gaussian integrals - W plane
             int n_w = 0;
-            std::set<std::pair<int, int>> set_WT;
             for (const auto& [coord_key, result] : map_W_charge_2D) {
                 const auto& coord_2d_set = result.second;
                 for (const auto& coord_2d : coord_2d_set) {
                     if (coord_2d.plane != kWlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
                     int wire = coord_2d.wire;
                     int time = coord_2d.time;
-                    set_WT.insert(std::make_pair(wire, time));
                     if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
 
                         double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T,
@@ -6075,8 +6098,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         // }
         // std::cout << std::endl;
 
+        ApaFaceKey af_key_v = {apa, face};
+        const auto& set_UT = precomp_UT.count(af_key_v) ? precomp_UT.at(af_key_v) : empty_wt_set;
+        const auto& set_VT = precomp_VT.count(af_key_v) ? precomp_VT.at(af_key_v) : empty_wt_set;
+        const auto& set_WT = precomp_WT.count(af_key_v) ? precomp_WT.at(af_key_v) : empty_wt_set;
+
         int n_u = 0;
-        std::set<std::pair<int, int>> set_UT;
         for (const auto& [coord_key, result] : map_U_charge_2D) {
             // const auto& measurement = result.first;
             const auto& coord_2d_set = result.second;
@@ -6084,7 +6111,6 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                 if (coord_2d.plane != kUlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
                 int wire = coord_2d.wire;
                 int time = coord_2d.time;
-                set_UT.insert(std::make_pair(wire, time));
 
                 if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                     
@@ -6109,14 +6135,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
 
         // Fill response matrices using Gaussian integrals - V plane
         int n_v = 0;
-        std::set<std::pair<int, int>> set_VT;
         for (const auto& [coord_key, result] : map_V_charge_2D) {
             const auto& coord_2d_set = result.second;
             for (const auto& coord_2d : coord_2d_set) {
                 if (coord_2d.plane != kVlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
                 int wire = coord_2d.wire;
                 int time = coord_2d.time;
-                set_VT.insert(std::make_pair(wire, time));
                     if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                     
                     double value = cal_gaus_integral_seg(coord_2d.time, coord_2d.wire, centers_T, sigmas_T, 
@@ -6137,14 +6161,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         
         // Fill response matrices using Gaussian integrals - W plane
         int n_w = 0;
-        std::set<std::pair<int, int>> set_WT;
         for (const auto& [coord_key, result] : map_W_charge_2D) {
             const auto& coord_2d_set = result.second;
             for (const auto& coord_2d : coord_2d_set) {
                 if (coord_2d.plane != kWlayer || coord_2d.apa != apa || coord_2d.face != face) continue;
                 int wire = coord_2d.wire;
                 int time = coord_2d.time;
-                set_WT.insert(std::make_pair(wire, time));
                 if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
 
                     double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T,
@@ -6597,6 +6619,31 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         // std::cout << i << " " << dx[i] << std::endl;
     }
     
+    // Pre-build (wire, time) lookup sets keyed by (apa, face) so we don't rebuild them
+    // inside the n_3D_pos loop (which would be O(n_3D_pos * n_measurements)).
+    using WireTimePair = std::pair<int, int>;
+    using ApaFaceKey   = std::pair<int, int>;
+    std::map<ApaFaceKey, std::set<WireTimePair>> precomp_UT, precomp_VT, precomp_WT;
+    for (const auto& [coord_key, result] : map_U_charge_2D) {
+        for (const auto& coord2d : result.second) {
+            if (coord2d.plane == kUlayer)
+                precomp_UT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+        }
+    }
+    for (const auto& [coord_key, result] : map_V_charge_2D) {
+        for (const auto& coord2d : result.second) {
+            if (coord2d.plane == kVlayer)
+                precomp_VT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+        }
+    }
+    for (const auto& [coord_key, result] : map_W_charge_2D) {
+        for (const auto& coord2d : result.second) {
+            if (coord2d.plane == kWlayer)
+                precomp_WT[{coord2d.apa, coord2d.face}].insert({coord2d.wire, coord2d.time});
+        }
+    }
+    static const std::set<WireTimePair> empty_wt_set;
+
     // Build response matrices using geometry information
     for (int i = 0; i < n_3D_pos; i++) {
         WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
@@ -6810,11 +6857,15 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         // std::cout << std::endl;
 
         // Fill response matrices using Gaussian integration
+        ApaFaceKey af_key = {apa, face};
+        const auto& set_UT = precomp_UT.count(af_key) ? precomp_UT.at(af_key) : empty_wt_set;
+        const auto& set_VT = precomp_VT.count(af_key) ? precomp_VT.at(af_key) : empty_wt_set;
+        const auto& set_WT = precomp_WT.count(af_key) ? precomp_WT.at(af_key) : empty_wt_set;
+
         int n_u = 0;
-        std::set<std::pair<int, int>> set_UT;
         for (const auto& [coord_key, result] : map_U_charge_2D) {
             const auto& measurement = result.first;
-            const auto& Coord2D_set = result.second;    
+            const auto& Coord2D_set = result.second;
 
             for (const auto& coord2d : Coord2D_set) {
                 // coord2d: TrackFitting::Coord2D
@@ -6822,8 +6873,6 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 if (coord2d.plane != kUlayer || coord2d.apa != apa || coord2d.face != face) continue;
                 int wire = coord2d.wire;
                 int time = coord2d.time;
-
-                set_UT.insert(std::make_pair(wire, time));
 
                 // if (wire !=938 || time != 7176) continue;
 
@@ -6846,10 +6895,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             n_u++;
         }
         int n_v = 0;
-        std::set<std::pair<int, int>> set_VT;
         for (const auto& [coord_key, result] : map_V_charge_2D) {
             const auto& measurement = result.first;
-            const auto& Coord2D_set = result.second;    
+            const auto& Coord2D_set = result.second;
 
             for (const auto& coord2d : Coord2D_set) {
                 // coord2d: TrackFitting::Coord2D
@@ -6857,7 +6905,6 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 if (coord2d.plane != kVlayer || coord2d.apa != apa || coord2d.face != face) continue;
                 int wire = coord2d.wire;
                 int time = coord2d.time;
-                set_VT.insert(std::make_pair(wire, time));
 
                 if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                     double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
@@ -6876,10 +6923,9 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
             n_v++;
         }
         int n_w = 0;
-        std::set<std::pair<int, int>> set_WT;
         for (const auto& [coord_key, result] : map_W_charge_2D) {
             const auto& measurement = result.first;
-            const auto& Coord2D_set = result.second;    
+            const auto& Coord2D_set = result.second;
 
             for (const auto& coord2d : Coord2D_set) {
                 // coord2d: TrackFitting::Coord2D
@@ -6887,7 +6933,6 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
                 if (coord2d.plane != kWlayer || coord2d.apa != apa || coord2d.face != face) continue;
                 int wire = coord2d.wire;
                 int time = coord2d.time;
-                set_WT.insert(std::make_pair(wire, time));
                 if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
                     double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
 
@@ -7665,7 +7710,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         }
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         trajectory_fit(ptss, 2, m_params.div_sigma);
-        if (m_perf) std::cout << "do_single_tracking timing: 2nd trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl;
+        if (m_perf) std::cout << "do_single_tracking timing: 2nd trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl;t_dst = DST_Clock::now();
 
         pts.clear();
         for (const auto& pt_pair : ptss) {
