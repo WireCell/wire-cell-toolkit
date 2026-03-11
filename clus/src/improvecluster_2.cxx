@@ -7,7 +7,6 @@
 #include "improvecluster_1.h"  // Include the ImproveCluster_1 header
 #include "SteinerGrapher.h"
 #include "WireCellUtil/NamedFactory.h"
-#include "WireCellUtil/Logging.h"
 #include <chrono>
 
 #include <vector>
@@ -37,7 +36,7 @@ namespace WireCell::Clus {
 } // namespace WireCell::Clus
 
 WIRECELL_FACTORY(ImproveCluster_2, WireCell::Clus::ImproveCluster_2,
-                 WireCell::IConfigurable, WireCell::IPCTreeMutate)
+                 WireCell::INamed, WireCell::IConfigurable, WireCell::IPCTreeMutate)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -51,7 +50,7 @@ namespace WCF = WireCell::Clus::Facade;
 namespace WRG = WireCell::RayGrid;
 namespace WireCell::Clus {
 
-    ImproveCluster_2::ImproveCluster_2() 
+    ImproveCluster_2::ImproveCluster_2()
     {
     }
 
@@ -84,7 +83,7 @@ namespace WireCell::Clus {
 
         // get the original cluster
         auto* orig_cluster = reinitialize(node);
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: reinitialize took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: reinitialize took {} ms", MS(Clock::now()-t0).count());
 
         // First: get the shortest path from the original cluster
         // Create a SteinerGrapher instance with the cluster
@@ -97,12 +96,11 @@ namespace WireCell::Clus {
         grapher_config.perf = m_verbose; // toggle timing printouts with verbose=true
         
         // Create the Steiner::Grapher instance
-        auto log = Log::logger("improve_cluster_2 mutate");
         t0 = Clock::now();
         Steiner::Grapher orig_steiner_grapher(*orig_cluster, grapher_config, log);
         auto& orig_graph = orig_steiner_grapher.get_graph("basic_pid"); // this is good for the original cluster
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: get_graph(basic_pid) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: get_graph(basic_pid) took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Orig Graph vertices: {}, edges: {}", boost::num_vertices(orig_graph), boost::num_edges(orig_graph));
 
         // Establish same blob steiner edges
         t0 = Clock::now();
@@ -114,18 +112,18 @@ namespace WireCell::Clus {
             auto second_index =   orig_cluster->get_closest_point_index(pair_points.second);
             orig_path_point_indices = orig_cluster->graph_algorithms("basic_pid").shortest_path(first_index, second_index);
         }
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: establish+shortest_path(basic_pid) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2 " << " Origi Shortest path indices: " << orig_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph)<< std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: establish+shortest_path(basic_pid) took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Orig shortest path indices: {} ; Graph vertices: {}, edges: {}", orig_path_point_indices.size(), boost::num_vertices(orig_graph), boost::num_edges(orig_graph));
         
         t0 = Clock::now();
         orig_steiner_grapher.remove_same_blob_steiner_edges("basic_pid");
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: remove_same_blob_steiner_edges(basic_pid) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2 " << " Orig Graph vertices: " << boost::num_vertices(orig_graph) << ", edges: " << boost::num_edges(orig_graph) << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: remove_same_blob_steiner_edges(basic_pid) took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Orig Graph vertices: {}, edges: {}", boost::num_vertices(orig_graph), boost::num_edges(orig_graph));
 
 
 
         // Second, make a temp_cluster based on the original cluster via ImproveCluster_1
-        if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "Grouping {} {}", m_grouping->get_name(), m_grouping->children().size());
 
         t0 = Clock::now();
         auto temp_node = ImproveCluster_1::mutate(node);
@@ -133,19 +131,19 @@ namespace WireCell::Clus {
         auto& temp_cluster = m_grouping->make_child();
         temp_cluster.take_children(*temp_cluster_1);  // Move all blobs from improved cluster
         temp_cluster.from(*orig_cluster);
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: ImproveCluster_1::mutate took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: ImproveCluster_1::mutate took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Grouping {} {}", m_grouping->get_name(), m_grouping->children().size());
 
         t0 = Clock::now();
         Steiner::Grapher temp_steiner_grapher(temp_cluster, grapher_config, log);
         
         // this requires CTPC and ref_point cloud of original cluster
         auto& temp_graph = temp_cluster.find_graph("ctpc_ref_pid", *orig_cluster, m_dv, m_pcts);
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: Grapher+find_graph(ctpc_ref_pid) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: Grapher+find_graph(ctpc_ref_pid) took {} ms", MS(Clock::now()-t0).count());
         //temp_steiner_grapher.get_graph("basic_pid"); 
         
 
-        if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "Temp Graph vertices: {}, edges: {}", boost::num_vertices(temp_graph), boost::num_edges(temp_graph));
         t0 = Clock::now();
         temp_steiner_grapher.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
         std::vector<size_t> temp_path_point_indices;
@@ -155,12 +153,12 @@ namespace WireCell::Clus {
             auto second_index =   temp_cluster.get_closest_point_index(pair_points.second);
             temp_path_point_indices = temp_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
         }
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: establish+shortest_path(ctpc_ref_pid) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Shortest path indices: " << temp_path_point_indices.size() << " ; Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph)<< std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: establish+shortest_path(ctpc_ref_pid) took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Temp shortest path indices: {} ; Graph vertices: {}, edges: {}", temp_path_point_indices.size(), boost::num_vertices(temp_graph), boost::num_edges(temp_graph));
         t0 = Clock::now();
         temp_steiner_grapher.remove_same_blob_steiner_edges("ctpc_ref_pid");
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: remove_same_blob_steiner_edges(ctpc_ref_pid) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2 " << " Temp Graph vertices: " << boost::num_vertices(temp_graph) << ", edges: " << boost::num_edges(temp_graph) << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: remove_same_blob_steiner_edges(ctpc_ref_pid) took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Temp Graph vertices: {}, edges: {}", boost::num_vertices(temp_graph), boost::num_edges(temp_graph));
 
 
         // star to construct a new cluster
@@ -180,24 +178,23 @@ namespace WireCell::Clus {
             // get original activities ...
             t0 = Clock::now();
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: get_activity_improved (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // hack activity according to original cluster
             t0 = Clock::now();
             hack_activity_improved(*orig_cluster, map_slices_measures, orig_path_point_indices, apa, face); // may need more args
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: hack_activity(orig) (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: hack_activity(orig) (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // hack activities according to the new cluster
             t0 = Clock::now();
             hack_activity_improved(temp_cluster, map_slices_measures, temp_path_point_indices, apa, face); // may need more args
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: hack_activity(temp) (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: hack_activity(temp) (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // Step 3.
             t0 = Clock::now();
             auto iblobs = make_iblobs_improved(map_slices_measures, apa, face);
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: make_iblobs_improved (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-
-            if (m_verbose) std::cout << "ImproveCluster_2: new cluster " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: make_iblobs_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_DEBUG(log, "new cluster {} iblobs for apa {} face {}", iblobs.size(), apa, face);
 
             auto niblobs = iblobs.size();
             // start to sampling points 
@@ -231,13 +228,13 @@ namespace WireCell::Clus {
 
                 npoints +=x_coords.size();
                 if (pcs.empty()) {
-                    SPDLOG_DEBUG("ImproveCluster_1: skipping blob {} with no points", iblob->ident());
+                    SPDLOG_LOGGER_DEBUG(log, "skipping blob {} with no points", iblob->ident());
                     continue;
                 }
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
             }
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: sample_live loop (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-            if (m_verbose) std::cout << "ImproveCluster_2: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: sample_live loop (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_DEBUG(log, "{} points sampled for apa {} face {} Blobs {}", npoints, apa, face, niblobs);
 
             // remove bad blobs
             t0 = Clock::now();
@@ -247,8 +244,8 @@ namespace WireCell::Clus {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: remove_bad_blobs (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-            if (m_verbose) std::cout << "ImproveCluster_2: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: remove_bad_blobs (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_DEBUG(log, "{} blobs removed for apa {} face {} remaining {}", blobs_to_remove.size(), apa, face, new_cluster.children().size());
         }
 
 
@@ -256,13 +253,13 @@ namespace WireCell::Clus {
         t0 = Clock::now();
         auto* temp_cluster_ptr = &temp_cluster;
         m_grouping->destroy_child(temp_cluster_ptr, true);
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: destroy_child(temp_cluster) took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-        if (m_verbose) std::cout << "ImproveCluster_2: Grouping" << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: destroy_child(temp_cluster) took {} ms", MS(Clock::now()-t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "Grouping {} {}", m_grouping->get_name(), m_grouping->children().size());
 
         auto& default_scope = orig_cluster->get_default_scope();
         auto& raw_scope = orig_cluster->get_raw_scope();
 
-        if (m_verbose) std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "Scope: {} {}", default_scope.hash(), raw_scope.hash());
         if (default_scope.hash()!=raw_scope.hash()){
             t0 = Clock::now();
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
@@ -272,13 +269,13 @@ namespace WireCell::Clus {
             // const auto& correction_scope = new_cluster.get_scope(correction_name);
             // Set this as the default scope for viewing
             new_cluster.from(*orig_cluster); // copy state from original cluster
-            if (m_verbose) std::cout << "ImproveCluster_2 timing: add_corrected_points took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: add_corrected_points took {} ms", MS(Clock::now()-t0).count());
             // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
         // auto retiled_node = new_cluster.node();
 
-        if (m_verbose) std::cout << "ImproveCluster_2 timing: mutate() TOTAL took " << MS(Clock::now()-t_mutate_start).count() << " ms" << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: mutate() TOTAL took {} ms", MS(Clock::now()-t_mutate_start).count());
         return m_grouping->remove_child(new_cluster);
 
     }

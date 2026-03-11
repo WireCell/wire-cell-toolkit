@@ -5,7 +5,7 @@
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
-#include "WireCellUtil/Logging.h"
+#include "WireCellAux/Logger.h"
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/TrackFitting.h"  
 #include "WireCellClus/TrackFittingPresets.h"
@@ -18,9 +18,9 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
-class TaggerCheckNeutrino : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData {
+class TaggerCheckNeutrino : public Aux::Logger, public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData {
 public:
-    TaggerCheckNeutrino() {
+    TaggerCheckNeutrino() : Aux::Logger("TaggerCheckNeutrino", "clus") {
         // Initialize with default preset
         m_track_fitter = std::make_shared<TrackFitting>(TrackFittingPresets::create_with_current_values());
     }

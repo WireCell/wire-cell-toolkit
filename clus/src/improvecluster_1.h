@@ -9,6 +9,7 @@
 
 #include "retile_cluster.h"  // Include the RetileCluster header
 
+#include "WireCellAux/Logger.h"
 #include "WireCellUtil/NamedFactory.h"
 
 #include <vector>
@@ -20,7 +21,7 @@ namespace WireCell::Clus {
     using namespace WireCell::Clus::Facade;
     using namespace WireCell::PointCloud::Tree;
 
-    class ImproveCluster_1 : public RetileCluster {
+    class ImproveCluster_1 : public RetileCluster, public Aux::Logger {
 
     public:
 

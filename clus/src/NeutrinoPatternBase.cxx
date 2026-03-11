@@ -265,7 +265,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     v2->cluster(&cluster);
 
     auto seg = create_segment_from_vertices(graph, cluster, v1, v2, dv);
-    if (m_perf) std::cout << "init_first_segment timing: do shortest path took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: do shortest path took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
 
     if (!seg) {
@@ -291,11 +291,11 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
 
     // perform fitting ...
     track_fitter.add_segment(seg);
-    if (m_perf) std::cout << "init_first_segment timing: create segment and prepare data took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: create segment and prepare data took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
 
     track_fitter.do_single_tracking(seg, true, true);
-    if (m_perf) std::cout << "init_first_segment timing: do single_track fitting took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: do single_track fitting took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
 
     const auto& fine_path = track_fitter.get_fine_tracking_path();
@@ -353,7 +353,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         remove_vertex(graph, v2);
         return nullptr;
     }
-    if (m_perf) std::cout << "init_first_segment timing: after fit assignment took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: after fit assignment took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     
     return seg;
 }
@@ -1106,7 +1106,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 
     // Initialize first segment
     SegmentPtr sg1 = init_first_segment(graph, cluster, &cluster, track_fitter, dv, flag_back_search);
-    if (m_perf) std::cout << "find_proto_vertex timing: init_first_segment took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: init_first_segment took {} ms", MS(Clock::now() - t0).count());
 
     if (!sg1) return false;
 
@@ -1130,22 +1130,22 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         std::vector<SegmentPtr> remaining_segments;
         remaining_segments.push_back(sg1);
         break_segments(graph, track_fitter, dv, remaining_segments);
-        if (m_perf) std::cout << "find_proto_vertex timing: break_segments took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
 
         t0 = Clock::now();
         examine_structure(graph, cluster, track_fitter, dv);
-        if (m_perf) std::cout << "find_proto_vertex timing: examine_structure took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
     } else {
         t0 = Clock::now();
         track_fitter.do_multi_tracking(true, true, true);
-        if (m_perf) std::cout << "find_proto_vertex timing: do_multi_tracking (no break) took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
 
     // Find other segments
     for (int i = 0; i < nrounds_find_other_tracks; i++) {
         t0 = Clock::now();
         find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
-        if (m_perf) std::cout << "find_proto_vertex timing: find_other_segments round " << i << " took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
     }
 
     // For main cluster, merge tracks if angles are consistent
@@ -1154,32 +1154,32 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         if (examine_structure_3(graph, cluster, track_fitter, dv)) {
             track_fitter.do_multi_tracking(true, true, true);
         }
-        if (m_perf) std::cout << "find_proto_vertex timing: examine_structure_3 took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
     }
 
     // Examine the vertices
     t0 = Clock::now();
     examine_vertices(graph, cluster, track_fitter, dv);
-    if (m_perf) std::cout << "find_proto_vertex timing: examine_vertices took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices took {} ms", MS(Clock::now() - t0).count());
 
     // Examine partial identical segments
     t0 = Clock::now();
     examine_partial_identical_segments(graph, cluster, track_fitter, dv);
-    if (m_perf) std::cout << "find_proto_vertex timing: examine_partial_identical_segments took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_partial_identical_segments took {} ms", MS(Clock::now() - t0).count());
 
     // Examine the two initial points for main cluster
     if (is_main_cluster && main_cluster_initial_pair_vertices.first) {
         t0 = Clock::now();
         examine_vertices_3(graph, cluster, main_cluster_initial_pair_vertices, track_fitter, dv);
-        if (m_perf) std::cout << "find_proto_vertex timing: examine_vertices_3 took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices_3 took {} ms", MS(Clock::now() - t0).count());
     }
 
     // Final multi-tracking
     t0 = Clock::now();
     track_fitter.do_multi_tracking(true, true, true);
-    if (m_perf) std::cout << "find_proto_vertex timing: final do_multi_tracking took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: final do_multi_tracking took {} ms", MS(Clock::now() - t0).count());
 
-    if (m_perf) std::cout << "find_proto_vertex timing: TOTAL took " << MS(Clock::now() - t_total).count() << " ms" << std::endl;
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
 
     return true;
 }

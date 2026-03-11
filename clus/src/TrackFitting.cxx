@@ -267,7 +267,7 @@ void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
         }
     }
 
-    std::cout << "TrackFitting: Added graph with " << segments_set.size() << " segments." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "Added graph with {} segments. clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
 }
 
 void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
@@ -293,7 +293,7 @@ void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
         }
     }
 
-    std::cout << "TrackFitting: Added segment with " << segment->wcpts().size() << " points." << " " << m_clusters.size() << " " << m_blobs.size() << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "Added segment with {} points. clusters={} blobs={}", segment->wcpts().size(), m_clusters.size(), m_blobs.size());
 }
 
 void TrackFitting::BuildGeometry(){
@@ -5445,7 +5445,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             case 2: map_W_charge_2D[coord_readout] = charge_coord_pair; break;
         }
     }
-    std::cout << "dQ/dx: " << map_U_charge_2D.size() << " " << map_V_charge_2D.size() << " " << map_W_charge_2D.size() << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
     
     // Count total 3D positions from all segments and vertices
     int n_3D_pos = 0;
@@ -6483,7 +6483,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     }
 
 
-    std::cout << "dQ/dx: " << map_U_charge_2D.size() << " " << map_V_charge_2D.size() << " " << map_W_charge_2D.size() << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
     // for (const auto& [coord_key, result] : map_U_charge_2D) {
     //     std::cout << "CoordReadout: APA=" << coord_key.apa
     //               << ", Time=" << coord_key.time

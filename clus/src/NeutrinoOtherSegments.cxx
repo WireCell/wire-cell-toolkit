@@ -8,6 +8,8 @@
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
 // Edge property tag for Boost Graph
 struct edge_base_t {
     typedef boost::edge_property_tag kind;
@@ -530,9 +532,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                          medium_dQ_dx / mip_dQdx > 1.6)) {
                         new_segments.push_back(new_seg);
                     }
-                    std::cout << "Cluster: " << cluster.get_cluster_id()
-                              << " Other tracks -- connected to existing graph, length="
-                              << length / units::cm << " cm" << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: {}: Cluster {} Other tracks -- connected to existing graph, length={} cm", __func__, cluster.get_cluster_id(), length / units::cm);
                 } else {
                     // Endpoints at same position – discard fresh vertices
                     if (!v1_existed) remove_vertex(graph, v1);
@@ -629,9 +629,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                 if (!flag_parallel) {
                     // Truly isolated residual – remove vertices from graph; segment was never added
-                    std::cout << "Cluster: " << cluster.get_cluster_id()
-                              << " Isolated residual segment found: "
-                              << dir_mag / units::cm << " cm" << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments:{}: Cluster {} Isolated residual segment found: {} cm", __func__, cluster.get_cluster_id(), dir_mag / units::cm);
                     remove_vertex(graph, v1);
                     remove_vertex(graph, v2);
                 } else {
@@ -807,7 +805,7 @@ PatternAlgorithms::check_end_point(Graph& graph,
                                    double sg_cut1,
                                    double sg_cut2)
 {
-    if (tracking_path.size() < 2) std::cout << "vector size wrong!" << std::endl;
+    if (tracking_path.size() < 2) SPDLOG_LOGGER_DEBUG(s_log, "check_end_point: {}: vector size wrong!", __func__);
 
     const int ncount = 5;
     Facade::geo_point_t test_p = flag_front ? tracking_path.front() : tracking_path.back();
@@ -969,7 +967,7 @@ VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Clu
         }
 
         if (!start_v || !end_v) {
-            std::cout << "Error in finding vertices for a segment" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "find_vertex_other_segment: {}: Error in finding vertices for a segment", __func__);
             return v1;
         }
 
@@ -1140,8 +1138,7 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
     remove_vertex(graph, v1);
     add_segment(graph, sg, vtx, v2);
     flag = true;
-    std::cout << "Cluster: " << cluster.get_cluster_id()
-              << " shift a isochronous vertex with adding a segment " << sg->id() << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "modify_vertex_isochronous: {}: Cluster {} shift a isochronous vertex with adding a segment {}", __func__, cluster.get_cluster_id(), sg->id());
 
     return flag;
 }
@@ -1273,6 +1270,6 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
 
     remove_segment(graph, sg1);
 
-    std::cout << "Modify segment for adding a segment in isochronous case" << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "modify_segment_isochronous: {}: Modify segment for adding a segment in isochronous case", __func__);
     return flag;
 }

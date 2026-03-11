@@ -3,7 +3,7 @@
 #include <chrono>
 
 WIRECELL_FACTORY(ImproveCluster_1, WireCell::Clus::ImproveCluster_1,
-                 WireCell::IConfigurable, WireCell::IPCTreeMutate)
+                 WireCell::INamed, WireCell::IConfigurable, WireCell::IPCTreeMutate)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -18,7 +18,8 @@ namespace WRG = WireCell::RayGrid;
 
 namespace WireCell::Clus {
 
-    ImproveCluster_1::ImproveCluster_1() 
+    ImproveCluster_1::ImproveCluster_1()
+        : Aux::Logger("ImproveCluster_1", "clus")
     {
     }
 
@@ -92,7 +93,7 @@ namespace WireCell::Clus {
 
         // get the original cluster
         auto* orig_cluster = reinitialize(node);
-        if (m_verbose) std::cout << "ImproveCluster_1 timing: reinitialize took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: reinitialize took {} ms", MS(Clock::now()-t0).count());
         
 
         // std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
@@ -132,7 +133,7 @@ namespace WireCell::Clus {
 
             t0 = Clock::now();
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
-            if (m_verbose) std::cout << "ImproveCluster_1 timing: get_activity_improved (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // Step 2.
             // hack_activity_improved(*orig_cluster, map_slices_measures, path_wcps, apa, face); // may need more args
@@ -170,9 +171,8 @@ namespace WireCell::Clus {
             // Step 3.
             t0 = Clock::now();
             auto iblobs = make_iblobs_improved(map_slices_measures, apa, face);
-            if (m_verbose) std::cout << "ImproveCluster_1 timing: make_iblobs_improved (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-
-            if (m_verbose) std::cout << "ImproveCluster_1: " << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: make_iblobs_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_DEBUG(log, "{} blobs -> {} iblobs for apa {} face {}", orig_cluster->nchildren(), iblobs.size(), apa, face);
 
             auto niblobs = iblobs.size();
             
@@ -213,8 +213,8 @@ namespace WireCell::Clus {
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
 
             }
-            if (m_verbose) std::cout << "ImproveCluster_1 timing: sample_live loop (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-            if (m_verbose) std::cout << "ImproveCluster_1: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: sample_live loop (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_DEBUG(log, "{} points sampled for apa {} face {} Blobs {}", npoints, apa, face, niblobs);
 
 
             // remove bad blobs ...
@@ -225,15 +225,15 @@ namespace WireCell::Clus {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
-            if (m_verbose) std::cout << "ImproveCluster_1 timing: remove_bad_blobs (apa=" << apa << ",face=" << face << ") took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
-            if (m_verbose) std::cout << "ImproveCluster_1: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: remove_bad_blobs (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_DEBUG(log, "{} blobs removed for apa {} face {} remaining {}", blobs_to_remove.size(), apa, face, new_cluster.children().size());
         }
 
 
         auto& default_scope = orig_cluster->get_default_scope();
         auto& raw_scope = orig_cluster->get_raw_scope();
 
-        if (m_verbose) std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "Scope: {} {}", default_scope.hash(), raw_scope.hash());
         if (default_scope.hash()!=raw_scope.hash()){
             t0 = Clock::now();
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
@@ -241,7 +241,7 @@ namespace WireCell::Clus {
             new_cluster.add_corrected_points(m_pcts, correction_name);
             // Set this as the default scope for viewing
             new_cluster.from(*orig_cluster); // copy state from original cluster
-            if (m_verbose) std::cout << "ImproveCluster_1 timing: add_corrected_points took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
+            SPDLOG_LOGGER_DEBUG(log, "timing: add_corrected_points took {} ms", MS(Clock::now()-t0).count());
             // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
@@ -250,7 +250,7 @@ namespace WireCell::Clus {
 
         // std::cout << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
-        if (m_verbose) std::cout << "ImproveCluster_1 timing: mutate() TOTAL took " << MS(Clock::now()-t_mutate_start).count() << " ms" << std::endl;
+        SPDLOG_LOGGER_DEBUG(log, "timing: mutate() TOTAL took {} ms", MS(Clock::now()-t_mutate_start).count());
         return m_grouping->remove_child(new_cluster);
     }
 
