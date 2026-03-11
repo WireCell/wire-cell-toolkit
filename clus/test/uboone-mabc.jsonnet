@@ -320,7 +320,7 @@ local ub = {
             // cm.retile(retiler=retiler),
             cm.steiner(retiler=improve_cluster_2),
             cm.tagger_check_stm(),
-            cm.do_tracking("","multiple"),
+            cm.do_tracking("","multiple", perf=true),
         ];
         pg.pnode({
         type: "MultiAlgBlobClustering",

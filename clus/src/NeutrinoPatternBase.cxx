@@ -3,6 +3,7 @@
 #include "WireCellUtil/Logging.h"
 
 #include <Eigen/Dense>
+#include <chrono>
 #include <limits>
 
 using namespace WireCell::Clus::PR;
@@ -176,6 +177,10 @@ SegmentPtr PatternAlgorithms::create_segment_from_vertices(Graph& graph, Facade:
 
 SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& cluster, Facade::Cluster* main_cluster,TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_back_search)
 {
+    using IFS_Clock = std::chrono::steady_clock;
+    using IFS_MS = std::chrono::duration<double, std::milli>;
+    auto t_ifs = IFS_Clock::now();
+    auto t0 = IFS_Clock::now();
     // Get two boundary points from the cluster
     auto boundary_indices = cluster.get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc");
 
@@ -195,10 +200,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     Facade::geo_point_t first_pt = boundary_point_first;
     Facade::geo_point_t second_pt = boundary_point_second;
 
-    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: raw boundary pts  A({:.2f},{:.2f},{:.2f})  B({:.2f},{:.2f},{:.2f})  flag_back_search={}",
-                        first_pt.x(), first_pt.y(), first_pt.z(),
-                        second_pt.x(), second_pt.y(), second_pt.z(),
-                        flag_back_search);
+    
 
     // Determine the starting point based on whether this is the main cluster or not
     const bool is_main_flag = cluster.get_flag(Facade::Flags::main_cluster);
@@ -249,6 +251,11 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         }
     }
     
+    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: raw boundary pts  A({:.2f},{:.2f},{:.2f})  B({:.2f},{:.2f},{:.2f})  flag_back_search={}",
+                        first_pt.x(), first_pt.y(), first_pt.z(),
+                        second_pt.x(), second_pt.y(), second_pt.z(),
+                        flag_back_search);
+
     // Create vertices for the endpoints
     VertexPtr v1 = make_vertex(graph);
     v1->wcpt().point = first_pt;
@@ -258,16 +265,19 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     v2->cluster(&cluster);
 
     auto seg = create_segment_from_vertices(graph, cluster, v1, v2, dv);
+    if (m_perf) std::cout << "init_first_segment timing: do shortest path took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    t0 = IFS_Clock::now();
+
     if (!seg) {
         remove_vertex(graph, v1);
         remove_vertex(graph, v2);
         return nullptr;
     }
     SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: Dijkstra path  npts={}", seg->wcpts().size());
-    for (size_t i = 0; i < seg->wcpts().size(); ++i) {
-        SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
-                            seg->wcpts()[i].point.x(), seg->wcpts()[i].point.y(), seg->wcpts()[i].point.z());
-    }
+    // for (size_t i = 0; i < seg->wcpts().size(); ++i) {
+    //     SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
+    //                         seg->wcpts()[i].point.x(), seg->wcpts()[i].point.y(), seg->wcpts()[i].point.z());
+    // }
 
 
 
@@ -281,7 +291,13 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
 
     // perform fitting ...
     track_fitter.add_segment(seg);
+    if (m_perf) std::cout << "init_first_segment timing: create segment and prepare data took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    t0 = IFS_Clock::now();
+
     track_fitter.do_single_tracking(seg, true, true);
+    if (m_perf) std::cout << "init_first_segment timing: do single_track fitting took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
+    t0 = IFS_Clock::now();
+
     const auto& fine_path = track_fitter.get_fine_tracking_path();
     const auto& dQ_vec = track_fitter.get_dQ();
     const auto& dx_vec = track_fitter.get_dx();
@@ -291,10 +307,10 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     const auto& pt_vec = track_fitter.get_pt();
     const auto& chi2_vec = track_fitter.get_reduced_chi2();
     SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: fitted path     npts={}", fine_path.size());
-    for (size_t i = 0; i < fine_path.size(); ++i) {
-        SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
-                            fine_path[i].first.x(), fine_path[i].first.y(), fine_path[i].first.z());
-    }
+    // for (size_t i = 0; i < fine_path.size(); ++i) {
+    //     SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
+    //                         fine_path[i].first.x(), fine_path[i].first.y(), fine_path[i].first.z());
+    // }
 
     if (fine_path.size()>1) {
         v1->fit().point = fine_path.front().first;
@@ -337,6 +353,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         remove_vertex(graph, v2);
         return nullptr;
     }
+    if (m_perf) std::cout << "init_first_segment timing: after fit assignment took " << IFS_MS(IFS_Clock::now() - t0).count() << " ms" << std::endl;
     
     return seg;
 }
@@ -1076,70 +1093,94 @@ Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex
 }
 
 bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, int nrounds_find_other_tracks, bool flag_back_search){
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = Clock::now();
+
     // Check if steiner point cloud exists and has enough points
     if (!cluster.has_pc("steiner_pc")) return false;
-    
+
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     if (steiner_pc.size() < 2) return false;
-    
+
     // Initialize first segment
     SegmentPtr sg1 = init_first_segment(graph, cluster, &cluster, track_fitter, dv, flag_back_search);
-    
+    if (m_perf) std::cout << "find_proto_vertex timing: init_first_segment took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+
     if (!sg1) return false;
-    
+
     // Store initial pair of vertices for main cluster
     std::pair<VertexPtr, VertexPtr> main_cluster_initial_pair_vertices{nullptr, nullptr};
     bool is_main_cluster = cluster.get_flag(Facade::Flags::main_cluster);
-    
+
     if (is_main_cluster) {
         main_cluster_initial_pair_vertices = find_vertices(graph, sg1);
     }
-    
+
     // Check if segment has more than one point
     const auto& wcpts = sg1->wcpts();
     if (wcpts.size() <= 1) {
         return false;
     }
-    
+
     // Break tracks and examine structure
     if (flag_break_track) {
+        t0 = Clock::now();
         std::vector<SegmentPtr> remaining_segments;
         remaining_segments.push_back(sg1);
         break_segments(graph, track_fitter, dv, remaining_segments);
-        
-        // Examine and improve structure
+        if (m_perf) std::cout << "find_proto_vertex timing: break_segments took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+
+        t0 = Clock::now();
         examine_structure(graph, cluster, track_fitter, dv);
+        if (m_perf) std::cout << "find_proto_vertex timing: examine_structure took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
     } else {
-        // Just do multi-tracking
+        t0 = Clock::now();
         track_fitter.do_multi_tracking(true, true, true);
+        if (m_perf) std::cout << "find_proto_vertex timing: do_multi_tracking (no break) took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
     }
-    
+
     // Find other segments
     for (int i = 0; i < nrounds_find_other_tracks; i++) {
+        t0 = Clock::now();
         find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
+        if (m_perf) std::cout << "find_proto_vertex timing: find_other_segments round " << i << " took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
     }
-    
+
     // For main cluster, merge tracks if angles are consistent
     if (is_main_cluster) {
+        t0 = Clock::now();
         if (examine_structure_3(graph, cluster, track_fitter, dv)) {
             track_fitter.do_multi_tracking(true, true, true);
         }
+        if (m_perf) std::cout << "find_proto_vertex timing: examine_structure_3 took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
     }
-    
+
     // Examine the vertices
+    t0 = Clock::now();
     examine_vertices(graph, cluster, track_fitter, dv);
-    
+    if (m_perf) std::cout << "find_proto_vertex timing: examine_vertices took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+
     // Examine partial identical segments
+    t0 = Clock::now();
     examine_partial_identical_segments(graph, cluster, track_fitter, dv);
-    
+    if (m_perf) std::cout << "find_proto_vertex timing: examine_partial_identical_segments took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+
     // Examine the two initial points for main cluster
     if (is_main_cluster && main_cluster_initial_pair_vertices.first) {
+        t0 = Clock::now();
         examine_vertices_3(graph, cluster, main_cluster_initial_pair_vertices, track_fitter, dv);
+        if (m_perf) std::cout << "find_proto_vertex timing: examine_vertices_3 took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
     }
-    
+
     // Final multi-tracking
+    t0 = Clock::now();
     track_fitter.do_multi_tracking(true, true, true);
-    
+    if (m_perf) std::cout << "find_proto_vertex timing: final do_multi_tracking took " << MS(Clock::now() - t0).count() << " ms" << std::endl;
+
+    if (m_perf) std::cout << "find_proto_vertex timing: TOTAL took " << MS(Clock::now() - t_total).count() << " ms" << std::endl;
+
     return true;
 }
 

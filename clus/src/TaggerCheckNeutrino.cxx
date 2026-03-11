@@ -21,11 +21,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
 {
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
     m_trackfitting_config_file = get(config, "trackfitting_config_file", m_trackfitting_config_file);
-    
+    m_perf = get(config, "perf", m_perf);
+
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
     }
-    
+
     NeedDV::configure(config);
     NeedPCTS::configure(config);
     NeedRecombModel::configure(config);
@@ -41,7 +42,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["recombination_model"] = "BoxRecombination";  
     cfg["particle_dataset"] = "ParticleDataSet"; 
 
-    cfg["trackfitting_config_file"] = ""; 
+    cfg["trackfitting_config_file"] = "";
+    cfg["perf"] = m_perf;
 
     return cfg;
 }
@@ -82,6 +84,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     m_track_fitter->add_graph(pr_graph);
 
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
+    pattern_algos.m_perf = m_perf;
+    m_track_fitter->set_perf(m_perf);
     // auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, *m_track_fitter, m_dv);
     pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
 

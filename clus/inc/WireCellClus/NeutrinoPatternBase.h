@@ -6,6 +6,7 @@
 namespace WireCell::Clus::PR {
     class PatternAlgorithms{
         public:
+        bool m_perf{false};  // if true, print per-step timing to stdout
         std::set<VertexPtr> find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster);
         std::set<SegmentPtr> find_cluster_segments(Graph& graph, const Facade::Cluster& cluster);
         bool clean_up_graph(Graph& graph, const Facade::Cluster& cluster);

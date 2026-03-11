@@ -35,6 +35,7 @@ public:
     private:
         std::string m_grouping_name{"live"};
         std::string m_trackfitting_config_file;  // Path to TrackFitting config file
+        bool m_perf{false};  // if true, print per-step timing to stdout
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

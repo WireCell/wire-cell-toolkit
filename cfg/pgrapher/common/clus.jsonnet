@@ -94,16 +94,21 @@ local wc = import "wirecell.jsonnet";
             } + dv_cfg + pcts_cfg
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
                 grouping: "live",           // Which grouping to process
-                trackfitting_config_file: trackfitting_config_file, 
+                trackfitting_config_file: trackfitting_config_file,
                 particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
+                perf: perf,
             } + dv_cfg + pcts_cfg
         },
+
+        // Run pattern recognition (find_proto_vertex) on the main cluster.
+        // mode is passed for future use (e.g. "multiple" for multi-track mode).
+        do_tracking(name="", mode="", perf=false) :: $.tagger_check_neutrino(name=name, perf=perf),
 
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",

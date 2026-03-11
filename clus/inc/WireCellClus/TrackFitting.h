@@ -6,6 +6,8 @@
 #include "WireCellClus/PRGraph.h"
 
 #include <Eigen/IterativeLinearSolvers>
+#include <unordered_map>
+#include <unordered_set>
 
 
 namespace WireCell::Clus {
@@ -108,6 +110,12 @@ namespace WireCell::Clus {
          * @param fitting_type The new fitting type to use
          */
         void set_fitting_type(FittingType fitting_type) { m_fitting_type = fitting_type; }
+
+        /**
+         * Enable/disable per-step timing output (printed to stdout)
+         */
+        void set_perf(bool perf) { m_perf = perf; }
+        bool get_perf() const { return m_perf; }
 
         /**
          * Get the current fitting type
@@ -273,6 +281,19 @@ namespace WireCell::Clus {
             if (apa != other.apa) return apa < other.apa;
             if (time != other.time) return time < other.time;
             return channel < other.channel;
+            }
+
+            bool operator==(const CoordReadout& other) const {
+                return apa == other.apa && time == other.time && channel == other.channel;
+            }
+        };
+
+        struct CoordReadoutHash {
+            size_t operator()(const CoordReadout& k) const {
+                size_t h = std::hash<int>{}(k.apa);
+                h ^= std::hash<int>{}(k.time)    + 0x9e3779b9 + (h << 6) + (h >> 2);
+                h ^= std::hash<int>{}(k.channel) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                return h;
             }
         };
 
@@ -484,6 +505,7 @@ namespace WireCell::Clus {
             return (param_value < 0) ? default_value : param_value;
         }
 
+        bool m_perf{false};  // if true, print per-step timing to stdout
         FittingType m_fitting_type;
         IDetectorVolumes::pointer m_dv{nullptr};  
         IPCTransformSet::pointer m_pcts{nullptr};          // PC Transform Set
@@ -538,7 +560,7 @@ namespace WireCell::Clus {
         std::map<int, Point3DInfo> m_3d_to_2d;               ///< Internal 3D→2D mapping
     
         // Global (apa, time, channel) to blobs
-        std::map<CoordReadout, std::set<Facade::Blob* > > global_rb_map;
+        std::unordered_map<CoordReadout, std::unordered_set<Facade::Blob*>, CoordReadoutHash> global_rb_map;
 
         // Fitted 2D charge organized by (apa, face, plane) -> (wire, time)
         std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> m_fitted_charge_2d;

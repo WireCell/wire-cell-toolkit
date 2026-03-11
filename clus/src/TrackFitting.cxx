@@ -3,6 +3,7 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 
 #include "WireCellUtil/Logging.h"
+#include <chrono>
 
 
 using namespace WireCell;
@@ -799,73 +800,85 @@ void TrackFitting::collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& 
 }
 
 void TrackFitting::fill_global_rb_map() {
-    // Clear the global readout map first
-    if (global_rb_map.size() != 0 ) return;
+    if (global_rb_map.size() != 0) return;
+
+    // Pre-size the hash map based on already-built charge data to avoid rehashing.
+    if (!m_charge_data.empty()) {
+        global_rb_map.reserve(m_charge_data.size() * 2);
+    }
+
+    // Per-plane metadata computed once on first encounter of each (apa, face, plane).
+    //   has_dead_wires: if false, is_blob_plane_bad() always returns false → skip it.
+    //   hot_vec:        direct pointer into hot-cache vector for O(1) wire→channel lookup.
+    struct PlaneInfo {
+        bool has_dead_wires{false};
+        const std::vector<int>* hot_vec{nullptr};
+    };
+    std::map<PlaneKey, PlaneInfo> plane_info_cache;
 
     auto clusters = m_grouping->children();
-    // Loop over the m_grouping's clusters
+
+    // Single pass over all blobs.  Hot cache and dead-wire checks are performed
+    // once per unique (apa, face, plane) and reused for all subsequent blobs.
     for (auto& cluster : clusters) {
-        // For each cluster, loop over its blobs
         if (!cluster->get_scope_filter(cluster->get_default_scope())) continue;
 
-        auto blobs = cluster->children();
-        for (auto blob : blobs) {
+        for (auto blob : cluster->children()) {
             if (!blob) continue;
-            
-            // Get the wire plane ID for this blob to determine apa and face
-            auto wpid = blob->wpid();
-            int apa = wpid.apa();
-            int face = wpid.face();
-            
-            // Get the time slice bounds for this blob
-            int time_slice_min = blob->slice_index_min();
-            // int time_slice_max = blob->slice_index_max();
-            
-            // For every blob, loop over its planes (U=0, V=1, W=2)
-            for (int plane = 0; plane < 3; ++plane) {
-                 if (m_grouping->is_blob_plane_bad(blob, plane)) continue;
 
-                // Get wire bounds for this plane in the blob
+            auto wpid = blob->wpid();
+            int apa  = wpid.apa();
+            int face = wpid.face();
+            int time_slice = blob->slice_index_min();
+
+            for (int plane = 0; plane < 3; ++plane) {
+                PlaneKey pk = std::make_tuple(apa, face, plane);
+
+                // On first encounter, warm the hot cache and check for dead wires.
+                auto pi_it = plane_info_cache.find(pk);
+                if (pi_it == plane_info_cache.end()) {
+                    cache_entire_plane(apa, face, plane);
+                    PlaneInfo pi;
+                    pi.has_dead_wires = !m_grouping->get_dead_winds(apa, face, plane).empty();
+                    auto ht = m_hot_cache.find(pk);
+                    pi.hot_vec = (ht != m_hot_cache.end()) ? &ht->second : nullptr;
+                    pi_it = plane_info_cache.emplace(pk, pi).first;
+                }
+                const PlaneInfo& pi = pi_it->second;
+
+                // If the plane has dead wires, check whether this blob's slice is
+                // mostly covered by them; otherwise skip the expensive per-wire scan.
+                if (pi.has_dead_wires && m_grouping->is_blob_plane_bad(blob, plane)) continue;
+
+                // Get wire bounds for this plane.
                 int wire_min, wire_max;
                 switch (plane) {
-                    case 0: // U plane
-                        wire_min = blob->u_wire_index_min();
-                        wire_max = blob->u_wire_index_max();
-                        break;
-                    case 1: // V plane
-                        wire_min = blob->v_wire_index_min();
-                        wire_max = blob->v_wire_index_max();
-                        break;
-                    case 2: // W plane
-                        wire_min = blob->w_wire_index_min();
-                        wire_max = blob->w_wire_index_max();
-                        break;
-                    default:
-                        continue;
+                    case 0: wire_min = blob->u_wire_index_min(); wire_max = blob->u_wire_index_max(); break;
+                    case 1: wire_min = blob->v_wire_index_min(); wire_max = blob->v_wire_index_max(); break;
+                    case 2: wire_min = blob->w_wire_index_min(); wire_max = blob->w_wire_index_max(); break;
+                    default: continue;
                 }
-                
-                // Skip if no valid wire range
                 if (wire_min >= wire_max) continue;
-                
-                // Loop over time slices in this blob
-                int time_slice = time_slice_min; 
-                // Loop over wire indices in this plane
+
+                // Wire → channel via O(1) hot-cache vector access.
+                const std::vector<int>* hot_vec = pi.hot_vec;
+                int hot_size = hot_vec ? static_cast<int>(hot_vec->size()) : 0;
+
                 for (int wire_index = wire_min; wire_index < wire_max; ++wire_index) {
-                    // Convert wire coordinates to channel using existing helper function
-                    int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
-                    if (channel == -1) continue; // Skip invalid channels
-                    
-                    // Create CoordReadout key and find out its CoordReadout
-                    CoordReadout coord_key(apa, time_slice, channel);
-                    
-                    // Fill in global_rb_map - add this blob to the set for this coordinate
-                    global_rb_map[coord_key].insert(blob);
-                    // std::cout << "Added blob to global_rb_map at " << coord_key.apa << " " << coord_key.time << " " << coord_key.channel  << std::endl;
+                    int channel;
+                    if (hot_vec && wire_index < hot_size) {
+                        channel = (*hot_vec)[wire_index];
+                    } else {
+                        channel = fetch_channel_from_anode(apa, face, plane, wire_index);
+                    }
+                    if (channel == -1) continue;
+
+                    global_rb_map[CoordReadout(apa, time_slice, channel)].insert(blob);
                 }
             }
         }
     }
-    
+
     std::cout << "Global RB Map filled with " << global_rb_map.size() << " coordinate entries." << std::endl;
 }
 
@@ -4950,30 +4963,25 @@ void TrackFitting::update_dQ_dx_data() {
         }
     }
     
-    // Step 2: Check each measurement in global_rb_map
-    for (const auto& [coord_key, blob_set] : global_rb_map) {
-        // coord_key is of type CoordReadout
-        // blob_set is of type std::set<const Facade::Blob*>
+    // Step 2: Check each track measurement against global_rb_map to find shared wires.
+    // Iterate over m_charge_data (track-region only) instead of all of global_rb_map,
+    // reducing cost from O(N_all_blobs) to O(N_track_measurements).
+    for (auto& [coord_key, measurement] : m_charge_data) {
+        auto rb_it = global_rb_map.find(coord_key);
+        if (rb_it == global_rb_map.end()) continue;
 
         bool is_shared = false;
-
-        for (auto blob : blob_set) {
+        for (auto blob : rb_it->second) {
             if (track_blobs_set.find(blob) == track_blobs_set.end()) {
                 // Found a blob not belonging to our track clusters
                 is_shared = true;
                 break;
             }
         }
-            
+
         if (is_shared) {
-            // Find and modify the measurement if it exists
-            auto charge_it = m_charge_data.find(coord_key);
-            if (charge_it != m_charge_data.end()) {
-                // Get current measurement and increase charge error for shared measurements
-                ChargeMeasurement& measurement = charge_it->second;
-                m_orig_charge_data[coord_key] = measurement;
-                measurement.charge_err = m_params.share_charge_err; // High penalty for shared wires
-            }
+            m_orig_charge_data[coord_key] = measurement;
+            measurement.charge_err = m_params.share_charge_err; // High penalty for shared wires
         }
     }
 }
@@ -7524,6 +7532,10 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
 
 void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_hack) {
+    using DST_Clock = std::chrono::steady_clock;
+    using DST_MS = std::chrono::duration<double, std::milli>;
+    auto t_dst = DST_Clock::now();
+
       // Clear all internal tracking vectors
     fine_tracking_path.clear();
     dQ.clear();
@@ -7544,6 +7556,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         prepare_data();
         fill_global_rb_map();
     }
+    if (m_perf) std::cout << "do_single_tracking timing: prepare_data took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
     // std::cout << "Global Blob Map: " << global_rb_map.size() << std::endl;
 
@@ -7574,16 +7587,19 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         }
     }
 
-    std::cout << "After organization " << pts.size() << std::endl;
+    // std::cout << "After organization " << pts.size() << std::endl;
 
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> ptss;
     for (const auto& pt : pts) {
         ptss.emplace_back(pt, segment);
     }
+    if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+
 
     if (flag_1st_tracking) {
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         trajectory_fit(ptss, 1, m_params.div_sigma);
+        if (m_perf) std::cout << "do_single_tracking timing: 1st trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
     }
     // Check for very close start/end points and reset if needed
     if (ptss.size() == 2) {
@@ -7635,6 +7651,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         // //
 
         organize_ps_path(segment, pts, low_dis_limit, end_point_limit);
+        if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+
         
         // std::cout << pts.size() << std::endl;
         // for (size_t i = 0; i < pts.size(); ++i) {
@@ -7647,6 +7665,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         }
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         trajectory_fit(ptss, 2, m_params.div_sigma);
+        if (m_perf) std::cout << "do_single_tracking timing: 2nd trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl;
 
         pts.clear();
         for (const auto& pt_pair : ptss) {
@@ -7655,6 +7674,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         
         // Final path organization
         organize_ps_path(segment, pts, low_dis_limit, 0);
+        if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+
 
         // Check for very close start/end points and reset if needed
         if (pts.size() == 2) {
@@ -7787,6 +7808,8 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     
     
     fine_tracking_path = ptss;
+    if (m_perf) std::cout << "do_single_tracking timing: organize data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+
 
     if (flag_dQ_dx) {
         // Store the fine tracking path as pairs of (Point, Segment)
@@ -7795,6 +7818,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     } else {
         dQ_dx_fill(end_point_limit);
     }
+    if (m_perf) std::cout << "do_single_tracking timing: dQ_dx fit/fill took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
     // Now put the results back into the
     // Create vector of Fit objects from the internal tracking results
@@ -7859,5 +7883,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     // replace point cloud after track fitting ...
     PR::create_segment_point_cloud(segment, path_points, m_dv, "main");
     PR::create_segment_fit_point_cloud(segment, m_dv, "fit");
+    if (m_perf) std::cout << "do_single_tracking timing: fill data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+
 
 }
