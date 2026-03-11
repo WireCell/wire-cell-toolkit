@@ -7577,9 +7577,9 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
 
 void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_hack) {
-    using DST_Clock = std::chrono::steady_clock;
-    using DST_MS = std::chrono::duration<double, std::milli>;
-    auto t_dst = DST_Clock::now();
+    // using DST_Clock = std::chrono::steady_clock;
+    // using DST_MS = std::chrono::duration<double, std::milli>;
+    // auto t_dst = DST_Clock::now();
 
       // Clear all internal tracking vectors
     fine_tracking_path.clear();
@@ -7601,7 +7601,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         prepare_data();
         fill_global_rb_map();
     }
-    if (m_perf) std::cout << "do_single_tracking timing: prepare_data took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+    // if (m_perf) std::cout << "do_single_tracking timing: prepare_data took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
     // std::cout << "Global Blob Map: " << global_rb_map.size() << std::endl;
 
@@ -7638,13 +7638,13 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     for (const auto& pt : pts) {
         ptss.emplace_back(pt, segment);
     }
-    if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+    // if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 
     if (flag_1st_tracking) {
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         trajectory_fit(ptss, 1, m_params.div_sigma);
-        if (m_perf) std::cout << "do_single_tracking timing: 1st trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+        // if (m_perf) std::cout << "do_single_tracking timing: 1st trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
     }
     // Check for very close start/end points and reset if needed
     if (ptss.size() == 2) {
@@ -7696,7 +7696,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         // //
 
         organize_ps_path(segment, pts, low_dis_limit, end_point_limit);
-        if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+        // if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         
         // std::cout << pts.size() << std::endl;
@@ -7710,7 +7710,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         }
         form_map(ptss, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         trajectory_fit(ptss, 2, m_params.div_sigma);
-        if (m_perf) std::cout << "do_single_tracking timing: 2nd trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl;t_dst = DST_Clock::now();
+        // if (m_perf) std::cout << "do_single_tracking timing: 2nd trajectory_fit took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl;t_dst = DST_Clock::now();
 
         pts.clear();
         for (const auto& pt_pair : ptss) {
@@ -7719,7 +7719,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         
         // Final path organization
         organize_ps_path(segment, pts, low_dis_limit, 0);
-        if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+        // if (m_perf) std::cout << "do_single_tracking timing: organize path " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 
         // Check for very close start/end points and reset if needed
@@ -7853,7 +7853,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     
     
     fine_tracking_path = ptss;
-    if (m_perf) std::cout << "do_single_tracking timing: organize data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+    // if (m_perf) std::cout << "do_single_tracking timing: organize data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 
     if (flag_dQ_dx) {
@@ -7863,7 +7863,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     } else {
         dQ_dx_fill(end_point_limit);
     }
-    if (m_perf) std::cout << "do_single_tracking timing: dQ_dx fit/fill took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+    // if (m_perf) std::cout << "do_single_tracking timing: dQ_dx fit/fill took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
     // Now put the results back into the
     // Create vector of Fit objects from the internal tracking results
@@ -7928,7 +7928,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     // replace point cloud after track fitting ...
     PR::create_segment_point_cloud(segment, path_points, m_dv, "main");
     PR::create_segment_fit_point_cloud(segment, m_dv, "fit");
-    if (m_perf) std::cout << "do_single_tracking timing: fill data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+    // if (m_perf) std::cout << "do_single_tracking timing: fill data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 
 }
