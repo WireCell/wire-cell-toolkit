@@ -55,7 +55,9 @@ namespace WireCell::Clus {
             std::string visitor;   // if given, dump just after this visitor runs and any cluster ID enumeration
             std::vector<std::string> coords;
             bool individual;
-            int filter{1};// 1 for on, 0 for off, -1 for inverse filter  
+            int filter{1};// 1 for on, 0 for off, -1 for inverse filter
+            double dQdx_scale{1.0};
+            double dQdx_offset{0.0};
         };
 
         // Vector to store configurations for multiple bee points sets

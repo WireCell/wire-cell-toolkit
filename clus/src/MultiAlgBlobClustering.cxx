@@ -161,6 +161,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             }
             
             bpc.individual = get<bool>(bps, "individual", false);
+            bpc.dQdx_scale = get<double>(bps, "dQdx_scale", 1.0);
+            bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             
             m_bee_points_configs.push_back(bpc);
             
@@ -499,9 +501,10 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // std::cout << "Test: Segment: " << segment_id << " Point: " << point << " Fit valid: " << fit.valid() << " " << fit.index << " " << fit.range << std::endl;
 
 
-            // Get charge (dQ) from fit
+            // Get charge (dQ) from fit, then apply scale and offset
             double charge = fit.dQ;
             if (charge < 0) charge = 0;  // Use 0 if charge is invalid
+            charge = charge * config.dQdx_scale + config.dQdx_offset;
 
             if (config.individual) {
                 // Fill individual APA/face bee points

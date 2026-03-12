@@ -66,11 +66,19 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // Find clusters that have the main_cluster flag (set by clustering_recovering_bundle)
     Cluster* main_cluster = nullptr;
 
+    int nclusters = grouping.nchildren();
+    int n_main_clusters = 0;
+    int n_in_beam_clusters = 0;
     for (auto* cluster : grouping.children()) {
         if (cluster->get_flag(Flags::main_cluster)) {
             main_cluster = cluster;
+            n_main_clusters ++;
         }
+        if (cluster->get_flag(Flags::beam_flash)) n_in_beam_clusters++;
     }
+
+    SPDLOG_LOGGER_DEBUG(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
+
 
     // // Debug dump (only when env var is set)
     // if (main_cluster) {
@@ -124,7 +132,7 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
             try {
                 double value = root[param_name].asDouble();
                 m_track_fitter->set_parameter(param_name, value);
-                SPDLOG_LOGGER_DEBUG(log, "Set {} = {}", param_name, value);
+                // SPDLOG_LOGGER_DEBUG(log, "Set {} = {}", param_name, value);
             } catch (const std::exception& e) {
                 std::cerr << "TaggerCheckNeutrino: Failed to set parameter " << param_name 
                         << ": " << e.what() << std::endl;
