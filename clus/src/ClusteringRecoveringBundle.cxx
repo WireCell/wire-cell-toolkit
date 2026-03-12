@@ -2,11 +2,12 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellAux/Logger.h"
 
 
 class ClusteringRecoveringBundle;
 WIRECELL_FACTORY(ClusteringRecoveringBundle, ClusteringRecoveringBundle,
-                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+                 WireCell::INamed, WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -17,9 +18,11 @@ using namespace WireCell::Clus::Facade;
  * into individual bundles based on isolated blob components.
  * This function recovers separated clusters from over-clustered beam-flash events.
  */
-class ClusteringRecoveringBundle : public IConfigurable, public Clus::IEnsembleVisitor {
+class ClusteringRecoveringBundle : public IConfigurable, public Clus::IEnsembleVisitor, public Aux::Logger {
 public:
-    ClusteringRecoveringBundle() {}
+    ClusteringRecoveringBundle()
+        : Aux::Logger("ClusteringRecoveringBundle", "clus")
+    {}
     virtual ~ClusteringRecoveringBundle() {}
 
     virtual void configure(const WireCell::Configuration& config) {
@@ -37,17 +40,15 @@ public:
     }
 
     virtual void visit(Ensemble& ensemble) const {
-        using spdlog::debug;
-        
         // Get the specified grouping (default: "live")
         auto groupings = ensemble.with_name(m_grouping_name);
         if (groupings.empty()) {
-            debug("ClusteringRecoveringBundle: No '{}' grouping found", m_grouping_name);
+            log->debug("No '{}' grouping found", m_grouping_name);
             return;
         }
-        
+
         auto& grouping = *groupings.at(0);
-        
+
         // Container to hold clusters after the initial filter
         std::vector<Cluster*> filtered_clusters;
 
@@ -57,15 +58,20 @@ public:
             }
         }
 
-        debug("ClusteringRecoveringBundle: Found {} beam-flash flagged clusters", 
-              filtered_clusters.size());
+        log->debug("Found {} beam-flash flagged clusters", filtered_clusters.size());
 
         // Process each filtered cluster
         for (auto* cluster : filtered_clusters) {
             process_cluster(grouping, cluster);
         }
-        
-        debug("ClusteringRecoveringBundle: Processing complete");
+
+        size_t nassoc = 0;
+        for (auto* cluster : grouping.children()) {
+            if (cluster->get_flag(Flags::associated_cluster)) {
+                ++nassoc;
+            }
+        }
+        log->debug("Associated clusters: {}", nassoc);
     }
 
 private:

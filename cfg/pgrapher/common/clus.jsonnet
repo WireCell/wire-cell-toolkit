@@ -223,10 +223,10 @@ local wc = import "wirecell.jsonnet";
             data: dv_cfg + scope_cfg,
         },
 
-        examine_bundles(name="") :: {
+        examine_bundles(name="", graph_name="relaxed") :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
-            data: dv_cfg + pcts_cfg + scope_cfg,
+            data: dv_cfg + pcts_cfg + scope_cfg + {graph_name: graph_name},
             uses: [detector_volumes, pc_transforms],
         },
 

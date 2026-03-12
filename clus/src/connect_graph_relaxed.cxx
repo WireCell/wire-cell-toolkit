@@ -829,7 +829,7 @@ void Graphs::connect_graph_relaxed_pid(
                                     std::pow(temp_wcps1[kk1].second.z() - temp_wcps2[kk2].second.z(), 2));
                                 
                                 std::tuple<int, int, double> temp_tuple = 
-                                    std::make_tuple(temp_wcps2[kk2].first, temp_wcps1[kk1].first, dis);
+                                    std::make_tuple(temp_wcps1[kk1].first, temp_wcps2[kk2].first, dis);
                                 
                                 if (check_connectivity(cluster, dv, pcts, temp_tuple, 
                                                       pt_clouds.at(j), pt_clouds_global_indices.at(j), pt_clouds.at(k), pt_clouds_global_indices.at(k), 

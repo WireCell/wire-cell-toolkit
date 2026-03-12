@@ -508,7 +508,7 @@ namespace WireCell::Clus::Facade {
         ///
         /// Note, this method used to be called "examine_graph()".
         ///
-        std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
+        std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const std::string& flavor = "relaxed") const;
         
         /// Return graph of given flavor or try to make it if it does not exist.
         /// See graph_algorithms() for flavors that can be made.

@@ -5,11 +5,12 @@
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellAux/Logger.h"
 
 
 class ClusteringExamineBundles;
 WIRECELL_FACTORY(ClusteringExamineBundles, ClusteringExamineBundles,
-                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+                 WireCell::INamed, WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 
 using namespace WireCell;
@@ -20,14 +21,18 @@ using namespace WireCell::PointCloud::Tree;
 
 static void clustering_examine_bundles(
         Grouping& live_grouping,
-        IDetectorVolumes::pointer dv, 
+        IDetectorVolumes::pointer dv,
         IPCTransformSet::pointer pcts,
         const Tree::Scope& scope,
-        const bool use_ctpc);
+        const bool use_ctpc,
+        const std::string& graph_name,
+        WireCell::Log::logptr_t log);
 
-class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
+class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, public Aux::Logger, private NeedDV, private NeedPCTS, private NeedScope {
 public:
-    ClusteringExamineBundles() {}
+    ClusteringExamineBundles()
+        : Aux::Logger("ClusteringExamineBundles", "clus")
+    {}
     virtual ~ClusteringExamineBundles() {}
     
     void configure(const WireCell::Configuration& config) {
@@ -37,15 +42,17 @@ public:
 
         // If false, then DV and PCTS are not needed.
         use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
+        graph_name_ = get<std::string>(config, "graph_name", graph_name_);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_);
+        clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_, log);
     }
-        
+
 private:
     bool use_ctpc_{true};
+    std::string graph_name_{"relaxed"};
 };
 
 
@@ -62,11 +69,13 @@ private:
 
 // All APA Faces 
 static void clustering_examine_bundles(
-    Grouping& live_grouping, 
+    Grouping& live_grouping,
     IDetectorVolumes::pointer dv,
     IPCTransformSet::pointer pcts,
     const Tree::Scope& scope,
-    const bool use_ctpc)
+    const bool use_ctpc,
+    const std::string& graph_name,
+    WireCell::Log::logptr_t log)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
 
@@ -81,11 +90,13 @@ static void clustering_examine_bundles(
 
         // if there is a cc component, record the main cluster as id of the blobs???
         auto old_cc_array = live_clusters.at(i)->get_pcarray("isolated", "perblob");
-        
+        log->debug("old_cc_array: {} clusters", std::set<int>(old_cc_array.begin(), old_cc_array.end()).size());
+
         // currently reset the cc component (todo: find the main component)
 
         // do the examine graph
-        auto b2groupid = live_clusters.at(i)->connected_blobs(dv, pcts);
+        auto b2groupid = live_clusters.at(i)->connected_blobs(dv, pcts, graph_name);
+        log->debug("b2groupid: {} clusters", std::set<int>(b2groupid.begin(), b2groupid.end()).size());
         
         bool flag_largest = false;
         // Compare old and new cluster groupings
