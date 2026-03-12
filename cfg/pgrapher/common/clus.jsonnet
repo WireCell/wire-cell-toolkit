@@ -73,14 +73,16 @@ local wc = import "wirecell.jsonnet";
             },
         },
 
-        clustering_recovering_bundle(name="") :: {
+clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             type: "ClusteringRecoveringBundle",
             name: prefix + name,
-            data: {
+            data: dv_cfg + pcts_cfg + scope_cfg + {
                 grouping: "live",           // Which grouping to process
-                array_name: "isolated",     // Array name for pcarray lookup  
+                array_name: "isolated",     // Array name for pcarray lookup
                 pcarray_name: "perblob",    // PCArray name for blob separation
+                graph_name: graph_name,     // Graph flavor for connected_blobs examine step
             },
+            uses: [detector_volumes, pc_transforms],
         },
 
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
