@@ -710,6 +710,10 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     bool flag_modified = false;
     int count = 0;
     std::set<size_t> saved_break_wcp_indices;
+    using BS_Clock = std::chrono::steady_clock;
+    using BS_MS = std::chrono::duration<double, std::milli>;
+    BS_MS t_segment_search_kink{0}, t_proto_extend_point{0}, t_proto_break_tracks{0};
+    BS_MS t_replace_segment_and_vertex{0}, t_break_segment_into_two{0}, t_do_multi_tracking{0};
     
     while(!remaining_segments.empty() && count < 2) {
         SegmentPtr curr_sg = remaining_segments.back();
@@ -756,7 +760,9 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
         while(ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
               ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
             
+            auto t_op = BS_Clock::now();
             auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
+            t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
             auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
             
             if (dir1.magnitude() != 0) {
@@ -765,19 +771,25 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 Facade::geo_vector_t dir2_geo(dir2.x(), dir2.y(), dir2.z());
                 Facade::geo_point_t kink_geo(kink_point.x(), kink_point.y(), kink_point.z());
                 
+                t_op = BS_Clock::now();
                 auto [break_pt, break_idx] = proto_extend_point(*cluster, kink_geo, dir1_geo, dir2_geo, flag_continue);
+                t_proto_extend_point += BS_MS(BS_Clock::now() - t_op);
                 break_wcp = break_pt;
                 
                 // Check if we've seen this break point before
                 if (break_idx != INVALID_STEINER_INDEX &&
                     saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
                     test_start_p = kink_geo;
+                    t_op = BS_Clock::now();
                     kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
+                    t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
                     auto& [kink_point2, dir1_2, dir2_2, flag_continue2] = kink_tuple;
                     Facade::geo_vector_t dir1_geo2(dir1_2.x(), dir1_2.y(), dir1_2.z());
                     Facade::geo_vector_t dir2_geo2(dir2_2.x(), dir2_2.y(), dir2_2.z());
                     Facade::geo_point_t kink_geo2(kink_point2.x(), kink_point2.y(), kink_point2.z());
+                    t_op = BS_Clock::now();
                     auto [break_pt2, break_idx2] = proto_extend_point(*cluster, kink_geo2, dir1_geo2, dir2_geo2, flag_continue2);
+                    t_proto_extend_point += BS_MS(BS_Clock::now() - t_op);
                     break_wcp = break_pt2;
                     break_idx = break_idx2;
                 } else {
@@ -811,10 +823,18 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 }
             }
             
+            { auto t_op_pbt = BS_Clock::now();
             flag_break = proto_break_tracks(*cluster, start_v->wcpt().point, break_wcp, 
                                            end_v->wcpt().point, wcps_list1, wcps_list2, flag_pass_check);
+            t_proto_break_tracks += BS_MS(BS_Clock::now() - t_op_pbt); }
             
             if (flag_break) {
+                if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments: cluster={} flag_break={} list1_front=({:.2f},{:.2f},{:.2f}) list1_back=({:.2f},{:.2f},{:.2f}) list2_front=({:.2f},{:.2f},{:.2f}) list2_back=({:.2f},{:.2f},{:.2f})",
+                    cluster->get_cluster_id(), flag_break,
+                    wcps_list1.front().x(), wcps_list1.front().y(), wcps_list1.front().z(),
+                    wcps_list1.back().x(), wcps_list1.back().y(), wcps_list1.back().z(),
+                    wcps_list2.front().x(), wcps_list2.front().y(), wcps_list2.front().z(),
+                    wcps_list2.back().x(), wcps_list2.back().y(), wcps_list2.back().z());
                 // Check geometry constraints
                 Facade::geo_vector_t tv1 = end_v->wcpt().point - start_v->wcpt().point;
                 Facade::geo_vector_t tv2 = end_v->wcpt().point - break_wcp;
@@ -834,21 +854,31 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                         // Replace segment and end vertex
                         SegmentPtr new_seg = curr_sg;
                         VertexPtr new_vtx = end_v;
-                        if (replace_segment_and_vertex(graph, new_seg, new_vtx, wcps_list1, break_wcp, dv)) {
+                        auto t_op_rsv = BS_Clock::now();
+                        bool rsv_ok = replace_segment_and_vertex(graph, new_seg, new_vtx, wcps_list1, break_wcp, dv);
+                        t_replace_segment_and_vertex += BS_MS(BS_Clock::now() - t_op_rsv);
+                        if (rsv_ok) {
                             flag_modified = true;
                             // Perform tracking
                             // track_fitter.add_graph(&graph); added already
+                            auto t_op_mt = BS_Clock::now();
                             track_fitter.do_multi_tracking(true, true, false);
+                            t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         }
                     }
                 } else {
                     // Break segment into two
                     SegmentPtr out_seg2 = nullptr;
-                    if (break_segment_into_two(graph, start_v, curr_sg, end_v, wcps_list1, break_wcp, wcps_list2, dv, out_seg2)) {
+                    auto t_op_bst = BS_Clock::now();
+                    bool bst_ok = break_segment_into_two(graph, start_v, curr_sg, end_v, wcps_list1, break_wcp, wcps_list2, dv, out_seg2);
+                    t_break_segment_into_two += BS_MS(BS_Clock::now() - t_op_bst);
+                    if (bst_ok) {
                         flag_modified = true;
                         // Perform tracking
                         // track_fitter.add_graph(&graph); added already
+                        auto t_op_mt = BS_Clock::now();
                         track_fitter.do_multi_tracking(true, true, false);
+                        t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         if (out_seg2) {
                             remaining_segments.push_back(out_seg2);
                         }
@@ -858,6 +888,15 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
         }
     }
     
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments timing: segment_search_kink={:.3f}ms proto_extend_point={:.3f}ms proto_break_tracks={:.3f}ms replace_segment_and_vertex={:.3f}ms break_segment_into_two={:.3f}ms do_multi_tracking={:.3f}ms",
+        t_segment_search_kink.count(), t_proto_extend_point.count(), t_proto_break_tracks.count(),
+        t_replace_segment_and_vertex.count(), t_break_segment_into_two.count(), t_do_multi_tracking.count());
+
+
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments: cluster={} break tracks -- # of Vertices: {}; # of Segments: {}",
+        11, boost::num_vertices(graph), boost::num_edges(graph));
+
+        
     return flag_modified;
 }
 

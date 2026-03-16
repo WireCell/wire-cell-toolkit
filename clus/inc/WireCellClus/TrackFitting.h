@@ -479,7 +479,7 @@ namespace WireCell::Clus {
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
         // Measured 2D charge data access
-        const std::map<CoordReadout, ChargeMeasurement>& get_charge_data() const { return m_charge_data; }
+        const std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash>& get_charge_data() const { return m_charge_data; }
 
         // Fitted 2D charge data organized by (apa, face, plane) -> (wire, time)
         const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& get_fitted_charge_2d() const { return m_fitted_charge_2d; }
@@ -553,8 +553,8 @@ namespace WireCell::Clus {
         // ----------------------------------------
         // Internal Storage
         // ----------------------------------------
-        std::map<CoordReadout, ChargeMeasurement> m_charge_data;  ///< Internal charge data storage using ChargeMeasurement struct
-        std::map<CoordReadout, ChargeMeasurement> m_orig_charge_data; // saved original charge measurement, if modified
+        std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash> m_charge_data;  ///< Internal charge data storage using ChargeMeasurement struct
+        std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash> m_orig_charge_data; // saved original charge measurement, if modified
 
         std::map<Coord2D, std::set<int>> m_2d_to_3d;  ///< Internal 2D→3D mapping
         std::map<int, Point3DInfo> m_3d_to_2d;               ///< Internal 3D→2D mapping

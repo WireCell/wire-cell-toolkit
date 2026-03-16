@@ -925,7 +925,7 @@ void Graphs::connect_graph_relaxed_pid(
     // Examine middle path for all three connection types
     double step_dis = 1.0 * units::cm;
     
-    auto examine_middle_path = [&](std::vector<std::vector<std::tuple<int, int, double>>>& index_dis_array) {
+    auto examine_middle_path = [&](std::vector<std::vector<std::tuple<int, int, double>>>& index_dis_array, bool apply_size_filter) {
         std::map<std::pair<int, int>, std::set<int>> map_add_connections;
         
         for (size_t j = 0; j != num; j++) {
@@ -959,9 +959,8 @@ void Graphs::connect_graph_relaxed_pid(
                             for (size_t qx1 = 0; qx1 != num; qx1++) {
                                 if (qx1 == j || qx1 == k) continue;
                                 
-                                // Skip small components, check only >= 50 points
                                 if (pt_clouds.at(qx1)->get_closest_dis(test_p) < 0.6 * units::cm &&
-                                    pt_clouds.at(qx1)->get_num_points() >= 50) {
+                                    (!apply_size_filter || pt_clouds.at(qx1)->get_num_points() >= 50)) {
                                     connections.insert(qx1);
                                 }
                             }
@@ -1014,9 +1013,9 @@ void Graphs::connect_graph_relaxed_pid(
     };
     
     // Examine all three connection types
-    examine_middle_path(index_index_dis);
-    examine_middle_path(index_index_dis_dir1);
-    examine_middle_path(index_index_dis_dir2);
+    examine_middle_path(index_index_dis,      true);
+    examine_middle_path(index_index_dis_dir1, false);
+    examine_middle_path(index_index_dis_dir2, false);
     
     // Final assembly: add edges to graph
     for (size_t j = 0; j != num; j++) {

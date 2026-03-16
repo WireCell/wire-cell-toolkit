@@ -148,6 +148,20 @@ namespace WireCell::Clus::PR {
         return std::make_tuple(min_dist_u, min_dist_v, min_dist_w);
     }
 
+    double segment_get_closest_2d_distance(SegmentPtr seg, const WireCell::Point& point, int apa, int face, int plane, const std::string& cloud_name) {
+        if (!seg) {
+            raise<RuntimeError>("segment_get_closest_2d_distance: invalid segment");
+        }
+        auto dpc = seg->dpcloud(cloud_name);
+        if (!dpc) {
+            raise<RuntimeError>("segment_get_closest_2d_distance: segment missing DynamicPointCloud with name 'fit'");
+        }
+        if (dpc->get_points().empty()) {
+            raise<RuntimeError>("segment_get_closest_2d_distance: DynamicPointCloud has no points");
+        }
+        return std::get<0>(dpc->get_closest_2d_point_info(point, plane, face, apa));
+    }
+
     std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold){
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
