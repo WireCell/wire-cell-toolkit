@@ -109,11 +109,23 @@ local gauss_filter = api.filter_axis([
 // by view
 local hf_tight = [
     // PDSP Wiener_tight_{U,V,W}
+    // Note -- the second, commented lines are from OSP settings for PDHD 
+    // https://github.com/DUNE/dunereco/blob/6aa02f60b5786e7c6488fa1c0e7c01364f68dde4/dunereco/DUNEWireCell/pdhd/sp-filters.jsonnet
     api.filter_function(scale=0.1487880 * wc.megahertz, power=3.76194),
+    // api.filter_function(scale=0.221933 * wc.megahertz, power=6.55413),
     api.filter_function(scale=0.1596568 * wc.megahertz, power=4.36125),
+    // api.filter_function(scale=0.222723 * wc.megahertz, power= 8.75998),
     api.filter_function(scale=0.1362300 * wc.megahertz, power=3.35324),
+    // api.filter_function(scale=0.225567 * wc.megahertz, power=3.47846),
 ];
-local hf_wide = [
+
+local hf_tight_apa1 = [
+    api.filter_function(scale=0.203451 * wc.megahertz, power=5.78093),
+    api.filter_function(scale=0.160191 * wc.megahertz, power=3.54835),
+    api.filter_function(scale=0.125448 * wc.megahertz, power=5.27080),
+];
+
+local hf_wide = [ //Why aren't these used?
     // PDSP's Wiener_wide_{U,V,W}
     api.filter_function(scale=0.186765 * wc.megahertz, power=5.05429),
     api.filter_function(scale=0.193600 * wc.megahertz, power=5.77422),
@@ -136,6 +148,12 @@ local dnnroi_filters = [
     api.filter_axis([hf_tight[2]])
 ];
     
+local dnnroi_filters_apa1 = [
+    api.filter_axis([hf_tight_apa1[0], lf_loose]),
+    api.filter_axis([hf_tight_apa1[1], lf_loose]),
+    api.filter_axis([hf_tight_apa1[2], lf_loose])
+];
+    
 local channel_filters = [
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
                     period=1.0, ignore_baseline=false),
@@ -143,6 +161,15 @@ local channel_filters = [
                      period=1.0, ignore_baseline=false),
     api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 10.0)],
                     period=1.0, ignore_baseline=false)
+];
+
+local channel_filters_apa1 = [
+    api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
+                    period=1.0, ignore_baseline=false),
+    api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 10.0)],
+                    period=1.0, ignore_baseline=false),
+    api.filter_axis([api.filter_function(scale=1.0 / wc.sqrtpi * 0.75)],
+                     period=1.0, ignore_baseline=false),
 ];
 
 local filters = [
@@ -156,12 +183,29 @@ local filters = [
                      channel_filters=api.channel_filters(channel_filters[i]))
     for i in [0,1,2]];
 
+local filters_ap1 = [
+    api.view_filters(time_filters=api.time_filters(gauss=gauss_filter,
+                                                   wiener=wiener_filters[i],
+                                                   dnnroi=dnnroi_filters_apa1[i],
+                                                   options={
+                                                       roll: decon_roll,
+                                                       crop: adc.readout_nticks,
+                                                   }),
+                     channel_filters=api.channel_filters(channel_filters_apa1[i]))
+    for i in [0,1,2]
+];
+
 // OSP defaults are 3/5 sigma for ind/col plus a nominal 1.0 (no units) 
 local cvt_ind = api.crossview_threshold(rms_nsigma=3.0, nominal=1);
 local cvt_col = api.crossview_threshold(rms_nsigma=5.0, nominal=1);
 local cvts = api.crossview_thresholds(cvt_ind, cvt_ind, cvt_col);
 
-// All TPCs are identical except for their anodes
+// NEED TO CHANGE THIS FOR BADAPA1
+local cvt_ind_apa1 = api.crossview_threshold(rms_nsigma=3.0, nominal=1);
+local cvt_col_apa1 = api.crossview_threshold(rms_nsigma=2.0, nominal=1);
+local cvts_apa1 = api.crossview_thresholds(cvt_ind_apa1, cvt_ind_apa1, cvt_col_apa1);
+
+
 local tpcs = [
     local this_fr = (if ianode == 0 then fr_apa1 else fr_other);
     local anode = anodes[ianode];
@@ -169,8 +213,9 @@ local tpcs = [
             pirs=pirs(anode, this_fr), noise=noise,
             view_groups=view_groups,
             view_wpids=view_wpids,
+            // filters=(if ianode == 0 then filters_ap1 else filters),
             filters=filters,
-            crossview_thresholds=cvts,
+            crossview_thresholds=(if ianode == 0 then cvts_apa1 else cvts),
             osp_subgraphs=osp)
     for ianode in std.range(0, std.length(anodes)-1)];
 
