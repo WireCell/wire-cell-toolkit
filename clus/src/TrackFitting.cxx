@@ -234,20 +234,11 @@ void TrackFitting::clear_segments(){
     m_blobs.clear(); 
 }
 
-void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
-    if (m_graph == graph) return;
-    
-    m_graph = graph;
+void TrackFitting::sync_from_graph(){
+    if (!m_graph) return;
 
-    if (!m_graph){
-        return;
-    }
-
-    // Get edges from the graph and extract segments from them
-    auto edge_range = boost::edges(*m_graph);
     std::set<std::shared_ptr<PR::Segment>> segments_set;
-    
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+    for (auto e_it = boost::edges(*m_graph).first; e_it != boost::edges(*m_graph).second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         if (edge_bundle.segment) {
             segments_set.insert(edge_bundle.segment);
@@ -255,19 +246,24 @@ void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
         }
     }
 
-    if (m_grouping == nullptr && !segments_set.empty()){
-        auto first_segment = *segments_set.begin();
-        m_grouping = first_segment->cluster()->grouping();
+    if (m_grouping == nullptr && !segments_set.empty()) {
+        m_grouping = (*segments_set.begin())->cluster()->grouping();
         BuildGeometry();
     }
 
-    for (auto& cluster: m_clusters){
-        for (auto& blob: cluster->children()){
+    for (auto& cluster : m_clusters) {
+        for (auto& blob : cluster->children()) {
             m_blobs.insert(blob);
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(s_log, "Added graph with {} segments. clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
+    SPDLOG_LOGGER_DEBUG(s_log, "sync_from_graph: segments={} clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
+}
+
+void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
+    if (m_graph == graph) return;
+    m_graph = graph;
+    sync_from_graph();
 }
 
 void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
@@ -590,6 +586,7 @@ int TrackFitting::fetch_channel_from_anode(int apa, int face, int plane, int wir
 
 
 void TrackFitting::prepare_data() {
+    sync_from_graph();
     if (m_charge_data.size()!=0) return;
 
     // Process every Facade::Cluster in m_clusters
@@ -1855,7 +1852,7 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     int cur_ntime_ticks = cluster->blob_with_point(closest_point_index)->slice_index_max() - cur_time_slice;
 
 
-    // std::cout << "Closest " << closest_point << " " << p << " " << temp_dis/units::cm << std::endl;
+    // std::cout << "Closest " << closest_point << " " << p << " " << temp_dis/units::cm << " " << dis_cut/units::cm << std::endl;
 
     if (temp_dis < dis_cut){
         
@@ -2300,36 +2297,52 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     // std::cout << "Pixels 1: " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
 
      // Fallback: simple projection if no associations were found from complex method
-    if (temp_2dut.associated_2d_points.size() == 0 && 
-        temp_2dvt.associated_2d_points.size() == 0 && 
+    if (temp_2dut.associated_2d_points.size() == 0 &&
+        temp_2dvt.associated_2d_points.size() == 0 &&
         temp_2dwt.associated_2d_points.size() == 0) {
-               
-        // Convert time_tick_cut to integer for iteration
-        int time_cut = static_cast<int>(time_tick_cut);
-        int wire_cut = time_cut/cur_ntime_ticks;
-        
-        // Simple diamond pattern projection around current point
-        for (int i = -wire_cut; i <= wire_cut; i++) {
-            // loop over time dimension ...
-            for (int j = -time_cut; j <= time_cut; j+=cur_ntime_ticks) {
-                if (abs(i*cur_ntime_ticks) + abs(j) <= time_cut) {
-                    // U plane projection
-                    Coord2D coord_u(apa, face, cur_time_slice + j, cur_wire_u + i, 
-                                   get_channel_for_wire(apa, face, 0, cur_wire_u + i), 
-                                   kUlayer);
-                    temp_2dut.associated_2d_points.insert(coord_u);
-                    
-                    // V plane projection  
-                    Coord2D coord_v(apa, face, cur_time_slice + j, cur_wire_v + i, 
-                                   get_channel_for_wire(apa, face, 1, cur_wire_v + i), 
-                                   kVlayer);
-                    temp_2dvt.associated_2d_points.insert(coord_v);
-                    
-                    // W plane projection
-                    Coord2D coord_w(apa, face, cur_time_slice + j, cur_wire_w + i, 
-                                   get_channel_for_wire(apa, face, 2, cur_wire_w + i), 
-                                   kWlayer);
-                    temp_2dwt.associated_2d_points.insert(coord_w);
+
+        // Derive apa/face and wire indices directly from the fit point p, not from the
+        // closest cluster point (which may be outside dis_cut and far in wire space).
+        auto fb_wpid = m_dv->contained_by(p);
+        int fb_apa = fb_wpid.apa();
+        int fb_face = fb_wpid.face();
+        if (fb_apa != -1 && fb_face != -1) {
+            auto fb_p_raw = transform->backward(geo_point_t(p.x(), p.y(), p.z()), cluster_t0, fb_face, fb_apa);
+            auto fb_ch_u = m_grouping->convert_3Dpoint_time_ch(fb_p_raw, fb_apa, fb_face, 0);
+            auto fb_ch_v = m_grouping->convert_3Dpoint_time_ch(fb_p_raw, fb_apa, fb_face, 1);
+            auto fb_ch_w = m_grouping->convert_3Dpoint_time_ch(fb_p_raw, fb_apa, fb_face, 2);
+            int fb_time_slice = std::floor(std::get<0>(fb_ch_u) / cur_ntime_ticks) * cur_ntime_ticks;
+            int fb_wire_u = std::get<1>(fb_ch_u);
+            int fb_wire_v = std::get<1>(fb_ch_v);
+            int fb_wire_w = std::get<1>(fb_ch_w);
+
+            // Convert time_tick_cut to integer for iteration
+            int time_cut = static_cast<int>(time_tick_cut);
+            int wire_cut = time_cut/cur_ntime_ticks;
+
+            // Simple diamond pattern projection around current point
+            for (int i = -wire_cut; i <= wire_cut; i++) {
+                // loop over time dimension ...
+                for (int j = -time_cut; j <= time_cut; j+=cur_ntime_ticks) {
+                    if (abs(i*cur_ntime_ticks) + abs(j) <= time_cut) {
+                        // U plane projection
+                        Coord2D coord_u(fb_apa, fb_face, fb_time_slice + j, fb_wire_u + i,
+                                       get_channel_for_wire(fb_apa, fb_face, 0, fb_wire_u + i),
+                                       kUlayer);
+                        temp_2dut.associated_2d_points.insert(coord_u);
+
+                        // V plane projection
+                        Coord2D coord_v(fb_apa, fb_face, fb_time_slice + j, fb_wire_v + i,
+                                       get_channel_for_wire(fb_apa, fb_face, 1, fb_wire_v + i),
+                                       kVlayer);
+                        temp_2dvt.associated_2d_points.insert(coord_v);
+
+                        // W plane projection
+                        Coord2D coord_w(fb_apa, fb_face, fb_time_slice + j, fb_wire_w + i,
+                                       get_channel_for_wire(fb_apa, fb_face, 2, fb_wire_w + i),
+                                       kWlayer);
+                        temp_2dwt.associated_2d_points.insert(coord_w);
+                    }
                 }
             }
         }
@@ -3057,11 +3070,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
                 // std::cout << "V " << vertex->fit().point << " " << temp_2dut.quantity << " " << temp_2dvt.quantity << " " << temp_2dwt.quantity << " " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << " " << dis_cut/units::cm << " " << nlevel << " " << time_tick_cut << std::endl;
 
-
                 examine_point_association(dummy_segment, pt, temp_2dut, temp_2dvt, temp_2dwt, true, charge_cut);
-
-
-
 
                 // Store vertex associations
                 m_3d_to_2d[vertex_count].set_plane_data(WirePlaneLayer_t::kUlayer, temp_2dut);
@@ -3278,6 +3287,7 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         }
         index++;
     }
+    // std::cout << "U plane " << index << " points filled." << std::endl;
     
     // Fill V plane data
     index = 0;
@@ -3329,7 +3339,7 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         }
         index++;
     }
-    
+    // std::cout << "V plane " << index << " points filled." << std::endl;
     // Fill W plane data
     index = 0;
     for (auto it = plane_data_w.associated_2d_points.begin(); it != plane_data_w.associated_2d_points.end(); it++) {
@@ -3379,7 +3389,7 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         }
         index++;
     }
-    
+    // std::cout << "W plane " << index << " points filled." << std::endl;
     // Solve the least squares problem
     Eigen::SparseMatrix<double> RUT = RU.transpose();
     Eigen::SparseMatrix<double> RVT = RV.transpose();
@@ -4179,7 +4189,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
         auto apa_face = std::make_pair(test_wpid.face(), test_wpid.apa());
         // all corrected points ...
-        bool flag_skip = skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
+        bool flag_skip =  skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
 
         // std::cout << "Skip: " << i << " " << flag_skip << std::endl;
         // Protection against too many consecutive skips
@@ -4372,6 +4382,8 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
         // Apply skip trajectory point check
         bool flag_skip = skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
         
+        // std::cout << "Skip Check: " << i << " " << flag_skip << std::endl;
+
         // Vertex points (first and last) should not be skipped
         if (i == 0 || i + 1 == final_ps_vec.size()) {
             flag_skip = false;
@@ -4732,11 +4744,15 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
         // Get hit information for dead channel detection
         // Check if we have valid 3D to 2D mapping for current point index
         bool has_u_hits = false, has_v_hits = false, has_w_hits = false;
+        // float n_u_hits = 0, n_v_hits = 0, n_w_hits = 0;
         if (m_3d_to_2d.find(i) != m_3d_to_2d.end()) {
             const auto& point_info = m_3d_to_2d.at(i);
             has_u_hits = point_info.get_plane_data(kUlayer).quantity > 0;
             has_v_hits = point_info.get_plane_data(kVlayer).quantity > 0;
             has_w_hits = point_info.get_plane_data(kWlayer).quantity > 0;
+            // n_u_hits = point_info.get_plane_data(kUlayer).quantity;
+            // n_v_hits = point_info.get_plane_data(kVlayer).quantity;
+            // n_w_hits = point_info.get_plane_data(kWlayer).quantity;
         }
         
         // Check for dead channel conditions
@@ -4745,7 +4761,7 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
         if (!has_v_hits) dead_plane_count++;
         if (!has_w_hits) dead_plane_count++;
 
-        // std::cout << "Inside: " << angle << " " << angle1 << " " << dead_plane_count << " " << mag2 << std::endl;
+        // std::cout << "Inside: " << angle << " " << angle1 << " " << n_u_hits << " " << n_v_hits << " " << n_w_hits << " " << has_u_hits << " " << has_v_hits << " " << has_w_hits << " " << dead_plane_count << " " << mag2 << std::endl;
         
         if (angle > m_params.skip_angle_cut_3 && dead_plane_count >= 2) {
             return true;
@@ -7212,7 +7228,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     }
 
     bool flag_1st_tracking = true;
-    bool flag_2nd_tracking = true;
+    bool flag_2nd_tracking = true; 
     bool flag_dQ_dx = flag_dQ_dx_fit;
     
     // Prepare the data for the fit - collect charge information from 2D projections
@@ -7222,66 +7238,68 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     }
 
     // if (m_perf) std::cout << "do_multiple_tracking timing: prepare_data took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
-   
-
-    // auto edge_range = boost::edges(*m_graph);
-    //  for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-    //         auto& edge_bundle = (*m_graph)[*e_it];
-    //         if (edge_bundle.segment) {
-    //             std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
-    //             for (const auto& fit : edge_bundle.segment->fits()) {
-    //                 std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
-    //             }
-    //         }
-    //     }
-    //     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-    //         auto vd = *vp.first;
-    //         auto& v_bundle = (*m_graph)[vd];
-    //         if (v_bundle.vertex) {
-    //             std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
-    //         }
-    //     }
-
-    // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-    //     auto& edge_bundle = (*m_graph)[*e_it];
-    //     if (edge_bundle.segment) {
-    //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
-    //     }
-    // }
-
+    auto edge_range = boost::edges(*m_graph);
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
-    organize_segments_path(low_dis_limit, end_point_limit);
+    // int count_segments = 0;
 
-    // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
-
-    // std::cout << "After first organization " << std::endl;
-
-    // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-    //     auto& edge_bundle = (*m_graph)[*e_it];
-    //     if (edge_bundle.segment) {
-    //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
-    //     }
-    // }
-    // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-    //     auto& edge_bundle = (*m_graph)[*e_it];
-    //     if (edge_bundle.segment) {
-    //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
-    //         for (const auto& fit : edge_bundle.segment->fits()) {
-    //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
-    //         }
-    //     }
-    // }
-    // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-    //     auto vd = *vp.first;
-    //     auto& v_bundle = (*m_graph)[vd];
-    //     if (v_bundle.vertex) {
-    //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
-    //     }
-    // }
-  
     if (flag_1st_tracking){
+
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //         auto& edge_bundle = (*m_graph)[*e_it];
+        //         if (edge_bundle.segment) {
+        //             std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //             for (const auto& fit : edge_bundle.segment->fits()) {
+        //                 std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //             }
+        //         }
+        //     }
+        //     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //         auto vd = *vp.first;
+        //         auto& v_bundle = (*m_graph)[vd];
+        //         if (v_bundle.vertex) {
+        //             std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //         }
+        //     }
+
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //     }
+        // }
+
+        
+        organize_segments_path(low_dis_limit, end_point_limit);
+
+        // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
+
+        // std::cout << "After first organization " << std::endl;
+
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //     }
+        // }
+        // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //     auto& edge_bundle = (*m_graph)[*e_it];
+        //     if (edge_bundle.segment) {
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
+        //     }
+        // }
+        // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
+        //     auto vd = *vp.first;
+        //     auto& v_bundle = (*m_graph)[vd];
+        //     if (v_bundle.vertex) {
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //     }
+        // }
+  
 
         // auto edge_range = boost::edges(*m_graph);
         // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
@@ -7334,42 +7352,41 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
         //     }
         // }
-        // int count_segments = 0;
         // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         //     auto& edge_bundle = (*m_graph)[*e_it];
         //     if (edge_bundle.segment) {
-        //         if (count_segments == 0){
-        //             std::vector<WireCell::Point> override_points = {
-        //                 WireCell::Point(2192.13, -873.682, 2094.73),
-        //                 WireCell::Point(2190.05, -877.433, 2095.44),
-        //                 WireCell::Point(2187.83, -882.064, 2096.35),
-        //                 WireCell::Point(2180.81, -896.504, 2099.74),
-        //                 WireCell::Point(2177.78, -906.556, 2101.00),
-        //                 WireCell::Point(2171.11, -917.69, 2104.21),
-        //                 WireCell::Point(2166.54, -930.426, 2106.31),
-        //                 WireCell::Point(2162.36, -936.867, 2108.50),
-        //                 WireCell::Point(2158.23, -947.918, 2110.48)
-        //             };
-        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
-        //                 edge_bundle.segment->fits()[i].point = override_points[i];
-        //             }
-        //         }else{
-        //             std::vector<WireCell::Point> override_points = {
-        //                 WireCell::Point(2158.23, -947.918, 2110.48),
-        //                 WireCell::Point(2152.65, -958.508, 2113.46),
-        //                 WireCell::Point(2147.92, -966.199, 2115.89),
-        //                 WireCell::Point(2143.84, -977.016, 2117.63),
-        //                 WireCell::Point(2139.62, -984.948, 2119.62),
-        //                 WireCell::Point(2133.49, -997.683, 2122.44),
-        //                 WireCell::Point(2127.23, -1006.59, 2125.5),
-        //                 WireCell::Point(2123.37, -1017.77, 2127.39),
-        //                 WireCell::Point(2121.5, -1023.82, 2128.23),
-        //                 WireCell::Point(2120.98, -1028.6, 2128.63)
-        //             };
-        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
-        //                 edge_bundle.segment->fits()[i].point = override_points[i];
-        //             }
-        //         }
+        //         // if (count_segments == 0){
+        //         //     std::vector<WireCell::Point> override_points = {
+        //         //         WireCell::Point(2192.13, -873.682, 2094.73),
+        //         //         WireCell::Point(2190.05, -877.433, 2095.44),
+        //         //         WireCell::Point(2187.83, -882.064, 2096.35),
+        //         //         WireCell::Point(2180.81, -896.504, 2099.74),
+        //         //         WireCell::Point(2177.78, -906.556, 2101.00),
+        //         //         WireCell::Point(2171.11, -917.69, 2104.21),
+        //         //         WireCell::Point(2166.54, -930.426, 2106.31),
+        //         //         WireCell::Point(2162.36, -936.867, 2108.50),
+        //         //         WireCell::Point(2158.23, -947.918, 2110.48)
+        //         //     };
+        //         //     for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //         //         edge_bundle.segment->fits()[i].point = override_points[i];
+        //         //     }
+        //         // }else{
+        //         //     std::vector<WireCell::Point> override_points = {
+        //         //         WireCell::Point(2158.23, -947.918, 2110.48),
+        //         //         WireCell::Point(2152.65, -958.508, 2113.46),
+        //         //         WireCell::Point(2147.92, -966.199, 2115.89),
+        //         //         WireCell::Point(2143.84, -977.016, 2117.63),
+        //         //         WireCell::Point(2139.62, -984.948, 2119.62),
+        //         //         WireCell::Point(2133.49, -997.683, 2122.44),
+        //         //         WireCell::Point(2127.23, -1006.59, 2125.5),
+        //         //         WireCell::Point(2123.37, -1017.77, 2127.39),
+        //         //         WireCell::Point(2121.5, -1023.82, 2128.23),
+        //         //         WireCell::Point(2120.98, -1028.6, 2128.63)
+        //         //     };
+        //         //     for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //         //         edge_bundle.segment->fits()[i].point = override_points[i];
+        //         //     }
+        //         // }
             
         //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
         //         for (const auto& fit : edge_bundle.segment->fits()) {
@@ -7382,24 +7399,24 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //     auto vd = *vp.first;
         //     auto& v_bundle = (*m_graph)[vd];
         //     if (v_bundle.vertex) {
-        //         // Set vertex fit point to the closest of the three given points
-        //         std::vector<WireCell::Point> candidate_points = {
-        //             WireCell::Point(2192.13, -873.682, 2094.73),
-        //             WireCell::Point(2158.23, -947.918, 2110.48),
-        //             WireCell::Point(2120.98, -1028.6, 2128.63)
-        //         };
-        //         double min_dist = std::numeric_limits<double>::max();
-        //         WireCell::Point closest_point = v_bundle.vertex->fit().point;
-        //         for (const auto& cp : candidate_points) {
-        //             double dist = sqrt(pow(cp.x() - v_bundle.vertex->fit().point.x(), 2) +
-        //                                pow(cp.y() - v_bundle.vertex->fit().point.y(), 2) +
-        //                                pow(cp.z() - v_bundle.vertex->fit().point.z(), 2));
-        //             if (dist < min_dist) {
-        //                 min_dist = dist;
-        //                 closest_point = cp;
-        //             }
-        //         }
-        //         v_bundle.vertex->fit().point = closest_point;
+        //         // // Set vertex fit point to the closest of the three given points
+        //         // std::vector<WireCell::Point> candidate_points = {
+        //         //     WireCell::Point(2192.13, -873.682, 2094.73),
+        //         //     WireCell::Point(2158.23, -947.918, 2110.48),
+        //         //     WireCell::Point(2120.98, -1028.6, 2128.63)
+        //         // };
+        //         // double min_dist = std::numeric_limits<double>::max();
+        //         // WireCell::Point closest_point = v_bundle.vertex->fit().point;
+        //         // for (const auto& cp : candidate_points) {
+        //         //     double dist = sqrt(pow(cp.x() - v_bundle.vertex->fit().point.x(), 2) +
+        //         //                        pow(cp.y() - v_bundle.vertex->fit().point.y(), 2) +
+        //         //                        pow(cp.z() - v_bundle.vertex->fit().point.z(), 2));
+        //         //     if (dist < min_dist) {
+        //         //         min_dist = dist;
+        //         //         closest_point = cp;
+        //         //     }
+        //         // }
+        //         // v_bundle.vertex->fit().point = closest_point;
 
 
         //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
@@ -7441,10 +7458,47 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //  for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         //     auto& edge_bundle = (*m_graph)[*e_it];
         //     if (edge_bundle.segment) {
-        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
-        //         for (const auto& fit : edge_bundle.segment->fits()) {
-        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
-        //         }
+        //         // std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         // for (const auto& fit : edge_bundle.segment->fits()) {
+        //         //     std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         // }
+
+        //             //  std::vector<WireCell::Point> override_points = {
+        //             //    WireCell::Point(2290.29, 866.821, 6526.53),
+        //             //     WireCell::Point(2292.28, 870.529, 6523),
+        //             //     WireCell::Point(2293.02, 868.797, 6518),
+        //             //     WireCell::Point(2293.75, 867.064, 6513),
+        //             //     WireCell::Point(2294.48, 865.332, 6508),
+        //             //     WireCell::Point(2294.59, 862.85, 6502.1),
+        //             //     WireCell::Point(2294.7, 860.368, 6496.19),
+        //             //     WireCell::Point(2294.8, 857.886, 6490.29),
+        //             //     WireCell::Point(2294.91, 855.404, 6484.39),
+        //             //     WireCell::Point(2293.59, 854.307, 6479.69),
+        //             //     WireCell::Point(2292.28, 853.209, 6475),
+        //             //     WireCell::Point(2291.73, 851.91, 6469.75),
+        //             //     WireCell::Point(2291.18, 850.611, 6464.5),
+        //             //     WireCell::Point(2290.63, 849.312, 6459.25),
+        //             //     WireCell::Point(2290.08, 848.013, 6454),
+        //             //     WireCell::Point(2289.34, 845.085, 6449.03),
+        //             //     WireCell::Point(2288.6, 842.157, 6444.06),
+        //             //     WireCell::Point(2287.86, 839.229, 6439.09),
+        //             //     WireCell::Point(2287.03, 837.784, 6433.25),
+        //             //     WireCell::Point(2286.21, 836.339, 6427.41),
+        //             //     WireCell::Point(2283.47, 835.023, 6419.5),
+        //             //     WireCell::Point(2283.47, 832.425, 6415),
+        //             //     WireCell::Point(2283.47, 829.827, 6410.5),
+        //             //     WireCell::Point(2283.47, 827.229, 6406),
+        //             //     WireCell::Point(2283.47, 824.631, 6401.5),
+        //             //     WireCell::Point(2283.47, 822.899, 6396.5),
+        //             //     WireCell::Point(2283.47, 821.167, 6391.5),
+        //             //     WireCell::Point(2283.47, 819.434, 6386.5),
+        //             //     WireCell::Point(2282.37, 816.836, 6382),
+        //             //     WireCell::Point(2281.27, 814.238, 6377.5),
+        //             //     WireCell::Point(2281.65, 811.773, 6371.83)
+        //             // };
+        //             // for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //             //     edge_bundle.segment->fits()[i].point = override_points[i];
+        //             // }
         //     }
         // }
         // for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
@@ -7463,58 +7517,58 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
         // std::cout << "After second Fit " << std::endl;
 
-        // int count_segments = 0;
+        // count_segments = 0;
         // for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         //     auto& edge_bundle = (*m_graph)[*e_it];
         //     if (edge_bundle.segment) {
-        //         if (count_segments == 0){
-        //             std::vector<WireCell::Point> override_points = {
-        //                 WireCell::Point(2191.77, -873.687, 2094.66),
-        //                 WireCell::Point(2189.93, -878.246, 2095.67),
-        //                 WireCell::Point(2188.76, -881.477, 2096.10),
-        //                 WireCell::Point(2185.86, -886.508, 2097.41),
-        //                 WireCell::Point(2183.5, -890.672, 2098.29),
-        //                 WireCell::Point(2180.25, -899.103, 2099.89),
-        //                 WireCell::Point(2179.17, -902.032, 2100.32),
-        //                 WireCell::Point(2177.74, -905.425, 2101.21),
-        //                 WireCell::Point(2174.8, -911.866, 2102.45),
-        //                 WireCell::Point(2170.12, -919.848, 2104.71),
-        //                 WireCell::Point(2167.97, -925.905, 2105.65),
-        //                 WireCell::Point(2166.54, -930.426, 2106.31),
-        //                 WireCell::Point(2162.86, -936.994, 2108.18),
-        //                 WireCell::Point(2160.29, -942.265, 2109.29),
-        //                 WireCell::Point(2158.08, -947.736, 2110.60)
-        //             };
-        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
-        //                 edge_bundle.segment->fits()[i].point = override_points[i];
-        //             }
-        //         }else{
-        //             std::vector<WireCell::Point> override_points = {
-        //                 WireCell::Point(2158.08, -947.736, 2110.6),
-        //                 WireCell::Point(2155.04, -952.146, 2112.02),
-        //                 WireCell::Point(2152.23, -958.438, 2113.63),
-        //                 WireCell::Point(2147.92, -966.199, 2115.89),
-        //                 WireCell::Point(2147.03, -967.753, 2116.48),
-        //                 WireCell::Point(2143.84, -977.016, 2117.63),
-        //                 WireCell::Point(2139.8, -983.235, 2119.51),
-        //                 WireCell::Point(2136.43, -990.294, 2120.93),
-        //                 WireCell::Point(2133.67, -997.807, 2122.05),
-        //                 WireCell::Point(2130.73, -1001.33, 2123.6),
-        //                 WireCell::Point(2127.06, -1006.35, 2125.66),
-        //                 WireCell::Point(2125.3, -1012.18, 2126.44),
-        //                 WireCell::Point(2121.84, -1018.37, 2128.12),
-        //                 WireCell::Point(2120.71, -1023.03, 2128.69),
-        //                 WireCell::Point(2120.71, -1026.48, 2128.67)
-        //             };
-        //             for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
-        //                 edge_bundle.segment->fits()[i].point = override_points[i];
-        //             }
-        //         }
-            
-        //         // std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
-        //         // for (const auto& fit : edge_bundle.segment->fits()) {
-        //         //     std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         // if (count_segments == 0){
+        //         //     std::vector<WireCell::Point> override_points = {
+        //         //         WireCell::Point(2191.77, -873.687, 2094.66),
+        //         //         WireCell::Point(2189.93, -878.246, 2095.67),
+        //         //         WireCell::Point(2188.76, -881.477, 2096.10),
+        //         //         WireCell::Point(2185.86, -886.508, 2097.41),
+        //         //         WireCell::Point(2183.5, -890.672, 2098.29),
+        //         //         WireCell::Point(2180.25, -899.103, 2099.89),
+        //         //         WireCell::Point(2179.17, -902.032, 2100.32),
+        //         //         WireCell::Point(2177.74, -905.425, 2101.21),
+        //         //         WireCell::Point(2174.8, -911.866, 2102.45),
+        //         //         WireCell::Point(2170.12, -919.848, 2104.71),
+        //         //         WireCell::Point(2167.97, -925.905, 2105.65),
+        //         //         WireCell::Point(2166.54, -930.426, 2106.31),
+        //         //         WireCell::Point(2162.86, -936.994, 2108.18),
+        //         //         WireCell::Point(2160.29, -942.265, 2109.29),
+        //         //         WireCell::Point(2158.08, -947.736, 2110.60)
+        //         //     };
+        //         //     for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //         //         edge_bundle.segment->fits()[i].point = override_points[i];
+        //         //     }
+        //         // }else{
+        //         //     std::vector<WireCell::Point> override_points = {
+        //         //         WireCell::Point(2158.08, -947.736, 2110.6),
+        //         //         WireCell::Point(2155.04, -952.146, 2112.02),
+        //         //         WireCell::Point(2152.23, -958.438, 2113.63),
+        //         //         WireCell::Point(2147.92, -966.199, 2115.89),
+        //         //         WireCell::Point(2147.03, -967.753, 2116.48),
+        //         //         WireCell::Point(2143.84, -977.016, 2117.63),
+        //         //         WireCell::Point(2139.8, -983.235, 2119.51),
+        //         //         WireCell::Point(2136.43, -990.294, 2120.93),
+        //         //         WireCell::Point(2133.67, -997.807, 2122.05),
+        //         //         WireCell::Point(2130.73, -1001.33, 2123.6),
+        //         //         WireCell::Point(2127.06, -1006.35, 2125.66),
+        //         //         WireCell::Point(2125.3, -1012.18, 2126.44),
+        //         //         WireCell::Point(2121.84, -1018.37, 2128.12),
+        //         //         WireCell::Point(2120.71, -1023.03, 2128.69),
+        //         //         WireCell::Point(2120.71, -1026.48, 2128.67)
+        //         //     };
+        //         //     for (size_t i = 0; i < override_points.size() && i < edge_bundle.segment->fits().size(); ++i) {
+        //         //         edge_bundle.segment->fits()[i].point = override_points[i];
+        //         //     }
         //         // }
+            
+        //         std::cout << "Segment fits size: " << edge_bundle.segment->fits().size() << std::endl;
+        //         for (const auto& fit : edge_bundle.segment->fits()) {
+        //             std::cout << "  Fit point: " << fit.point << " " << fit.index << std::endl;
+        //         }
         //     }
         //     count_segments++;
         // }
@@ -7522,27 +7576,27 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //     auto vd = *vp.first;
         //     auto& v_bundle = (*m_graph)[vd];
         //     if (v_bundle.vertex) {
-        //         // Set vertex fit point to the closest of the three given points
-        //         std::vector<WireCell::Point> candidate_points = {
-        //             WireCell::Point(2191.77, -873.687, 2094.66),
-        //             WireCell::Point(2158.08, -947.736, 2110.6),
-        //             WireCell::Point(2120.71, -1026.48, 2128.67)
-        //         };
-        //         double min_dist = std::numeric_limits<double>::max();
-        //         WireCell::Point closest_point = v_bundle.vertex->fit().point;
-        //         for (const auto& cp : candidate_points) {
-        //             double dist = sqrt(pow(cp.x() - v_bundle.vertex->fit().point.x(), 2) +
-        //                                pow(cp.y() - v_bundle.vertex->fit().point.y(), 2) +
-        //                                pow(cp.z() - v_bundle.vertex->fit().point.z(), 2));
-        //             if (dist < min_dist) {
-        //                 min_dist = dist;
-        //                 closest_point = cp;
-        //             }
-        //         }
-        //         v_bundle.vertex->fit().point = closest_point;
+        //         // // Set vertex fit point to the closest of the three given points
+        //         // std::vector<WireCell::Point> candidate_points = {
+        //         //     WireCell::Point(2191.77, -873.687, 2094.66),
+        //         //     WireCell::Point(2158.08, -947.736, 2110.6),
+        //         //     WireCell::Point(2120.71, -1026.48, 2128.67)
+        //         // };
+        //         // double min_dist = std::numeric_limits<double>::max();
+        //         // WireCell::Point closest_point = v_bundle.vertex->fit().point;
+        //         // for (const auto& cp : candidate_points) {
+        //         //     double dist = sqrt(pow(cp.x() - v_bundle.vertex->fit().point.x(), 2) +
+        //         //                        pow(cp.y() - v_bundle.vertex->fit().point.y(), 2) +
+        //         //                        pow(cp.z() - v_bundle.vertex->fit().point.z(), 2));
+        //         //     if (dist < min_dist) {
+        //         //         min_dist = dist;
+        //         //         closest_point = cp;
+        //         //     }
+        //         // }
+        //         // v_bundle.vertex->fit().point = closest_point;
 
 
-        //         // std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
+        //         std::cout << v_bundle.vertex->fit().point << " VTX " << v_bundle.vertex->fit().index << std::endl;
         //     }
         // }
 
@@ -7653,7 +7707,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     reduced_chi2.clear();
     
     bool flag_1st_tracking = true;
-    bool flag_2nd_tracking = true;
+    bool flag_2nd_tracking = false;
     bool flag_dQ_dx = flag_dQ_dx_fit;
     
     // Prepare the data for the fit - collect charge information from 2D projections

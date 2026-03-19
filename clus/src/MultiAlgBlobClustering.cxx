@@ -498,13 +498,15 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // Extract 3D point from fit
             const auto& point = fit.point;
 
-            // std::cout << "Test: Segment: " << segment_id << " Point: " << point << " Fit valid: " << fit.valid() << " " << fit.index << " " << fit.range << std::endl;
 
 
             // Get charge (dQ) from fit, then apply scale and offset
             double charge = fit.dQ;
-            if (charge < 0) charge = 0;  // Use 0 if charge is invalid
             charge = charge * config.dQdx_scale + config.dQdx_offset;
+            if (charge < 0) charge = 0;  // Use 0 if charge is invalid
+
+            // std::cout << "Test: Segment: " << segment_id << " Point: " << point << " Fit valid: " << fit.valid() << " " << fit.index << " " << fit.range << " " << fit.dQ << " " << charge << std::endl;
+
 
             if (config.individual) {
                 // Fill individual APA/face bee points

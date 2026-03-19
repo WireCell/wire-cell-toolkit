@@ -568,6 +568,7 @@ namespace WireCell::Clus {
         // global geometry
 
         void BuildGeometry();
+        void sync_from_graph();
 
         std::map<WirePlaneId , std::tuple<WireCell::Point, double, double, double>> wpid_params;
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_U_dir;
