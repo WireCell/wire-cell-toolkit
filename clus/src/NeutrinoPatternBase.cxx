@@ -198,10 +198,10 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
                                 y_coords[boundary_indices.second], 
                                 z_coords[boundary_indices.second]);
 
-    // hack first and second point
-    boundary_point_first = Facade::geo_point_t(2285.68, 866.2, 6527.5);
-    boundary_point_second = Facade::geo_point_t(2296.69, 872.262, 5818);
-    // end hack
+    // // hack first and second point
+    // boundary_point_first = Facade::geo_point_t(2285.68, 866.2, 6527.5);
+    // boundary_point_second = Facade::geo_point_t(2296.69, 872.262, 5818);
+    // // end hack
                                 
     Facade::geo_point_t first_pt = boundary_point_first;
     Facade::geo_point_t second_pt = boundary_point_second;
@@ -1176,22 +1176,22 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         return false;
     }
 
-    // // Break tracks and examine structure
-    // if (flag_break_track) {
-    //     t0 = Clock::now();
-    //     std::vector<SegmentPtr> remaining_segments;
-    //     remaining_segments.push_back(sg1);
-    //     break_segments(graph, track_fitter, dv, remaining_segments);
-    //     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
+    // Break tracks and examine structure
+    if (flag_break_track) {
+        t0 = Clock::now();
+        std::vector<SegmentPtr> remaining_segments;
+        remaining_segments.push_back(sg1);
+        break_segments(graph, track_fitter, dv, remaining_segments);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
 
-    //     t0 = Clock::now();
-    //     examine_structure(graph, cluster, track_fitter, dv);
-    //     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
-    // } else {
-    //     t0 = Clock::now();
-    //     track_fitter.do_multi_tracking(true, true, true);
-    //     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
-    // }
+        t0 = Clock::now();
+        examine_structure(graph, cluster, track_fitter, dv);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
+    } else {
+        t0 = Clock::now();
+        track_fitter.do_multi_tracking(true, true, true);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
+    }
 
     // // Find other segments
     // for (int i = 0; i < nrounds_find_other_tracks; i++) {
