@@ -603,7 +603,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             local meth_name = "_cross_v" + std.toString(it.index),
             type: 'SPNGThreshold',
             name: $.this_name(extra_name, meth_name),
-            data: it.value + control,
+            data: {tag: 'tight'} + it.value + control,
         }, nin=1, nout=1)
         for it in wc.enumerate(tpc.crossview_thresholds)
     ],
@@ -1346,10 +1346,32 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     ///
     /// Input decon, output signals using cell basis initial rois and DNNROI
     /// inference for crossed views.  Intermediate waveforms are rebinned.
-    simple_decon(rebin=4, extra_name="")::
-        // local sg1 = $.frame_decon(extra_name=extra_name);
-        pg.shuntline($.frame_decon(extra_name=extra_name),
-                     $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name)),
+    simple_decon(rebin=4, output='decon', extra_name="")::
+
+        (if output == 'decon' then
+            $.frame_decon(extra_name=extra_name)
+        else
+            local filtering_nodes = {
+                'gauss': $.gauss_dense_views(rebin=rebin, extra_name=extra_name),
+                'dnnroi': $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name),
+                'tight': $.tight_roi(rebin=rebin, views=[0,1,2], extra_name=extra_name),
+                'wiener': $.time_filter_views("wiener", views=[0,1,2], extra_name=extra_name),
+            };
+            pg.shuntline(
+                $.frame_decon(extra_name=extra_name),
+                filtering_nodes[output]
+            )
+        ),
+
+        // local filtering_node = (
+        //     if gauss_filter then
+        //         $.gauss_dense_views(rebin=rebin, extra_name=extra_name) else
+        //         $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name)
+        // );
+        
+        // pg.shuntline($.frame_decon(extra_name=extra_name),
+        //             filtering_node),
+                    //  $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name)),
                     //   $.gauss_dense_views(rebin=1, extra_name=extra_name)),
         // local sg1_infer = $.dnnroi_inference_preface_simple(rebin=rebin, extra_name=extra_name+'_PRE');
 

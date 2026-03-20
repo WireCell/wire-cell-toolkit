@@ -36,6 +36,7 @@ function(input,
          engine='Pgrapher',
          device='cpu',
          dump="",
+         outstage='gauss', //gauss, dnnroi, decon, tightroi?
          verbosity=0)
     
     local controls = control_js(device=device, verbosity=wc.intify(verbosity));
@@ -87,9 +88,10 @@ function(input,
     local sink = io.frame_array_any_sink(output);
 
     local head = sg.frame_to_tdm(extra_name="_TOTDM");
-    local tail = sg.tdm_to_frame(extra_name="_FROMTDM", traces_tag='dnnroi');
+    // local traces_tag = (if gauss_filter then 'gauss' else 'dnnroi');
+    local tail = sg.tdm_to_frame(extra_name="_FROMTDM", traces_tag=outstage);//traces_tag);
 
-    local infer = sg.simple_decon(rebin=rebin);
+    local infer = sg.simple_decon(rebin=rebin, output=outstage);
                                       
     local pack = sg.tensor_packer(extra_name="_signals");
     local guts = pg.shuntlines([infer, pack]);
