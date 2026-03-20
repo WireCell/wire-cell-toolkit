@@ -80,6 +80,7 @@ function(input,
          crossed_views=[1,1,0], //TLA Code, not tla str --> provide via "--tla-code"
          dump="",
          gzip=1,
+         seeds=[0,1,2,3,4], //TLA Code, not tla str --> provide via "--tla-code"
          verbosity=0)
 
     local cross_view_ids = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
@@ -92,7 +93,7 @@ function(input,
     local iverbosity = wc.numberify(verbosity);
 
 
-    local controls = control_js(device=device, verbosity=iverbosity);
+    local controls = control_js(device=device, verbosity=iverbosity, seeds=seeds);
     local control = controls.config;
 
     // We focus here on just one TPC

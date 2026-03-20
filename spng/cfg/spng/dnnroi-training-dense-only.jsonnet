@@ -78,6 +78,7 @@ function(input,
          tpcid=3,
          dump="",
          gzip=1,
+         seeds=[0,1,2,3,4],//TLA Code, not tla str --> provide via "--tla-code"
          verbosity=0)
 
     # Assure numbers
@@ -87,7 +88,7 @@ function(input,
     local iverbosity = wc.numberify(verbosity);
 
 
-    local controls = control_js(device=device, verbosity=iverbosity);
+    local controls = control_js(device=device, verbosity=iverbosity, seeds=seeds);
     local control = controls.config;
 
     // We focus here on just one TPC
@@ -224,6 +225,34 @@ function(input,
                              datapath_pattern="tensorsets/{ident}", gzip=wc.numberify(gzip))
         ]),
     }[schema];
+
+    // local sim_fanout = pg.pnode({
+    //     type:'FrameFanout',
+    //     name: det.name + "_sim_frame",
+    //     data: {
+    //         multiplicity:2
+    //     }
+    // },nin=1, nout=2);
+    // local sim_sink = io.frame_tensor_sink('test_sim.npz');
+    // local sim_sink = io.frame_to_sio('test_sim.npz');
+    // local pre_fodder = pg.pipeline([to_tdm, fodder_body]);
+
+    // local fodder = pg.intern(
+    //     innodes=[sim],
+    //     outnodes=[pre_fodder],
+    //     centernodes=[
+    //         sim_fanout,
+    //         sim_sink
+    //     ],
+    //     edges = [
+    //         pg.edge(sim, sim_fanout),
+    //         pg.edge(sim_fanout, sim_sink, 0, 0),
+    //         pg.edge(sim_fanout, pre_fodder, 1, 0),
+    //     ]
+    // );
+    //I'd like to be able to save the sim for checks -- need to figure out 
+    //[WireCell::tag_errmsg*] = failed to get node "FrameTensor:test_sim.npz" <-- error
+
 
     local fodder = pg.pipeline([sim, to_tdm, fodder_body]);
 
