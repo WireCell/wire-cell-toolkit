@@ -44,7 +44,7 @@ def xz_y_from_xzw_xzu(xzw, xzu, tyy=35.7):
     v = np.linalg.cross(vu, vw)
     v /= np.linalg.norm(v)
     xz, y = xz_y_from_samexz(v)
-    print(f'{xzu},{xzv} --> {xz:.2f}, {y:.2f}') 
+    print(f'{xzw},{xzu} --> {xz:.2f}, {y:.2f}') 
     return xz, y
 
 def xz_y_from_xzu_xzv_hyu(xzu, xzv, tyy=-35.7):
@@ -64,6 +64,7 @@ def xz_y_from_xzu_xzv_hyu(xzu, xzv, tyy=-35.7):
 
 high_end_xzu_xzv_deg=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 75], [87, 85], [87, 87])
 high_end_xzu_xzv_deg_uplane=([75, 75], [80, 80], [82,82], [85,85], [87, 75], [87, 85], [87, 87])
+high_end_xzw_xzu_deg_wplane=([75, 75], [80, 80], [82,82], [85,85], [87, 75], [87, 85], [87, 87])
 high_end_xzu_xzv_deg_vplane=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 87])
 
 # high_end_xz_y_deg=(
@@ -71,56 +72,64 @@ high_end_xzu_xzv_deg_vplane=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85
 #     for xzu, xzv in high_end_xzu_xzv_deg
 # )
 # for xz, y in high_end_xz_y_deg:
-#     print(xz, y)
+# #     print(xz, y)
 
-rule all_linedepos:
-    input:
-        depos=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz', plane=all_planes, txz=all_theta_xz_deg, ty=90),
-        meta=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json', plane=all_planes, txz=all_theta_xz_deg, ty=90)
+# rule all_linedepos:
+#     input:
+#         depos=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz', plane=all_planes, txz=all_theta_xz_deg, ty=90),
+#         meta=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json', plane=all_planes, txz=all_theta_xz_deg, ty=90)
 
-rule splat_all_lines:
-    input:
-        expand("splat-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90),
-        expand("drifted-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}-frame.npz", plane=all_planes, txz=all_theta_xz_deg, ty=90)
+# rule splat_all_lines:
+#     input:
+#         expand("splat-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90),
+#         expand("drifted-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}-frame.npz", plane=all_planes, txz=all_theta_xz_deg, ty=90)
     
-rule all_lines_final:
-    input:
-        expand("sigproc-spng-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90)
+# rule all_lines_final:
+#     input:
+#         expand("sigproc-spng-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90)
 
 
 
-rule linedepos:
-    output:
-        depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz',
-        meta='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json',
-    params:
-        offset="--offset '1*m,0*m,0*m'"
-    shell: '''
-    wcpy gen detlinegen \
-    {params.offset} \
-    --detector=pdhd \
-    --plane={wildcards.plane} \
-    --angle-coords=wire-plane \
-    --theta_xz="{wildcards.txz}*deg" \
-    --theta_y="{wildcards.ty}*deg" \
-    --output_depos {output.depos} \
-    --output_meta {output.meta}
-    '''
+# rule linedepos:
+#     output:
+#         depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz',
+#         meta='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json',
+#     params:
+#         offset="--offset '1*m,0*m,0*m'"
+#     shell: '''
+#     wcpy gen detlinegen \
+#     {params.offset} \
+#     --detector=pdhd \
+#     --plane={wildcards.plane} \
+#     --angle-coords=wire-plane \
+#     --theta_xz="{wildcards.txz}*deg" \
+#     --theta_y="{wildcards.ty}*deg" \
+#     --output_depos {output.depos} \
+#     --output_meta {output.meta}
+#     '''
+
+def resolve_angles(w):
+    if w.plane in ['u', 'v']:
+        conversion = xz_y_from_xzu_xzv_hyu
+    elif w.plane == 'w':
+        conversion = xz_y_from_xzw_xzu
+    return conversion(float(w.t1), float(w.t2))
 
 rule linedepos_xzu_xzv:
     output:
-        depos='linedepos-pdhd-plane{plane}-txzu{txzu}-txzv{txzv}_wct-depos.npz',
-        meta='linedepos-pdhd-plane{plane}-txzu{txzu}-txzv{txzv}_wct-depos.json',
+        depos='linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz',
+        meta='linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.json',
     params:
         offset="--offset '1*m,0*m,0*m'",
-        xz_y = lambda w: xz_y_from_xzu_xzv_hyu(float(w.txzu), float(w.txzv)),
+        # xz_y = lambda w: xz_y_from_xzu_xzv_hyu(float(w.txzu), float(w.txzv)),
+        xz_y = resolve_angles
         
     shell: '''
 
     wcpy gen detlinegen \
     {params.offset} \
     --detector=pdhd \
-    --plane={wildcards.plane} \
+    --plane=0 \
     --angle-coords=global \
     --theta_xz="{params.xz_y[0]}*deg" \
     --theta_y="{params.xz_y[1]}*deg" \
@@ -241,9 +250,10 @@ rule spng_mpsigproc:
 
 rule spng_mpsigproc_lines:
     input:
-        "linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}_wct-depos.npz",
+        # "linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}_wct-depos.npz",
+        'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
     output:
-        "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+        "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
     params:
         jsonnet='dnnroi-training.jsonnet',
         tpcid=config['tpcid'],
@@ -282,9 +292,9 @@ rule spng_densesigproc:
 
 rule spng_densesigproc_lines:
     input:
-        os.path.join(config['external_loc'], "linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}_wct-depos.npz"),
+        os.path.join(config['external_loc'], 'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'),
     output:
-        "seeds_{seeds}/sigproc-spng-dense-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+        "seeds_{seeds}/sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
         # "sigproc-spng-dense-{name}.tar"
     shadow: "minimal"
     params:
@@ -316,15 +326,15 @@ rule convert_spng_mp_to_hdf5:
 
 rule convert_spng_mp_to_hdf5_lines:
     input:
-        "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+        "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
     output:
-        rec0="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5",
-        rec1="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5",
-        rec2="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-2.h5",
+        rec0="seeds_{seeds}/linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-0.h5",
+        rec1="seeds_{seeds}/linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-1.h5",
+        rec2="seeds_{seeds}/linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-2.h5",
 
-        tru0="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5",
-        tru1="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5",
-        tru2="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-2.h5"
+        tru0="seeds_{seeds}/linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-0.h5",
+        tru1="seeds_{seeds}/linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-1.h5",
+        tru2="seeds_{seeds}/linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-2.h5"
 
     script:
         "scripts/convert_to_h5mpSnake.py"
@@ -337,22 +347,27 @@ for i in range(1):
     these_seeds = '.'.join([str(random.randint(0,100)) for j in range(5)])
     seeds.append(these_seeds)
 
+# rule high_end_mp_hdf5_seeded:
+#     input:
+#         rec0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+#         tru0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+#         rec1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+#         tru1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+#         # Add in -2.h5 
+
 rule high_end_mp_hdf5_seeded:
     input:
-        rec0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
-        tru0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
-        rec1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
-        tru1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
-        # Add in -2.h5 
+        rec0 = [expand("seeds_{seeds}/linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-0.h5", seeds=seeds, plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        tru0 = [expand("seeds_{seeds}/linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-0.h5", seeds=seeds, plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        rec1 = [expand("seeds_{seeds}/linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-1.h5", seeds=seeds, plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        tru1 = [expand("seeds_{seeds}/linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-1.h5", seeds=seeds, plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        rec2 = [expand("seeds_{seeds}/linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-2.h5", seeds=seeds, plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        tru2 = [expand("seeds_{seeds}/linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-2.h5", seeds=seeds, plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
 
-rule high_end_mp_hdf5_seeded_v:
-    input:
-        rec0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
-        tru0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
-        rec1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
-        tru1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
-        # Add in -2.h5 
 
+
+
+## TODO 
 rule convert_spng_dense_to_hdf5:
     input:
         "sigproc-spng-dense-cosmics_{sample}.tar"
@@ -429,11 +444,18 @@ def get_angles_by_plane(plane):
         angles = high_end_xzu_xzv_deg_uplane
     elif plane == 'v':
         angles = high_end_xzu_xzv_deg_vplane
+    elif plane == 'w':
+        angles = high_end_xzw_xzu_deg_wplane
+    else:
+        raise RuntimeError(f'Unknown plane {plane}')
     return angles
 
 def get_input_by_plane(wildcards):
     angles = get_angles_by_plane(wildcards.plane)
-    return [os.path.join(config['test_input'], f'test_line_txzu{txzu}-txzv{txzv}.pt') for txzu, txzv in angles]
+    # return [os.path.join(config['test_input'], f'test_line_txzu{txzu}-txzv{txzv}.pt') for txzu, txzv in angles]
+    return [
+        os.path.join(config['test_input'], f'test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt') for t1,t2 in angles
+    ]
 
 rule plot_eff_pur:
     input:
@@ -489,7 +511,8 @@ rule plot_eff_pur:
 
 
 def get_input(wildcards):
-    return os.path.join(config['test_input'], f'test_line_txzu{wildcards.txzu}-txzv{wildcards.txzv}.pt') 
+    # return os.path.join(config['test_input'], f'test_line_txzu{wildcards.txzu}-txzv{wildcards.txzv}.pt') 
+    return os.path.join(config['test_input'], f'test_line_{wildcards.plane}plane_t1-{wildcards.t1}-t2-{wildcards.t2}.pt') 
 
 
 rule plot_feat_y_labels:
@@ -497,7 +520,7 @@ rule plot_feat_y_labels:
         # 'test_line_txzu82-txzv82.pt'
         get_input
     output:
-        temp('line-display-txzu{txzu}-txzv{txzv}.pickle')
+        temp('line-display-{plane}plane-t1_{t1}-t2_{t2}.pickle')
     run:
         import torch
         import matplotlib
@@ -526,17 +549,30 @@ rule plot_feat_y_labels:
         # plt.savefig(f)
         import pickle
         pickle.dump(fig, open(f, 'wb'))
-rule plot_feat_y_labels_all:
-    input:
-        [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in high_end_xzu_xzv_deg]
-    output:
-        'line-displays.tar'
-    shell:
-        'tar -cf {output} {input}'
+# rule plot_feat_y_labels_all:
+#     input:
+#         [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in high_end_xzu_xzv_deg]
+#     output:
+#         'line-displays.tar'
+#     shell:
+#         'tar -cf {output} {input}'
 
+def get_plot_input_by_plane(w):
+    if w.plane == 'u':
+        angles = high_end_xzu_xzv_deg_uplane
+    elif w.plane == 'v':
+        angles = high_end_xzu_xzv_deg_vplane
+    elif w.plane == 'w':
+        angles = high_end_xzw_xzu_deg_wplane
+    # else:
+        # raise RuntimeError()
+    res = [f'line-display-{w.plane}plane-t1_{t1}-t2_{t2}.pickle' for t1, t2 in angles]
+    return res
+    # return [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in angles]
 rule plot_feat_y_labels_uvplane:
     input:
-        lambda w: [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in (high_end_xzu_xzv_deg_uplane if w.plane == 'u' else (high_end_xzu_xzv_deg_vplane))]
+        # lambda w: [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in (high_end_xzu_xzv_deg_uplane if w.plane == 'u' else (high_end_xzu_xzv_deg_vplane))]
+        get_plot_input_by_plane
     output:
         'line-displays_{plane}plane.tar'
     shell:
@@ -547,7 +583,16 @@ rule all_plots:
         tar='line-displays.tar',
         effpur='all_eff_pur.png'
 
-rule all_plots_uvplane:
+
+rule all_plots_u:
     input:
-        tar='line-displays_{plane}plane.tar',
-        effpur='all_eff_pur_{plane}plane.png'
+        tar=f'line-displays_uplane.tar',
+        effpur=f'all_eff_pur_uplane.png'
+rule all_plots_v:
+    input:
+        tar=f'line-displays_vplane.tar',
+        effpur=f'all_eff_pur_vplane.png'
+rule all_plots_w:
+    input:
+        tar=f'line-displays_wplane.tar',
+        effpur=f'all_eff_pur_wplane.png'
