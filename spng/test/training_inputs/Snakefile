@@ -5,7 +5,7 @@ import os
 SRC_DIR = workflow.basedir
 
 config.setdefault('nevents', '2')
-config.setdefault('fodder_style', 'mp') #set to dense to run dnnroi-training-dense-only.jsonnet
+config.setdefault('detname', 'pdhd')
 # container="/nfs/data/1/calcuttj/dunesw.sif"
 all_theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 )
 all_planes = [0,1,2]
@@ -27,22 +27,49 @@ def same_thetaxz_plane_norm(txz, tyy):
     ])
 
     return Rx @ (Ry @ ret)
+
+def xz_y_from_samexz(v):
+    import numpy as np
+    y = np.acos(v[1])
+    xz = np.asin(v[0]/np.sin(y))
+    xz = xz*180./np.pi
+    y = y*180./np.pi
+    # print(f'{xzu},{xzv} --> {xz:.2f}, {y:.2f}') 
+    return xz, y
+
+def xz_y_from_xzw_xzu(xzw, xzu, tyy=35.7):
+    import numpy as np
+    vw = same_thetaxz_plane_norm(xzw, 0)
+    vu = same_thetaxz_plane_norm(xzu, tyy)
+    v = np.linalg.cross(vu, vw)
+    v /= np.linalg.norm(v)
+    xz, y = xz_y_from_samexz(v)
+    print(f'{xzu},{xzv} --> {xz:.2f}, {y:.2f}') 
+    return xz, y
+
 def xz_y_from_xzu_xzv_hyu(xzu, xzv, tyy=-35.7):
     import numpy as np
     vu = same_thetaxz_plane_norm(xzu, tyy)
     vv = same_thetaxz_plane_norm(xzv, -tyy)
-    v = np.linalg.cross(vu, vv)
+    v = np.linalg.cross(vv, vu)
     v /= np.linalg.norm(v)
 
-    y = np.acos(v[1])
-    xz = np.asin(v[0]/np.sin(y))
-    return xz*180./np.pi, y*180./np.pi
+    # y = np.acos(v[1])
+    # xz = np.asin(v[0]/np.sin(y))
+    # xz = xz*180./np.pi
+    # y = y*180./np.pi
+    xz, y = xz_y_from_samexz(v)
+    print(f'{xzu},{xzv} --> {xz:.2f}, {y:.2f}') 
+    return xz, y 
 
-high_end_xzu_xzv_deg=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 87])
-high_end_xz_y_deg=(
-    xz_y_from_xzu_xzv_hyu(xzu, xzv)
-    for xzu, xzv in high_end_xzu_xzv_deg
-)
+high_end_xzu_xzv_deg=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 75], [87, 85], [87, 87])
+high_end_xzu_xzv_deg_uplane=([75, 75], [80, 80], [82,82], [85,85], [87, 75], [87, 85], [87, 87])
+high_end_xzu_xzv_deg_vplane=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 87])
+
+# high_end_xz_y_deg=(
+#     xz_y_from_xzu_xzv_hyu(xzu, xzv)
+#     for xzu, xzv in high_end_xzu_xzv_deg
+# )
 # for xz, y in high_end_xz_y_deg:
 #     print(xz, y)
 
@@ -94,12 +121,13 @@ rule linedepos_xzu_xzv:
     {params.offset} \
     --detector=pdhd \
     --plane={wildcards.plane} \
-    --angle-coords=wire-plane \
+    --angle-coords=global \
     --theta_xz="{params.xz_y[0]}*deg" \
     --theta_y="{params.xz_y[1]}*deg" \
     --output_depos {output.depos} \
     --output_meta {output.meta}
     '''
+
 
 rule test_container:
     container:
@@ -165,11 +193,11 @@ rule save_depos:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
         "/nfs/data/1/calcuttj/dunesw.sif"
     input:
-        inputfile="{name}_g4.root",
+        inputfile="cosmics_{sample}_g4.root",
         fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
         js=os.path.join(SRC_DIR, "wcls-save-larg4-depos.jsonnet"),
     output:
-        npz="{name}_wct-depos.npz",
+        npz="cosmics_{sample}_wct-depos.npz",
         # bz2='{name}_wct-depos.tar.bz2'
     shadow: "minimal" #This runs in an auto-removed tmp dir
     shell:
@@ -187,149 +215,242 @@ rule save_depos:
         # mv wct-depos.tar.bz2 
         """
 
-def get_sourcestyle(wildcards):
-    style='linedepo' #'default'
-    if 'linedepo' in wildcards.name:
-        style = 'linedepo'
-    return f'-A "sourcestyle={style}"'
-rule splat_and_drift:
-    input:
-        "{name}_wct-depos.npz",
-    output:
-        "splat-{name}.h5",
-        "drifted-{name}-frame.npz"
-    params:
-        extra_flag=get_sourcestyle
-    shell:
-        """
-        export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
-        wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A outname={wildcards.name} {params.extra_flag} --ext-code nanodes=1 \
-        wct-sim-deposource-framesink.jsonnet
-        """
-
-
-rule osp_sigproc:
-    input:
-        "drifted-{name}-frame.npz",
-    output:
-        "sigproc-osp-{name}-0.h5",
-    shell:
-        """
-        wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A outname={wildcards.name} --ext-code nanodes=1 \
-        wct-sim-framesource-sigproc.jsonnet
-        """
-
-rule spng_sigproc:
-    input:
-        "drifted-{name}-frame.npz",
-    output:
-        temp("sigproc-spng-{name}.npz"),
-    shell:
-        """
-        wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A style=spng -A outname={wildcards.name} --ext-code nanodes=1 \
-        wct-sim-framesource-sigproc.jsonnet
-        """
 
 config.setdefault('tpcid', '0')
+config.setdefault('device', 'cpu')
 rule spng_mpsigproc:
     input:
-        "{name}_wct-depos.npz",
+        "cosmics_{sample}_wct-depos.npz",
     output:
-        temp("sigproc-spng-mp-{name}.tar")
+        temp("sigproc-spng-mp-cosmics_{sample}.tar")
     params:
         jsonnet='dnnroi-training.jsonnet',
-        tpcid=config['tpcid']
+        tpcid=config['tpcid'],
+        detname=config['detname'],
+        device=config['device']
     shadow: "minimal"
     shell:
         """
         wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
-            -A "tpcid={params.tpcid}"
+            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
+            -A "device={params.device}"
         # tar the output files
         tar -cf {output} dnnroi-training-truth.npz \
         dnnroi-training-fodder.npz
         """
+
+rule spng_mpsigproc_lines:
+    input:
+        "linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}_wct-depos.npz",
+    output:
+        "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+    params:
+        jsonnet='dnnroi-training.jsonnet',
+        tpcid=config['tpcid'],
+        detname=config['detname'],
+    shadow: "minimal"
+    shell:
+        """
+        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "seeds=[$(echo {wildcards.seeds} | sed -e "s/\./,/g")]" --tla-code "crossed_views=[1,1,1]"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
+
+
+config.setdefault('external_loc', '')
 
 rule spng_densesigproc:
     input:
-        "{name}_wct-depos.npz",
+        os.path.join(config['external_loc'], "cosmics_{sample}_wct-depos.npz"),
     output:
-        temp("sigproc-spng-dense-{name}.tar")
+        temp("sigproc-spng-dense-cosmics_{sample}.tar")
         # "sigproc-spng-dense-{name}.tar"
     shadow: "minimal"
     params:
-        jsonnet='dnnroi-training-dense-only.jsonnet'
+        jsonnet='dnnroi-training-dense-only.jsonnet',
+        detname=config['detname'],
     shell:
         """
         wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
-            -A "tpcid=0"
+            -A "tpcid=0" -A "detname={params.detname}"
         # tar the output files
         tar -cf {output} dnnroi-training-truth.npz \
         dnnroi-training-fodder.npz
         """
 
-rule convert_spng_to_hdf5:
+rule spng_densesigproc_lines:
     input:
-        "sigproc-spng-{name}.npz",
+        os.path.join(config['external_loc'], "linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}_wct-depos.npz"),
     output:
-        "sigproc-spng-{name}.h5",
+        "seeds_{seeds}/sigproc-spng-dense-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+        # "sigproc-spng-dense-{name}.tar"
+    shadow: "minimal"
     params:
-        tags={
-            '*':'loose_lf'
-        }
-    script:
-        "scripts/convert_to_h5.py"
+        jsonnet='dnnroi-training-dense-only.jsonnet',
+        detname=config['detname'],
+        # seeds=
+    shell:
+        """
+        wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
+            -A "tpcid=0" -A "detname={params.detname}" --tla-code "seeds=[$(echo {wildcards.seeds} | sed -e "s/\./,/g")]"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
 
 rule convert_spng_mp_to_hdf5:
     input:
-        "sigproc-spng-mp-{name}.tar"
+        "sigproc-spng-mp-cosmics_{sample}.tar"
     output:
-        rec0="{name}-g4-rec-0.h5",
-        rec1="{name}-g4-rec-1.h5",
-        tru0="{name}-g4-tru-0.h5",
-        tru1="{name}-g4-tru-1.h5"
+        rec0="cosmics_{sample}-g4-rec-0.h5",
+        rec1="cosmics_{sample}-g4-rec-1.h5",
+        rec2="cosmics_{sample}-g4-rec-2.h5",
+
+        tru0="cosmics_{sample}-g4-tru-0.h5",
+        tru1="cosmics_{sample}-g4-tru-1.h5",
+        tru2="cosmics_{sample}-g4-tru-2.h5",
     script:
         "scripts/convert_to_h5mpSnake.py"
 
-rule high_end_mp_hdf5:
+rule convert_spng_mp_to_hdf5_lines:
     input:
-        rec = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5" for xzu, xzv in high_end_xzu_xzv_deg],
-        tru = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5" for xzu, xzv in high_end_xzu_xzv_deg]
+        "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+    output:
+        rec0="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5",
+        rec1="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5",
+        rec2="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-2.h5",
 
+        tru0="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5",
+        tru1="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5",
+        tru2="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-2.h5"
+
+    script:
+        "scripts/convert_to_h5mpSnake.py"
+
+#seeds=['1.2.3', '91.62.10.1',  ]
+seeds = []
+import random
+for i in range(1):
+
+    these_seeds = '.'.join([str(random.randint(0,100)) for j in range(5)])
+    seeds.append(these_seeds)
+
+rule high_end_mp_hdf5_seeded:
+    input:
+        rec0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+        tru0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+        rec1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+        tru1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+        # Add in -2.h5 
+
+rule high_end_mp_hdf5_seeded_v:
+    input:
+        rec0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
+        tru0 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
+        rec1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
+        tru1 = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-1.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg_vplane],
+        # Add in -2.h5 
 
 rule convert_spng_dense_to_hdf5:
     input:
-        "sigproc-spng-dense-{name}.tar"
+        "sigproc-spng-dense-cosmics_{sample}.tar"
     output:
-        rec="{name}-g4-rec-dense-0.h5",
-        tru="{name}-g4-tru-dense-0.h5",
+        rec="cosmics_{sample}-g4-rec-dense-0.h5",
+        tru="cosmics_{sample}-g4-tru-dense-0.h5",
+    script:
+        "scripts/convert_to_h5denseSnake.py"
+rule convert_spng_dense_to_hdf5_lines:
+    input:
+        "seeds_{seeds}/sigproc-spng-dense-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+    output:
+        rec="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-dense-0.h5",
+        tru="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-dense-0.h5",
     script:
         "scripts/convert_to_h5denseSnake.py"
 
-rule high_end_dense_hdf5:
+rule high_end_dense_hdf5_seeded:
     input:
-        rec = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-dense-0.h5" for xzu, xzv in high_end_xzu_xzv_deg],
-        tru = [f"linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-dense-0.h5" for xzu, xzv in high_end_xzu_xzv_deg]
+        rec = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-dense-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+        tru = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-dense-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg]
 
 
 config.setdefault('test_input', 'blah')
 config.setdefault('test_tpcs', [1])
-test_tpcs = [int(i) for i in config['test_tpcs']]
+
+def run_plot(angles):
+    import torch
+    import matplotlib.pyplot as plt
+    import numpy as np
+    all_effs = []
+    all_purs = []
+
+    xlabels = [f'{u},{v}' for u,v in angles]
+    xpos = [i for i in range(len(xlabels))]
+
+    ranges = [[0,800], [800,1600], [1600,2560]]
+    for f in input:
+        t = torch.load(f)
+        labels = t['labels'][0].detach().cpu()
+        y = t['y'][0].detach().cpu()
+
+        for plane in params.test_tpcs:
+            this_range = ranges[plane]
+            real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+            eff = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/labels[this_range[0]:this_range[1]].sum()
+            all_effs.append(eff)
+
+            pur = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/(y[this_range[0]:this_range[1]] > .5).sum()
+            all_purs.append(pur)
+    print(all_effs)
+    print(all_purs)
+
+    plt.subplot(2, 1, 1)
+    plt.plot(all_effs, label='Efficiency')
+    plt.xticks(xpos, xlabels)
+    plt.grid(True, axis='both')
+    plt.ylim(0., 1.5)
+    plt.subplot(2, 1, 2)
+    plt.plot(all_purs)
+    plt.grid(True, axis='both')
+    plt.yticks(np.arange(0.,1.5, .2))
+    plt.xticks(xpos, xlabels, label='Purity')
+    plt.ylim(0., 1.5)
+    plt.yticks(np.arange(0.,1.5, .2))
+    f = output[0]
+    print(type(f))
+    print(f)
+    plt.savefig(f)
+
 import os
+def get_angles_by_plane(plane):
+    if plane == 'u':
+        angles = high_end_xzu_xzv_deg_uplane
+    elif plane == 'v':
+        angles = high_end_xzu_xzv_deg_vplane
+    return angles
+
+def get_input_by_plane(wildcards):
+    angles = get_angles_by_plane(wildcards.plane)
+    return [os.path.join(config['test_input'], f'test_line_txzu{txzu}-txzv{txzv}.pt') for txzu, txzv in angles]
+
 rule plot_eff_pur:
     input:
-        [os.path.join(config['test_input'], f'test_line_txzu{txzu}-txzv{txzv}.pt') for txzu, txzv in high_end_xzu_xzv_deg]
+        get_input_by_plane
     output:
-        'all_eff_pur.png'
+        'all_eff_pur_{plane}plane.png'
+    params:
+        test_tpcs = [int(i) for i in config['test_tpcs']]
+
     run:
         import torch
         import matplotlib.pyplot as plt
+        import numpy as np
         all_effs = []
         all_purs = []
 
-        xlabels = [f'{u},{v}' for u,v in high_end_xzu_xzv_deg]
+        xlabels = [f'{u},{v}' for u,v in get_angles_by_plane(wildcards.plane)]
         xpos = [i for i in range(len(xlabels))]
 
         ranges = [[0,800], [800,1600], [1600,2560]]
@@ -338,7 +459,7 @@ rule plot_eff_pur:
             labels = t['labels'][0].detach().cpu()
             y = t['y'][0].detach().cpu()
 
-            for plane in test_tpcs:
+            for plane in params.test_tpcs:
                 this_range = ranges[plane]
                 real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
                 eff = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/labels[this_range[0]:this_range[1]].sum()
@@ -352,11 +473,15 @@ rule plot_eff_pur:
         plt.subplot(2, 1, 1)
         plt.plot(all_effs, label='Efficiency')
         plt.xticks(xpos, xlabels)
+        plt.grid(True, axis='both')
         plt.ylim(0., 1.5)
         plt.subplot(2, 1, 2)
         plt.plot(all_purs)
+        plt.grid(True, axis='both')
+        plt.yticks(np.arange(0.,1.5, .2))
         plt.xticks(xpos, xlabels, label='Purity')
         plt.ylim(0., 1.5)
+        plt.yticks(np.arange(0.,1.5, .2))
         f = output[0]
         print(type(f))
         print(f)
@@ -409,7 +534,20 @@ rule plot_feat_y_labels_all:
     shell:
         'tar -cf {output} {input}'
 
+rule plot_feat_y_labels_uvplane:
+    input:
+        lambda w: [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in (high_end_xzu_xzv_deg_uplane if w.plane == 'u' else (high_end_xzu_xzv_deg_vplane))]
+    output:
+        'line-displays_{plane}plane.tar'
+    shell:
+        'tar -cf {output} {input}'
+
 rule all_plots:
     input:
         tar='line-displays.tar',
         effpur='all_eff_pur.png'
+
+rule all_plots_uvplane:
+    input:
+        tar='line-displays_{plane}plane.tar',
+        effpur='all_eff_pur_{plane}plane.png'
