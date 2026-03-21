@@ -626,9 +626,11 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     // Remove the old segment (this will disconnect it from the graph)
     remove_segment(graph, seg);
 
-    // Remove the old vertex, if it no longer has any connected segments  
-    auto vd = vtx->get_descriptor();
-    if (boost::degree(vd, graph) == 0) remove_vertex(graph, vtx);
+    // Remove the old vertex, if it no longer has any connected segments
+    if (vtx->descriptor_valid()) {
+        auto vd = vtx->get_descriptor();
+        if (boost::degree(vd, graph) == 0) remove_vertex(graph, vtx);
+    }
     
     // Add the new segment connecting other_vertex and new_vtx
     add_segment(graph, new_seg, other_vertex, new_vtx);
@@ -938,9 +940,14 @@ bool PatternAlgorithms::merge_two_segments_into_one(Graph& graph, SegmentPtr& se
     // Delete old segments
     remove_segment(graph, seg1);
     remove_segment(graph, seg2);
-    
-    // Delete the middle vertex
-    remove_vertex(graph, vtx);
+
+    // Delete the middle vertex (only if now isolated)
+    if (vtx->descriptor_valid()) {
+        auto vd = vtx->get_descriptor();
+        if (boost::degree(vd, graph) == 0) {
+            remove_vertex(graph, vtx);
+        }
+    }
     
     // Update output parameter
     seg1 = new_seg;
@@ -1240,7 +1247,11 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 void PatternAlgorithms::init_point_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
     // Get two boundary points from the cluster (using regular point cloud)
     auto boundary_wcps = cluster.get_two_boundary_wcps(false);
-    
+
+    // Ensure "relaxed_pid" graph is built and cached before do_rough_path_reg_pc,
+    // which calls graph_algorithms() without dv/pcts and would throw if not cached.
+    cluster.graph_algorithms("relaxed_pid", dv, track_fitter.get_pc_transforms());
+
     // Find shortest path using the regular point cloud with "relaxed_pid" graph
     auto path_points = do_rough_path_reg_pc(cluster, boundary_wcps.first, boundary_wcps.second, "relaxed_pid");
     
