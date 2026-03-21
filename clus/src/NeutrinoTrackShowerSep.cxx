@@ -1251,7 +1251,7 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
         SegmentPtr sg = *it;
         bool flag_change = true;
         
-        const auto& pts = sg->wcpts();
+        const auto& pts = sg->fits();//wcpts();
         
         // Check each point in the segment
         for (size_t i = 0; i < pts.size(); i++) {

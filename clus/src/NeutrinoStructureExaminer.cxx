@@ -1572,10 +1572,10 @@ bool PatternAlgorithms::examine_vertices_4p(Graph&graph, VertexPtr v1, VertexPtr
         SegmentPtr sg = graph[*eit].segment;
         if (!sg || sg == sg1) continue;
         
-        // Get segment points
-        const auto& pts = sg->wcpts();
+        // Get segment points (fit points, matching prototype's get_point_vec())
+        const auto& pts = sg->fits();
         if (pts.empty()) continue;
-        
+
         // Find point on segment approximately 3cm from v1
         Facade::geo_point_t min_point = pts.front().point;
         double min_dis = 1e9;
@@ -1649,16 +1649,16 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
     for (auto& sg : all_segments) {
         if (!sg->descriptor_valid()) continue; // may have been removed in an earlier iteration
         
-        const auto& pts = sg->wcpts();
+        const auto& pts = sg->fits();
         if (pts.size() < 2) continue;
-        
+
         // Get vertices
         auto pair_vertices = find_vertices(graph, sg);
         VertexPtr v1 = pair_vertices.first;
         VertexPtr v2 = pair_vertices.second;
         if (!v1 || !v2) continue;
-        
-        // Calculate segment direction
+
+        // Calculate segment direction (using fit points, matching prototype's get_point_vec())
         Facade::geo_vector_t tmp_dir(
             pts.front().point.x() - pts.back().point.x(),
             pts.front().point.y() - pts.back().point.y(),
@@ -2032,7 +2032,8 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                 SegmentPtr sg1 = graph[*eit1].segment;
                 if (!sg1) continue;
 
-                const auto& pts_1 = sg1->wcpts();
+                // Use fit points, matching prototype's get_point_vec()
+                const auto& pts_1 = sg1->fits();
                 if (pts_1.empty()) continue;
 
                 // Order points from vertex outward
@@ -2418,7 +2419,8 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         if (direct_length >= 5.0 * units::cm) continue;
         
         // Check if all points on this segment are close to other segments in 2D
-        const auto& pts = sg->wcpts();
+        // (use fit points, matching prototype's get_point_vec())
+        const auto& pts = sg->fits();
         int num_unique = 0;
         
         for (size_t i = 0; i < pts.size(); i++) {
@@ -2930,7 +2932,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                     SegmentPtr sg1 = graph[*vtx1_eit].segment;
                     if (!sg1 || sg1 == sg) continue;
                     
-                    const auto& pts = sg1->wcpts();
+                    const auto& pts = sg1->fits();//sg1->wcpts();
                     if (pts.empty()) continue;
                     
                     // Determine which end of sg connects to vtx1
@@ -3008,7 +3010,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                 
                 // Check if sg is solid in all three views (if vtx1 has only 2 connections)
                 if ((!flag_update) && boost::degree(vtx1_vd, graph) == 2) {
-                    const auto& tmp_pts = sg->wcpts();
+                    const auto& tmp_pts = sg->fits();//->wcpts();
                     for (size_t i = 0; i < tmp_pts.size(); i++) {
                         WireCell::Point test_p = tmp_pts.at(i).point;
                         
@@ -3115,7 +3117,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                     SegmentPtr sg1 = graph[*main_eit].segment;
                     if (!sg1 || sg1 == sg) continue;
                     
-                    const auto& pts = sg1->wcpts();
+                    const auto& pts = sg1->fits();//sg1->wcpts();
                     if (pts.empty()) continue;
                     
                     // Determine which end of sg connects to main_vertex

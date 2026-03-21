@@ -739,7 +739,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
         
         // Initialize the start test point
         Facade::geo_point_t break_wcp = start_v->wcpt().point;
-        const auto& point_vec = curr_sg->wcpts();
+        const auto& point_vec = curr_sg->fits();  // use fit points, matching prototype's get_point_vec()
         Facade::geo_point_t test_start_p = point_vec.front().point;
         
         if (dis_cut > 0) {
@@ -1113,13 +1113,13 @@ Facade::geo_vector_t PatternAlgorithms::vertex_segment_get_dir(VertexPtr& vertex
     // Get vertex position (use fit if available, otherwise wcpt)
     Facade::geo_point_t vtx_point = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
     
-    // Get points from segment
-    const auto& pts = segment->wcpts();
-    
+    // Get fit points from segment (matching prototype's cal_dir_3vector which uses fit_pt_vec)
+    const auto& pts = segment->fits();
+
     // Find the point on the segment whose distance from vertex is closest to dis_cut
     double min_dis = 1e9;
     Facade::geo_point_t min_point = vtx_point;
-    
+
     for (size_t i = 0; i < pts.size(); i++) {
         double tmp_dis = std::sqrt(std::pow(pts[i].point.x() - vtx_point.x(), 2) +
                                    std::pow(pts[i].point.y() - vtx_point.y(), 2) +
@@ -1200,31 +1200,31 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
     }
 
-    // // For main cluster, merge tracks if angles are consistent
-    // if (is_main_cluster) {
-    //     t0 = Clock::now();
-    //     if (examine_structure_3(graph, cluster, track_fitter, dv)) {
-    //         track_fitter.do_multi_tracking(true, true, true);
-    //     }
-    //     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
-    // }
+    // For main cluster, merge tracks if angles are consistent
+    if (is_main_cluster) {
+        t0 = Clock::now();
+        if (examine_structure_3(graph, cluster, track_fitter, dv)) {
+            track_fitter.do_multi_tracking(true, true, true);
+        }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
+    }
 
-    // // Examine the vertices
-    // t0 = Clock::now();
-    // examine_vertices(graph, cluster, track_fitter, dv);
-    // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices took {} ms", MS(Clock::now() - t0).count());
+    // Examine the vertices
+    t0 = Clock::now();
+    examine_vertices(graph, cluster, track_fitter, dv);
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices took {} ms", MS(Clock::now() - t0).count());
 
-    // // Examine partial identical segments
-    // t0 = Clock::now();
-    // examine_partial_identical_segments(graph, cluster, track_fitter, dv);
-    // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_partial_identical_segments took {} ms", MS(Clock::now() - t0).count());
+    // Examine partial identical segments
+    t0 = Clock::now();
+    examine_partial_identical_segments(graph, cluster, track_fitter, dv);
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_partial_identical_segments took {} ms", MS(Clock::now() - t0).count());
 
-    // // Examine the two initial points for main cluster
-    // if (is_main_cluster && main_cluster_initial_pair_vertices.first) {
-    //     t0 = Clock::now();
-    //     examine_vertices_3(graph, cluster, main_cluster_initial_pair_vertices, track_fitter, dv);
-    //     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices_3 took {} ms", MS(Clock::now() - t0).count());
-    // }
+    // Examine the two initial points for main cluster
+    if (is_main_cluster && main_cluster_initial_pair_vertices.first) {
+        t0 = Clock::now();
+        examine_vertices_3(graph, cluster, main_cluster_initial_pair_vertices, track_fitter, dv);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices_3 took {} ms", MS(Clock::now() - t0).count());
+    }
 
     // Final multi-tracking
     t0 = Clock::now();
