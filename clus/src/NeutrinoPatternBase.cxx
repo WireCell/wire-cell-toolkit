@@ -1193,12 +1193,12 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
 
-    // // Find other segments
-    // for (int i = 0; i < nrounds_find_other_tracks; i++) {
-    //     t0 = Clock::now();
-    //     find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
-    //     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
-    // }
+    // Find other segments
+    for (int i = 0; i < nrounds_find_other_tracks; i++) {
+        t0 = Clock::now();
+        find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
+    }
 
     // // For main cluster, merge tracks if angles are consistent
     // if (is_main_cluster) {
