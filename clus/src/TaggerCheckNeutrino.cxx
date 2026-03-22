@@ -88,6 +88,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     //     }
     // }
 
+    SPDLOG_LOGGER_DEBUG(log, "Number of Main Clusters: {}", n_main_clusters);
+
+    std::set<VertexPtr> vertices_in_long_muon;
+    std::set<SegmentPtr> segments_in_long_muon;
+    VertexPtr main_vertex = nullptr;
+    std::map<Cluster*, VertexPtr> map_cluster_main_vertices;
+
     // Create PRGraph and first segment
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
     m_track_fitter->add_graph(pr_graph);
@@ -95,11 +102,29 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
     pattern_algos.m_perf = m_perf;
     m_track_fitter->set_perf(m_perf);
-    // auto segment = pattern_algos.init_first_segment(*pr_graph, *main_cluster, main_cluster, *m_track_fitter, m_dv);
-    pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
 
+    {
+        // initial pattern recognitions
+        pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
 
-    // m_track_fitter->do_multi_tracking(true, true, true);
+        // shower related operations
+        pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+        pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+        
+        // // direction determination
+        // pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
+
+        // // shower clustering
+        // pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
+
+        // // main vertex determination
+        // pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
+
+        // if (main_vertex !=0){
+        //     map_cluster_main_vertices[main_cluster] = main_vertex;
+        //     main_vertex = 0;
+        // }
+    }
 
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink

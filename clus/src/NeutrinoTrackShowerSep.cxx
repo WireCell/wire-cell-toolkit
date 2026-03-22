@@ -1,13 +1,22 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellUtil/Logging.h"
+#include <chrono>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
 void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = Clock::now();
+
     // Collect all segments that belong to this cluster
     std::set<SegmentPtr> segments;
-    
+
     auto [ebegin, eend] = boost::edges(graph);
     for (auto eit = ebegin; eit != eend; ++eit) {
         SegmentPtr seg = graph[*eit].segment;
@@ -15,30 +24,47 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
             segments.insert(seg);
         }
     }
-    
+    // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: collect segments ({}) took {} ms", segments.size(), MS(Clock::now() - t0).count());
+
     // Run clustering on the collected segments
+    t0 = Clock::now();
     if (!segments.empty()) {
         clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d);
     }
+    // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: clustering_points_segments took {} ms", MS(Clock::now() - t0).count());
+
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
 }
 
 void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& cluster) {
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    MS t_topology{0}, t_trajectory{0};
+
     // Iterate through all edges (segments) in the graph
     auto [ebegin, eend] = boost::edges(graph);
     for (auto eit = ebegin; eit != eend; ++eit) {
         SegmentPtr seg = graph[*eit].segment;
-        
+
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
-        
+
         // First check if segment is a shower topology
+        auto t0 = Clock::now();
         segment_is_shower_topology(seg);
-        
+        t_topology += MS(Clock::now() - t0);
+
         // If not shower topology, check if it's a shower trajectory
         if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
+            t0 = Clock::now();
             segment_is_shower_trajectory(seg);
+            t_trajectory += MS(Clock::now() - t0);
         }
     }
+
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "separate_track_shower timing: shower_topology={:.3f}ms shower_trajectory={:.3f}ms TOTAL={:.3f}ms",
+        t_topology.count(), t_trajectory.count(), MS(Clock::now() - t_total).count());
 }
 
 void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model) {

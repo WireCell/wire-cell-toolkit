@@ -121,6 +121,13 @@ void ParticleInfo::validate_inputs() {
     if (m_mass < 0.0) {
         raise<ValueError>("ParticleInfo: mass cannot be negative");
     }
+    // Allow zero 4-momentum as a placeholder (energy not yet computed)
+    // if (m_four_momentum.e() == 0.0 &&
+    //     m_four_momentum.px() == 0.0 &&
+    //     m_four_momentum.py() == 0.0 &&
+    //     m_four_momentum.pz() == 0.0) {
+    //     return;
+    // }
     if (m_four_momentum.e() < m_mass) {
         raise<ValueError>("ParticleInfo: total energy cannot be less than rest mass");
     }

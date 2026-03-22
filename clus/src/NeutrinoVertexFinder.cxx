@@ -1811,7 +1811,7 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
 }
 
 
-void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
+void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
     
     std::set<VertexPtr> fitted_vertices;
     std::set<SegmentPtr> existing_segments;
@@ -2231,7 +2231,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     }
 }
 
-void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_print){
+void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_print){
 
     // Find the main vertex - check if we have only showers
     bool flag_save_only_showers = true;
