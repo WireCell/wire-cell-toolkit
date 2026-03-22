@@ -268,6 +268,17 @@ DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius,
 
 
 
+std::array<double, 3> DynamicPointCloud::get_angles(int face, int apa) const
+{
+    WirePlaneId wpid_volume(kAllLayers, face, apa);
+    auto it = m_wpid_params.find(wpid_volume);
+    if (it == m_wpid_params.end()) {
+        return {0.0, 0.0, 0.0};
+    }
+    const auto& [_, angle_u, angle_v, angle_w] = it->second;
+    return {angle_u, angle_v, angle_w};
+}
+
 std::tuple<double, const Cluster *, size_t>
 DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int plane, const int face, const int apa) const
 {

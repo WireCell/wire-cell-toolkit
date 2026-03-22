@@ -4,6 +4,8 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/KSTest.h"
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <numeric>
 #include <algorithm>
@@ -1645,17 +1647,21 @@ namespace WireCell::Clus::PR {
      }
 
     void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
+        // using Clock = std::chrono::steady_clock;
+        // using MS = std::chrono::duration<double, std::milli>;
+        // auto t_total = Clock::now();
+
         std::map<Facade::Cluster*, std::set<SegmentPtr> > map_cluster_segs;
         for (auto seg : segments){
             if (seg->cluster()){
-                map_cluster_segs[seg->cluster()].insert(seg); 
+                map_cluster_segs[seg->cluster()].insert(seg);
             }
         }
-        
+
         for (auto it : map_cluster_segs){
             auto clus = it.first;
             auto& segs = it.second;
-            
+
             // get the default point cloud from cluster
             const auto& points = clus->points();
 
@@ -1665,11 +1671,9 @@ namespace WireCell::Clus::PR {
             std::map<SegmentPtr, std::vector<geo_point_t>> map_segment_points;
             std::map<SegmentPtr, std::vector<size_t>> map_segment_global_indices;
             std::map<int, std::pair<SegmentPtr, double>> map_pindex_segment;
-            //std::cout << "Cluster has " << npoints << " points and " << segs.size() << " segments." << std::endl;
-            //std::cout << "Number of vertices in the graph: " << boost::num_vertices(graph) << std::endl;
-            
+
             // core algorithms
-             
+
             // define steiner terminal for segments ...
             for (auto seg: segs){
                 auto& fits = seg->fits();
@@ -1685,7 +1689,7 @@ namespace WireCell::Clus::PR {
                             }
                         }
                     }
-                }else{
+                }else if (fits.size() == 2){
                     geo_point_t gp = {(fits[0].point.x()+fits[1].point.x())/2., (fits[0].point.y()+fits[1].point.y())/2., (fits[0].point.z()+fits[1].point.z())/2.};
                     auto closest_results = clus->kd_knn(5, gp);
                     for (const auto& [point_index, distance] : closest_results) {
@@ -1699,6 +1703,7 @@ namespace WireCell::Clus::PR {
 
 
             // these are terminals ...
+            // auto t_ghost = Clock::now();
             if (map_pindex_segment.size()>0){
                
                 // Convert terminals from int to vertex_type
@@ -1707,51 +1712,125 @@ namespace WireCell::Clus::PR {
                     terminals.push_back(static_cast<WireCell::Clus::Graphs::Weighted::vertex_type>(it->first));
                 }
 
+                // auto t_voronoi = Clock::now();
                 auto vor = WireCell::Clus::Graphs::Weighted::voronoi(graph, terminals);
-                
-                // Now we can find the nearest terminal for every vertex in the graph
-                // The Voronoi diagram provides:
-                // - vor.terminal[v]: the nearest terminal vertex for vertex v
-                // - vor.distance[v]: the distance to the nearest terminal for vertex v
-                std::map<int, std::pair<int, double>> vertex_to_nearest_terminal;
-                // Iterate through all vertices in the graph
+                // std::cout << "[clustering_points_segments] voronoi took " << MS(Clock::now() - t_voronoi).count() << " ms" << std::endl;
+
                 const int num_graph_vertices = boost::num_vertices(graph);
-                for (int vertex_idx = 0; vertex_idx < num_graph_vertices; ++vertex_idx) {
-                    // Get the nearest terminal for this vertex
-                    int nearest_terminal_idx = vor.terminal[vertex_idx];
-                    double distance_to_terminal = vor.distance[vertex_idx];
-                    // Store the mapping
-                    vertex_to_nearest_terminal[vertex_idx] = std::make_pair(nearest_terminal_idx, distance_to_terminal);
+                // Use the flat vector directly for O(1) access by vertex index
+                const auto& nearest_terminal = vor.terminal;
+
+                // Pre-build per-segment fit-point caches.
+                // Avoids N*(S+1)*3 KD-tree queries in the hot ghost-removal loop below;
+                // replaces them with direct linear scans over the small fit-point sets.
+                using ApFaceKey = std::tuple<int, int, int>;  // (plane, apa, face)
+                struct Pt2D { double x, y; };
+                std::map<SegmentPtr, std::shared_ptr<Facade::DynamicPointCloud>> seg_dpc_cache;
+                std::map<SegmentPtr, std::vector<std::array<double, 3>>>         seg_pts3d;
+                std::map<SegmentPtr, std::map<ApFaceKey, std::vector<Pt2D>>>     seg_pts2d;
+                for (auto seg : segs) {
+                    auto dpc = seg->dpcloud("fit");
+                    if (!dpc) continue;
+                    seg_dpc_cache[seg] = dpc;
+                    auto& pts3d    = seg_pts3d[seg];
+                    auto& pts2d_map = seg_pts2d[seg];
+                    for (const auto& pt : dpc->get_points()) {
+                        pts3d.push_back({pt.x, pt.y, pt.z});
+                        for (int pind = 0; pind < 3; ++pind) {
+                            for (size_t j = 0; j < pt.x_2d[pind].size(); ++j) {
+                                WirePlaneId wpid_2d(pt.wpid_2d[pind][j]);
+                                pts2d_map[{pind, wpid_2d.apa(), wpid_2d.face()}]
+                                    .push_back({pt.x_2d[pind][j], pt.y_2d[pind][j]});
+                            }
+                        }
+                    }
                 }
-                // std::cout << "Debug: Number of graph vertices: " << num_graph_vertices << std::endl;
+
+                // Cache projection angles per (apa, face) — same detector geometry for all segs
+                std::map<std::pair<int,int>, std::array<double, 3>> ang_cache;
+                auto get_angles_cached = [&](int apa, int face) -> const std::array<double, 3>& {
+                    auto key = std::make_pair(apa, face);
+                    auto it = ang_cache.find(key);
+                    if (it == ang_cache.end()) {
+                        std::array<double,3> a = {0.0, 0.0, 0.0};
+                        for (auto& [s, dpc] : seg_dpc_cache) {
+                            a = dpc->get_angles(face, apa);
+                            break;
+                        }
+                        ang_cache[key] = a;
+                        return ang_cache[key];
+                    }
+                    return it->second;
+                };
+
+                // Fast 2D closest distance: linear scan over precomputed fit-point projections.
+                // Returns {1e9, 1e9, 1e9} for planes with no matching (apa, face) data.
+                auto get_2d_dist_fast = [&](SegmentPtr seg,
+                                            double qx, const std::array<double, 3>& qy,
+                                            int apa, int face) -> std::tuple<double, double, double> {
+                    auto it = seg_pts2d.find(seg);
+                    if (it == seg_pts2d.end()) return {1e9, 1e9, 1e9};
+                    double min_d2[3] = {1e18, 1e18, 1e18};
+                    for (int pind = 0; pind < 3; ++pind) {
+                        auto it2 = it->second.find({pind, apa, face});
+                        if (it2 == it->second.end()) continue;
+                        for (const auto& [px, py] : it2->second) {
+                            double dx = qx - px, dy = qy[pind] - py;
+                            double d2 = dx*dx + dy*dy;
+                            if (d2 < min_d2[pind]) min_d2[pind] = d2;
+                        }
+                    }
+                    return {std::sqrt(min_d2[0]), std::sqrt(min_d2[1]), std::sqrt(min_d2[2])};
+                };
+
+                // Fast 3D closest distance: linear scan over precomputed fit-point coordinates.
+                auto get_3d_dist_fast = [&](SegmentPtr seg, const geo_point_t& gp) -> double {
+                    auto it = seg_pts3d.find(seg);
+                    if (it == seg_pts3d.end()) return 1e9;
+                    double min_d2 = 1e18;
+                    for (const auto& [px, py, pz] : it->second) {
+                        double dx = gp.x()-px, dy = gp.y()-py, dz = gp.z()-pz;
+                        double d2 = dx*dx + dy*dy + dz*dz;
+                        if (d2 < min_d2) min_d2 = d2;
+                    }
+                    return std::sqrt(min_d2);
+                };
+
                 // now examine to remove ghost points ....
                 for (int i = 0; i < num_graph_vertices; i++){
-                    if (map_pindex_segment.find(vertex_to_nearest_terminal.at(i).first) == map_pindex_segment.end()) continue;
+                    const int nt_i = static_cast<int>(nearest_terminal[i]);
+                    if (map_pindex_segment.find(nt_i) == map_pindex_segment.end()) continue;
                     geo_point_t gp(points[0][i], points[1][i], points[2][i]);
-                    auto main_sg = map_pindex_segment[vertex_to_nearest_terminal.at(i).first].first;
+                    auto main_sg = map_pindex_segment[nt_i].first;
 
                     auto point_wpid = clus->wire_plane_id(i);
                     auto apa = point_wpid.apa();
                     auto face = point_wpid.face();
 
-                    // use the dynamic point cloud of fit, and then derive distances ... 
-                    // Get 3D closest point using the "fit" point cloud
-                    std::pair<double, WireCell::Point> closest_dis_point = segment_get_closest_point(main_sg, gp, "fit");
+                    // Compute projected query coordinates once per point (shared by all segments)
+                    const auto& ang = get_angles_cached(apa, face);
+                    const double qx = gp.x();
+                    const std::array<double, 3> qy = {
+                        std::cos(ang[0]) * gp.z() - std::sin(ang[0]) * gp.y(),
+                        std::cos(ang[1]) * gp.z() - std::sin(ang[1]) * gp.y(),
+                        std::cos(ang[2]) * gp.z() - std::sin(ang[2]) * gp.y()
+                    };
 
-                    // Calculate 2D distances for each wire plane (U, V, W) using APA/face information
-                    std::tuple<double, double, double> closest_2d_dis = segment_get_closest_2d_distances(main_sg, gp, apa, face, "fit");
-                    
+                    // 3D and 2D closest distances to main segment (linear scan)
+                    std::pair<double, WireCell::Point> closest_dis_point = {get_3d_dist_fast(main_sg, gp), WireCell::Point(0,0,0)};
+                    std::tuple<double, double, double> closest_2d_dis = get_2d_dist_fast(main_sg, qx, qy, apa, face);
+
                     std::tuple<double, double, double> min_2d_dis = closest_2d_dis;
-                
+
                     // check against main_sg;
                     bool flag_change = true;
-                
+
                     // Compare against all segments in the cluster to find minimum 2D distances
                     for (auto seg : segs) {
                        if (main_sg == seg) continue;
-                    
-                        // Get 2D distances for this segment
-                        std::tuple<double, double, double> temp_2d_dis = segment_get_closest_2d_distances(seg, gp, apa, face, "fit");
+
+                        // Get 2D distances for this segment (linear scan)
+                        std::tuple<double, double, double> temp_2d_dis = get_2d_dist_fast(seg, qx, qy, apa, face);
                         // Update minimum distances for each plane
                         if (std::get<0>(temp_2d_dis) < std::get<0>(min_2d_dis)) std::get<0>(min_2d_dis) = std::get<0>(temp_2d_dis);
                         if (std::get<1>(temp_2d_dis) < std::get<1>(min_2d_dis)) std::get<1>(min_2d_dis) = std::get<1>(temp_2d_dis);
@@ -1796,19 +1875,33 @@ namespace WireCell::Clus::PR {
                     // change the point's clustering ...
                     if (!flag_change){
                         map_segment_global_indices[main_sg].push_back(i);
+                        map_segment_points[main_sg].push_back(gp);
                     }
                 }
             }
 
 
+            // std::cout << "[clustering_points_segments] ghost removal took " << MS(Clock::now() - t_ghost).count() << " ms" << std::endl;
+
             // convert points to geo_point_t format
-            // add points to segments ... 
+            // add points to segments ...
+            // auto t_build = Clock::now();
             for (const auto& [seg, geo_points] : map_segment_points) {
                 const auto& global_indices = map_segment_global_indices[seg];
                 create_segment_point_cloud(seg, geo_points, dv, cloud_name, global_indices);
                 // create_segment_point_cloud(seg, geo_points, dv, cloud_name);
             }
+
+            // std::cout << "[clustering_points_segments] build point clouds took " << MS(Clock::now() - t_build).count() << " ms" << std::endl;
+
+            // debug: print number of points assigned to each segment
+            // for (const auto& [seg, geo_points] : map_segment_points) {
+            //     std::cout << "[clustering_points_segments] cloud: " << cloud_name
+            //               << "  seg: " << seg.get()
+            //               << "  npoints: " << geo_points.size() << std::endl;
+            // }
         }
+        // std::cout << "[clustering_points_segments] TOTAL took " << MS(Clock::now() - t_total).count() << " ms" << std::endl;
     }
 
     bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut){

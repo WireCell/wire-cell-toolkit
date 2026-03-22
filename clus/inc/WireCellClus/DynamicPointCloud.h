@@ -68,6 +68,10 @@ namespace WireCell::Clus::Facade {
         /// @brief: dist, Cluster, global point_index
         std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info(const geo_point_t &p, const int plane,
                                                                               const int face, const int apa) const;
+
+        /// @brief Return (angle_u, angle_v, angle_w) for the given face/apa from the stored wpid_params.
+        /// Returns {0,0,0} if the face/apa combination is not found.
+        std::array<double, 3> get_angles(int face, int apa) const;
         
 
         std::pair<double, double> hough_transform(const geo_point_t &origin, const double dis) const;
