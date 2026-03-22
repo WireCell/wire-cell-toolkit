@@ -609,7 +609,7 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
                 int layer = plane + 2;
                 if (map_slices_measures.find(tick_range) != map_slices_measures.end()) {
                     if (map_slices_measures[tick_range][layer][wire] > 0) {
-                        wire_hits[plane] += (delta == 0) ? 1 : (delta == -1) ? 2 : 1;
+                        wire_hits[plane] += (delta == 0) ? 2 : 1;
                     }
                 }
             }
