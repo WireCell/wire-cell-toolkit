@@ -487,7 +487,8 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // --- shower_track mode: use associated points, charge from shower flags ---
             const bool is_shower =
                 segment->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
-                segment->flags_any(PR::SegmentFlags::kShowerTopology);
+                segment->flags_any(PR::SegmentFlags::kShowerTopology) || 
+                (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 11);
             const double charge = is_shower ? 15000.0 : 0.0;
 
             auto dpc = segment->dpcloud("associate_points");
