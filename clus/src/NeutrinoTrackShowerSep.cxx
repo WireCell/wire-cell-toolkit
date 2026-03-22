@@ -1835,5 +1835,33 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
             t_improve_shower_in_track_out_2.count(), t_improve_multiple_tracks_in.count(),
             t_fix_shower_in_track_out_2.count(), t_judge_no_dir_tracks.count(),
             t_examine_maps.count(), t_examine_all_showers.count(), t_total_ms.count());
+
+        // // Print final per-segment state, matching determine_direction format
+        // auto [ebegin2, eend2] = boost::edges(graph);
+        // for (auto eit = ebegin2; eit != eend2; ++eit) {
+        //     SegmentPtr seg = graph[*eit].segment;
+        //     if (!seg || seg->cluster() != &cluster) continue;
+
+        //     std::string seg_type;
+        //     if (seg->flags_any(SegmentFlags::kShowerTrajectory))
+        //         seg_type = "Shower_traj";
+        //     else if (seg->flags_any(SegmentFlags::kShowerTopology))
+        //         seg_type = "Shower_topo";
+        //     else if (seg->has_particle_info() && std::abs(seg->particle_info()->pdg()) == 11)
+        //         seg_type = "Electron";
+        //     else
+        //         seg_type = "Track";
+
+        //     double length = segment_track_length(seg, 0);
+        //     int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
+        //     double mass   = seg->has_particle_info() ? seg->particle_info()->mass() / units::MeV : 0.0;
+        //     double ke     = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0;
+        //     double score  = seg->particle_score();
+        //     SPDLOG_LOGGER_DEBUG(s_log,
+        //         "shower_determining_in_main_cluster: {} len={:.2f}cm dir={} weak={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
+        //         seg_type, length / units::cm,
+        //         seg->dirsign(), seg->dir_weak() ? 1 : 0,
+        //         pdg, mass, ke, score);
+        // }
     }
 }
