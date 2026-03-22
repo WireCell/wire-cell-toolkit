@@ -51,9 +51,9 @@ void MyFCN::AddSegment(SegmentPtr sg)
     Facade::geo_point_t center(0, 0, 0);
     double min_dis = 1e9;
 
-    // Get fit points from segment
-    const auto& fits = sg->fits();
-    if (fits.empty()) {
+    // Get raw steiner points from segment (consistent with prototype's get_point_vec())
+    const auto& wcpts = sg->wcpts();
+    if (wcpts.empty()) {
         Facade::geo_point_t a(0, 0, 0);
         vec_PCA_dirs.push_back(std::make_tuple(a, a, a));
         vec_PCA_vals.push_back(std::make_tuple(0, 0, 0));
@@ -62,8 +62,8 @@ void MyFCN::AddSegment(SegmentPtr sg)
     }
 
     std::vector<Facade::geo_point_t> pts;
-    for (const auto& fit : fits) {
-        pts.push_back(fit.point);
+    for (const auto& wcp : wcpts) {
+        pts.push_back(wcp.point);
     }
     double length = 0;
     if (pts.size() > 1) {

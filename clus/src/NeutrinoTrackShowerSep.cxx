@@ -434,9 +434,10 @@ void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Clust
             
             bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
             
-            // Check if segment is a shower
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                           sg->flags_any(SegmentFlags::kShowerTopology);
+            // Check if segment is a shower (matches prototype get_flag_shower())
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                             sg->flags_any(SegmentFlags::kShowerTopology) ||
+                             (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
             
             // Check if this is an "incoming" segment (pointing into vertex)
             if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {

@@ -515,7 +515,11 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
         double min_dis_v = 1e9;
         double min_dis_w = 1e9;
         
-        // Check against all segments in the graph
+        // NOTE: prototype checks ALL segments from ALL clusters here (map_segment_vertices,
+        // with the cluster-filter line explicitly commented out). This toolkit only checks
+        // the current cluster's segments, which may lead to more false-positive vertex
+        // activities when a candidate terminal is close to a segment from a different cluster.
+        // Fixing this would require passing a cross-cluster segment collection as a parameter.
         auto [ebegin, eend] = boost::edges(graph);
         for (auto eit = ebegin; eit != eend; ++eit) {
             SegmentPtr sg = graph[*eit].segment;
@@ -1995,7 +1999,7 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
         
         // Merge vertices if they are too close (Type II) - only if more than 2 vertices
         if (num_vertices > 2) {
-            flag_continue = flag_continue || examine_vertices_2(graph, cluster, track_fitter, dv);
+            flag_continue = flag_continue || examine_vertices_2(graph, cluster, track_fitter, dv, main_vertex);
         }
         
         // Merge vertices if they are reasonably close (Type III/IV)
@@ -2667,7 +2671,9 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
     WireCell::Vector dir2 = segment_cal_dir_3vector(sg2, main_vtx_point, 15*units::cm);
     
     // Calculate angle between directions (in degrees)
-    double angle = (3.1415926 - std::acos(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()))) / 3.1415926 * 180.0;
+    // Prototype: dir1.Angle(dir2)*180/pi — angle between the two direction vectors
+    // Both dirs point away from main_vertex; collinear segments give ~180° (antiparallel)
+    double angle = std::acos(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude())) / 3.1415926 * 180.0;
     
     // Get segment lengths
     double length1 = segment_track_length(sg1);
@@ -2694,15 +2700,17 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             if (vec_wcps.empty() || vec_wcps1.empty()) return flag_update;
             
             // Determine which end of sg2 connects to main_vertex
-            bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_vtx_point}) < 0.01*units::cm);
-            
+            // Use wcpt().point (steiner node) not fit().point — segment wcpts are anchored at steiner nodes
+            WireCell::Point main_wcpt_point = main_vertex->wcpt().point;
+            bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_wcpt_point}) < 0.01*units::cm);
+
             // Determine which end of sg1 connects to main_vertex
-            bool flag_front1 = (ray_length(Ray{vec_wcps1.front().point, main_vtx_point}) < 0.01*units::cm);
-            
+            bool flag_front1 = (ray_length(Ray{vec_wcps1.front().point, main_wcpt_point}) < 0.01*units::cm);
+
             // Create a list to merge the wcpts
             std::list<WCPoint> old_list;
             std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
-            
+
             // Merge sg1 points into sg2 based on orientation
             if (flag_front && flag_front1) {
                 // Both connect at front - add sg1 in order to front of old_list
@@ -2788,15 +2796,17 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             if (vec_wcps.empty() || vec_wcps1.empty()) return flag_update;
             
             // Determine which end of sg1 connects to main_vertex
-            bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_vtx_point}) < 0.01*units::cm);
-            
+            // Use wcpt().point (steiner node) not fit().point — segment wcpts are anchored at steiner nodes
+            WireCell::Point main_wcpt_point = main_vertex->wcpt().point;
+            bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_wcpt_point}) < 0.01*units::cm);
+
             // Determine which end of sg2 connects to main_vertex
-            bool flag_front1 = (ray_length(Ray{vec_wcps1.front().point, main_vtx_point}) < 0.01*units::cm);
-            
+            bool flag_front1 = (ray_length(Ray{vec_wcps1.front().point, main_wcpt_point}) < 0.01*units::cm);
+
             // Create a list to merge the wcpts
             std::list<WCPoint> old_list;
             std::copy(vec_wcps.begin(), vec_wcps.end(), std::back_inserter(old_list));
-            
+
             // Merge sg2 points into sg1 based on orientation
             if (flag_front && flag_front1) {
                 // Both connect at front - add sg2 in order to front of old_list
@@ -2932,36 +2942,38 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                     SegmentPtr sg1 = graph[*vtx1_eit].segment;
                     if (!sg1 || sg1 == sg) continue;
                     
-                    const auto& pts = sg1->fits();//sg1->wcpts();
-                    if (pts.empty()) continue;
-                    
+                    const auto& sg1_wcpts = sg1->wcpts();
+                    if (sg1_wcpts.empty()) continue;
+
                     // Determine which end of sg connects to vtx1
+                    // Use vtx1->wcpt().point (steiner node), not vtx1_point (fit), to match sg wcpts
                     const auto& sg_wcpts = sg->wcpts();
                     if (sg_wcpts.empty()) continue;
-                    
-                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, vtx1_point}) < 0.01*units::cm);
-                    
+
+                    WireCell::Point vtx1_wcpt_point = vtx1->wcpt().point;
+                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, vtx1_wcpt_point}) < 0.01*units::cm);
+
                     // Find point at ~3cm from vtx1
-                    WireCell::Point min_point = pts.front().point;
+                    WireCell::Point min_point = sg1_wcpts.front().point;
                     double min_dis = 1e9;
                     int min_index = 0;
-                    
-                    for (size_t i = 0; i < pts.size(); i++) {
-                        double dis = std::fabs(ray_length(Ray{pts.at(i).point, vtx1_point}) - 3*units::cm);
+
+                    for (size_t i = 0; i < sg1_wcpts.size(); i++) {
+                        double dis = std::fabs(ray_length(Ray{sg1_wcpts.at(i).point, vtx1_point}) - 3*units::cm);
                         if (dis < min_dis) {
                             min_dis = dis;
-                            min_point = pts.at(i).point;
+                            min_point = sg1_wcpts.at(i).point;
                             min_index = i;
                         }
                     }
-                    
+
                     // Check connectivity from min_point to vtx1
                     bool flag_connect = true;
                     if (flag_start) {
                         for (int i = min_index; i >= 0; i--) {
-                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                            auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
                                 if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                                     flag_connect = false;
                                     break;
@@ -2969,10 +2981,10 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                             }
                         }
                     } else {
-                        for (size_t i = min_index; i < pts.size(); i++) {
-                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                        for (size_t i = min_index; i < sg1_wcpts.size(); i++) {
+                            auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
                                 if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                                     flag_connect = false;
                                     break;
@@ -3010,10 +3022,10 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                 
                 // Check if sg is solid in all three views (if vtx1 has only 2 connections)
                 if ((!flag_update) && boost::degree(vtx1_vd, graph) == 2) {
-                    const auto& tmp_pts = sg->fits();//->wcpts();
-                    for (size_t i = 0; i < tmp_pts.size(); i++) {
-                        WireCell::Point test_p = tmp_pts.at(i).point;
-                        
+                    const auto& sg_wcpts2 = sg->wcpts();
+                    for (size_t i = 0; i < sg_wcpts2.size(); i++) {
+                        WireCell::Point test_p = sg_wcpts2.at(i).point;
+
                         auto test_wpid = dv->contained_by(test_p);
                         if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                             auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
@@ -3021,13 +3033,13 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                                 flag_update = true;
                             }
                         }
-                        
+
                         // Check midpoint
-                        if (i + 1 != tmp_pts.size()) {
+                        if (i + 1 != sg_wcpts2.size()) {
                             WireCell::Point mid_p(
-                                test_p.x() + (tmp_pts.at(i+1).point.x() - test_p.x()) / 2.,
-                                test_p.y() + (tmp_pts.at(i+1).point.y() - test_p.y()) / 2.,
-                                test_p.z() + (tmp_pts.at(i+1).point.z() - test_p.z()) / 2.
+                                test_p.x() + (sg_wcpts2.at(i+1).point.x() - test_p.x()) / 2.,
+                                test_p.y() + (sg_wcpts2.at(i+1).point.y() - test_p.y()) / 2.,
+                                test_p.z() + (sg_wcpts2.at(i+1).point.z() - test_p.z()) / 2.
                             );
                             
                             auto mid_wpid = dv->contained_by(mid_p);
@@ -3117,36 +3129,37 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                     SegmentPtr sg1 = graph[*main_eit].segment;
                     if (!sg1 || sg1 == sg) continue;
                     
-                    const auto& pts = sg1->fits();//sg1->wcpts();
-                    if (pts.empty()) continue;
-                    
+                    const auto& sg1_wcpts = sg1->wcpts();
+                    if (sg1_wcpts.empty()) continue;
+
                     // Determine which end of sg connects to main_vertex
                     const auto& sg_wcpts = sg->wcpts();
                     if (sg_wcpts.empty()) continue;
-                    
-                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, main_vtx_point}) < 0.01*units::cm);
-                    
+
+                    WireCell::Point main_wcpt_point = main_vertex->wcpt().point;
+                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, main_wcpt_point}) < 0.01*units::cm);
+
                     // Find point at ~3cm from main_vertex
-                    WireCell::Point min_point = pts.front().point;
+                    WireCell::Point min_point = sg1_wcpts.front().point;
                     double min_dis = 1e9;
                     int min_index = 0;
-                    
-                    for (size_t i = 0; i < pts.size(); i++) {
-                        double dis = std::fabs(ray_length(Ray{pts.at(i).point, main_vtx_point}) - 3*units::cm);
+
+                    for (size_t i = 0; i < sg1_wcpts.size(); i++) {
+                        double dis = std::fabs(ray_length(Ray{sg1_wcpts.at(i).point, main_vtx_point}) - 3*units::cm);
                         if (dis < min_dis) {
                             min_dis = dis;
-                            min_point = pts.at(i).point;
+                            min_point = sg1_wcpts.at(i).point;
                             min_index = i;
                         }
                     }
-                    
+
                     // Check connectivity from min_point to main_vertex
                     bool flag_connect = true;
                     if (flag_start) {
                         for (int i = min_index; i >= 0; i--) {
-                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                            auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
                                 if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                                     flag_connect = false;
                                     break;
@@ -3154,10 +3167,10 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                             }
                         }
                     } else {
-                        for (size_t i = min_index; i < pts.size(); i++) {
-                            auto test_wpid = dv->contained_by(pts.at(i).point);
+                        for (size_t i = min_index; i < sg1_wcpts.size(); i++) {
+                            auto test_wpid = dv->contained_by(sg1_wcpts.at(i).point);
                             if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                                auto temp_p_raw = transform->backward(pts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
+                                auto temp_p_raw = transform->backward(sg1_wcpts.at(i).point, cluster_t0, test_wpid.face(), test_wpid.apa());
                                 if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                                     flag_connect = false;
                                     break;
@@ -3216,8 +3229,9 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                         
                         if (vec_wcps.empty()) continue;
                         
-                        // Determine orientation
-                        bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_vtx_point}) < 0.01*units::cm);
+                        // Determine orientation: compare against steiner node position, not fit position
+                        WireCell::Point main_wcpt_point2 = main_vertex->wcpt().point;
+                        bool flag_front = (ray_length(Ray{vec_wcps.front().point, main_wcpt_point2}) < 0.01*units::cm);
                         
                         // Find point at ~3cm from main_vertex
                         WCPoint min_wcp = vec_wcps.front();

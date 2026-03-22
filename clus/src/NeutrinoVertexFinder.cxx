@@ -229,9 +229,10 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
         SegmentPtr sg = graph[*eit].segment;
         if (!sg) continue;
         
-        // Check if segment is a shower (has kShowerTrajectory or kShowerTopology flags)
-        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                        sg->flags_any(SegmentFlags::kShowerTopology);
+        // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                        sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
         
         if (is_shower) {
             nshowers++;
@@ -539,8 +540,9 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
         
         // Check if segment has direction and is long enough to matter
         int dir_sign = sg->dirsign();
-        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                        sg->flags_any(SegmentFlags::kShowerTopology);
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                        sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
         double sg_length = segment_track_length(sg);
         
         if (dir_sign != 0 && ((is_shower && sg_length > 5*units::cm) || !is_shower)) {
@@ -586,10 +588,11 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
             if (!sg || map_seg_dir.find(sg) == map_seg_dir.end()) continue;
             
             VertexPtr start_vtx = map_seg_dir[sg].first;
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                            sg->flags_any(SegmentFlags::kShowerTopology);
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                            sg->flags_any(SegmentFlags::kShowerTopology) ||
+                            (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
             // bool is_shower_traj = sg->flags_any(SegmentFlags::kShowerTrajectory);
-            
+
             if (vtx != start_vtx) {
                 // Segment is incoming to this vertex
                 n_in++;
@@ -628,10 +631,12 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
             if (sg1 && sg2) {
                 bool flag_check = true;
                 bool is_sg2_shower_traj = sg2->flags_any(SegmentFlags::kShowerTrajectory);
-                bool is_sg1_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                    sg1->flags_any(SegmentFlags::kShowerTopology);
-                bool is_sg2_shower = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                    sg2->flags_any(SegmentFlags::kShowerTopology);
+                bool is_sg1_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                    sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                    (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
+                bool is_sg2_shower = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                    sg2->flags_any(SegmentFlags::kShowerTopology) ||
+                                    (sg2->has_particle_info() && std::abs(sg2->particle_info()->pdg()) == 11);
                 
                 // Skip check for shower trajectories or both showers
                 if (is_sg2_shower_traj || (is_sg1_shower && is_sg2_shower)) {
@@ -700,10 +705,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         if (!sg || sg->cluster() != &cluster) continue;
         
         // Skip showers
-        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                        sg->flags_any(SegmentFlags::kShowerTopology);
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                        sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
         if (is_shower) continue;
-        
+
         // Skip protons
         if (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 2212) continue;
         
@@ -788,16 +794,20 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     }
     
     // Score based on z position (prefer forward/upstream vertices)
+    // Use fit position (improve_vertex has already run in this branch)
+    auto vtx_pt = [](VertexPtr v) -> WireCell::Point {
+        return v->fit().valid() ? v->fit().point : v->wcpt().point;
+    };
     double min_z = 1e9;
     for (auto vtx : vertex_candidates) {
-        if (vtx->wcpt().point.z() < min_z) min_z = vtx->wcpt().point.z();
+        if (vtx_pt(vtx).z() < min_z) min_z = vtx_pt(vtx).z();
     }
-    
+
     for (auto vtx : vertex_candidates) {
         if (!vtx->descriptor_valid()) continue;
-        
+
         // Position penalty
-        map_vertex_num[vtx] -= (vtx->wcpt().point.z() - min_z) / (200 * units::cm);
+        map_vertex_num[vtx] -= (vtx_pt(vtx).z() - min_z) / (200 * units::cm);
         
         // Score based on connected segments
         auto vd = vtx->get_descriptor();
@@ -807,10 +817,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
             SegmentPtr sg = graph[*e_it].segment;
             if (!sg) continue;
             
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                            sg->flags_any(SegmentFlags::kShowerTopology);
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                            sg->flags_any(SegmentFlags::kShowerTopology) ||
+                            (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
             // bool is_shower_traj = sg->flags_any(SegmentFlags::kShowerTrajectory);
-            
+
             if (is_shower) {
                 map_vertex_num[vtx] += 1.0 / 4.0 / 2.0; // number of showers
                 
@@ -838,11 +849,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
         }
     }
     
-    // Score based on fiducial volume (removed offset_x in WCP, need to validate)
+    // Score based on fiducial volume — use fit position (improve_vertex has already run)
     auto fiducial_utils = cluster.grouping()->get_fiducialutils();
     if (fiducial_utils) {
         for (auto vtx : vertex_candidates) {
-            if (fiducial_utils->inside_fiducial_volume(vtx->wcpt().point)) {
+            if (fiducial_utils->inside_fiducial_volume(vtx_pt(vtx))) {
                 map_vertex_num[vtx] += 0.5; // good - inside fiducial volume
             }
         }
@@ -1079,7 +1090,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 
                 int dir_sign = sg->dirsign();
                 if ((flag_start && dir_sign == -1) || (!flag_start && dir_sign == 1)) {
-                    if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) {
+                    if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                        sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11)) {
                         flag_shower_in = true;
                         in_showers.push_back(sg);
                         break;
@@ -1090,8 +1103,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             if (used_segments.find(current_sg) != used_segments.end()) continue;
             
             double length = segment_track_length(current_sg);
-            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                            current_sg->flags_any(SegmentFlags::kShowerTopology);
+            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                            current_sg->flags_any(SegmentFlags::kShowerTopology) ||
+                            (current_sg->has_particle_info() && std::abs(current_sg->particle_info()->pdg()) == 11);
             
             // Determine segment direction
             if (current_sg->dirsign() == 0 || current_sg->dir_weak() || is_shower || flag_final) {
@@ -1116,11 +1130,15 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                         auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                         current_sg->particle_info(pinfo);
-                    } else if (flag_shower_in && current_sg->has_particle_info() && 
-                              (std::abs(current_sg->particle_info()->pdg()) == 13 || current_sg->particle_info()->pdg() == 0)) {
-                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
-                        auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
-                        current_sg->particle_info(pinfo);
+                    } else if (flag_shower_in) {
+                        // Matches prototype: flag_shower_in && (|pdg|==13 || pdg==0).
+                        // no-particle-info means pdg defaults to 0, which also qualifies.
+                        int cur_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
+                        if (std::abs(cur_pdg) == 13 || cur_pdg == 0) {
+                            auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                            auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
+                            current_sg->particle_info(pinfo);
+                        }
                     } else {
                         auto pair_result = calculate_num_daughter_showers(graph, prev_vtx, current_sg);
                         auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
@@ -1175,19 +1193,23 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                                 current_sg->particle_info(pinfo);
                             }
-                        } else if (current_pdg == 11 && num_daughter_showers <= 2 && !flag_shower_in && 
-                                  !current_sg->flags_any(SegmentFlags::kShowerTopology) && 
-                                  !current_sg->flags_any(SegmentFlags::kShowerTrajectory) && 
+                        } else if (current_pdg == 11 && num_daughter_showers <= 2 && !flag_shower_in &&
+                                  !current_sg->flags_any(SegmentFlags::kShowerTopology) &&
+                                  !current_sg->flags_any(SegmentFlags::kShowerTrajectory) &&
                                   length > 10*units::cm && !flag_only_showers) {
-                            
-                            double direct_length = segment_track_direct_length(current_sg);
-                            if (direct_length >= 34*units::cm || 
-                                (direct_length < 34*units::cm && direct_length > 0.93 * length)) {
-                                auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
-                                auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
-                                current_sg->particle_info(pinfo);
+
+                            // Matches prototype: score <= 100 guard prevents reclassification
+                            // when the classifier is very confident it is an electron
+                            if (current_sg->particle_score() <= 100) {
+                                double direct_length = segment_track_direct_length(current_sg);
+                                if (direct_length >= 34*units::cm ||
+                                    (direct_length < 34*units::cm && direct_length > 0.93 * length)) {
+                                    auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                    auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
+                                    current_sg->particle_info(pinfo);
+                                }
                             }
-                        } else if (current_pdg == 11 && current_sg->flags_any(SegmentFlags::kShowerTrajectory) && 
+                        } else if (current_pdg == 11 && current_sg->flags_any(SegmentFlags::kShowerTrajectory) &&
                                   num_daughter_showers == 1 && !flag_only_showers) {
                             auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
                             if (pair_result1.second > 3*length && pair_result1.second - length > 12*units::cm) {
@@ -1549,28 +1571,9 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
             SegmentPtr sg = graph[*eit].segment;
             if (!sg || sg->cluster() != &cluster) continue;
             if (existing_segments.find(sg) != existing_segments.end()) continue;
-            
+
             // Get the two vertices of this segment
-            auto [vbegin, vend] = boost::vertices(graph);
-            VertexPtr v1 = nullptr, v2 = nullptr;
-            
-            // Find vertices connected to this segment
-            for (auto vit = vbegin; vit != vend; ++vit) {
-                VertexPtr vtx = graph[*vit].vertex;
-                if (!vtx || !vtx->descriptor_valid()) continue;
-                
-                auto vtx_vd = vtx->get_descriptor();
-                auto vtx_edge_range = boost::out_edges(vtx_vd, graph);
-                for (auto ve_it = vtx_edge_range.first; ve_it != vtx_edge_range.second; ++ve_it) {
-                    if (graph[*ve_it].segment == sg) {
-                        if (!v1) v1 = vtx;
-                        else if (!v2 && vtx != v1) v2 = vtx;
-                        break;
-                    }
-                }
-                if (v1 && v2) break;
-            }
-            
+            auto [v1, v2] = find_vertices(graph, sg);
             if (!v1 || !v2) continue;
             
             // Count segments at each vertex
@@ -1621,12 +1624,15 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
                 }
             }
             
-            // Check Case 3: Very short segments (< 0.1 cm) or segments connected to main_vertex
+            // Check Case 3: Very short segments (< 0.1 cm) connected to main_vertex
+            // Prototype always removes v2, relying on set ordering so main_vertex is v1.
+            // Toolkit ordering is non-deterministic, so explicitly remove the non-main vertex.
             if (!flag_continue) {
                 if ((v1 == main_vertex && num_segs_v1 > 1) || (v2 == main_vertex && num_segs_v2 > 1)) {
                     if (length < 0.1*units::cm) {
                         to_be_removed_segments.insert(sg);
-                        to_be_removed_vertices.insert(v2);
+                        VertexPtr to_remove = (v1 == main_vertex) ? v2 : v1;
+                        to_be_removed_vertices.insert(to_remove);
                         flag_continue = true;
                         break;
                     }
@@ -1824,7 +1830,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             SegmentPtr sg = graph[*it].segment;
             if (!sg || sg->cluster() != &cluster) continue;
             existing_segments.insert(sg);
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+                             (sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
             if (!is_shower) ntracks++;
         }
         if (ntracks == 0)
@@ -1862,7 +1869,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         int ntracks = 0, nshowers = 0;
         int n_long_muons = 0;
         for (auto sg : vertex_segments) {
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+                             (sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
             if (is_shower) nshowers++;
             else ntracks++;
             if (segments_in_long_muon.find(sg) != segments_in_long_muon.end()) n_long_muons++;
@@ -1977,11 +1985,12 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             
             int ntracks = 0, nshowers = 0;
             for (auto sg : vertex_segments) {
-                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                 (sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
                 if (is_shower) nshowers++;
                 else ntracks++;
             }
-            
+
             if (ntracks == 0 && vtx != main_vertex) continue;
             if (vertices_in_long_muon.find(vtx) != vertices_in_long_muon.end()) continue;
             if (vtx == main_vertex && flag_found_vertex_activities) continue;
@@ -2103,7 +2112,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     }
                     
                     bool flag_print = false;
-                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology);
+                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                     (sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
                     if (start_v && end_v && !is_shower) {
                         // Track
                         int start_n = boost::out_degree(source_v, graph);
@@ -2415,18 +2425,20 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
         if (sg1->flags_any(SegmentFlags::kShowerTrajectory)) continue;
         if (!sg1->dir_weak() && sg1->dirsign() != 0) continue;
         
-        // Check shower topology case: long segments with no direction
-        if (sg1->flags_any(SegmentFlags::kShowerTopology) && 
-            sg1->dirsign() == 0 && 
+        // Check shower topology case: long segments with no direction.
+        // Matches prototype: if large-shower-topology → try 170°, then fall through to 165° check.
+        // All other segments (small-shower-topology, non-topology) → skip.
+        if (sg1->flags_any(SegmentFlags::kShowerTopology) &&
+            sg1->dirsign() == 0 &&
             segment_track_length(sg1) > 40*units::cm) {
-            
+
             // Calculate direction at 40cm
             Facade::geo_vector_t dir2 = segment_cal_dir_3vector(sg1, other_vtx_pt, 40*units::cm);
-            
+
             if (dir1.magnitude() > 0 && dir2.magnitude() > 0) {
                 double cos_angle = std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0);
                 double angle = std::acos(cos_angle) / M_PI * 180.0;
-                
+
                 if (angle > 170) {
                     // Change particle type and mass
                     if (!sg1->particle_info()) {
@@ -2435,7 +2447,7 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
                     sg1->particle_info()->set_pdg(particle_type);
                     sg1->particle_info()->set_mass(mass);
                     sg1->unset_flags(SegmentFlags::kShowerTopology);
-                    
+
                     // Recursively propagate changes
                     change_daughter_type(graph, other_vtx, sg1, particle_type, mass, particle_data, recomb_model);
                     VertexPtr sg1_other_vtx = find_other_vertex(graph, sg1, other_vtx);
@@ -2444,14 +2456,13 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
                     }
                 }
             }
-            continue;
-        } else if (sg1->flags_any(SegmentFlags::kShowerTopology) && 
-                   sg1->dirsign() == 0 && 
-                   segment_track_length(sg1) <= 40*units::cm) {
+            // Fall through to general 165° check below (matches prototype)
+        } else {
+            // Not a large-shower-topology segment → skip (matches prototype's else continue)
             continue;
         }
-        
-        // Check general case: segments longer than 10cm
+
+        // General check: only reached for large-shower-topology segments (length > 40cm implies > 10cm)
         if (segment_track_length(sg1) > 10*units::cm) {
             // Calculate direction at 15cm
             Facade::geo_vector_t dir2 = segment_cal_dir_3vector(sg1, other_vtx_pt, 15*units::cm);
@@ -2571,9 +2582,10 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
                     if (used_segments.find(sg1) != used_segments.end()) continue;
                     
                     double length = segment_track_length(sg1);
-                    bool is_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                    sg1->flags_any(SegmentFlags::kShowerTopology);
-                    
+                    bool is_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                    sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                    (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
+
                     if (is_shower) {
                         // Check shower significance
                         auto pair_result = calculate_num_daughter_showers(graph, vtx, sg1, false);

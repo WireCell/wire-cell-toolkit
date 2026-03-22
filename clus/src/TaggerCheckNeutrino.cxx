@@ -117,13 +117,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // shower clustering
         pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
 
-        // // main vertex determination
-        // pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
+        // main vertex determination
+        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
 
-        // if (main_vertex !=0){
-        //     map_cluster_main_vertices[main_cluster] = main_vertex;
-        //     main_vertex = 0;
-        // }
+        if (main_vertex !=0){
+            map_cluster_main_vertices[main_cluster] = main_vertex;
+            main_vertex = 0;
+        }
     }
 
 
