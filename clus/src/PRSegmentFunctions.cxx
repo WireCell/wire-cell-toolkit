@@ -937,7 +937,7 @@ namespace WireCell::Clus::PR {
                 dir_1 = dir_1.norm();
             }
             
-            double tmp_dQ_dx = segment_median_dQ_dx(seg) / (mip_dQ_dx);
+            double tmp_dQ_dx = segment_median_dQ_dx(seg, first_idx, second_idx) / (mip_dQ_dx);
             
             // Calculate angle difference
             double dot_product = drift_dir.dot(dir_1);
@@ -1897,7 +1897,7 @@ namespace WireCell::Clus::PR {
             // debug: print number of points assigned to each segment
             // for (const auto& [seg, geo_points] : map_segment_points) {
             //     std::cout << "[clustering_points_segments] cloud: " << cloud_name
-            //               << "  seg: " << seg.get()
+            //               << "  seg id: " << seg->id()
             //               << "  npoints: " << geo_points.size() << std::endl;
             // }
         }

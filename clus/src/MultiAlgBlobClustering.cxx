@@ -163,6 +163,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.individual = get<bool>(bps, "individual", false);
             bpc.dQdx_scale = get<double>(bps, "dQdx_scale", 1.0);
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
+            bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             
             m_bee_points_configs.push_back(bpc);
             
@@ -482,51 +483,56 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
 
         if (!segment) continue;
 
-        // Get the fitted points from this segment
-        const auto& fits = segment->fits();
+        if (config.use_associate_points) {
+            // --- shower_track mode: use associated points, charge from shower flags ---
+            const bool is_shower =
+                segment->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
+                segment->flags_any(PR::SegmentFlags::kShowerTopology);
+            const double charge = is_shower ? 15000.0 : 0.0;
 
-        if (fits.empty()) continue;
+            auto dpc = segment->dpcloud("associate_points");
+            if (!dpc) {
+                segment_id++;
+                continue;
+            }
+            for (const auto& dp : dpc->get_points()) {
+                WireCell::Point point(dp.x, dp.y, dp.z);
+                apa_bpts.global.append(point, charge, segment_id, 0);
+            }
+        } else {
+            // --- default mode: use fitted points with dQdx scale/offset ---
+            const auto& fits = segment->fits();
 
-        // std::cout << "Segment " << segment_id << " has " << fits.size() << " fitted points." << std::endl;
+            if (fits.empty()) {
+                segment_id++;
+                continue;
+            }
 
-        SPDLOG_LOGGER_DEBUG(log, "Segment {} has {} fitted points", segment_id, fits.size());
+            SPDLOG_LOGGER_DEBUG(log, "Segment {} has {} fitted points", segment_id, fits.size());
 
-        // Process each fitted point
-        for (const auto& fit : fits) {
-            if (!fit.valid()) continue;  // Skip invalid fits
+            for (const auto& fit : fits) {
+                if (!fit.valid()) continue;
 
-            // Extract 3D point from fit
-            const auto& point = fit.point;
+                const auto& point = fit.point;
+                double charge = fit.dQ;
+                charge = charge * config.dQdx_scale + config.dQdx_offset;
+                if (charge < 0) charge = 0;
 
-
-
-            // Get charge (dQ) from fit, then apply scale and offset
-            double charge = fit.dQ;
-            charge = charge * config.dQdx_scale + config.dQdx_offset;
-            if (charge < 0) charge = 0;  // Use 0 if charge is invalid
-
-            // std::cout << "Test: Segment: " << segment_id << " Point: " << point << " Fit valid: " << fit.valid() << " " << fit.index << " " << fit.range << " " << fit.dQ << " " << charge << std::endl;
-
-
-            if (config.individual) {
-                // Fill individual APA/face bee points
-                if (fit.paf.first >= 0 && fit.paf.second >= 0) {
-                    int apa = fit.paf.first;
-                    int face = fit.paf.second;
-
-                    auto it_apa = apa_bpts.by_apa_face.find(apa);
-                    if (it_apa != apa_bpts.by_apa_face.end()) {
-                        auto it_face = it_apa->second.find(face);
-                        if (it_face != it_apa->second.end()) {
-                            // Append point: (position, charge, cluster_id, type)
-                            it_face->second.append(point, charge, segment_id, 0);
+                if (config.individual) {
+                    if (fit.paf.first >= 0 && fit.paf.second >= 0) {
+                        int apa = fit.paf.first;
+                        int face = fit.paf.second;
+                        auto it_apa = apa_bpts.by_apa_face.find(apa);
+                        if (it_apa != apa_bpts.by_apa_face.end()) {
+                            auto it_face = it_apa->second.find(face);
+                            if (it_face != it_apa->second.end()) {
+                                it_face->second.append(point, charge, segment_id, 0);
+                            }
                         }
                     }
+                } else {
+                    apa_bpts.global.append(point, charge, segment_id, 0);
                 }
-            } else {
-                // Fill global bee points
-                // Append point: (position, charge, cluster_id, type)
-                apa_bpts.global.append(point, charge, segment_id, 0);
             }
         }
 

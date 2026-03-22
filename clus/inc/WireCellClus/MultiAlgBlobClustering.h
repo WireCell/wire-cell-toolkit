@@ -58,6 +58,7 @@ namespace WireCell::Clus {
             int filter{1};// 1 for on, 0 for off, -1 for inverse filter
             double dQdx_scale{1.0};
             double dQdx_offset{0.0};
+            bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
         };
 
         // Vector to store configurations for multiple bee points sets
