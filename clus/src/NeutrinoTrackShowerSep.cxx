@@ -146,19 +146,19 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_track += MS(Clock::now() - t0);
         }
 
-        if (m_perf) {
-            double length = segment_track_length(seg, 0);
-            int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
-            double mass   = seg->has_particle_info() ? seg->particle_info()->mass() / units::MeV : 0.0;
-            double ke     = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0;
-            double score  = seg->particle_score();
-            SPDLOG_LOGGER_DEBUG(s_log,
-                "determine_direction: {} len={:.2f}cm dir={} weak={} start_n={} end_n={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
-                seg_type, length / units::cm,
-                seg->dirsign(), seg->dir_weak() ? 1 : 0,
-                start_n, end_n,
-                pdg, mass, ke, score);
-        }
+        // if (m_perf) {
+        //     double length = segment_track_length(seg, 0);
+        //     int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
+        //     double mass   = seg->has_particle_info() ? seg->particle_info()->mass() / units::MeV : 0.0;
+        //     double ke     = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0;
+        //     double score  = seg->particle_score();
+        //     SPDLOG_LOGGER_DEBUG(s_log,
+        //         "determine_direction: {} len={:.2f}cm dir={} weak={} start_n={} end_n={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
+        //         seg_type, length / units::cm,
+        //         seg->dirsign(), seg->dir_weak() ? 1 : 0,
+        //         start_n, end_n,
+        //         pdg, mass, ke, score);
+        // }
     }
 
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "determine_direction timing: shower_traj={:.3f}ms shower_topo={:.3f}ms track={:.3f}ms TOTAL={:.3f}ms",
@@ -184,9 +184,11 @@ std::pair<int, double> PatternAlgorithms::calculate_num_daughter_showers(Graph& 
             
             if (used_segments.find(current_sg) != used_segments.end()) continue; // looked at it before
             
-            // Check if segment is a shower (has kShowerTrajectory or kShowerTopology flags)
-            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                           current_sg->flags_any(SegmentFlags::kShowerTopology);
+            // Check if segment is a shower: trajectory flag, topology flag, or electron by dQ/dx
+            // (matches prototype's get_flag_shower() = flag_shower_trajectory || flag_shower_topology || get_flag_shower_dQdx())
+            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                             current_sg->flags_any(SegmentFlags::kShowerTopology) ||
+                             (current_sg->has_particle_info() && std::abs(current_sg->particle_info()->pdg()) == 11);
             
             if (is_shower || (!flag_count_shower)) {
                 number_showers++;
@@ -225,12 +227,14 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
         // Skip if segment is null or doesn't belong to this cluster
         if (!sg || sg->cluster() != &cluster) continue;
         
-        // Skip if segment is a shower
-        if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) continue;
-        
+        // Skip if segment is a shower (trajectory, topology, or electron by dQ/dx)
+        // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
+        if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+            (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11)) continue;
+
         // Skip if no direction or weak direction
         if (sg->dirsign() == 0 || sg->dir_weak()) continue;
-        
+
         // Get the two vertices of this segment
         auto [vertex1, vertex2] = find_vertices(graph, sg);
         if (!vertex1 || !vertex2) continue;
@@ -307,11 +311,12 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
             length < 15*units::cm) {
             
             // Reclassify as electron (PDG 11)
+            double em_mass = particle_data->get_particle_mass(11);
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
                 11,                                              // electron PDG
-                particle_data->get_particle_mass(11),           // electron mass
+                em_mass,                                         // electron mass
                 particle_data->pdg_to_name(11),                 // "e-"
-                WireCell::D4Vector<double>(0, 0, 0, 0)         // zero 4-momentum (will be recalculated)
+                WireCell::D4Vector<double>(em_mass, 0, 0, 0)    // at-rest 4-momentum
             );
             sg->particle_info(pinfo);
             
@@ -369,9 +374,11 @@ void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluste
             // "in" means: (at front and direction is -1) OR (at back and direction is 1)
             if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
                 n_in++;
-                
-                // Check if it's a shower
-                if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology)) {
+
+                // Check if it's a shower (trajectory, topology, or electron by dQ/dx)
+                // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
+                if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+                    (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11)) {
                     n_in_shower++;
                 } else {
                     in_tracks.push_back(sg);
@@ -616,12 +623,13 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                 
                 bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
                 
-                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                               sg->flags_any(SegmentFlags::kShowerTopology);
-                
+                // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                 sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                 (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
                 // Check if this is an "incoming" segment (pointing into vertex)
                 if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
-                    // n_in++;
                     if (is_shower) {
                         n_in_shower++;
                     }
@@ -650,13 +658,8 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     
                     // Set as electron (PDG 11)
                     int pdg_code = 11;
-                    auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                    
-                    // Recalculate 4-momentum if segment has valid energy
-                    if (sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
-                        four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
-                    }
-                    
+                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(
                         pdg_code,
                         particle_data->get_particle_mass(pdg_code),
@@ -673,20 +676,15 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                 for (auto it1 = map_no_dir_segments.begin(); it1 != map_no_dir_segments.end(); it1++) {
                     SegmentPtr sg1 = it1->first;
                     if (used_segments.find(sg1) != used_segments.end()) continue;
-                    
-                    // If it's not already a shower, set as electron
-                    bool is_shower = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                   sg1->flags_any(SegmentFlags::kShowerTopology);
-                    
-                    if (!is_shower) {
+
+                    // If it's not already a shower, reclassify as electron
+                    // matches prototype: set particle_type=11 only if !get_flag_shower()
+                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                      sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                      (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
+                    if (!is_shower1) {
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        
-                        // Recalculate 4-momentum if segment has valid energy
-                        if (sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
-                        }
-                        
+                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -695,7 +693,21 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                         );
                         sg1->particle_info(pinfo);
                     }
-                    
+
+                    // Prototype calls cal_4mom() for ALL segments here (including showers) if energy>0.
+                    // Recalculate 4-momentum for showers that already have particle info with valid energy.
+                    if (is_shower1 && sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
+                        int pdg_code = sg1->particle_info()->pdg();
+                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                            pdg_code,
+                            particle_data->get_particle_mass(pdg_code),
+                            particle_data->pdg_to_name(pdg_code),
+                            four_momentum
+                        );
+                        sg1->particle_info(pinfo);
+                    }
+
                     sg1->dir_weak(true);
                     used_segments.insert(sg1);
                     flag_update = true;
@@ -722,13 +734,13 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
             // Skip if segment is null or doesn't belong to this cluster
             if (!sg || !sg->cluster() || sg->cluster() != &cluster) continue;
             
-            // Skip showers
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                           sg->flags_any(SegmentFlags::kShowerTopology);
-            if (is_shower) continue;
-            
+            // Skip showers (trajectory, topology, or electron by dQ/dx)
+            // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
+            if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
+                (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11)) continue;
+
             double length = segment_track_length(sg);
-            
+
             // Check if segment has no direction, weak direction, or is a proton
             int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
             if (sg->dirsign() == 0 || sg->dir_weak() || std::abs(pdg) == 2212) {
@@ -758,8 +770,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     const auto& wcpts = sg1->wcpts();
                     if (wcpts.size() < 2) continue;
                     
-                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                     sg1->flags_any(SegmentFlags::kShowerTopology);
+                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                     sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                     (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
                     if (is_shower1) nshowers[0]++;
                     
                     auto front_pt = wcpts.front().point;
@@ -786,8 +799,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     const auto& wcpts = sg1->wcpts();
                     if (wcpts.size() < 2) continue;
                     
-                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                     sg1->flags_any(SegmentFlags::kShowerTopology);
+                    bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                     sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                     (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
                     if (is_shower1) nshowers[1]++;
                     
                     auto front_pt = wcpts.front().point;
@@ -810,14 +824,11 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 
                 // Case A: Many showers and very short track
                 if ((nshowers[0] + nshowers[1] > 2 && length < 5*units::cm) ||
-                    (nshowers[0]+1 == nvtx1_segs && nshowers[1]+1 == nvtx2_segs && 
+                    (nshowers[0]+1 == nvtx1_segs && nshowers[1]+1 == nvtx2_segs &&
                      nshowers[0] > 0 && nshowers[1] > 0 && length < 5*units::cm)) {
-                    
+
                     int pdg_code = 11;
-                    auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                    if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                        four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                    }
+                    auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(
                         pdg_code,
                         particle_data->get_particle_mass(pdg_code),
@@ -852,17 +863,14 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double dis_front = ray_length(Ray{vtx1_pt, front_pt});
                         double dis_back = ray_length(Ray{vtx1_pt, back_pt});
                         bool flag_start = (dis_front < dis_back);
-                        
+
                         if (flag_start)
                             sg->dirsign(-1);
                         else
                             sg->dirsign(1);
-                        
+
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                        }
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -897,17 +905,14 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         double dis_front = ray_length(Ray{vtx2_pt, front_pt});
                         double dis_back = ray_length(Ray{vtx2_pt, back_pt});
                         bool flag_start = (dis_front < dis_back);
-                        
+
                         if (flag_start)
                             sg->dirsign(-1);
                         else
                             sg->dirsign(1);
-                        
+
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                        }
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -933,10 +938,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                    (nprotons[1] + nshowers[1] == 0 && nshowers[0] >= 2)))) {
                         
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                        }
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -961,12 +963,13 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             if (!sg1 || sg1 == sg) continue;
                             
                             WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx1_pt, 15*units::cm);
-                            bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                             sg1->flags_any(SegmentFlags::kShowerTopology);
+                            bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                             sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                             (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
                             if (is_shower1) {
                                 double angle = dir1.angle(dir2) / 3.14159265 * 180.0;
                                 if (max_angle1 < angle) max_angle1 = angle;
-                                
+
                                 auto pair_result = calculate_num_daughter_showers(graph, two_vertices.first, sg1);
                                 num_s1 += pair_result.first;
                                 length_s1 += pair_result.second;
@@ -979,12 +982,13 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             if (!sg1 || sg1 == sg) continue;
                             
                             WireCell::Vector dir2 = segment_cal_dir_3vector(sg1, vtx2_pt, 15*units::cm);
-                            bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                             sg1->flags_any(SegmentFlags::kShowerTopology);
+                            bool is_shower1 = sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                             sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                             (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
                             if (is_shower1) {
                                 double angle = dir1.angle(dir2) / 3.14159265 * 180.0;
                                 if (max_angle2 < angle) max_angle2 = angle;
-                                
+
                                 auto pair_result = calculate_num_daughter_showers(graph, two_vertices.second, sg1);
                                 num_s2 += pair_result.first;
                                 length_s2 += pair_result.second;
@@ -997,10 +1001,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                       (num_s2 >= 4 && length_s2 > 20*units::cm)))) {
                             
                             int pdg_code = 11;
-                            auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                            if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                                four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                            }
+                            auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                             auto pinfo = std::make_shared<Aux::ParticleInfo>(
                                 pdg_code,
                                 particle_data->get_particle_mass(pdg_code),
@@ -1053,10 +1054,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                        }
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1067,7 +1065,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         flag_update = true;
                     }
                 }
-                
+
                 // Case B: Setting direction for segments between shower vertices
                 if (((nshowers[0]+1 == nvtx1_segs) || nshowers[0] > 0) &&
                     ((nshowers[1]+1 == nvtx2_segs) || nshowers[1] > 0) &&
@@ -1097,12 +1095,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             }
                         }
                         sg->dir_weak(true);
-                        
+
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                        }
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1131,10 +1126,11 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         for (auto e_it = edge_range1.first; e_it != edge_range1.second; ++e_it) {
                             SegmentPtr sg2 = graph[*e_it].segment;
                             if (!sg2 || sg2 == sg) continue;
-                            bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                             sg2->flags_any(SegmentFlags::kShowerTopology);
+                            bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                             sg2->flags_any(SegmentFlags::kShowerTopology) ||
+                                             (sg2->has_particle_info() && std::abs(sg2->particle_info()->pdg()) == 11);
                             if (!is_shower2) continue;
-                            
+
                             WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx1_pt, 10*units::cm);
                             double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
                             if (angle < min_angle) {
@@ -1158,10 +1154,11 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         for (auto e_it = edge_range2.first; e_it != edge_range2.second; ++e_it) {
                             SegmentPtr sg2 = graph[*e_it].segment;
                             if (!sg2 || sg2 == sg) continue;
-                            bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                             sg2->flags_any(SegmentFlags::kShowerTopology);
+                            bool is_shower2 = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                             sg2->flags_any(SegmentFlags::kShowerTopology) ||
+                                             (sg2->has_particle_info() && std::abs(sg2->particle_info()->pdg()) == 11);
                             if (!is_shower2) continue;
-                            
+
                             WireCell::Vector v2 = segment_cal_dir_3vector(sg2, vtx2_pt, 10*units::cm);
                             double angle = std::abs(v1.angle(v2) / 3.14159265 * 180.0 - 180.0);
                             if (angle < min_angle) {
@@ -1179,10 +1176,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                        if (sg->has_particle_info() && sg->particle_info()->energy() > 0) {
-                            four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
-                        }
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1193,7 +1187,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         flag_update = true;
                     }
                 }
-                
+
             } // end if no direction or weak or proton
         } // loop over all segments
     } // while flag_update
@@ -1269,13 +1263,8 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
                     SegmentPtr sg1 = *it1;
                     
                     int pdg_code = 11;
-                    auto four_momentum = WireCell::D4Vector<double>(0, 0, 0, 0);
-                    
-                    // Recalculate 4-momentum if segment has valid energy
-                    if (sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
-                        four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
-                    }
-                    
+                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(
                         pdg_code,
                         particle_data->get_particle_mass(pdg_code),
@@ -1302,9 +1291,11 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
         SegmentPtr sg = graph[*eit].segment;
         if (!sg || sg->cluster() != &cluster) continue;
         
-        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                        sg->flags_any(SegmentFlags::kShowerTopology);
-        
+        // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                        sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
         if (is_shower) {
             shower_set.insert(sg);
         } else {
@@ -1358,11 +1349,12 @@ void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facad
         // Reclassify segment as electron if all points are close to showers
         if (flag_change) {
             int pdg_code = 11;
+            double em_mass = particle_data->get_particle_mass(pdg_code);
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
                 pdg_code,
-                particle_data->get_particle_mass(pdg_code),
+                em_mass,
                 particle_data->pdg_to_name(pdg_code),
-                WireCell::D4Vector<double>(0, 0, 0, 0)
+                WireCell::D4Vector<double>(em_mass, 0, 0, 0)
             );
             sg->particle_info(pinfo);
         }
@@ -1410,9 +1402,11 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
             
             bool flag_start = (dis_front < dis_back); // vertex is at the front of segment
             
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                           sg->flags_any(SegmentFlags::kShowerTopology);
-            
+            // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                           sg->flags_any(SegmentFlags::kShowerTopology) ||
+                           (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
             // Check if this is an "incoming" segment (pointing into vertex)
             if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
                 n_in++;
@@ -1420,7 +1414,7 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
                     n_in_shower++;
                 }
             }
-            
+
             // Check if this is an "outgoing" track (pointing away from vertex)
             if ((flag_start && sg->dirsign() == 1) || (!flag_start && sg->dirsign() == -1)) {
                 if (!is_shower) {
@@ -1462,9 +1456,11 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
         if (!sg || sg->cluster() != &cluster) continue;
         
         double length = segment_track_length(sg);
-        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                        sg->flags_any(SegmentFlags::kShowerTopology);
-        
+        // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
+        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                        sg->flags_any(SegmentFlags::kShowerTopology) ||
+                        (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
         if (is_shower) {
             n_showers++;
             length_showers += length;
@@ -1569,9 +1565,10 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
                         SegmentPtr sg = graph[*e_it].segment;
                         if (!sg) continue;
-                        
-                        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                       sg->flags_any(SegmentFlags::kShowerTopology);
+
+                        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                       sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                       (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
                         if (is_shower) {
                             double length = segment_track_length(sg);
                             if (length > max_length) {
@@ -1581,7 +1578,7 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                         }
                     }
                 }
-                
+
                 if (max_segment != nullptr && max_length > 5*units::cm) {
                     WireCell::Point vtx2_pt = pair_vertices.second->fit().valid() ? pair_vertices.second->fit().point : pair_vertices.second->wcpt().point;
                     WireCell::Vector dir = segment_cal_dir_3vector(max_segment, vtx2_pt, 15*units::cm);
@@ -1601,9 +1598,10 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
                         SegmentPtr sg = graph[*e_it].segment;
                         if (!sg) continue;
-                        
-                        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                       sg->flags_any(SegmentFlags::kShowerTopology);
+
+                        bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                       sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                       (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
                         if (is_shower) {
                             double length = segment_track_length(sg);
                             if (length > max_length) {
@@ -1613,7 +1611,7 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                         }
                     }
                 }
-                
+
                 if (max_segment != nullptr && max_length > 5*units::cm) {
                     WireCell::Point vtx1_pt = pair_vertices.first->fit().valid() ? pair_vertices.first->fit().point : pair_vertices.first->wcpt().point;
                     WireCell::Vector dir = segment_cal_dir_3vector(max_segment, vtx1_pt, 15*units::cm);
@@ -1691,50 +1689,52 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                     flag_change_showers = false;
                 }
         } else if (length_tracks < 35*units::cm && length_tracks + length_showers < 50*units::cm && length_showers < 15*units::cm) {
-            
-            // Check if all non-shower segments are connected to shower segments
-            if (flag_change_showers) {
-                for (auto eit = ebegin; eit != eend; ++eit) {
-                    SegmentPtr sg = graph[*eit].segment;
-                    if (!sg || sg->cluster() != &cluster) continue;
-                    
-                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                   sg->flags_any(SegmentFlags::kShowerTopology);
-                    
-                    if (!is_shower) {
-                        auto pair_vertices = find_vertices(graph, sg);
-                        bool flag_shower = false;
-                        
-                        if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
-                            auto vd1 = pair_vertices.first->get_descriptor();
-                            auto edge_range = boost::out_edges(vd1, graph);
-                            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                                SegmentPtr sg1 = graph[*e_it].segment;
-                                if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                           sg1->flags_any(SegmentFlags::kShowerTopology))) {
-                                    flag_shower = true;
-                                    break;
-                                }
+
+            // matches prototype: set true then verify each non-shower touches a shower neighbor
+            flag_change_showers = true;
+            for (auto eit = ebegin; eit != eend; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (!sg || sg->cluster() != &cluster) continue;
+
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                               sg->flags_any(SegmentFlags::kShowerTopology) ||
+                               (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
+                if (!is_shower) {
+                    auto pair_vertices = find_vertices(graph, sg);
+                    bool flag_shower = false;
+
+                    if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
+                        auto vd1 = pair_vertices.first->get_descriptor();
+                        auto edge_range = boost::out_edges(vd1, graph);
+                        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                            SegmentPtr sg1 = graph[*e_it].segment;
+                            if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                       sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                       (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11))) {
+                                flag_shower = true;
+                                break;
                             }
                         }
-                        
-                        if (!flag_shower && pair_vertices.second && pair_vertices.second->descriptor_valid()) {
-                            auto vd2 = pair_vertices.second->get_descriptor();
-                            auto edge_range = boost::out_edges(vd2, graph);
-                            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                                SegmentPtr sg1 = graph[*e_it].segment;
-                                if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                           sg1->flags_any(SegmentFlags::kShowerTopology))) {
-                                    flag_shower = true;
-                                    break;
-                                }
+                    }
+
+                    if (!flag_shower && pair_vertices.second && pair_vertices.second->descriptor_valid()) {
+                        auto vd2 = pair_vertices.second->get_descriptor();
+                        auto edge_range = boost::out_edges(vd2, graph);
+                        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                            SegmentPtr sg1 = graph[*e_it].segment;
+                            if (sg1 && (sg1->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                       sg1->flags_any(SegmentFlags::kShowerTopology) ||
+                                       (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11))) {
+                                flag_shower = true;
+                                break;
                             }
                         }
-                        
-                        if (!flag_shower) {
-                            flag_change_showers = false;
-                            break;
-                        }
+                    }
+
+                    if (!flag_shower) {
+                        flag_change_showers = false;
+                        break;
                     }
                 }
             }
@@ -1745,10 +1745,11 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
         for (auto eit = ebegin; eit != eend; ++eit) {
             SegmentPtr sg = graph[*eit].segment;
             if (!sg || sg->cluster() != &cluster) continue;
-            
-            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                           sg->flags_any(SegmentFlags::kShowerTopology);
-            
+
+            bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                           sg->flags_any(SegmentFlags::kShowerTopology) ||
+                           (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
             if (!is_shower) {
                 int pdg_code = 11;
                 double electron_mass = particle_data->get_particle_mass(pdg_code);
@@ -1756,7 +1757,7 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                     pdg_code,
                     electron_mass,
                     particle_data->pdg_to_name(pdg_code),
-                    WireCell::D4Vector<double>(0, 0, 0, 0)
+                    WireCell::D4Vector<double>(electron_mass, 0, 0, 0)
                 );
                 sg->particle_info(pinfo);
             }
@@ -1765,39 +1766,74 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 }
 
 void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, IDetectorVolumes::pointer dv){
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = Clock::now();
+
     // Examine good tracks first
     examine_good_tracks(graph, cluster, particle_data);
-    
+    MS t_examine_good_tracks(Clock::now() - t0); t0 = Clock::now();
+
     // If multiple tracks in, make them undetermined
     fix_maps_multiple_tracks_in(graph, cluster);
-    
+    MS t_fix_multiple_tracks_in(Clock::now() - t0); t0 = Clock::now();
+
     // If one shower in and a good track out, reverse the shower
     fix_maps_shower_in_track_out(graph, cluster);
-    
+    MS t_fix_shower_in_track_out_1(Clock::now() - t0); t0 = Clock::now();
+
     // If there is one good track in, turn everything else to out
     improve_maps_one_in(graph, cluster, particle_data, recomb_model);
-    
+    MS t_improve_one_in(Clock::now() - t0); t0 = Clock::now();
+
     // If one shower in and a track out, change the track to shower
     improve_maps_shower_in_track_out(graph, cluster, particle_data, recomb_model);
-    
+    MS t_improve_shower_in_track_out_1(Clock::now() - t0); t0 = Clock::now();
+
     // Help to change tracks around shower to showers
     improve_maps_no_dir_tracks(graph, cluster, particle_data, recomb_model);
-    
+    MS t_improve_no_dir_tracks(Clock::now() - t0); t0 = Clock::now();
+
     // If one shower in and a track out, change the track to shower (no reverse flag)
     improve_maps_shower_in_track_out(graph, cluster, particle_data, recomb_model, false);
-    
+    MS t_improve_shower_in_track_out_2(Clock::now() - t0); t0 = Clock::now();
+
     // If multiple tracks in, change track to shower
     improve_maps_multiple_tracks_in(graph, cluster, particle_data, recomb_model);
-    
+    MS t_improve_multiple_tracks_in(Clock::now() - t0); t0 = Clock::now();
+
     // If one shower in and a good track out, reverse the shower
     fix_maps_shower_in_track_out(graph, cluster);
-    
+    MS t_fix_shower_in_track_out_2(Clock::now() - t0); t0 = Clock::now();
+
     // Judgement for no-direction tracks close to showers
     judge_no_dir_tracks_close_to_showers(graph, cluster, particle_data, dv);
-    
+    MS t_judge_no_dir_tracks(Clock::now() - t0); t0 = Clock::now();
+
     // Examine maps for physics violations
     examine_maps(graph, cluster);
-    
+    MS t_examine_maps(Clock::now() - t0); t0 = Clock::now();
+
     // Examine all showers comprehensively
     examine_all_showers(graph, cluster, particle_data);
+    MS t_examine_all_showers(Clock::now() - t0);
+
+    if (m_perf) {
+        MS t_total_ms(Clock::now() - t_total);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "shower_determining_in_main_cluster timing: "
+            "examine_good_tracks={:.3f}ms fix_multiple_tracks_in={:.3f}ms "
+            "fix_shower_in_track_out_1={:.3f}ms improve_one_in={:.3f}ms "
+            "improve_shower_in_track_out_1={:.3f}ms improve_no_dir_tracks={:.3f}ms "
+            "improve_shower_in_track_out_2={:.3f}ms improve_multiple_tracks_in={:.3f}ms "
+            "fix_shower_in_track_out_2={:.3f}ms judge_no_dir_tracks={:.3f}ms "
+            "examine_maps={:.3f}ms examine_all_showers={:.3f}ms TOTAL={:.3f}ms",
+            t_examine_good_tracks.count(), t_fix_multiple_tracks_in.count(),
+            t_fix_shower_in_track_out_1.count(), t_improve_one_in.count(),
+            t_improve_shower_in_track_out_1.count(), t_improve_no_dir_tracks.count(),
+            t_improve_shower_in_track_out_2.count(), t_improve_multiple_tracks_in.count(),
+            t_fix_shower_in_track_out_2.count(), t_judge_no_dir_tracks.count(),
+            t_examine_maps.count(), t_examine_all_showers.count(), t_total_ms.count());
+    }
 }
