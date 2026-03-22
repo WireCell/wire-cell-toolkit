@@ -1493,8 +1493,8 @@ namespace WireCell::Clus::PR {
         
         // Short track what to do???
         if (pdg_code == 0) {
-            // Calculate median dQ/dx
-            double medium_dQ_dx = segment_median_dQ_dx(segment);
+            // Calculate median dQ/dx over trimmed range (excluding vertex points)
+            double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
             if (medium_dQ_dx > MIP_dQdx * 1.75) {
                 pdg_code = 2212; // proton
             } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
@@ -1521,7 +1521,7 @@ namespace WireCell::Clus::PR {
         if (length < 1.5*units::cm && (start_n == 1 || end_n == 1)) {
             if (start_n == 1 && end_n > 2) {
                 segment->dirsign(-1);
-                double medium_dQ_dx = segment_median_dQ_dx(segment);
+                double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
                 if (medium_dQ_dx > MIP_dQdx * 1.75) {
                     pdg_code = 2212;
                 } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
@@ -1529,7 +1529,7 @@ namespace WireCell::Clus::PR {
                 }
             } else if (end_n == 1 && start_n > 2) {
                 segment->dirsign(1);
-                double medium_dQ_dx = segment_median_dQ_dx(segment);
+                double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
                 if (medium_dQ_dx > MIP_dQdx * 1.75) {
                     pdg_code = 2212;
                 } else if (medium_dQ_dx < MIP_dQdx * 1.2) {

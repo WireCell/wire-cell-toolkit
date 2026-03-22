@@ -68,36 +68,41 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
 }
 
 void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model) {
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    MS t_shower_traj{0}, t_shower_topo{0}, t_track{0};
+
     // Iterate through all edges (segments) in the graph
     auto [ebegin, eend] = boost::edges(graph);
     for (auto eit = ebegin; eit != eend; ++eit) {
         SegmentPtr seg = graph[*eit].segment;
-        
+
         // Skip if segment is null or doesn't belong to this cluster
         if (!seg || seg->cluster() != &cluster) continue;
-        
+
         // Get the two vertices of this segment
         auto [start_v, end_v] = find_vertices(graph, seg);
         if (!start_v || !end_v) {
             std::cout << "Error in finding vertices for a segment" << std::endl;
             continue;
         }
-        
+
         // Check if vertices match the segment endpoints (start_v should be at front, end_v at back)
         const auto& wcpts = seg->wcpts();
         if (wcpts.size() < 2) continue;
-        
+
         auto front_pt = wcpts.front().point;
         auto back_pt = wcpts.back().point;
-        
+
         // Determine which vertex is start and which is end based on point positions
         double dis_sv_front = ray_length(Ray{start_v->wcpt().point, front_pt});
         double dis_sv_back = ray_length(Ray{start_v->wcpt().point, back_pt});
-        
+
         if (dis_sv_front > dis_sv_back) {
             std::swap(start_v, end_v);
         }
-        
+
         // Count number of segments connected to each vertex
         int start_n = 0, end_n = 0;
         if (start_v->descriptor_valid()) {
@@ -106,21 +111,58 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
         if (end_v->descriptor_valid()) {
             end_n = boost::degree(end_v->get_descriptor(), graph);
         }
-        
+
         bool flag_print = false;
         // if (seg->cluster() == main_cluster) flag_print = true;
-        
+
+        auto t0 = Clock::now();
+        const char* seg_type;
         if (seg->flags_any(SegmentFlags::kShowerTrajectory)) {
+            seg_type = "S_traj";
             // Trajectory shower
             segment_determine_shower_direction_trajectory(seg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
+            t_shower_traj += MS(Clock::now() - t0);
         } else if (seg->flags_any(SegmentFlags::kShowerTopology)) {
-            // Topology shower
+            seg_type = "S_topo";
+            // Topology shower: determine direction, then set electron particle info
             segment_determine_shower_direction(seg, particle_data, recomb_model);
+            {
+                const int pdg_code = 11; // electron
+                auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, 43000/units::cm);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    pdg_code,
+                    particle_data->get_particle_mass(pdg_code),
+                    particle_data->pdg_to_name(pdg_code),
+                    four_momentum
+                );
+                seg->particle_info(pinfo);
+                seg->particle_score(100.0);
+            }
+            t_shower_topo += MS(Clock::now() - t0);
         } else {
+            seg_type = "Track";
             // Track
             segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
+            t_track += MS(Clock::now() - t0);
+        }
+
+        if (m_perf) {
+            double length = segment_track_length(seg, 0);
+            int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
+            double mass   = seg->has_particle_info() ? seg->particle_info()->mass() / units::MeV : 0.0;
+            double ke     = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0;
+            double score  = seg->particle_score();
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "determine_direction: {} len={:.2f}cm dir={} weak={} start_n={} end_n={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
+                seg_type, length / units::cm,
+                seg->dirsign(), seg->dir_weak() ? 1 : 0,
+                start_n, end_n,
+                pdg, mass, ke, score);
         }
     }
+
+    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "determine_direction timing: shower_traj={:.3f}ms shower_topo={:.3f}ms track={:.3f}ms TOTAL={:.3f}ms",
+        t_shower_traj.count(), t_shower_topo.count(), t_track.count(), MS(Clock::now() - t_total).count());
 }
 
 std::pair<int, double> PatternAlgorithms::calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower) {

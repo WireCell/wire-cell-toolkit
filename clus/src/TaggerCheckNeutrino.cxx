@@ -111,8 +111,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
         pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
         
-        // // direction determination
-        // pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
+        // direction determination
+        pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
 
         // // shower clustering
         // pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
