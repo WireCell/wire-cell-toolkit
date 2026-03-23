@@ -4187,7 +4187,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         auto test_wpid = m_dv->contained_by(pss_vec[i].first);
 
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
-        auto apa_face = std::make_pair(test_wpid.face(), test_wpid.apa());
+        auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
         // all corrected points ...
         bool flag_skip =  skip_trajectory_point(p, apa_face, i, pss_vec, fine_tracking_path);
 
@@ -4205,7 +4205,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         // now all corrected points ... 
         temp_fine_tracking_path.push_back(pss_vec[i]);
         fine_tracking_path.push_back(std::make_pair(p, segment));
-        saved_paf.push_back(std::make_pair(test_wpid.face(), test_wpid.apa()));
+        saved_paf.push_back(std::make_pair(test_wpid.apa(), test_wpid.face()));
     }
     
     // Apply trajectory smoothing (simplified version of the area-based correction)
@@ -7707,7 +7707,7 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     reduced_chi2.clear();
     
     bool flag_1st_tracking = true;
-    bool flag_2nd_tracking = false;
+    bool flag_2nd_tracking = true;   // prototype always does 2nd pass; was wrongly disabled
     bool flag_dQ_dx = flag_dQ_dx_fit;
     
     // Prepare the data for the fit - collect charge information from 2D projections
