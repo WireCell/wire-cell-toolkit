@@ -1284,7 +1284,7 @@ private:
                             pow(end_p.z() - seg_fits.front().point.z(), 2));
 
             // Protection against Michel electron
-            double seg_length = segment_track_length(fitted_segments[i]);
+            double seg_length = segment_track_length(fitted_segments[i], 1);
             double seg_dQ_dx = segment_median_dQ_dx(fitted_segments[i]) * units::cm / 50000;
             
 
@@ -2015,7 +2015,9 @@ private:
             m_track_fitter.add_segment(new_segment);
             m_track_fitter.do_single_tracking(new_segment, true, true, false);
 
-            fitted_segments.push_back(new_segment);
+            if (new_segment->fits().size() > 1) {
+                fitted_segments.push_back(new_segment);
+            }
         }
 
         // std::cout << "Fitted segments: " << fitted_segments.size() << std::endl;
@@ -2081,7 +2083,7 @@ private:
         for (size_t i = 1; i < fitted_segments.size(); i++) {
             auto segment = fitted_segments[i];
             // Use helper functions from PRSegmentFunctions.h
-            double track_length1 = segment_track_length(segment) / units::cm;
+            double track_length1 = segment_track_length(segment, 1) / units::cm;
             double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / 50000.;
             double track_length_threshold = segment_track_length_threshold(segment, 75000./units::cm) / units::cm;
             
@@ -2110,8 +2112,8 @@ private:
             }
             if (track_length1 > 40 && track_medium_dQ_dx > 0.8) return true;
             
-            double angle_deg = fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) * 180. / 3.1415926;
-            if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly parallel to drift
+            double angle_deg = dir1.angle(drift_dir_abs) * 180. / 3.1415926;
+            if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly perpendicular to drift
             
             // Complex condition from prototype
             if (((track_length1 > 5 && track_medium_dQ_dx > 0.7) &&
@@ -2568,6 +2570,7 @@ private:
             
             {
                 // Create segment for tracking
+                m_track_fitter.clear_segments();
                 auto segment = create_segment_for_cluster(cluster, path_points);
                 m_track_fitter.add_segment(segment);
                 m_track_fitter.do_single_tracking(segment, false);
