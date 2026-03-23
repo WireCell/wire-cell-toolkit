@@ -3350,9 +3350,15 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                         }
                     }
                     
-                    // Delete vtx1 and sg
-                    remove_vertex(graph, vtx1);
+                    // Delete sg first, then vtx1.
+                    // IMPORTANT: boost::remove_vertex automatically removes all
+                    // incident edges, so removing vtx1 first would silently free
+                    // the sg edge descriptor, leaving sg->descriptor_valid()==true
+                    // while the underlying edge is gone.  The subsequent
+                    // remove_segment(sg) would then call boost::remove_edge on a
+                    // freed descriptor → double-free crash.
                     remove_segment(graph, sg);
+                    remove_vertex(graph, vtx1);
                     
                     break;
                 }

@@ -437,10 +437,11 @@ namespace WireCell::Clus::PR {
         // }
 
 
-        // reject if test point is at begin or end of fits.
-        // if (itfits == fits.begin() || itfits+1 == fits.end()) {
-            // return std::make_tuple(false, std::pair<SegmentPtr, SegmentPtr>(), VertexPtr());
-        // }
+        // reject if test point is at begin or end of fits: would create a
+        // degenerate 1-point segment.  Mirrors prototype nbreak_fit check.
+        if (itfits == fits.begin() || itfits+1 == fits.end()) {
+            return std::make_tuple(false, std::pair<SegmentPtr, SegmentPtr>(), VertexPtr());
+        }
 
         const auto& wcpts = seg->wcpts();        
         auto itwcpts = closest_point(wcpts, point, owp_to_point<WCPoint>);
@@ -484,18 +485,23 @@ namespace WireCell::Clus::PR {
             seg1->fits(std::vector<Fit>(fits.begin(), itfits+1));
             seg2->fits(std::vector<Fit>(itfits, fits.end()));
             vtx->fit(*itfits);
+            vtx->fit_range(1*units::cm);  // prototype sets fit_range=1cm on new vertex
         }
 
         // Copy segment properties from original to both new segments (matching WCPPID)
         seg1->dir_weak(seg->dir_weak());
         seg2->dir_weak(seg->dir_weak());
-        
+
         seg1->dirsign(seg->dirsign());
         seg2->dirsign(seg->dirsign());
-        
+
         // Copy all flags
         seg1->flags_set(seg->flags());
         seg2->flags_set(seg->flags());
+
+        // Copy particle_score (separate field, not in flags)
+        seg1->particle_score(seg->particle_score());
+        seg2->particle_score(seg->particle_score());
 
             
         if (seg->has_particle_info()) {
