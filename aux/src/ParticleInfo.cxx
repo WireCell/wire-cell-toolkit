@@ -135,6 +135,13 @@ void ParticleInfo::validate_inputs() {
         raise<ValueError>("ParticleInfo: kinetic energy cannot be negative");
     }
     
+    // When spatial momentum is zero the stored 4-vector is a placeholder used for
+    // particles whose direction is undetermined: (E=KE+m, p=0).  This convention
+    // matches the prototype (ProtoSegment stores [px,py,pz,E]=[0,0,0,KE+m] for
+    // flag_dir==0) and is intentional — energy is known, direction is not.
+    // In that case E²-p²=m² cannot hold (unless KE=0), so we skip the check.
+    if (m_four_momentum.p2() < 1e-20) return;
+
     // Check energy-momentum relation using D4Vector's mass calculation
     double calculated_mass = m_four_momentum.mass();
     if (std::abs(calculated_mass - m_mass) > 1e-6 * m_mass) {

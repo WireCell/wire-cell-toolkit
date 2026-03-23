@@ -221,8 +221,8 @@ namespace WireCell::Clus::PR {
         if (siz < 2) { return 0.0; }
         double total_dist = 0.0;
         Point last_point = transform(points[0]);
-        for (size_t i = 1; i < siz - 1; ++i) {
-            Point next_point = transform(points[i+1]);
+        for (size_t i = 1; i < siz; ++i) {
+            Point next_point = transform(points[i]);
             total_dist += (last_point - next_point).magnitude();
             last_point = next_point;
         }

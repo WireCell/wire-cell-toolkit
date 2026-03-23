@@ -93,6 +93,11 @@ namespace WireCell::Clus::PR {
     std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range=35*units::cm, double offset_length = 0*units::cm, bool flag_force = false,  double MIP_dQdx = 50000/units::cm);
 
     // direction calculation ...
+    /// Returns true if the segment's direction is weakly determined.
+    ///
+    /// Mirrors prototype ProtoSegment::is_dir_weak(): checks particle-type-based
+    /// score thresholds (muon, proton) and the static dir_weak flag.
+    bool segment_is_dir_weak(SegmentPtr seg);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start);

@@ -259,8 +259,14 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                 const double distance_threshold = 0.01 * units::cm;
                 
                 if (dist_vtx1_vtx2 < distance_threshold) {
-                    // The two endpoint vertices are the same, merge vtx2 into vtx1
-                    merge_vertex_into_another(graph, vtx2, vtx1, dv);
+                    // vtx1 and vtx2 are co-located: the two segments and
+                    // the middle vertex are removed by the common code
+                    // below.  Do NOT call merge_vertex_into_another here —
+                    // it would attempt to re-add sg2 as a vtx1-vtx edge,
+                    // but that edge already carries sg1.  With setS edges,
+                    // add_segment then aliases sg2's descriptor to sg1's,
+                    // so the subsequent remove_segment(sg2) crashes on a
+                    // dangling edge descriptor.
                 } else {
                     // Create a new segment with straight line path
                     // Get steiner point cloud
