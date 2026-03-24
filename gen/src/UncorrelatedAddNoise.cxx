@@ -16,7 +16,7 @@
  * - DC is forced to zero.
  * - If N is even, Nyquist bin is real-only (required for real-valued time-domain signal).
  * - One-sided spectrum is converted to time domain using a NumPy-compatible irfft
- *   convention implemented via FFTW: bin-doubling + 1/N + optional ifft_scale.
+ *   convention implemented via FFTW: FFTW c2r + 1/N + optional ifft_scale.
  *
  * @author Avik Ghosh
  * @version 1.0.0
@@ -154,30 +154,37 @@ inline Json::Value parse_json_string(const std::string& text,
 // -----------------------------------------------------------------------------
 // FFTW helper: NumPy-like irfft with one-sided spectrum
 //
-// Implements a NumPy-compatible inverse real FFT convention:
+// Implements a NumPy-compatible inverse real FFT convention.
 //
 // Input:
-//   Xpos : one-sided spectrum of length K = N/2 + 1
-// Behavior:
-//   - If N even, enforce Nyquist bin imaginary part = 0
-//   - Double bins that have conjugate partners:
-//       * N even : k = 1 .. K-2
-//       * N odd  : k = 1 .. K-1
-//   - FFTW c2r is unnormalized => apply 1/N explicitly
-//   - Apply final_scale after 1/N (this corresponds to ifft_scale)
+//   Xpos : one-sided spectrum of length K = N/2 + 1, ordered as
+//          [DC, +f1, +f2, ..., +f_{N/2}] (Nyquist present only if N is even).
+//
+// Behavior / convention:
+//   - Enforce the constraints required for a real-valued time-domain signal:
+//       * DC bin is purely real (imag = 0)
+//       * If N is even, Nyquist bin is purely real (imag = 0)
+//   - Uses FFTW's complex-to-real inverse transform (c2r), which interprets the
+//     provided one-sided spectrum and implicitly supplies the conjugate negative-
+//     frequency half.
+//   - FFTW's backward transform is unnormalized, so we apply an explicit 1/N.
+//   - Apply an additional user knob `ifft_scale` after the 1/N normalization.
+//
+// Output:
+//   x_time[t] = (ifft_scale / N) * FFTW_c2r(Xpos)[t]
 // -----------------------------------------------------------------------------
-inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
-                                  std::vector<float>& x_time,
-                                  int N,
-                                  float final_scale)
+inline void irfft_fftwf(const std::vector<std::complex<float>>& Xpos,
+                        std::vector<float>& x_time,
+                        int N,
+                        float ifft_scale)
 {
     const int Kt = N / 2 + 1;
     if ((int)Xpos.size() != Kt) {
         THROW(WireCell::ValueError()
-              << WireCell::errmsg{"irfft_numpy_like_fftwf: Xpos size != N/2+1"});
+              << WireCell::errmsg{"irfft_fftwf: Xpos size != N/2+1"});
     }
 
-    x_time.assign((size_t)N, 0.0f);
+    x_time.resize((size_t)N);
 
     fftwf_complex* in  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * (size_t)Kt);
     float*         out = (float*)fftwf_malloc(sizeof(float) * (size_t)N);
@@ -186,26 +193,16 @@ inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
         if (in)  fftwf_free(in);
         if (out) fftwf_free(out);
         THROW(WireCell::RuntimeError()
-              << WireCell::errmsg{"irfft_numpy_like_fftwf: fftwf_malloc failed"});
+              << WireCell::errmsg{"irfft_fftwf: fftwf_malloc failed"});
     }
 
-    // Copy one-sided spectrum into FFTW input layout.
     for (int k = 0; k < Kt; ++k) {
         in[k][0] = Xpos[(size_t)k].real();
         in[k][1] = Xpos[(size_t)k].imag();
     }
 
-    const bool is_even = ((N % 2) == 0);
-    if (is_even) {
-        // For real output, the Nyquist bin must be purely real when N is even.
-        in[Kt - 1][1] = 0.0f;
-    }
-
-    // Bin-doubling to account for omitted negative-frequency half.
-    const int k_max = is_even ? (Kt - 2) : (Kt - 1);
-    for (int k = 1; k <= k_max; ++k) {
-        in[k][0] *= 2.0f;
-        in[k][1] *= 2.0f;
+    if ((N % 2) == 0) {
+        in[Kt - 1][1] = 0.0f; // Nyquist imag must be 0
     }
 
     fftwf_plan plan = fftwf_plan_dft_c2r_1d(N, in, out, FFTW_ESTIMATE);
@@ -213,15 +210,14 @@ inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
         fftwf_free(in);
         fftwf_free(out);
         THROW(WireCell::RuntimeError()
-              << WireCell::errmsg{"irfft_numpy_like_fftwf: fftwf_plan_dft_c2r_1d failed"});
+              << WireCell::errmsg{"irfft_fftwf: fftwf_plan_dft_c2r_1d failed"});
     }
 
     fftwf_execute(plan);
 
-    // Explicit 1/N to match NumPy irfft conventions.
-    const float invN = 1.0f / (float)N;
+    const float norm = ifft_scale / (float)N;  // 1/N normalization (+ optional scale)
     for (int t = 0; t < N; ++t) {
-        x_time[(size_t)t] = out[t] * invN * final_scale;
+        x_time[(size_t)t] = out[t] * norm;
     }
 
     fftwf_destroy_plan(plan);
@@ -576,7 +572,7 @@ Eigen::MatrixXd UncorrelatedAddNoise::make_uncorrelated_noise(int nwires_frame,
                 std::complex<float>(one_sided[(size_t)(Kt - 1)].real(), 0.0f);
         }
 
-        irfft_numpy_like_fftwf(one_sided, x_time, N, (float)m_ifft_scale);
+        irfft_fftwf(one_sided, x_time, N, (float)m_ifft_scale);
 
         // Store into Eigen matrix
         for (int t = 0; t < N; ++t) {

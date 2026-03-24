@@ -34,10 +34,21 @@ local params = params_maker(fcl_params) {
   },
 };
 
-local tools = tools_maker(params);
+// define local nticks (since the noise model was built with 2128 ticks)
+local RUN_NTICKS = 2128;
+local RUN_TICK   = params.daq.tick;
+
+// override nticks and tick from params with local values
+local params_run = params {
+  daq: super.daq { nticks: RUN_NTICKS, tick: RUN_TICK },
+};
+
+//local tools = tools_maker(params);
+local tools = tools_maker(params_run);
 
 local sim_maker = import 'pgrapher/experiment/iceberg/sim.jsonnet';
-local sim = sim_maker(params, tools);
+//local sim = sim_maker(params, tools);
+local sim = sim_maker(params_run, tools);
 
 // Anode bookkeeping
 local nanodes = std.length(tools.anodes);
@@ -52,7 +63,8 @@ local noise_model = "/cvmfs/dune.osgstorage.org/pnfs/fnal.gov/usr/dune/persisten
 // (3) WCLS input + MegaAnode plane definition
 // ----------------------------------------------------------------------------
 local wcls_maker = import 'pgrapher/ui/wcls/nodes.jsonnet';
-local wcls = wcls_maker(params, tools);
+//local wcls = wcls_maker(params, tools);
+local wcls = wcls_maker(params_run, tools);
 
 local wcls_input = {
   depos: wcls.input.depos(
@@ -129,11 +141,14 @@ local wcls_simchannel_sink = g.pnode({
     artlabel: 'simpleSC',
     anodes_tn: [wc.tn(anode) for anode in tools.anodes],
     rng: wc.tn(rng),
-    tick: 0.5 * wc.us,
+    // tick: 0.5 * wc.us,
+    tick: RUN_TICK,
     start_time: -0.25 * wc.ms,
-    readout_time: self.tick * 6000,
+    // readout_time: self.tick * 6000,
+    readout_time: RUN_NTICKS * RUN_TICK,
     nsigma: 3.0,
-    drift_speed: params.lar.drift_speed,
+    //drift_speed: params.lar.drift_speed,
+    drift_speed: params_run.lar.drift_speed,
     u_to_rp: 100 * wc.mm,
     v_to_rp: 100 * wc.mm,
     y_to_rp: 100 * wc.mm,
@@ -195,8 +210,10 @@ local noise_adders = [
       model_file: noise_model,
 
       // These are in WCT base units already:
-      nsamples: params.daq.nticks,
-      dt: params.daq.tick,       // ns (WCT base time units)
+      // nsamples: params.daq.nticks,
+      nsamples: RUN_NTICKS,
+      // dt: params.daq.tick,       // ns (WCT base time units)
+      dt: RUN_TICK,
 
       // Keep at 1.0 unless you need a quick normalization tweak
       ifft_scale: 1.0,

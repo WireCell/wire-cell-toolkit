@@ -14,7 +14,7 @@
  * - If N is even, Nyquist bin is handled as real-only and correlated via A_b on a
  *   real normal vector, with scaling based on E|N(0,1)|.
  * - One-sided spectrum -> time domain via NumPy-like irfft convention:
- *     bin-doubling + FFTW c2r + 1/N + optional ifft_scale.
+ *     FFTW c2r + 1/N + optional ifft_scale.
  *
  * @author Avik Ghosh
  * @version 1.0.0
@@ -150,18 +150,18 @@ inline Json::Value parse_json_string(const std::string& text,
 //
 // Same convention as in UncorrelatedAddNoise.
 // -----------------------------------------------------------------------------
-inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
-                                  std::vector<float>& x_time,
-                                  int N,
-                                  float final_scale)
+inline void irfft_fftwf(const std::vector<std::complex<float>>& Xpos,
+                        std::vector<float>& x_time,
+                        int N,
+                        float ifft_scale)
 {
     const int Kt = N / 2 + 1;
     if ((int)Xpos.size() != Kt) {
         THROW(WireCell::ValueError()
-              << WireCell::errmsg{"irfft_numpy_like_fftwf: Xpos size != N/2+1"});
+              << WireCell::errmsg{"irfft_fftwf: Xpos size != N/2+1"});
     }
 
-    x_time.assign((size_t)N, 0.0f);
+    x_time.resize((size_t)N);
 
     fftwf_complex* in  = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * (size_t)Kt);
     float*         out = (float*)fftwf_malloc(sizeof(float) * (size_t)N);
@@ -170,7 +170,7 @@ inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
         if (in)  fftwf_free(in);
         if (out) fftwf_free(out);
         THROW(WireCell::RuntimeError()
-              << WireCell::errmsg{"irfft_numpy_like_fftwf: fftwf_malloc failed"});
+              << WireCell::errmsg{"irfft_fftwf: fftwf_malloc failed"});
     }
 
     for (int k = 0; k < Kt; ++k) {
@@ -178,15 +178,9 @@ inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
         in[k][1] = Xpos[(size_t)k].imag();
     }
 
-    const bool is_even = ((N % 2) == 0);
-    if (is_even) {
-        in[Kt - 1][1] = 0.0f; // Nyquist imag must be 0
-    }
-
-    const int k_max = is_even ? (Kt - 2) : (Kt - 1);
-    for (int k = 1; k <= k_max; ++k) {
-        in[k][0] *= 2.0f;
-        in[k][1] *= 2.0f;
+    // Even-N Nyquist bin must be purely real
+    if ((N % 2) == 0) {
+        in[Kt - 1][1] = 0.0f;
     }
 
     fftwf_plan plan = fftwf_plan_dft_c2r_1d(N, in, out, FFTW_ESTIMATE);
@@ -194,14 +188,15 @@ inline void irfft_numpy_like_fftwf(const std::vector<std::complex<float>>& Xpos,
         fftwf_free(in);
         fftwf_free(out);
         THROW(WireCell::RuntimeError()
-              << WireCell::errmsg{"irfft_numpy_like_fftwf: fftwf_plan_dft_c2r_1d failed"});
+              << WireCell::errmsg{"irfft_fftwf: fftwf_plan_dft_c2r_1d failed"});
     }
 
     fftwf_execute(plan);
 
-    const float invN = 1.0f / (float)N;
+    // FFTW backward transform is unnormalized: apply 1/N to match NumPy irfft
+    const float norm = ifft_scale / (float)N;
     for (int t = 0; t < N; ++t) {
-        x_time[(size_t)t] = out[t] * invN * final_scale;
+        x_time[(size_t)t] = out[t] * norm;
     }
 
     fftwf_destroy_plan(plan);
@@ -677,7 +672,7 @@ Eigen::MatrixXd CorrelatedAddNoise::make_correlated_noise(int nwires_frame,
                 std::complex<float>(one_sided[(size_t)(Kt - 1)].real(), 0.0f);
         }
 
-        irfft_numpy_like_fftwf(one_sided, x_time, N, (float)m_ifft_scale);
+        irfft_fftwf(one_sided, x_time, N, (float)m_ifft_scale);
 
         for (int t = 0; t < N; ++t) {
             noise_time(w, t) = (double)x_time[(size_t)t];

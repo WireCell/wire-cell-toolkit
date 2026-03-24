@@ -28,7 +28,7 @@
  *      using Rayleigh-mean scaling and the row-wise variance of A_b
  *   5) Handle DC (force to 0) and Nyquist (real-only if N even, correlated draw)
  *   6) Convert one-sided spectrum to time domain using NumPy-like irfft convention:
- *        - bin-doubling + 1/N + optional ifft_scale
+ *        - FFTW c2r + 1/N + optional ifft_scale
  *
  * IMPORTANT ASSUMPTION ABOUT CHANNEL ORDERING
  * ------------------------------------------
