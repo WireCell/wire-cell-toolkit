@@ -1413,9 +1413,6 @@ void TrackFitting::organize_segments_path(double low_dis_limit, double end_point
         }
         
         WireCell::Point start_p, end_p;
-        
-        start_v->fit().index = -1;
-        end_v->fit().index = -1;
 
         // Process start vertex
         if (!start_v->fit().flag_fix) {
@@ -2469,11 +2466,13 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
         auto offset_t = std::get<0>(offset_it->second);
         auto offset_w = std::get<3>(offset_it->second);
         auto slope_x = std::get<0>(slope_it->second);
-        auto slope_yw = std::get<3>(slope_it->second).first;
+        auto slope_zw = std::get<3>(slope_it->second).second;
 
+        // W plane measures Z (angle_w = 0, slope_yw = 0): reconstruct Z from wire index.
+        // Using slope_yw (= -sin(angle_w)/pitch_w = 0) here would cause divide-by-zero.
         double raw_x = (coord.time - offset_t) / slope_x;
-        double raw_y = (coord.wire - offset_w)/slope_yw;
-        WireCell::Point test_point(raw_x, raw_y, 0);
+        double raw_z = (coord.wire - offset_w) / slope_zw;
+        WireCell::Point test_point(raw_x, 0, raw_z);
 
         auto main_distances = segment_get_closest_2d_distances(segment, test_point, apa, face, "fit");
         double min_dis_track = std::get<2>(main_distances);
@@ -3383,7 +3382,8 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         if (scaling != 0) {
             data_w_2D(2 * index) = scaling * (it->wire - offset_w);
             data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
-            
+
+            RW.insert(2 * index, 1) = scaling * slope_yw;     // Y --> W
             RW.insert(2 * index, 2) = scaling * slope_zw;     // Z --> W
             RW.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
         }
@@ -3394,11 +3394,11 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
     Eigen::SparseMatrix<double> RUT = RU.transpose();
     Eigen::SparseMatrix<double> RVT = RV.transpose();
     Eigen::SparseMatrix<double> RWT = RW.transpose();
-    
+
     Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
     Eigen::VectorXd b = RUT * data_u_2D + RVT * data_v_2D + RWT * data_w_2D;
     Eigen::SparseMatrix<double> A = RUT * RU + RVT * RV + RWT * RW;
-    
+
     solver.compute(A);
     temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
     
@@ -3569,15 +3569,16 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         
         auto vertex = v_bundle.vertex;
         int i = vertex->fit_index();
-        auto segment = map_index_pss[i].second;
-        auto cluster = segment->cluster();
-        auto cluster_t0 = cluster->get_cluster_t0();
-        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-
         bool flag_fit_fix = vertex->flag_fix();
         WireCell::Point init_p = vertex->fit().point;
-        
+
         if (!flag_fit_fix && i >= 0) {
+            auto pss_it = map_index_pss.find(i);
+            if (pss_it == map_index_pss.end() || !pss_it->second.second) continue;
+            auto segment = pss_it->second.second;
+            auto cluster = segment->cluster();
+            auto cluster_t0 = cluster->get_cluster_t0();
+            const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
             // Get geometry parameters for this point
             auto test_wpid = m_dv->contained_by(init_p);
             if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
