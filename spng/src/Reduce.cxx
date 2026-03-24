@@ -3,6 +3,7 @@
 #include "WireCellSpng/Torch.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellSpng/Util.h"
 
 WIRECELL_FACTORY(SPNGReduce,
                  WireCell::SPNG::Reduce,
@@ -26,11 +27,16 @@ namespace WireCell::SPNG {
         Configuration md;
         std::vector<torch::Tensor> inputs;
         const size_t nin = inv.size();
+        log->debug("Applying reduction operation \"{}\" with {} input tensors with the following sizes",
+            m_config.operation, nin);
         for (size_t ind=0; ind<nin; ++ind) {
             md = update(md, inv[ind]->metadata());
             inputs.push_back(inv[ind]->tensor());
+            log->debug("Tensor {}: {}", ind, to_string(inputs[ind]));
         }
         auto reduced = m_op(inputs);
+        log->debug("Applied reduction. Resulting tensor is of shape {}",
+            to_string(reduced));
         out = std::make_shared<SimpleTorchTensor>(reduced, md);
         logit(out, "reduce");
     }
