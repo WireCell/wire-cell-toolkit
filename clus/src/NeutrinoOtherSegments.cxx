@@ -545,7 +545,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // At least one endpoint connects to the existing graph
                 if (v1v2_dist > 0.1 * units::cm) {
                     add_segment(graph, new_seg, v1, v2);
-                    track_fitter.do_multi_tracking(true, true, true);
+                    track_fitter.do_multi_tracking(true, true, false);
 
                     double length        = segment_track_length(new_seg);
                     double direct_length = segment_track_direct_length(new_seg);
@@ -662,7 +662,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     remove_vertex(graph, v2);
                 } else {
                     // Isochronous connection found (segment already added by modify_*)
-                    track_fitter.do_multi_tracking(true, true, true);
+                    track_fitter.do_multi_tracking(true, true, false);
 
                     double direct_length = segment_track_direct_length(new_seg);
                     double length        = segment_track_length(new_seg);

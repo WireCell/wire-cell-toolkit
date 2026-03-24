@@ -503,10 +503,18 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_stein
 
     const auto& steiner_pc = cluster->get_pc("steiner_pc");
     const auto& coords = cluster->get_default_scope().coords;
-    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
-    const auto& wpid_array = steiner_pc.get("wpid")->elements<WirePlaneId>();
+    auto x_ptr = steiner_pc.get(coords.at(0));
+    auto y_ptr = steiner_pc.get(coords.at(1));
+    auto z_ptr = steiner_pc.get(coords.at(2));
+    auto wpid_ptr = steiner_pc.get("wpid");
+    if (!x_ptr || !y_ptr || !z_ptr || !wpid_ptr) {
+        SPDLOG_WARN("make_points_cluster_steiner: steiner_pc missing coordinate arrays, returning empty");
+        return {};
+    }
+    const auto& x_coords = x_ptr->elements<double>();
+    const auto& y_coords = y_ptr->elements<double>();
+    const auto& z_coords = z_ptr->elements<double>();
+    const auto& wpid_array = wpid_ptr->elements<WirePlaneId>();
     
     const size_t num_points = x_coords.size();
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;

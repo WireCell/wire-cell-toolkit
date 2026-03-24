@@ -145,6 +145,18 @@ void ParticleInfo::validate_inputs() {
     // Check energy-momentum relation using D4Vector's mass calculation
     double calculated_mass = m_four_momentum.mass();
     if (std::abs(calculated_mass - m_mass) > 1e-6 * m_mass) {
+        // std::cout << "ParticleInfo E-p violation: pdg=" << m_pdg_code
+        //           << " mass=" << m_mass
+        //           << " E=" << m_four_momentum.e()
+        //           << " KE=" << m_kinetic_energy
+        //           << " px=" << m_four_momentum.px()
+        //           << " py=" << m_four_momentum.py()
+        //           << " pz=" << m_four_momentum.pz()
+        //           << " p2=" << m_four_momentum.p2()
+        //           << " calc_mass=" << calculated_mass
+        //           << " delta=" << std::abs(calculated_mass - m_mass)
+        //           << " tol=" << 1e-6 * m_mass
+        //           << std::endl;
         raise<ValueError>("ParticleInfo: energy-momentum relation violated");
     }
 }

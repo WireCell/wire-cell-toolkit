@@ -1239,6 +1239,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 current_sg->particle_info(pinfo);
                             } else {
                                 double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
+                                // std::cout << "examine_direction: dqdx_ratio=" << dqdx_ratio
+                                //           << " length=" << segment_track_length(current_sg)/units::cm << " cm"
+                                //           << " nfits=" << current_sg->fits().size() << std::endl;
                                 if (dqdx_ratio > 1.4) {
                                     auto four_momentum = segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
                                     auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);

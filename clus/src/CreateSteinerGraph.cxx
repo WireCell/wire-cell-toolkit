@@ -160,6 +160,15 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             t0 = Clock::now();
             sg.create_steiner_tree(main_cluster, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
             if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: create_steiner_tree took {} ms", MS(Clock::now() - t0).count());
+
+            if (!new_cluster.has_graph("steiner_graph")) {
+                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: create_steiner_tree produced no steiner_graph for main cluster {}, skipping transfer", main_cluster->ident());
+                auto* new_cluster_ptr = &new_cluster;
+                grouping.destroy_child(new_cluster_ptr, true);
+                // Without steiner_pc/steiner_graph, find_proto_vertex will return false for this cluster.
+                return;
+            }
+
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
             const auto& steiner_graph = sg.get_graph("steiner_graph");
             auto& flag_terminals = sg.get_flag_steiner_terminal();
@@ -174,7 +183,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             main_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
             if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: transfer_pc/graph took {} ms", MS(Clock::now() - t0).count());
 
-            // test ... 
+            // test ...
             auto pair_idx = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
             // std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << " " << pair_points.first << std::endl;
             auto kd_results = main_cluster->kd_steiner_knn(1, pair_points.first);
@@ -236,6 +245,14 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             t0 = Clock::now();
             sg.create_steiner_tree(cluster, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
             if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] create_steiner_tree took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
+
+            if (!new_cluster.has_graph("steiner_graph")) {
+                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: create_steiner_tree produced no steiner_graph for assoc cluster {}, skipping transfer", cluster->get_cluster_id());
+                auto* new_cluster_ptr = &new_cluster;
+                grouping.destroy_child(new_cluster_ptr, true);
+                // Without steiner_pc/steiner_graph, find_proto_vertex will return false for this cluster.
+                continue;
+            }
 
             const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
             const auto& steiner_graph = sg.get_graph("steiner_graph");

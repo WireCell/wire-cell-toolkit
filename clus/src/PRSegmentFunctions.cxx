@@ -93,14 +93,15 @@ namespace WireCell::Clus::PR {
         }
         
         auto dpc = seg->dpcloud(cloud_name);
-        if (!dpc) {
-            // Fall back to base_cloud_name (typically "main") if the requested cloud is absent
+        if (!dpc || dpc->get_points().empty()) {
+            // Fall back to base_cloud_name (typically "main") if the requested cloud is
+            // absent or empty (e.g. fitting produced no valid-index fit points).
             dpc = seg->dpcloud(base_cloud_name);
             if (!dpc) {
                 raise<RuntimeError>("get_closest_point: segment missing DynamicPointCloud with name " + cloud_name + " and fallback " + base_cloud_name);
             }
         }
-        
+
         const auto& points = dpc->get_points();
         if (points.empty()) {
             raise<RuntimeError>("get_closest_point: DynamicPointCloud has no points");
@@ -128,10 +129,14 @@ namespace WireCell::Clus::PR {
         }
 
         auto dpc = seg->dpcloud(cloud_name);
-        if (!dpc) {
-            raise<RuntimeError>("segment_get_closest_2d_distances: segment missing DynamicPointCloud with name 'fit'");
+        if (!dpc || dpc->get_points().empty()) {
+            // Fall back to "main" cloud if requested cloud is absent or empty
+            dpc = seg->dpcloud("main");
+            if (!dpc) {
+                raise<RuntimeError>("segment_get_closest_2d_distances: segment missing DynamicPointCloud with name " + cloud_name + " and fallback 'main'");
+            }
         }
-        
+
         const auto& points = dpc->get_points();
         if (points.empty()) {
             raise<RuntimeError>("segment_get_closest_2d_distances: DynamicPointCloud has no points");
@@ -155,8 +160,12 @@ namespace WireCell::Clus::PR {
             raise<RuntimeError>("segment_get_closest_2d_distance: invalid segment");
         }
         auto dpc = seg->dpcloud(cloud_name);
-        if (!dpc) {
-            raise<RuntimeError>("segment_get_closest_2d_distance: segment missing DynamicPointCloud with name 'fit'");
+        if (!dpc || dpc->get_points().empty()) {
+            // Fall back to "main" cloud if requested cloud is absent or empty
+            dpc = seg->dpcloud("main");
+            if (!dpc) {
+                raise<RuntimeError>("segment_get_closest_2d_distance: segment missing DynamicPointCloud with name " + cloud_name + " and fallback 'main'");
+            }
         }
         if (dpc->get_points().empty()) {
             raise<RuntimeError>("segment_get_closest_2d_distance: DynamicPointCloud has no points");
@@ -683,7 +692,17 @@ namespace WireCell::Clus::PR {
                 }
             }
         }
-        
+
+        // if (std::isnan(length)) {
+        //     const auto& dbg_fits = seg->fits();
+        //     std::cout << "segment_track_length: NaN! nfits=" << dbg_fits.size() << std::endl;
+        //     for (size_t i = 0; i < dbg_fits.size(); i++) {
+        //         std::cout << "  fit[" << i << "] point=("
+        //                   << dbg_fits[i].point.x() << "," << dbg_fits[i].point.y() << "," << dbg_fits[i].point.z()
+        //                   << ") dx=" << dbg_fits[i].dx/units::cm << std::endl;
+        //     }
+        // }
+
         return length;
     }
 
@@ -1155,6 +1174,10 @@ namespace WireCell::Clus::PR {
                     dX = dis;
                 }
             }
+            // Skip if dX became zero (e.g. degenerate segment with coincident fit points);
+            // prototype avoids this by accumulating dEdx*dis where dis=0 → 0 contribution
+            if (dX <=0) dX = fits[i].dx;
+            if (dX <= 0) continue;
             // std::cout << i << " " << fits[i].dQ << " " << fits[i].dx/units::cm << " " << dX/units::cm << std::endl;
             // Filter out unreasonable values (same threshold as original)
             if (dQ/dX / (43e3/units::cm) > 1000) dQ = 0;
@@ -1400,20 +1423,25 @@ namespace WireCell::Clus::PR {
         return std::make_tuple(false, 0, 0, 100.0);
     }
 
-    // 4-momentum: E, px, py, pz, 
+    // 4-momentum: E, px, py, pz,
     WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx){
         double length = segment_track_length(segment, 0);
         double kine_energy = 0;
 
+        // std::cout << "segment_cal_4mom: pdg=" << pdg_code
+        //           << " length=" << length/units::cm << " cm"
+        //           << " nfits=" << segment->fits().size() << std::endl;
+
         WireCell::D4Vector<double> results(0.0, 0.0, 0.0, 0.0); // 4-momentum: E, px, py, pz
 
         if (length < 4*units::cm){
-            kine_energy = segment_cal_kine_dQdx(segment, recomb_model); // short track 
+            kine_energy = segment_cal_kine_dQdx(segment, recomb_model); // short track
         }else if (segment->flags_any(PR::SegmentFlags::kShowerTrajectory)){
             kine_energy = segment_cal_kine_dQdx(segment, recomb_model);
         }else{
             kine_energy = cal_kine_range(length, pdg_code, particle_data);
         }
+        // std::cout << "segment_cal_4mom: kine_energy=" << kine_energy/units::MeV << " MeV" << std::endl;
         // results[4] = kine_energy;
 
         double particle_mass = particle_data->get_particle_mass(pdg_code);

@@ -278,6 +278,26 @@ void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
     }
 }
 
+void TrackFitting::preload_clusters(const std::vector<Facade::Cluster*>& clusters)
+{
+    for (auto* cluster : clusters) {
+        auto [it, inserted] = m_clusters.insert(cluster);
+        if (inserted) m_charge_data_dirty = true;
+
+        if (m_grouping == nullptr) {
+            m_grouping = cluster->grouping();
+            BuildGeometry();
+        }
+
+        for (auto& blob : cluster->children()) {
+            m_blobs.insert(blob);
+        }
+    }
+    if (m_charge_data_dirty) {
+        prepare_data();
+    }
+}
+
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
     auto [it, inserted] = m_clusters.insert(segment->cluster());
@@ -1180,6 +1200,7 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
             if (dis_prev + extra_dis > step_size) {
                 extra_dis += dis_prev;
                 while (extra_dis > step_size) {
+                    if (dis_prev <= 0) break;  // guard against zero-length segment
                     WireCell::Point tmp_p(
                         pts.back().x() + (p1.x() - pts.back().x()) / dis_prev * step_size,
                         pts.back().y() + (p1.y() - pts.back().y()) / dis_prev * step_size,
@@ -1206,18 +1227,20 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
                 if (pts.size() <= 1) {
                     // Do nothing
                 } else {
-                    double dis2 = sqrt(pow(pts.back().x() - pts.at(pts.size()-2).x(), 2) + 
-                                     pow(pts.back().y() - pts.at(pts.size()-2).y(), 2) + 
+                    double dis2 = sqrt(pow(pts.back().x() - pts.at(pts.size()-2).x(), 2) +
+                                     pow(pts.back().y() - pts.at(pts.size()-2).y(), 2) +
                                      pow(pts.back().z() - pts.at(pts.size()-2).z(), 2));
-                    double dis3 = (dis1 + dis2) / 2.0;
-                    
-                    WireCell::Point tmp_p(
-                        pts.at(pts.size()-2).x() + (pts.back().x() - pts.at(pts.size()-2).x()) / dis2 * dis3,
-                        pts.at(pts.size()-2).y() + (pts.back().y() - pts.at(pts.size()-2).y()) / dis2 * dis3,
-                        pts.at(pts.size()-2).z() + (pts.back().z() - pts.at(pts.size()-2).z()) / dis2 * dis3
-                    );
-                    pts.pop_back();
-                    pts.push_back(tmp_p);
+                    if (dis2 > 0) {  // guard against zero-length segment (duplicate consecutive points)
+                        double dis3 = (dis1 + dis2) / 2.0;
+
+                        WireCell::Point tmp_p(
+                            pts.at(pts.size()-2).x() + (pts.back().x() - pts.at(pts.size()-2).x()) / dis2 * dis3,
+                            pts.at(pts.size()-2).y() + (pts.back().y() - pts.at(pts.size()-2).y()) / dis2 * dis3,
+                            pts.at(pts.size()-2).z() + (pts.back().z() - pts.at(pts.size()-2).z()) / dis2 * dis3
+                        );
+                        pts.pop_back();
+                        pts.push_back(tmp_p);
+                    }
                 }
             } else if (dis1 > step_size * 1.6) {
                 int npoints = std::round(dis1 / step_size);
@@ -5714,6 +5737,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             WireCell::Point next_mid = 0.5 * (next_pos + curr_pos);
 
             double dx = (curr_pos - prev_mid).magnitude() + (curr_pos - next_mid).magnitude();
+            // if (std::isnan(dx)) {
+            //     std::cout << "dQ_dx_multi_fit: NaN dx at i=" << i
+            //               << " curr=(" << curr_pos.x() << "," << curr_pos.y() << "," << curr_pos.z() << ")"
+            //               << " prev=(" << prev_pos.x() << "," << prev_pos.y() << "," << prev_pos.z() << ")"
+            //               << " next=(" << next_pos.x() << "," << next_pos.y() << "," << next_pos.z() << ")" << std::endl;
+            // }
             local_dx[idx] = dx;
         }
 
@@ -6052,13 +6081,20 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         // If only one connection, extend endpoint
         if (connected_pts.size() == 1) {
             WireCell::Point curr_pos = vertex->fit().point;
-            WireCell::Vector dir = (connected_pts[0] - curr_pos).norm();
-            WireCell::Point extended = curr_pos - dir * dis_end_point_ext;
-            connected_pts.push_back(extended);
+            WireCell::Vector raw_dir = connected_pts[0] - curr_pos;
+            if (raw_dir.magnitude() > 0) {  // guard: zero vector from degenerate (zero-length) segment
+                WireCell::Vector dir = raw_dir.norm();
+                WireCell::Point extended = curr_pos - dir * dis_end_point_ext;
+                connected_pts.push_back(extended);
+            }
+            // If zero-vector: don't extend; connected_pts stays size 1 with total_dx ≈ 0
 
-            // std::cout << (extended - curr_pos).magnitude()/units::cm << " " << (connected_pts[0] - curr_pos).magnitude()/units::cm << std::endl;
+            // std::cout << (connected_pts.back() - curr_pos).magnitude()/units::cm << " " << (connected_pts[0] - curr_pos).magnitude()/units::cm << std::endl;
         }
-        
+
+        // Skip vertex if no connected points (e.g. segment has only 1 fit point) or no cluster found
+        if (connected_pts.empty() || cluster == nullptr) continue;
+
         // Calculate total dx
         double total_dx = 0;
         for (const auto& pt : connected_pts) {

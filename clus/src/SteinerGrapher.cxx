@@ -34,8 +34,9 @@ void Steiner::Grapher::create_steiner_tree(
 
     // std::cout << "Test1: " << steiner_terminals.size() << std::endl;
 
-    if (steiner_terminals.empty()) {
-        SPDLOG_LOGGER_WARN(log, "create_steiner_tree: no steiner terminals found, returning empty graph");
+    if (steiner_terminals.size() < 2) {
+        SPDLOG_LOGGER_WARN(log, "create_steiner_tree: only {} steiner terminal(s) found (need >=2), returning empty graph",
+                           steiner_terminals.size());
         return;
     }
 
@@ -70,8 +71,9 @@ void Steiner::Grapher::create_steiner_tree(
     // std::cout << "Test4: " << steiner_terminals.size() << std::endl;
 
 
-    if (steiner_terminals.empty()) {
-        SPDLOG_LOGGER_WARN(log, "create_steiner_tree: no terminals remain after filtering, returning empty graph");
+    if (steiner_terminals.size() < 2) {
+        SPDLOG_LOGGER_WARN(log, "create_steiner_tree: only {} terminal(s) remain after filtering (need >=2), returning empty graph",
+                           steiner_terminals.size());
         return;
     }
 

@@ -161,6 +161,11 @@ namespace WireCell::Clus {
 
         void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
 
+        /// Pre-load all clusters at once and call prepare_data() a single time.
+        /// Call this before starting pattern recognition so that subsequent
+        /// do_multi_tracking calls can use flag_force_load_data=false.
+        void preload_clusters(const std::vector<Facade::Cluster*>& clusters);
+
         // collect charge
         void prepare_data();
 

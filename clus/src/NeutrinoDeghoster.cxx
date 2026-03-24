@@ -152,7 +152,9 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
                         WirePlaneId test_wpid = dv->contained_by(test_point);
                         int apa = test_wpid.apa();
                         int face = test_wpid.face();
-                        
+
+                        if (apa == -1 || face == -1) continue;  // point outside detector volume
+
                         // Get point in raw coordinates for dead channel check
                         auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                         double cluster_t0 = cluster->get_cluster_t0();
