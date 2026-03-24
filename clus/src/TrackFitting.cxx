@@ -224,14 +224,18 @@ double TrackFitting::get_parameter(const std::string& name) const {
 void TrackFitting::clear_graph(){
     m_graph = nullptr;
     m_clusters.clear();
-    m_blobs.clear(); 
+    m_loaded_clusters.clear();
+    m_charge_data_dirty = true;
+    m_blobs.clear();
 }
 
 
 void TrackFitting::clear_segments(){
     m_segments.clear();
     m_clusters.clear();
-    m_blobs.clear(); 
+    m_loaded_clusters.clear();
+    m_charge_data_dirty = true;
+    m_blobs.clear();
 }
 
 void TrackFitting::sync_from_graph(){
@@ -267,7 +271,8 @@ void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
 }
 
 void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
-    m_clusters.insert(cluster.get());
+    auto [it, inserted] = m_clusters.insert(cluster.get());
+    if (inserted) m_charge_data_dirty = true;
     for (auto& blob: cluster->children()){
         m_blobs.insert(blob);
     }
@@ -275,7 +280,8 @@ void TrackFitting::add_cluster(std::shared_ptr<Facade::Cluster> cluster){
 
 void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
     m_segments.insert(segment);
-    m_clusters.insert(segment->cluster());
+    auto [it, inserted] = m_clusters.insert(segment->cluster());
+    if (inserted) m_charge_data_dirty = true;
 
     if (m_grouping == nullptr){
         m_grouping = segment->cluster()->grouping();
@@ -587,10 +593,20 @@ int TrackFitting::fetch_channel_from_anode(int apa, int face, int plane, int wir
 
 void TrackFitting::prepare_data() {
     sync_from_graph();
-    if (m_charge_data.size()!=0) return;
 
-    // Process every Facade::Cluster in m_clusters
+    // Only process clusters whose charge data has not yet been loaded.
+    // This allows incremental loading when associated clusters are added after
+    // the main cluster has already been processed.
+    std::set<Facade::Cluster*> new_clusters;
     for (auto& cluster : m_clusters) {
+        if (m_loaded_clusters.find(cluster) == m_loaded_clusters.end()) {
+            new_clusters.insert(cluster);
+        }
+    }
+    if (new_clusters.empty()) return;
+
+    // Process every new Facade::Cluster
+    for (auto& cluster : new_clusters) {
         // Get boundary range using get_uvwt_range which returns map<WirePlaneId, tuple<int,int,int,int>>
         auto uvwt_ranges = cluster->get_uvwt_range();
         
@@ -662,7 +678,7 @@ void TrackFitting::prepare_data() {
         }
     }
         
-    for (auto& cluster : m_clusters) {
+    for (auto& cluster : new_clusters) {
          // Get the grouping from the cluster
         auto grouping = cluster->grouping();
         // Handle dead channels - loop over all Facade::Blobs in cluster
@@ -741,6 +757,10 @@ void TrackFitting::prepare_data() {
     //               << ", ChargeErr=" << charge_measurement.charge_err
     //               << ", Flag=" << charge_measurement.flag << std::endl;
     // }
+
+    // Mark these clusters as loaded so future calls skip them.
+    m_loaded_clusters.insert(new_clusters.begin(), new_clusters.end());
+    m_charge_data_dirty = false;
 }
 
 void TrackFitting::collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires){
@@ -7232,9 +7252,13 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     bool flag_2nd_tracking = true; 
     bool flag_dQ_dx = flag_dQ_dx_fit;
     
-    // Prepare the data for the fit - collect charge information from 2D projections
-    if (flag_force_load_data || global_rb_map.size() == 0){
+    // Prepare the data for the fit - collect charge information from 2D projections.
+    // prepare_data() is only called when new clusters have been added (dirty flag).
+    // fill_global_rb_map() only runs once (it self-guards internally).
+    if (flag_force_load_data || m_charge_data_dirty) {
         prepare_data();
+    }
+    if (flag_force_load_data || global_rb_map.size() == 0){
         fill_global_rb_map();
     }
 
@@ -7711,9 +7735,13 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     bool flag_2nd_tracking = true;   // prototype always does 2nd pass; was wrongly disabled
     bool flag_dQ_dx = flag_dQ_dx_fit;
     
-    // Prepare the data for the fit - collect charge information from 2D projections
-    if (flag_force_load_data || global_rb_map.size() == 0){
+    // Prepare the data for the fit - collect charge information from 2D projections.
+    // prepare_data() is only called when new clusters have been added (dirty flag).
+    // fill_global_rb_map() only runs once (it self-guards internally).
+    if (flag_force_load_data || m_charge_data_dirty) {
         prepare_data();
+    }
+    if (flag_force_load_data || global_rb_map.size() == 0){
         fill_global_rb_map();
     }
     // if (m_perf) std::cout << "do_single_tracking timing: prepare_data took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();

@@ -1829,13 +1829,14 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
             "improve_shower_in_track_out_1={:.3f}ms improve_no_dir_tracks={:.3f}ms "
             "improve_shower_in_track_out_2={:.3f}ms improve_multiple_tracks_in={:.3f}ms "
             "fix_shower_in_track_out_2={:.3f}ms judge_no_dir_tracks={:.3f}ms "
-            "examine_maps={:.3f}ms examine_all_showers={:.3f}ms TOTAL={:.3f}ms",
+            "examine_maps={:.3f}ms examine_all_showers={:.3f}ms ",
             t_examine_good_tracks.count(), t_fix_multiple_tracks_in.count(),
             t_fix_shower_in_track_out_1.count(), t_improve_one_in.count(),
             t_improve_shower_in_track_out_1.count(), t_improve_no_dir_tracks.count(),
             t_improve_shower_in_track_out_2.count(), t_improve_multiple_tracks_in.count(),
             t_fix_shower_in_track_out_2.count(), t_judge_no_dir_tracks.count(),
-            t_examine_maps.count(), t_examine_all_showers.count(), t_total_ms.count());
+            t_examine_maps.count(), t_examine_all_showers.count());
+        SPDLOG_LOGGER_DEBUG(s_log, "shower_determining_in_main_cluster timing:  TOTAL={:.3f}ms", t_total_ms.count());
 
         // // Print final per-segment state, matching determine_direction format
         // auto [ebegin2, eend2] = boost::edges(graph);

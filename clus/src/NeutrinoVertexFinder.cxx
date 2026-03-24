@@ -3,8 +3,14 @@
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellClus/MyFCN.h"
 
+#include "WireCellAux/Logger.h"
+
+#include <chrono>
+
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::set<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range){
     // Get steiner point cloud and terminal flags
@@ -2244,18 +2250,22 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
 }
 
 void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_print){
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = Clock::now();
 
     // Find the main vertex - check if we have only showers
     bool flag_save_only_showers = true;
     for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
         VertexPtr vtx = graph[v].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         auto results = examine_main_vertex_candidate(graph, vtx);
         bool flag_in = std::get<0>(results);
         int ntracks = std::get<1>(results);
         // int nshowers = std::get<2>(results);
-        
+
         if (!flag_in) {
             if (ntracks > 0) {
                 flag_save_only_showers = false;
@@ -2263,39 +2273,42 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             }
         }
     }
-    
+    MS t_scan_only_showers(Clock::now() - t0); t0 = Clock::now();
+
     // Improve vertex if not only showers and cluster is main cluster
     if (!flag_save_only_showers && cluster.get_flag(Facade::Flags::main_cluster)) {
         improve_vertex(graph, cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, track_fitter, dv, particle_data, recomb_model, false);
         // Fix maps with shower in and track out
         fix_maps_shower_in_track_out(graph, cluster);
     }
-    
+    MS t_improve_vertex(Clock::now() - t0); t0 = Clock::now();
+
     // Build map of vertex candidates and their track/shower counts
     std::map<VertexPtr, std::pair<int, int>> map_vertex_track_shower;
     std::vector<VertexPtr> main_vertex_candidates;
-    
+
     for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
         VertexPtr vtx = graph[v].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         auto results = examine_main_vertex_candidate(graph, vtx);
         bool flag_in = std::get<0>(results);
         int ntracks = std::get<1>(results);
         int nshowers = std::get<2>(results);
-        
+
         if (!flag_in) {
             map_vertex_track_shower[vtx] = std::make_pair(ntracks, nshowers);
         }
     }
-    
+    MS t_build_candidate_map(Clock::now() - t0); t0 = Clock::now();
+
     // Select main vertex candidates based on topology
     if (flag_save_only_showers) {
         // For all showers case, add vertices with 1 segment first
         for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
             VertexPtr vtx = graph[v].vertex;
             if (!vtx || vtx->cluster() != &cluster) continue;
-            
+
             int num_segs = 0;
             if (vtx->descriptor_valid()) {
                 auto vd = vtx->get_descriptor();
@@ -2304,12 +2317,12 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
                     if (graph[*e_it].segment) num_segs++;
                 }
             }
-            
+
             if (num_segs == 1) {
                 main_vertex_candidates.push_back(vtx);
             }
         }
-        
+
         // Add remaining candidates
         for (auto it = map_vertex_track_shower.begin(); it != map_vertex_track_shower.end(); it++) {
             if (std::find(main_vertex_candidates.begin(), main_vertex_candidates.end(), it->first) == main_vertex_candidates.end()) {
@@ -2324,26 +2337,36 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             }
         }
     }
-    
+    MS t_select_candidates(Clock::now() - t0); t0 = Clock::now();
+
     // Determine main vertex based on candidates
     if (flag_save_only_showers) {
         if (main_vertex_candidates.size() > 0) {
             if (flag_print) {
-                std::cout << "Determining the main vertex with all showers: " << main_vertex_candidates.size() 
+                std::cout << "Determining the main vertex with all showers: " << main_vertex_candidates.size()
                          << " in cluster " << cluster.get_cluster_id() << std::endl;
             }
             main_vertex = compare_main_vertices_all_showers(graph, cluster, main_vertex_candidates, track_fitter, dv, particle_data, recomb_model);
         } else {
+            if (m_perf) {
+                MS t_total_ms(Clock::now() - t_total);
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_main_vertex timing (early return, all-showers no candidates): "
+                    "scan_only_showers={:.3f}ms improve_vertex={:.3f}ms "
+                    "build_candidate_map={:.3f}ms select_candidates={:.3f}ms TOTAL={:.3f}ms",
+                    t_scan_only_showers.count(), t_improve_vertex.count(),
+                    t_build_candidate_map.count(), t_select_candidates.count(), t_total_ms.count());
+            }
             return;
         }
     } else {
         // Examine main vertex candidates to filter and identify back-to-back tracks
         examine_main_vertices_local(graph, main_vertex_candidates, particle_data, recomb_model);
-        
+
         if (flag_print) {
             for (auto vtx : main_vertex_candidates) {
                 std::cout << "Candidate main vertex " << vtx->fit().point << " connecting to: ";
-                
+
                 if (vtx->descriptor_valid()) {
                     auto vd = vtx->get_descriptor();
                     auto edge_range = boost::out_edges(vd, graph);
@@ -2357,30 +2380,57 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
                 std::cout << " in cluster " << cluster.get_cluster_id() << std::endl;
             }
         }
-        
+
         if (main_vertex_candidates.size() == 1) {
             main_vertex = main_vertex_candidates.front();
         } else if (main_vertex_candidates.size() > 1) {
             main_vertex = compare_main_vertices(graph, cluster, main_vertex_candidates);
         } else {
+            if (m_perf) {
+                MS t_total_ms(Clock::now() - t_total);
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_main_vertex timing (early return, no candidates): "
+                    "scan_only_showers={:.3f}ms improve_vertex={:.3f}ms "
+                    "build_candidate_map={:.3f}ms select_candidates={:.3f}ms TOTAL={:.3f}ms",
+                    t_scan_only_showers.count(), t_improve_vertex.count(),
+                    t_build_candidate_map.count(), t_select_candidates.count(), t_total_ms.count());
+            }
             return;
         }
     }
-    
+    MS t_select_main_vertex(Clock::now() - t0); t0 = Clock::now();
+
     // Examine structure for non-shower cases
     if (!flag_save_only_showers) {
         examine_structure_final(graph, main_vertex, cluster, track_fitter, dv);
     }
-    
+    MS t_examine_structure_final(Clock::now() - t0); t0 = Clock::now();
+
     // Examine directions
     bool flag_check = examine_direction(graph, main_vertex, main_vertex, vertices_in_long_muon, segments_in_long_muon, particle_data, recomb_model, false);
     if (!flag_check) {
         std::cout << "Wrong: inconsistency for track directions in cluster " << cluster.get_cluster_id() << std::endl;
     }
-    
+    MS t_examine_direction(Clock::now() - t0);
+
+    if (m_perf) {
+        MS t_total_ms(Clock::now() - t_total);
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "determine_main_vertex timing: "
+            "scan_only_showers={:.3f}ms improve_vertex={:.3f}ms "
+            "build_candidate_map={:.3f}ms select_candidates={:.3f}ms "
+            "select_main_vertex={:.3f}ms examine_structure_final={:.3f}ms "
+            "examine_direction={:.3f}ms ",
+            t_scan_only_showers.count(), t_improve_vertex.count(),
+            t_build_candidate_map.count(), t_select_candidates.count(),
+            t_select_main_vertex.count(), t_examine_structure_final.count(),
+            t_examine_direction.count());
+        SPDLOG_LOGGER_DEBUG(s_log, "determine_main_vertex timing: TOTAL={:.3f}ms", t_total_ms.count());
+    }
+
     if (flag_print) {
         std::cout << "Main Vertex " << main_vertex->fit().point << " connecting to: ";
-        
+
         if (main_vertex->descriptor_valid()) {
             auto vd = main_vertex->get_descriptor();
             auto edge_range = boost::out_edges(vd, graph);
@@ -2392,7 +2442,7 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             }
         }
         std::cout << std::endl;
-        
+
         print_segs_info(graph, cluster, main_vertex);
     }
 }

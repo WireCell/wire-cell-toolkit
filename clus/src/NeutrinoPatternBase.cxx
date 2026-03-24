@@ -1168,6 +1168,8 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: init_first_segment took {} ms", MS(Clock::now() - t0).count());
 
     if (!sg1) return false;
+    std::cout << "Fits: " << sg1->fits().size() << std::endl;
+
 
     // Store initial pair of vertices for main cluster
     std::pair<VertexPtr, VertexPtr> main_cluster_initial_pair_vertices{nullptr, nullptr};
@@ -1237,6 +1239,23 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     t0 = Clock::now();
     track_fitter.do_multi_tracking(true, true, true);
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: final do_multi_tracking took {} ms", MS(Clock::now() - t0).count());
+
+    // Verify that at least one segment for this cluster survived all the merging/cleanup.
+    // If all segments were removed (e.g. Type II merge on the only segment), return false
+    // so the caller can fall back to init_point_segment.
+    bool has_segment = false;
+    {
+        auto [ebegin, eend] = boost::edges(graph);
+        for (auto eit = ebegin; eit != eend; ++eit) {
+            auto seg = graph[*eit].segment;
+            if (seg && seg->cluster() == &cluster) { has_segment = true; break; }
+        }
+    }
+    if (!has_segment) {
+        SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex: no segments remain for cluster after processing, returning false");
+        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
+        return false;
+    }
 
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
 

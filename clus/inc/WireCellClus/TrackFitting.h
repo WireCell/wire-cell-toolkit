@@ -513,6 +513,8 @@ namespace WireCell::Clus {
         // cluster and grouping, CTPC is from m_grouping ...
         Facade::Grouping* m_grouping{nullptr};
         std::set<Facade::Cluster*> m_clusters;
+        std::set<Facade::Cluster*> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
+        bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
 
         std::set<Facade::Blob*> m_blobs;
 

@@ -2000,10 +2000,9 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
         // Merge vertex if the kink is not at right location (Type I)
         flag_continue = flag_continue || examine_vertices_1(graph, cluster, track_fitter, dv, main_vertex);
         
-        // Count vertices in the graph
-        size_t num_vertices = boost::num_vertices(graph);
-        
-        // Merge vertices if they are too close (Type II) - only if more than 2 vertices
+        size_t num_vertices = boost::num_vertices(graph); 
+
+        // Merge vertices if they are too close (Type II) - only if cluster has more than 2 vertices
         if (num_vertices > 2) {
             flag_continue = flag_continue || examine_vertices_2(graph, cluster, track_fitter, dv, main_vertex);
         }

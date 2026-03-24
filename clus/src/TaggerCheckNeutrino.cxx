@@ -65,6 +65,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     
     // Find clusters that have the main_cluster flag (set by clustering_recovering_bundle)
     Cluster* main_cluster = nullptr;
+    std::vector<Cluster*> other_clusters;  // beam_flash clusters that are not the main cluster
 
     int nclusters = grouping.nchildren();
     int n_main_clusters = 0;
@@ -75,6 +76,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             n_main_clusters ++;
         }
         if (cluster->get_flag(Flags::beam_flash)) n_in_beam_clusters++;
+    }
+    for (auto* cluster : grouping.children()) {
+        if (cluster != main_cluster && cluster->get_flag(Flags::beam_flash)) {
+            other_clusters.push_back(cluster);
+        }
     }
 
     SPDLOG_LOGGER_DEBUG(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
@@ -118,7 +124,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
 
         // main vertex determination
-        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
+        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, false);
 
         if (main_vertex !=0){
             map_cluster_main_vertices[main_cluster] = main_vertex;
@@ -126,6 +132,47 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         }
     }
 
+
+    // Loop over other (non-main) beam-flash clusters
+    if (!other_clusters.empty()) {
+        for (auto* cluster : other_clusters) {
+            if (cluster->get_length() > 6 * units::cm) {
+                std::cout << "Long Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() << std::endl;
+                // Long cluster: break tracks and do 2 rounds of other-track finding
+                pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, true, 2, false);
+                // pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
+                // pattern_algos.separate_track_shower(*pr_graph, *cluster);
+                // pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
+                // pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
+                // pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, false);
+                // if (main_vertex != nullptr) {
+                //     map_cluster_main_vertices[cluster] = main_vertex;
+                //     main_vertex = nullptr;
+                // }
+            } else {
+                // Short cluster: no track breaking, 1 round; fall back to init_point_segment if needed
+                if (!pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, false, 1, false)) {
+                    std::cout << "Point Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() <<std::endl;
+                    pattern_algos.init_point_segment(*pr_graph, *cluster, *m_track_fitter, m_dv);
+                }
+                // pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
+                // pattern_algos.separate_track_shower(*pr_graph, *cluster);
+                // pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
+                // pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
+                // pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, false);
+                // if (main_vertex != nullptr) {
+                //     map_cluster_main_vertices[cluster] = main_vertex;
+                //     main_vertex = nullptr;
+                // }
+            }
+        }
+
+        // Deghost across all beam-flash clusters (main + others)
+        std::vector<Cluster*> all_clusters;
+        all_clusters.push_back(main_cluster);
+        all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+        // pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
+    }
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);
