@@ -777,6 +777,64 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         pg.intern(innodes=[sg1], outnodes=[sg5],
                   centernodes=[sg1_connection, sg23_connection, sg4_connection]),
 
+    /// [1]tensor set -> tensor[2].
+    /// Input is TDM frame tensor set.  Output is the 3-feature tensors for input to dnnroi training.
+    ///
+    dnnroi_training_preface_dnnroi_init(
+        rebin=4, initial_models=[],
+        change_views = [
+            [[1,1,800,-1], [1,800,-1]],
+            [[1,1,800,-1], [1,800,-1]],
+            [[2,1,480,-1], [1,960,-1]],
+        ],
+        do_transpose=true,
+        extra_name=""
+    )::
+        local sg1 = $.frame_decon(extra_name=extra_name);
+        
+        // [3]tensor -> tensor[3]
+        local dnnroi_views = [0,1,2];
+        local sg_dense = $.dnnroi_dense_views(views=dnnroi_views, rebin=rebin, extra_name=extra_name);
+        local dense_fan = $.fanout_for_dnnroi_inference_simple(
+            targets=[['dense', 'dnnroi'] for i in std.range(0,2)],
+            extra_name=extra_name
+        );
+        local sg1_connection = pg.shuntlines([sg1, sg_dense, dense_fan.sink]);
+
+        local models = [
+            $.dnnroi_model(modelfile)
+            for modelfile in initial_models
+        ];
+        local initial_dnnroi_nodes = pg.crossline([
+            $.dnnroi_forward_view_special(
+                model.value, view=model.index,
+                do_transpose=do_transpose, change_view=change_views[model.index], extra_name=extra_name)
+            for model in wc.enumerate(models)
+        ]);
+
+        local thresholds = pg.crossline([
+            local thresh_name = $.this_name(extra_name, "v"+std.toString(view)+'_dnnroi_thresh');
+            pg.pnode({
+                type: 'SPNGThreshold',
+                name: thresh_name,
+                data: {
+                    nominal: 0.5,   // FIXME: a study is needed to best set this
+                    tag: "roi",
+                    datapath_format: "/traces/Threshold/" + thresh_name,
+                } + control
+            }, nin=1, nout=1)
+            for view in dnnroi_views
+        ]);
+        
+        local cellviews = $.cellviews_tensors(out_views=dnnroi_views, chunk_size=0, extra_name=extra_name);
+        local sg_dnnroi = pg.shuntlines([
+            dense_fan.targets.dnnroi, initial_dnnroi_nodes, thresholds, cellviews]);
+        
+        // mp_sink:[3]tensor + dense_sink:[2]tensor(decon) -> source:tensor[2]
+        local sg5 = $.connect_dnnroi_stack(sg_dnnroi, dense_fan.targets.dense, views=dnnroi_views, extra_name=extra_name);
+
+        pg.intern(innodes=[sg1], outnodes=[sg5],
+                  centernodes=[sg1_connection, sg_dnnroi]),
 
     /// TODO FILL OUT DESC
     /// Input is TDM frame tensor set.  Output is the 3-feature tensors for input to dnnroi training.
@@ -1099,9 +1157,11 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         pg.crossline([$.dnnroi_forward_view(model, view=vi.index, do_transpose=do_transpose, extra_name=extra_name)
                       for vi in wc.enumerate(crossed_views)
                       if vi.value == 1]),
+    
+    
     /// Ncrossed->Ncrossed Make DNNROI-forward subgraph.  Input is initial
     /// dnnroi "fodder" tensors with three features.  Output are DNNROI ROI
-    /// tensors.
+    /// tensors. TODO -- WRITE OUT THE SPECIAL CASE HERE FOR APA1
     dnnroi_forward_views_separate_models(
             modelfiles, do_transpose=true,
             extra_name="")::
