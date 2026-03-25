@@ -1699,15 +1699,15 @@ namespace WireCell::Clus::PR {
         }
      }
 
-    void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
+    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name, double search_range, double scaling_2d){
         // using Clock = std::chrono::steady_clock;
         // using MS = std::chrono::duration<double, std::milli>;
         // auto t_total = Clock::now();
 
-        std::map<Facade::Cluster*, std::set<SegmentPtr> > map_cluster_segs;
+        std::map<Facade::Cluster*, std::vector<SegmentPtr> > map_cluster_segs;
         for (auto seg : segments){
             if (seg->cluster()){
-                map_cluster_segs[seg->cluster()].insert(seg);
+                map_cluster_segs[seg->cluster()].push_back(seg);
             }
         }
 

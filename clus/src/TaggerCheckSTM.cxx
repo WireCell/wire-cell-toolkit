@@ -123,7 +123,7 @@ public:
         }
 
         // Process each main cluster
-        size_t stm_count = 0;
+        // size_t stm_count = 0;
 
         // validation check ... temporary ...
         {

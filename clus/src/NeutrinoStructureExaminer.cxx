@@ -1,8 +1,14 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 
+#include "WireCellAux/Logger.h"
+
+#include <algorithm>
+
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 void PatternAlgorithms::examine_structure(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Change 2 to 1 (merge two segments into one straight segment)
@@ -152,7 +158,7 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
                 create_segment_point_cloud(sg, main_pts_1, dv, "main");
 
                 flag_update = true;
-                std::cout << "Cluster: " << cluster.ident() << " replace Track Content with Straight Line for segment with length " << length/units::cm << " cm" << std::endl;
+                // std::cout << "Cluster: " << cluster.ident() << " replace Track Content with Straight Line for segment with length " << length/units::cm << " cm" << std::endl;
             }
         }
     }
@@ -177,15 +183,14 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
     bool flag_continue = true;
     while (flag_continue) {
         flag_continue = false;
-        
-        // Iterate through all vertices in the graph
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
-            
+
+        // Iterate in insertion order for deterministic results
+        for (const auto& vd_cur : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd_cur].vertex;
+
             // Skip if vertex doesn't belong to this cluster
             if (!vtx || vtx->cluster() != &cluster) continue;
-            
+
             // Check if this vertex has exactly 2 connected segments
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
@@ -249,10 +254,10 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
             
             // If the straight line is better, merge the two segments
             if (flag_replace) {
-                std::cout << "Cluster: " << cluster.ident() << " Merge two segments with a straight one, vtx at (" 
-                          << vtx->wcpt().point.x()/units::cm << ", "
-                          << vtx->wcpt().point.y()/units::cm << ", "
-                          << vtx->wcpt().point.z()/units::cm << ") cm" << std::endl;
+                // std::cout << "Cluster: " << cluster.ident() << " Merge two segments with a straight one, vtx at (" 
+                //           << vtx->wcpt().point.x()/units::cm << ", "
+                //           << vtx->wcpt().point.y()/units::cm << ", "
+                //           << vtx->wcpt().point.z()/units::cm << ") cm" << std::endl;
                 
                 // Check if the two endpoint vertices are at the same position
                 double dist_vtx1_vtx2 = ray_length(Ray{vtx1->wcpt().point, vtx2->wcpt().point});
@@ -337,19 +342,18 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
     
     while (flag_continue) {
         flag_continue = false;
-        
-        // Iterate through all vertices in the graph
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
-            
+
+        // Iterate in insertion order for deterministic results
+        for (const auto& vd_cur : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd_cur].vertex;
+
             // Skip if vertex doesn't belong to this cluster
             if (!vtx || vtx->cluster() != &cluster) continue;
-            
+
             // Check if this vertex has exactly 2 connected segments
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
-            
+
             // Get the two segments connected to this vertex
             auto edge_range = boost::out_edges(vd, graph);
             auto eit = edge_range.first;
@@ -927,11 +931,10 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
 
 void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Step 1: Examine short segments with multiple connections at both ends
-    auto [ebegin, eend] = boost::edges(graph);
     std::vector<SegmentPtr> segments_to_examine;
-    
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
         
         double length = segment_track_length(sg);
@@ -1001,12 +1004,12 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
     }
     
     // Step 2: Merge vertices at the same position
-    std::set<VertexPtr> all_vertices;
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    // Use a vector in insertion order for deterministic iteration
+    std::vector<VertexPtr> all_vertices;
+    for (const auto& vd : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd].vertex;
         if (vtx && vtx->cluster() == &cluster) {
-            all_vertices.insert(vtx);
+            all_vertices.push_back(vtx);
         }
     }
     
@@ -1052,7 +1055,7 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
                             remove_segment(graph, sg);
                         }
                         
-                        all_vertices.erase(vtx2);
+                        all_vertices.erase(std::remove(all_vertices.begin(), all_vertices.end(), vtx2), all_vertices.end());
                         flag_merge = true;
                         break;
                     }
@@ -1063,8 +1066,8 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
     }
     
     // Step 3: Remove duplicate segments (same endpoints)
-    std::set<SegmentPtr> segments_to_be_removed;
-    
+    std::vector<SegmentPtr> segments_to_be_removed;
+
     for (auto it = all_vertices.begin(); it != all_vertices.end(); ++it) {
         VertexPtr vtx = *it;
         if (!vtx->descriptor_valid()) continue;
@@ -1093,7 +1096,9 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
             
             if (seen_keys.count(key)) {
                 // Duplicate: a segment with the same endpoint pair was already seen
-                segments_to_be_removed.insert(tmp_segments[i]);
+                if (std::find(segments_to_be_removed.begin(), segments_to_be_removed.end(), tmp_segments[i]) == segments_to_be_removed.end()) {
+                    segments_to_be_removed.push_back(tmp_segments[i]);
+                }
             } else {
                 seen_keys.insert(key);
             }
@@ -1106,17 +1111,12 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
     }
     
     // Step 4: Remove isolated vertices (no connections)
-    std::set<VertexPtr> vertices_to_be_removed;
-    auto [vbegin2, vend2] = boost::vertices(graph);
-    
-    for (auto vit = vbegin2; vit != vend2; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    std::vector<VertexPtr> vertices_to_be_removed;
+    for (const auto& vd : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd].vertex;
         if (vtx && vtx->cluster() == &cluster) {
-            if (vtx->descriptor_valid()) {
-                auto vd = vtx->get_descriptor();
-                if (boost::degree(vd, graph) == 0) {
-                    vertices_to_be_removed.insert(vtx);
-                }
+            if (vtx->descriptor_valid() && boost::degree(vd, graph) == 0) {
+                vertices_to_be_removed.push_back(vtx);
             }
         }
     }
@@ -1328,19 +1328,18 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
     VertexPtr v2 = nullptr;
     VertexPtr v3 = nullptr;
     
-    // Iterate through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    // Iterate in insertion order for deterministic results
+    for (const auto& vd_cur : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd_cur].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         // Check if vertex has exactly 2 connections (potential candidate)
-        if (boost::degree(*vit, graph) != 2) continue;
-        
+        if (boost::degree(vd_cur, graph) != 2) continue;
+
         // Get the two connected segments and cache their neighbor vertices,
         // avoiding redundant find_other_vertex calls later.
         std::vector<std::pair<SegmentPtr, VertexPtr>> seg_vtx_pairs;
-        auto [ebegin, eend] = boost::out_edges(*vit, graph);
+        auto [ebegin, eend] = boost::out_edges(vd_cur, graph);
         for (auto eit = ebegin; eit != eend; ++eit) {
             SegmentPtr seg = graph[*eit].segment;
             if (seg) seg_vtx_pairs.emplace_back(seg, graph[boost::target(*eit, graph)].vertex);
@@ -1409,8 +1408,8 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
             return flag_continue;
         }
         
-        std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type I " 
-                  << "combining two segments into new segment" << std::endl;
+        // std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type I " 
+        //           << "combining two segments into new segment" << std::endl;
         
         // Add new segment to graph
         add_segment(graph, sg2, v2, v3);
@@ -1434,10 +1433,9 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
     VertexPtr v2 = nullptr;
     SegmentPtr sg = nullptr;
     
-    // Iterate through all edges (segments) in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr segment = graph[*eit].segment;
+    // Iterate in insertion order for deterministic results
+    for (const auto& ed_cur : ordered_edges(graph)) {
+        SegmentPtr segment = graph[ed_cur].segment;
         if (!segment || segment->cluster() != &cluster) continue;
         
         // Get the two vertices of this segment
@@ -1480,7 +1478,7 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
     // Merge vertices if found
     if (v1 && v2 && sg) {
         if (v2!= main_vertex){
-            std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type II" << std::endl;
+            // std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type II" << std::endl;
             
             // Remove the segment between v1 and v2
             remove_segment(graph, sg);
@@ -1835,7 +1833,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 remove_vertex(graph, v1);
                 
                 flag_continue = true;
-                std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
+                // std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
                 track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
                 break;
                 
@@ -1976,7 +1974,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 remove_vertex(graph, v2);
                 
                 flag_continue = true;
-                std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
+                // std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
                 track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
                 break;
             }
@@ -2020,24 +2018,32 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
     while (flag_continue) {
         flag_continue = false;
         
-        // Iterate through all vertices
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
+        // Iterate in insertion order for deterministic results
+        for (const auto& vd_cur : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd_cur].vertex;
             if (!vtx || vtx->cluster() != &cluster) continue;
-            
+
             // Only process vertices with more than 2 connections
-            size_t degree = boost::degree(*vit, graph);
+            size_t degree = boost::degree(vd_cur, graph);
             if (degree <= 2) continue;
-            
+
             // Find pair of segments with maximum overlap distance
             SegmentPtr max_sg1 = nullptr;
             SegmentPtr max_sg2 = nullptr;
             double max_dis = 0;
             Facade::geo_point_t max_point;
 
-            auto [ebegin, eend] = boost::out_edges(*vit, graph);
-            for (auto eit1 = ebegin; eit1 != eend; ++eit1) {
+            // Collect out-edges in insertion order for deterministic pair selection
+            std::vector<edge_descriptor> out_edges_sorted;
+            {
+                auto [oe_begin, oe_end] = boost::out_edges(vd_cur, graph);
+                out_edges_sorted.assign(oe_begin, oe_end);
+                std::sort(out_edges_sorted.begin(), out_edges_sorted.end(),
+                          [&graph](const edge_descriptor& a, const edge_descriptor& b) {
+                              return graph[a].index < graph[b].index;
+                          });
+            }
+            for (auto eit1 = out_edges_sorted.begin(); eit1 != out_edges_sorted.end(); ++eit1) {
                 SegmentPtr sg1 = graph[*eit1].segment;
                 if (!sg1) continue;
 
@@ -2063,7 +2069,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                 if (test_pts.empty()) continue;
 
                 // Compare with other segments
-                for (auto eit2 = std::next(eit1); eit2 != eend; ++eit2) {
+                for (auto eit2 = std::next(eit1); eit2 != out_edges_sorted.end(); ++eit2) {
                     SegmentPtr sg2 = graph[*eit2].segment;
                     if (!sg2) continue;
 
@@ -2405,11 +2411,11 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
     }
 
     // Find and remove redundant short segments
-    std::set<SegmentPtr> segments_to_be_removed;
-    
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // Use vector in insertion order for deterministic iteration
+    std::vector<SegmentPtr> segments_to_be_removed;
+
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &main_cluster) continue;
         
         auto pair_vertices = find_vertices(graph, sg);
@@ -2462,27 +2468,30 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         
         // If no unique points, mark for removal
         if (num_unique == 0) {
-            segments_to_be_removed.insert(sg);
+            segments_to_be_removed.push_back(sg);
         }
     }
-    
+
     // Collect vertices that will need examination after removal
-    std::set<VertexPtr> can_vertices;
+    // Use vector in insertion order for deterministic call order into examine_structure_4
+    std::vector<VertexPtr> can_vertices;
     
     for (auto sg : segments_to_be_removed) {
         auto pair_vertices = find_vertices(graph, sg);
         
         if (pair_vertices.first && pair_vertices.first->descriptor_valid()) {
             auto vd1 = pair_vertices.first->get_descriptor();
-            if (boost::degree(vd1, graph) > 1) {
-                can_vertices.insert(pair_vertices.first);
+            if (boost::degree(vd1, graph) > 1 &&
+                std::find(can_vertices.begin(), can_vertices.end(), pair_vertices.first) == can_vertices.end()) {
+                can_vertices.push_back(pair_vertices.first);
             }
         }
-        
+
         if (pair_vertices.second && pair_vertices.second->descriptor_valid()) {
             auto vd2 = pair_vertices.second->get_descriptor();
-            if (boost::degree(vd2, graph) > 1) {
-                can_vertices.insert(pair_vertices.second);
+            if (boost::degree(vd2, graph) > 1 &&
+                std::find(can_vertices.begin(), can_vertices.end(), pair_vertices.second) == can_vertices.end()) {
+                can_vertices.push_back(pair_vertices.second);
             }
         }
         
@@ -2493,11 +2502,9 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
     bool flag_cont = true;
     while (flag_cont) {
         flag_cont = false;
-        
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            if (boost::degree(*vit, graph) == 0) {
-                VertexPtr vtx = graph[*vit].vertex;
+        for (const auto& vd : ordered_nodes(graph)) {
+            if (boost::degree(vd, graph) == 0) {
+                VertexPtr vtx = graph[vd].vertex;
                 if (vtx) {
                     remove_vertex(graph, vtx);
                     flag_cont = true;
@@ -2540,17 +2547,16 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
     while (flag_continue) {
         flag_continue = false;
         
-        // Iterate through all vertices in the graph
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
-            
+        // Iterate in insertion order for deterministic results
+        for (const auto& vd_cur : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd_cur].vertex;
+
             // Skip if vertex doesn't belong to this cluster
             if (!vtx || vtx->cluster() != &cluster) continue;
-            
+
             // Skip the main vertex
             if (vtx == main_vertex) continue;
-            
+
             // Only consider vertices with exactly 2 connections
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
@@ -2579,6 +2585,8 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             if ((dist_front_front < 0.1*units::cm && dist_back_back < 0.1*units::cm) ||
                 (dist_front_back < 0.1*units::cm && dist_back_front < 0.1*units::cm)) {
                 // Segments are identical, delete one
+                s_log->debug("examine_structure_final_1: cluster {} removing duplicate segment at vtx ({:.2f},{:.2f},{:.2f})",
+                    cluster.ident(), vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
                 remove_segment(graph, sg2);
                 flag_update = true;
                 flag_continue = true;
@@ -2636,6 +2644,8 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             if (flag_replace) {
                 // Use helper function to merge the two segments
                 if (merge_two_segments_into_one(graph, sg1, vtx, sg2, dv)) {
+                    s_log->debug("examine_structure_final_1: cluster {} merged two segments through vtx ({:.2f},{:.2f},{:.2f})",
+                        cluster.ident(), vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
                     flag_update = true;
                     flag_continue = true;
                     break;
@@ -2787,9 +2797,11 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             // Delete sg1 and vtx
             remove_segment(graph, sg1);
             remove_vertex(graph, vtx);
-            
+            s_log->debug("examine_structure_final_1p: cluster {} merged short sg1 ({:.2f} cm) into sg2 at main_vtx ({:.2f},{:.2f},{:.2f})",
+                cluster.ident(), length1/units::cm,
+                main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm);
             flag_update = true;
-            
+
         } else if (length2 < 6*units::cm && length2 < length1) {
             // sg2 is short - merge it into sg1
             VertexPtr vtx = find_other_vertex(graph, sg2, main_vertex);
@@ -2883,16 +2895,18 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             // Delete sg2 and vtx
             remove_segment(graph, sg2);
             remove_vertex(graph, vtx);
-            
+            s_log->debug("examine_structure_final_1p: cluster {} merged short sg2 ({:.2f} cm) into sg1 at main_vtx ({:.2f},{:.2f},{:.2f})",
+                cluster.ident(), length2/units::cm,
+                main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm);
             flag_update = true;
         }
-        
+
         // If we updated, redo multi-tracking
         if (flag_update) {
             track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }
     }
-    
+
     return flag_update;
 }
 
@@ -3060,10 +3074,12 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                 
                 // Perform the merge
                 if (flag_update) {
-                    std::cout << "Cluster: " << cluster.ident() << " Final stage merge vertex to main vertex " 
-                            //   << vtx1->ident() << " " << vtx1_point << " into " << main_vertex->ident() 
-                              << " " << main_vtx_point << std::endl;
-                    
+                    s_log->debug("examine_structure_final_2: cluster {} merging vtx ({:.2f},{:.2f},{:.2f}) into main_vtx ({:.2f},{:.2f},{:.2f}) dis={:.2f} cm",
+                        cluster.ident(),
+                        vtx1_point.x()/units::cm, vtx1_point.y()/units::cm, vtx1_point.z()/units::cm,
+                        main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm,
+                        dis/units::cm);
+
                     // Use helper function to merge vtx1 into main_vertex
                     merge_vertex_into_another(graph, vtx1, main_vertex, dv);
                     
@@ -3213,9 +3229,11 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                 
                 // Perform the merge
                 if (flag_update) {
-                    std::cout << "Cluster: " << cluster.ident() << " Final stage merge main_vertex " 
-                            //   << main_vertex->ident() << " " << main_vtx_point << " " << vtx1->ident() 
-                              << " " << vtx1_point << std::endl;
+                    s_log->debug("examine_structure_final_3: cluster {} merging main_vtx ({:.2f},{:.2f},{:.2f}) into vtx ({:.2f},{:.2f},{:.2f}) dis={:.2f} cm",
+                        cluster.ident(),
+                        main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm,
+                        vtx1_point.x()/units::cm, vtx1_point.y()/units::cm, vtx1_point.z()/units::cm,
+                        dis/units::cm);
                     
                     // Collect segments to update
                     std::vector<SegmentPtr> segments_to_update;

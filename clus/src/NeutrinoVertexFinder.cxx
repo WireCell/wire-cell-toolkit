@@ -12,7 +12,12 @@ using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
-bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::set<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range){
+bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::vector<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range){
+    s_log->debug("search_for_vertex_activities: cluster {} vertex ({:.2f}, {:.2f}, {:.2f}) search_range={:.2f} cm nsegs={}",
+        cluster.ident(),
+        vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm,
+        search_range/units::cm, segments_set.size());
+
     // Get steiner point cloud and terminal flags
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
@@ -66,9 +71,9 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
         
         auto test_wpid = dv->contained_by(test_p);
         if (test_wpid.face() == -1 || test_wpid.apa() == -1) continue;
-        
-        for (auto it = boost::edges(graph).first; it != boost::edges(graph).second; ++it) {
-            SegmentPtr sg = graph[*it].segment;
+
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr sg = graph[e].segment;
             if (!sg || sg->cluster() != &cluster) continue;
             
             auto [dist_3d, closest_pt] = segment_get_closest_point(sg, test_p, "fit");
@@ -199,8 +204,9 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
         }
         
         if (wcp_list.size() > 1) {
-            std::cout << "Cluster: " << cluster.ident() << " Vertex Activity Found at " << mid_p << std::endl;
-            
+            s_log->debug("search_for_vertex_activities: cluster {} vertex activity found at ({:.2f}, {:.2f}, {:.2f}), max_dis={:.4f}",
+                cluster.ident(), max_point.x()/units::cm, max_point.y()/units::cm, max_point.z()/units::cm, max_dis);
+
             // Convert to vector for segment creation
             std::vector<WireCell::Point> path_points(wcp_list.begin(), wcp_list.end());
             
@@ -222,11 +228,14 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
     int nshowers = 0;
     SegmentPtr shower_cand = nullptr;
     SegmentPtr track_cand = nullptr;
-    
+
     // Get all segments connected to this vertex
     if (!vertex || !vertex->descriptor_valid()) {
+        s_log->debug("examine_main_vertex_candidate: invalid vertex, returning early");
         return std::make_tuple(flag_in, ntracks, nshowers);
     }
+    s_log->debug("examine_main_vertex_candidate: vertex ({:.2f}, {:.2f}, {:.2f})",
+        vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm);
     
     auto vd = vertex->get_descriptor();
     auto edge_range = boost::out_edges(vd, graph);
@@ -297,8 +306,9 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
 }
 
 VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    s_log->debug("compare_main_vertices_all_showers: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
     if (vertex_candidates.empty()) return nullptr;
-    
+
     VertexPtr temp_main_vertex = vertex_candidates.front();
     
     // Collect all points from segments and vertices in the cluster
@@ -474,7 +484,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     }
     
     // Local graph and temporary elements automatically cleaned up when going out of scope
-    
+    s_log->debug("compare_main_vertices_all_showers: selected vertex ({:.2f}, {:.2f}, {:.2f}) sg_length={:.2f}cm sg_dir={}",
+        temp_main_vertex->wcpt().point.x()/units::cm, temp_main_vertex->wcpt().point.y()/units::cm,
+        temp_main_vertex->wcpt().point.z()/units::cm, tmp_sg_length/units::cm, tmp_sg_dir);
+
     return temp_main_vertex;
 }
 
@@ -695,8 +708,9 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
 }
 
 VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates){
+    s_log->debug("compare_main_vertices: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
     if (vertex_candidates.empty()) return nullptr;
-    
+
     std::map<VertexPtr, double> map_vertex_num;
     for (auto vtx : vertex_candidates) {
         map_vertex_num[vtx] = 0;
@@ -882,7 +896,14 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
             max_vertex = vtx;
         }
     }
-    
+
+    if (max_vertex) {
+        s_log->debug("compare_main_vertices: selected vertex ({:.2f}, {:.2f}, {:.2f}) score={:.3f}",
+            max_vertex->wcpt().point.x()/units::cm, max_vertex->wcpt().point.y()/units::cm,
+            max_vertex->wcpt().point.z()/units::cm, max_val);
+    } else {
+        s_log->debug("compare_main_vertices: no vertex selected");
+    }
     return max_vertex;
 }
 
@@ -987,8 +1008,12 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
 
 bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_final){
     if (!vertex || !vertex->cluster()) return false;
-    
+
     Facade::Cluster& cluster = *vertex->cluster();
+    s_log->debug("examine_direction: cluster {} vtx ({:.2f},{:.2f},{:.2f}) is_main_vtx={} flag_final={}",
+        cluster.ident(),
+        vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm,
+        (vertex == main_vertex), flag_final);
     
     // Calculate cluster statistics
     double max_vtx_length = 0;
@@ -1051,6 +1076,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         }
     }
     
+    s_log->debug("examine_direction: cluster {} topology: num_total_segs={} max_vtx_len={:.2f}cm min_vtx_len={:.2f}cm flag_only_showers={}",
+        cluster.ident(), num_total_segments,
+        max_vtx_length/units::cm, min_vtx_length/units::cm, flag_only_showers);
+
     // Beam direction (along z-axis)
     Facade::geo_vector_t drift_dir(1, 0, 0);
     
@@ -1108,12 +1137,16 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             }
             
             if (used_segments.find(current_sg) != used_segments.end()) continue;
-            
+
             double length = segment_track_length(current_sg);
             bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
                             current_sg->flags_any(SegmentFlags::kShowerTopology) ||
                             (current_sg->has_particle_info() && std::abs(current_sg->particle_info()->pdg()) == 11);
-            
+
+            s_log->debug("examine_direction: cluster {} processing seg: length={:.2f}cm is_shower={} flag_shower_in={} cur_dirsign={} dir_weak={}",
+                cluster.ident(), length/units::cm, is_shower, flag_shower_in,
+                current_sg->dirsign(), current_sg->dir_weak());
+
             // Determine segment direction
             if (current_sg->dirsign() == 0 || current_sg->dir_weak() || is_shower || flag_final) {
                 const auto& wcps = current_sg->wcpts();
@@ -1238,9 +1271,8 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 current_sg->particle_info(pinfo);
                             } else {
                                 double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
-                                // std::cout << "examine_direction: dqdx_ratio=" << dqdx_ratio
-                                //           << " length=" << segment_track_length(current_sg)/units::cm << " cm"
-                                //           << " nfits=" << current_sg->fits().size() << std::endl;
+                                s_log->debug("examine_direction: cluster {} dqdx_ratio={:.3f} length={:.2f}cm nfits={}",
+                                    cluster.ident(), dqdx_ratio, length/units::cm, current_sg->fits().size());
                                 if (dqdx_ratio > 1.4) {
                                     auto four_momentum = segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
                                     auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
@@ -1255,6 +1287,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     }
                     
                     current_sg->dir_weak(true);
+                    s_log->debug("examine_direction: cluster {} seg assigned: dirsign={} pdg={} length={:.2f}cm",
+                        cluster.ident(), current_sg->dirsign(),
+                        current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0,
+                        length/units::cm);
                 }
             } else if (current_sg->dirsign() != 0 && !current_sg->dir_weak()) {
                 // Strong direction already set
@@ -1344,6 +1380,8 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             }
             
             if (total_length > 45*units::cm && max_length > 35*units::cm && acc_segments.size() > 1) {
+                s_log->debug("examine_direction: cluster {} found long muon chain: total_length={:.2f}cm max_length={:.2f}cm nsegs={}",
+                    cluster.ident(), total_length/units::cm, max_length/units::cm, acc_segments.size());
                 for (auto acc_seg : acc_segments) {
                     auto four_momentum = segment_cal_4mom(acc_seg, 13, particle_data, recomb_model);
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
@@ -1426,6 +1464,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             }
         }
         
+        s_log->debug("examine_direction: cluster {} muon/pion selection: muon_length={:.2f}cm n_muon_candidates={} has_muon={}",
+            cluster.ident(), muon_length/units::cm, (int)pion_sgs.size(), (muon_sg != nullptr));
+
         // Convert non-muon candidates to pions
         for (auto pion_sg : pion_sgs) {
             if (pion_sg == muon_sg) continue;
@@ -1762,7 +1803,7 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
 }
 
 
-bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, VertexPtr main_vertex, std::set<SegmentPtr>& sg_set, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, VertexPtr main_vertex, std::vector<SegmentPtr>& sg_set, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Allow to move 1.5 cm - create MyFCN object with constraint parameters
     MyFCN fcn(vertex, true, 0.43*units::cm, 1.5*units::cm, 0.9*units::cm, 6*units::cm);
     
@@ -1828,7 +1869,8 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
 
 
 void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
-    
+    s_log->debug("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
+
     std::set<VertexPtr> fitted_vertices;
     std::set<SegmentPtr> existing_segments;
     
@@ -1861,16 +1903,16 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     bool flag_update_fit = false;
     
     // Find and fit vertices
-    for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+    for (auto v : ordered_nodes(graph)) {
         VertexPtr vtx = graph[v].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
+
         // Get segments connected to this vertex
-        std::set<SegmentPtr> vertex_segments;
+        std::vector<SegmentPtr> vertex_segments;
         for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
             SegmentPtr sg = graph[*it].segment;
             if (sg && sg->cluster() == &cluster) {
-                vertex_segments.insert(sg);
+                vertex_segments.push_back(sg);
             }
         }
         
@@ -1890,20 +1932,32 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         if (flag_skip_two_legs && vertex_segments.size() <= 2) continue;
         
         auto wcp_save = vtx->wcpt();
-        
+
+        s_log->debug("improve_vertex: cluster {} fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",
+            cluster.ident(),
+            vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm,
+            vertex_segments.size());
         bool flag_update = fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
         if (flag_update) fitted_vertices.insert(vtx);
         if (flag_update) {
             flag_update_fit = true;
-            
-            double tmp_dis = std::sqrt(std::pow(wcp_save.point.x() - vtx->wcpt().point.x(), 2) + 
-                                      std::pow(wcp_save.point.y() - vtx->wcpt().point.y(), 2) + 
+
+            double tmp_dis = std::sqrt(std::pow(wcp_save.point.x() - vtx->wcpt().point.x(), 2) +
+                                      std::pow(wcp_save.point.y() - vtx->wcpt().point.y(), 2) +
                                       std::pow(wcp_save.point.z() - vtx->wcpt().point.z(), 2));
-            
+            s_log->debug("improve_vertex: cluster {} fit_vertex done, vertex moved {:.3f} cm -> ({:.2f}, {:.2f}, {:.2f})",
+                cluster.ident(), tmp_dis/units::cm,
+                vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
+
             if (tmp_dis > 0.5*units::cm) { // if the vertex moved far, refit
                 track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
                 fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
+                s_log->debug("improve_vertex: cluster {} second fit_vertex done -> ({:.2f}, {:.2f}, {:.2f})",
+                    cluster.ident(),
+                    vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
             }
+        } else {
+            s_log->debug("improve_vertex: cluster {} fit_vertex made no update", cluster.ident());
         }
 
         (void)nshowers;
@@ -1926,16 +1980,16 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         if (flag_keep_main_vertex) {
             // Check if main_vertex still exists in graph
             bool found_main_vertex = false;
-            for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+            for (auto v : ordered_nodes(graph)) {
                 if (graph[v].vertex == main_vertex) {
                     found_main_vertex = true;
                     break;
                 }
             }
-            
+
             if (!found_main_vertex) {
                 double min_dis = 1e9;
-                for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                for (auto v : ordered_nodes(graph)) {
                     VertexPtr vtx = graph[v].vertex;
                     if (!vtx || vtx->cluster() != &cluster) continue;
                     double dis = std::sqrt(std::pow(vtx->fit().point.x() - main_vtx_pt.x(), 2) + 
@@ -1960,13 +2014,13 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 flag_found_vertex_activities = true;
                 
                 // Get segments connected to main_vertex
-                std::set<SegmentPtr> main_vertex_segments;
-                for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                std::vector<SegmentPtr> main_vertex_segments;
+                for (auto v : ordered_nodes(graph)) {
                     if (graph[v].vertex == main_vertex) {
                         for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
                             SegmentPtr sg = graph[*it].segment;
                             if (sg && sg->cluster() == &cluster) {
-                                main_vertex_segments.insert(sg);
+                                main_vertex_segments.push_back(sg);
                             }
                         }
                         break;
@@ -1978,21 +2032,21 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             }
         }
         
-        for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+        for (auto v : ordered_nodes(graph)) {
             VertexPtr vtx = graph[v].vertex;
             if (!vtx || vtx->cluster() != &cluster) continue;
-            
+
             // Get segments connected to this vertex
-            std::set<SegmentPtr> vertex_segments;
+            std::vector<SegmentPtr> vertex_segments;
             for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
                 SegmentPtr sg = graph[*it].segment;
                 if (sg && sg->cluster() == &cluster) {
-                    vertex_segments.insert(sg);
+                    vertex_segments.push_back(sg);
                 }
             }
-            
+
             if (vertex_segments.size() <= 2 && vtx != main_vertex) continue;
-            
+
             int ntracks = 0, nshowers = 0;
             for (auto sg : vertex_segments) {
                 bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -2005,19 +2059,19 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (vertices_in_long_muon.find(vtx) != vertices_in_long_muon.end()) continue;
             if (vtx == main_vertex && flag_found_vertex_activities) continue;
             if (flag_skip_two_legs && vertex_segments.size() <= 2) continue;
-            
+
             double search_range = 1.5*units::cm;
             if (vertex_segments.size() == 1) search_range = 3.0*units::cm;
-            
+
             bool flag_update = search_for_vertex_activities(graph, vtx, vertex_segments, cluster, track_fitter, dv, search_range);
-            
+
             if (flag_update) {
                 // Get updated segments
                 vertex_segments.clear();
                 for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
                     SegmentPtr sg = graph[*it].segment;
                     if (sg && sg->cluster() == &cluster) {
-                        vertex_segments.insert(sg);
+                        vertex_segments.push_back(sg);
                     }
                 }
                 if (vertex_segments.size() == 3) refit_vertices.push_back(vtx);
@@ -2030,27 +2084,38 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             // Do the overall fit again
             track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
             flag_update_fit = false;
-            
+
             // Redo the fit
             for (auto vtx : refit_vertices) {
-                std::set<SegmentPtr> vertex_segments;
-                for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+                std::vector<SegmentPtr> vertex_segments;
+                for (auto v : ordered_nodes(graph)) {
                     if (graph[v].vertex == vtx) {
                         for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
                             SegmentPtr sg = graph[*it].segment;
                             if (sg && sg->cluster() == &cluster) {
-                                vertex_segments.insert(sg);
+                                vertex_segments.push_back(sg);
                             }
                         }
                         break;
                     }
                 }
-                
+
+                s_log->debug("improve_vertex: cluster {} refit pass, fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",
+                    cluster.ident(),
+                    vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm,
+                    vertex_segments.size());
                 bool flag_update = fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
                 if (flag_update) fitted_vertices.insert(vtx);
-                if (flag_update) flag_update_fit = true;
+                if (flag_update) {
+                    flag_update_fit = true;
+                    s_log->debug("improve_vertex: cluster {} refit fit_vertex updated vertex -> ({:.2f}, {:.2f}, {:.2f})",
+                        cluster.ident(),
+                        vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
+                }
             }
-            if (flag_update_fit) track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            if (flag_update_fit) {
+                track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            }
         }
         
         // Eliminate short tracks
@@ -2097,7 +2162,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     } else { // flag_search_vertex_activity
         for (auto vtx : fitted_vertices) {
             // Find vertex descriptor
-            for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+            for (auto v : ordered_nodes(graph)) {
                 if (graph[v].vertex != vtx) continue;
                 
                 for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
@@ -2138,7 +2203,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     // Handle special cases for main_vertex segments
     if (main_vertex != nullptr && main_vertex->cluster() == &cluster) {
         // Find main_vertex descriptor
-        for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+        for (auto v : ordered_nodes(graph)) {
             if (graph[v].vertex != main_vertex) continue;
             
             for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
@@ -2249,6 +2314,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             break;
         }
     }
+
+    s_log->debug("improve_vertex: cluster {} done", cluster.ident());
 }
 
 void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_print){
@@ -2257,9 +2324,11 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     auto t_total = Clock::now();
     auto t0 = Clock::now();
 
+    s_log->debug("determine_main_vertex: cluster {} flag_print={}", cluster.ident(), flag_print);
+
     // Find the main vertex - check if we have only showers
     bool flag_save_only_showers = true;
-    for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+    for (auto v : ordered_nodes(graph)) {
         VertexPtr vtx = graph[v].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
 
@@ -2277,8 +2346,11 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     }
     MS t_scan_only_showers(Clock::now() - t0); t0 = Clock::now();
 
+    s_log->debug("determine_main_vertex: cluster {} flag_save_only_showers={}", cluster.ident(), flag_save_only_showers);
+
     // Improve vertex if not only showers and cluster is main cluster
     if (!flag_save_only_showers && cluster.get_flag(Facade::Flags::main_cluster)) {
+        s_log->debug("determine_main_vertex: cluster {} calling improve_vertex + fix_maps_shower_in_track_out", cluster.ident());
         improve_vertex(graph, cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, track_fitter, dv, particle_data, recomb_model, false);
         // Fix maps with shower in and track out
         fix_maps_shower_in_track_out(graph, cluster);
@@ -2289,7 +2361,7 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     std::map<VertexPtr, std::pair<int, int>> map_vertex_track_shower;
     std::vector<VertexPtr> main_vertex_candidates;
 
-    for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+    for (auto v : ordered_nodes(graph)) {
         VertexPtr vtx = graph[v].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
 
@@ -2307,7 +2379,7 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     // Select main vertex candidates based on topology
     if (flag_save_only_showers) {
         // For all showers case, add vertices with 1 segment first
-        for (auto v : boost::make_iterator_range(boost::vertices(graph))) {
+        for (auto v : ordered_nodes(graph)) {
             VertexPtr vtx = graph[v].vertex;
             if (!vtx || vtx->cluster() != &cluster) continue;
 
@@ -2325,31 +2397,41 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             }
         }
 
-        // Add remaining candidates
-        for (auto it = map_vertex_track_shower.begin(); it != map_vertex_track_shower.end(); it++) {
-            if (std::find(main_vertex_candidates.begin(), main_vertex_candidates.end(), it->first) == main_vertex_candidates.end()) {
-                main_vertex_candidates.push_back(it->first);
+        // Add remaining candidates in insertion order
+        for (auto v : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[v].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            if (map_vertex_track_shower.find(vtx) == map_vertex_track_shower.end()) continue;
+            if (std::find(main_vertex_candidates.begin(), main_vertex_candidates.end(), vtx) == main_vertex_candidates.end()) {
+                main_vertex_candidates.push_back(vtx);
             }
         }
     } else {
-        // For mixed case, only add vertices with tracks
-        for (auto it = map_vertex_track_shower.begin(); it != map_vertex_track_shower.end(); it++) {
-            if (it->second.first > 0) {
-                main_vertex_candidates.push_back(it->first);
+        // For mixed case, only add vertices with tracks in insertion order
+        for (auto v : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[v].vertex;
+            if (!vtx || vtx->cluster() != &cluster) continue;
+            auto it = map_vertex_track_shower.find(vtx);
+            if (it != map_vertex_track_shower.end() && it->second.first > 0) {
+                main_vertex_candidates.push_back(vtx);
             }
         }
     }
     MS t_select_candidates(Clock::now() - t0); t0 = Clock::now();
 
+    s_log->debug("determine_main_vertex: cluster {} ncandidates={}", cluster.ident(), main_vertex_candidates.size());
+
     // Determine main vertex based on candidates
     if (flag_save_only_showers) {
         if (main_vertex_candidates.size() > 0) {
+            s_log->debug("determine_main_vertex: cluster {} all-showers path, calling compare_main_vertices_all_showers", cluster.ident());
             if (flag_print) {
                 std::cout << "Determining the main vertex with all showers: " << main_vertex_candidates.size()
                          << " in cluster " << cluster.get_cluster_id() << std::endl;
             }
             main_vertex = compare_main_vertices_all_showers(graph, cluster, main_vertex_candidates, track_fitter, dv, particle_data, recomb_model);
         } else {
+            s_log->debug("determine_main_vertex: cluster {} all-showers but no candidates, early return", cluster.ident());
             if (m_perf) {
                 MS t_total_ms(Clock::now() - t_total);
                 SPDLOG_LOGGER_DEBUG(s_log,
@@ -2363,7 +2445,9 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         }
     } else {
         // Examine main vertex candidates to filter and identify back-to-back tracks
+        s_log->debug("determine_main_vertex: cluster {} calling examine_main_vertices_local", cluster.ident());
         examine_main_vertices_local(graph, main_vertex_candidates, particle_data, recomb_model);
+        s_log->debug("determine_main_vertex: cluster {} after examine_main_vertices_local, ncandidates={}", cluster.ident(), main_vertex_candidates.size());
 
         if (flag_print) {
             for (auto vtx : main_vertex_candidates) {
@@ -2384,8 +2468,10 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         }
 
         if (main_vertex_candidates.size() == 1) {
+            s_log->debug("determine_main_vertex: cluster {} single candidate, selecting directly", cluster.ident());
             main_vertex = main_vertex_candidates.front();
         } else if (main_vertex_candidates.size() > 1) {
+            s_log->debug("determine_main_vertex: cluster {} multiple candidates, calling compare_main_vertices", cluster.ident());
             main_vertex = compare_main_vertices(graph, cluster, main_vertex_candidates);
         } else {
             if (m_perf) {
@@ -2446,6 +2532,15 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         std::cout << std::endl;
 
         print_segs_info(graph, cluster, main_vertex);
+    }
+
+    if (main_vertex) {
+        s_log->debug("determine_main_vertex: cluster {} done, main_vertex ({:.2f}, {:.2f}, {:.2f})",
+            cluster.ident(),
+            main_vertex->wcpt().point.x()/units::cm, main_vertex->wcpt().point.y()/units::cm,
+            main_vertex->wcpt().point.z()/units::cm);
+    } else {
+        s_log->debug("determine_main_vertex: cluster {} done, main_vertex is null", cluster.ident());
     }
 }
 
@@ -2546,8 +2641,9 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
 }
 
 void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    s_log->debug("examine_main_vertices_local: nvertices={}", vertices.size());
     if (vertices.size() == 1) return;
-    
+
     double max_length = 0;
     std::set<VertexPtr> tmp_vertices;
     
@@ -2724,11 +2820,15 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
     }
     
     // Update vertices collection
-    if (tmp_vertices.size() == 0) return;
-    
+    if (tmp_vertices.size() == 0) {
+        s_log->debug("examine_main_vertices_local: no vertices survived filtering, returning unchanged");
+        return;
+    }
+
     vertices.clear();
     vertices.resize(tmp_vertices.size());
     std::copy(tmp_vertices.begin(), tmp_vertices.end(), vertices.begin());
+    s_log->debug("examine_main_vertices_local: done, nvertices_out={}", vertices.size());
 }
 
 

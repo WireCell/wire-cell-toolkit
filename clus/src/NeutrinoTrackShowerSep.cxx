@@ -15,13 +15,11 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
     auto t0 = Clock::now();
 
     // Collect all segments that belong to this cluster
-    std::set<SegmentPtr> segments;
-
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    std::vector<SegmentPtr> segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (seg && seg->cluster() == &cluster) {
-            segments.insert(seg);
+            segments.push_back(seg);
         }
     }
     // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: collect segments ({}) took {} ms", segments.size(), MS(Clock::now() - t0).count());
@@ -116,14 +114,11 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
         // if (seg->cluster() == main_cluster) flag_print = true;
 
         auto t0 = Clock::now();
-        const char* seg_type;
         if (seg->flags_any(SegmentFlags::kShowerTrajectory)) {
-            seg_type = "S_traj";
             // Trajectory shower
             segment_determine_shower_direction_trajectory(seg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
             t_shower_traj += MS(Clock::now() - t0);
         } else if (seg->flags_any(SegmentFlags::kShowerTopology)) {
-            seg_type = "S_topo";
             // Topology shower: determine direction, then set electron particle info
             segment_determine_shower_direction(seg, particle_data, recomb_model);
             {
@@ -140,7 +135,6 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             }
             t_shower_topo += MS(Clock::now() - t0);
         } else {
-            seg_type = "Track";
             // Track
             segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
             t_track += MS(Clock::now() - t0);
@@ -473,23 +467,22 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
         flag_update = false;
         
         // Iterate through all vertices in the graph
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
-            
+        for (auto vit : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vit].vertex;
+
             // Skip if vertex is null or doesn't belong to this cluster
             if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
-            
+
             // Check how many segments are connected to this vertex
             if (!vtx->descriptor_valid()) continue;
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) <= 1) continue;
-            
+
             // Skip if already processed
             if (used_vertices.find(vtx) != used_vertices.end()) continue;
-            
+
             int n_in = 0;
-            std::map<SegmentPtr, bool> map_sg_dir; // segment -> flag_start
+            std::vector<std::pair<SegmentPtr, bool>> map_sg_dir; // segment -> flag_start
             
             // Get vertex position
             WireCell::Point vtx_point = vtx->wcpt().point;
@@ -527,7 +520,7 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
                 
                 // Collect segments with no or weak direction
                 if (sg->dirsign() == 0 || sg->dir_weak()) {
-                    map_sg_dir[sg] = flag_start;
+                    map_sg_dir.push_back({sg, flag_start});
                 }
             }
             
@@ -538,9 +531,7 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
             
             // If there are incoming segments, set all weak/no-direction segments to point out
             if (n_in > 0) {
-                for (auto it1 = map_sg_dir.begin(); it1 != map_sg_dir.end(); it1++) {
-                    SegmentPtr sg = it1->first;
-                    bool flag_start = it1->second;
+                for (auto& [sg, flag_start] : map_sg_dir) {
                     
                     // Set direction to point away from vertex
                     if (flag_start) {
@@ -583,25 +574,24 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
         flag_update = false;
         
         // Iterate through all vertices in the graph
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
-            
+        for (auto vit : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vit].vertex;
+
             // Skip if vertex is null or doesn't belong to this cluster
             if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
-            
+
             // Check how many segments are connected to this vertex
             if (!vtx->descriptor_valid()) continue;
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) <= 1) continue;
-            
+
             // Skip if already processed
             if (used_vertices.find(vtx) != used_vertices.end()) continue;
-            
+
             // int n_in = 0;
             int n_in_shower = 0;
             std::vector<SegmentPtr> out_tracks;
-            std::map<SegmentPtr, bool> map_no_dir_segments; // segment -> flag_start
+            std::vector<SegmentPtr> map_no_dir_segments; // segments with no direction
             
             // Get vertex position
             WireCell::Point vtx_point = vtx->wcpt().point;
@@ -647,7 +637,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                 }
                 // Segment with no direction
                 else if (sg->dirsign() == 0) {
-                    map_no_dir_segments[sg] = flag_start;
+                    map_no_dir_segments.push_back(sg);
                 }
             }
             
@@ -674,8 +664,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                 }
                 
                 // Process no-direction segments
-                for (auto it1 = map_no_dir_segments.begin(); it1 != map_no_dir_segments.end(); it1++) {
-                    SegmentPtr sg1 = it1->first;
+                for (auto sg1 : map_no_dir_segments) {
                     if (used_segments.find(sg1) != used_segments.end()) continue;
 
                     // If it's not already a shower, reclassify as electron
@@ -1203,13 +1192,12 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
         flag_update = false;
         
         // Iterate through all vertices in the graph
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr vtx = graph[*vit].vertex;
-            
+        for (auto vit : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vit].vertex;
+
             // Skip if vertex is null or doesn't belong to this cluster
             if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
-            
+
             // Skip if vertex has only 1 segment
             if (!vtx->descriptor_valid()) continue;
             auto vd = vtx->get_descriptor();
@@ -1283,32 +1271,30 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
 }
 
 void PatternAlgorithms::judge_no_dir_tracks_close_to_showers(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, IDetectorVolumes::pointer dv){
-    std::set<SegmentPtr> shower_set;
-    std::set<SegmentPtr> no_dir_track_set;
-    
+    std::vector<SegmentPtr> shower_set;
+    std::vector<SegmentPtr> no_dir_track_set;
+
     // Collect shower segments and no-direction track segments
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr sg = graph[e].segment;
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
         bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
                         sg->flags_any(SegmentFlags::kShowerTopology) ||
                         (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
 
         if (is_shower) {
-            shower_set.insert(sg);
+            shower_set.push_back(sg);
         } else {
             if (sg->dirsign() == 0) {
-                no_dir_track_set.insert(sg);
+                no_dir_track_set.push_back(sg);
             }
         }
     }
-    
+
     // Process each no-direction track segment
-    for (auto it = no_dir_track_set.begin(); it != no_dir_track_set.end(); it++) {
-        SegmentPtr sg = *it;
+    for (auto sg : no_dir_track_set) {
         bool flag_change = true;
         
         const auto& pts = sg->fits();//wcpts();

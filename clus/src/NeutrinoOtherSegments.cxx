@@ -48,8 +48,8 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
     const auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
     double cluster_t0 = cluster.get_cluster_t0();
     
-    // Get all existing segments in this cluster
-    std::set<SegmentPtr> existing_segments = find_cluster_segments(graph, cluster);
+    // Get all existing segments in this cluster (in insertion order)
+    std::vector<SegmentPtr> existing_segments = find_cluster_segments(graph, cluster);
     
     for (size_t i = 0; i < N; i++) {
         Facade::geo_point_t p(x_coords[i], y_coords[i], z_coords[i]);
@@ -455,7 +455,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         track_fitter.do_single_tracking(new_seg, true, true, false, false, &cluster);
 
         // Always add to existing_segments for 2D distance re-evaluation of remaining clusters
-        existing_segments.insert(new_seg);
+        existing_segments.push_back(new_seg);
 
         if (new_seg->fits().size() > 1) {
             // Find existing vertices/segments near the endpoints
@@ -581,9 +581,9 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                     // Try to snap to a nearby isochronous vertex
                     const WireCell::Vector drift_dir(1, 0, 0);
-                    auto [vbegin, vend] = boost::vertices(graph);
-                    for (auto vit = vbegin; vit != vend && !flag_parallel; ++vit) {
-                        VertexPtr vtx = graph[*vit].vertex;
+                    for (const auto& vd_snap : ordered_nodes(graph)) {
+                        if (flag_parallel) break;
+                        VertexPtr vtx = graph[vd_snap].vertex;
                         if (!vtx || vtx->cluster() != &cluster) continue;
                         if (vtx == v1 || vtx == v2) continue;
 
@@ -610,9 +610,8 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         double min_dis1 = 1e9; SegmentPtr min_sg1 = nullptr;
                         double min_dis2 = 1e9; SegmentPtr min_sg2 = nullptr;
 
-                        auto [ebegin, eend] = boost::edges(graph);
-                        for (auto eit = ebegin; eit != eend; ++eit) {
-                            SegmentPtr sg1 = graph[*eit].segment;
+                        for (const auto& ed_snap : ordered_edges(graph)) {
+                            SegmentPtr sg1 = graph[ed_snap].segment;
                             if (!sg1 || sg1->cluster() != &cluster) continue;
 
                             double dis1 = segment_get_closest_point(sg1, v1_fit_pt, "fit").first;
@@ -851,9 +850,8 @@ PatternAlgorithms::check_end_point(Graph& graph,
 
         Facade::geo_vector_t temp_dir = dir_p.norm();
 
-        auto [vbegin, vend] = boost::vertices(graph);
-        for (auto vit = vbegin; vit != vend; ++vit) {
-            VertexPtr test_v = graph[*vit].vertex;
+        for (const auto& vd_track : ordered_nodes(graph)) {
+            VertexPtr test_v = graph[vd_track].vertex;
             if (!test_v || test_v->cluster() != &cluster) {
                 continue;
             }

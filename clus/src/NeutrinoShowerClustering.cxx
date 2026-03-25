@@ -66,21 +66,20 @@ void PatternAlgorithms::update_shower_maps(std::set<ShowerPtr>& showers,  std::m
 
 void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon){
     if (!main_vertex) return;
-    
-    // Build map_vertex_segments from graph
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+
+    // Build map_vertex_segments from graph (ordered for determinism)
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
-        if (v1) map_vertex_segments[v1].insert(seg);
-        if (v2) map_vertex_segments[v2].insert(seg);
+
+        if (v1) map_vertex_segments[v1].push_back(seg);
+        if (v2) map_vertex_segments[v2].push_back(seg);
     }
     
     // Step 1: Collect segments from showers starting at main_vertex
@@ -309,21 +308,20 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
 
 void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters){
     if (!main_vertex) return;
-    
-    // Build map_vertex_segments from graph
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+
+    // Build map_vertex_segments from graph (ordered for determinism)
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
-        if (v1) map_vertex_segments[v1].insert(seg);
-        if (v2) map_vertex_segments[v2].insert(seg);
+
+        if (v1) map_vertex_segments[v1].push_back(seg);
+        if (v2) map_vertex_segments[v2].push_back(seg);
     }
     
     // Step 1: Collect segments from showers starting at main_vertex
@@ -558,18 +556,21 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
 void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters){
     if (!main_vertex || !main_cluster) return;
     
-    // Build map_segment_vertices from graph
+    // Build map_segment_vertices from graph (ordered for determinism)
     std::map<SegmentPtr, std::set<VertexPtr>> map_segment_vertices;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    std::vector<SegmentPtr> seg_order;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
+
+        if (map_segment_vertices.find(seg) == map_segment_vertices.end()) {
+            seg_order.push_back(seg);
+        }
         if (v1) map_segment_vertices[seg].insert(v1);
         if (v2) map_segment_vertices[seg].insert(v2);
     }
@@ -582,7 +583,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
     // Step 1: Find the maximum length segment in main_cluster
     {
         double max_length = 0;
-        for (auto& [seg, vertices] : map_segment_vertices) {
+        for (auto seg : seg_order) {
             if (seg->cluster() != main_cluster) continue;
             double length = segment_track_length(seg);
             if (length > max_length && length > 6 * units::cm) {
@@ -593,7 +594,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
     }
     
     // Step 2: Build map_shower_dir for showers in main_cluster
-    for (auto& [seg, vertices] : map_segment_vertices) {
+    for (auto seg : seg_order) {
         if (seg->cluster() != main_cluster) continue;
         if (map_segment_in_shower.find(seg) == map_segment_in_shower.end()) continue;
         
@@ -678,7 +679,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         bool flag_continue = true;
         while (flag_continue) {
             flag_continue = false;
-            for (auto& [seg1, vertices] : map_segment_vertices) {
+            for (auto seg1 : seg_order) {
                 if (seg1->cluster() == main_cluster) continue;
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
                 
@@ -714,7 +715,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
     if (map_shower_dir.empty()) return;
     
     // Step 4: Examine other segments and add to showers based on angle and distance
-    for (auto& [seg1, vertices] : map_segment_vertices) {
+    for (auto seg1 : seg_order) {
         if (seg1->cluster() == main_cluster) continue;
         if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
         
@@ -774,19 +775,18 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     std::map<SegmentPtr, Facade::Cluster*> map_segment_cluster;
     std::map<SegmentPtr, std::set<VertexPtr>> map_segment_vertices;
     
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg || !seg->cluster()) continue;
-        
+
         map_cluster_segments[seg->cluster()].push_back(seg);
         map_segment_cluster[seg] = seg->cluster();
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
+
         if (v1) map_segment_vertices[seg].insert(v1);
         if (v2) map_segment_vertices[seg].insert(v2);
     }
@@ -839,11 +839,10 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     
     // Step 2: List main cluster vertices
     std::vector<VertexPtr> main_cluster_vertices;
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    for (auto v : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[v].vertex;
         if (!vtx || !vtx->cluster() || vtx->cluster() != main_cluster) continue;
-        
+
         if (vtx != main_vertex) {
             if (vertices_in_long_muon.find(vtx) != vertices_in_long_muon.end()) continue;
             if (map_vertex_in_shower.find(vtx) != map_vertex_in_shower.end()) continue;
@@ -863,7 +862,10 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     std::set<int> apas;
     Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
     
-    for (auto& [cluster, center_pair] : map_cluster_center_point) {
+    for (auto cluster : other_clusters) {
+        auto cpi = map_cluster_center_point.find(cluster);
+        if (cpi == map_cluster_center_point.end()) continue;
+        auto& center_pair = cpi->second;
         WireCell::Point center_p = center_pair.first;
         
         // Create point cloud from cluster segments
@@ -1290,26 +1292,29 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
     
     if (!main_vertex || !main_cluster) return;
     
-    // Build map_vertex_segments and map_segment_vertices
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
+    // Build map_vertex_segments and map_segment_vertices (ordered for determinism)
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
     std::map<SegmentPtr, std::set<VertexPtr>> map_segment_vertices;
-    
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    std::vector<SegmentPtr> seg_order;
+
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
+
+        if (map_segment_vertices.find(seg) == map_segment_vertices.end()) {
+            seg_order.push_back(seg);
+        }
         if (v1) {
-            map_vertex_segments[v1].insert(seg);
+            map_vertex_segments[v1].push_back(seg);
             map_segment_vertices[seg].insert(v1);
         }
         if (v2) {
-            map_vertex_segments[v2].insert(seg);
+            map_vertex_segments[v2].push_back(seg);
             map_segment_vertices[seg].insert(v2);
         }
     }
@@ -1320,9 +1325,11 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
         map_cluster_length[cluster] = cluster->get_length();
     }
     
-    // Collect vertices in main cluster as well as existing showers
+    // Collect vertices in main cluster as well as existing showers (in deterministic order)
     std::vector<VertexPtr> vertices;
-    for (auto& [vtx, seg_set] : map_vertex_segments) {
+    for (auto v : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[v].vertex;
+        if (!vtx) continue;
         if ((vtx->cluster() && vtx->cluster()->get_cluster_id() == main_cluster->get_cluster_id()) ||
             map_vertex_in_shower.find(vtx) != map_vertex_in_shower.end()) {
             vertices.push_back(vtx);
@@ -1401,7 +1408,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             WireCell::Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_pt, 15 * units::cm);
             
             // Cluster with the rest - add segments based on angle and distance
-            for (auto& [seg1, vertices_set] : map_segment_vertices) {
+            for (auto seg1 : seg_order) {
                 if (seg1->cluster() == main_cluster) continue;
                 if (map_segment_in_shower.find(seg1) != map_segment_in_shower.end()) continue;
                 if (seg1->cluster() == shower->start_segment()->cluster()) continue;
@@ -1572,21 +1579,20 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
 void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
-    
-    // Build map_vertex_segments
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+
+    // Build map_vertex_segments (ordered for determinism)
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
-        if (v1) map_vertex_segments[v1].insert(seg);
-        if (v2) map_vertex_segments[v2].insert(seg);
+
+        if (v1) map_vertex_segments[v1].push_back(seg);
+        if (v2) map_vertex_segments[v2].push_back(seg);
     }
     
     // Check if there is already a large EM shower connecting to main_vertex
@@ -1983,21 +1989,20 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
     if (!main_vertex) return;
     
     // Build map_vertex_segments
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
-        if (v1) map_vertex_segments[v1].insert(seg);
-        if (v2) map_vertex_segments[v2].insert(seg);
+
+        if (v1) map_vertex_segments[v1].push_back(seg);
+        if (v2) map_vertex_segments[v2].push_back(seg);
     }
-    
+
     std::map<SegmentPtr, ShowerPtr> map_merge_seg_shower;
     WireCell::Vector drift_dir(1, 0, 0);
     std::set<ShowerPtr> del_showers;
@@ -2332,22 +2337,21 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
 
     if (!main_vertex) return;
     
-    // Build map_vertex_segments
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    // Build map_vertex_segments (ordered for determinism)
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
-        if (v1) map_vertex_segments[v1].insert(seg);
-        if (v2) map_vertex_segments[v2].insert(seg);
+
+        if (v1) map_vertex_segments[v1].push_back(seg);
+        if (v2) map_vertex_segments[v2].push_back(seg);
     }
-    
+
     // Figure out all disconnected showers
     std::set<ShowerPtr> disconnected_showers;
     std::map<ShowerPtr, WireCell::Vector> map_shower_dir;
@@ -2581,30 +2585,29 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
 
     if (!main_vertex) return;
     
-    // Build map_vertex_segments and segments_in_long_muon
-    std::map<VertexPtr, std::set<SegmentPtr>> map_vertex_segments;
+    // Build map_vertex_segments and segments_in_long_muon (ordered for determinism)
+    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
     std::set<SegmentPtr> segments_in_long_muon;  // Placeholder - would need proper implementation
-    
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-        
-        auto source_vdesc = boost::source(*eit, graph);
-        auto target_vdesc = boost::target(*eit, graph);
+
+        auto source_vdesc = boost::source(e, graph);
+        auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-        
-        if (v1) map_vertex_segments[v1].insert(seg);
-        if (v2) map_vertex_segments[v2].insert(seg);
+
+        if (v1) map_vertex_segments[v1].push_back(seg);
+        if (v2) map_vertex_segments[v2].push_back(seg);
     }
-    
+
     // Check main vertex conditions
     if (map_vertex_segments[main_vertex].size() > 2) return;
-    
+
     if (map_vertex_segments[main_vertex].size() > 0) {
-        auto first_seg = *map_vertex_segments[main_vertex].begin();
-        auto last_seg = *map_vertex_segments[main_vertex].rbegin();
+        auto first_seg = map_vertex_segments[main_vertex].front();
+        auto last_seg = map_vertex_segments[main_vertex].back();
         
         if ((map_segment_in_shower.find(first_seg) == map_segment_in_shower.end() &&
              map_segment_in_shower.find(last_seg) == map_segment_in_shower.end()) ||

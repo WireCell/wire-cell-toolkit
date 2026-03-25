@@ -25,9 +25,8 @@ void PatternAlgorithms::order_clusters(Graph& graph, std::vector<Facade::Cluster
     ordered_clusters.clear();
     
     // Iterate through all segments in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+    for (auto e : ordered_edges(graph)) {
+        SegmentPtr seg = graph[e].segment;
         
         if (!seg || !seg->cluster()) continue;
         
@@ -308,14 +307,13 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
     
     // Clean up orphaned vertices
     std::vector<VertexPtr> tmp_vertices;
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
-        if (vtx && boost::out_degree(*vit, graph) == 0) {
+    for (auto v : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[v].vertex;
+        if (vtx && boost::out_degree(v, graph) == 0) {
             tmp_vertices.push_back(vtx);
         }
     }
-    
+
     for (auto vtx : tmp_vertices) {
         remove_vertex(graph, vtx);
     }

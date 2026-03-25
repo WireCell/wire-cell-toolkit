@@ -318,13 +318,12 @@ void TrackFitting::build_cluster_edges() {
     m_cluster_edges.clear();
     m_all_edges.clear();
     if (!m_graph) return;
-    auto [eb, ee] = boost::edges(*m_graph);
-    for (auto e_it = eb; e_it != ee; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (auto e : PR::ordered_edges(*m_graph)) {
+        auto& edge_bundle = (*m_graph)[e];
         if (!edge_bundle.segment) continue;
-        m_all_edges.push_back(*e_it);
+        m_all_edges.push_back(e);
         if (edge_bundle.segment->cluster())
-            m_cluster_edges[edge_bundle.segment->cluster()].push_back(*e_it);
+            m_cluster_edges[edge_bundle.segment->cluster()].push_back(e);
     }
 }
 
@@ -2996,8 +2995,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     m_2d_to_3d.clear();
 
     // Reset fit properties for all vertices (filtered to target cluster if set)
-    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-        auto vd = *vp.first;
+    for (auto vd : PR::ordered_nodes(*m_graph)) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
             for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
@@ -3173,8 +3171,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     }
 
     // Deal with all vertices again
-    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-        auto vd = *vp.first;
+    for (auto vd : PR::ordered_nodes(*m_graph)) {
         auto& v_bundle = (*m_graph)[vd];
         if (!v_bundle.vertex) continue;
         
@@ -3690,11 +3687,10 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
     }
     
     // Process vertices first
-    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-        auto vd = *vp.first;
+    for (auto vd : PR::ordered_nodes(*m_graph)) {
         auto& v_bundle = (*m_graph)[vd];
         if (!v_bundle.vertex) continue;
-        
+
         auto vertex = v_bundle.vertex;
         int i = vertex->fit_index();
         bool flag_fit_fix = vertex->flag_fix();
@@ -7388,8 +7384,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     m_cluster_filter = cluster_filter;
 
     // Reset fit properties for all vertices first
-    for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-        auto vd = *vp.first;
+    for (auto vd : PR::ordered_nodes(*m_graph)) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
             for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
@@ -7817,8 +7812,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
   
   
     if (flag_dQ_dx){
-        for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
-            auto vd = *vp.first;
+        for (auto vd : PR::ordered_nodes(*m_graph)) {
             if (m_cluster_filter) {
                 bool has_cluster_seg = false;
                 for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
