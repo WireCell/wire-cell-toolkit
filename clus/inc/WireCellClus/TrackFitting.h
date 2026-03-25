@@ -538,7 +538,8 @@ namespace WireCell::Clus {
         // Option 1: per-cluster edge descriptor cache to avoid full graph traversal
         std::unordered_map<Facade::Cluster*, std::vector<PR::edge_descriptor>> m_cluster_edges;
         std::vector<PR::edge_descriptor> m_all_edges;  ///< All segment edges in m_graph
-        void build_cluster_edges();                    ///< Rebuild m_cluster_edges and m_all_edges from m_graph
+        std::vector<PR::node_descriptor> m_ordered_nodes_vec;  ///< Nodes sorted by index, cached by build_cluster_edges
+        void build_cluster_edges();                    ///< Rebuild m_cluster_edges, m_all_edges, and m_ordered_nodes_vec from m_graph
         const std::vector<PR::edge_descriptor>& get_segment_edges() const; ///< Return edges for current filter
 
         // Option 2: per-cluster charge data cache to avoid iterating full m_charge_data

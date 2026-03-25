@@ -51,7 +51,7 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     const std::string& aname, const std::string& pcname)
 {
     std::unordered_map<int, int> desc2id;
-    std::unordered_map<int, std::set<int> > id2desc;
+    std::map<int, std::set<int> > id2desc;
     /*int num_components =*/ boost::connected_components(g, boost::make_assoc_property_map(desc2id));
     for (const auto& [desc, id] : desc2id) {
         id2desc[id].insert(desc);

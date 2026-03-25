@@ -229,6 +229,7 @@ void TrackFitting::clear_graph(){
     m_blobs.clear();
     m_cluster_edges.clear();
     m_all_edges.clear();
+    m_ordered_nodes_vec.clear();
     m_cluster_charge_data.clear();
 }
 
@@ -317,6 +318,7 @@ void TrackFitting::inherit_from(const TrackFitting& src, Facade::Cluster* cluste
 void TrackFitting::build_cluster_edges() {
     m_cluster_edges.clear();
     m_all_edges.clear();
+    m_ordered_nodes_vec.clear();
     if (!m_graph) return;
     for (auto e : PR::ordered_edges(*m_graph)) {
         auto& edge_bundle = (*m_graph)[e];
@@ -325,6 +327,7 @@ void TrackFitting::build_cluster_edges() {
         if (edge_bundle.segment->cluster())
             m_cluster_edges[edge_bundle.segment->cluster()].push_back(e);
     }
+    m_ordered_nodes_vec = PR::ordered_nodes(*m_graph);
 }
 
 const std::vector<PR::edge_descriptor>& TrackFitting::get_segment_edges() const {
@@ -1503,9 +1506,6 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
 
 void TrackFitting::organize_segments_path(double low_dis_limit, double end_point_limit){
     if (!m_graph) return;
-
-    // Build edge cache if needed (organize_segments_path is the first call in do_multi_tracking)
-    build_cluster_edges();
 
     // Iterate over segment edges for the current cluster filter
     for (const auto& ed : get_segment_edges()) {
@@ -2995,7 +2995,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     m_2d_to_3d.clear();
 
     // Reset fit properties for all vertices (filtered to target cluster if set)
-    for (auto vd : PR::ordered_nodes(*m_graph)) {
+    for (auto vd : m_ordered_nodes_vec) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
             for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
@@ -3171,10 +3171,10 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     }
 
     // Deal with all vertices again
-    for (auto vd : PR::ordered_nodes(*m_graph)) {
+    for (auto vd : m_ordered_nodes_vec) {
         auto& v_bundle = (*m_graph)[vd];
         if (!v_bundle.vertex) continue;
-        
+
         auto vertex = v_bundle.vertex;
         double dis_cut = vertex->fit_range();
         int vertex_count = vertex->fit_index();
@@ -3687,7 +3687,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
     }
     
     // Process vertices first
-    for (auto vd : PR::ordered_nodes(*m_graph)) {
+    for (auto vd : m_ordered_nodes_vec) {
         auto& v_bundle = (*m_graph)[vd];
         if (!v_bundle.vertex) continue;
 
@@ -7383,8 +7383,11 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
     m_cluster_filter = cluster_filter;
 
+    // Build edge/node cache once for the entire do_multi_tracking call
+    build_cluster_edges();
+
     // Reset fit properties for all vertices first
-    for (auto vd : PR::ordered_nodes(*m_graph)) {
+    for (auto vd : m_ordered_nodes_vec) {
         if (m_cluster_filter) {
             bool has_cluster_seg = false;
             for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
@@ -7812,7 +7815,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
   
   
     if (flag_dQ_dx){
-        for (auto vd : PR::ordered_nodes(*m_graph)) {
+        for (auto vd : m_ordered_nodes_vec) {
             if (m_cluster_filter) {
                 bool has_cluster_seg = false;
                 for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
