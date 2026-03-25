@@ -1855,7 +1855,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     if (flag_search_vertex_activity) {
         if (examine_structure_4(main_vertex, flag_final_vertex, graph, cluster, track_fitter, dv)) {
             flag_found_vertex_activities = true;
-            track_fitter.do_multi_tracking(true, true, true);
+            track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
         }
     }
     
@@ -1902,7 +1902,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                                       std::pow(wcp_save.point.z() - vtx->wcpt().point.z(), 2));
             
             if (tmp_dis > 0.5*units::cm) { // if the vertex moved far, refit
-                track_fitter.do_multi_tracking(true, true, true);
+                track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
                 fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
             }
         }
@@ -1913,8 +1913,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     
     if (flag_update_fit) {
         // Do the overall fit again
-        track_fitter.do_multi_tracking(true, true, true);
-        
+        track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+
         bool flag_keep_main_vertex = false;
         Facade::geo_point_t main_vtx_pt;
         if (main_vertex != nullptr) {
@@ -2029,7 +2029,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         
         if (flag_update_fit) {
             // Do the overall fit again
-            track_fitter.do_multi_tracking(true, true, true);
+            track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
             flag_update_fit = false;
             
             // Redo the fit
@@ -2051,12 +2051,12 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 if (flag_update) fitted_vertices.insert(vtx);
                 if (flag_update) flag_update_fit = true;
             }
-            if (flag_update_fit) track_fitter.do_multi_tracking(true, true, true);
+            if (flag_update_fit) track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
         }
         
         // Eliminate short tracks
         if (eliminate_short_vertex_activities(graph, cluster, main_vertex, existing_segments, track_fitter, dv)) {
-            track_fitter.do_multi_tracking(true, true, true);
+            track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
         }
         
         // Determine directions for segments

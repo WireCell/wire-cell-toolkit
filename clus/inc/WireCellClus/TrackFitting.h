@@ -383,8 +383,8 @@ namespace WireCell::Clus {
         void dQ_dx_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
         void dQ_dx_multi_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
 
-        void do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_hack = false);
-        void do_multi_tracking(bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_exclusion =false, bool flag_hack = false);
+        void do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_hack = false, Facade::Cluster* cluster_filter = nullptr);
+        void do_multi_tracking(bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_exclusion =false, bool flag_hack = false, Facade::Cluster* cluster_filter = nullptr);
 
 
         
@@ -520,6 +520,7 @@ namespace WireCell::Clus {
         std::set<Facade::Cluster*> m_clusters;
         std::set<Facade::Cluster*> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
         bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
+        Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
 
         std::set<Facade::Blob*> m_blobs;
 

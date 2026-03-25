@@ -1145,16 +1145,17 @@ std::vector<PR::Fit> TrackFitting::generate_fits_with_projections(
 
 void TrackFitting::organize_segments_path_3rd(double step_size){
     if (!m_graph) return;
-    
+
     // First pass: check for vertices that are too close together
     check_and_reset_close_vertices();
-    
+
     // Second pass: organize segments path with uniform step size
     auto edge_range = boost::edges(*m_graph);
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
+        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         
         // Get ordered vertices
         std::shared_ptr<PR::Vertex> start_v, end_v;
@@ -1270,16 +1271,17 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
 
 void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_point_limit){
     if (!m_graph) return;
-    
+
     // First pass: check for vertices that are too close together
     check_and_reset_close_vertices();
-    
+
     // Second pass: organize segments path with 2D projection
     auto edge_range = boost::edges(*m_graph);
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
+        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         
         // Get ordered vertices
         std::shared_ptr<PR::Vertex> start_v, end_v;
@@ -1430,13 +1432,14 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
 
 void TrackFitting::organize_segments_path(double low_dis_limit, double end_point_limit){
     if (!m_graph) return;
-    
+
     // Iterate over all edges (segments) in the graph
     auto edge_range = boost::edges(*m_graph);
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
+        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         
         // Get ordered vertices
         std::shared_ptr<PR::Vertex> start_v, end_v;
@@ -2916,9 +2919,17 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     m_3d_to_2d.clear();
     m_2d_to_3d.clear();
 
-    // Reset fit properties for all vertices first
+    // Reset fit properties for all vertices (filtered to target cluster if set)
     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
         auto vd = *vp.first;
+        if (m_cluster_filter) {
+            bool has_cluster_seg = false;
+            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
+                auto& eb = (*m_graph)[*oe.first];
+                if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
+            }
+            if (!has_cluster_seg) continue;
+        }
         auto& v_bundle = (*m_graph)[vd];
         if (v_bundle.vertex) {
             bool flag_fix = v_bundle.vertex->flag_fix();
@@ -2933,6 +2944,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         if (edge_bundle.segment) {
+            if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
             segments.push_back(edge_bundle.segment);
             edge_bundle.segment->reset_fit_prop();
         }
@@ -2946,6 +2958,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         if (!edge_bundle.segment) continue;
 
         auto segment = edge_bundle.segment;
+        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         auto& fits = segment->fits();
         if (fits.empty()) continue;
 
@@ -3464,13 +3477,14 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
 void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma){
     if (!m_graph) return;
     
-    // create pss_vec ... 
+    // create pss_vec ...
     std::map<int, std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> map_index_pss;
     auto edge_range = boost::edges(*m_graph);
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         if (!edge_bundle.segment) continue;
         auto segment = edge_bundle.segment;
+        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         const auto& fits = segment->fits();
         for (const auto& fit : fits) {
             int idx = fit.index;
@@ -5494,7 +5508,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         if (!edge_bundle.segment) continue;
-        
+        if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
+
         auto segment = edge_bundle.segment;
         auto& fits = segment->fits();
         if (fits.empty()) continue;
@@ -5701,7 +5716,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
         auto& edge_bundle = (*m_graph)[*e_it];
         if (!edge_bundle.segment) continue;
-        
+        if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
+
         auto segment = edge_bundle.segment;
         auto& fits = segment->fits();
         if (fits.empty()) continue;
@@ -7259,16 +7275,26 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     recover_original_charge_data();
 }
 
-void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_exclusion, bool flag_hack){
+void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_exclusion, bool flag_hack, Facade::Cluster* cluster_filter){
 
     // using DST_Clock = std::chrono::steady_clock;
     // using DST_MS = std::chrono::duration<double, std::milli>;
     // auto t_dst = DST_Clock::now();
     // m_perf = true;
 
+    m_cluster_filter = cluster_filter;
+
     // Reset fit properties for all vertices first
     for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
         auto vd = *vp.first;
+        if (m_cluster_filter) {
+            bool has_cluster_seg = false;
+            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
+                auto& eb = (*m_graph)[*oe.first];
+                if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
+            }
+            if (!has_cluster_seg) continue;
+        }
         auto& v_bundle = (*m_graph)[vd];
         if (v_bundle.vertex) {
             bool flag_fix = v_bundle.vertex->flag_fix();
@@ -7691,6 +7717,14 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     if (flag_dQ_dx){
         for (auto vp = boost::vertices(*m_graph); vp.first != vp.second; ++vp.first) {
             auto vd = *vp.first;
+            if (m_cluster_filter) {
+                bool has_cluster_seg = false;
+                for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
+                    auto& eb = (*m_graph)[*oe.first];
+                    if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
+                }
+                if (!has_cluster_seg) continue;
+            }
             auto& v_bundle = (*m_graph)[vd];
             if (v_bundle.vertex) {
                 bool flag_fix = v_bundle.vertex->flag_fix();
@@ -7699,10 +7733,11 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
             }
         }
 
-        auto edge_range = boost::edges(*m_graph);    
+        auto edge_range = boost::edges(*m_graph);
         for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
             auto& edge_bundle = (*m_graph)[*e_it];
             if (edge_bundle.segment) {
+                if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
                 edge_bundle.segment->reset_fit_prop();
             }
         }
@@ -7740,6 +7775,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         for (auto e_it = edge_range_final.first; e_it != edge_range_final.second; ++e_it) {
             auto& edge_bundle = (*m_graph)[*e_it];
             if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
+                if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
                 PR::create_segment_fit_point_cloud(edge_bundle.segment, m_dv, "fit");
             }
         }
@@ -7747,10 +7783,12 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
     // if (m_perf) std::cout << "do_multiple_tracking timing: filling results took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now(); m_perf = false;
 
+    m_cluster_filter = nullptr;
 }
 
 
-void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_hack) {
+void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fit, bool flag_force_load_data, bool flag_hack, Facade::Cluster* cluster_filter) {
+    m_cluster_filter = cluster_filter;
     // using DST_Clock = std::chrono::steady_clock;
     // using DST_MS = std::chrono::duration<double, std::milli>;
     // auto t_dst = DST_Clock::now();
@@ -8113,5 +8151,5 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     PR::create_segment_fit_point_cloud(segment, m_dv, "fit");
     // if (m_perf) std::cout << "do_single_tracking timing: fill data " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now(); m_perf = false;
 
-
+    m_cluster_filter = nullptr;
 }

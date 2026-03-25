@@ -290,7 +290,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: create segment and prepare data took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
     track_fitter.add_segment(seg);
-    track_fitter.do_single_tracking(seg, true, true);
+    track_fitter.do_single_tracking(seg, true, true, false, false, &cluster);
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: do single_track fitting took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
 
@@ -877,7 +877,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                             // Perform tracking
                             // track_fitter.add_graph(&graph); added already
                             auto t_op_mt = BS_Clock::now();
-                            track_fitter.do_multi_tracking(true, true, false);
+                            track_fitter.do_multi_tracking(true, true, false, false, false, cluster);
                             t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         }
                     }
@@ -892,7 +892,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                         // Perform tracking
                         // track_fitter.add_graph(&graph); added already
                         auto t_op_mt = BS_Clock::now();
-                        track_fitter.do_multi_tracking(true, true, false);
+                        track_fitter.do_multi_tracking(true, true, false, false, false, cluster);
                         t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         if (out_seg2) {
                             remaining_segments.push_back(out_seg2);
@@ -1198,7 +1198,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
     } else {
         t0 = Clock::now();
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
 
@@ -1213,7 +1213,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (is_main_cluster) {
         t0 = Clock::now();
         if (examine_structure_3(graph, cluster, track_fitter, dv)) {
-            track_fitter.do_multi_tracking(true, true, false);
+            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
     }
@@ -1237,7 +1237,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 
     // Final multi-tracking
     t0 = Clock::now();
-    track_fitter.do_multi_tracking(true, true, false);
+    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: final do_multi_tracking took {} ms", MS(Clock::now() - t0).count());
 
     // Verify that at least one segment for this cluster survived all the merging/cleanup.
@@ -1301,7 +1301,7 @@ void PatternAlgorithms::init_point_segment(Graph& graph, Facade::Cluster& cluste
     
     // Perform multi-tracking to fit the segment
     track_fitter.add_segment(sg1);
-    track_fitter.do_multi_tracking(true, true, false);
+    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
 }
 
 void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Facade::Cluster& cluster,  const std::string& cloud_name){

@@ -7,12 +7,12 @@ using namespace WireCell::Clus;
 void PatternAlgorithms::examine_structure(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     // Change 2 to 1 (merge two segments into one straight segment)
     if (examine_structure_2(graph, cluster, track_fitter, dv)) {
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
     }
-    
+
     // Straighten 1 (replace curved segments with straight lines)
     if (examine_structure_1(graph, cluster, track_fitter, dv)) {
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
     }
 }
 
@@ -916,7 +916,7 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         }
         
         // Perform multi-tracking
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         
         flag = true;
         break;
@@ -1421,7 +1421,7 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
         remove_vertex(graph, v1);
         
         // Update tracking
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
     }
     
     return flag_continue;
@@ -1540,7 +1540,7 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
             }
             
             // Update tracking
-            track_fitter.do_multi_tracking(true, true, false);
+            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }else{
             flag_continue = false;
         }
@@ -1836,7 +1836,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 
                 flag_continue = true;
                 std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
-                track_fitter.do_multi_tracking(true, true, false);
+                track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
                 break;
                 
             } else if (boost::degree(vd2, graph) >= 2 && examine_vertices_4p(graph, v2, v1, track_fitter, dv) && v2 != main_vertex) {
@@ -1977,7 +1977,7 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 
                 flag_continue = true;
                 std::cout << "Cluster: " << cluster.ident() << " Merge Vertices Type III" << std::endl;
-                track_fitter.do_multi_tracking(true, true, false);
+                track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
                 break;
             }
         }
@@ -2176,7 +2176,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                         }
                     }
                     
-                    track_fitter.do_multi_tracking(true, true, false);
+                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
                     
                 } else {
                     // Create new vertex at split point
@@ -2254,7 +2254,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                             }
                         }
                         
-                        track_fitter.do_multi_tracking(true, true, false);
+                        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
                     }
                 }
                 
@@ -2401,9 +2401,9 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
     }
     
     if (flag_refit) {
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &main_cluster);
     }
-    
+
     // Find and remove redundant short segments
     std::set<SegmentPtr> segments_to_be_removed;
     
@@ -2516,7 +2516,7 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
     
     // Refit if segments were removed
     if (segments_to_be_removed.size() > 0) {
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &main_cluster);
     }
 }
 
@@ -2645,7 +2645,7 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
     } // while continue
     
     if (flag_update) {
-        track_fitter.do_multi_tracking(true, true, false);
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
     }
     
     return flag_update;
@@ -2889,7 +2889,7 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
         
         // If we updated, redo multi-tracking
         if (flag_update) {
-            track_fitter.do_multi_tracking(true, true, false);
+            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }
     }
     
@@ -3076,7 +3076,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
         if (flag_update) {
             flag_continue = true;
             flag_updated = true;
-            track_fitter.do_multi_tracking(true, true, false);
+            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }
     }
     
@@ -3368,7 +3368,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
         if (flag_update) {
             flag_continue = true;
             flag_updated = true;
-            track_fitter.do_multi_tracking(true, true, false);
+            track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }
     }
     

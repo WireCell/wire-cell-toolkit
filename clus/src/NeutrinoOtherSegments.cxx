@@ -452,7 +452,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
         // Do single tracking to get fine fit path and "fit" point cloud
         track_fitter.add_segment(new_seg);
-        track_fitter.do_single_tracking(new_seg, true, true);
+        track_fitter.do_single_tracking(new_seg, true, true, false, false, &cluster);
 
         // Always add to existing_segments for 2D distance re-evaluation of remaining clusters
         existing_segments.insert(new_seg);
@@ -545,7 +545,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // At least one endpoint connects to the existing graph
                 if (v1v2_dist > 0.1 * units::cm) {
                     add_segment(graph, new_seg, v1, v2);
-                    track_fitter.do_multi_tracking(true, true, false);
+                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
 
                     double length        = segment_track_length(new_seg);
                     double direct_length = segment_track_direct_length(new_seg);
@@ -662,7 +662,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     remove_vertex(graph, v2);
                 } else {
                     // Isochronous connection found (segment already added by modify_*)
-                    track_fitter.do_multi_tracking(true, true, false);
+                    track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
 
                     double direct_length = segment_track_direct_length(new_seg);
                     double length        = segment_track_length(new_seg);
