@@ -1168,7 +1168,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: init_first_segment took {} ms", MS(Clock::now() - t0).count());
 
     if (!sg1) return false;
-    std::cout << "Fits: " << sg1->fits().size() << std::endl;
+    // std::cout << "Fits: " << sg1->fits().size() << std::endl;
 
 
     // Store initial pair of vertices for main cluster

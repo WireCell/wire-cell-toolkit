@@ -147,7 +147,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     if (!other_clusters.empty()) {
         for (auto* cluster : other_clusters) {
             if (cluster->get_length() > 6 * units::cm) {
-                std::cout << "Long Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() << std::endl;
+                // std::cout << "Long Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() << std::endl;
                 // Long cluster: break tracks and do 2 rounds of other-track finding
                 pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, true, 2, false);
                 pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
@@ -162,7 +162,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             } else {
                 // Short cluster: no track breaking, 1 round; fall back to init_point_segment if needed
                 if (!pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, false, 1, false)) {
-                    std::cout << "Point Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() <<std::endl;
+                    // std::cout << "Point Cluster " << cluster->get_cluster_id() << " " << cluster->nchildren() <<std::endl;
                     pattern_algos.init_point_segment(*pr_graph, *cluster, *m_track_fitter, m_dv);
                 }
                 pattern_algos.clustering_points(*pr_graph, *cluster, m_dv);
