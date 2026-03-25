@@ -227,6 +227,9 @@ void TrackFitting::clear_graph(){
     m_loaded_clusters.clear();
     m_charge_data_dirty = true;
     m_blobs.clear();
+    m_cluster_edges.clear();
+    m_all_edges.clear();
+    m_cluster_charge_data.clear();
 }
 
 
@@ -236,6 +239,7 @@ void TrackFitting::clear_segments(){
     m_loaded_clusters.clear();
     m_charge_data_dirty = true;
     m_blobs.clear();
+    m_cluster_charge_data.clear();
 }
 
 void TrackFitting::sync_from_graph(){
@@ -262,6 +266,76 @@ void TrackFitting::sync_from_graph(){
     }
 
     SPDLOG_LOGGER_DEBUG(s_log, "sync_from_graph: segments={} clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
+}
+
+void TrackFitting::inherit_from(const TrackFitting& src, Facade::Cluster* cluster)
+{
+    // Copy basic configuration
+    m_params  = src.m_params;
+    m_dv      = src.m_dv;
+    m_pcts    = src.m_pcts;
+
+    // Copy grouping pointer so sync_from_graph skips BuildGeometry()
+    m_grouping = src.m_grouping;
+
+    // Copy all pre-built wire-plane geometry
+    wpid_params  = src.wpid_params;
+    wpid_U_dir   = src.wpid_U_dir;
+    wpid_V_dir   = src.wpid_V_dir;
+    wpid_W_dir   = src.wpid_W_dir;
+    apas         = src.apas;
+    wpid_geoms   = src.wpid_geoms;
+    wpid_offsets = src.wpid_offsets;
+    wpid_slopes  = src.wpid_slopes;
+
+    // Copy wire-channel lookup cache to avoid repeated anode queries
+    m_hot_cache    = src.m_hot_cache;
+    m_cold_cache   = src.m_cold_cache;
+    m_access_count = src.m_access_count;
+
+    // Copy the global readout-blob map so fill_global_rb_map() is a no-op.
+    // fill_global_rb_map() iterates m_grouping->children() (ALL clusters), so
+    // without this copy it would scan every cluster in the grouping — as expensive
+    // as a fully cold fitter.  The parent has already built this once.
+    global_rb_map = src.global_rb_map;
+
+    // Pre-populate the cluster's charge data from the parent's per-cluster cache
+    if (cluster) {
+        m_clusters.insert(cluster);
+        m_loaded_clusters.insert(cluster);
+        for (auto& blob : cluster->children()) {
+            m_blobs.insert(blob);
+        }
+        auto it = src.m_cluster_charge_data.find(cluster);
+        if (it != src.m_cluster_charge_data.end()) {
+            m_charge_data = it->second;
+        }
+    }
+    m_charge_data_dirty = false;
+}
+
+void TrackFitting::build_cluster_edges() {
+    m_cluster_edges.clear();
+    m_all_edges.clear();
+    if (!m_graph) return;
+    auto [eb, ee] = boost::edges(*m_graph);
+    for (auto e_it = eb; e_it != ee; ++e_it) {
+        auto& edge_bundle = (*m_graph)[*e_it];
+        if (!edge_bundle.segment) continue;
+        m_all_edges.push_back(*e_it);
+        if (edge_bundle.segment->cluster())
+            m_cluster_edges[edge_bundle.segment->cluster()].push_back(*e_it);
+    }
+}
+
+const std::vector<PR::edge_descriptor>& TrackFitting::get_segment_edges() const {
+    if (m_cluster_filter) {
+        auto it = m_cluster_edges.find(m_cluster_filter);
+        if (it != m_cluster_edges.end()) return it->second;
+        static const std::vector<PR::edge_descriptor> empty;
+        return empty;
+    }
+    return m_all_edges;
 }
 
 void TrackFitting::add_graph(std::shared_ptr<PR::Graph> graph){
@@ -691,13 +765,14 @@ void TrackFitting::prepare_data() {
                         flag = 2;
                     }
                     
-                    // Save to m_charge_data
+                    // Save to m_charge_data and per-cluster cache
                     m_charge_data[data_key] = {charge, charge_err, flag};
+                    m_cluster_charge_data[cluster][data_key] = {charge, charge_err, flag};
                 }
             }
         }
     }
-        
+
     for (auto& cluster : new_clusters) {
          // Get the grouping from the cluster
         auto grouping = cluster->grouping();
@@ -752,13 +827,15 @@ void TrackFitting::prepare_data() {
                             double charge = blob_charge / num_wires;
                             double charge_err = sqrt(pow(charge * m_params.rel_charge_uncer, 2) + pow(m_params.add_charge_uncer, 2));
                             m_charge_data[data_key] = {charge, charge_err, 0};
+                            m_cluster_charge_data[cluster][data_key] = {charge, charge_err, 0};
                         } else if (it->second.flag == 0) {
                             // Existing content with flag = 0
                             double new_charge = blob_charge / num_wires;
                             double new_charge_err = sqrt(pow(new_charge * m_params.rel_charge_uncer, 2) + pow(m_params.add_charge_uncer, 2));
-                            
+
                             it->second.charge += new_charge;
                             it->second.charge_err = sqrt(pow(it->second.charge_err, 2) + pow(new_charge_err, 2));
+                            m_cluster_charge_data[cluster][data_key] = it->second;
                         }
                         // If flag != 0, do nothing
                     }
@@ -991,16 +1068,15 @@ void TrackFitting::fill_fitted_charge_2d(
 
 void TrackFitting::check_and_reset_close_vertices() {
     if (!m_graph) return;
-    
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
-        
+
         // Get vertices connected to this segment
-        auto vd1 = boost::source(*e_it, *m_graph);
-        auto vd2 = boost::target(*e_it, *m_graph);
+        auto vd1 = boost::source(ed, *m_graph);
+        auto vd2 = boost::target(ed, *m_graph);
         auto& v1_bundle = (*m_graph)[vd1];
         auto& v2_bundle = (*m_graph)[vd2];
         auto start_v = v1_bundle.vertex;
@@ -1150,17 +1226,15 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
     check_and_reset_close_vertices();
 
     // Second pass: organize segments path with uniform step size
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
-        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
-        
+
         // Get ordered vertices
         std::shared_ptr<PR::Vertex> start_v, end_v;
         PR::node_descriptor vd1, vd2;
-        if (!get_ordered_segment_vertices(segment, *e_it, start_v, end_v, vd1, vd2)) continue;
+        if (!get_ordered_segment_vertices(segment, ed, start_v, end_v, vd1, vd2)) continue;
         
         // Check if vertices are endpoints (degree == 1)
         bool flag_startv_end = (boost::degree(vd1, *m_graph) == 1);
@@ -1276,17 +1350,15 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
     check_and_reset_close_vertices();
 
     // Second pass: organize segments path with 2D projection
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
-        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
-        
+
         // Get ordered vertices
         std::shared_ptr<PR::Vertex> start_v, end_v;
         PR::node_descriptor vd1, vd2;
-        if (!get_ordered_segment_vertices(segment, *e_it, start_v, end_v, vd1, vd2)) continue;
+        if (!get_ordered_segment_vertices(segment, ed, start_v, end_v, vd1, vd2)) continue;
         
         // Check if vertices are endpoints (degree == 1)
         bool flag_startv_end = (boost::degree(vd1, *m_graph) == 1);
@@ -1433,18 +1505,19 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
 void TrackFitting::organize_segments_path(double low_dis_limit, double end_point_limit){
     if (!m_graph) return;
 
-    // Iterate over all edges (segments) in the graph
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    // Build edge cache if needed (organize_segments_path is the first call in do_multi_tracking)
+    build_cluster_edges();
+
+    // Iterate over segment edges for the current cluster filter
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         auto segment = edge_bundle.segment;
         if (!segment) continue;
-        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
-        
+
         // Get ordered vertices
         std::shared_ptr<PR::Vertex> start_v, end_v;
         PR::node_descriptor vd1, vd2;
-        if (!get_ordered_segment_vertices(segment, *e_it, start_v, end_v, vd1, vd2)) continue;
+        if (!get_ordered_segment_vertices(segment, ed, start_v, end_v, vd1, vd2)) continue;
         
         // Check if vertices are endpoints (degree == 1)
         bool flag_startv_end = (boost::degree(vd1, *m_graph) == 1);
@@ -2915,6 +2988,9 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
  }
 
 void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, double mid_point_factor, int nlevel, double time_tick_cut, double charge_cut){
+    // Rebuild edge cache (graph structure may have changed since last call)
+    build_cluster_edges();
+
     // Clear existing mappings
     m_3d_to_2d.clear();
     m_2d_to_3d.clear();
@@ -2940,11 +3016,9 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
     // Collect segments and reset their fit properties
     std::vector<std::shared_ptr<PR::Segment>> segments;
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (edge_bundle.segment) {
-            if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
             segments.push_back(edge_bundle.segment);
             edge_bundle.segment->reset_fit_prop();
         }
@@ -2953,25 +3027,24 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
     int count = 0;
 
     // Process each segment
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
 
         auto segment = edge_bundle.segment;
-        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         auto& fits = segment->fits();
         if (fits.empty()) continue;
 
         // Get start and end vertices for this segment
-        auto vd1 = boost::source(*e_it, *m_graph);
-        auto vd2 = boost::target(*e_it, *m_graph);
+        auto vd1 = boost::source(ed, *m_graph);
+        auto vd2 = boost::target(ed, *m_graph);
         auto& v_bundle1 = (*m_graph)[vd1];
         auto& v_bundle2 = (*m_graph)[vd2];
-        
+
         std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
-        
+
         if (v_bundle1.vertex && v_bundle2.vertex) {
-            // Determine which vertex is start and which is end by comparing with first/last fit points   
+            // Determine which vertex is start and which is end by comparing with first/last fit points
             double dist1_first = (v_bundle1.vertex->wcpt().point - segment->wcpts().front().point).magnitude();
             double dist1_last = (v_bundle1.vertex->wcpt().point - segment->wcpts().back().point).magnitude();
 
@@ -3479,12 +3552,10 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
     
     // create pss_vec ...
     std::map<int, std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> map_index_pss;
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
         auto segment = edge_bundle.segment;
-        if (m_cluster_filter && segment->cluster() != m_cluster_filter) continue;
         const auto& fits = segment->fits();
         for (const auto& fit : fits) {
             int idx = fit.index;
@@ -3682,26 +3753,26 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
     }
     
     // Process segments (tracks)
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
-        
+
         auto segment = edge_bundle.segment;
         auto cluster = segment->cluster();
         auto cluster_t0 = cluster->get_cluster_t0();
         const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
         auto& fits = segment->fits();
         if (fits.empty()) continue;
-        
+
         // Get start and end vertices
-        auto vd1 = boost::source(*e_it, *m_graph);
-        auto vd2 = boost::target(*e_it, *m_graph);
+        auto vd1 = boost::source(ed, *m_graph);
+        auto vd2 = boost::target(ed, *m_graph);
         auto& v_bundle1 = (*m_graph)[vd1];
         auto& v_bundle2 = (*m_graph)[vd2];
-        
+
         std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
         if (v_bundle1.vertex && v_bundle2.vertex) {
-            // Determine which vertex is start and which is end by comparing with first/last fit points   
+            // Determine which vertex is start and which is end by comparing with first/last fit points
             double dist1_first = (v_bundle1.vertex->wcpt().point - segment->wcpts().front().point).magnitude();
             double dist1_last = (v_bundle1.vertex->wcpt().point - segment->wcpts().back().point).magnitude();
 
@@ -5445,7 +5516,25 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
 
     // Update charge data for shared wires
     update_dQ_dx_data();
-    
+
+    // Sync per-cluster charge cache with any shared-wire corrections from update_dQ_dx_data
+    if (m_cluster_filter) {
+        auto cit = m_cluster_charge_data.find(m_cluster_filter);
+        if (cit != m_cluster_charge_data.end()) {
+            for (auto& [key, meas] : cit->second) {
+                auto it = m_charge_data.find(key);
+                if (it != m_charge_data.end()) meas = it->second;
+            }
+        }
+    }
+    // Use per-cluster charge data when filter is set (avoids iterating full m_charge_data)
+    const auto* p_charge_source = &m_charge_data;
+    if (m_cluster_filter) {
+        auto cit = m_cluster_charge_data.find(m_cluster_filter);
+        if (cit != m_cluster_charge_data.end()) p_charge_source = &cit->second;
+    }
+    const auto& charge_source = *p_charge_source;
+
     // Use parameters from member variable
     const double DL = m_params.DL;
     const double DT = m_params.DT;
@@ -5457,12 +5546,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     const double add_uncer_ind = m_params.add_uncer_ind;
     const double add_uncer_col = m_params.add_uncer_col;
     const double add_sigma_L = m_params.add_sigma_L;
-    
+
     // Prepare charge data maps similar to dQ_dx_fit
     std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>> map_U_charge_2D, map_V_charge_2D, map_W_charge_2D;
-    
-    // Fill the maps from m_charge_data
-    for (const auto& [coord_readout, charge_measurement] : m_charge_data) {
+
+    // Fill the maps from charge_source (per-cluster when filter is set, global otherwise)
+    for (const auto& [coord_readout, charge_measurement] : charge_source) {
         int apa = coord_readout.apa;
         int time = coord_readout.time;
         int channel = coord_readout.channel;
@@ -5504,19 +5593,17 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     std::map<std::pair<std::shared_ptr<PR::Segment>, int>, int> segment_point_index_map;
     
     // First pass: assign indices to vertices and segments
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
-        if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
 
         auto segment = edge_bundle.segment;
         auto& fits = segment->fits();
         if (fits.empty()) continue;
-        
+
         // Get start and end vertices
-        auto vd1 = boost::source(*e_it, *m_graph);
-        auto vd2 = boost::target(*e_it, *m_graph);
+        auto vd1 = boost::source(ed, *m_graph);
+        auto vd2 = boost::target(ed, *m_graph);
         auto& v_bundle1 = (*m_graph)[vd1];
         auto& v_bundle2 = (*m_graph)[vd2];
         
@@ -5713,10 +5800,9 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     }
 
     // Build response matrices using cal_gaus_integral_seg
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
-        if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
 
         auto segment = edge_bundle.segment;
         auto& fits = segment->fits();
@@ -6333,8 +6419,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         
     // Build connected_vec for regularization
     std::vector<std::vector<int>> connected_vec(n_3D_pos);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
         
         auto segment = edge_bundle.segment;
@@ -6506,14 +6592,14 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         vertex_fit.reduced_chi2 = reduced_chi2;
     }
     
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (!edge_bundle.segment) continue;
-        
+
         auto segment = edge_bundle.segment;
         auto& fits = segment->fits();
         if (fits.empty()) continue;
-        
+
         // Update segment fit information
         std::vector<int> pt_idx(fits.size());
         for (size_t i = 0; i < fits.size(); i++) {
@@ -6540,22 +6626,39 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     
     // Update charge data for shared wires (uses existing toolkit function)
     update_dQ_dx_data();
-    
-    const double DL = m_params.DL;                    // WAS: const double DL = 6.4e-7;
-    const double DT = m_params.DT;                    // WAS: const double DT = 9.8e-7;
-    const double col_sigma_w_T = m_params.col_sigma_w_T;  // WAS: const double col_sigma_w_T = 0.188060 * 0.2;
-    const double ind_sigma_u_T = m_params.ind_sigma_u_T;  // WAS: const double ind_sigma_u_T = 0.402993 * 0.3;
-    const double ind_sigma_v_T = m_params.ind_sigma_v_T;  // WAS: const double ind_sigma_v_T = 0.402993 * 0.5;
-    const double rel_uncer_ind = m_params.rel_uncer_ind; // WAS: const double rel_uncer_ind = 0.075;
-    const double rel_uncer_col = m_params.rel_uncer_col; // WAS: const double rel_uncer_col = 0.05;
-    const double add_uncer_ind = m_params.add_uncer_ind; // WAS: const double add_uncer_ind = 0.0;
-    const double add_uncer_col = m_params.add_uncer_col; // WAS: const double add_uncer_col = 300.0;
-    const double add_sigma_L = m_params.add_sigma_L;     // WAS: const double add_sigma_L = 1.428249 * 0.5;
-    
+
+    // Sync per-cluster charge cache with any shared-wire corrections from update_dQ_dx_data
+    if (m_cluster_filter) {
+        auto cit = m_cluster_charge_data.find(m_cluster_filter);
+        if (cit != m_cluster_charge_data.end()) {
+            for (auto& [key, meas] : cit->second) {
+                auto it = m_charge_data.find(key);
+                if (it != m_charge_data.end()) meas = it->second;
+            }
+        }
+    }
+    // Use per-cluster charge data when filter is set (avoids iterating full m_charge_data)
+    const auto* p_charge_source = &m_charge_data;
+    if (m_cluster_filter) {
+        auto cit = m_cluster_charge_data.find(m_cluster_filter);
+        if (cit != m_cluster_charge_data.end()) p_charge_source = &cit->second;
+    }
+    const auto& charge_source = *p_charge_source;
+
+    const double DL = m_params.DL;
+    const double DT = m_params.DT;
+    const double col_sigma_w_T = m_params.col_sigma_w_T;
+    const double ind_sigma_u_T = m_params.ind_sigma_u_T;
+    const double ind_sigma_v_T = m_params.ind_sigma_v_T;
+    const double rel_uncer_ind = m_params.rel_uncer_ind;
+    const double rel_uncer_col = m_params.rel_uncer_col;
+    const double add_uncer_ind = m_params.add_uncer_ind;
+    const double add_uncer_col = m_params.add_uncer_col;
+    const double add_sigma_L = m_params.add_sigma_L;
+
     std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>> map_U_charge_2D, map_V_charge_2D, map_W_charge_2D;
-    // Fill the maps from m_charge_data
-    // Fill the maps from m_charge_data
-    for (const auto& [coord_readout, charge_measurement] : m_charge_data) {
+    // Fill the maps from charge_source (per-cluster when filter is set, global otherwise)
+    for (const auto& [coord_readout, charge_measurement] : charge_source) {
         int apa = coord_readout.apa;
         int time = coord_readout.time;
         int channel = coord_readout.channel;
@@ -7325,7 +7428,6 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     }
 
     // if (m_perf) std::cout << "do_multiple_tracking timing: prepare_data took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
-    auto edge_range = boost::edges(*m_graph);
     // First round of organizing the path from the path_wcps (shortest path)
     double low_dis_limit = m_params.low_dis_limit;
     double end_point_limit = m_params.end_point_limit;
@@ -7733,13 +7835,10 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
             }
         }
 
-        auto edge_range = boost::edges(*m_graph);
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            auto& edge_bundle = (*m_graph)[*e_it];
-            if (edge_bundle.segment) {
-                if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
-                edge_bundle.segment->reset_fit_prop();
-            }
+        // form_map_graph rebuilds the edge cache, so use get_segment_edges() directly
+        for (const auto& ed : get_segment_edges()) {
+            auto& edge_bundle = (*m_graph)[ed];
+            if (edge_bundle.segment) edge_bundle.segment->reset_fit_prop();
         }
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
         // if (m_perf) std::cout << "do_multiple_tracking timing: form_map_graph took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
@@ -7770,15 +7869,10 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
     }
 
     // Update "fit" DynamicPointCloud for all segments after multi-tracking
-    {
-        auto edge_range_final = boost::edges(*m_graph);
-        for (auto e_it = edge_range_final.first; e_it != edge_range_final.second; ++e_it) {
-            auto& edge_bundle = (*m_graph)[*e_it];
-            if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
-                if (m_cluster_filter && edge_bundle.segment->cluster() != m_cluster_filter) continue;
-                PR::create_segment_fit_point_cloud(edge_bundle.segment, m_dv, "fit");
-            }
-        }
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
+        if (edge_bundle.segment && !edge_bundle.segment->fits().empty())
+            PR::create_segment_fit_point_cloud(edge_bundle.segment, m_dv, "fit");
     }
 
     // if (m_perf) std::cout << "do_multiple_tracking timing: filling results took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now(); m_perf = false;

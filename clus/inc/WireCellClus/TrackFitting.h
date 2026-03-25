@@ -450,6 +450,19 @@ namespace WireCell::Clus {
         CacheStats get_cache_stats() const;
 
         /**
+         * Inherit pre-built geometry and cluster charge data from a parent fitter.
+         *
+         * Copies the wire-plane geometry, wire-channel cache, and the already-computed
+         * charge data for @p cluster from @p src into this fitter.  After this call:
+         *   - BuildGeometry() will NOT be called again (m_grouping is set)
+         *   - prepare_data() will skip @p cluster (it is pre-populated in m_loaded_clusters)
+         *
+         * Intended for lightweight child fitters (e.g. in compare_main_vertices_all_showers)
+         * that need to fit a single temporary segment without re-loading all cluster blobs.
+         */
+        void inherit_from(const TrackFitting& src, Facade::Cluster* cluster);
+
+        /**
          * Set the detector volume for this TrackFitting instance
          * @param dv Pointer to IDetectorVolumes
          */
@@ -521,6 +534,15 @@ namespace WireCell::Clus {
         std::set<Facade::Cluster*> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
         bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
         Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
+
+        // Option 1: per-cluster edge descriptor cache to avoid full graph traversal
+        std::unordered_map<Facade::Cluster*, std::vector<PR::edge_descriptor>> m_cluster_edges;
+        std::vector<PR::edge_descriptor> m_all_edges;  ///< All segment edges in m_graph
+        void build_cluster_edges();                    ///< Rebuild m_cluster_edges and m_all_edges from m_graph
+        const std::vector<PR::edge_descriptor>& get_segment_edges() const; ///< Return edges for current filter
+
+        // Option 2: per-cluster charge data cache to avoid iterating full m_charge_data
+        std::unordered_map<Facade::Cluster*, std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash>> m_cluster_charge_data;
 
         std::set<Facade::Blob*> m_blobs;
 

@@ -428,11 +428,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     // Add segment to local graph
     add_segment(*local_graph, tmp_sg, tmp_v1, tmp_v2);
     
-    // Create local fitter with same configuration as input fitter
+    // Create local fitter that inherits pre-built geometry and cluster charge data
+    // from the parent fitter, avoiding expensive BuildGeometry() + prepare_data() calls.
     TrackFitting local_fitter(TrackFitting::FittingType::Multiple);
-    local_fitter.set_parameters(track_fitter.get_parameters());
-    local_fitter.set_detector_volume(dv);  // required before add_graph, else BuildGeometry crashes
-    local_fitter.set_pc_transforms(track_fitter.get_pc_transforms());  // required for generate_fits_with_projections
+    local_fitter.inherit_from(track_fitter, &cluster);
     local_fitter.add_graph(local_graph);
     
     // Do fitting on local graph
