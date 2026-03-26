@@ -843,6 +843,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     wcps_list1.back().x(), wcps_list1.back().y(), wcps_list1.back().z(),
                     wcps_list2.front().x(), wcps_list2.front().y(), wcps_list2.front().z(),
                     wcps_list2.back().x(), wcps_list2.back().y(), wcps_list2.back().z());
+
                 // Check geometry constraints
                 Facade::geo_vector_t tv1 = end_v->wcpt().point - start_v->wcpt().point;
                 Facade::geo_vector_t tv2 = end_v->wcpt().point - break_wcp;
@@ -895,7 +896,23 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             }
         }
     }
-    
+
+    // Post-process: merge any vertices that ended up at the same position
+    // (within 0.1 cm).  The oscillating-break pattern leaves duplicate vertex
+    // objects at identical wcpt locations; merging them collapses the zigzag
+    // into the correct linear topology and triggers a refit.
+    {
+        // remaining_segments is always empty here; get the cluster from any graph edge.
+        Facade::Cluster* cluster_ptr = nullptr;
+        auto [eb, ee] = boost::edges(graph);
+        if (eb != ee) cluster_ptr = graph[*eb].segment ? graph[*eb].segment->cluster() : nullptr;
+        if (cluster_ptr) {
+            merge_nearby_vertices(graph, *cluster_ptr, track_fitter, dv);
+        }
+    }
+
+   
+
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments timing: segment_search_kink={:.3f}ms proto_extend_point={:.3f}ms proto_break_tracks={:.3f}ms replace_segment_and_vertex={:.3f}ms break_segment_into_two={:.3f}ms do_multi_tracking={:.3f}ms",
         t_segment_search_kink.count(), t_proto_extend_point.count(), t_proto_break_tracks.count(),
         t_replace_segment_and_vertex.count(), t_break_segment_into_two.count(), t_do_multi_tracking.count());
@@ -908,6 +925,154 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     return flag_modified;
 }
 
+
+bool PatternAlgorithms::merge_nearby_vertices(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
+{
+    // Build an ordered list of vertices belonging to this cluster.
+    std::vector<VertexPtr> all_vertices;
+    for (const auto& vd : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd].vertex;
+        if (vtx && vtx->cluster() == &cluster) {
+            all_vertices.push_back(vtx);
+        }
+    }
+
+    bool any_modified = false;
+
+    // Pass 1: merge co-located vertices (within 0.1 cm).
+    // After merging vtx_j into vtx_i, vtx_i retains its position, so we
+    // continue scanning the tail of the list against the same vtx_i without
+    // a full restart.  This reduces the cost from O(N² × merges) to O(N²).
+    for (size_t i = 0; i < all_vertices.size(); ++i) {
+        VertexPtr vtx1 = all_vertices[i];
+        if (!vtx1 || !vtx1->descriptor_valid()) continue;
+
+        for (size_t j = i + 1; j < all_vertices.size(); ) {
+            VertexPtr vtx2 = all_vertices[j];
+            if (!vtx2 || !vtx2->descriptor_valid()) { ++j; continue; }
+
+            if (ray_length(Ray{vtx1->wcpt().point, vtx2->wcpt().point}) >= 0.1 * units::cm) {
+                ++j; continue;
+            }
+
+            // Collect any segment directly connecting vtx1↔vtx2 (would become
+            // a self-loop after the merge and must be removed beforehand).
+            std::vector<SegmentPtr> direct_segs;
+            auto v2d = vtx2->get_descriptor();
+            for (auto [eit, eend] = boost::out_edges(v2d, graph); eit != eend; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (!sg) continue;
+                auto [sv1, sv2] = find_vertices(graph, sg);
+                if ((sv1 == vtx1 || sv2 == vtx1) && (sv1 == vtx2 || sv2 == vtx2))
+                    direct_segs.push_back(sg);
+            }
+
+            if (merge_vertex_into_another(graph, vtx2, vtx1, dv)) {
+                for (auto sg : direct_segs) remove_segment(graph, sg);
+                all_vertices.erase(all_vertices.begin() + j);
+                any_modified = true;
+                // Do NOT increment j: the element now at position j must also
+                // be checked against vtx1 (which kept its position).
+            } else {
+                ++j;
+            }
+        }
+    }
+
+    // Second pass: remove segments completely covered by another segment.
+    // Since the graph is linear (every vertex has at most 2 edges), this
+    // means all fit points of the candidate segment lie within 0.3 cm of
+    // some other segment.  When that happens the two endpoints of the
+    // covered segment are effectively redundant — merge them.
+    bool flag_covered = true;
+    while (flag_covered) {
+        flag_covered = false;
+
+        // Collect all edges in a stable vector so we can iterate safely.
+        std::vector<SegmentPtr> all_segments;
+        for (const auto& vd : ordered_nodes(graph)) {
+            auto [oe_begin, oe_end] = boost::out_edges(vd, graph);
+            for (auto eit = oe_begin; eit != oe_end; ++eit) {
+                SegmentPtr sg = graph[*eit].segment;
+                if (sg && sg->cluster() == &cluster) {
+                    // Only add once (undirected graph exposes both directions)
+                    if (std::find(all_segments.begin(), all_segments.end(), sg) == all_segments.end()) {
+                        all_segments.push_back(sg);
+                    }
+                }
+            }
+        }
+
+        for (SegmentPtr seg : all_segments) {
+            const auto& fits = seg->fits();
+            if (fits.empty()) continue;
+
+            auto [vtx_a_pre, vtx_b_pre] = find_vertices(graph, seg);
+            if (!vtx_a_pre || !vtx_b_pre) continue;
+            if (!vtx_a_pre->descriptor_valid() || !vtx_b_pre->descriptor_valid()) continue;
+
+            // Gather adjacent segments (at most 2 in a linear graph).
+            // Use a fixed-size stack array — no heap allocation, no std::find.
+            SegmentPtr neighbors[4];
+            int n_neighbors = 0;
+            for (VertexPtr end_vtx : {vtx_a_pre, vtx_b_pre}) {
+                auto vd = end_vtx->get_descriptor();
+                for (auto [eit, eend] = boost::out_edges(vd, graph); eit != eend; ++eit) {
+                    SegmentPtr sg = graph[*eit].segment;
+                    if (!sg || sg == seg) continue;
+                    bool dup = false;
+                    for (int k = 0; k < n_neighbors; ++k) if (neighbors[k] == sg) { dup = true; break; }
+                    if (!dup && n_neighbors < 4) neighbors[n_neighbors++] = sg;
+                }
+            }
+
+            // Check only adjacent segments
+            for (int ni = 0; ni < n_neighbors; ++ni) {
+                SegmentPtr seg_other = neighbors[ni];
+                const auto& fits_other = seg_other->fits();
+                if (fits_other.empty()) continue;
+
+                // Test whether ALL fit points of seg lie within 0.3 cm of seg_other
+                bool all_covered = true;
+                for (const auto& fp : fits) {
+                    auto [dis, _pt] = segment_get_closest_point(seg_other, fp.point, "fit");
+                    if (dis >= 0.3 * units::cm) {
+                        all_covered = false;
+                        break;
+                    }
+                }
+
+                if (!all_covered) continue;
+
+                // seg is completely covered by seg_other.
+                // The endpoint shared between seg and seg_other is the junction
+                // vertex that should be eliminated; the non-shared endpoint lies
+                // along seg_other's path and must be kept.
+                // e.g.  vtx_p --(segP)-- vtx_a --(seg)-- vtx_b --(segQ)--
+                //   seg covered by segP → vtx_a is shared → merge vtx_a into vtx_b
+                auto [so_v1, so_v2] = find_vertices(graph, seg_other);
+                VertexPtr vtx_to_remove = (vtx_a_pre == so_v1 || vtx_a_pre == so_v2) ? vtx_a_pre : vtx_b_pre;
+                VertexPtr vtx_to_keep   = (vtx_to_remove == vtx_a_pre) ? vtx_b_pre : vtx_a_pre;
+
+                // seg will become a self-loop after merge; remove it first.
+                remove_segment(graph, seg);
+                if (merge_vertex_into_another(graph, vtx_to_remove, vtx_to_keep, dv)) {
+                    all_vertices.erase(std::remove(all_vertices.begin(), all_vertices.end(), vtx_to_remove), all_vertices.end());
+                    flag_covered = true;
+                    any_modified = true;
+                }
+                break;  // restart outer loop
+            }
+            if (flag_covered) break;
+        }
+    }
+
+    if (any_modified) {
+        track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
+    }
+
+    return any_modified;
+}
 
 bool PatternAlgorithms::merge_two_segments_into_one(Graph& graph, SegmentPtr& seg1, VertexPtr& vtx, SegmentPtr& seg2, IDetectorVolumes::pointer dv){
     // Get cluster from seg1 (should be same as seg2)
@@ -1185,6 +1350,54 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         remaining_segments.push_back(sg1);
         break_segments(graph, track_fitter, dv, remaining_segments);
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
+
+        
+
+        //  // Debug: print all segments and vertices
+        // {
+        //     // Print all segments
+        //     auto [ebegin, eend] = boost::edges(graph);
+        //     for (auto eit = ebegin; eit != eend; ++eit) {
+        //         SegmentPtr sg = graph[*eit].segment;
+        //         if (!sg) continue;
+
+        //         double length = segment_track_length(sg) / units::cm;
+        //         auto [v1, v2] = find_vertices(graph, sg);
+        //         WireCell::Point p1_wcp = v1 ? v1->wcpt().point : WireCell::Point(0, 0, 0);
+        //         WireCell::Point p2_wcp = v2 ? v2->wcpt().point : WireCell::Point(0, 0, 0);
+        //         bool p1_fit_valid = (v1 && v1->fit().valid());
+        //         bool p2_fit_valid = (v2 && v2->fit().valid());
+        //         WireCell::Point p1_fit = p1_fit_valid ? v1->fit().point : WireCell::Point(0, 0, 0);
+        //         WireCell::Point p2_fit = p2_fit_valid ? v2->fit().point : WireCell::Point(0, 0, 0);
+
+        //         std::cout << "[Segment] length=" << length << " cm"
+        //             << "  v1_wcps=(" << p1_wcp.x() << "," << p1_wcp.y() << "," << p1_wcp.z() << ")"
+        //             << "  v1_fit="
+        //             << (p1_fit_valid ? "(" + std::to_string(p1_fit.x()) + "," + std::to_string(p1_fit.y()) + "," + std::to_string(p1_fit.z()) + ")" : std::string("invalid"))
+        //             << "  v2_wcps=(" << p2_wcp.x() << "," << p2_wcp.y() << "," << p2_wcp.z() << ")"
+        //             << "  v2_fit="
+        //             << (p2_fit_valid ? "(" + std::to_string(p2_fit.x()) + "," + std::to_string(p2_fit.y()) + "," + std::to_string(p2_fit.z()) + ")" : std::string("invalid"))
+        //                 << std::endl;
+        //     }
+
+        //     // Print all vertices
+        //     auto [vbegin, vend] = boost::vertices(graph);
+        //     for (auto vit = vbegin; vit != vend; ++vit) {
+        //         VertexPtr vtx = graph[*vit].vertex;
+        //         if (!vtx) continue;
+
+        //         WireCell::Point wcp_pt = vtx->wcpt().point;
+        //         bool fit_valid = vtx->fit().valid();
+        //         WireCell::Point fit_pt = fit_valid ? vtx->fit().point : WireCell::Point(0, 0, 0);
+        //         int degree = static_cast<int>(boost::degree(*vit, graph));
+
+        //         std::cout << "[Vertex] wcps=(" << wcp_pt.x() << "," << wcp_pt.y() << "," << wcp_pt.z() << ")"
+        //             << "  fit="
+        //             << (fit_valid ? "(" + std::to_string(fit_pt.x()) + "," + std::to_string(fit_pt.y()) + "," + std::to_string(fit_pt.z()) + ")" : std::string("invalid"))
+        //                 << "  num_segments=" << degree
+        //                 << std::endl;
+        //     }
+        // }
 
         t0 = Clock::now();
         examine_structure(graph, cluster, track_fitter, dv);

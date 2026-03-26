@@ -551,10 +551,14 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     double direct_length = segment_track_direct_length(new_seg);
                     double medium_dQ_dx  = segment_median_dQ_dx(new_seg);
 
+                    
+
                     if (length > 30 * units::cm ||
                         (direct_length < 0.78 * length && length > 10 * units::cm &&
-                         medium_dQ_dx / mip_dQdx > 1.6)) {
+                         medium_dQ_dx / mip_dQdx > 1.6) || (direct_length< 0.72 * length && length > 15 * units::cm && medium_dQ_dx / mip_dQdx > 1.05)) {
                         new_segments.push_back(new_seg);
+                        // std::cout << "Cluster " << cluster.get_cluster_id() << " New segment: length = " << length / units::cm << " cm, direct_length = " << direct_length / units::cm 
+                            //   << " cm, medium_dQ_dx = " << medium_dQ_dx / (units::MeV / units::cm) << " MeV/cm" << " " << v1_fit_pt << " " << v2_fit_pt << std::endl;
                     }
                     SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Other tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
