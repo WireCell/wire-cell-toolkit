@@ -1,6 +1,7 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/Facade_Summary.h"
 #include "WireCellClus/PRSegment.h"
+#include "WireCellClus/PRVertex.h"
 
 
 #include "WireCellAux/TensorDMpointtree.h"
@@ -164,7 +165,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.dQdx_scale = get<double>(bps, "dQdx_scale", 1.0);
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
-            
+            bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
+
             m_bee_points_configs.push_back(bpc);
             
             
@@ -541,6 +543,49 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
     }
 
     SPDLOG_LOGGER_DEBUG(log, "Filled bee points '{}' from {} segments", name, segment_id);
+}
+
+
+void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping)
+{
+    if (m_bee_points.find(name) == m_bee_points.end()) {
+        SPDLOG_LOGGER_WARN(log, "Bee points set '{}' not found for graph vertices, skipping", name);
+        return;
+    }
+
+    auto& apa_bpts = m_bee_points[name];
+
+    // Reset RSE
+    if (m_use_config_rse) {
+        apa_bpts.global.rse(m_runNo, m_subRunNo, m_eventNo);
+    } else {
+        int run = 0, evt = 0;
+        if (m_last_ident > 0) {
+            run = (m_last_ident >> 16) & 0x7fff;
+            evt = (m_last_ident) & 0xffff;
+        }
+        apa_bpts.global.reset(evt, 0, run);
+    }
+
+    auto pr_graph = grouping.get_pr_graph();
+    if (!pr_graph) {
+        SPDLOG_LOGGER_WARN(log, "No PR graph found in grouping for vertices bee set '{}'", name);
+        return;
+    }
+
+    int vertex_id = 0;
+    for (auto node_desc : PR::ordered_nodes(*pr_graph)) {
+        const auto& node_bundle = (*pr_graph)[node_desc];
+        auto vertex = node_bundle.vertex;
+        if (!vertex) { ++vertex_id; continue; }
+
+        const WireCell::Point& point = vertex->fit().point;
+        const double charge = vertex->flags_any(PR::VertexFlags::kNeutrinoVertex) ? 15000.0 : 0.0;
+        apa_bpts.global.append(point, charge, vertex_id, 0);
+        ++vertex_id;
+    }
+
+    SPDLOG_LOGGER_DEBUG(log, "Filled bee vertices '{}' from {} vertices", name, vertex_id);
 }
 
 
@@ -943,8 +988,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             // std::cout << "Test: Visitor: " << cmeth.name << " Grouping: " << config.grouping << " " << pr_graph << std::endl;
 
             if (pr_graph) {
-                // Fill bee points from PRGraph (for track trajectories)
-                fill_bee_points_from_pr_graph(config.name, *gs[0]);
+                if (config.use_graph_vertices) {
+                    fill_bee_vertices_from_pr_graph(config.name, *gs[0]);
+                } else {
+                    // Fill bee points from PRGraph (for track trajectories)
+                    fill_bee_points_from_pr_graph(config.name, *gs[0]);
+                }
                 // std::cout << "Filled bee points from PR graph for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
             } else {
                 // Fill bee points from clusters normally

@@ -181,6 +181,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         std::vector<Cluster*> all_clusters;
         all_clusters.push_back(main_cluster);
         all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+        // Mark each cluster's main vertex so bee output can identify it
+        for (auto& [cluster, vtx] : map_cluster_main_vertices) {
+            if (vtx) vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
+        }
+
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
     }
 

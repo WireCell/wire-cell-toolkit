@@ -59,6 +59,7 @@ namespace WireCell::Clus {
             double dQdx_scale{1.0};
             double dQdx_offset{0.0};
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
+            bool use_graph_vertices{false};    // dump graph vertices; charge=15000 for main (kNeutrinoVertex), 0 otherwise
         };
 
         // Vector to store configurations for multiple bee points sets
@@ -94,6 +95,7 @@ namespace WireCell::Clus {
             const std::string& pcname, const std::vector<std::string>& coords,
             int filter);
         void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
+        void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
 
         void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
         void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
