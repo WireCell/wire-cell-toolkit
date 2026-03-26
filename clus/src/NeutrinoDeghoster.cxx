@@ -8,10 +8,13 @@ using namespace WireCell::Clus;
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 namespace {
-    // Helper function to sort clusters by total length in descending order
+    // Helper function to sort clusters by total length in descending order.
+    // Tiebreaker on cluster ident() makes this a total order so std::sort
+    // produces the same result regardless of pointer-address iteration order.
     bool sortbysec(const std::pair<Facade::Cluster*, double>& a,
                    const std::pair<Facade::Cluster*, double>& b) {
-        return (a.second > b.second);
+        if (a.second != b.second) return a.second > b.second;
+        return a.first->ident() < b.first->ident();
     }
     
     // Helper function to sort segments by length in descending order
@@ -122,15 +125,14 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
             global_point_cloud->add_points(Facade::make_points_cluster(ordered_clusters[i], wpid_params, true));
             global_steiner_point_cloud->add_points(Facade::make_points_cluster_steiner(ordered_clusters[i], wpid_params, true));
             
-            // Add skeleton points from segments
+            // Add skeleton points from segments (raw wcpts, matching prototype)
             auto it = map_cluster_to_segments.find(ordered_clusters[i]);
             if (it != map_cluster_to_segments.end()) {
                 for (auto seg : it->second) {
-                    // Create point-plane pairs from segment fits
                     std::vector<std::pair<Facade::geo_point_t, WirePlaneId>> point_plane_pairs;
-                    for (const auto& fit : seg->fits()) {
-                        WirePlaneId wpid = dv->contained_by(fit.point);
-                        point_plane_pairs.emplace_back(fit.point, wpid);
+                    for (const auto& wcpt : seg->wcpts()) {
+                        WirePlaneId wpid = dv->contained_by(wcpt.point);
+                        point_plane_pairs.emplace_back(wcpt.point, wpid);
                     }
                     global_skeleton_cloud->add_points(Facade::make_points_direct(ordered_clusters[i], dv, wpid_params, point_plane_pairs, true));
                 }
@@ -283,9 +285,9 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
                 if (it != map_cluster_to_segments.end()) {
                     for (auto seg : it->second) {
                         std::vector<std::pair<Facade::geo_point_t, WirePlaneId>> point_plane_pairs;
-                        for (const auto& fit : seg->fits()) {
-                            WirePlaneId wpid = dv->contained_by(fit.point);
-                            point_plane_pairs.emplace_back(fit.point, wpid);
+                        for (const auto& wcpt : seg->wcpts()) {
+                            WirePlaneId wpid = dv->contained_by(wcpt.point);
+                            point_plane_pairs.emplace_back(wcpt.point, wpid);
                         }
                         global_skeleton_cloud->add_points(Facade::make_points_direct(cluster, dv, wpid_params, point_plane_pairs, true));
                     }
@@ -338,8 +340,9 @@ void PatternAlgorithms::order_segments(std::vector<SegmentPtr>& ordered_segments
         temp_pair_vec.push_back(std::make_pair(seg, length));
     }
     
-    // Sort by length in descending order
-    std::sort(temp_pair_vec.begin(), temp_pair_vec.end(), sortbysec1);
+    // Stable sort by length descending: input is in ordered_edges order (deterministic),
+    // stable_sort preserves that order for equal-length segments.
+    std::stable_sort(temp_pair_vec.begin(), temp_pair_vec.end(), sortbysec1);
     
     // Fill ordered_segments with sorted results
     for (auto it = temp_pair_vec.begin(); it != temp_pair_vec.end(); ++it) {
@@ -510,11 +513,11 @@ void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*
             }
             
             if (flag_add_seg) {
-                // Add segment fits to skeleton cloud
+                // Add segment raw wcpts to skeleton cloud (matching prototype)
                 std::vector<std::pair<Facade::geo_point_t, WirePlaneId>> point_plane_pairs;
-                for (const auto& fit : seg->fits()) {
-                    WirePlaneId wpid = dv->contained_by(fit.point);
-                    point_plane_pairs.emplace_back(fit.point, wpid);
+                for (const auto& wcpt : seg->wcpts()) {
+                    WirePlaneId wpid = dv->contained_by(wcpt.point);
+                    point_plane_pairs.emplace_back(wcpt.point, wpid);
                 }
                 global_skeleton_cloud->add_points(Facade::make_points_direct(cluster, dv, wpid_params, point_plane_pairs, true));
             } else {
@@ -539,9 +542,9 @@ void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*
                 if (flag_add_seg) {
                     // Keep the segment to protect main vertex
                     std::vector<std::pair<Facade::geo_point_t, WirePlaneId>> point_plane_pairs;
-                    for (const auto& fit : seg->fits()) {
-                        WirePlaneId wpid = dv->contained_by(fit.point);
-                        point_plane_pairs.emplace_back(fit.point, wpid);
+                    for (const auto& wcpt : seg->wcpts()) {
+                        WirePlaneId wpid = dv->contained_by(wcpt.point);
+                        point_plane_pairs.emplace_back(wcpt.point, wpid);
                     }
                     global_skeleton_cloud->add_points(Facade::make_points_direct(cluster, dv, wpid_params, point_plane_pairs, true));
                 } else {
