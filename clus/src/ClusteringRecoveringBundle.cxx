@@ -159,10 +159,14 @@ private:
         if (std::set<int>(cc_vec.begin(), cc_vec.end()).size() < 2) return;
 
         // Perform the separation
+        const int main_cluster_id = cluster->ident();
         auto splits = grouping.separate(cluster, cc_vec);
         cluster->set_flag(Flags::main_cluster);
 
+        int sub_id = 1;
         for (auto& [id, new_cluster] : splits) {
+            new_cluster->set_ident(main_cluster_id * 100 + sub_id);
+            ++sub_id;
             new_cluster->set_flag(Flags::associated_cluster);
         }
     }

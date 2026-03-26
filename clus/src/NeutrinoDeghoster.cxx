@@ -1,8 +1,11 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
+#include "WireCellAux/Logger.h"
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 namespace {
     // Helper function to sort clusters by total length in descending order
@@ -144,41 +147,37 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
             auto it = map_cluster_to_segments.find(cluster);
             if (it != map_cluster_to_segments.end()) {
                 for (auto seg : it->second) {
-                    for (const auto& fit : seg->fits()) {
-                        Facade::geo_point_t test_point = fit.point;
-                        num_total_points++;
-                        
+                    // Use raw wcpts (not t0-corrected fits) to match prototype behavior
+                    // and avoid points being pushed outside detector volume by t0 correction
+                    for (const auto& wcpt : seg->wcpts()) {
+                        Facade::geo_point_t test_point = wcpt.point;
+
                         WirePlaneId test_wpid = dv->contained_by(test_point);
                         int apa = test_wpid.apa();
                         int face = test_wpid.face();
 
                         if (apa == -1 || face == -1) continue;  // point outside detector volume
 
-                        // Get point in raw coordinates for dead channel check
-                        auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-                        double cluster_t0 = cluster->get_cluster_t0();
-                        Facade::geo_point_t p_raw = transform->backward(test_point, cluster_t0, face, apa);
-                        
-                        // const auto& winds = cluster->wire_indices();
-                        
+                        num_total_points++;  // only count points inside detector volume
+
                         // U plane
                         bool flag_dead = false;
-                        if (af_dead_u_index.find(apa) != af_dead_u_index.end() && 
+                        if (af_dead_u_index.find(apa) != af_dead_u_index.end() &&
                             af_dead_u_index[apa].find(face) != af_dead_u_index[apa].end()) {
-                            flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0);
+                            flag_dead = cluster->grouping()->get_closest_dead_chs(test_point, 1, apa, face, 0);
                         }
-                        
+
                         if (!flag_dead) {
                             auto results = global_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
-                            if (std::get<0>(results) <= dis_cut / 2.) {
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut / 2.) {
                                 // Overlap with global point cloud
                             } else {
                                 results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
-                                if (std::get<0>(results) <= dis_cut * 2. / 3.) {
+                                if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) {
                                     // Overlap with steiner cloud
                                 } else {
                                     results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
-                                    if (std::get<0>(results) <= dis_cut * 6. / 4.) {
+                                    if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 6. / 4.) {
                                         // Overlap with skeleton cloud
                                     } else {
                                         num_unique[0]++;
@@ -188,23 +187,23 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
                         } else {
                             num_dead[0]++;
                         }
-                        
+
                         // V plane
                         flag_dead = false;
-                        if (af_dead_v_index.find(apa) != af_dead_v_index.end() && 
+                        if (af_dead_v_index.find(apa) != af_dead_v_index.end() &&
                             af_dead_v_index[apa].find(face) != af_dead_v_index[apa].end()) {
-                            flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1);
+                            flag_dead = cluster->grouping()->get_closest_dead_chs(test_point, 1, apa, face, 1);
                         }
-                        
+
                         if (!flag_dead) {
                             auto results = global_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
-                            if (std::get<0>(results) <= dis_cut / 2.) {
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut / 2.) {
                             } else {
                                 results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
-                                if (std::get<0>(results) <= dis_cut * 2. / 3.) {
+                                if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) {
                                 } else {
                                     results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
-                                    if (std::get<0>(results) <= dis_cut * 6. / 4.) {
+                                    if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 6. / 4.) {
                                     } else {
                                         num_unique[1]++;
                                     }
@@ -213,23 +212,23 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
                         } else {
                             num_dead[1]++;
                         }
-                        
+
                         // W plane
                         flag_dead = false;
-                        if (af_dead_w_index.find(apa) != af_dead_w_index.end() && 
+                        if (af_dead_w_index.find(apa) != af_dead_w_index.end() &&
                             af_dead_w_index[apa].find(face) != af_dead_w_index[apa].end()) {
-                            flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2);
+                            flag_dead = cluster->grouping()->get_closest_dead_chs(test_point, 1, apa, face, 2);
                         }
-                        
+
                         if (!flag_dead) {
                             auto results = global_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
-                            if (std::get<0>(results) <= dis_cut / 2.) {
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut / 2.) {
                             } else {
                                 results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
-                                if (std::get<0>(results) <= dis_cut * 2. / 3.) {
+                                if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) {
                                 } else {
                                     results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
-                                    if (std::get<0>(results) <= dis_cut * 6. / 4.) {
+                                    if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 6. / 4.) {
                                     } else {
                                         num_unique[2]++;
                                     }
@@ -244,14 +243,16 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
             
             // Calculate percentages
             bool flag_add = true;
+            double unique_percent_u = 0, unique_percent_v = 0, unique_percent_w = 0;
+            double dead_percent_u = 0, dead_percent_v = 0, dead_percent_w = 0;
             if (num_total_points > 0) {
-                double unique_percent_u = num_unique[0] * 1.0 / num_total_points;
-                double unique_percent_v = num_unique[1] * 1.0 / num_total_points;
-                double unique_percent_w = num_unique[2] * 1.0 / num_total_points;
-                
-                double dead_percent_u = num_dead[0] * 1.0 / num_total_points;
-                double dead_percent_v = num_dead[1] * 1.0 / num_total_points;
-                double dead_percent_w = num_dead[2] * 1.0 / num_total_points;
+                unique_percent_u = num_unique[0] * 1.0 / num_total_points;
+                unique_percent_v = num_unique[1] * 1.0 / num_total_points;
+                unique_percent_w = num_unique[2] * 1.0 / num_total_points;
+
+                dead_percent_u = num_dead[0] * 1.0 / num_total_points;
+                dead_percent_v = num_dead[1] * 1.0 / num_total_points;
+                dead_percent_w = num_dead[2] * 1.0 / num_total_points;
                 
                 double max_unique_percent = std::max({unique_percent_u, unique_percent_v, unique_percent_w});
                 double min_unique_percent = std::min({unique_percent_u, unique_percent_v, unique_percent_w});
@@ -290,11 +291,18 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
                     }
                 }
             } else {
+                s_log->debug("deghost_clusters: cluster {} ghosted len={:.2f}cm pts={} "
+                    "unique=({:.0f}%,{:.0f}%,{:.0f}%) dead=({:.0f}%,{:.0f}%,{:.0f}%)",
+                    cluster->ident(),
+                    map_cluster_total_length[cluster] / units::cm,
+                    num_total_points,
+                    unique_percent_u * 100, unique_percent_v * 100, unique_percent_w * 100,
+                    dead_percent_u * 100, dead_percent_v * 100, dead_percent_w * 100);
                 to_be_removed_clusters.push_back(cluster);
             }
         }
     }
-    
+
     // Remove segments from ghosted clusters
     for (auto cluster : to_be_removed_clusters) {
         auto it = map_cluster_to_segments.find(cluster);
@@ -406,95 +414,93 @@ void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*
             int end_n = boost::out_degree(target_vdesc, graph);
             
             // Check if this is a terminal segment with low dQ/dx
+            int num_unique[3] = {0, 0, 0};
             if ((start_n == 1 || end_n == 1) && medium_dQ_dx < 1.1 * 43e3 / units::cm && length > 3.6 * units::cm) {
                 int num_dead[3] = {0, 0, 0};
-                int num_unique[3] = {0, 0, 0};
                 int num_total_points = 0;
                 
-                // Check each fit point
-                for (const auto& fit : seg->fits()) {
-                    Facade::geo_point_t test_point = fit.point;
-                    num_total_points++;
-                    
+                // Use raw wcpts (not t0-corrected fits) to match prototype behavior
+                for (const auto& wcpt : seg->wcpts()) {
+                    Facade::geo_point_t test_point = wcpt.point;
+
                     WirePlaneId test_wpid = dv->contained_by(test_point);
                     int apa = test_wpid.apa();
                     int face = test_wpid.face();
-                    
-                    // Get point in raw coordinates
-                    auto transform = track_fitter.get_pc_transforms()->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-                    double cluster_t0 = cluster->get_cluster_t0();
-                    Facade::geo_point_t p_raw = transform->backward(test_point, cluster_t0, face, apa);
-                    
+
+                    if (apa == -1 || face == -1) continue;  // point outside detector volume
+
+                    num_total_points++;
+
                     // Check U plane
-                    bool flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 0);
+                    bool flag_dead = cluster->grouping()->get_closest_dead_chs(test_point, 1, apa, face, 0);
                     if (!flag_dead) {
                         bool flag_in = false;
-                        
+
                         auto results = global_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
-                        if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
-                        
+                        if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+
                         if (global_steiner_point_cloud->get_points().size() != 0) {
                             results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
-                            if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
                         }
-                        
+
                         if (global_skeleton_cloud->get_points().size() != 0) {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
-                            if (std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
                         }
-                        
+
                         if (!flag_in) num_unique[0]++;
                     } else {
                         num_dead[0]++;
                     }
-                    
+
                     // Check V plane
-                    flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 1);
+                    flag_dead = cluster->grouping()->get_closest_dead_chs(test_point, 1, apa, face, 1);
                     if (!flag_dead) {
                         bool flag_in = false;
-                        
+
                         auto results = global_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
-                        if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
-                        
+                        if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+
                         if (global_steiner_point_cloud->get_points().size() != 0) {
                             results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
-                            if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
                         }
-                        
+
                         if (global_skeleton_cloud->get_points().size() != 0) {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
-                            if (std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
                         }
-                        
+
                         if (!flag_in) num_unique[1]++;
                     } else {
                         num_dead[1]++;
                     }
-                    
+
                     // Check W plane
-                    flag_dead = cluster->grouping()->get_closest_dead_chs(p_raw, 1, apa, face, 2);
+                    flag_dead = cluster->grouping()->get_closest_dead_chs(test_point, 1, apa, face, 2);
                     if (!flag_dead) {
                         bool flag_in = false;
-                        
+
                         auto results = global_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
-                        if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
-                        
+                        if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+
                         if (global_steiner_point_cloud->get_points().size() != 0) {
                             results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
-                            if (std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
                         }
-                        
+
                         if (global_skeleton_cloud->get_points().size() != 0) {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
-                            if (std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
+                            if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
                         }
-                        
+
                         if (!flag_in) num_unique[2]++;
                     } else {
                         num_dead[2]++;
                     }
                 }
-                
+
                 // If all points overlap with existing clouds, mark for removal
                 if (num_unique[0] + num_unique[1] + num_unique[2] == 0) {
                     flag_add_seg = false;
@@ -540,6 +546,17 @@ void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*
                     global_skeleton_cloud->add_points(Facade::make_points_direct(cluster, dv, wpid_params, point_plane_pairs, true));
                 } else {
                     // Remove segment
+                    auto p1 = v1 ? v1->wcpt().point : Facade::geo_point_t{};
+                    auto p2 = v2 ? v2->wcpt().point : Facade::geo_point_t{};
+                    s_log->debug("deghost_segments: cluster {} removing segment len={:.2f}cm "
+                        "dQ/dx={:.1f} unique=({},{},{}) "
+                        "vtx1({:.2f},{:.2f},{:.2f}) vtx2({:.2f},{:.2f},{:.2f})",
+                        cluster->ident(),
+                        length / units::cm,
+                        medium_dQ_dx * units::cm,
+                        num_unique[0], num_unique[1], num_unique[2],
+                        p1.x() / units::cm, p1.y() / units::cm, p1.z() / units::cm,
+                        p2.x() / units::cm, p2.y() / units::cm, p2.z() / units::cm);
                     remove_segment(graph, seg);
                 }
             }
