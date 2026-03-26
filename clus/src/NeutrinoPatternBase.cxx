@@ -1698,64 +1698,59 @@ std::pair<Facade::geo_point_t, Facade::geo_vector_t> PatternAlgorithms::calc_PCA
 Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::Cluster& cluster, const Facade::geo_point_t& orig_p, double dis_cut){
     Facade::geo_point_t ave_p(0, 0, 0);
     int num = 0;
-    
+    const double dis_cut_sq = dis_cut * dis_cut;
+
     // Iterate through all segments in the graph that belong to this cluster
     auto [ebegin, eend] = boost::edges(graph);
     for (auto eit = ebegin; eit != eend; ++eit) {
         SegmentPtr sg = graph[*eit].segment;
         if (!sg || sg->cluster() != &cluster) continue;
-        
-        // Get points from this segment (skip first and last points as in original)
-        const auto& wcpts = sg->wcpts();
-        for (size_t i = 1; i + 1 < wcpts.size(); i++) {
-            const WireCell::Point& pt = wcpts[i].point;
-            double dis = std::sqrt(std::pow(pt.x() - orig_p.x(), 2) + 
-                                  std::pow(pt.y() - orig_p.y(), 2) + 
-                                  std::pow(pt.z() - orig_p.z(), 2));
-            
-            if (dis < dis_cut) {
+
+        // Use fitted points (mirrors prototype's fit_pt_vec / get_point_vec()),
+        // skipping first and last points as in the original.
+        const auto& fits = sg->fits();
+        for (size_t i = 1; i + 1 < fits.size(); i++) {
+            const WireCell::Point& pt = fits[i].point;
+            double dx = pt.x() - orig_p.x();
+            double dy = pt.y() - orig_p.y();
+            double dz = pt.z() - orig_p.z();
+            if (dx*dx + dy*dy + dz*dz < dis_cut_sq) {
                 ave_p.set(ave_p.x() + pt.x(), ave_p.y() + pt.y(), ave_p.z() + pt.z());
                 num++;
             }
         }
     }
-    
+
     // Iterate through all vertices in the graph that belong to this cluster
     auto [vbegin, vend] = boost::vertices(graph);
     for (auto vit = vbegin; vit != vend; ++vit) {
         VertexPtr vtx = graph[*vit].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
-        
-        // Get vertex position (prefer fit point if available)
-        WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
-        
-        double dis = std::sqrt(std::pow(vtx_pt.x() - orig_p.x(), 2) + 
-                              std::pow(vtx_pt.y() - orig_p.y(), 2) + 
-                              std::pow(vtx_pt.z() - orig_p.z(), 2));
-        
-        if (dis < dis_cut) {
+
+        // Prefer fit point if available, otherwise fall back to wcpt
+        const WireCell::Point& vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+
+        double dx = vtx_pt.x() - orig_p.x();
+        double dy = vtx_pt.y() - orig_p.y();
+        double dz = vtx_pt.z() - orig_p.z();
+        if (dx*dx + dy*dy + dz*dz < dis_cut_sq) {
             ave_p.set(ave_p.x() + vtx_pt.x(), ave_p.y() + vtx_pt.y(), ave_p.z() + vtx_pt.z());
             num++;
         }
     }
-    
+
     // Calculate direction vector
     Facade::geo_vector_t dir(0, 0, 0);
-    
+
     if (num > 0) {
-        // Calculate average position
         ave_p.set(ave_p.x() / num, ave_p.y() / num, ave_p.z() / num);
-        
-        // Calculate direction from origin to average
         dir.set(ave_p.x() - orig_p.x(), ave_p.y() - orig_p.y(), ave_p.z() - orig_p.z());
-        
-        // Normalize to unit vector
         double magnitude = std::sqrt(dir.x() * dir.x() + dir.y() * dir.y() + dir.z() * dir.z());
         if (magnitude > 0) {
             dir.set(dir.x() / magnitude, dir.y() / magnitude, dir.z() / magnitude);
         }
     }
-    
+
     return dir;
 }
 
@@ -1783,7 +1778,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
        return &new_main_cluster;
     }
 
-    void PatternAlgorithms::examine_main_vertices(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+    void PatternAlgorithms::examine_main_vertices(Graph& graph, std::map<Facade::Cluster*, VertexPtr>& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters){
         if (!main_cluster) return;
         
         // Calculate cluster length cut
@@ -1810,8 +1805,9 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                         SegmentPtr seg = graph[*e_it].segment;
                         if (!seg) continue;
                         
-                        bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                        seg->flags_any(SegmentFlags::kShowerTopology);
+                        bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                        seg->flags_any(SegmentFlags::kShowerTopology) ||
+                                        (seg->has_particle_info() && seg->particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
                         int dirsign = seg->dirsign();
                         bool is_dir_weak = seg->dir_weak();
                         double median_dqdx = segment_median_dQ_dx(seg) / (43e3 / units::cm);
@@ -1879,8 +1875,9 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                 int cluster_id = sg->cluster() ? sg->cluster()->get_cluster_id() : -1;
                 if (map_cluster_id_shower.find(cluster_id) == map_cluster_id_shower.end()) continue;
                 
-                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                sg->flags_any(SegmentFlags::kShowerTopology);
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                (sg->has_particle_info() && sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
                 if (!is_shower) {
                     map_cluster_id_shower[cluster_id] = false;
                 }

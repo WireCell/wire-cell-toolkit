@@ -2863,9 +2863,10 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
                 SegmentPtr sg = graph[*e_it].segment;
                 if (!sg) continue;
                 
-                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                sg->flags_any(SegmentFlags::kShowerTopology);
-                
+                bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                (sg->has_particle_info() && sg->particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
+
                 if (is_shower) {
                     map_vertex_num[vtx] += 1.0 / 4.0 / 2.0;  // showers count less
                 } else {
@@ -3011,12 +3012,13 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, std:
                 if (!seg) continue;
                 
                 n_total++;
-                bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                seg->flags_any(SegmentFlags::kShowerTopology);
+                bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                seg->flags_any(SegmentFlags::kShowerTopology) ||
+                                (seg->has_particle_info() && seg->particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
                 if (is_shower) n_showers++;
             }
         }
-        
+
         if (n_total > 0 && n_showers == n_total) {
             flag_all_showers = true;
         }
@@ -3102,8 +3104,9 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
             if (!seg) continue;
             
             n_total++;
-            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                            seg->flags_any(SegmentFlags::kShowerTopology);
+            bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                            seg->flags_any(SegmentFlags::kShowerTopology) ||
+                            (seg->has_particle_info() && seg->particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
             if (is_shower) n_showers++;
         }
     }
@@ -3122,7 +3125,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     return main_cluster;
 }
 
-VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model ){
+VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain){
     if (!main_cluster) return nullptr;
     
     // Find cluster with maximum length
@@ -3162,15 +3165,21 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::ma
     examine_main_vertices(graph, map_cluster_main_vertices, main_cluster, other_clusters);
     
     // Check for main cluster switch
-    // For now, using simplified version (similar to frozen chain in original)
-    if (max_length_cluster && main_cluster) {
-        double main_length = main_cluster->get_length();
-        if (max_length > main_length * 0.8) {
-            VertexPtr temp_main_vertex = map_cluster_main_vertices.find(main_cluster) != map_cluster_main_vertices.end() 
-                                         ? map_cluster_main_vertices[main_cluster] : nullptr;
-            if (temp_main_vertex) {
-                main_cluster = check_switch_main_cluster_2(graph, temp_main_vertex, max_length_cluster, main_cluster, 
-                                                           other_clusters);
+    if (flag_dev_chain) {
+        // Development chain: use compare_main_vertices_global to find the globally best vertex
+        main_cluster = check_switch_main_cluster(graph, map_cluster_main_vertices, main_cluster, other_clusters,
+                                                 track_fitter, dv);
+    } else {
+        // Frozen chain: only switch if another cluster is significantly longer and main vertex is all showers
+        if (max_length_cluster && main_cluster) {
+            double main_length = main_cluster->get_length();
+            if (max_length > main_length * 0.8) {
+                VertexPtr temp_main_vertex = map_cluster_main_vertices.find(main_cluster) != map_cluster_main_vertices.end()
+                                             ? map_cluster_main_vertices[main_cluster] : nullptr;
+                if (temp_main_vertex) {
+                    main_cluster = check_switch_main_cluster_2(graph, temp_main_vertex, max_length_cluster, main_cluster,
+                                                               other_clusters);
+                }
             }
         }
     }

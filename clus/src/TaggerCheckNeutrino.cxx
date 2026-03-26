@@ -186,6 +186,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             if (vtx) vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
         }
 
+        // determine the overall vertex
+        pattern_algos.determine_overall_main_vertex(*pr_graph,map_cluster_main_vertices, main_cluster, other_clusters, vertices_in_long_muon, segments_in_long_muon,*m_track_fitter, m_dv,particle_data(), m_recomb_model);
+
+
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
     }
 
