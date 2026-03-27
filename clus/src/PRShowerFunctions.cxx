@@ -122,29 +122,27 @@ namespace WireCell::Clus::PR {
     WireCell::Vector shower_cal_dir_3vector(Shower& shower, const WireCell::Point& p, double dis_cut /* = 15*units::cm */){
         WireCell::Point p_sum(0, 0, 0);
         int ncount = 0;
-        
+        const double dis_cut_sq = dis_cut * dis_cut;
+
         // Get the view graph to access segments
         const auto& view = shower.view_graph();
-        
+
         // Loop through all segments in the shower
         for (auto edesc : shower.edges()) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
-            
+
             // Get the segment's fits
             const auto& fits = seg->fits();
-            
+
             // Check each fit point in the segment
             for (const auto& fit : fits) {
-                // Calculate distance from this fit point to p
-                double dis = sqrt(pow(fit.point.x() - p.x(), 2) + 
-                                 pow(fit.point.y() - p.y(), 2) + 
-                                 pow(fit.point.z() - p.z(), 2));
-                
-                // If within distance cutoff, accumulate the point
-                if (dis < dis_cut) {
-                    p_sum = WireCell::Point(p_sum.x() + fit.point.x(), 
-                                           p_sum.y() + fit.point.y(), 
+                double dx = fit.point.x() - p.x();
+                double dy = fit.point.y() - p.y();
+                double dz = fit.point.z() - p.z();
+                if (dx*dx + dy*dy + dz*dz < dis_cut_sq) {
+                    p_sum = WireCell::Point(p_sum.x() + fit.point.x(),
+                                           p_sum.y() + fit.point.y(),
                                            p_sum.z() + fit.point.z());
                     ncount++;
                 }

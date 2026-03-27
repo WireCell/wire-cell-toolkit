@@ -1891,9 +1891,19 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                 WireCell::Point main_vtx_pt = main_vtx->fit().valid() ? main_vtx->fit().point : main_vtx->wcpt().point;
                 Facade::geo_vector_t dir_main = calc_dir_cluster(graph, *main_cluster, main_vtx_pt, 15 * units::cm);
                 
-                for (auto& [cluster, vertex] : map_cluster_main_vertices) {
+                // Sort by cluster_id for deterministic evaluation order
+                std::vector<std::pair<Facade::Cluster*, VertexPtr>> sorted_candidates(
+                    map_cluster_main_vertices.begin(), map_cluster_main_vertices.end());
+                std::sort(sorted_candidates.begin(), sorted_candidates.end(),
+                          [](const auto& a, const auto& b) {
+                              int aid = a.first ? a.first->get_cluster_id() : -1;
+                              int bid = b.first ? b.first->get_cluster_id() : -1;
+                              return aid < bid;
+                          });
+
+                for (auto& [cluster, vertex] : sorted_candidates) {
                     if (cluster == main_cluster || !vertex) continue;
-                    
+
                     WireCell::Point vtx_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
                     
                     // Get closest distance to main cluster

@@ -3,6 +3,8 @@
 
 #include "WireCellClus/PRCommon.h"
 #include "WireCellClus/PRTrajectoryView.h"
+#include "WireCellClus/PRVertex.h"
+#include "WireCellClus/PRSegment.h"
 
 #include "WireCellUtil/Flagged.h"
 #include "WireCellUtil/Point.h"
@@ -10,7 +12,33 @@
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellClus/ParticleDataSet.h"
 
+#include <set>
+
 namespace WireCell::Clus::PR {
+
+    /** Comparators for VertexPtr and SegmentPtr that order by the stable
+     *  NodeBundle/EdgeBundle index rather than by raw pointer address.
+     *
+     *  Use these (via IndexedVertexSet / IndexedSegmentSet) wherever a
+     *  std::set<VertexPtr> or std::set<SegmentPtr> must produce a
+     *  deterministic iteration order across runs.
+     */
+    struct VertexIndexCmp {
+        const Graph* g{nullptr};
+        explicit VertexIndexCmp(const Graph& graph) : g(&graph) {}
+        bool operator()(const VertexPtr& a, const VertexPtr& b) const {
+            return (*g)[a->get_descriptor()].index < (*g)[b->get_descriptor()].index;
+        }
+    };
+    struct SegmentIndexCmp {
+        const Graph* g{nullptr};
+        explicit SegmentIndexCmp(const Graph& graph) : g(&graph) {}
+        bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
+            return (*g)[a->get_descriptor()].index < (*g)[b->get_descriptor()].index;
+        }
+    };
+    using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;
+    using IndexedSegmentSet = std::set<SegmentPtr, SegmentIndexCmp>;
 
     /** The "flags" that may be set on a shower.
      */
@@ -158,11 +186,12 @@ namespace WireCell::Clus::PR {
 
 
         // get the information from the shower
-        void fill_sets(std::set<VertexPtr>& used_vertices, std::set<SegmentPtr>& used_segments, bool flag_exclude_start_segment = true);
+        void fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment = true);
         void fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main = true);
         TrajectoryView& fill_maps();
 
-        std::pair<std::set<VertexPtr>, std::set<SegmentPtr>> get_connected_pieces(SegmentPtr seg);
+        int count_connected_segments(SegmentPtr seg);
+        std::pair<IndexedVertexSet, IndexedSegmentSet> get_connected_pieces(SegmentPtr seg);
 
         std::pair<SegmentPtr, VertexPtr> get_last_segment_vertex_long_muon(std::set<SegmentPtr>& segments_in_muons);
 

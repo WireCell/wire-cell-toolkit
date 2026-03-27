@@ -7,7 +7,9 @@
 
 #include "WireCellClus/PRGraphType.h"
 
+#include <algorithm>
 #include <unordered_set>
+#include <vector>
 
 
 namespace WireCell::Clus::PR {
@@ -115,6 +117,49 @@ namespace WireCell::Clus::PR {
         node_unordered_set m_nodes;
         edge_unordered_set m_edges;
     };
+
+    /** Return view nodes sorted by NodeBundle::index for deterministic iteration.
+     *
+     * Use this instead of iterating view.nodes() directly whenever the
+     * order of processing may affect results (e.g. picking a "best" element).
+     */
+    inline node_vector ordered_nodes(const TrajectoryView& view, const Graph& g) {
+        node_vector result(view.nodes().begin(), view.nodes().end());
+        std::sort(result.begin(), result.end(),
+                  [&g](const node_descriptor& a, const node_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
+
+    /** Return view edges sorted by EdgeBundle::index for deterministic iteration.
+     *
+     * Use this instead of iterating view.edges() directly whenever the
+     * order of processing may affect results.
+     */
+    inline std::vector<edge_descriptor> ordered_edges(const TrajectoryView& view, const Graph& g) {
+        std::vector<edge_descriptor> result(view.edges().begin(), view.edges().end());
+        std::sort(result.begin(), result.end(),
+                  [&g](const edge_descriptor& a, const edge_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
+
+    /** Return out-edges of a vertex sorted by EdgeBundle::index for deterministic iteration.
+     *
+     * boost::out_edges() with setS iterates in pointer order.  Use this
+     * instead wherever out-edge order may affect which segment is selected.
+     */
+    inline std::vector<edge_descriptor> sorted_out_edges(node_descriptor vdesc, const Graph& g) {
+        auto [begin, end] = boost::out_edges(vdesc, g);
+        std::vector<edge_descriptor> result(begin, end);
+        std::sort(result.begin(), result.end(),
+                  [&g](const edge_descriptor& a, const edge_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
 
     /** Make a view of a particular type as a shared pointer.
      *

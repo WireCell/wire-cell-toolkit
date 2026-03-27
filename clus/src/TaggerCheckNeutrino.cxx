@@ -134,7 +134,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
 
         // main vertex determination
-        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, false);
+        pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
 
         if (main_vertex !=0){
             map_cluster_main_vertices[main_cluster] = main_vertex;
@@ -154,7 +154,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 pattern_algos.separate_track_shower(*pr_graph, *cluster);
                 pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
                 pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
-                pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, false);
+                pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
                 if (main_vertex != nullptr) {
                     map_cluster_main_vertices[cluster] = main_vertex;
                     main_vertex = nullptr;
@@ -169,7 +169,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 pattern_algos.separate_track_shower(*pr_graph, *cluster);
                 pattern_algos.determine_direction(*pr_graph, *cluster, particle_data(), m_recomb_model);
                 pattern_algos.shower_determining_in_main_cluster(*pr_graph, *cluster, particle_data(), m_recomb_model, m_dv);
-                pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model, false);
+                pattern_algos.determine_main_vertex(*pr_graph, *cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
                 if (main_vertex != nullptr) {
                     map_cluster_main_vertices[cluster] = main_vertex;
                     main_vertex = nullptr;
@@ -186,12 +186,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             if (vtx) vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
         }
 
-        // determine the overall vertex
-        pattern_algos.determine_overall_main_vertex(*pr_graph,map_cluster_main_vertices, main_cluster, other_clusters, vertices_in_long_muon, segments_in_long_muon,*m_track_fitter, m_dv,particle_data(), m_recomb_model);
-
 
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
     }
+     
+    // determine the overall vertex
+    pattern_algos.determine_overall_main_vertex(*pr_graph,map_cluster_main_vertices, main_cluster, other_clusters, vertices_in_long_muon, segments_in_long_muon,*m_track_fitter, m_dv,particle_data(), m_recomb_model);
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);
