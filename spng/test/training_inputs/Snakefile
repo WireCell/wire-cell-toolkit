@@ -429,7 +429,6 @@ rule run_one:
 
 def get_input_by_plane(wildcards):
     angles = get_angles_by_plane(wildcards.plane)
-    # return [os.path.join(config['test_input'], f'test_line_txzu{txzu}-txzv{txzv}.pt') for txzu, txzv in angles]
     return [
         f'test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
     ]
@@ -493,9 +492,7 @@ rule plot_eff_pur:
 
 
 def get_input(wildcards):
-    # return os.path.join(config['test_input'], f'test_line_txzu{wildcards.txzu}-txzv{wildcards.txzv}.pt') 
     return f'test_line_{wildcards.plane}plane_t1-{wildcards.t1}-t2-{wildcards.t2}.pt'
-    # return os.path.join(config['test_input'], f'test_line_{wildcards.plane}plane_t1-{wildcards.t1}-t2-{wildcards.t2}.pt') 
 
 
 rule plot_feat_y_labels:
@@ -533,13 +530,6 @@ rule plot_feat_y_labels:
         # plt.savefig(f)
         import pickle
         pickle.dump(fig, open(f, 'wb'))
-# rule plot_feat_y_labels_all:
-#     input:
-#         [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in high_end_xzu_xzv_deg]
-#     output:
-#         'line-displays.tar'
-#     shell:
-#         'tar -cf {output} {input}'
 
 def get_plot_input_by_plane(w):
     if w.plane == 'u':
@@ -548,25 +538,16 @@ def get_plot_input_by_plane(w):
         angles = high_end_xzu_xzv_deg_vplane
     elif w.plane == 'w':
         angles = high_end_xzw_xzu_deg_wplane
-    # else:
-        # raise RuntimeError()
     res = [f'line-display-{w.plane}plane-t1_{t1}-t2_{t2}.pickle' for t1, t2 in angles]
     return res
-    # return [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in angles]
-rule plot_feat_y_labels_uvplane:
+
+rule collect_feat_y_labels_uvplane:
     input:
-        # lambda w: [f'line-display-txzu{txzu}-txzv{txzv}.pickle' for txzu, txzv in (high_end_xzu_xzv_deg_uplane if w.plane == 'u' else (high_end_xzu_xzv_deg_vplane))]
         get_plot_input_by_plane
     output:
         'line-displays_{plane}plane.tar'
     shell:
         'tar -cf {output} {input}'
-
-# rule all_plots:
-#     input:
-#         tar='line-displays.tar',
-#         effpur='all_eff_pur.png'
-
 
 rule all_plots_u:
     input:
