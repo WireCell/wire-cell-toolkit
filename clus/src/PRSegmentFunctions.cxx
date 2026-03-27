@@ -97,14 +97,19 @@ namespace WireCell::Clus::PR {
             // Fall back to base_cloud_name (typically "main") if the requested cloud is
             // absent or empty (e.g. fitting produced no valid-index fit points).
             dpc = seg->dpcloud(base_cloud_name);
-            if (!dpc) {
-                raise<RuntimeError>("get_closest_point: segment missing DynamicPointCloud with name " + cloud_name + " and fallback " + base_cloud_name);
-            }
+        }
+
+        // If both clouds are absent or empty (e.g. segments from lightly-processed
+        // other_clusters that share the same graph), treat the segment as infinitely
+        // far away rather than crashing.  The caller's minimum-distance search will
+        // simply skip this segment.
+        if (!dpc || dpc->get_points().empty()) {
+            return {min_dist, closest_point};
         }
 
         const auto& points = dpc->get_points();
         if (points.empty()) {
-            raise<RuntimeError>("get_closest_point: DynamicPointCloud has no points");
+            return {min_dist, closest_point};
         }
         
         // Use KD-tree to find the closest point
@@ -132,14 +137,17 @@ namespace WireCell::Clus::PR {
         if (!dpc || dpc->get_points().empty()) {
             // Fall back to "main" cloud if requested cloud is absent or empty
             dpc = seg->dpcloud("main");
-            if (!dpc) {
-                raise<RuntimeError>("segment_get_closest_2d_distances: segment missing DynamicPointCloud with name " + cloud_name + " and fallback 'main'");
-            }
+        }
+
+        // If both clouds are absent or empty, return infinite distances so the
+        // caller's minimum-distance search simply skips this segment.
+        if (!dpc || dpc->get_points().empty()) {
+            return {1e9, 1e9, 1e9};
         }
 
         const auto& points = dpc->get_points();
         if (points.empty()) {
-            raise<RuntimeError>("segment_get_closest_2d_distances: DynamicPointCloud has no points");
+            return {1e9, 1e9, 1e9};
         }
         
         // Use DynamicPointCloud's optimized method to get 2D distances for each plane

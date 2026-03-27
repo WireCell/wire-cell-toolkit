@@ -3129,7 +3129,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
 
 bool PatternAlgorithms::determine_overall_main_vertex_DL(
     Graph& graph,
-    std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,
+    std::map<Facade::Cluster*, VertexPtr>& map_cluster_main_vertices,
     Facade::Cluster*& main_cluster,
     std::vector<Facade::Cluster*>& other_clusters,
     std::set<VertexPtr>& vertices_in_long_muon,
@@ -3270,6 +3270,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             if (main_cluster && min_vertex->cluster() && min_vertex->cluster() != main_cluster) {
                 main_cluster = swap_main_cluster(*min_vertex->cluster(), *main_cluster, other_clusters);
             }
+
+            // Record DL-chosen vertex as the neutrino vertex for the main cluster
+            map_cluster_main_vertices[main_cluster] = min_vertex;
 
             VertexPtr main_vertex = min_vertex;
 

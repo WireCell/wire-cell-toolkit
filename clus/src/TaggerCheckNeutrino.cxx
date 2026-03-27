@@ -152,9 +152,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // main vertex determination
         pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
 
-        if (main_vertex !=0){
+        if (main_vertex !=nullptr){
             map_cluster_main_vertices[main_cluster] = main_vertex;
-            main_vertex = 0;
+            main_vertex = nullptr;
         }
     }
 
@@ -197,18 +197,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         std::vector<Cluster*> all_clusters;
         all_clusters.push_back(main_cluster);
         all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
-        // Mark each cluster's main vertex so bee output can identify it
-        for (auto& [cluster, vtx] : map_cluster_main_vertices) {
-            if (vtx) vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
-        }
-
-
+        
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
     }
      
     // Determine the overall neutrino vertex.
     // If DL weights are configured, try DL first (matches prototype flag_dl_vtx logic).
     // Fall back to traditional algorithm if DL is disabled or does not change the vertex.
+    // DL path updates map_cluster_main_vertices[main_cluster] directly (by-ref parameter).
+    // Traditional path returns the chosen vertex; capture it and sync to the map.
+    VertexPtr final_main_vertex = nullptr;
     bool flag_dl_changed = false;
     if (!m_dl_weights.empty()) {
         flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
@@ -218,10 +216,71 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset);
     }
     if (!flag_dl_changed) {
-        pattern_algos.determine_overall_main_vertex(
+        final_main_vertex = pattern_algos.determine_overall_main_vertex(
             *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
             vertices_in_long_muon, segments_in_long_muon,
             *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
+        if (final_main_vertex) {
+            map_cluster_main_vertices[main_cluster] = final_main_vertex;
+        }
+    }
+
+    // Retrieve the chosen neutrino vertex regardless of which path ran
+    {
+        auto it = map_cluster_main_vertices.find(main_cluster);
+        if (it != map_cluster_main_vertices.end()) {
+            final_main_vertex = it->second;
+        }
+    }
+
+    // Post-vertex refinement (matches prototype block after determine_overall_main_vertex):
+    //   1. Minuit-based vertex position fit
+    //   2. Re-cluster EM shower points with refined vertex
+    //   3. Re-examine track directions (flag_final=true)
+    //   4. Re-separate tracks and showers
+    if (final_main_vertex) {
+        pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
+                                     vertices_in_long_muon, segments_in_long_muon,
+                                     *m_track_fitter, m_dv, particle_data(), m_recomb_model,
+                                     true, true);
+        // improve_vertex may update final_main_vertex pointer; sync back to map
+        map_cluster_main_vertices[main_cluster] = final_main_vertex;
+
+        // pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+
+        // pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
+        //                                 vertices_in_long_muon, segments_in_long_muon,
+        //                                 particle_data(), m_recomb_model, true);
+
+        // SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
+        // // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+
+        // pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+    }
+
+
+
+    // Mark each cluster's main vertex so bee output can identify it
+    for (auto& [cluster, vtx] : map_cluster_main_vertices) {
+        if (vtx) {
+            vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
+
+            const auto& wcpt = vtx->wcpt().point;
+            if (vtx->fit().valid()) {
+                const auto& fitpt = vtx->fit().point;
+                SPDLOG_LOGGER_DEBUG(log,
+                                    "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=({:.2f}, {:.2f}, {:.2f}) cm",
+                                    cluster->get_cluster_id(),
+                                    wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm,
+                                    fitpt.x() / units::cm, fitpt.y() / units::cm, fitpt.z() / units::cm);
+            }
+            else {
+                SPDLOG_LOGGER_DEBUG(log,
+                                    "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=invalid",
+                                    cluster->get_cluster_id(),
+                                    wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm);
+            }
+        }
     }
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
