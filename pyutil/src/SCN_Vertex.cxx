@@ -54,8 +54,21 @@ namespace WCPPyUtil {
         // Load the module object
         pModule = PyImport_Import(pName);
         if (!pModule) {
-            PyErr_Print();
-            throw std::runtime_error("SCN_Vertex: import failed for module: " + module);
+            std::string pyerr;
+            if (PyErr_Occurred()) {
+                PyObject *ptype, *pvalue, *ptraceback;
+                PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+                PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+                PyObject* pstr = pvalue ? PyObject_Str(pvalue) : nullptr;
+                if (pstr) {
+                    pyerr = std::string(": ") + PyUnicode_AsUTF8(pstr);
+                    Py_DECREF(pstr);
+                }
+                Py_XDECREF(ptype);
+                Py_XDECREF(pvalue);
+                Py_XDECREF(ptraceback);
+            }
+            throw std::runtime_error("SCN_Vertex: import failed for module: " + module + pyerr);
         }
 
         // pDict is a borrowed reference
@@ -94,8 +107,21 @@ namespace WCPPyUtil {
         Py_DECREF(pQ);
 
         if (!pValue) {
-            PyErr_Print();
-            throw std::runtime_error("SCN_Vertex: Python function call failed");
+            std::string pyerr;
+            if (PyErr_Occurred()) {
+                PyObject *ptype, *pvalue, *ptraceback;
+                PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+                PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+                PyObject* pstr = pvalue ? PyObject_Str(pvalue) : nullptr;
+                if (pstr) {
+                    pyerr = std::string(": ") + PyUnicode_AsUTF8(pstr);
+                    Py_DECREF(pstr);
+                }
+                Py_XDECREF(ptype);
+                Py_XDECREF(pvalue);
+                Py_XDECREF(ptraceback);
+            }
+            throw std::runtime_error("SCN_Vertex: Python function call failed" + pyerr);
         }
 
         size_t ret_size = PyBytes_Size(pValue);

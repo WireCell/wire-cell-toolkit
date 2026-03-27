@@ -1,1 +1,9 @@
 bld.smplpkg('WCPPyUtil', use='PYTHON')
+
+# Install Python modules so they are on PYTHONPATH at runtime.
+# SCN_Vertex.py is the top-level inference script called by the C++ SCN_Vertex wrapper.
+# SCN/DeepVtx.py contains the sparseconvnet model class imported by SCN_Vertex.py.
+bld.install_files('${PREFIX}/python',
+                  bld.path.ant_glob('python/*.py'))
+bld.install_files('${PREFIX}/python/SCN',
+                  bld.path.ant_glob('python/SCN/*.py'))

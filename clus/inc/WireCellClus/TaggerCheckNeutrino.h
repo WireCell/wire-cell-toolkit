@@ -36,8 +36,10 @@ public:
         std::string m_grouping_name{"live"};
         std::string m_trackfitting_config_file;  // Path to TrackFitting config file
         bool m_perf{false};  // if true, print per-step timing to stdout
-        std::string m_dl_weights;  // path to SCN vertex .pth weights file (empty = DL disabled)
-        double m_dl_vtx_cut{20.0};  // max distance (mm) from DL prediction to accept a candidate vertex (default 2 cm)
+        std::string m_dl_weights;      // path to SCN vertex .pth weights file (empty = DL disabled)
+        double m_dl_vtx_cut{20.0};     // max distance (mm) from DL prediction to accept candidate vertex (default 2 cm)
+        double m_dQdx_scale{0.1};      // scale factor applied to dQ before passing to SCN network
+        double m_dQdx_offset{-1000.0}; // offset applied after scaling: q_in = dQ * scale + offset
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

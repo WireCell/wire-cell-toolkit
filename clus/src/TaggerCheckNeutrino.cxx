@@ -2,6 +2,8 @@
 #include "WireCellClus/NeutrinoPatternBase.h" // pattern recognition ...
 #include "WireCellClus/PatternDebugIO.h"      // debug dump/load
 
+#include "WireCellUtil/Persist.h"
+
 #include <cstdlib>
 
 class TaggerCheckNeutrino;
@@ -23,8 +25,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
     m_trackfitting_config_file = get(config, "trackfitting_config_file", m_trackfitting_config_file);
     m_perf = get(config, "perf", m_perf);
-    m_dl_weights = get(config, "dl_weights", m_dl_weights);
+    auto dl_weights_raw = get(config, "dl_weights", m_dl_weights);
+    if (!dl_weights_raw.empty()) {
+        m_dl_weights = Persist::resolve(dl_weights_raw);
+        if (m_dl_weights.empty()) {
+            SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: dl_weights path not found: {}", dl_weights_raw);
+        }
+    }
     m_dl_vtx_cut = get(config, "dl_vtx_cut", m_dl_vtx_cut);
+    m_dQdx_scale  = get(config, "dQdx_scale",  m_dQdx_scale);
+    m_dQdx_offset = get(config, "dQdx_offset", m_dQdx_offset);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -49,6 +59,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["perf"] = m_perf;
     cfg["dl_weights"] = "";      // empty = DL vertex disabled
     cfg["dl_vtx_cut"] = 20.0;   // mm (= 2 cm)
+    cfg["dQdx_scale"]  = 0.1;   // dQ scale factor for SCN network input
+    cfg["dQdx_offset"] = -1000.0; // dQ offset for SCN network input
 
     return cfg;
 }
@@ -194,8 +206,23 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
     }
      
-    // determine the overall vertex
-    pattern_algos.determine_overall_main_vertex(*pr_graph,map_cluster_main_vertices, main_cluster, other_clusters, vertices_in_long_muon, segments_in_long_muon,*m_track_fitter, m_dv,particle_data(), m_recomb_model, true, m_dl_weights, m_dl_vtx_cut);
+    // Determine the overall neutrino vertex.
+    // If DL weights are configured, try DL first (matches prototype flag_dl_vtx logic).
+    // Fall back to traditional algorithm if DL is disabled or does not change the vertex.
+    bool flag_dl_changed = false;
+    if (!m_dl_weights.empty()) {
+        flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
+            *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
+            vertices_in_long_muon, segments_in_long_muon,
+            *m_track_fitter, m_dv, particle_data(), m_recomb_model,
+            m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset);
+    }
+    if (!flag_dl_changed) {
+        pattern_algos.determine_overall_main_vertex(
+            *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
+            vertices_in_long_muon, segments_in_long_muon,
+            *m_track_fitter, m_dv, particle_data(), m_recomb_model, true);
+    }
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);
