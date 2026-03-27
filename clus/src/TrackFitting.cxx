@@ -2476,11 +2476,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
     // double cluster_t0 = cluster->get_cluster_t0();
 
-    // Collect all segments from the graph for comparison
+    // Collect segments from the same cluster for comparison.
+    // Using boost::edges(*m_graph) would include segments from ALL clusters, causing
+    // charge 2D-points to be incorrectly stolen by another cluster's nearby segment.
     std::vector<std::shared_ptr<PR::Segment>> all_segments;
-    auto edge_range = boost::edges(*m_graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        auto& edge_bundle = (*m_graph)[*e_it];
+    for (const auto& ed : get_segment_edges()) {
+        auto& edge_bundle = (*m_graph)[ed];
         if (edge_bundle.segment && edge_bundle.segment != segment) {
             all_segments.push_back(edge_bundle.segment);
         }
@@ -3175,6 +3176,19 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         auto& v_bundle = (*m_graph)[vd];
         if (!v_bundle.vertex) continue;
 
+        // Apply cluster filter: skip vertices not belonging to the target cluster.
+        // Without this, stale fit_index/fit_range values from other clusters' vertices
+        // (set in a previous form_map_graph call) corrupt m_3d_to_2d with wrong indices
+        // and wrong charge associations, producing ghost fit points.
+        if (m_cluster_filter) {
+            bool has_cluster_seg = false;
+            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
+                auto& eb = (*m_graph)[*oe.first];
+                if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
+            }
+            if (!has_cluster_seg) continue;
+        }
+
         auto vertex = v_bundle.vertex;
         double dis_cut = vertex->fit_range();
         int vertex_count = vertex->fit_index();
@@ -3690,6 +3704,18 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
     for (auto vd : m_ordered_nodes_vec) {
         auto& v_bundle = (*m_graph)[vd];
         if (!v_bundle.vertex) continue;
+
+        // Apply cluster filter: stale fit_index values from other clusters (left over from
+        // a previous dQ/dx form_map_graph pass) would otherwise be processed here, corrupting
+        // those clusters' vertex fit positions with data from the current cluster's charge map.
+        if (m_cluster_filter) {
+            bool has_cluster_seg = false;
+            for (auto oe = boost::out_edges(vd, *m_graph); oe.first != oe.second; ++oe.first) {
+                auto& eb = (*m_graph)[*oe.first];
+                if (eb.segment && eb.segment->cluster() == m_cluster_filter) { has_cluster_seg = true; break; }
+            }
+            if (!has_cluster_seg) continue;
+        }
 
         auto vertex = v_bundle.vertex;
         int i = vertex->fit_index();

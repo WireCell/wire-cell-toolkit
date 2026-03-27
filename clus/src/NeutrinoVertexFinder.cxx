@@ -110,12 +110,12 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
             
             for (int plane = 0; plane < 3; plane++) {
                 if (!grouping->get_closest_dead_chs(test_p_raw, 1, test_wpid.apa(), test_wpid.face(), plane)) {
-                    sum_charge += grouping->get_ave_charge(test_p_raw, 0.3*units::cm, plane, test_wpid.apa(), test_wpid.face());
+                    sum_charge += grouping->get_ave_charge(test_p_raw, test_wpid.apa(), test_wpid.face(), plane, 0.3*units::cm);
                     ncount++;
                 }
             }
             if (ncount != 0) sum_charge /= ncount;
-            
+
             if ((sum_angle) * (sum_charge + 1e-9) > max_dis) {
                 max_dis = (sum_angle) * (sum_charge + 1e-9);
                 max_idx = idx;
@@ -165,7 +165,7 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
                 
                 for (int plane = 0; plane < 3; plane++) {
                     if (!grouping->get_closest_dead_chs(test_p_raw, 1, test_wpid.apa(), test_wpid.face(), plane)) {
-                        sum_charge += grouping->get_ave_charge(test_p_raw, 0.3*units::cm, plane, test_wpid.apa(), test_wpid.face());
+                        sum_charge += grouping->get_ave_charge(test_p_raw, test_wpid.apa(), test_wpid.face(), plane, 0.3*units::cm);
                         ncount++;
                     }
                 }
@@ -1814,6 +1814,8 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
     // Allow to move 1.5 cm - create MyFCN object with constraint parameters
     MyFCN fcn(vertex, true, 0.43*units::cm, 1.5*units::cm, 0.9*units::cm, 6*units::cm);
     
+    // std::cout << "MyFCN: " << sg_set.size() << " segments to be fitted for vertex " << vertex->fit_index() << std::endl;
+
     // Add all segments to the fitting
     for (auto it = sg_set.begin(); it != sg_set.end(); it++) {
         fcn.AddSegment(*it);
@@ -1897,6 +1899,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             flag_skip_two_legs = true; // all showers
     }
     
+
     bool flag_found_vertex_activities = false;
     
     // Search for vertex activities

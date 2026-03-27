@@ -233,11 +233,34 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         }
     }
 
+    
+
     // Post-vertex refinement (matches prototype block after determine_overall_main_vertex):
     //   1. Minuit-based vertex position fit
     //   2. Re-cluster EM shower points with refined vertex
     //   3. Re-examine track directions (flag_final=true)
     //   4. Re-separate tracks and showers
+    std::size_t n_main_cluster_vertices = 0;
+    std::size_t n_main_cluster_segments = 0;
+    std::size_t n_main_cluster_fit_points = 0;
+    for (const auto& nd : PR::graph_nodes(*pr_graph)) {
+        const auto& vtx = (*pr_graph)[nd].vertex;
+        if (vtx && vtx->cluster() == main_cluster) {
+            ++n_main_cluster_vertices;
+        }
+    }
+    for (const auto& ed : PR::ordered_edges(*pr_graph)) {
+        const auto& seg = (*pr_graph)[ed].segment;
+        if (seg && seg->cluster() == main_cluster) {
+            ++n_main_cluster_segments;
+            n_main_cluster_fit_points += seg->fits().size();
+        }
+    }
+    SPDLOG_LOGGER_DEBUG(log,
+                        "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
+                        main_cluster->get_cluster_id(), n_main_cluster_vertices,
+                        n_main_cluster_segments, n_main_cluster_fit_points);
+
     if (final_main_vertex) {
         pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
                                      vertices_in_long_muon, segments_in_long_muon,
@@ -246,18 +269,38 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // improve_vertex may update final_main_vertex pointer; sync back to map
         map_cluster_main_vertices[main_cluster] = final_main_vertex;
 
-        // pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+        pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
 
-        // pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
-        //                                 vertices_in_long_muon, segments_in_long_muon,
-        //                                 particle_data(), m_recomb_model, true);
+        pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
+                                        vertices_in_long_muon, segments_in_long_muon,
+                                        particle_data(), m_recomb_model, true);
 
-        // SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
-        // // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+        SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
+        // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
 
-        // pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+        pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
     }
 
+    n_main_cluster_vertices = 0;
+    n_main_cluster_segments = 0;
+    n_main_cluster_fit_points = 0;
+    for (const auto& nd : PR::graph_nodes(*pr_graph)) {
+        const auto& vtx = (*pr_graph)[nd].vertex;
+        if (vtx && vtx->cluster() == main_cluster) {
+            ++n_main_cluster_vertices;
+        }
+    }
+    for (const auto& ed : PR::ordered_edges(*pr_graph)) {
+        const auto& seg = (*pr_graph)[ed].segment;
+        if (seg && seg->cluster() == main_cluster) {
+            ++n_main_cluster_segments;
+            n_main_cluster_fit_points += seg->fits().size();
+        }
+    }
+    SPDLOG_LOGGER_DEBUG(log,
+                        "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
+                        main_cluster->get_cluster_id(), n_main_cluster_vertices,
+                        n_main_cluster_segments, n_main_cluster_fit_points);
 
 
     // Mark each cluster's main vertex so bee output can identify it
