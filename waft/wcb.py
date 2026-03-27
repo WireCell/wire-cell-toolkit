@@ -46,7 +46,7 @@ package_descriptions = [
                       extuses=("ZYRE","CZMQ","ZMQ"))),
     ('GRPC',     dict(incs=['grpcpp/grpcpp.h'], libs=['grpc++', 'grpc', 'gpr'], pcname='grpc++', mandatory=False)),
     ('PROTOBUF', dict(incs=['google/protobuf/message.h'], libs=['protobuf'], pcname='protobuf', mandatory=False)),
-    ('TRITON',   dict(incs=['grpc_client.h'],   
+    ('TRITON',   dict(incs=['grpc_client.h'],
     libs=[
         'grpcclient',
         'tritoncommonerror',
@@ -56,7 +56,9 @@ package_descriptions = [
         'tritonthreadpool',
         'tritonasyncworkqueue',
     ],
-    mandatory=False))
+    mandatory=False)),
+
+    ('Python',   dict(incs=['Python.h'], libs=['python3.11'], pcname='python3-embed', mandatory=False)),
     # Note, this list may be modified (appended) in wscript files.
     # The list here represents the minimum wire-cell-toolkit requires.
 ]
@@ -81,8 +83,11 @@ def options(opt):
 
 def find_submodules(ctx):
     sms = list()
-    for wb in ctx.path.ant_glob("**/wscript_build"):
-        sms.append(wb.parent.name)
+    for wb in ctx.path.ant_glob("*/wscript_build"):
+        name = wb.parent.name
+        if name.startswith("prototype"):
+            continue
+        sms.append(name)
     sms.sort()
     return sms
 
@@ -168,6 +173,7 @@ def configure(cfg):
             ("cuda","HAVE_CUDA"),
             ("hio", "INCLUDES_HDF5"),
             ("pytorch", "LIB_LIBTORCH"),
+            ("pyutil", "INCLUDES_PYTHON"),
             ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ"),
             ("triton", "LIB_GRPC LIB_PROTOBUF LIB_TRITON"), # LIB_PROTOBUF LIB_TRITON
     ]:

@@ -96,7 +96,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dl_vtx_cut=20.0) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -105,6 +105,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
                 perf: perf,
+                dl_weights: dl_weights,     // path to SCN vertex .pth file (empty = DL disabled)
+                dl_vtx_cut: dl_vtx_cut,     // max distance mm to accept DL vertex (default 20mm = 2cm)
             } + dv_cfg + pcts_cfg
         },
 

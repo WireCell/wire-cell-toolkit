@@ -184,8 +184,8 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
             if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: transfer_pc/graph took {} ms", MS(Clock::now() - t0).count());
 
             // test ...
-            auto pair_idx = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
-            // std::cout << "Xin3: " << pair_idx.first << " " << pair_idx.second << " " << pair_points.first << std::endl;
+            (void)main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+            // std::cout << "Xin3: " << " " << pair_points.first << std::endl;
             auto kd_results = main_cluster->kd_steiner_knn(1, pair_points.first);
             auto kd_points = main_cluster->kd_steiner_points(kd_results);
             // std::cout << "Xin4: " << kd_points.size() << " " << (*kd_points.begin()).first << " " << (*kd_points.begin()).second.first << " " << (*kd_points.begin()).second.second << std::endl;

@@ -4,8 +4,15 @@
 #include "WireCellClus/MyFCN.h"
 
 #include "WireCellAux/Logger.h"
+#include "WireCellUtil/Units.h"
+#include "WireCellUtil/BuildConfig.h"
+
+#ifdef HAVE_PYTHON_INC
+#include "WCPPyUtil/SCN_Vertex.h"
+#endif
 
 #include <chrono>
+#include <cmath>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
@@ -3120,7 +3127,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     return main_cluster;
 }
 
-VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain){
+VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain, const std::string& dl_weights, double dl_vtx_cut){
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
     auto t_total = Clock::now();
@@ -3261,6 +3268,146 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::ma
         }
     }
     MS t_cleanup_long_muon(Clock::now() - t0);
+
+    // --- Deep Learning vertex refinement ---
+    // If dl_weights is configured, run the SCN vertex network and potentially
+    // update main_vertex and main_cluster to the DL-predicted location.
+    if (!dl_weights.empty() && main_vertex) {
+#ifdef HAVE_PYTHON_INC
+        const double dQdx_scale = 0.1;
+        const double dQdx_offset = -1000.0;
+
+        // Collect point cloud (x, y, z, q) from all clusters
+        std::vector<std::vector<float>> vec_xyzq(4);
+
+        // All candidate clusters: main + other
+        std::vector<Facade::Cluster*> dl_clusters;
+        dl_clusters.push_back(main_cluster);
+        for (auto c : other_clusters) {
+            if (c) dl_clusters.push_back(c);
+        }
+
+        // Vertices: one point per vertex
+        auto [vbegin_dl, vend_dl] = boost::vertices(graph);
+        for (auto vit = vbegin_dl; vit != vend_dl; ++vit) {
+            auto vtx = graph[*vit].vertex;
+            if (!vtx) continue;
+            bool in_clusters = false;
+            for (auto c : dl_clusters) { if (vtx->cluster() == c) { in_clusters = true; break; } }
+            if (!in_clusters) continue;
+
+            auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            vec_xyzq[0].push_back(static_cast<float>(pt.x() / units::cm));
+            vec_xyzq[1].push_back(static_cast<float>(pt.y() / units::cm));
+            vec_xyzq[2].push_back(static_cast<float>(pt.z() / units::cm));
+            double dQ = vtx->fit().valid() ? vtx->fit().dQ : 0.0;
+            vec_xyzq[3].push_back(static_cast<float>(dQ * dQdx_scale + dQdx_offset));
+        }
+
+        // Segment interior points
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr sg = graph[e].segment;
+            if (!sg) continue;
+            bool in_clusters = false;
+            for (auto c : dl_clusters) { if (sg->cluster() == c) { in_clusters = true; break; } }
+            if (!in_clusters) continue;
+
+            const auto& fits = sg->fits();
+            // skip first and last (those are vertex positions)
+            for (size_t i = 1; i + 1 < fits.size(); ++i) {
+                const auto& fit = fits[i];
+                vec_xyzq[0].push_back(static_cast<float>(fit.point.x() / units::cm));
+                vec_xyzq[1].push_back(static_cast<float>(fit.point.y() / units::cm));
+                vec_xyzq[2].push_back(static_cast<float>(fit.point.z() / units::cm));
+                vec_xyzq[3].push_back(static_cast<float>(fit.dQ * dQdx_scale + dQdx_offset));
+            }
+        }
+
+        if (!vec_xyzq[0].empty()) {
+            try {
+                auto dnn_vtx = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false);
+                if (dnn_vtx.size() == 3) {
+                    double x_reg = dnn_vtx[0] * units::cm;
+                    double y_reg = dnn_vtx[1] * units::cm;
+                    double z_reg = dnn_vtx[2] * units::cm;
+                    SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex DL prediction: ({:.2f}, {:.2f}, {:.2f}) cm",
+                                        dnn_vtx[0], dnn_vtx[1], dnn_vtx[2]);
+
+                    // Collect all candidate vertices
+                    std::vector<VertexPtr> cand_vertices;
+                    auto [vb2, ve2] = boost::vertices(graph);
+                    for (auto vit = vb2; vit != ve2; ++vit) {
+                        auto vtx = graph[*vit].vertex;
+                        if (!vtx) continue;
+                        bool in_clusters = false;
+                        for (auto c : dl_clusters) { if (vtx->cluster() == c) { in_clusters = true; break; } }
+                        if (in_clusters) cand_vertices.push_back(vtx);
+                    }
+
+                    // Find nearest candidate vertex to DL prediction
+                    double min_dis = 1e9;
+                    VertexPtr min_vertex = nullptr;
+                    for (auto vtx : cand_vertices) {
+                        auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                        double dis = std::sqrt(std::pow(pt.x() - x_reg, 2) +
+                                               std::pow(pt.y() - y_reg, 2) +
+                                               std::pow(pt.z() - z_reg, 2));
+                        if (dis < min_dis) {
+                            min_dis = dis;
+                            min_vertex = vtx;
+                        }
+                    }
+
+                    if (min_vertex && min_dis <= dl_vtx_cut) {
+                        // Direction sanity check: reject if all connected tracks point away
+                        bool flag_pass = true;
+                        int num_bad = 0;
+                        int num_tracks = 0;
+                        auto vd = min_vertex->get_descriptor();
+                        if (min_vertex->descriptor_valid()) {
+                            auto edge_range = boost::out_edges(vd, graph);
+                            for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                                SegmentPtr sg = graph[*e_it].segment;
+                                if (!sg) continue;
+                                double length = segment_track_length(sg);
+                                double medium_dqdx = segment_median_dQ_dx(sg);
+                                double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * 43e3 / units::cm;
+                                auto [v1, v2] = find_vertices(graph, sg);
+                                bool flag_start = (v1 == min_vertex);
+                                if (length > 15 * units::cm && !sg->dir_weak() && !flag_start && medium_dqdx > dQ_dx_cut) {
+                                    num_bad++;
+                                }
+                                num_tracks++;
+                            }
+                        }
+                        if (num_bad > 0 && num_bad == num_tracks) flag_pass = false;
+
+                        if (flag_pass) {
+                            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex: switching to DL vertex (dis={:.2f} cm)",
+                                                min_dis / units::cm);
+                            main_vertex = min_vertex;
+                            // Switch main_cluster if the DL vertex is in a different cluster
+                            if (min_vertex->cluster() != main_cluster) {
+                                for (auto c : other_clusters) {
+                                    if (c && c == min_vertex->cluster()) {
+                                        main_cluster = check_switch_main_cluster(graph, map_cluster_main_vertices,
+                                                                                  main_cluster, other_clusters,
+                                                                                  track_fitter, dv);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (const std::exception& e) {
+                SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex: DL vertex failed: {}", e.what());
+            }
+        }
+#endif  // HAVE_PYTHON_INC
+    }
+    // --- end DL vertex refinement ---
 
     if (m_perf) {
         MS t_total_ms(Clock::now() - t_total);

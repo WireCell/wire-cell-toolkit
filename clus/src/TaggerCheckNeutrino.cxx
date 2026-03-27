@@ -23,6 +23,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
     m_trackfitting_config_file = get(config, "trackfitting_config_file", m_trackfitting_config_file);
     m_perf = get(config, "perf", m_perf);
+    m_dl_weights = get(config, "dl_weights", m_dl_weights);
+    m_dl_vtx_cut = get(config, "dl_vtx_cut", m_dl_vtx_cut);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -45,6 +47,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
 
     cfg["trackfitting_config_file"] = "";
     cfg["perf"] = m_perf;
+    cfg["dl_weights"] = "";      // empty = DL vertex disabled
+    cfg["dl_vtx_cut"] = 20.0;   // mm (= 2 cm)
 
     return cfg;
 }
@@ -191,7 +195,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     }
      
     // determine the overall vertex
-    pattern_algos.determine_overall_main_vertex(*pr_graph,map_cluster_main_vertices, main_cluster, other_clusters, vertices_in_long_muon, segments_in_long_muon,*m_track_fitter, m_dv,particle_data(), m_recomb_model);
+    pattern_algos.determine_overall_main_vertex(*pr_graph,map_cluster_main_vertices, main_cluster, other_clusters, vertices_in_long_muon, segments_in_long_muon,*m_track_fitter, m_dv,particle_data(), m_recomb_model, true, m_dl_weights, m_dl_vtx_cut);
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);

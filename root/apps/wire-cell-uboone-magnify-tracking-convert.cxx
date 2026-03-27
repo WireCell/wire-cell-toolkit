@@ -317,7 +317,7 @@ int main(int argc, char* argv[])
     t1->Branch("com_dtheta",&dtheta);
   }
   
-  double prev_x1, prev_y1, prev_z1;
+  double prev_x1{0}, prev_y1{0}, prev_z1{0};
   int prev_cluster_id = -1;
 
   // Npoints = T_rec->GetEntries();
@@ -480,7 +480,7 @@ int main(int argc, char* argv[])
   						  ,int(point_pair.second.y()/(0.01*units::mm)),int(point_pair.second.z()/(0.01*units::mm)))].first;
 
       // std::cout << index << " " << dQ_tru->back().size() << " " << dQ_tru->front().size() << std::endl;
-      if (index <dQ_tru->at(index1).size())
+      if (static_cast<size_t>(index) < dQ_tru->at(index1).size())
 	dQ_tru->at(index1).at(index) += Q->at(i);
       
       // if (i==0 || i==x->size()-1)

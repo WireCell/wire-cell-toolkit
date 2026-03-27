@@ -800,7 +800,7 @@ Facade::geo_vector_t tracking_direction(const std::vector<Facade::geo_point_t>& 
 {
     Facade::geo_vector_t dir_p(0, 0, 0);
     if (flag_front) {
-        if (index + 1 < tracking_path.size()) {
+        if (static_cast<size_t>(index + 1) < tracking_path.size()) {
             dir_p.x(test_p.x() - tracking_path.at(index + 1).x());
             dir_p.y(test_p.y() - tracking_path.at(index + 1).y());
             dir_p.z(test_p.z() - tracking_path.at(index + 1).z());
@@ -812,7 +812,7 @@ Facade::geo_vector_t tracking_direction(const std::vector<Facade::geo_point_t>& 
         }
     }
     else {
-        if (tracking_path.size() >= index + 2) {
+        if (tracking_path.size() >= static_cast<size_t>(index + 2)) {
             dir_p.x(test_p.x() - tracking_path.at(tracking_path.size() - 2 - index).x());
             dir_p.y(test_p.y() - tracking_path.at(tracking_path.size() - 2 - index).y());
             dir_p.z(test_p.z() - tracking_path.at(tracking_path.size() - 2 - index).z());

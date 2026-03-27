@@ -368,9 +368,7 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     Facade::geo_point_t curr_wcp(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
     Facade::geo_point_t next_wcp = curr_wcp;
     
-    // Save starting position and direction
-    Facade::geo_point_t saved_start_wcp = curr_wcp;
-    Facade::geo_vector_t saved_dir = dir;
+    // (saved_start_wcp and saved_dir removed: set but never used)
     
     // Forward search
     while(flag_continue){

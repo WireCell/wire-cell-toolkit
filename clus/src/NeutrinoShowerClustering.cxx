@@ -2452,9 +2452,6 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
         }
     }
     
-    // Store pi0 kinematic variables (not implemented as member variables yet, just processing)
-    WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
-    
     // Find pi0 iteratively
     // static int acc_segment_id = 100000;  // Static counter for pi0 IDs
     
@@ -2663,7 +2660,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
             }
         }
         
-        if (flag_return && num_showers == map_vertex_segments[main_vertex].size()) {
+        if (flag_return && static_cast<size_t>(num_showers) == map_vertex_segments[main_vertex].size()) {
             flag_return = false;
         }
         if (flag_return) return;
