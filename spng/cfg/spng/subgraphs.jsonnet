@@ -944,7 +944,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             rois: roi_fan.targets.extract
         },
     // 
-    dnnroi_inference_preface_simple(rebin=4, extra_name="")::
+    dnnroi_inference_preface_simple(rebin=4, wplane_gauss=false, extra_name="")::
         local sg1 = $.frame_decon(extra_name=extra_name);
 
         // Give .sink and .targets.{gauss, wiener, dense}
@@ -952,7 +952,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             targets=[
                 ["gauss", "dense"],
                 ["gauss", "dense"],
-                ["dense"]
+                (if wplane_gauss then ['gauss', 'dense'] else ["dense"]),
             ],
             extra_name=extra_name);
         local sg1_cap = pg.shuntline(sg1, decon_fan.sink);
@@ -964,7 +964,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local sg4_feed = pg.shuntline(decon_fan.targets.dense, sg4);
 
         local sg6 = pg.shuntline(decon_fan.targets.gauss,
-                                 $.gauss_dense_views(views=[0,1], rebin=1, extra_name=extra_name));
+                                 $.gauss_dense_views(
+                                    views=[0,1] + (if wplane_gauss then [2] else []), rebin=1, extra_name=extra_name));
         {
             decon_sink: pg.intern(innodes=[sg1],
                                   centernodes=[
@@ -1280,11 +1281,65 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                   outnodes=[applyrois.signal_source],
                   centernodes=[rois_cap, dense_cap]),
 
-    // / [3]tensor -> tensor[3]
-    ///
-    /// Input decon, output signals using cell basis initial rois and DNNROI
-    /// inference for crossed views.  Intermediate waveforms are rebinned.
     dnnroi_inference_simple(modelfiles=[], rebin=4, do_transpose=true, extra_name="")::
+        local all_views = wc.iota(std.length(modelfiles));
+        
+        // For inference, sg1_infer is just the beginning.  Must feed .fodder to
+        // dnnroi forward and then that plus .rois plus .gauss into apply_roi.
+        local sg1_infer = $.dnnroi_inference_preface_simple(rebin=rebin, wplane_gauss=true, extra_name=extra_name+'_PRE');
+
+        local models = [
+            $.dnnroi_model(modelfile)
+            for modelfile in modelfiles
+        ];
+        local change_views = [
+            [[1,1,800,-1], [1,800,-1]],
+            [[1,1,800,-1], [1,800,-1]],
+            [[2,1,480,-1], [1,960,-1]],
+        ];
+        local initial_dnnroi_nodes = pg.crossline([
+            $.dnnroi_forward_view_special(
+                model.value, view=model.index,
+                do_transpose=do_transpose, change_view=change_views[model.index], extra_name=extra_name)
+            for model in wc.enumerate(models)
+        ]);
+
+        local thresholds = pg.crossline([
+            local thresh_name = $.this_name(extra_name, "v"+std.toString(view)+'_dnnroi_thresh');
+            pg.pnode({
+                type: 'SPNGThreshold',
+                name: thresh_name,
+                data: {
+                    nominal: 0.5,   // FIXME: a study is needed to best set this
+                    tag: "roi",
+                    datapath_format: "/traces/Threshold/" + thresh_name,
+                } + control
+            }, nin=1, nout=1)
+            for view in all_views
+        ]);
+        
+        local sg_dnnroi = pg.shuntlines([
+            sg1_infer.fodder, initial_dnnroi_nodes, thresholds]);
+
+        // BIG FAT WARNING: this should be done with knowledge of crossed_views to
+        // get the port ordering correct.  As is, it assumes dnnroi rois all come
+        // before the views that have only initial rois.
+        local unbin = $.unbin_views(rebin=rebin, views=all_views, extra_name=extra_name+'_UNBIN');
+        local rois = pg.shuntline(sg_dnnroi, unbin);
+
+        /// Gives .roi_sink, .dense_sink and .signal_source
+        local applyrois = $.applyroi_views(views=all_views, extra_name=extra_name+'_APPLY');
+        local rois_cap = pg.shuntline(rois, applyrois.roi_sink);
+        local dense_cap = pg.shuntline(sg1_infer.gauss, applyrois.dense_sink);
+
+        pg.intern(innodes=[sg1_infer.decon_sink],
+                  outnodes=[applyrois.signal_source],
+                  centernodes=[rois_cap, dense_cap]),
+
+    /// [3]tensor -> tensor[3]
+    /// This uses a special version of DNNROI for APA1 PDHD
+    /// It regresses the charge information as well as finding the ROIs
+    dnnroi_inference_pdhd_apa1_regres(modelfiles=[], rebin=4, do_transpose=true, extra_name="")::
         local all_views = wc.iota(std.length(modelfiles));
         
         // For inference, sg1_infer is just the beginning.  Must feed .fodder to
@@ -1403,9 +1458,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                   centernodes=[rois_cap, dense_cap, apa1_cap, connect_charge_split, connect_roi_split]), //, rois_cap_apa1, dense_cap_apa1]), //
 
     // / [3]tensor -> tensor[3]
-    ///
-    /// Input decon, output signals using cell basis initial rois and DNNROI
-    /// inference for crossed views.  Intermediate waveforms are rebinned.
+    ///Do decon. If requested also do a specific flavor of Filtering/ROI finding
     simple_decon(rebin=4, output='decon', extra_name="")::
 
         (if output == 'decon' then
@@ -1422,24 +1475,6 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 filtering_nodes[output]
             )
         ),
-
-        // local filtering_node = (
-        //     if gauss_filter then
-        //         $.gauss_dense_views(rebin=rebin, extra_name=extra_name) else
-        //         $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name)
-        // );
-        
-        // pg.shuntline($.frame_decon(extra_name=extra_name),
-        //             filtering_node),
-                    //  $.dnnroi_dense_views(views=[0,1,2], rebin=rebin, extra_name=extra_name)),
-                    //   $.gauss_dense_views(rebin=1, extra_name=extra_name)),
-        // local sg1_infer = $.dnnroi_inference_preface_simple(rebin=rebin, extra_name=extra_name+'_PRE');
-
-        // local unbin = $.unbin_views(rebin=rebin, views=all_views, extra_name=extra_name+'_UNBIN');
-        // pg.intern(innodes=[sg1_infer.decon_sink],
-        //           outnodes=[sg1_infer.gauss],
-        //           centernodes=[]),
-
 
     /// Return a sink of tensor sets to a WCT tensor file in one of many "stream
     /// type" file formats: .npz, .zip, .tar, .tar.gz, etc. (not .hdf)

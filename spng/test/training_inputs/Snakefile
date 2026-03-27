@@ -227,13 +227,15 @@ rule save_depos:
 
 config.setdefault('tpcid', '0')
 config.setdefault('device', 'cpu')
+config.setdefault('mpsigproc_training_js', 'dnnroi-training.jsonnet')
 rule spng_mpsigproc:
     input:
         "cosmics_{sample}_wct-depos.npz",
     output:
         temp("sigproc-spng-mp-cosmics_{sample}.tar")
     params:
-        jsonnet='dnnroi-training.jsonnet',
+        # jsonnet='dnnroi-training.jsonnet',
+        jsonnet=config['mpsigproc_training_js'],
         tpcid=config['tpcid'],
         detname=config['detname'],
         device=config['device']
@@ -255,14 +257,17 @@ rule spng_mpsigproc_lines:
     output:
         "seeds_{seeds}/sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
     params:
-        jsonnet='dnnroi-training.jsonnet',
+        # jsonnet='dnnroi-training.jsonnet',
+        jsonnet=config['mpsigproc_training_js'],
         tpcid=config['tpcid'],
         detname=config['detname'],
+        device=config['device'],
     shadow: "minimal"
     shell:
         """
         wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
-            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "seeds=[$(echo {wildcards.seeds} | sed -e "s/\./,/g")]" --tla-code "crossed_views=[1,1,1]"
+            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "seeds=[$(echo {wildcards.seeds} | sed -e "s/\./,/g")]" --tla-code "crossed_views=[1,1,1]" \
+            -A "device={params.device}"
         # tar the output files
         tar -cf {output} dnnroi-training-truth.npz \
         dnnroi-training-fodder.npz
@@ -342,7 +347,8 @@ rule convert_spng_mp_to_hdf5_lines:
 #seeds=['1.2.3', '91.62.10.1',  ]
 seeds = []
 import random
-for i in range(1):
+config.setdefault('nseeds', 1)
+for i in range(int(config['nseeds'])):
 
     these_seeds = '.'.join([str(random.randint(0,100)) for j in range(5)])
     seeds.append(these_seeds)
@@ -461,7 +467,8 @@ rule plot_eff_pur:
     input:
         get_input_by_plane
     output:
-        'all_eff_pur_{plane}plane.png'
+        png='all_eff_pur_{plane}plane.png',
+        npz='all_eff_pur_{plane}plane.npz',
     params:
         test_tpcs = [int(i) for i in config['test_tpcs']]
 
@@ -491,7 +498,7 @@ rule plot_eff_pur:
                 all_purs.append(pur)
         print(all_effs)
         print(all_purs)
-    
+
         plt.subplot(2, 1, 1)
         plt.plot(all_effs, label='Efficiency')
         plt.xticks(xpos, xlabels)
@@ -504,10 +511,12 @@ rule plot_eff_pur:
         plt.xticks(xpos, xlabels, label='Purity')
         plt.ylim(0., 1.5)
         plt.yticks(np.arange(0.,1.5, .2))
-        f = output[0]
+        f = output.png
         print(type(f))
         print(f)
         plt.savefig(f)
+
+        np.savez(output.npz, effs=all_effs, purs=all_purs)
 
 
 def get_input(wildcards):
@@ -578,21 +587,24 @@ rule plot_feat_y_labels_uvplane:
     shell:
         'tar -cf {output} {input}'
 
-rule all_plots:
-    input:
-        tar='line-displays.tar',
-        effpur='all_eff_pur.png'
+# rule all_plots:
+#     input:
+#         tar='line-displays.tar',
+#         effpur='all_eff_pur.png'
 
 
 rule all_plots_u:
     input:
         tar=f'line-displays_uplane.tar',
-        effpur=f'all_eff_pur_uplane.png'
+        effpur=f'all_eff_pur_uplane.png',
+        npy=f'all_eff_pur_uplane.npz',
 rule all_plots_v:
     input:
         tar=f'line-displays_vplane.tar',
-        effpur=f'all_eff_pur_vplane.png'
+        effpur=f'all_eff_pur_vplane.png',
+        npy=f'all_eff_pur_vplane.npz',
 rule all_plots_w:
     input:
         tar=f'line-displays_wplane.tar',
-        effpur=f'all_eff_pur_wplane.png'
+        effpur=f'all_eff_pur_wplane.png',
+        npy=f'all_eff_pur_wplane.npz',

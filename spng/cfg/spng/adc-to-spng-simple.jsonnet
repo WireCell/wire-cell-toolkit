@@ -81,17 +81,21 @@ function(input,
 
 
     // True if care about cross view info for the view.
-    local crossed_views = [1,1,0];
-    local all_views = wc.iota(std.length(crossed_views));
+    // local crossed_views = [1,1,0];
+    // local all_views = wc.iota(std.length(crossed_views));
     local rebin = 4;
 
-    // local dnnroi_model_file = "/nfs/data/1/calcuttj/spng_merging2/toolkit/spng/test/unet-l23-cosmic500-e50.ts";
-    local u_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_pdhd_badAPA1_uplane_10epochs.ts";
-    local v_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_pdhd_badAPA1_vplane_10epochs.ts";
-    // local w_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_pdhd_badAPA1_wplane_10epochs.ts";
-    local w_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_regres_wplane_2.ts";
+    // // local dnnroi_model_file = "/nfs/data/1/calcuttj/spng_merging2/toolkit/spng/test/unet-l23-cosmic500-e50.ts";
+    // local u_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_pdhd_badAPA1_uplane_10epochs.ts";
+    // local v_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_pdhd_badAPA1_vplane_10epochs.ts";
+    // // local w_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_pdhd_badAPA1_wplane_10epochs.ts";
+    // local w_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_regres_wplane_2.ts";
     
-
+    local initial_models=[
+        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_uplane_032326.ts',
+        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_vplane_032326.ts',
+        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_wplane_032326.ts'
+    ];
 
     local source = io.frame_array_source(input);
     local sink = io.frame_array_any_sink(output);
@@ -99,10 +103,13 @@ function(input,
     local head = sg.frame_to_tdm(extra_name="_TOTDM");
     local tail = sg.tdm_to_frame(extra_name="_FROMTDM");
 
-    local infer = sg.dnnroi_inference_simple(modelfiles=[u_model_file, v_model_file, w_model_file],
+    // local infer = sg.dnnroi_inference_pdhd_apa1_regres(modelfiles=[u_model_file, v_model_file, w_model_file],
+    //                                   rebin=rebin,
+    //                                   do_transpose=false);
+
+    local infer = sg.dnnroi_inference_simple(modelfiles=initial_models,
                                       rebin=rebin,
                                       do_transpose=false);
-                                      
     local pack = sg.tensor_packer(extra_name="_signals");
     local guts = pg.shuntlines([infer, pack]);
     local body = sg.wrap_bypass(guts);
