@@ -10,6 +10,12 @@ namespace WireCell::Clus::PR {
      *  in WireCell internal units (multiply by 1/units::MeV, 1/units::cm for output).
      *  Default-initialised to zero (flag==0 means no pi0 found).
      */
+    /// Type aliases for the pre-collected 2D charge maps used by cal_kine_charge.
+    /// Collect once per shower_clustering_with_nv call via TrackFitting::collect_2D_charge()
+    /// and reuse across all showers/merges to avoid O(N_hits) re-collection per shower.
+    using ChargeMap = std::map<TrackFitting::CoordReadout, TrackFitting::ChargeMeasurement>;
+    using WireMap   = std::map<std::pair<int,int>, std::vector<std::tuple<int,int,int>>>;
+
     struct Pi0KineFeatures {
         int    flag{0};      ///< 0=none, 1=with_vertex, 2=without_vertex
         double mass{0};      ///< reconstructed pi0 invariant mass
@@ -28,6 +34,17 @@ namespace WireCell::Clus::PR {
     class PatternAlgorithms{
         public:
         bool m_perf{false};  // if true, print per-step timing to stdout
+
+        // 2D charge maps cached for the duration of shower_clustering_with_nv.
+        // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
+        // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.
+        ChargeMap m_charge_2d_u, m_charge_2d_v, m_charge_2d_w;
+        WireMap   m_map_apa_ch_plane_wires;
+
+        // Populate the cached charge maps from track_fitter.
+        // Call once at the start of shower_clustering_with_nv; the maps are then
+        // valid for the entire call tree beneath it.
+        void collect_charge_maps(TrackFitting& track_fitter);
         std::vector<VertexPtr> find_cluster_vertices(Graph& graph, const Facade::Cluster& cluster);
         std::vector<SegmentPtr> find_cluster_segments(Graph& graph, const Facade::Cluster& cluster);
         bool clean_up_graph(Graph& graph, const Facade::Cluster& cluster);
@@ -192,8 +209,15 @@ namespace WireCell::Clus::PR {
 
         // energy calculation ...
         double cal_corr_factor(WireCell::Point& pt, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // Convenience overloads: collect 2D charge maps internally (safe for isolated calls).
         double cal_kine_charge(ShowerPtr Shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+        // Fast overload: reuse pre-collected 2D charge maps (avoids O(N_hits) collection per call).
+        // Collect maps once with track_fitter.collect_2D_charge() and pass here when calling in a loop.
+        double cal_kine_charge(ShowerPtr shower,
+            const ChargeMap& charge_2d_u, const ChargeMap& charge_2d_v, const ChargeMap& charge_2d_w,
+            const WireMap& map_apa_ch_plane_wires,
+            TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
 
     };
 }

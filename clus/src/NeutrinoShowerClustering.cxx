@@ -1201,7 +1201,7 @@ void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, Vert
         }
         shower1->update_particle_type(particle_data, recomb_model);
         shower1->calculate_kinematics(particle_data, recomb_model);
-        double kine_charge = cal_kine_charge(shower1, graph, track_fitter, dv);
+        double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
         shower1->set_kine_charge(kine_charge);
         shower1->set_flag_kinematics(true);
     }
@@ -1219,7 +1219,7 @@ void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, Vert
 void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_save){
     
     if (!main_vertex || !main_cluster) return;
-    
+
     // Build map_vertex_segments and map_segment_vertices (ordered for determinism)
     std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
     std::map<SegmentPtr, std::set<VertexPtr>> map_segment_vertices;
@@ -1804,10 +1804,10 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                 }
                 
                 shower1->calculate_kinematics(particle_data, recomb_model);
-                double kine_charge = cal_kine_charge(shower1, graph, track_fitter, dv);
+                double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                 shower1->set_kine_charge(kine_charge);
                 shower1->set_flag_kinematics(true);
-                
+
                 showers.insert(shower1);
                 SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_in_other_clusters: Create a new low-energy shower: {} MeV", kine_charge / units::MeV);
                 flag_added = true;
@@ -1919,7 +1919,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
             
             max_shower->calculate_kinematics(particle_data, recomb_model);
             max_shower->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
-            double kine_charge = cal_kine_charge(max_shower, graph, track_fitter, dv);
+            double kine_charge = cal_kine_charge(max_shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
             max_shower->set_kine_charge(kine_charge);
             max_shower->set_flag_kinematics(true);
         }
@@ -2228,7 +2228,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
         if (sg->has_particle_info() && sg->particle_info()) sg->particle_info()->set_pdg(11);
         shower->update_particle_type(particle_data, recomb_model);
         shower->calculate_kinematics(particle_data, recomb_model);
-        shower->set_kine_charge(cal_kine_charge(shower, graph, track_fitter, dv));
+        shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
         shower->set_flag_kinematics(true);
     }
 
@@ -2271,7 +2271,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
             if (angle_dir2 < 10 && angle_dir3 < 20) {
                 shower->add_shower(*shower1);
                 shower->calculate_kinematics(particle_data, recomb_model);
-                shower->set_kine_charge(cal_kine_charge(shower, graph, track_fitter, dv));
+                shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
                 shower->set_flag_kinematics(true);
                 del_showers.insert(shower1);
             }
@@ -2995,6 +2995,10 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
 
 
 void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    // Collect 2D charge maps once for the entire shower_clustering_with_nv call tree.
+    // All cal_kine_charge call sites reuse m_charge_* instead of re-collecting.
+    collect_charge_maps(track_fitter);
+
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
     auto t_total = Clock::now();

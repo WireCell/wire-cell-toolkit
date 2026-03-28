@@ -34,8 +34,9 @@ double PatternAlgorithms::cal_corr_factor(WireCell::Point& pt, TrackFitting& tra
 
 namespace {
 
-using ChargeMap = std::map<TrackFitting::CoordReadout, TrackFitting::ChargeMeasurement>;
-using WireMap   = std::map<std::pair<int,int>, std::vector<std::tuple<int,int,int>>>;
+// ChargeMap and WireMap are defined in NeutrinoPatternBase.h (WireCell::Clus::PR namespace).
+using WireCell::Clus::PR::ChargeMap;
+using WireCell::Clus::PR::WireMap;
 
 // Core charge-to-energy conversion given pre-collected 2D charge maps and point clouds.
 // CorrFn: callable with signature double(WireCell::Point&).
@@ -140,10 +141,12 @@ static double kine_charge_from_maps(
 } // anonymous namespace
 
 
-double PatternAlgorithms::cal_kine_charge(ShowerPtr shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
-    (void)graph;
+double PatternAlgorithms::cal_kine_charge(ShowerPtr shower,
+    const ChargeMap& charge_2d_u, const ChargeMap& charge_2d_v, const ChargeMap& charge_2d_w,
+    const WireMap& map_apa_ch_plane_wires,
+    TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
+{
     if (!shower) return 0.0;
-
     auto grouping = track_fitter.grouping();
     if (!grouping) return 0.0;
 
@@ -155,13 +158,9 @@ double PatternAlgorithms::cal_kine_charge(ShowerPtr shower, Graph& graph, TrackF
         recom_factor = 0.35;
     }
 
-    ChargeMap charge_2d_u, charge_2d_v, charge_2d_w;
-    WireMap   map_apa_ch_plane_wires;
-    track_fitter.collect_2D_charge(charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires);
-
     auto pcloud1 = shower->get_pcloud("associate_points");
     auto pcloud2 = shower->get_pcloud("fit");
-    if (!pcloud1 && !pcloud2) return 0;
+    if (!pcloud1 && !pcloud2) return 0.0;
     if (!pcloud1) pcloud1 = pcloud2;
     if (!pcloud2) pcloud2 = pcloud1;
 
@@ -171,6 +170,27 @@ double PatternAlgorithms::cal_kine_charge(ShowerPtr shower, Graph& graph, TrackF
         grouping,
         [&](WireCell::Point& pt) { return cal_corr_factor(pt, track_fitter, dv); },
         0.6 * units::cm);
+}
+
+
+void PatternAlgorithms::collect_charge_maps(TrackFitting& track_fitter)
+{
+    m_charge_2d_u.clear();
+    m_charge_2d_v.clear();
+    m_charge_2d_w.clear();
+    m_map_apa_ch_plane_wires.clear();
+    track_fitter.collect_2D_charge(m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires);
+}
+
+
+double PatternAlgorithms::cal_kine_charge(ShowerPtr shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+    (void)graph;
+    if (!shower) return 0.0;
+    if (!track_fitter.grouping()) return 0.0;
+
+    // Use cached maps if available, otherwise collect (standalone call outside shower_clustering_with_nv).
+    if (m_charge_2d_u.empty()) collect_charge_maps(track_fitter);
+    return cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
 }
 
 
@@ -215,12 +235,9 @@ void PatternAlgorithms::calculate_shower_kinematics(std::set<ShowerPtr>& showers
     auto grouping = track_fitter.grouping();
     if (!grouping) return;
 
-    // Collect 2D charge maps once for all showers.  The 2D charge data is
-    // event-global (not shower-specific), so collecting inside the per-shower
-    // loop would redundantly repeat this O(N_hits) operation N_shower times.
-    ChargeMap charge_2d_u, charge_2d_v, charge_2d_w;
-    WireMap   map_apa_ch_plane_wires;
-    track_fitter.collect_2D_charge(charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires);
+    // Use pre-collected maps if available (populated once by shower_clustering_with_nv
+    // via collect_charge_maps()), otherwise collect here for standalone calls.
+    if (m_charge_2d_u.empty()) collect_charge_maps(track_fitter);
 
     auto corr_fn = [&](WireCell::Point& pt) { return cal_corr_factor(pt, track_fitter, dv); };
     const double dis_cut = 0.6 * units::cm;
@@ -250,7 +267,7 @@ void PatternAlgorithms::calculate_shower_kinematics(std::set<ShowerPtr>& showers
 
         double kine_charge = kine_charge_from_maps(
             pcloud1, pcloud2, fudge_factor, recom_factor,
-            charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires,
+            m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires,
             grouping, corr_fn, dis_cut);
 
         shower->set_kine_charge(kine_charge);
