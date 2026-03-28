@@ -2,9 +2,12 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellUtil/Logging.h"
 
 #include "connect_graphs.h"
+#include <sstream>
 
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -38,12 +41,12 @@ void Graphs::connect_graph(const Cluster& cluster, Weighted::Graph& graph)
     /// DEBUGONLY:
     if (0) {
         for (size_t i = 0; i != num; i++) {
-            std::cout << *pt_clouds.at(i) << std::endl;
-            std::cout << "global indices: ";
+            { std::ostringstream oss; oss << *pt_clouds.at(i); SPDLOG_LOGGER_DEBUG(s_log, "connect_graph: {}", oss.str()); }
+            std::string idx_str;
             for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
-                std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
+                idx_str += std::to_string(pt_clouds_global_indices.at(i).at(j)) + " ";
             }
-            std::cout << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "connect_graph: global indices: {}", idx_str);
         }
     }
 

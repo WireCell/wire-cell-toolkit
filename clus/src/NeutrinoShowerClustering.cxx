@@ -1,12 +1,16 @@
 #include "WireCellClus/NeutrinoPatternBase.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/PRShowerFunctions.h"
+#include "WireCellUtil/Logging.h"
+#include <chrono>
 #include <Eigen/Dense>
 #include <unordered_map>
 #include <unordered_set>
 
 using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 namespace {
     struct cluster_point_info {
@@ -112,9 +116,9 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 if (curr_sg->has_particle_info() && curr_sg->particle_info() &&
                     std::abs(curr_sg->particle_info()->pdg()) == 13) {
                     shower->set_particle_type(curr_sg->particle_info()->pdg());
-                    std::cout << "Main-cluster long muon " << new_showers.size() << " : " << curr_sg->particle_info()->pdg() << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster long muon {} : {}", new_showers.size(), curr_sg->particle_info()->pdg());
                 } else {
-                    std::cout << "Main-cluster shower " << new_showers.size() << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster shower {}", new_showers.size());
                 }
                 new_showers.push_back(shower);
                 // BFS does not descend into shower sub-tree
@@ -179,7 +183,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
 
         if (n_others >= 2 * n_muons && length_others > 0.33 * length_muons &&
             n_muons > 0 && max_muon_length < 60 * units::cm) {
-            std::cout << "Long muon converted to EM shower" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_in_main_cluster: Long muon converted to EM shower");
             for (auto sg1 : shower_segs) {
                 if (sg1 == max_sg) sg1->set_flags(SegmentFlags::kAvoidMuonCheck);
                 if (sg1->has_particle_info() && sg1->particle_info()) {
@@ -398,7 +402,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
         for (auto& [shower, max_sg] : map_shower_max_sg) {
             if (shower == max_shower) {
                 // Convert to EM shower (particle type 11 = electron)
-                std::cout << "Convert EM shower " << shower->start_segment()->id() << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_connecting_to_main_vertex: Convert EM shower {}", shower->start_segment()->id());
                 if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
                     shower->start_segment()->particle_info()->set_pdg(11);
                 }
@@ -1057,9 +1061,10 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         shower->update_particle_type(particle_data, recomb_model);
 
         bool tmp_flag = (shower->start_vertex() == main_vertex);
-        std::cout << "Separated shower: " << shower->start_segment()->cluster()->get_cluster_id() * 1000 + shower->start_segment()->id()
-                  << " " << (shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info() ? shower->start_segment()->particle_info()->pdg() : 0)
-                  << " " << shower->get_num_segments() << " " << tmp_flag << " " << pi.min_dis / units::cm << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
+            shower->start_segment()->cluster()->get_cluster_id() * 1000 + shower->start_segment()->id(),
+            (shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info() ? shower->start_segment()->particle_info()->pdg() : 0),
+            shower->get_num_segments(), tmp_flag, pi.min_dis / units::cm);
 
         update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters);
 
@@ -1127,7 +1132,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
     }
     
-    std::cout << "With separated-cluster shower: " << showers.size() << std::endl;
+    SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_from_vertices: With separated-cluster shower: {}", showers.size());
 }
 
 void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, VertexPtr main_vertex,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
@@ -1804,7 +1809,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                 shower1->set_flag_kinematics(true);
                 
                 showers.insert(shower1);
-                std::cout << "Create a new low-energy shower: " << kine_charge / units::MeV << " MeV" << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_in_other_clusters: Create a new low-energy shower: {} MeV", kine_charge / units::MeV);
                 flag_added = true;
             }
         }
@@ -2182,7 +2187,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
     std::set<ShowerPtr>    updated_showers_set;
 
     for (auto& [sg, shower] : map_merge_seg_shower) {
-        std::cout << "EM shower modification: " << shower->start_segment()->id() << " -> " << sg->id() << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "examine_showers: EM shower modification: {} -> {}", shower->start_segment()->id(), sg->id());
         if (!updated_showers_set.count(shower)) {
             updated_showers_vec.push_back(shower);
             updated_showers_set.insert(shower);
@@ -2576,9 +2581,8 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
             svc[shower_2] = {vtx, 2};
         }
 
-        std::cout << "Pi0 found with mass: " << mass_save / units::MeV << " MeV with "
-                  << shower_1->get_kine_charge() / units::MeV << " MeV + "
-                  << shower_2->get_kine_charge() / units::MeV << " MeV" << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "examine_showers: Pi0 found with mass: {} MeV with {} MeV + {} MeV",
+            mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
 
         // Remove all pairs that involve either used shower.
         std::vector<std::pair<ShowerPtr,ShowerPtr>> to_remove;
@@ -2983,33 +2987,48 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                               map_vertex_to_shower, used_shower_clusters);
             
-            std::cout << "Pi0 (displaced vertex) found with mass: " << mass_save / units::MeV 
-                      << " MeV with " << shower_1->get_kine_charge() / units::MeV << " MeV + " 
-                      << shower_2->get_kine_charge() / units::MeV << " MeV" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "examine_showers: Pi0 (displaced vertex) found with mass: {} MeV with {} MeV + {} MeV",
+                mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
         }
     }
 }
 
 
 void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
-
-    
+    using Clock = std::chrono::steady_clock;
+    using MS = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = t_total;
+    MS t_in_main_cluster{0};
+    MS t_connecting_to_main_vertex{0};
+    MS t_from_main_cluster{0};
+    MS t_from_vertices{0};
+    MS t_calc_kine_1{0};
+    MS t_examine_merge{0};
+    MS t_in_other_clusters{0};
+    MS t_calc_kine_2{0};
+    MS t_examine_showers{0};
+    MS t_id_pi0_with_vertex{0};
+    MS t_id_pi0_without_vertex{0};
     
     // Connect to the main cluster
     shower_clustering_with_nv_in_main_cluster(graph, main_vertex, showers, 
                                               map_vertex_in_shower, map_segment_in_shower, 
                                               map_vertex_to_shower, used_shower_clusters,
                                               vertices_in_long_muon, segments_in_long_muon);
+    t_in_main_cluster = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Examine things connecting to the main vertex
     shower_clustering_connecting_to_main_vertex(graph, main_vertex, showers,
                                                 map_vertex_in_shower, map_segment_in_shower,
                                                 map_vertex_to_shower, used_shower_clusters);
+    t_connecting_to_main_vertex = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Shower clustering from main cluster
     shower_clustering_with_nv_from_main_cluster(graph, main_vertex, main_cluster, showers,
                                                 map_vertex_in_shower, map_segment_in_shower,
                                                 map_vertex_to_shower, used_shower_clusters);
+    t_from_main_cluster = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Shower clustering from vertices
     shower_clustering_with_nv_from_vertices(graph, main_vertex, main_cluster, other_clusters, showers,
@@ -3017,16 +3036,19 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
                                            map_vertex_to_shower, used_shower_clusters,
                                            vertices_in_long_muon, segments_in_long_muon,
                                            track_fitter, dv, particle_data, recomb_model);
+    t_from_vertices = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Calculate shower kinematics
     calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                 graph, track_fitter, dv, particle_data, recomb_model);
+    t_calc_kine_1 = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Examine and merge showers
     examine_merge_showers(showers, main_vertex, map_vertex_in_shower, map_segment_in_shower,
                          map_vertex_to_shower, used_shower_clusters,
                          vertices_in_long_muon, segments_in_long_muon,
                          graph, track_fitter, dv, particle_data, recomb_model);
+    t_examine_merge = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Check remaining clusters
     shower_clustering_in_other_clusters(graph, main_vertex, showers, main_cluster, other_clusters,
@@ -3034,16 +3056,19 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
                                        map_segment_in_shower, map_vertex_to_shower,
                                        used_shower_clusters, track_fitter, dv,
                                        particle_data, recomb_model, true);
+    t_in_other_clusters = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Calculate shower kinematics again
     calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                 graph, track_fitter, dv, particle_data, recomb_model);
+    t_calc_kine_2 = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Examine shower trunk and add to shower
     examine_showers(graph, main_vertex, showers, main_cluster, other_clusters,
                    map_cluster_main_vertices, map_vertex_in_shower, map_segment_in_shower,
                    map_vertex_to_shower, used_shower_clusters,
                    track_fitter, dv, particle_data, recomb_model);
+    t_examine_showers = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Identify pi0 with vertex
     id_pi0_with_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
@@ -3051,6 +3076,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
                       other_clusters, map_cluster_main_vertices, map_vertex_in_shower,
                       map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
                       track_fitter, dv, particle_data, recomb_model);
+    t_id_pi0_with_vertex = MS(Clock::now() - t0); t0 = Clock::now();
 
     // Identify pi0 without vertex (displaced vertex)
     id_pi0_without_vertex(acc_segment_id, pi0_showers, map_shower_pio_id, map_pio_id_showers,
@@ -3058,4 +3084,25 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
                          main_cluster, other_clusters, map_cluster_main_vertices,
                          map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower,
                          used_shower_clusters, segments_in_long_muon, track_fitter, dv, particle_data, recomb_model);
+    t_id_pi0_without_vertex = MS(Clock::now() - t0);
+
+    if (m_perf) {
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "shower_clustering_with_nv timing: "
+            "in_main_cluster={:.3f}ms connecting_to_main_vertex={:.3f}ms "
+            "from_main_cluster={:.3f}ms from_vertices={:.3f}ms "
+            "calc_kine_1={:.3f}ms examine_merge={:.3f}ms "
+            "in_other_clusters={:.3f}ms calc_kine_2={:.3f}ms "
+            "examine_showers={:.3f}ms id_pi0_with_vertex={:.3f}ms "
+            "id_pi0_without_vertex={:.3f}ms",
+            t_in_main_cluster.count(), t_connecting_to_main_vertex.count(),
+            t_from_main_cluster.count(), t_from_vertices.count(),
+            t_calc_kine_1.count(), t_examine_merge.count(),
+            t_in_other_clusters.count(), t_calc_kine_2.count(),
+            t_examine_showers.count(), t_id_pi0_with_vertex.count(),
+            t_id_pi0_without_vertex.count());
+        SPDLOG_LOGGER_DEBUG(s_log,
+            "shower_clustering_with_nv timing: TOTAL={:.3f}ms",
+            MS(Clock::now() - t_total).count());
+    }
 }

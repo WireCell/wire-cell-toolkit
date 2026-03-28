@@ -25,6 +25,8 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
 struct edge_base_t {
     typedef boost::edge_property_tag kind;
 };
@@ -53,10 +55,10 @@ public:
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
     
         if (!m_trackfitting_config_file.empty()) {
-            std::cout << "TaggerCheckSTM: Loading TrackFitting config from: " << m_trackfitting_config_file << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: Loading TrackFitting config from: {}", m_trackfitting_config_file);
             load_trackfitting_config(m_trackfitting_config_file);
         } else {
-            std::cout << "TaggerCheckSTM: No TrackFitting config file specified, using defaults" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: No TrackFitting config file specified, using defaults");
         }
 
     }
@@ -97,8 +99,7 @@ public:
             }
         }
 
-        std::cout << "TaggerCheckSTM: Found " << (main_cluster ? 1 : 0)
-                  << " main clusters to check for STM conditions." << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "visit: TaggerCheckSTM: Found {} main clusters to check for STM conditions.", (main_cluster ? 1 : 0));
 
         // For each main cluster, find its associated clusters
         std::map<Cluster*, std::vector<Cluster*>> main_to_associated;
@@ -146,7 +147,7 @@ public:
             geo_point_t first_wcp = boundary_point_first;
             geo_point_t last_wcp = boundary_point_second;
 
-            std::cout << "End Points: " << first_wcp << " " << last_wcp << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "visit: End Points: {} {}", first_wcp, last_wcp);
             // last_wcp = geo_point_t(215.532, -95.1674, 211.193);
 
             auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
@@ -214,7 +215,7 @@ public:
                 new_wcpts.push_back({WireCell::Point(212.053*units::cm, -101.827*units::cm, 212.95*units::cm)});
                 new_wcpts.push_back({WireCell::Point(212.053*units::cm, -103.213*units::cm, 212.95*units::cm)});
                 segment->wcpts(new_wcpts);
-                std::cout << "Hacked segment wcpts with " << new_wcpts.size() << " points" << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "visit: Hacked segment wcpts with {} points", new_wcpts.size());
             }
 
 
@@ -362,13 +363,13 @@ public:
             auto break_results = break_segment(*pr_graph, segment, break_p, particle_data(), m_recomb_model, m_dv);
             bool break_success = std::get<0>(break_results);
             if (break_success){
-                std::cout << "Break segment successful." << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "visit: Break segment successful.");
                 auto seg1 = std::get<1>(break_results).first;
                 auto seg2 = std::get<1>(break_results).second;
                 auto vtx_break = std::get<2>(break_results);
-                std::cout << " Segment 1 fits size: " << seg1->fits().size() << std::endl;
-                std::cout << " Segment 2 fits size: " << seg2->fits().size() << std::endl;
-                std::cout << " Break vertex position: " << vtx_break->fit().point << " " << vtx_break->wcpt().point << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "visit:  Segment 1 fits size: {}", seg1->fits().size());
+                SPDLOG_LOGGER_DEBUG(s_log, "visit:  Segment 2 fits size: {}", seg2->fits().size());
+                SPDLOG_LOGGER_DEBUG(s_log, "visit:  Break vertex position: {} {}", vtx_break->fit().point, vtx_break->wcpt().point);
 
             //     std::set<std::shared_ptr<PR::Segment>> segs;
             //     segs.insert(seg1);
@@ -520,14 +521,14 @@ private:
                 try {
                     double value = root[param_name].asDouble();
                     m_track_fitter.set_parameter(param_name, value);
-                    std::cout << "TaggerCheckSTM: Set " << param_name << " = " << value << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "load_trackfitting_config: TaggerCheckSTM: Set {} = {}", param_name, value);
                 } catch (const std::exception& e) {
                     std::cerr << "TaggerCheckSTM: Failed to set parameter " << param_name 
                             << ": " << e.what() << std::endl;
                 }
             }
             
-            std::cout << "TaggerCheckSTM: Successfully loaded TrackFitting configuration" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "load_trackfitting_config: TaggerCheckSTM: Successfully loaded TrackFitting configuration");
             
         } catch (const std::exception& e) {
             std::cerr << "TaggerCheckSTM: Exception loading config: " << e.what() << std::endl;
@@ -680,11 +681,7 @@ private:
 
             // First breakpoint condition: Low charge with significant angles
             if (min_dQ_dx < 1000 && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
-                std::cout << "Mid_Point_Break: " << i << " " << refl_angles.at(i) << " " 
-                        << para_angles.at(i) << " " << min_dQ_dx << " " 
-                        << fine_tracking_path.at(i).first.x() << " " 
-                        << fine_tracking_path.at(i).first.y() << " " 
-                        << fine_tracking_path.at(i).first.z() << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
                 flag_crawl = true;
                 save_i = i;
                 break;
@@ -708,11 +705,7 @@ private:
                 // Skip if the angle is too small (nearly straight line)
                 if (angle3 < 20) continue;
                 
-                std::cout << "Mid_Point_Break: " << i << " " << refl_angles.at(i) << " " 
-                        << para_angles.at(i) << " " << angle3 << " " << min_dQ_dx << " " 
-                        << fine_tracking_path.at(i).first.x() << " " 
-                        << fine_tracking_path.at(i).first.y() << " " 
-                        << fine_tracking_path.at(i).first.z() << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), angle3, min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
                 flag_crawl = true;
                 save_i = i;
                 break;
@@ -836,9 +829,7 @@ private:
                                 std::pow(steiner_y[curr_index] - steiner_y[last_index], 2) + 
                                 std::pow(steiner_z[curr_index] - steiner_z[last_index], 2));
 
-            std::cout << "First, Center: " << steiner_x[first_index] << " " << steiner_y[first_index] 
-                    << " " << steiner_z[first_index] << " " << steiner_x[curr_index] << " " 
-                    << steiner_y[curr_index] << " " << steiner_z[curr_index] << " " << dis/units::cm << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "adjust_rough_path: First, Center: {} {} {} {} {} {} {}", steiner_x[first_index], steiner_y[first_index], steiner_z[first_index], steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index], dis/units::cm);
             
             if (dis > 1.0 * units::cm) {
                 // Find path from first to current point
@@ -901,7 +892,7 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            std::cout << "TaggerCheckSTM: No FiducialUtils available in find_first_kink" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
@@ -1112,10 +1103,7 @@ private:
                         v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
                         
                         if (i + 2 < dq_size) {
-                            std::cout << "Kink: " << i << " " << refl_angles.at(i) << " " << para_angles.at(i) 
-                                    << " " << ave_angles.at(i) << " " << max_numbers.at(i) << " " << angle3 
-                                    << " " << dQ.at(i)/dx.at(i)*units::cm/50e3 << " " << pu.at(i) 
-                                    << " " << pv.at(i) << " " << pw.at(i) << std::endl;
+                            SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3, pu.at(i), pv.at(i), pw.at(i));
                             return max_numbers.at(i);
                         }
                     }
@@ -1213,7 +1201,7 @@ private:
                     
                     if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
                         if (i+2<dq_size){
-                            std::cout << "Kink: " << i << " " << refl_angles.at(i) << " " << para_angles.at(i) << " " << ave_angles.at(i) << " " << max_numbers.at(i) << " " << angle3 << " " << dQ.at(i)/dx.at(i)*units::cm/50e3 << std::endl;
+                            SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3);
                             return max_numbers.at(i);
                         }
                     }
@@ -1230,7 +1218,7 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            std::cout << "TaggerCheckSTM: No FiducialUtils available in find_first_kink" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
@@ -1333,9 +1321,7 @@ private:
                 if ((p2.angle(p1)/3.1415926*180. < 20 || 
                     (p3.angle(p1)/3.1415926*180. < 15 && p3.magnitude() > 4*units::cm && p2.angle(p1)/3.1415926*180. < 35)) &&
                     seg_dQ_dx > 0.8) {
-                    std::cout << "Delta Ray Dir: " << p2.angle(p1)/3.1415926*180. << " " 
-                            << p3.angle(p1)/3.1415926*180. << " " << p3.magnitude()/units::cm << " " 
-                            << dis/units::cm << " " << seg_length/units::cm << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: Delta Ray Dir: {} {} {} {} {}", p2.angle(p1)/3.1415926*180., p3.angle(p1)/3.1415926*180., p3.magnitude()/units::cm, dis/units::cm, seg_length/units::cm);
                     return true;
                 }
             }
@@ -1462,9 +1448,7 @@ private:
             double ratio3 = std::accumulate(vec_yp.begin(), vec_yp.end(), 0.0) / 
                         (std::accumulate(muon_ref_p.begin(), muon_ref_p.end(), 0.0) + 1e-9);
 
-            std::cout << "End proton detection: " << ks1 << " " << ks2 << " " << ratio1 << " " << ratio2 
-                    << " " << ks3 << " " << ratio3 << " " << ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 
-                    << " " << dQ_dx[max_bin]/50e3 << " " << dQ_dx.size() - max_bin << " " << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/50e3, dQ_dx.size() - max_bin);
 
             if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/50e3 > 2.3 &&
                 (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {
@@ -1478,8 +1462,7 @@ private:
 
             // Check for proton with very high dQ_dx
             double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / 50000.;
-            std::cout << "End proton detection1: " << track_medium_dQ_dx << " " << dQ_dx[max_bin]/50e3 
-                    << " " << ks3 << " " << ratio3 << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/50e3, ks3, ratio3);
                     
             if (track_medium_dQ_dx < 1.0 && dQ_dx.at(max_bin)/50e3 > 3.5){
                 if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) return true;
@@ -1497,7 +1480,7 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            std::cout << "TaggerCheckSTM: No FiducialUtils available in find_first_kink" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
             return -1;
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
@@ -1660,7 +1643,7 @@ private:
         double ratio2 = std::accumulate(ref_flat.begin(), ref_flat.end(), 0.0) / 
                         (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
 
-        std::cout << "KS value: " << flag_strong_check << " " << ks1 << " " << ks2 << " " << ratio1 << " " << ratio2 << " " << ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 << " "  << res_dis1/(res_length1+1e-9) << " " << res_length /units::cm << " " << ave_res_dQ_dx/50000. << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/50000.);
 
         if (ks1 - ks2 >= 0.0) return false;
         if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 && 
@@ -2064,11 +2047,9 @@ private:
         }
         
         // Apply the final condition from prototype
-        if (number_clusters > 0 && 
+        if (number_clusters > 0 &&
             (number_clusters/3. + total_length/(35*units::cm)/number_clusters) >= 1) {
-            std::cout << "Other clusters: " << number_clusters << " " 
-                    << (number_clusters/3. + total_length/(35*units::cm)/number_clusters) 
-                    << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_other_clusters: Other clusters: {} {}", number_clusters, (number_clusters/3. + total_length/(35*units::cm)/number_clusters));
             return true;
         }
 
@@ -2164,8 +2145,7 @@ private:
         std::set<int> apas;
         compute_wireplane_params(wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
 
-        std::cout << "TaggerCheckSTM: Checking cluster with " << wpids.size() 
-                  << " wire plane IDs and " << apas.size() << " APAs." << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TaggerCheckSTM: Checking cluster with {} wire plane IDs and {} APAs.", wpids.size(), apas.size());
 
         // Early exit if no steiner graph points
         if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size() == 0) {
@@ -2217,7 +2197,7 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            std::cout << "TaggerCheckSTM: No FiducialUtils available" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TaggerCheckSTM: No FiducialUtils available");
             return false;
         }
 
@@ -2514,11 +2494,11 @@ private:
 
         // Fully contained, so not a STM
         if (candidate_exit_wcps.size() == 0) {
-            std::cout << "STMTagger: Mid Point: A" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: STMTagger: Mid Point: A");
             return false;
         }
 
-        std::cout << "end_point: " << temp_set.size() << " " << candidate_exit_wcps.size() << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: end_point: {} {}", temp_set.size(), candidate_exit_wcps.size());
 
         // Determine first and last points for further analysis
         geo_point_t first_wcp, last_wcp;
@@ -2545,7 +2525,7 @@ private:
                 double angle_between = acos(dir1.dot(dir2) / (dis1 * dis2));
                 
                 if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
-                    std::cout << "Mid Point: B" << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point: B");
                     return false;
                 } else {
                     if (dis1 < dis2) {
@@ -2555,19 +2535,18 @@ private:
                     }
                 }
             } else {
-                std::cout << "Mid Point: C" << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point: C");
                 return false;
             }
         }
 
         bool flag_other_clusters = check_other_clusters(cluster, associated_clusters);
 
-        std::cout << "STM analysis: flag_double_end=" << flag_double_end 
-                  << ", flag_other_clusters=" << flag_other_clusters << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: STM analysis: flag_double_end={}, flag_other_clusters={}", flag_double_end, flag_other_clusters);
 
         // Forward check
         {
-            if (flag_double_end) std::cout << "Forward check!" << std::endl;
+            if (flag_double_end) SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Forward check!");
             
             // Do rough path tracking
             auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
@@ -2583,7 +2562,7 @@ private:
                 if (fits.size() <=3) return false;
             }
 
-            std::cout << "Finish first round of fitting" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Finish first round of fitting");
 
             geo_point_t mid_point(0,0,0);
             auto adjusted_path_points = adjust_rough_path(cluster, mid_point);            
@@ -2593,7 +2572,7 @@ private:
             m_track_fitter.add_segment(adjusted_segment);
             m_track_fitter.do_single_tracking(adjusted_segment);
 
-            std::cout << "Finish second round of fitting" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Finish second round of fitting");
             
             // // hack to test recombination model usage  ... 
             // double kine_energy = segment_cal_kine_dQdx(adjusted_segment, m_recomb_model);
@@ -2651,9 +2630,7 @@ private:
                 left_Q += dQ.at(i);
             }
             
-            std::cout << "Left: " << exit_L/units::cm << " " << left_L/units::cm << " " 
-                      << (left_Q/(left_L/units::cm+1e-9))/50e3 << " " 
-                      << (exit_Q/(exit_L/units::cm+1e-9)/50e3) << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Left: {} {} {} {}", exit_L/units::cm, left_L/units::cm, (left_Q/(left_L/units::cm+1e-9))/50e3, (exit_Q/(exit_L/units::cm+1e-9)/50e3));
 
             // TGM (Through-Going Muon) check
             if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && (!fiducial_utils->inside_fiducial_volume(pts.back()))){
@@ -2678,12 +2655,12 @@ private:
                 }
                 
                 if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode){
-                    std::cout << "TGM: " << pts.front() << " " << pts.back() << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                     cluster.set_flag(Flags::TGM);
                     return true;
                 }
-                
-            } 
+
+            }
             else if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && left_L < 3*units::cm){
                 // Check dead volume
                 WireCell::Point p1 = pts.back();
@@ -2692,19 +2669,17 @@ private:
                 
                 if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)){
                     if (exit_L < 3*units::cm || left_L < 3*units::cm){
-                        std::cout << "TGM: " << pts.front() << " " << pts.back() << std::endl;
+                        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                         cluster.set_flag(Flags::TGM);
                         return true;
                     }
                 }
-            } 
+            }
 
             // STM evaluation logic
             if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)){
                 if (!flag_double_end){
-                    std::cout << "Mid Point A " << " Fid "
-                             << " " << mid_point << " " << left_L << " " 
-                             << (left_Q/(left_L/units::cm+1e-9)/50e3) << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}", mid_point, left_L, (left_Q/(left_L/units::cm+1e-9)/50e3));
                     return false;
                 }
             } else {
@@ -2782,18 +2757,18 @@ private:
                     search_other_tracks(cluster, fitted_segments);
 
                     if (check_other_tracks(cluster, fitted_segments)){
-                        std::cout << "Mid Point Tracks" << std::endl;
+                        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point Tracks");
                         return false;
                     }
-                    
+
                     if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
                 }
             }
         }
-        
+
         // Backward check (if double-ended)
         if (flag_double_end){
-            std::cout << "Backward check!" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Backward check!");
             
             // Do backward path tracking
             auto path_points = do_rough_path(cluster, last_wcp, first_wcp);
@@ -2858,10 +2833,8 @@ private:
                 left_Q += dQ.at(i);
             }
             
-            std::cout << "Left: " << exit_L/units::cm << " " << left_L/units::cm << " " 
-                      << (left_Q/(left_L/units::cm+1e-9))/50e3 << " " 
-                      << (exit_Q/(exit_L/units::cm+1e-9)/50e3) << std::endl;
-            
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Left: {} {} {} {}", exit_L/units::cm, left_L/units::cm, (left_Q/(left_L/units::cm+1e-9))/50e3, (exit_Q/(exit_L/units::cm+1e-9)/50e3));
+
             // TGM check for backward direction
             if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && 
                 (!fiducial_utils->inside_fiducial_volume(pts.back()))){
@@ -2887,16 +2860,14 @@ private:
                 }
                 
                 if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode){
-                    std::cout << "TGM: " << pts.front() << " " << pts.back() << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                     cluster.set_flag(Flags::TGM);
                     return true;
                 }
             }
 
             if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)){
-                std::cout << "Mid Point A " << " Fid" 
-                         << " " << mid_point << " " << left_L << " " 
-                         << (left_Q/(left_L/units::cm+1e-9)/50e3) << std::endl;
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}", mid_point, left_L, (left_Q/(left_L/units::cm+1e-9)/50e3));
                 return false;
             } else {
                 bool flag_fix_end = false;
@@ -2970,16 +2941,16 @@ private:
                     search_other_tracks(cluster, fitted_segments);
                     
                     if (check_other_tracks(cluster, fitted_segments)){
-                        std::cout << "Mid Point Tracks" << std::endl;
+                        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point Tracks");
                         return false;
                     }
-                    
+
                     if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
                 }
             }
         }
-        
-        std::cout << "Mid Point " << std::endl;
+
+        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point ");
 
 
 

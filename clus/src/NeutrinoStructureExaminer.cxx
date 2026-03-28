@@ -394,8 +394,7 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
                 
                 // Check if segments are nearly collinear (small 3cm angle)
                 if (angle_3cm < 27) {
-                    std::cout << "Cluster: " << cluster.ident() << " Merge two segments into one according to angle " 
-                              << angle_10cm << "° (10cm) and " << angle_3cm << "° (3cm)" << std::endl;
+                    SPDLOG_LOGGER_DEBUG(s_log, "examine_structure: Cluster: {} Merge two segments into one according to angle {}° (10cm) and {}° (3cm)", cluster.ident(), angle_10cm, angle_3cm);
                     
                     // Merge the two segments by combining their WCPoint lists
                     const auto& wcpts1 = sg1->wcpts();
@@ -661,8 +660,7 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
             wcp_list.push_back(end_wcp);
         }
         
-        std::cout << "Cluster: " << cluster.ident() << " Add a track to the main vertex, " 
-                  << wcp_list.size() << " points" << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "examine_structure: Cluster: {} Add a track to the main vertex, {} points", cluster.ident(), wcp_list.size());
         
         // Create new segment
         auto sg1 = make_segment();

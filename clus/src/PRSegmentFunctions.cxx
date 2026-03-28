@@ -4,11 +4,14 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/KSTest.h"
+#include "WireCellUtil/Logging.h"
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <numeric>
 #include <algorithm>
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
@@ -471,7 +474,7 @@ namespace WireCell::Clus::PR {
             --itwcpts;
         }
 
-        std::cout << "Closest point found: " << itfits - fits.begin() << " / " << fits.size() << " " << itwcpts - wcpts.begin() << " / " << wcpts.size() << " points in fits\n";
+        SPDLOG_LOGGER_DEBUG(s_log, "break_segment: Closest point found: {} / {} {} / {} points in fits", itfits - fits.begin(), fits.size(), itwcpts - wcpts.begin(), wcpts.size());
 
         
         // update graph
@@ -1116,7 +1119,7 @@ namespace WireCell::Clus::PR {
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start){
         const auto& fits = seg->fits();
         if (fits.empty() || start >= static_cast<int>(fits.size()) || start <= 0) {
-            std::cout << "bad start point in segment_cal_dir_3vector" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "segment_cal_dir_3vector: bad start point in segment_cal_dir_3vector");
             return WireCell::Vector(0, 0, 0);
         }
         
@@ -1634,14 +1637,9 @@ namespace WireCell::Clus::PR {
                 kinetic_energy = segment->particle_info()->kinetic_energy();
             }
             
-            std::cout << "Seg " << length/units::cm << " cm Track " 
-                      << segment->dirsign() << " " 
-                      << (segment->dir_weak() ? 1 : 0) << " "
-                      << pdg_code << " " 
-                      << particle_mass/units::MeV << " MeV " 
-                      << kinetic_energy/units::MeV << " MeV "
-                      << particle_score 
-                      << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "segment_determine_dir_track: Seg {} cm Track {} {} {} {} MeV {} MeV {}",
+                length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0),
+                pdg_code, particle_mass/units::MeV, kinetic_energy/units::MeV, particle_score);
         }
     }
 
@@ -1696,14 +1694,9 @@ namespace WireCell::Clus::PR {
             double particle_mass = particle_data->get_particle_mass(pdg_code);
             double kinetic_energy = pinfo->kinetic_energy();
             
-            std::cout << "Seg " << length/units::cm << " cm S_traj " 
-                      << segment->dirsign() << " " 
-                      << (segment->dir_weak() ? 1 : 0) << " "
-                      << pdg_code << " " 
-                      << particle_mass/units::MeV << " MeV " 
-                      << kinetic_energy/units::MeV << " MeV "
-                      << particle_score 
-                      << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "segment_determine_shower_direction_trajectory: Seg {} cm S_traj {} {} {} {} MeV {} MeV {}",
+                length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0),
+                pdg_code, particle_mass/units::MeV, kinetic_energy/units::MeV, particle_score);
         }
      }
 

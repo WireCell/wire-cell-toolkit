@@ -1628,17 +1628,11 @@ void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, 
         
         // Determine segment type and print
         if (sg->flags_any(SegmentFlags::kShowerTopology)) {
-            std::cout << seg_id << " " << length << " S_topo " << flag_dir << " " 
-                      << particle_type << " " << particle_mass << " " << kinetic_energy << " " 
-                      << is_dir_weak << " " << in_vertex << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "print_segs_info: {} {} S_topo {} {} {} {} {} {}", seg_id, length, flag_dir, particle_type, particle_mass, kinetic_energy, is_dir_weak, in_vertex);
         } else if (sg->flags_any(SegmentFlags::kShowerTrajectory)) {
-            std::cout << seg_id << " " << length << " S_traj " << flag_dir << " " 
-                      << particle_type << " " << particle_mass << " " << kinetic_energy << " " 
-                      << is_dir_weak << " " << in_vertex << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "print_segs_info: {} {} S_traj {} {} {} {} {} {}", seg_id, length, flag_dir, particle_type, particle_mass, kinetic_energy, is_dir_weak, in_vertex);
         } else {
-            std::cout << seg_id << " " << length << " Track  " << flag_dir << " " 
-                      << particle_type << " " << particle_mass << " " << kinetic_energy << " " 
-                      << is_dir_weak << " " << in_vertex << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "print_segs_info: {} {} Track  {} {} {} {} {} {}", seg_id, length, flag_dir, particle_type, particle_mass, kinetic_energy, is_dir_weak, in_vertex);
         }
     }
 }

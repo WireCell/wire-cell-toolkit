@@ -82,7 +82,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
         // Get the two vertices of this segment
         auto [start_v, end_v] = find_vertices(graph, seg);
         if (!start_v || !end_v) {
-            std::cout << "Error in finding vertices for a segment" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "determine_direction: Error in finding vertices for a segment");
             continue;
         }
 
@@ -1412,13 +1412,13 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
         
         // Check for violations
         if (n_in > 1 && n_in != n_in_shower) {
-            std::cout << "Wrong: Multiple (" << n_in << ") particles into a vertex!" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "examine_maps: Wrong: Multiple ({}) particles into a vertex!", n_in);
             print_segs_info(graph, cluster, vtx);
             flag_return = false;
         }
         
         if (n_in_shower > 0 && n_out_tracks > 0) {
-            std::cout << "Wrong: " << n_in_shower << " showers in and " << n_out_tracks << " tracks out!" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "examine_maps: Wrong: {} showers in and {} tracks out!", n_in_shower, n_out_tracks);
             print_segs_info(graph, cluster, vtx);
             flag_return = false;
         }

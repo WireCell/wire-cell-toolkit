@@ -1,10 +1,12 @@
 #include "WireCellClus/MyFCN.h"
 #include "WireCellUtil/Units.h"
+#include "WireCellUtil/Logging.h"
 
 #include <Eigen/Dense>
 #include <Eigen/IterativeLinearSolvers>
-#include <iostream>
 #include <cmath>
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 using namespace WireCell;
 using namespace WireCell::Clus::PR;
@@ -31,10 +33,11 @@ void MyFCN::print_points()
 {
     for (size_t i = 0; i != vec_points.size(); i++) {
         for (size_t j = 0; j != vec_points.at(i).size(); j++) {
-            std::cout << i << " " << j << " " 
-                      << vec_points.at(i).at(j).x() / units::cm << " " 
-                      << vec_points.at(i).at(j).y() / units::cm << " " 
-                      << vec_points.at(i).at(j).z() / units::cm << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "print_points: {} {} {} {} {}",
+                i, j,
+                vec_points.at(i).at(j).x() / units::cm,
+                vec_points.at(i).at(j).y() / units::cm,
+                vec_points.at(i).at(j).z() / units::cm);
         }
     }
 }
@@ -267,13 +270,8 @@ std::pair<bool, WireCell::Clus::Facade::geo_point_t> MyFCN::FitVertex()
             fit_pos = Facade::geo_point_t(temp_pos_3D(0), temp_pos_3D(1), temp_pos_3D(2));
             fit_flag = true;
         } else {
-            std::cout << "Cluster: ";
-            if (vtx->cluster()) {
-                std::cout << vtx->cluster()->get_cluster_id();
-            } else {
-                std::cout << "unknown";
-            }
-            std::cout << " Fit Vertex Failed!" << std::endl;
+            SPDLOG_LOGGER_DEBUG(s_log, "FitVertex: Cluster: {} Fit Vertex Failed!",
+                vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"));
         }
     }
 
@@ -290,7 +288,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     // Get APA/face for the fit position
     auto test_wpid = dv->contained_by(fit_pos);
     if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
-        std::cout << "Warning: fit_pos not contained in detector volume" << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Warning: fit_pos not contained in detector volume");
         return;
     }
     int apa = test_wpid.apa();
@@ -305,7 +303,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     auto slope_it = wpid_slopes.find(wpid);
     
     if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
-        std::cout << "Warning: geometry parameters not found for APA " << apa << " Face " << face << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Warning: geometry parameters not found for APA {} Face {}", apa, face);
         return;
     }
     
@@ -327,26 +325,21 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     
     // Print update information if vertex moved significantly
     if ((fit_pos - vtx->fit().point).magnitude() > 0.01 * units::cm) {
-        std::cout << "Cluster: ";
-        if (vtx->cluster()) {
-            std::cout << vtx->cluster()->get_cluster_id();
-        } else {
-            std::cout << "unknown";
-        }
-        std::cout << " Update Vertex: ("
-                  << offset_u + (slope_yu * fit_pos_raw.y() + slope_zu * fit_pos_raw.z()) << ", "
-                  << offset_v + (slope_yv * fit_pos_raw.y() + slope_zv * fit_pos_raw.z()) << ", "
-                  << offset_w + (slope_yw * fit_pos_raw.y() + slope_zw * fit_pos_raw.z()) << ", "
-                  << offset_t + slope_x * fit_pos_raw.x() << ") <- ("
-                  << offset_u + (slope_yu * vtx_pos_raw.y() + slope_zu * vtx_pos_raw.z()) << ", "
-                  << offset_v + (slope_yv * vtx_pos_raw.y() + slope_zv * vtx_pos_raw.z()) << ", "
-                  << offset_w + (slope_yw * vtx_pos_raw.y() + slope_zw * vtx_pos_raw.z()) << ", "
-                  << offset_t + slope_x * vtx_pos_raw.x() << ")" << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Cluster: {} Update Vertex: ({}, {}, {}, {}) <- ({}, {}, {}, {})",
+            vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"),
+            offset_u + (slope_yu * fit_pos_raw.y() + slope_zu * fit_pos_raw.z()),
+            offset_v + (slope_yv * fit_pos_raw.y() + slope_zv * fit_pos_raw.z()),
+            offset_w + (slope_yw * fit_pos_raw.y() + slope_zw * fit_pos_raw.z()),
+            offset_t + slope_x * fit_pos_raw.x(),
+            offset_u + (slope_yu * vtx_pos_raw.y() + slope_zu * vtx_pos_raw.z()),
+            offset_v + (slope_yv * vtx_pos_raw.y() + slope_zv * vtx_pos_raw.z()),
+            offset_w + (slope_yw * vtx_pos_raw.y() + slope_zw * vtx_pos_raw.z()),
+            offset_t + slope_x * vtx_pos_raw.x());
     }
     
     // Get steiner point cloud from cluster
     if (!temp_cluster.has_pc("steiner_pc") || temp_cluster.get_pc("steiner_pc").size() == 0) {
-        std::cout << "Warning: steiner_pc not found in cluster" << std::endl;
+        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Warning: steiner_pc not found in cluster");
         return;
     }
     const auto& steiner_pc = temp_cluster.get_pc("steiner_pc");
