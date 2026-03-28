@@ -30,6 +30,8 @@ struct Res_proto_segment {
 
 void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, bool flag_break_track, double search_range, double scaling_2d)
 {
+    if (!cluster.has_pc("steiner_pc")) return;
+
     // Get steiner point cloud data
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
@@ -1067,6 +1069,8 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
         v1_fit_pt.z() + dir.z() / dir.x() * dx
     );
 
+    if (!cluster.has_pc("steiner_pc")) return false;
+
     // Find the closest steiner point to test_p
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
@@ -1181,6 +1185,7 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
     // Direction of sg at v1's position, reversed to point away from v2
     WireCell::Vector dir1 = segment_cal_dir_3vector(sg, v1_fit_pt, extend_cut) * (-1.0);
     if (dir1.x() == 0) return flag;
+    if (!cluster.has_pc("steiner_pc")) return flag;
 
     // Get steiner point cloud data
     const auto& steiner_pc = cluster.get_pc("steiner_pc");

@@ -235,31 +235,31 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     
 
-    // Post-vertex refinement (matches prototype block after determine_overall_main_vertex):
-    //   1. Minuit-based vertex position fit
-    //   2. Re-cluster EM shower points with refined vertex
-    //   3. Re-examine track directions (flag_final=true)
-    //   4. Re-separate tracks and showers
-    std::size_t n_main_cluster_vertices = 0;
-    std::size_t n_main_cluster_segments = 0;
-    std::size_t n_main_cluster_fit_points = 0;
-    for (const auto& nd : PR::graph_nodes(*pr_graph)) {
-        const auto& vtx = (*pr_graph)[nd].vertex;
-        if (vtx && vtx->cluster() == main_cluster) {
-            ++n_main_cluster_vertices;
-        }
-    }
-    for (const auto& ed : PR::ordered_edges(*pr_graph)) {
-        const auto& seg = (*pr_graph)[ed].segment;
-        if (seg && seg->cluster() == main_cluster) {
-            ++n_main_cluster_segments;
-            n_main_cluster_fit_points += seg->fits().size();
-        }
-    }
-    SPDLOG_LOGGER_DEBUG(log,
-                        "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
-                        main_cluster->get_cluster_id(), n_main_cluster_vertices,
-                        n_main_cluster_segments, n_main_cluster_fit_points);
+    // // Post-vertex refinement (matches prototype block after determine_overall_main_vertex):
+    // //   1. Minuit-based vertex position fit
+    // //   2. Re-cluster EM shower points with refined vertex
+    // //   3. Re-examine track directions (flag_final=true)
+    // //   4. Re-separate tracks and showers
+    // std::size_t n_main_cluster_vertices = 0;
+    // std::size_t n_main_cluster_segments = 0;
+    // std::size_t n_main_cluster_fit_points = 0;
+    // for (const auto& nd : PR::graph_nodes(*pr_graph)) {
+    //     const auto& vtx = (*pr_graph)[nd].vertex;
+    //     if (vtx && vtx->cluster() == main_cluster) {
+    //         ++n_main_cluster_vertices;
+    //     }
+    // }
+    // for (const auto& ed : PR::ordered_edges(*pr_graph)) {
+    //     const auto& seg = (*pr_graph)[ed].segment;
+    //     if (seg && seg->cluster() == main_cluster) {
+    //         ++n_main_cluster_segments;
+    //         n_main_cluster_fit_points += seg->fits().size();
+    //     }
+    // }
+    // SPDLOG_LOGGER_DEBUG(log,
+    //                     "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
+    //                     main_cluster->get_cluster_id(), n_main_cluster_vertices,
+    //                     n_main_cluster_segments, n_main_cluster_fit_points);
 
     if (final_main_vertex) {
         pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
@@ -279,52 +279,54 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
 
         pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+
+        
     }
 
-    n_main_cluster_vertices = 0;
-    n_main_cluster_segments = 0;
-    n_main_cluster_fit_points = 0;
-    for (const auto& nd : PR::graph_nodes(*pr_graph)) {
-        const auto& vtx = (*pr_graph)[nd].vertex;
-        if (vtx && vtx->cluster() == main_cluster) {
-            ++n_main_cluster_vertices;
-        }
-    }
-    for (const auto& ed : PR::ordered_edges(*pr_graph)) {
-        const auto& seg = (*pr_graph)[ed].segment;
-        if (seg && seg->cluster() == main_cluster) {
-            ++n_main_cluster_segments;
-            n_main_cluster_fit_points += seg->fits().size();
-        }
-    }
-    SPDLOG_LOGGER_DEBUG(log,
-                        "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
-                        main_cluster->get_cluster_id(), n_main_cluster_vertices,
-                        n_main_cluster_segments, n_main_cluster_fit_points);
+    // n_main_cluster_vertices = 0;
+    // n_main_cluster_segments = 0;
+    // n_main_cluster_fit_points = 0;
+    // for (const auto& nd : PR::graph_nodes(*pr_graph)) {
+    //     const auto& vtx = (*pr_graph)[nd].vertex;
+    //     if (vtx && vtx->cluster() == main_cluster) {
+    //         ++n_main_cluster_vertices;
+    //     }
+    // }
+    // for (const auto& ed : PR::ordered_edges(*pr_graph)) {
+    //     const auto& seg = (*pr_graph)[ed].segment;
+    //     if (seg && seg->cluster() == main_cluster) {
+    //         ++n_main_cluster_segments;
+    //         n_main_cluster_fit_points += seg->fits().size();
+    //     }
+    // }
+    // SPDLOG_LOGGER_DEBUG(log,
+    //                     "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
+    //                     main_cluster->get_cluster_id(), n_main_cluster_vertices,
+    //                     n_main_cluster_segments, n_main_cluster_fit_points);
 
 
     // Mark each cluster's main vertex so bee output can identify it
-    for (auto& [cluster, vtx] : map_cluster_main_vertices) {
-        if (vtx) {
-            vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
+    // for (auto& [cluster, vtx] : map_cluster_main_vertices) {
+    //     if (vtx) {
+    //         vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
 
-            const auto& wcpt = vtx->wcpt().point;
-            if (vtx->fit().valid()) {
-                const auto& fitpt = vtx->fit().point;
-                SPDLOG_LOGGER_DEBUG(log,
-                                    "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=({:.2f}, {:.2f}, {:.2f}) cm",
-                                    cluster->get_cluster_id(),
-                                    wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm,
-                                    fitpt.x() / units::cm, fitpt.y() / units::cm, fitpt.z() / units::cm);
-            }
-            else {
-                SPDLOG_LOGGER_DEBUG(log,
-                                    "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=invalid",
-                                    cluster->get_cluster_id(),
-                                    wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm);
-            }
-        }
-    }
+    //         const auto& wcpt = vtx->wcpt().point;
+    //         if (vtx->fit().valid()) {
+    //             const auto& fitpt = vtx->fit().point;
+    //             SPDLOG_LOGGER_DEBUG(log,
+    //                                 "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=({:.2f}, {:.2f}, {:.2f}) cm",
+    //                                 cluster->get_cluster_id(),
+    //                                 wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm,
+    //                                 fitpt.x() / units::cm, fitpt.y() / units::cm, fitpt.z() / units::cm);
+    //         }
+    //         else {
+    //             SPDLOG_LOGGER_DEBUG(log,
+    //                                 "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=invalid",
+    //                                 cluster->get_cluster_id(),
+    //                                 wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm);
+    //         }
+    //     }
+    // }
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);

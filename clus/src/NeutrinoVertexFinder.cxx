@@ -25,6 +25,8 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
         vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm,
         search_range/units::cm, segments_set.size());
 
+    if (!cluster.has_pc("steiner_pc")) return false;
+
     // Get steiner point cloud and terminal flags
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
@@ -394,9 +396,9 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
         return temp_main_vertex;
     }
     
-    // Check if steiner point cloud exists
-    const auto& steiner_pc = cluster.get_pc("steiner_pc");
-    if (steiner_pc.size() < 3) {
+    // Check if steiner point cloud exists and has enough points
+    if (!cluster.has_pc("steiner_pc")) {
+        // Fall through to backup vertex selection below
         // Pick forward vertex based on z coordinate
         if (max_vtx->wcpt().point.z() < min_vtx->wcpt().point.z()) {
             temp_main_vertex = max_vtx;

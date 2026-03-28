@@ -126,6 +126,7 @@ public:
         // size_t stm_count = 0;
 
         // validation check ... temporary ...
+        if (main_cluster->has_pc("steiner_pc"))
         {
             auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
 
@@ -553,6 +554,7 @@ private:
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
             
         std::vector<geo_point_t> path_points;
+        if (!cluster.has_pc("steiner_pc")) return path_points;
         const auto& steiner_pc = cluster.get_pc("steiner_pc");
         const auto& coords = cluster.get_default_scope().coords;
         const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
@@ -721,10 +723,10 @@ private:
 
         // std::cout <<"flag crawl " << flag_crawl << std::endl;
 
-        if (flag_crawl){
+        if (flag_crawl && cluster.has_pc("steiner_pc")){
             // Start to Crawl
             const double step_dis = 1.0 * units::cm;
-            
+
             // Get point clouds and coordinate arrays from cluster
             const auto& steiner_pc = cluster.get_pc("steiner_pc");
             const auto& coords = cluster.get_default_scope().coords;
@@ -1732,6 +1734,7 @@ private:
 
         // Early return if no existing segment
         if (fitted_segments.empty()) return;
+        if (!cluster.has_pc("steiner_pc")) return;
 
         const auto& steiner_pc = cluster.get_pc("steiner_pc");
         const auto& coords = cluster.get_default_scope().coords;
@@ -2359,6 +2362,7 @@ private:
             out_vec_wcps = cluster.get_extreme_wcps();
             
             // Get the steiner_pc to access actual points using boundary_indices
+            if (!cluster.has_pc("steiner_pc")) return false;
             const auto& steiner_pc = cluster.get_pc("steiner_pc");
             const auto& coords = cluster.get_default_scope().coords;
             const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();

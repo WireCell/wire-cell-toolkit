@@ -87,6 +87,7 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
             
         std::vector<Facade::geo_point_t> path_points;
+        if (!cluster.has_pc("steiner_pc")) return path_points;
         const auto& steiner_pc = cluster.get_pc("steiner_pc");
         const auto& coords = cluster.get_default_scope().coords;
         const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
@@ -177,6 +178,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     // Get two boundary points from the cluster
     auto boundary_indices = cluster.get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc");
 
+    if (!cluster.has_pc("steiner_pc")) return nullptr;
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
@@ -351,6 +353,10 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
 std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(const Facade::Cluster& cluster, Facade::geo_point_t& p, Facade::geo_vector_t& dir, Facade::geo_vector_t& dir_other, bool flag_continue){
     const double step_dis = 1.0 * units::cm;
     
+    if (!cluster.has_pc("steiner_pc")) return {p, 0};
+
+    if (!cluster.has_pc("steiner_pc")) return {p, 0};
+
     // Get steiner point cloud data
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;

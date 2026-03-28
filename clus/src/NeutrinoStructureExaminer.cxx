@@ -108,6 +108,7 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
             
             // If the straight line is better, replace the segment path
             if (flag_replace) {
+                if (!cluster.has_pc("steiner_pc")) continue;
                 // Get steiner point cloud
                 const auto& steiner_pc = cluster.get_pc("steiner_pc");
                 const auto& coords = cluster.get_default_scope().coords;
@@ -274,6 +275,7 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                     // dangling edge descriptor.
                 } else {
                     // Create a new segment with straight line path
+                    if (!cluster.has_pc("steiner_pc")) continue;
                     // Get steiner point cloud
                     const auto& steiner_pc = cluster.get_pc("steiner_pc");
                     const auto& coords = cluster.get_default_scope().coords;
@@ -490,7 +492,9 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
     auto vd = vertex->get_descriptor();
     int degree = boost::degree(vd, graph);
     if (degree < 2 && !flag_final_vertex) return false;
-    
+
+    if (!cluster.has_pc("steiner_pc")) return false;
+
     // Get steiner point cloud and flag terminals
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
@@ -784,6 +788,7 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
     }
     
     // Step 5: Update segment and vertex if good point found
+    if (!cluster.has_pc("steiner_pc")) return false;
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
@@ -1638,6 +1643,8 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
     // Drift direction (X direction)
     Facade::geo_vector_t drift_dir_abs(1, 0, 0);
     
+    if (!cluster.has_pc("steiner_pc")) return false;
+
     // Get steiner point cloud for later use
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
@@ -2186,6 +2193,7 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
                     
                 } else {
                     // Create new vertex at split point
+                    if (!cluster.has_pc("steiner_pc")) continue;
                     // Get steiner point cloud
                     const auto& steiner_pc = cluster.get_pc("steiner_pc");
                     const auto& coords = cluster.get_default_scope().coords;
