@@ -76,7 +76,7 @@ namespace WireCell::Clus::PR {
             m_start_segment = nullptr;
             return *this;
         }
-        this->add_segment(seg);
+        TrajectoryView::add_segment(seg);
         m_start_segment = seg;
         
         // If flag_include_vertices is true, add all vertices connected to this segment
@@ -132,7 +132,7 @@ namespace WireCell::Clus::PR {
         if (! seg->descriptor_valid()) {
             return;
         }
-        this->add_segment(seg);
+        TrajectoryView::add_segment(seg);
         
         // If flag_include_vertices is true, add all vertices connected to this segment
         if (flag_include_vertices) {

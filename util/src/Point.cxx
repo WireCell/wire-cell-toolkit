@@ -145,7 +145,7 @@ std::pair<WireCell::Point, WireCell::Point> WireCell::ray_closest_points(const W
     // Project d onto dir2 and calculate rejection
     double proj_mag = d.dot(dir2) / dir2.magnitude();
     WireCell::Vector proj = proj_mag * dir2.norm();
-    WireCell::Vector rej = d - proj - (d.dot(c_unit) / c_mag) * c_unit;
+    WireCell::Vector rej = d - proj - d.dot(c_unit) * c_unit;
     
     // Find point on ray1
     WireCell::Vector dir1_unit = dir1.norm();
@@ -160,7 +160,7 @@ std::pair<WireCell::Point, WireCell::Point> WireCell::ray_closest_points(const W
     
     double proj_p_mag = d_p.dot(dir1) / dir1.magnitude();
     WireCell::Vector proj_p = proj_p_mag * dir1.norm();
-    WireCell::Vector rej_p = d_p - proj_p - (d_p.dot(c_p_unit) / c_mag) * c_p_unit;
+    WireCell::Vector rej_p = d_p - proj_p - d_p.dot(c_p_unit) * c_p_unit;
     
     WireCell::Vector dir2_unit = dir2.norm();
     double rej_p_mag = rej_p.magnitude();

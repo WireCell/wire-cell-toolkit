@@ -267,6 +267,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
     std::map<int, std::pair<double, int>> map_pio_id_mass;
     std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
+    Pi0KineFeatures pio_kine{};
     std::map<VertexPtr, ShowerPtr> map_vertex_in_shower;
     std::map<SegmentPtr, ShowerPtr> map_segment_in_shower;
     std::map<VertexPtr, std::set<ShowerPtr>> map_vertex_to_shower;
@@ -297,6 +298,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
                                                 map_shower_pio_id, map_pio_id_showers,
                                                 map_pio_id_mass, map_pio_id_saved_pair,
+                                                pio_kine,
                                                 vertices_in_long_muon, segments_in_long_muon,
                                                 *pr_graph, final_main_vertex, showers,
                                                 main_cluster, other_clusters,
