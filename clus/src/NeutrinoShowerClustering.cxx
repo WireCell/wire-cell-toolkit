@@ -502,7 +502,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
             WireCell::Point start_point = start_vtx ? (start_vtx->fit().valid() ? start_vtx->fit().point : start_vtx->wcpt().point) : WireCell::Point(0, 0, 0);
             
             bool is_shower_topology = seg->flags_any(SegmentFlags::kShowerTopology);
-            double medium_dQ_dx = segment_median_dQ_dx(seg);
+            double medium_dQ_dx = segment_median_dQ_dx(seg, 0, 100); // matches prototype get_medium_dQ_dx(0,100)
             double seg_length = segment_track_length(seg);
             
             if (is_shower_topology || shower->get_num_segments() > 2 || 
@@ -1289,12 +1289,16 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             min_vertex = main_vertex;
         }
         
-        // Find a shower segment starting at vertex
+        // Find a shower segment starting at vertex.
+        // Matches prototype's get_flag_shower(): kShowerTrajectory || kShowerTopology || abs(pdg)==11.
         SegmentPtr sg = nullptr;
         if (map_vertex_segments.find(vertex) != map_vertex_segments.end()) {
             for (auto seg : map_vertex_segments[vertex]) {
-                if (seg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                    seg->flags_any(SegmentFlags::kShowerTopology)) {
+                bool is_shower = seg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                 seg->flags_any(SegmentFlags::kShowerTopology) ||
+                                 (seg->has_particle_info() && seg->particle_info() &&
+                                  std::abs(seg->particle_info()->pdg()) == 11);
+                if (is_shower) {
                     sg = seg;
                     break;
                 }
