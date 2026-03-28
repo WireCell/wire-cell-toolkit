@@ -70,27 +70,20 @@ void PatternAlgorithms::update_shower_maps(std::set<ShowerPtr>& showers,  std::m
 }
 
 void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon){
-    if (!main_vertex) return;
-
-    // Build map_vertex_segments from graph (ordered for determinism)
-    std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
-    for (auto e : ordered_edges(graph)) {
-        SegmentPtr seg = graph[e].segment;
-        if (!seg) continue;
-        auto v1 = graph[boost::source(e, graph)].vertex;
-        auto v2 = graph[boost::target(e, graph)].vertex;
-        if (v1) map_vertex_segments[v1].push_back(seg);
-        if (v2) map_vertex_segments[v2].push_back(seg);
-    }
+    if (!main_vertex || !main_vertex->descriptor_valid()) return;
 
     // BFS from main_vertex: find shower-flagged segments anywhere in the segment tree.
-    // used_segments tracks all visited segments; showers stop the BFS descent.
+    // Segment ordering is guaranteed by sorted_out_edges() which sorts by stable graph index,
+    // eliminating any pointer-address-dependent randomness.
+    // std::set is required here because complete_structure_with_start_segment() takes set&.
     std::set<SegmentPtr> used_segments;
     std::vector<ShowerPtr> new_showers;
 
-    // Seed BFS: all segments connected to main_vertex, paired with their other (daughter) vertex
+    // Seed BFS: all segments incident to main_vertex in stable index order.
     std::vector<std::pair<SegmentPtr, VertexPtr>> segments_to_examine;
-    for (auto seg : map_vertex_segments[main_vertex]) {
+    for (auto e : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr seg = graph[e].segment;
+        if (!seg) continue;
         VertexPtr other_vtx = find_other_vertex(graph, seg, main_vertex);
         segments_to_examine.push_back({seg, other_vtx});
     }
@@ -126,10 +119,11 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 new_showers.push_back(shower);
                 // BFS does not descend into shower sub-tree
             } else {
-                // Track-like segment: keep descending from daughter_vtx
-                if (daughter_vtx) {
-                    for (auto next_sg : map_vertex_segments[daughter_vtx]) {
-                        if (!used_segments.count(next_sg)) {
+                // Track-like segment: keep descending from daughter_vtx in stable index order.
+                if (daughter_vtx && daughter_vtx->descriptor_valid()) {
+                    for (auto e : sorted_out_edges(daughter_vtx->get_descriptor(), graph)) {
+                        SegmentPtr next_sg = graph[e].segment;
+                        if (next_sg && !used_segments.count(next_sg)) {
                             VertexPtr other_vtx = find_other_vertex(graph, next_sg, daughter_vtx);
                             temp_segments.push_back({next_sg, other_vtx});
                         }
@@ -137,7 +131,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 }
             }
         }
-        segments_to_examine = temp_segments;
+        segments_to_examine = std::move(temp_segments);
     }
 
     // Complete shower structure for all newly created showers.
@@ -1935,346 +1929,354 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
 void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     
     if (!main_vertex) return;
-    
+
     // Build map_vertex_segments
     std::map<VertexPtr, std::vector<SegmentPtr>> map_vertex_segments;
     for (auto e : ordered_edges(graph)) {
         SegmentPtr seg = graph[e].segment;
         if (!seg) continue;
-
         auto source_vdesc = boost::source(e, graph);
         auto target_vdesc = boost::target(e, graph);
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
-
         if (v1) map_vertex_segments[v1].push_back(seg);
         if (v2) map_vertex_segments[v2].push_back(seg);
     }
 
-    std::map<SegmentPtr, ShowerPtr> map_merge_seg_shower;
+    WireCell::Point  main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
     WireCell::Vector drift_dir(1, 0, 0);
+
+    // ---- Shower comparator by start-segment graph index (deterministic ordering) ----
+    auto shower_cmp = [&](const ShowerPtr& a, const ShowerPtr& b) -> bool {
+        auto sa = a->start_segment(), sb = b->start_segment();
+        if (!sa && !sb) return false;
+        if (!sa) return true;
+        if (!sb) return false;
+        return graph[sa->get_descriptor()].index < graph[sb->get_descriptor()].index;
+    };
+
+    // ---- Per-shower cached data (EM electrons only) ----
+    // Pre-computing dir_internal, dir_from_main, composition, etc. avoids
+    // O(N_seg * N_shower) calls to shower_cal_dir_3vector / fill_maps.
+    struct EMShowerCache {
+        ShowerPtr shower;
+        int conn_type;
+        VertexPtr start_vtx;
+        double Eshower;               // kine_best (if non-zero) else kine_charge — for Case I
+        WireCell::Vector dir_internal;   // shower_cal_dir_3vector at 100 cm
+        WireCell::Vector dir_from_main;  // start_pt - main_vtx_pt (for Cases II/III)
+        double angle_drift_internal;     // angle(dir_internal, drift_dir) in degrees
+        double angle_fm_vs_int;          // angle(dir_from_main, dir_internal) in degrees (for Case III)
+        bool composition_ok;             // passes track-fraction composition check (for Case I)
+    };
+
+    auto build_em_cache = [&](const std::set<ShowerPtr>& shower_set) -> std::vector<EMShowerCache> {
+        std::vector<ShowerPtr> sorted(shower_set.begin(), shower_set.end());
+        std::sort(sorted.begin(), sorted.end(), shower_cmp);
+        std::vector<EMShowerCache> result;
+        result.reserve(sorted.size());
+        for (const auto& sh : sorted) {
+            if (!sh->start_segment() || !sh->start_segment()->has_particle_info() ||
+                sh->start_segment()->particle_info()->pdg() != 11) continue;
+            auto [sv, ct] = sh->get_start_vertex_and_type();
+            double E      = sh->get_kine_best() != 0 ? sh->get_kine_best() : sh->get_kine_charge();
+            WireCell::Point  sp    = sh->get_start_point();
+            WireCell::Vector dir_i = shower_cal_dir_3vector(*sh, sp, 100 * units::cm);
+            WireCell::Vector dir_fm(sp.x() - main_vtx_pt.x(), sp.y() - main_vtx_pt.y(), sp.z() - main_vtx_pt.z());
+            double ang_drift = std::acos(std::clamp(dir_i.dot(drift_dir) / (dir_i.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+            double ang_fm_i  = std::acos(std::clamp(dir_fm.dot(dir_i)   / (dir_fm.magnitude() * dir_i.magnitude()),    -1.0, 1.0)) / M_PI * 180.0;
+            // Composition check: track-fraction within shower's start cluster
+            TrajectoryView& traj = sh->fill_maps();
+            double ttl = 0, ttrk = 0;
+            for (auto edesc : traj.edges()) {
+                auto sg1 = traj.view_graph()[edesc].segment;
+                if (!sg1 || sg1->cluster() != sh->start_segment()->cluster()) continue;
+                double len = segment_track_length(sg1);
+                ttl += len;
+                if (!sg1->dir_weak()) ttrk += len;
+            }
+            bool comp_ok = !(ttrk > 3 * units::cm && ttrk > 0.25 * ttl);
+            result.push_back({sh, ct, sv, E, dir_i, dir_fm, ang_drift, ang_fm_i, comp_ok});
+        }
+        return result;
+    };
+
+    // Pre-cache Case II (showers at main_vertex) and Case III (all showers) — built once
+    std::vector<EMShowerCache> cache_main_vtx;
+    if (map_vertex_to_shower.count(main_vertex))
+        cache_main_vtx = build_em_cache(map_vertex_to_shower[main_vertex]);
+    std::vector<EMShowerCache> cache_all_showers = build_em_cache(showers);
+
+    // Per-vertex lazy cache for Case I (populated on first access per vertex)
+    std::map<VertexPtr, std::vector<EMShowerCache>> vtx_cache;
+
+    // SegmentIndexCmp for deterministic merge-processing order
+    std::map<SegmentPtr, ShowerPtr, SegmentIndexCmp> map_merge_seg_shower{SegmentIndexCmp(graph)};
     std::set<ShowerPtr> del_showers;
-    
-    WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
-    
-    // Loop over segments at main_vertex
-    if (map_vertex_segments.find(main_vertex) != map_vertex_segments.end()) {
+
+    // ---- Segment loop ----
+    if (map_vertex_segments.count(main_vertex)) {
         for (auto sg : map_vertex_segments[main_vertex]) {
-            // Skip if already in shower and not a muon (unclassified segments also skipped, matching prototype)
             if (map_segment_in_shower.count(sg)) {
                 if (!sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13) continue;
             }
-            
+
             double sg_length = segment_track_length(sg);
-            
-            // Skip long segments
             if ((sg_length > 45 * units::cm && !sg->dir_weak()) || sg_length > 55 * units::cm) continue;
-            
-            // Find other vertex
+
             auto seg_edesc = sg->get_descriptor();
-            auto source_vdesc = boost::source(seg_edesc, graph);
-            auto target_vdesc = boost::target(seg_edesc, graph);
-            VertexPtr v1 = graph[source_vdesc].vertex;
-            VertexPtr v2 = graph[target_vdesc].vertex;
-            VertexPtr vtx = (v1 == main_vertex) ? v2 : v1;
+            VertexPtr v1   = graph[boost::source(seg_edesc, graph)].vertex;
+            VertexPtr v2   = graph[boost::target(seg_edesc, graph)].vertex;
+            VertexPtr vtx  = (v1 == main_vertex) ? v2 : v1;
             if (!vtx) continue;
-            
+
             auto daughter_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
             double daughter_length = daughter_result.second;
-            
+
+            // Pre-compute segment directions shared across Cases I, II, III
+            WireCell::Point  vtx_pt           = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            WireCell::Vector dir_seg_from_vtx  = segment_cal_dir_3vector(sg, vtx_pt,      15 * units::cm);
+            WireCell::Vector dir_seg_from_main = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
+
             bool flag_checked = false;
-            
-            // Case I: Check showers at the other vertex
-            if (map_vertex_to_shower.find(vtx) != map_vertex_to_shower.end()) {
-                WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
-                WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx_pt, 15 * units::cm);
-                WireCell::Vector dir1_1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
+
+            // ---- Case I: showers at the other vertex ----
+            if (map_vertex_to_shower.count(vtx)) {
+                // Lazy-populate vtx cache
+                if (!vtx_cache.count(vtx))
+                    vtx_cache[vtx] = build_em_cache(map_vertex_to_shower[vtx]);
+                const auto& vtx_em = vtx_cache[vtx];
+
+                // First pass: any high-energy directly connected shower? (composition not required)
                 bool flag_tmp_connected = false;
-                
-                // First pass: check for high-energy directly connected showers
-                for (auto shower : map_vertex_to_shower[vtx]) {
-                    if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
-                        shower->start_segment()->particle_info()->pdg() != 11) continue;
-                    
-                    auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-                    double Eshower = (shower->get_kine_best() != 0) ? shower->get_kine_best() : shower->get_kine_charge();
-                    
-                    if (conn_type == 1 && Eshower > 60 * units::MeV) flag_tmp_connected = true;
+                for (const auto& c : vtx_em) {
+                    if (c.conn_type == 1 && c.Eshower > 60 * units::MeV) { flag_tmp_connected = true; break; }
                 }
-                
-                // Second pass: check merging conditions
-                for (auto shower : map_vertex_to_shower[vtx]) {
-                    if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
-                        shower->start_segment()->particle_info()->pdg() != 11) continue;
-                    
-                    auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-                    WireCell::Vector dir2 = shower_cal_dir_3vector(*shower, shower->get_start_point(), 100 * units::cm);
-                    
-                    double Eshower = (shower->get_kine_best() != 0) ? shower->get_kine_best() : shower->get_kine_charge();
-                    
-                    // Check shower composition
-                    TrajectoryView& traj = shower->fill_maps();
-                    double tmp_total_length = 0;
-                    double tmp_track_length = 0;
-                    
-                    for (auto edesc : traj.edges()) {
-                        auto sg1 = traj.view_graph()[edesc].segment;
-                        if (!sg1) continue;
-                        if (sg1->cluster() != shower->start_segment()->cluster()) continue;
-                        
-                        double length = segment_track_length(sg1);
-                        tmp_total_length += length;
-                        if (!sg1->dir_weak()) tmp_track_length += length;
-                    }
-                    
-                    if (tmp_track_length > 3 * units::cm && tmp_track_length > 0.25 * tmp_total_length) continue;
-                    
-                    if (conn_type == 1 && Eshower > 100 * units::MeV) flag_checked = true;
-                    
-                    double angle1 = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    double angle2 = std::acos(std::clamp(dir1_1.dot(dir2) / (dir1_1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    double tmp_angle = std::min(180.0 - angle1, angle2);
-                    
-                    auto [closest_dis, closest_pt] = segment_get_closest_point(sg, shower->get_start_point());
-                    
-                    // Special checks for connection type 2
-                    if (conn_type == 2) {
+
+                // Second pass: evaluate merge conditions
+                for (const auto& c : vtx_em) {
+                    if (!c.composition_ok) continue;
+
+                    if (c.conn_type == 1 && c.Eshower > 100 * units::MeV) flag_checked = true;
+
+                    double angle1     = std::acos(std::clamp(dir_seg_from_vtx.dot(c.dir_internal)  / (dir_seg_from_vtx.magnitude()  * c.dir_internal.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                    double angle2     = std::acos(std::clamp(dir_seg_from_main.dot(c.dir_internal) / (dir_seg_from_main.magnitude() * c.dir_internal.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                    double tmp_angle  = std::min(180.0 - angle1, angle2);
+
+                    // Lazy closest-distance: only computed when conn_type==2 conditions are reached
+                    double closest_dis = -1.0;
+                    auto get_closest_dis = [&]() -> double {
+                        if (closest_dis < 0) {
+                            auto [cd, cp] = segment_get_closest_point(sg, c.shower->get_start_point());
+                            closest_dis = cd;
+                        }
+                        return closest_dis;
+                    };
+
+                    if (c.conn_type == 2) {
                         if ((!sg->dir_weak() && sg_length > 3 * units::cm) || flag_tmp_connected) {
-                            if (closest_dis < 8 * units::cm && Eshower > 75 * units::MeV && tmp_angle < 6) {
+                            if (get_closest_dis() < 8 * units::cm && c.Eshower > 75 * units::MeV && tmp_angle < 6) {
                                 // Allow this condition
                             } else {
                                 continue;
                             }
                         }
-                        if (closest_dis > 20 * units::cm && Eshower < 150 * units::MeV && tmp_angle > 2.5) continue;
+                        if (get_closest_dis() > 20 * units::cm && c.Eshower < 150 * units::MeV && tmp_angle > 2.5) continue;
                     }
-                    
-                    // Main merging conditions
-                    if ((Eshower > 800 * units::MeV && tmp_angle < 30) ||
-                        (Eshower > 150 * units::MeV && tmp_angle < 10) ||
-                        (Eshower > 150 * units::MeV && tmp_angle < 18 && conn_type == 1 && sg->dir_weak()) ||
-                        (Eshower > 100 * units::MeV && tmp_angle < 10 && sg_length < 25 * units::cm) ||
-                        (Eshower > 250 * units::MeV && tmp_angle < 15) ||
-                        (Eshower > 360 * units::MeV && tmp_angle < 25) ||
-                        (Eshower > 100 * units::MeV && Eshower <= 150 * units::MeV && tmp_angle < 15 && 
+
+                    if ((c.Eshower > 800 * units::MeV && tmp_angle < 30) ||
+                        (c.Eshower > 150 * units::MeV && tmp_angle < 10) ||
+                        (c.Eshower > 150 * units::MeV && tmp_angle < 18 && c.conn_type == 1 && sg->dir_weak()) ||
+                        (c.Eshower > 100 * units::MeV && tmp_angle < 10 && sg_length < 25 * units::cm) ||
+                        (c.Eshower > 250 * units::MeV && tmp_angle < 15) ||
+                        (c.Eshower > 360 * units::MeV && tmp_angle < 25) ||
+                        (c.Eshower > 100 * units::MeV && c.Eshower <= 150 * units::MeV && tmp_angle < 15 &&
                          sg_length < 25 * units::cm && flag_checked) ||
-                        (Eshower > 60 * units::MeV && conn_type == 2 && sg->dir_weak() &&
-                         ((tmp_angle < 15 && closest_dis < 18 * units::cm) || 
-                          (tmp_angle < 17.5 && closest_dis < 6 * units::cm)) &&
+                        (c.Eshower > 60 * units::MeV && c.conn_type == 2 && sg->dir_weak() &&
+                         ((tmp_angle < 15   && get_closest_dis() < 18 * units::cm) ||
+                          (tmp_angle < 17.5 && get_closest_dis() <  6 * units::cm)) &&
                          sg_length < 15 * units::cm) ||
-                        (Eshower > 60 * units::MeV && conn_type == 2 && tmp_angle < 7.5 && 
-                         closest_dis < 8 * units::cm && sg_length < 20 * units::cm)) {
-                        map_merge_seg_shower[sg] = shower;
+                        (c.Eshower > 60 * units::MeV && c.conn_type == 2 && tmp_angle < 7.5 &&
+                         get_closest_dis() < 8 * units::cm && sg_length < 20 * units::cm)) {
+                        map_merge_seg_shower[sg] = c.shower;
                         continue;
                     }
                 }
             }
-            
-            if (map_merge_seg_shower.find(sg) != map_merge_seg_shower.end()) continue;
+
+            if (map_merge_seg_shower.count(sg)) continue;
             if (flag_checked) continue;
             if (!sg->dir_weak() && sg_length > 6 * units::cm && daughter_length < 40 * units::cm) continue;
-            
-            // Case II: Check showers at main_vertex (not directly connected)
-            if (map_vertex_to_shower.find(main_vertex) != map_vertex_to_shower.end()) {
-                WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
-                
-                for (auto shower : map_vertex_to_shower[main_vertex]) {
-                    if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
-                        shower->start_segment()->particle_info()->pdg() != 11) continue;
 
-                    auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-                    if (conn_type == 1) continue; // Skip directly connected
-                    
-                    WireCell::Vector dir2(shower->get_start_point().x() - main_vtx_pt.x(),
-                                         shower->get_start_point().y() - main_vtx_pt.y(),
-                                         shower->get_start_point().z() - main_vtx_pt.z());
-                    WireCell::Vector dir3 = shower_cal_dir_3vector(*shower, shower->get_start_point(), 100 * units::cm);
-                    
-                    auto [min_dis, closest_pt] = segment_get_closest_point(sg, shower->get_start_point());
-                    
-                    double angle_dir2 = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    double angle_dir3 = std::acos(std::clamp(dir1.dot(dir3) / (dir1.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    double angle_drift1 = std::acos(std::clamp(dir1.dot(drift_dir) / (dir1.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    double angle_drift3 = std::acos(std::clamp(dir3.dot(drift_dir) / (dir3.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    
-                    if (((shower->get_kine_charge() > 80 * units::MeV && angle_dir2 < 10) ||
-                         (shower->get_kine_charge() > 50 * units::MeV && angle_dir2 < 3) ||
-                         (shower->get_kine_charge() > 80 * units::MeV && angle_dir3 < 6 && angle_dir2 < 17.5) ||
-                         (shower->get_kine_charge() > 80 * units::MeV && angle_dir3 < 6 && 
-                          std::fabs(90 - angle_drift1) < 10 && std::fabs(90 - angle_drift3) < 10 && angle_dir2 < 30)) &&
+            // ---- Case II: showers at main_vertex (indirect connections only) ----
+            {
+                double angle_drift1 = std::acos(std::clamp(dir_seg_from_main.dot(drift_dir) / (dir_seg_from_main.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+
+                for (const auto& c : cache_main_vtx) {
+                    if (c.conn_type == 1) continue;
+
+                    double angle_dir2 = std::acos(std::clamp(dir_seg_from_main.dot(c.dir_from_main) / (dir_seg_from_main.magnitude() * c.dir_from_main.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+                    double angle_dir3 = std::acos(std::clamp(dir_seg_from_main.dot(c.dir_internal)  / (dir_seg_from_main.magnitude() * c.dir_internal.magnitude()),  -1.0, 1.0)) / M_PI * 180.0;
+
+                    auto [min_dis, closest_pt] = segment_get_closest_point(sg, c.shower->get_start_point());
+
+                    if (((c.shower->get_kine_charge() > 80 * units::MeV && angle_dir2 < 10) ||
+                         (c.shower->get_kine_charge() > 50 * units::MeV && angle_dir2 < 3) ||
+                         (c.shower->get_kine_charge() > 80 * units::MeV && angle_dir3 < 6 && angle_dir2 < 17.5) ||
+                         (c.shower->get_kine_charge() > 80 * units::MeV && angle_dir3 < 6 &&
+                          std::fabs(90 - angle_drift1) < 10 && std::fabs(90 - c.angle_drift_internal) < 10 && angle_dir2 < 30)) &&
                         (sg_length > 5 * units::cm || (sg_length > 3 * units::cm && min_dis < 2.0 * units::cm))) {
-                        map_merge_seg_shower[sg] = shower;
+                        map_merge_seg_shower[sg] = c.shower;
                         continue;
                     }
                 }
             }
-            
-            // Case III: Check other showers
-            WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
-            
-            for (auto shower : showers) {
-                auto [start_vtx_shower, conn_type_shower] = shower->get_start_vertex_and_type();
-                if (start_vtx_shower == vtx || start_vtx_shower == main_vertex) continue;
-                
-                if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
-                    shower->start_segment()->particle_info()->pdg() != 11) continue;
 
-                if (conn_type_shower <= 2) {
-                    WireCell::Vector dir2(shower->get_start_point().x() - main_vtx_pt.x(),
-                                         shower->get_start_point().y() - main_vtx_pt.y(),
-                                         shower->get_start_point().z() - main_vtx_pt.z());
-                    WireCell::Vector dir3 = shower_cal_dir_3vector(*shower, shower->get_start_point(), 100 * units::cm);
-                    
-                    double angle_dir2 = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    double angle_dir3 = std::acos(std::clamp(dir2.dot(dir3) / (dir2.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    
-                    if ((((shower->get_kine_charge() > 80 * units::MeV && angle_dir2 < 15) ||
-                          (shower->get_kine_charge() > 50 * units::MeV && angle_dir2 < 5)) &&
-                         angle_dir3 < 15 && (angle_dir2 + angle_dir3) < 25 && sg_length > 5 * units::cm)) {
-                        map_merge_seg_shower[sg] = shower;
-                        continue;
+            // ---- Case III: other showers not at vtx or main_vertex ----
+            {
+                for (const auto& c : cache_all_showers) {
+                    if (c.start_vtx == vtx || c.start_vtx == main_vertex) continue;
+
+                    if (c.conn_type <= 2) {
+                        double angle_dir2 = std::acos(std::clamp(dir_seg_from_main.dot(c.dir_from_main) / (dir_seg_from_main.magnitude() * c.dir_from_main.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+
+                        if ((((c.shower->get_kine_charge() > 80 * units::MeV && angle_dir2 < 15) ||
+                              (c.shower->get_kine_charge() > 50 * units::MeV && angle_dir2 < 5)) &&
+                             c.angle_fm_vs_int < 15 && (angle_dir2 + c.angle_fm_vs_int) < 25 && sg_length > 5 * units::cm)) {
+                            map_merge_seg_shower[sg] = c.shower;
+                            continue;
+                        }
                     }
                 }
             }
         }
     }
-    
+
     // Mark showers for deletion if their start segment should be merged
     for (auto shower : showers) {
         SegmentPtr sg1 = shower->start_segment();
-        if (sg1 && map_merge_seg_shower.find(sg1) != map_merge_seg_shower.end()) {
+        if (sg1 && map_merge_seg_shower.count(sg1)) {
             sg1->set_flags(SegmentFlags::kAvoidMuonCheck);
             del_showers.insert(shower);
         }
     }
-    
+
     // Delete marked showers first
-    if (del_showers.size() != 0) {
-        for (auto shower1 : del_showers) {
-            showers.erase(shower1);
-        }
+    if (!del_showers.empty()) {
+        for (auto shower1 : del_showers) showers.erase(shower1);
         del_showers.clear();
-        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                           map_vertex_to_shower, used_shower_clusters);
     }
-    
-    // Perform the merging
-    std::set<ShowerPtr> updated_showers;
+
+    // Sort showers once for deterministic sub-shower absorption in the merge loop
+    std::vector<ShowerPtr> showers_sorted_merge(showers.begin(), showers.end());
+    std::sort(showers_sorted_merge.begin(), showers_sorted_merge.end(), shower_cmp);
+
+    // Perform the merging; track updated showers in stable index order for post-merge pass
+    std::vector<ShowerPtr> updated_showers_vec;
+    std::set<ShowerPtr>    updated_showers_set;
+
     for (auto& [sg, shower] : map_merge_seg_shower) {
         std::cout << "EM shower modification: " << shower->start_segment()->id() << " -> " << sg->id() << std::endl;
-        updated_showers.insert(shower);
-        
-        auto [pair_vertex, pair_conn_type] = shower->get_start_vertex_and_type();
-        
-        if (pair_conn_type != 1) {
-            shower->add_segment(sg);
-            shower->set_start_vertex(main_vertex, 1);
-            shower->set_start_segment(sg);
-            shower->set_start_point(main_vtx_pt);
-            std::set<SegmentPtr> tmp_used_segments;
-            shower->complete_structure_with_start_segment(tmp_used_segments);
-            if (segment_track_length(sg) > 44 * units::cm || sg->dir_weak()) {
-                sg->set_flags(SegmentFlags::kAvoidMuonCheck);
-            }
-        } else {
-            shower->add_segment(sg);
-            shower->set_start_vertex(main_vertex, 1);
-            shower->set_start_segment(sg);
-            shower->set_start_point(main_vtx_pt);
-            std::set<SegmentPtr> tmp_used_segments;
-            shower->complete_structure_with_start_segment(tmp_used_segments);
-            if (shower->get_num_main_segments() >= 3) {
-                sg->set_flags(SegmentFlags::kAvoidMuonCheck);
-            }
+        if (!updated_showers_set.count(shower)) {
+            updated_showers_vec.push_back(shower);
+            updated_showers_set.insert(shower);
         }
-        
-        // Add other showers that connect to this shower
+
+        auto [pair_vertex, pair_conn_type] = shower->get_start_vertex_and_type();
+
+        shower->add_segment(sg);
+        shower->set_start_vertex(main_vertex, 1);
+        shower->set_start_segment(sg);
+        shower->set_start_point(main_vtx_pt);
+        std::set<SegmentPtr> tmp_used_segments;
+        shower->complete_structure_with_start_segment(tmp_used_segments);
+        if (pair_conn_type != 1) {
+            if (segment_track_length(sg) > 44 * units::cm || sg->dir_weak())
+                sg->set_flags(SegmentFlags::kAvoidMuonCheck);
+        } else {
+            if (shower->get_num_main_segments() >= 3)
+                sg->set_flags(SegmentFlags::kAvoidMuonCheck);
+        }
+
+        // Absorb other showers whose start vertex is now inside this shower
         TrajectoryView& traj = shower->fill_maps();
         std::set<VertexPtr> shower_vertices;
         for (auto vdesc : traj.nodes()) {
             auto vtx = traj.view_graph()[vdesc].vertex;
             if (vtx) shower_vertices.insert(vtx);
         }
-        
-        for (auto shower1 : showers) {
+        for (auto shower1 : showers_sorted_merge) {
             if (shower == shower1) continue;
             auto [start_vtx1, conn_type1] = shower1->get_start_vertex_and_type();
-            if (conn_type1 == 1 && start_vtx1 != main_vertex) {
-                if (shower_vertices.find(start_vtx1) != shower_vertices.end()) {
-                    shower->add_shower(*shower1);
-                    del_showers.insert(shower1);
-                }
+            if (conn_type1 == 1 && start_vtx1 != main_vertex && shower_vertices.count(start_vtx1)) {
+                shower->add_shower(*shower1);
+                del_showers.insert(shower1);
             }
         }
-        
-        // Update particle type and kinematics
-        if (sg->has_particle_info() && sg->particle_info()) {
-            sg->particle_info()->set_pdg(11);
-        }
+
+        if (sg->has_particle_info() && sg->particle_info()) sg->particle_info()->set_pdg(11);
         shower->update_particle_type(particle_data, recomb_model);
         shower->calculate_kinematics(particle_data, recomb_model);
-        double kine_charge = cal_kine_charge(shower, graph, track_fitter, dv);
-        shower->set_kine_charge(kine_charge);
+        shower->set_kine_charge(cal_kine_charge(shower, graph, track_fitter, dv));
         shower->set_flag_kinematics(true);
     }
-    
+
     // Delete merged showers (not at main_vertex)
     for (auto shower1 : del_showers) {
         auto [start_vtx1, conn_type1] = shower1->get_start_vertex_and_type();
-        if (start_vtx1 != main_vertex) {
-            showers.erase(shower1);
-        }
+        if (start_vtx1 != main_vertex) showers.erase(shower1);
     }
     del_showers.clear();
-    
-    // Check other showers and merge with updated showers
-    for (auto shower : updated_showers) {
-        WireCell::Point shower_start = shower->get_start_point();
+
+    // Post-merge pass: check updated showers against remaining showers (sorted for determinism)
+    std::vector<ShowerPtr> showers_sorted_post(showers.begin(), showers.end());
+    std::sort(showers_sorted_post.begin(), showers_sorted_post.end(), shower_cmp);
+
+    for (auto shower : updated_showers_vec) {
+        WireCell::Point  shower_start = shower->get_start_point();
         WireCell::Vector dir1 = shower_cal_dir_3vector(*shower, shower_start, 25 * units::cm);
-        
-        for (auto shower1 : showers) {
-            if (updated_showers.find(shower1) != updated_showers.end()) continue;
-            if (shower1->start_segment() && shower1->start_segment()->has_particle_info() &&
+
+        for (auto shower1 : showers_sorted_post) {
+            if (updated_showers_set.count(shower1)) continue;
+            // Fixed: correct particle-type filter (was inverted — admitted unclassified showers)
+            if (!shower1->start_segment() || !shower1->start_segment()->has_particle_info() ||
                 shower1->start_segment()->particle_info()->pdg() != 11) continue;
-            
+
             auto [start_vtx1, conn_type1] = shower1->get_start_vertex_and_type();
-            if (conn_type1 == 2) {
-                if (del_showers.find(shower1) != del_showers.end()) continue;
-                
-                auto [shower_vtx, shower_conn] = shower->get_start_vertex_and_type();
-                WireCell::Point shower_vtx_pt = shower_vtx->fit().valid() ? shower_vtx->fit().point : shower_vtx->wcpt().point;
-                
-                WireCell::Vector dir2(shower1->get_start_point().x() - shower_vtx_pt.x(),
-                                     shower1->get_start_point().y() - shower_vtx_pt.y(),
-                                     shower1->get_start_point().z() - shower_vtx_pt.z());
-                WireCell::Vector dir3 = shower_cal_dir_3vector(*shower1, shower1->get_start_point(), 25 * units::cm);
-                
-                double angle_dir2 = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                double angle_dir3 = std::acos(std::clamp(dir1.dot(dir3) / (dir1.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                
-                if (angle_dir2 < 10 && angle_dir3 < 20) {
-                    shower->add_shower(*shower1);
-                    shower->calculate_kinematics(particle_data, recomb_model);
-                    double kine_charge = cal_kine_charge(shower, graph, track_fitter, dv);
-                    shower->set_kine_charge(kine_charge);
-                    shower->set_flag_kinematics(true);
-                    del_showers.insert(shower1);
-                }
+            if (conn_type1 != 2) continue;
+            if (del_showers.count(shower1)) continue;
+
+            auto [shower_vtx, shower_conn] = shower->get_start_vertex_and_type();
+            WireCell::Point shower_vtx_pt = shower_vtx->fit().valid() ? shower_vtx->fit().point : shower_vtx->wcpt().point;
+
+            WireCell::Vector dir2(shower1->get_start_point().x() - shower_vtx_pt.x(),
+                                 shower1->get_start_point().y() - shower_vtx_pt.y(),
+                                 shower1->get_start_point().z() - shower_vtx_pt.z());
+            WireCell::Vector dir3 = shower_cal_dir_3vector(*shower1, shower1->get_start_point(), 25 * units::cm);
+
+            double angle_dir2 = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+            double angle_dir3 = std::acos(std::clamp(dir1.dot(dir3) / (dir1.magnitude() * dir3.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
+
+            if (angle_dir2 < 10 && angle_dir3 < 20) {
+                shower->add_shower(*shower1);
+                shower->calculate_kinematics(particle_data, recomb_model);
+                shower->set_kine_charge(cal_kine_charge(shower, graph, track_fitter, dv));
+                shower->set_flag_kinematics(true);
+                del_showers.insert(shower1);
             }
         }
     }
-    
+
     // Final deletion
-    for (auto shower1 : del_showers) {
-        showers.erase(shower1);
-    }
-    
-    if (map_merge_seg_shower.size() > 0) {
-        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
+    for (auto shower1 : del_showers) showers.erase(shower1);
+
+    if (!map_merge_seg_shower.empty()) {
+        update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                           map_vertex_to_shower, used_shower_clusters);
     }
-    
-    // Finally call examine_shower_1
+
     examine_shower_1(graph, main_vertex, showers, main_cluster, other_clusters, map_cluster_main_vertices,
                     map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters,
                     track_fitter, dv, particle_data, recomb_model);
