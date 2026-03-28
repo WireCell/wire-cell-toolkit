@@ -41,10 +41,12 @@ void PatternAlgorithms::update_shower_maps(std::set<ShowerPtr>& showers,  std::m
         // Fill maps using TrajectoryView - iterate through all vertices and segments in the shower
         TrajectoryView& traj = shower->fill_maps();
         
-        // Fill map_vertex_in_shower with all vertices in this shower
+        // Fill map_vertex_in_shower with all vertices in this shower except start_vertex.
+        // Matches prototype: set_start_vertex() never adds to map_vtx_segs, so fill_maps()
+        // never includes start_vertex in map_vertex_in_shower.
         for (auto vdesc : traj.nodes()) {
             auto vtx = traj.view_graph()[vdesc].vertex;
-            if (vtx) {
+            if (vtx && vtx != start_vtx) {
                 map_vertex_in_shower[vtx] = shower;
             }
         }
@@ -170,7 +172,8 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
             if (segments_in_long_muon.count(sg1)) {
                 n_muons++;
                 length_muons += length;
-                if (length > max_muon_length) {
+                if (length > max_muon_length ||
+                    (length == max_muon_length && max_sg && sg1->id() < max_sg->id())) {
                     max_muon_length = length;
                     max_sg = sg1;
                 }
@@ -259,11 +262,11 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
         auto& main_vtx_segments = map_vertex_segments[main_vertex];
 
         for (auto sg : main_vtx_segments) {
+            // Skip segments already claimed by a shower before the expensive BFS traversal.
+            if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) continue;
+
             // Calculate total number of daughter segments for this segment
             auto pair_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
-
-            // Skip if segment is in a shower
-            if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) continue;
 
             // Get segment properties
             double medium_dQ_dx = segment_median_dQ_dx(sg);
@@ -352,8 +355,12 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                             bool flag_non_ele = false;
                             for (auto sg2 : map_vertex_segments[end_vertex]) {
                                 if (sg2 == sg1) continue;
-                                if (!sg2->flags_any(SegmentFlags::kShowerTrajectory) &&
-                                    !sg2->flags_any(SegmentFlags::kShowerTopology)) {
+                                // Matches prototype get_flag_shower(): shower topology/trajectory OR pdg==11
+                                bool sg2_is_shower = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                                     sg2->flags_any(SegmentFlags::kShowerTopology) ||
+                                                     (sg2->has_particle_info() && sg2->particle_info() &&
+                                                      std::abs(sg2->particle_info()->pdg()) == 11);
+                                if (!sg2_is_shower) {
                                     flag_non_ele = true;
                                     break;  // no need to check remaining segments
                                 }
@@ -382,9 +389,13 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 n_two_vtx < 3) {
 
                 map_shower_max_sg[shower] = max_sg;
-                if (shower->get_total_length() > max_length) {
+                double shower_len = shower->get_total_length();
+                if (shower_len > max_length ||
+                    (shower_len == max_length && max_shower &&
+                     shower->start_segment() && max_shower->start_segment() &&
+                     shower->start_segment()->id() < max_shower->start_segment()->id())) {
                     max_shower = shower;
-                    max_length = shower->get_total_length();
+                    max_length = shower_len;
                 }
             }
         }
@@ -1542,14 +1553,16 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
         std::set<ShowerPtr> used_showers;
         std::map<SegmentPtr, std::set<ShowerPtr>> map_segment_showers;
         std::map<SegmentPtr, ShowerPtr> map_segment_new_shower;
+        std::vector<SegmentPtr> seg_order;  // preserves outer-loop order for deterministic processing
         std::set<SegmentPtr> used_segments;
         std::set<ShowerPtr> del_showers;
-        
+
+        WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+
         // Loop over segments at main_vertex
-        if (map_vertex_segments.find(main_vertex) != map_vertex_segments.end()) {
-            WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
-            
-            for (auto sg : map_vertex_segments[main_vertex]) {
+        auto it_mv = map_vertex_segments.find(main_vertex);
+        if (it_mv != map_vertex_segments.end()) {
+            for (auto sg : it_mv->second) {
                 // Skip strong direction segments or certain particle types
                 if (!sg->dir_weak()) continue;
                 
@@ -1569,27 +1582,35 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                 shower1->complete_structure_with_start_segment(used_segments);
                 
                 WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
-                
-                // Check against existing showers
+
+                // Build shower1_vertices once — shower1 does not change in the inner loop.
+                TrajectoryView& traj1 = shower1->fill_maps();
+                std::set<VertexPtr> shower1_vertices;
+                for (auto vdesc : traj1.nodes()) {
+                    auto vtx = traj1.view_graph()[vdesc].vertex;
+                    if (vtx) shower1_vertices.insert(vtx);
+                }
+
+                // Check against existing showers.
+                // Order of guards: cheapest first to avoid the two expensive KD-tree calls
+                // (shower_get_closest_dis, shower_get_closest_point) for the majority of showers.
                 for (auto shower : showers) {
-                    double energy = shower->get_kine_charge();
-                    double min_dis = shower_get_closest_dis(*shower, sg);
-                    
-                    auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
-                    
-                    if (conn_type > 2 && min_dis > 3 * units::cm) continue;
+                    // 1. Already claimed by an earlier segment — skip before any other work.
+                    if (used_showers.count(shower)) continue;
+
+                    // 2. Cheap scalar/pointer checks.
                     if (shower->start_segment() && shower->start_segment()->has_particle_info() &&
                         shower->start_segment()->particle_info()->pdg() != 11) continue;
+
+                    auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
                     if (start_vtx == main_vertex && conn_type == 1) continue;
-                    
-                    // Get shower1's vertices
-                    TrajectoryView& traj1 = shower1->fill_maps();
-                    std::set<VertexPtr> shower1_vertices;
-                    for (auto vdesc : traj1.nodes()) {
-                        auto vtx = traj1.view_graph()[vdesc].vertex;
-                        if (vtx) shower1_vertices.insert(vtx);
-                    }
-                    
+
+                    // 3. First expensive KD-tree call — only for showers that pass cheap filters.
+                    double min_dis = shower_get_closest_dis(*shower, sg);
+                    if (conn_type > 2 && min_dis > 3 * units::cm) continue;
+
+                    double energy = shower->get_kine_charge();
+
                     if (conn_type == 1 && energy > 80 * units::MeV) {
                         if (shower1_vertices.find(start_vtx) == shower1_vertices.end()) continue;
                         else {
@@ -1599,7 +1620,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                         }
                     } else {
                         WireCell::Vector dir3 = shower_cal_dir_3vector(*shower, shower->get_start_point(), 15 * units::cm);
-                        
+
                         // Find closest vertex in shower1 to shower start point
                         WireCell::Point min_point;
                         double min_vtx_dis = 1e9;
@@ -1611,27 +1632,26 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                                 min_point = vtx3_pt;
                             }
                         }
-                        
+
                         WireCell::Vector dir4(shower->get_start_point().x() - min_point.x(),
                                              shower->get_start_point().y() - min_point.y(),
                                              shower->get_start_point().z() - min_point.z());
-                        
+
                         double angle3 = std::acos(std::clamp(dir3.dot(dir1) / (dir3.magnitude() * dir1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                         double angle4 = std::acos(std::clamp(dir4.dot(dir1) / (dir4.magnitude() * dir1.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
                         double tmp_angle = std::min(angle3, angle4);
-                        
+
                         if (energy > 25 * units::MeV && tmp_angle > 40) continue;
                     }
-                    
-                    if (used_showers.find(shower) != used_showers.end()) continue;
-                    
+
+                    // 4. Second expensive KD-tree call — final angle test.
                     auto [shower_dis, shower_point] = shower_get_closest_point(*shower, main_vtx_pt);
                     WireCell::Vector dir2(shower_point.x() - main_vtx_pt.x(),
                                          shower_point.y() - main_vtx_pt.y(),
                                          shower_point.z() - main_vtx_pt.z());
-                    
+
                     double angle = std::acos(std::clamp(dir1.dot(dir2) / (dir1.magnitude() * dir2.magnitude()), -1.0, 1.0)) / M_PI * 180.0;
-                    
+
                     if ((angle < 15 && min_dis < 36 * units::cm) ||
                         (angle < 10 && min_dis < 46 * units::cm) ||
                         (angle < 7.5)) {
@@ -1639,17 +1659,18 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                         used_showers.insert(shower);
                     }
                 }
-                
-                if (map_segment_showers.find(sg) != map_segment_showers.end()) {
+
+                if (map_segment_showers.count(sg)) {
                     map_segment_new_shower[sg] = shower1;
-                } else {
-                    // Shower1 will be deleted by shared_ptr
+                    seg_order.push_back(sg);  // record in outer-loop (graph-index) order
                 }
             }
         }
         
-        // Process segments with associated showers
-        for (auto& [sg, associated_showers] : map_segment_showers) {
+        // Process segments in the same order they were discovered (graph-index order),
+        // not in pointer order as a plain map iteration would give.
+        for (auto sg : seg_order) {
+            auto& associated_showers = map_segment_showers[sg];
             ShowerPtr shower1 = map_segment_new_shower[sg];
             int num_showers = associated_showers.size();
             
@@ -1713,9 +1734,12 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                             bool flag_non_ele = false;
                             for (auto sg2 : map_vertex_segments[end_vertex]) {
                                 if (sg2 == sg1) continue;
-                                bool is_shower = sg2->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                                sg2->flags_any(SegmentFlags::kShowerTopology);
-                                if (!is_shower) flag_non_ele = true;
+                                // Matches prototype get_flag_shower(): shower topology/trajectory OR pdg==11
+                                bool sg2_is_shower = sg2->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                                     sg2->flags_any(SegmentFlags::kShowerTopology) ||
+                                                     (sg2->has_particle_info() && sg2->particle_info() &&
+                                                      std::abs(sg2->particle_info()->pdg()) == 11);
+                                if (!sg2_is_shower) flag_non_ele = true;
                             }
                             if (!flag_non_ele && map_vertex_segments[end_vertex].size() <= 3) {
                                 flag_good_track = true;
@@ -1811,29 +1835,30 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                 if (conn_type != 1) continue;
                 
                 WireCell::Vector dir1 = shower_cal_dir_3vector(*shower, main_vtx_pt, 15 * units::cm);
-                
+
+                // Build shower_vertices once — shower does not change in the inner loop.
+                TrajectoryView& traj_shower = shower->fill_maps();
+                std::set<VertexPtr> shower_vertices;
+                for (auto vdesc : traj_shower.nodes()) {
+                    auto vtx = traj_shower.view_graph()[vdesc].vertex;
+                    if (vtx) shower_vertices.insert(vtx);
+                }
+
                 for (auto shower1 : showers) {
-                    double energy = shower1->get_kine_charge();
-                    double min_dis = shower_get_closest_dis(*shower1, shower->start_segment());
-                    
-                    auto [start_vtx1, conn_type1] = shower1->get_start_vertex_and_type();
-                    
-                    if (conn_type1 > 2 && min_dis > 3 * units::cm) continue;
+                    // Cheap guards before the expensive KD-tree call.
                     if (shower1->start_segment() && shower1->start_segment()->has_particle_info() &&
                         shower1->start_segment()->particle_info()->pdg() != 11) continue;
+
+                    auto [start_vtx1, conn_type1] = shower1->get_start_vertex_and_type();
                     if (start_vtx1 == main_vertex && conn_type1 == 1) continue;
-                    
-                    // Get shower's vertices
-                    TrajectoryView& traj_shower = shower->fill_maps();
-                    std::set<VertexPtr> shower_vertices;
-                    for (auto vdesc : traj_shower.nodes()) {
-                        auto vtx = traj_shower.view_graph()[vdesc].vertex;
-                        if (vtx) shower_vertices.insert(vtx);
-                    }
-                    
                     if (conn_type1 == 1 && shower_vertices.find(start_vtx1) == shower_vertices.end()) continue;
-                    
                     if (shower1->get_total_length() < 3 * units::cm) continue;
+
+                    // Expensive KD-tree call — only after cheap filters pass.
+                    double min_dis = shower_get_closest_dis(*shower1, shower->start_segment());
+                    if (conn_type1 > 2 && min_dis > 3 * units::cm) continue;
+
+                    double energy = shower1->get_kine_charge();
                     
                     auto [shower_dis, shower_point] = shower_get_closest_point(*shower1, main_vtx_pt);
                     WireCell::Vector dir2(shower_point.x() - main_vtx_pt.x(),
@@ -1874,12 +1899,15 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
                 }
             }
             
-            if (acc_energy > max_energy) {
+            if (acc_energy > max_energy ||
+                (acc_energy == max_energy && max_shower &&
+                 shower->start_segment() && max_shower->start_segment() &&
+                 shower->start_segment()->id() < max_shower->start_segment()->id())) {
                 max_energy = acc_energy;
                 max_shower = shower;
             }
         }
-        
+
         if (max_shower) {
             for (auto shower1 : map_shower_showers[max_shower]) {
                 max_shower->add_shower(*shower1);
@@ -1932,9 +1960,9 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
     // Loop over segments at main_vertex
     if (map_vertex_segments.find(main_vertex) != map_vertex_segments.end()) {
         for (auto sg : map_vertex_segments[main_vertex]) {
-            // Skip if already in shower and not a muon
-            if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) {
-                if (sg->has_particle_info() && sg->particle_info()->pdg() != 13) continue;
+            // Skip if already in shower and not a muon (unclassified segments also skipped, matching prototype)
+            if (map_segment_in_shower.count(sg)) {
+                if (!sg->has_particle_info() || std::abs(sg->particle_info()->pdg()) != 13) continue;
             }
             
             double sg_length = segment_track_length(sg);
@@ -1965,7 +1993,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
                 
                 // First pass: check for high-energy directly connected showers
                 for (auto shower : map_vertex_to_shower[vtx]) {
-                    if (shower->start_segment() && shower->start_segment()->has_particle_info() &&
+                    if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
                         shower->start_segment()->particle_info()->pdg() != 11) continue;
                     
                     auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -1976,7 +2004,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
                 
                 // Second pass: check merging conditions
                 for (auto shower : map_vertex_to_shower[vtx]) {
-                    if (shower->start_segment() && shower->start_segment()->has_particle_info() &&
+                    if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
                         shower->start_segment()->particle_info()->pdg() != 11) continue;
                     
                     auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
@@ -2051,9 +2079,9 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
                 WireCell::Vector dir1 = segment_cal_dir_3vector(sg, main_vtx_pt, 15 * units::cm);
                 
                 for (auto shower : map_vertex_to_shower[main_vertex]) {
-                    if (shower->start_segment() && shower->start_segment()->has_particle_info() &&
+                    if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
                         shower->start_segment()->particle_info()->pdg() != 11) continue;
-                    
+
                     auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
                     if (conn_type == 1) continue; // Skip directly connected
                     
@@ -2088,9 +2116,9 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
                 auto [start_vtx_shower, conn_type_shower] = shower->get_start_vertex_and_type();
                 if (start_vtx_shower == vtx || start_vtx_shower == main_vertex) continue;
                 
-                if (shower->start_segment() && shower->start_segment()->has_particle_info() &&
+                if (!shower->start_segment() || !shower->start_segment()->has_particle_info() ||
                     shower->start_segment()->particle_info()->pdg() != 11) continue;
-                
+
                 if (conn_type_shower <= 2) {
                     WireCell::Vector dir2(shower->get_start_point().x() - main_vtx_pt.x(),
                                          shower->get_start_point().y() - main_vtx_pt.y(),
