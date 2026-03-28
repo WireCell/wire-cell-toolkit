@@ -261,7 +261,21 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     //                     main_cluster->get_cluster_id(), n_main_cluster_vertices,
     //                     n_main_cluster_segments, n_main_cluster_fit_points);
 
+    int acc_segment_id = 0;
+    std::set<ShowerPtr> pi0_showers;
+    std::map<ShowerPtr, int> map_shower_pio_id;
+    std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
+    std::map<int, std::pair<double, int>> map_pio_id_mass;
+    std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
+    std::map<VertexPtr, ShowerPtr> map_vertex_in_shower;
+    std::map<SegmentPtr, ShowerPtr> map_segment_in_shower;
+    std::map<VertexPtr, std::set<ShowerPtr>> map_vertex_to_shower;
+    std::set<Facade::Cluster*> used_shower_clusters;
+    std::set<ShowerPtr> showers;
+
     if (final_main_vertex) {
+   
+
         pattern_algos.improve_vertex(*pr_graph, *main_cluster, final_main_vertex,
                                      vertices_in_long_muon, segments_in_long_muon,
                                      *m_track_fitter, m_dv, particle_data(), m_recomb_model,
@@ -279,6 +293,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
 
         pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+
+        pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
+                                                map_shower_pio_id, map_pio_id_showers,
+                                                map_pio_id_mass, map_pio_id_saved_pair,
+                                                vertices_in_long_muon, segments_in_long_muon,
+                                                *pr_graph, final_main_vertex, showers,
+                                                main_cluster, other_clusters,
+                                                map_cluster_main_vertices,
+                                                map_vertex_in_shower, map_segment_in_shower,
+                                                map_vertex_to_shower, used_shower_clusters,
+                                                *m_track_fitter, m_dv, particle_data(),
+                                                m_recomb_model);
 
         
     }
