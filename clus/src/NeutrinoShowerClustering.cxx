@@ -1313,6 +1313,14 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
         int connection_type = 3;
         
         if (sg) {
+            // Ensure the segment has a "fit" dpcloud before adding to the shower.
+            // Segments from other clusters may have fits() but no dpcloud("fit") if
+            // they were not individually track-fitted (create_segment_fit_point_cloud
+            // was never called for them). Build it now so set_start_segment can copy it.
+            if (!sg->dpcloud("fit") && !sg->fits().empty()) {
+                create_segment_fit_point_cloud(sg, dv, "fit");
+            }
+
             // Create new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(min_vertex, connection_type);
@@ -1442,11 +1450,16 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
         if (!flag_save) connection_type = 4;
         
         if (sg) {
+            // Ensure the segment has a "fit" dpcloud before adding to the shower.
+            if (!sg->dpcloud("fit") && !sg->fits().empty()) {
+                create_segment_fit_point_cloud(sg, dv, "fit");
+            }
+
             // Create new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
             shower->set_start_vertex(min_vertex, connection_type);
             shower->set_start_segment(sg);
-            
+
             // Set direction if not already set
             if (sg->dirsign() == 0) {
                 // find_vertices returns (front_vtx, back_vtx) ordered by proximity
@@ -3149,22 +3162,28 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
             }
             // Use data.start_point if set; fall back to start_vertex position.
             WireCell::Point sp = shower->get_start_point();
-            if (sp.x() == 0 && sp.y() == 0 && sp.z() == 0) {
-                auto vtx = shower->start_vertex();
-                if (vtx) sp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
-            }
+            // if (sp.x() == 0 && sp.y() == 0 && sp.z() == 0) {
+            //     auto vtx = shower->start_vertex();
+            //     if (vtx) sp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            // }
             WireCell::Vector dir = shower->get_init_dir();
             auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+            auto start_seg = shower->start_segment();
+            int start_seg_dirsign = start_seg ? start_seg->dirsign() : -99;
+            WireCell::Point vtx_pt(0, 0, 0);
+            if (start_vtx) vtx_pt = start_vtx->fit().valid() ? start_vtx->fit().point : start_vtx->wcpt().point;
             SPDLOG_LOGGER_DEBUG(s_log,
                 "shower_clustering_with_nv:   shower[{}] pdg={} flag_shower={} conn={}"
                 " nseg={} ncls={} kine_charge={:.1f}MeV"
-                " start=({:.1f},{:.1f},{:.1f})cm dir=({:.3f},{:.3f},{:.3f})",
+                " start=({:.1f},{:.1f},{:.1f})cm vtx=({:.1f},{:.1f},{:.1f})cm"
+                " dir=({:.3f},{:.3f},{:.3f}) seg_dirsign={}",
                 idx++,
                 shower->get_particle_type(), shower->get_flag_shower() ? 1 : 0, conn_type,
                 shower->get_num_segments(), shower_clusters.size(),
                 shower->get_kine_charge() / units::MeV,
                 sp.x() / units::cm, sp.y() / units::cm, sp.z() / units::cm,
-                dir.x(), dir.y(), dir.z());
+                vtx_pt.x() / units::cm, vtx_pt.y() / units::cm, vtx_pt.z() / units::cm,
+                dir.x(), dir.y(), dir.z(), start_seg_dirsign);
         }
 
         SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv: {} pi0(s)", map_pio_id_showers.size());

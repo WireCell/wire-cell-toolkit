@@ -888,7 +888,15 @@ namespace WireCell::Clus::PR {
             
             // Calculate start_point and end_point
             const auto& fits = m_start_segment->fits();
-            if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
+            bool has_fit_pcloud = (this->dpcloud("fit") != nullptr);
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "calculate_kinematics start_point: nseg=1 conn_type={} nfits={} dirsign={}"
+                " has_fit_pcloud={} has_start_vertex={} vtx_fit_valid={}",
+                data.start_connection_type, fits.size(), m_start_segment->dirsign(),
+                has_fit_pcloud ? 1 : 0,
+                m_start_vertex ? 1 : 0,
+                (m_start_vertex && m_start_vertex->fit().valid()) ? 1 : 0);
+            if (data.start_connection_type == 1 || !has_fit_pcloud) {
                 if (!fits.empty()) {
                     if (m_start_segment->dirsign() == 1) {
                         data.start_point = fits.front().point;
@@ -898,10 +906,30 @@ namespace WireCell::Clus::PR {
                         data.end_point = fits.front().point;
                     }
                 }
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "calculate_kinematics start_point:   branch=fits start=({:.1f},{:.1f},{:.1f})cm",
+                    data.start_point.x()/units::cm, data.start_point.y()/units::cm, data.start_point.z()/units::cm);
             } else {
                 if (m_start_vertex) {
-                    data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
-                    
+                    auto [sgcp_dis, sgcp_pt] = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit");
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "calculate_kinematics start_point:   branch=shower_get_closest vtx=({:.1f},{:.1f},{:.1f})cm"
+                        " closest_dis={:.3f}cm closest_pt=({:.1f},{:.1f},{:.1f})cm fit_pcloud_npts={}",
+                        m_start_vertex->fit().point.x()/units::cm,
+                        m_start_vertex->fit().point.y()/units::cm,
+                        m_start_vertex->fit().point.z()/units::cm,
+                        sgcp_dis/units::cm,
+                        sgcp_pt.x()/units::cm, sgcp_pt.y()/units::cm, sgcp_pt.z()/units::cm,
+                        this->dpcloud("fit") ? (int)this->dpcloud("fit")->get_points().size() : -1);
+                    data.start_point = sgcp_pt;
+                    // Fallback: if "fit" pcloud is absent or empty, use fits directly (same as conn_type==1)
+                    if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {
+                        SPDLOG_LOGGER_DEBUG(s_log, "calculate_kinematics start_point:   shower_get_closest returned (0,0,0), applying fits fallback");
+                        if (!fits.empty()) {
+                            data.start_point = (m_start_segment->dirsign() == -1) ? fits.back().point : fits.front().point;
+                        }
+                    }
+
                     // Find farthest vertex — ordered_nodes gives index-stable tie-breaking
                     double max_dis = 0;
                     const auto& view = this->view_graph();
@@ -1043,9 +1071,16 @@ namespace WireCell::Clus::PR {
                 } else {
                     if (m_start_vertex) {
                         data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
+                        // // Fallback: if "fit" pcloud is absent or empty, use fits directly
+                        // if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {
+                        //     const auto& fits2 = m_start_segment->fits();
+                        //     if (!fits2.empty()) {
+                        //         data.start_point = (m_start_segment->dirsign() == -1) ? fits2.back().point : fits2.front().point;
+                        //     }
+                        // }
                     }
                 }
-                
+
                 // Calculate init_dir
                 double seg_length = segment_track_length(m_start_segment);
                 if (data.start_connection_type == 1) {
@@ -1084,7 +1119,7 @@ namespace WireCell::Clus::PR {
                         data.end_point = vtx->fit().point;
                     }
                 }
-                
+
                 // Collect all dQ and dx from all segments
                 std::vector<double> vec_dQ, vec_dx;
                 for (auto edesc : this->edges()) {

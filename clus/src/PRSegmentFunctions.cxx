@@ -74,11 +74,14 @@ namespace WireCell::Clus::PR {
             raise<RuntimeError>("create_segment_fit_point_cloud: invalid segment or missing cluster");
         }
         
-        // Extract points from segment fits
+        // Extract points from segment fits.
+        // fit.valid() checks index>=0, which is only set during full track fitting.
+        // Segments initialized from wcpts (e.g. via clear_fit) have index=-1 but
+        // still carry valid 3D positions. Include any fit whose point is non-zero.
         const auto& fits = segment->fits();
         fit_points.reserve(fits.size());
         for (const auto& fit : fits) {
-            if (fit.valid()) {
+            if (fit.valid() || (fit.point.x() != 0 || fit.point.y() != 0 || fit.point.z() != 0)) {
                 fit_points.push_back(fit.point);
             }
         }
