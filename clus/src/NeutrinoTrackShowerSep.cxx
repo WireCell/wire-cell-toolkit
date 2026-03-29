@@ -140,19 +140,19 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_track += MS(Clock::now() - t0);
         }
 
-        // if (m_perf) {
-        //     double length = segment_track_length(seg, 0);
-        //     int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
-        //     double mass   = seg->has_particle_info() ? seg->particle_info()->mass() / units::MeV : 0.0;
-        //     double ke     = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0;
-        //     double score  = seg->particle_score();
-        //     SPDLOG_LOGGER_DEBUG(s_log,
-        //         "determine_direction: {} len={:.2f}cm dir={} weak={} start_n={} end_n={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
-        //         seg_type, length / units::cm,
-        //         seg->dirsign(), seg->dir_weak() ? 1 : 0,
-        //         start_n, end_n,
-        //         pdg, mass, ke, score);
-        // }
+        {
+            const char* seg_type = seg->flags_any(SegmentFlags::kShowerTrajectory) ? "S_traj"
+                                 : seg->flags_any(SegmentFlags::kShowerTopology)   ? "S_topo"
+                                 : "Track";
+            double length = segment_track_length(seg);
+            int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "determine_direction: {} nfits={} nwcpts={} len={:.2f}cm dirsign={} dir_weak={}"
+                " start_n={} end_n={} pdg={}",
+                seg_type, seg->fits().size(), seg->wcpts().size(), length / units::cm,
+                seg->dirsign(), seg->dir_weak() ? 1 : 0,
+                start_n, end_n, pdg);
+        }
     }
 
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "determine_direction timing: shower_traj={:.3f}ms shower_topo={:.3f}ms track={:.3f}ms TOTAL={:.3f}ms",

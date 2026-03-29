@@ -1055,14 +1055,17 @@ namespace WireCell::Clus::PR {
 
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg){
         const auto& fits = seg->fits();
+        int flag_dir = seg->dirsign();
 
         if (fits.size() < 2) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "segment_cal_dir_3vector: seg id={} nfits={} dirsign={} — too few fits, returning (0,0,0)",
+                seg->id(), fits.size(), flag_dir);
             return WireCell::Vector(0, 0, 0);
         }
-        
+
         WireCell::Point p(0, 0, 0);
-        int flag_dir = seg->dirsign();
-        
+
         if (flag_dir == 1) {
             // Forward direction: from first point using next few points
             for (size_t i = 1; i < 5 && i < fits.size(); i++) {
@@ -1077,6 +1080,9 @@ namespace WireCell::Clus::PR {
             }
         } else {
             // flag_dir == 0: direction undetermined, return zero vector (matches prototype)
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "segment_cal_dir_3vector: seg id={} nfits={} dirsign=0 — direction undetermined, returning (0,0,0)",
+                seg->id(), fits.size());
             return WireCell::Vector(0, 0, 0);
         }
         

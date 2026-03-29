@@ -193,7 +193,8 @@ namespace WireCell::Clus::Facade {
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;
         // In class Grouping definition
-        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int apa, const int face, const int plane) const;
+        /// @param wire  local wire index within the plane (NOT global channel number)
+        std::pair<double,double> convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const;
 
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)

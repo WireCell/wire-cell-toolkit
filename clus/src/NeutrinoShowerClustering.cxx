@@ -2995,9 +2995,24 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
 
 
 void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
-    // Collect 2D charge maps once for the entire shower_clustering_with_nv call tree.
-    // All cal_kine_charge call sites reuse m_charge_* instead of re-collecting.
-    collect_charge_maps(track_fitter);
+    // Diagnostic: print dirsign for all main-cluster segments at entry,
+    // to verify examine_direction() ran correctly before this call.
+    if (main_cluster) {
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr seg = graph[e].segment;
+            if (!seg || seg->cluster() != main_cluster) continue;
+            if (seg->fits().size() >= 2) {  // only segments with real fit data
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "shower_clustering_with_nv entry: seg id={} nfits={} nwcpts={} dirsign={} dir_weak={}"
+                    " shower_topo={} shower_traj={} pdg={}",
+                    seg->id(), seg->fits().size(), seg->wcpts().size(),
+                    seg->dirsign(), seg->dir_weak() ? 1 : 0,
+                    seg->flags_any(SegmentFlags::kShowerTopology) ? 1 : 0,
+                    seg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0,
+                    seg->has_particle_info() ? seg->particle_info()->pdg() : 0);
+            }
+        }
+    }
 
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
@@ -3041,7 +3056,15 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
                                            vertices_in_long_muon, segments_in_long_muon,
                                            track_fitter, dv, particle_data, recomb_model);
     t_from_vertices = MS(Clock::now() - t0); t0 = Clock::now();
-    
+
+    // Collect 2D charge maps ONCE here — after track fitting (shower_clustering_with_nv_from_vertices)
+    // has populated the underlying charge data, but before any kinematics calculations.
+    // All cal_kine_charge call sites below reuse m_charge_* to avoid repeated O(N_hits) collection.
+    collect_charge_maps(track_fitter);
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "shower_clustering_with_nv: collected charge maps U={} V={} W={} hits, {} shower(s) before calc_kine_1",
+        m_charge_2d_u.size(), m_charge_2d_v.size(), m_charge_2d_w.size(), showers.size());
+
     // Calculate shower kinematics
     calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                 graph, track_fitter, dv, particle_data, recomb_model);
@@ -3063,6 +3086,8 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
     t_in_other_clusters = MS(Clock::now() - t0); t0 = Clock::now();
     
     // Calculate shower kinematics again
+    SPDLOG_LOGGER_DEBUG(s_log,
+        "shower_clustering_with_nv: {} shower(s) before calc_kine_2", showers.size());
     calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                 graph, track_fitter, dv, particle_data, recomb_model);
     t_calc_kine_2 = MS(Clock::now() - t0); t0 = Clock::now();
@@ -3108,5 +3133,63 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<S
         SPDLOG_LOGGER_DEBUG(s_log,
             "shower_clustering_with_nv timing: TOTAL={:.3f}ms",
             MS(Clock::now() - t_total).count());
+    }
+
+    // Debug summary: showers and pi0s
+    {
+        SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv: {} shower(s)", showers.size());
+        int idx = 0;
+        for (auto& shower : showers) {
+            if (!shower) continue;
+            // Count unique clusters via map_segment_in_shower (already up-to-date)
+            std::set<Facade::Cluster*> shower_clusters;
+            for (auto& [seg, sh] : map_segment_in_shower) {
+                if (sh == shower && seg && seg->cluster())
+                    shower_clusters.insert(seg->cluster());
+            }
+            // Use data.start_point if set; fall back to start_vertex position.
+            WireCell::Point sp = shower->get_start_point();
+            if (sp.x() == 0 && sp.y() == 0 && sp.z() == 0) {
+                auto vtx = shower->start_vertex();
+                if (vtx) sp = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+            }
+            WireCell::Vector dir = shower->get_init_dir();
+            auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "shower_clustering_with_nv:   shower[{}] pdg={} flag_shower={} conn={}"
+                " nseg={} ncls={} kine_charge={:.1f}MeV"
+                " start=({:.1f},{:.1f},{:.1f})cm dir=({:.3f},{:.3f},{:.3f})",
+                idx++,
+                shower->get_particle_type(), shower->get_flag_shower() ? 1 : 0, conn_type,
+                shower->get_num_segments(), shower_clusters.size(),
+                shower->get_kine_charge() / units::MeV,
+                sp.x() / units::cm, sp.y() / units::cm, sp.z() / units::cm,
+                dir.x(), dir.y(), dir.z());
+        }
+
+        SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv: {} pi0(s)", map_pio_id_showers.size());
+        for (auto& [pio_id, pi0_shower_vec] : map_pio_id_showers) {
+            auto mass_it = map_pio_id_mass.find(pio_id);
+            double mass = mass_it != map_pio_id_mass.end() ? mass_it->second.first : 0.0;
+            int    flag = mass_it != map_pio_id_mass.end() ? mass_it->second.second : 0;
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "shower_clustering_with_nv:   pi0[id={}] flag={} mass={:.1f}MeV",
+                pio_id, flag, mass / units::MeV);
+            for (size_t i = 0; i < pi0_shower_vec.size(); ++i) {
+                auto& s = pi0_shower_vec[i];
+                if (!s) continue;
+                WireCell::Point  sp  = s->get_start_point();
+                WireCell::Vector dir = s->get_init_dir();
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "shower_clustering_with_nv:     pi0[id={}] shower[{}] pdg={}"
+                    " nseg={} kine_charge={:.1f}MeV"
+                    " start=({:.1f},{:.1f},{:.1f})cm dir=({:.3f},{:.3f},{:.3f})",
+                    pio_id, i,
+                    s->get_particle_type(), s->get_num_segments(),
+                    s->get_kine_charge() / units::MeV,
+                    sp.x() / units::cm, sp.y() / units::cm, sp.z() / units::cm,
+                    dir.x(), dir.y(), dir.z());
+            }
+        }
     }
 }

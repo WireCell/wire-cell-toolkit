@@ -69,6 +69,12 @@ namespace WireCell::Clus::Facade {
         std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info(const geo_point_t &p, const int plane,
                                                                               const int face, const int apa) const;
 
+        /// @brief Like get_closest_2d_point_info but takes pre-projected (drift, wire_perp) coordinates
+        /// directly from Grouping::convert_time_wire_2Dpoint(), bypassing the internal angle projection.
+        /// Use this when the 2D coordinates are already in the wire-perpendicular space.
+        std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info_direct(
+            double drift, double wire_perp, const int plane, const int face, const int apa) const;
+
         /// @brief Return (angle_u, angle_v, angle_w) for the given face/apa from the stored wpid_params.
         /// Returns {0,0,0} if the face/apa combination is not found.
         std::array<double, 3> get_angles(int face, int apa) const;

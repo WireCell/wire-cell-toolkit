@@ -320,6 +320,32 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
     return std::make_tuple(distance, pt.cluster, global_idx);
 }
 
+std::tuple<double, const Cluster *, size_t>
+DynamicPointCloud::get_closest_2d_point_info_direct(
+    double drift, double wire_perp, const int plane, const int face, const int apa) const
+{
+    auto &kd2d = this->kd2d(plane, face, apa);
+    auto &l2g  = this->kd2d_l2g(plane, face, apa);
+
+    // Query directly with (drift, wire_perp) — no angle projection needed because
+    // convert_time_wire_2Dpoint already returns coordinates in the wire-perpendicular space
+    // that matches the KD2D tree's storage format.
+    const std::vector<double> query = {drift, wire_perp};
+    auto results = kd2d.knn(1, query);
+
+    if (results.empty()) {
+        return std::make_tuple(-1.0, nullptr, static_cast<size_t>(-1));
+    }
+
+    const size_t local_idx  = results[0].first;
+    const double distance   = sqrt(results[0].second);
+    const size_t global_idx = l2g.at(local_idx);
+    const auto  &pt         = m_points[global_idx];
+
+    return std::make_tuple(distance, pt.cluster, global_idx);
+}
+
+
 std::pair<double, double> DynamicPointCloud::hough_transform(const geo_point_t &origin, const double dis) const
 {
     auto &kd3d = this->kd3d();

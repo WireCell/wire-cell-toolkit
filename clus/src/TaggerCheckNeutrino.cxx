@@ -286,14 +286,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
 
+        
+
+        // examine_direction runs last and has the final word on segment orientations
+        // relative to the main vertex.
         pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
                                         vertices_in_long_muon, segments_in_long_muon,
                                         particle_data(), m_recomb_model, true);
 
         SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
         // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
-
-        pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
 
         pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
                                                 map_shower_pio_id, map_pio_id_showers,

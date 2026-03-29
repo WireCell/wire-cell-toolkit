@@ -3,7 +3,11 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/PRShowerFunctions.h"
 #include "WireCellClus/DynamicPointCloud.h"
+#include "WireCellUtil/Logging.h"
 #include <unordered_set>
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+
 namespace WireCell::Clus::PR {
 
  
@@ -921,6 +925,10 @@ namespace WireCell::Clus::PR {
                     data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
                 }
             }
+            // Fallback: if direction is still zero, use shower_cal_dir_3vector from start vertex
+            if (data.init_dir.magnitude() == 0 && m_start_vertex) {
+                data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
+            }
             
         } else {
             // Multiple segments case
@@ -1051,7 +1059,19 @@ namespace WireCell::Clus::PR {
                         data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
                     }
                 }
-                
+                // Fallback: if direction is still zero, use shower_cal_dir_3vector from start vertex
+                if (data.init_dir.magnitude() == 0) {
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "calculate_kinematics: nseg={} conn_type={} seg_length={:.1f}cm"
+                        " seg_nfits={} seg_dirsign={} — init_dir is zero, applying fallback",
+                        get_num_segments(), data.start_connection_type,
+                        seg_length / units::cm,
+                        m_start_segment->fits().size(), m_start_segment->dirsign());
+                    if (m_start_vertex) {
+                        data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
+                    }
+                }
+
                 // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
                 double max_dis = 0;
                 const auto& view = this->view_graph();

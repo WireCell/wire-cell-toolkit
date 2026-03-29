@@ -1159,16 +1159,23 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             // Determine segment direction
             if (current_sg->dirsign() == 0 || current_sg->dir_weak() || is_shower || flag_final) {
                 const auto& wcps = current_sg->wcpts();
+                s_log->debug("examine_direction: processing seg nfits={} nwcpts={} dirsign_before={}"
+                    " is_shower={} shower_topo={} shower_traj={}",
+                    current_sg->fits().size(), wcps.size(), current_sg->dirsign(),
+                    is_shower ? 1 : 0,
+                    current_sg->flags_any(SegmentFlags::kShowerTopology) ? 1 : 0,
+                    current_sg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0);
                 if (!wcps.empty()) {
                     bool flag_start = (ray_length(Ray{wcps.front().point, prev_vtx->wcpt().point}) <
                                       ray_length(Ray{wcps.back().point, prev_vtx->wcpt().point}));
-                    
+
                     // Set direction
                     if (flag_start) {
                         current_sg->dirsign(1);
                     } else {
                         current_sg->dirsign(-1);
                     }
+                    s_log->debug("examine_direction:   → dirsign set to {}", current_sg->dirsign());
                     
                     // Determine particle type
                     if (flag_shower_in && current_sg->dirsign() == 0 && !is_shower) {
