@@ -4,9 +4,11 @@
 #include "WireCellClus/PRShowerFunctions.h"
 #include "WireCellClus/DynamicPointCloud.h"
 #include "WireCellUtil/Logging.h"
+#include <atomic>
 #include <unordered_set>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
+static std::atomic<int> s_shower_id_counter{0};
 
 namespace WireCell::Clus::PR {
 
@@ -16,6 +18,9 @@ namespace WireCell::Clus::PR {
         : TrajectoryView(graph)
         , m_full_graph(graph)
     {
+        // Assign a stable, unique shower ID
+        m_shower_id = s_shower_id_counter.fetch_add(1, std::memory_order_relaxed);
+
         // Initialize all ShowerData members to defaults
         data.particle_type = 0;
         data.kenergy_range = 0;
@@ -438,8 +443,8 @@ namespace WireCell::Clus::PR {
     }
 
     std::pair<IndexedVertexSet, IndexedSegmentSet> Shower::get_connected_pieces(SegmentPtr seg){
-        IndexedVertexSet  result_vertices{VertexIndexCmp(m_full_graph)};
-        IndexedSegmentSet result_segments{SegmentIndexCmp(m_full_graph)};
+        IndexedVertexSet  result_vertices;
+        IndexedSegmentSet result_segments;
 
         if (!seg || !seg->descriptor_valid() || !this->has_edge(seg->get_descriptor())) {
             return std::make_pair(result_vertices, result_segments);
@@ -1141,7 +1146,7 @@ namespace WireCell::Clus::PR {
         }
     }
 
-    void Shower::calculate_kinematics_long_muon(std::set<SegmentPtr>& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
         // Get particle type from start segment
         int particle_type = abs(m_start_segment->particle_info()->pdg());
         // double particle_mass = m_start_segment->particle_info()->mass();

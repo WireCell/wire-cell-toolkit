@@ -5,6 +5,7 @@
 #include "WireCellClus/PRTrajectoryView.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRSegment.h"
+#include "WireCellClus/Facade_Cluster.h"
 
 #include "WireCellUtil/Flagged.h"
 #include "WireCellUtil/Point.h"
@@ -12,29 +13,27 @@
 #include "WireCellIface/IRecombinationModel.h"
 #include "WireCellClus/ParticleDataSet.h"
 
+#include <map>
 #include <set>
 
 namespace WireCell::Clus::PR {
 
     /** Comparators for VertexPtr and SegmentPtr that order by the stable
-     *  NodeBundle/EdgeBundle index rather than by raw pointer address.
+     *  graph index stored directly in the object rather than by raw pointer
+     *  address.  No graph reference is required.
      *
      *  Use these (via IndexedVertexSet / IndexedSegmentSet) wherever a
      *  std::set<VertexPtr> or std::set<SegmentPtr> must produce a
      *  deterministic iteration order across runs.
      */
     struct VertexIndexCmp {
-        const Graph* g{nullptr};
-        explicit VertexIndexCmp(const Graph& graph) : g(&graph) {}
         bool operator()(const VertexPtr& a, const VertexPtr& b) const {
-            return (*g)[a->get_descriptor()].index < (*g)[b->get_descriptor()].index;
+            return a->get_graph_index() < b->get_graph_index();
         }
     };
     struct SegmentIndexCmp {
-        const Graph* g{nullptr};
-        explicit SegmentIndexCmp(const Graph& graph) : g(&graph) {}
         bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
-            return (*g)[a->get_descriptor()].index < (*g)[b->get_descriptor()].index;
+            return a->get_graph_index() < b->get_graph_index();
         }
     };
     using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;
@@ -153,6 +152,9 @@ namespace WireCell::Clus::PR {
 
         void add_segment(SegmentPtr seg, bool flag_include_vertices = false, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
 
+        // stable shower ID (assigned at construction, unique per run)
+        int get_shower_id() const { return m_shower_id; }
+
         // particle type
         int get_particle_type(){return data.particle_type;};
         void set_particle_type(int val){data.particle_type = val;};
@@ -208,17 +210,37 @@ namespace WireCell::Clus::PR {
         // calculate the kinematics
         void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        void calculate_kinematics_long_muon(std::set<SegmentPtr>& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
 
     private:
 
         Graph& m_full_graph;
         VertexPtr m_start_vertex;
         SegmentPtr m_start_segment;
+        int m_shower_id{-1};
 
     };
 
     using ShowerPtr = std::shared_ptr<Shower>;
+
+    struct ShowerIndexCmp {
+        bool operator()(const ShowerPtr& a, const ShowerPtr& b) const {
+            return a->get_shower_id() < b->get_shower_id();
+        }
+    };
+    using IndexedShowerSet   = std::set<ShowerPtr, ShowerIndexCmp>;
+    using ShowerVertexMap    = std::map<VertexPtr,  ShowerPtr, VertexIndexCmp>;
+    using ShowerSegmentMap   = std::map<SegmentPtr, ShowerPtr, SegmentIndexCmp>;
+    using VertexShowerSetMap = std::map<VertexPtr,  IndexedShowerSet, VertexIndexCmp>;
+    using ShowerIntMap       = std::map<ShowerPtr,  int, ShowerIndexCmp>;
+
+    struct ClusterPtrCmp {
+        bool operator()(Facade::Cluster* a, Facade::Cluster* b) const {
+            return a->get_cluster_id() < b->get_cluster_id();
+        }
+    };
+    using ClusterPtrSet    = std::set<Facade::Cluster*, ClusterPtrCmp>;
+    using ClusterVertexMap = std::map<Facade::Cluster*, VertexPtr, ClusterPtrCmp>;
 
 }
 #endif

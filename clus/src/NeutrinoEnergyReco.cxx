@@ -266,7 +266,7 @@ double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, Trac
 }
 
 
-void PatternAlgorithms::calculate_shower_kinematics(std::set<ShowerPtr>& showers, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     (void)vertices_in_long_muon;
     (void)graph;
 

@@ -4,6 +4,7 @@
 #include "WireCellClus/PRCommon.h"
 #include "WireCellUtil/Flagged.h"
 #include "WireCellClus/PRGraphType.h"
+#include <limits>
 
 namespace WireCell::Clus::Facade {
     class Cluster;
@@ -88,11 +89,15 @@ namespace WireCell::Clus::PR {
             return m_fit.distance(point);
         };
 
+        size_t get_graph_index() const { return m_graph_index; }
+        void set_graph_index(size_t idx) { m_graph_index = idx; }
+
     private:
 
         WCPoint m_wcpt;         // "initial" point.
         Fit m_fit;
 
+        size_t m_graph_index{std::numeric_limits<size_t>::max()};
 
     };
 

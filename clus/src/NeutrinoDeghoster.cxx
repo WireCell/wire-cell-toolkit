@@ -350,7 +350,7 @@ void PatternAlgorithms::order_segments(std::vector<SegmentPtr>& ordered_segments
     }
 }
 
-void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
+void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv) {
     // Order clusters by total segment length
     std::map<Facade::Cluster*, std::vector<SegmentPtr>> map_cluster_to_segments;
     std::map<Facade::Cluster*, double> map_cluster_total_length;
@@ -586,7 +586,7 @@ void PatternAlgorithms::deghost_segments(Graph& graph, std::map<Facade::Cluster*
 }
 
 
-void PatternAlgorithms::deghosting(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
+void PatternAlgorithms::deghosting(Graph& graph, ClusterVertexMap map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
     // Call deghost_clusters
     deghost_clusters(graph, all_clusters, track_fitter, dv);
     

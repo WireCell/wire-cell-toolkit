@@ -6,6 +6,7 @@
 #include "WireCellUtil/Flagged.h"
 #include "WireCellAux/ParticleInfo.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include <limits>
 #include <memory>
 
 
@@ -142,10 +143,14 @@ namespace WireCell::Clus::PR {
         // Add public accessor:
         int id() const { return m_id; }
         void set_id(int id) { m_id = id; }
-        
+
+        size_t get_graph_index() const { return m_graph_index; }
+        void set_graph_index(size_t idx) { m_graph_index = idx; }
+
     private:
         // Add to PRSegment.h private section:
         int m_id{-1};
+        size_t m_graph_index{std::numeric_limits<size_t>::max()};
 
         std::vector<WCPoint> m_wcpts;
         std::vector<Fit> m_fits;

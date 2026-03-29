@@ -112,10 +112,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     SPDLOG_LOGGER_DEBUG(log, "Number of Main Clusters: {}", n_main_clusters);
 
-    std::set<VertexPtr> vertices_in_long_muon;
-    std::set<SegmentPtr> segments_in_long_muon;
+    IndexedVertexSet vertices_in_long_muon;
+    IndexedSegmentSet segments_in_long_muon;
     VertexPtr main_vertex = nullptr;
-    std::map<Cluster*, VertexPtr> map_cluster_main_vertices;
+    ClusterVertexMap map_cluster_main_vertices;
 
     // Pre-load charge data for all beam-flash clusters once so that
     // do_multi_tracking calls throughout pattern recognition can use
@@ -262,17 +262,17 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     //                     n_main_cluster_segments, n_main_cluster_fit_points);
 
     int acc_segment_id = 0;
-    std::set<ShowerPtr> pi0_showers;
-    std::map<ShowerPtr, int> map_shower_pio_id;
+    IndexedShowerSet pi0_showers;
+    ShowerIntMap map_shower_pio_id;
     std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
     std::map<int, std::pair<double, int>> map_pio_id_mass;
     std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
     Pi0KineFeatures pio_kine{};
-    std::map<VertexPtr, ShowerPtr> map_vertex_in_shower;
-    std::map<SegmentPtr, ShowerPtr> map_segment_in_shower;
-    std::map<VertexPtr, std::set<ShowerPtr>> map_vertex_to_shower;
-    std::set<Facade::Cluster*> used_shower_clusters;
-    std::set<ShowerPtr> showers;
+    ShowerVertexMap map_vertex_in_shower;
+    ShowerSegmentMap map_segment_in_shower;
+    VertexShowerSetMap map_vertex_to_shower;
+    ClusterPtrSet used_shower_clusters;
+    IndexedShowerSet showers;
 
     if (final_main_vertex) {
    

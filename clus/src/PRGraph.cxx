@@ -12,6 +12,7 @@ namespace WireCell::Clus::PR {
         auto desc = boost::add_vertex(NodeBundle{vtx, index}, g);
         ++ gb.num_node_indices;
         vtx->set_descriptor(desc);
+        vtx->set_graph_index(index);
         return true;
     }
 
@@ -46,11 +47,14 @@ namespace WireCell::Clus::PR {
         if (added) {
             ++ gb.num_edge_indices;
             seg->set_descriptor(desc);
+            seg->set_graph_index(index);
             return true;
         }
 
         // Edge already existed, assure its object is this one.
+        // Inherit the existing edge's graph index so m_graph_index is not left at SIZE_MAX.
         g[desc].segment = seg;
+        seg->set_graph_index(g[desc].index);
 
         return changed;
     }

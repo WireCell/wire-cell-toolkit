@@ -27,7 +27,7 @@ namespace {
     }
 }
 
-void PatternAlgorithms::update_shower_maps(std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters){
+void PatternAlgorithms::update_shower_maps(IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters){
     // Clear all maps
     map_vertex_to_shower.clear();
     map_vertex_in_shower.clear();
@@ -73,7 +73,7 @@ void PatternAlgorithms::update_shower_maps(std::set<ShowerPtr>& showers,  std::m
     }
 }
 
-void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon){
+void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon){
     if (!main_vertex || !main_vertex->descriptor_valid()) return;
 
     // BFS from main_vertex: find shower-flagged segments anywhere in the segment tree.
@@ -148,8 +148,8 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // Check if any long muon shower should be reclassified as an EM shower.
     // Condition: the shower has more non-muon segments than muon segments (by count and length).
     // Use index-stable sets so iteration order is deterministic across runs.
-    IndexedSegmentSet tmp_segments{SegmentIndexCmp(graph)};
-    IndexedVertexSet  tmp_vertices{VertexIndexCmp(graph)};
+    IndexedSegmentSet tmp_segments;
+    IndexedVertexSet  tmp_vertices;
     for (auto shower : showers) {
         if (std::abs(shower->get_particle_type()) != 13) continue;
         if (!shower->start_segment()) continue;
@@ -205,7 +205,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters);
 }
 
-void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters){
+void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters){
     if (!main_vertex) return;
 
     // Build map_vertex_segments from graph (ordered for determinism)
@@ -445,7 +445,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
     }
 }
 
-void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters){
+void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters){
     if (!main_vertex || !main_cluster) return;
     
     // Build map_segment_vertices from graph (ordered for determinism)
@@ -686,7 +686,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
     update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters);
 }
 
-void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<ShowerPtr>& showers,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, VertexPtr main_vertex, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     if (!main_vertex || !main_cluster) return;
     
     // Build map_cluster_segments, map_segment_cluster, and seg_order.
@@ -892,7 +892,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     }
     std::sort(vec_pi.begin(), vec_pi.end(), sortbydis);
     
-    std::map<Facade::Cluster*, VertexPtr> map_cluster_associated_vertex;
+    ClusterVertexMap map_cluster_associated_vertex;
     for (const auto& pi : vec_pi) {
         if (pi.min_angle < 10) {
             map_cluster_associated_vertex[pi.cluster] = pi.min_vertex;
@@ -1135,7 +1135,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
     SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_from_vertices: With separated-cluster shower: {}", showers.size());
 }
 
-void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, VertexPtr main_vertex,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexPtr main_vertex, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex || map_vertex_to_shower.find(main_vertex) == map_vertex_to_shower.end()) {
         return;
@@ -1216,7 +1216,7 @@ void PatternAlgorithms::examine_merge_showers(std::set<ShowerPtr>& showers, Vert
 }
 
 
-void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_save){
+void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_save){
     
     if (!main_vertex || !main_cluster) return;
 
@@ -1523,7 +1523,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
 }
 
 
-void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -1566,12 +1566,12 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
     bool flag_added = false;
     
     if (!flag_skip) {
-        std::set<ShowerPtr> used_showers;
-        std::map<SegmentPtr, std::set<ShowerPtr>> map_segment_showers;
-        std::map<SegmentPtr, ShowerPtr> map_segment_new_shower;
+        IndexedShowerSet used_showers;
+        std::map<SegmentPtr, std::set<ShowerPtr>, SegmentIndexCmp> map_segment_showers;
+        ShowerSegmentMap map_segment_new_shower;
         std::vector<SegmentPtr> seg_order;  // preserves outer-loop order for deterministic processing
         std::set<SegmentPtr> used_segments;
-        std::set<ShowerPtr> del_showers;
+        IndexedShowerSet del_showers;
 
         WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
 
@@ -1948,7 +1948,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, st
 }
 
 
-void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     
     if (!main_vertex) return;
 
@@ -1992,7 +1992,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
         bool composition_ok;             // passes track-fraction composition check (for Case I)
     };
 
-    auto build_em_cache = [&](const std::set<ShowerPtr>& shower_set) -> std::vector<EMShowerCache> {
+    auto build_em_cache = [&](const IndexedShowerSet& shower_set) -> std::vector<EMShowerCache> {
         std::vector<ShowerPtr> sorted(shower_set.begin(), shower_set.end());
         std::sort(sorted.begin(), sorted.end(), shower_cmp);
         std::vector<EMShowerCache> result;
@@ -2033,7 +2033,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
     std::map<VertexPtr, std::vector<EMShowerCache>> vtx_cache;
 
     // SegmentIndexCmp for deterministic merge-processing order
-    std::map<SegmentPtr, ShowerPtr, SegmentIndexCmp> map_merge_seg_shower{SegmentIndexCmp(graph)};
+    std::map<SegmentPtr, ShowerPtr, SegmentIndexCmp> map_merge_seg_shower;
     std::set<ShowerPtr> del_showers;
 
     // ---- Segment loop ----
@@ -2305,7 +2305,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, std
 }
 
 
-void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -2368,7 +2368,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
     std::vector<VertexPtr> vtx_sorted;
     vtx_sorted.reserve(map_vertex_to_shower.size());
     for (auto& [v, _] : map_vertex_to_shower) vtx_sorted.push_back(v);
-    std::sort(vtx_sorted.begin(), vtx_sorted.end(), VertexIndexCmp(graph));
+    std::sort(vtx_sorted.begin(), vtx_sorted.end(), VertexIndexCmp{});
 
     // -- Disconnected showers (conn_type==2, non-muon), deterministic order --
     // Using set<..., shower_cmp> gives automatic dedup and graph-index ordering.
@@ -2376,7 +2376,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
     std::map<ShowerPtr, WireCell::Vector> map_shower_dir;  // lookup-only; pointer key OK
 
     // -- Candidate vertices in deterministic graph-index order ---------------
-    IndexedVertexSet candidate_vertices{VertexIndexCmp(graph)};
+    IndexedVertexSet candidate_vertices;
     candidate_vertices.insert(main_vertex);
 
     // Single pass over map_vertex_to_shower (merged from the original two passes).
@@ -2607,7 +2607,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
     }
 
     // -- Reclassify incoming muons/unknowns at pi0 decay vertices as pions --
-    IndexedVertexSet pi0_vertices{VertexIndexCmp(graph)};
+    IndexedVertexSet pi0_vertices;
     for (auto shower : pi0_showers) {
         auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
         pi0_vertices.insert(start_vtx);
@@ -2639,7 +2639,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, std::set<ShowerPt
 }
 
 
-void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
 
     if (!main_vertex) return;
 
@@ -3007,7 +3007,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, std::set<Showe
 }
 
 
-void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, std::set<ShowerPtr>& pi0_showers, std::map<ShowerPtr, int>& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass,  std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, std::set<ShowerPtr>& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices,  std::map<VertexPtr, ShowerPtr>& map_vertex_in_shower,  std::map<SegmentPtr, ShowerPtr>& map_segment_in_shower, std::map<VertexPtr, std::set<ShowerPtr> >& map_vertex_to_shower, std::set<Facade::Cluster*>& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedShowerSet& pi0_showers, ShowerIntMap& map_shower_pio_id, std::map<int, std::vector<ShowerPtr > >& map_pio_id_showers, std::map<int, std::pair<double, int> >& map_pio_id_mass, std::map<int, std::pair<int, int> >& map_pio_id_saved_pair, Pi0KineFeatures& pio_kine, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, ClusterVertexMap map_cluster_main_vertices, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     // Diagnostic: print dirsign for all main-cluster segments at entry,
     // to verify examine_direction() ran correctly before this call.
     if (main_cluster) {

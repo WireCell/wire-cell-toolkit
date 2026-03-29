@@ -1776,7 +1776,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
        return &new_main_cluster;
     }
 
-    void PatternAlgorithms::examine_main_vertices(Graph& graph, std::map<Facade::Cluster*, VertexPtr>& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters){
+    void PatternAlgorithms::examine_main_vertices(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters){
         if (!main_cluster) return;
         
         // Calculate cluster length cut

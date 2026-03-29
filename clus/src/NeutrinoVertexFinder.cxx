@@ -1015,7 +1015,7 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
     }
 }
 
-bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, VertexPtr main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_final){
+bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, VertexPtr main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_final){
     if (!vertex || !vertex->cluster()) return false;
 
     Facade::Cluster& cluster = *vertex->cluster();
@@ -1886,7 +1886,7 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
 }
 
 
-void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
+void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
     s_log->debug("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
 
     std::set<VertexPtr> fitted_vertices;
@@ -2337,7 +2337,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     s_log->debug("improve_vertex: cluster {} done", cluster.ident());
 }
 
-void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
     auto t_total = Clock::now();
@@ -3006,7 +3006,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
     return max_vertex;
 }
 
-Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
+Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, ClusterVertexMap map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
     if (!main_cluster) return main_cluster;
     
     bool flag_all_showers = false;
@@ -3141,11 +3141,11 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
 
 bool PatternAlgorithms::determine_overall_main_vertex_DL(
     Graph& graph,
-    std::map<Facade::Cluster*, VertexPtr>& map_cluster_main_vertices,
+    ClusterVertexMap& map_cluster_main_vertices,
     Facade::Cluster*& main_cluster,
     std::vector<Facade::Cluster*>& other_clusters,
-    std::set<VertexPtr>& vertices_in_long_muon,
-    std::set<SegmentPtr>& segments_in_long_muon,
+    IndexedVertexSet& vertices_in_long_muon,
+    IndexedSegmentSet& segments_in_long_muon,
     TrackFitting& track_fitter,
     IDetectorVolumes::pointer dv,
     const Clus::ParticleDataSet::pointer& particle_data,
@@ -3353,7 +3353,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     return flag_change;
 }
 
-VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, std::map<Facade::Cluster*, VertexPtr> map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, std::set<VertexPtr>& vertices_in_long_muon, std::set<SegmentPtr>& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain){
+VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, ClusterVertexMap map_cluster_main_vertices, Facade::Cluster* main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_dev_chain){
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
     auto t_total = Clock::now();
