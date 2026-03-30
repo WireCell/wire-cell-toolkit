@@ -1144,6 +1144,7 @@ namespace WireCell::Clus::PR {
                 data.kenergy_best = 0;
             }
         }
+
     }
 
     void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){

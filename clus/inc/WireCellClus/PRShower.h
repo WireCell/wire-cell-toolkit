@@ -169,7 +169,8 @@ namespace WireCell::Clus::PR {
         double get_kine_dQdx(){return data.kenergy_dQdx;};
         void set_kine_charge(double val){data.kenergy_charge = val;};
         double get_kine_charge(){return data.kenergy_charge;};
-        double get_kine_best(){return data.kenergy_best;};
+        double get_kine_best(){  
+            if (data.kenergy_best != 0) return data.kenergy_best; else return data.kenergy_charge;};
 
         // return initial direction ...
         WireCell::Vector& get_init_dir(){return data.init_dir;};

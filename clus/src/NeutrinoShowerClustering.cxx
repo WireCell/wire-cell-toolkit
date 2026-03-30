@@ -3174,13 +3174,13 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
             if (start_vtx) vtx_pt = start_vtx->fit().valid() ? start_vtx->fit().point : start_vtx->wcpt().point;
             SPDLOG_LOGGER_DEBUG(s_log,
                 "shower_clustering_with_nv:   shower[{}] pdg={} flag_shower={} conn={}"
-                " nseg={} ncls={} kine_charge={:.1f}MeV"
+                " nseg={} ncls={} kine_charge={:.1f}MeV kine_best={:.1f}MeV"
                 " start=({:.1f},{:.1f},{:.1f})cm vtx=({:.1f},{:.1f},{:.1f})cm"
                 " dir=({:.3f},{:.3f},{:.3f}) seg_dirsign={}",
                 idx++,
                 shower->get_particle_type(), shower->get_flag_shower() ? 1 : 0, conn_type,
                 shower->get_num_segments(), shower_clusters.size(),
-                shower->get_kine_charge() / units::MeV,
+                shower->get_kine_charge() / units::MeV, shower->get_kine_best() / units::MeV,
                 sp.x() / units::cm, sp.y() / units::cm, sp.z() / units::cm,
                 vtx_pt.x() / units::cm, vtx_pt.y() / units::cm, vtx_pt.z() / units::cm,
                 dir.x(), dir.y(), dir.z(), start_seg_dirsign);
