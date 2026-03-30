@@ -100,6 +100,22 @@ namespace WireCell::Clus {
         void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
         void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
 
+        // ---- Particle-flow Bee output ----
+        // Triggered after TaggerCheckNeutrino (or any configured visitor) runs.
+        // Produces one file per event named "mc" (bare JSON array), matching the
+        // prototype "mc" format read by the Bee viewer.
+        struct BeePFConfig {
+            std::string name{"mc"};          // Bee file name (default "mc")
+            std::string visitor;             // dump after this visitor runs
+            std::string grouping{"live"};    // grouping to read PR graph from
+        };
+        std::vector<BeePFConfig> m_bee_pf_configs;
+
+        // Storage: flushed at end of each event (same lifecycle as m_bee_points)
+        std::map<std::string, WireCell::Bee::ParticleTree> m_bee_pf_trees;
+
+        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping);
+
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
         // Bee::Patches m_bee_dead; // dead region ...
 

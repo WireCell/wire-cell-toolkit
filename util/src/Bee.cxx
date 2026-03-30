@@ -372,3 +372,34 @@ void Bee::Sink::close()
     m_out.pop();
     m_out.clear();
 }
+
+// ---- Bee::ParticleTree ----
+//
+// The serialized form is a bare JSON array, exactly matching the prototype "mc"
+// output read by the Bee viewer.  No object wrapper, no RSE metadata.
+
+Bee::ParticleTree::ParticleTree(const std::string& name)
+{
+    m_name = name;
+    m_data = Json::arrayValue;
+}
+
+void Bee::ParticleTree::reset()
+{
+    m_data = Json::arrayValue;
+}
+
+void Bee::ParticleTree::set_particles(const Configuration& particles_array)
+{
+    m_data = particles_array;
+}
+
+bool Bee::ParticleTree::empty() const
+{
+    return m_data.empty();
+}
+
+size_t Bee::ParticleTree::size() const
+{
+    return m_data.size();
+}

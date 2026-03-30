@@ -2,6 +2,8 @@
 #include "WireCellClus/Facade_Summary.h"
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRVertex.h"
+#include "WireCellClus/PRShower.h"
+#include "WireCellClus/TrackFitting.h"
 
 
 #include "WireCellAux/TensorDMpointtree.h"
@@ -199,6 +201,19 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         }
     } 
 
+    // Configure particle-flow bee output (mc tree)
+    if (cfg.isMember("bee_pf")) {
+        for (const auto& pf : cfg["bee_pf"]) {
+            BeePFConfig pfc;
+            pfc.name     = get<std::string>(pf, "name",     "mc");
+            pfc.visitor  = get<std::string>(pf, "visitor",  "");
+            pfc.grouping = get<std::string>(pf, "grouping", "live");
+            m_bee_pf_configs.push_back(pfc);
+            m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
+            SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
+        }
+    }
+
     // Initialize patches for each APA and face
     if (m_save_deadarea) {
         for (const auto& anode : m_anodes) {
@@ -331,7 +346,7 @@ void MultiAlgBlobClustering::flush(int ident)
     //     m_bee_dead.clear();
     // }
     if (m_save_deadarea) {
-        
+
         // Flush individual patches
         for (auto& [apa, face_map] : m_bee_dead_patches) {
             for (auto& [face, patches] : face_map) {
@@ -341,6 +356,14 @@ void MultiAlgBlobClustering::flush(int ident)
                     patches.clear();
                 }
             }
+        }
+    }
+
+    // Flush particle-flow mc trees
+    for (auto& [name, tree] : m_bee_pf_trees) {
+        if (!tree.empty()) {
+            m_sink.write(tree);
+            tree.reset();
         }
     }
 
@@ -586,6 +609,189 @@ void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& 
     }
 
     SPDLOG_LOGGER_DEBUG(log, "Filled bee vertices '{}' from {} vertices", name, vertex_id);
+}
+
+
+// Helper: map PDG code to a short display name for the Bee particle tree.
+static std::string pf_pdg_to_name(int pdg)
+{
+    switch (pdg) {
+        case  11: return "e-";
+        case -11: return "e+";
+        case  13: return "mu-";
+        case -13: return "mu+";
+        case  22: return "gamma";
+        case  211: return "pi+";
+        case -211: return "pi-";
+        case 2212: return "p";
+        case 2112: return "n";
+        case  321: return "K+";
+        case -321: return "K-";
+        default:   return "particle";
+    }
+}
+
+
+// Hierarchical particle-flow tree matching the prototype "mc" Bee JSON format.
+//
+// Output is a bare JSON array of jsTree nodes, each node:
+//   { "id":N, "text":"name  KE MeV",
+//     "data":{"start":[x,y,z],"end":[x,y,z]},
+//     "children":[...] }
+// Leaf nodes (no children) additionally carry "icon":"jstree-file".
+//
+// DFS from the identified neutrino vertex.  Showers are leaves.
+// Track segments recurse into their far vertex.
+void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
+                                               const Facade::Grouping& grouping)
+{
+    auto map_it = m_bee_pf_trees.find(cfg.name);
+    if (map_it == m_bee_pf_trees.end()) {
+        SPDLOG_LOGGER_WARN(log, "bee_pf tree storage '{}' not found", cfg.name);
+        return;
+    }
+    auto& tree = map_it->second;
+
+    auto pr_graph = grouping.get_pr_graph();
+    if (!pr_graph) return;
+
+    auto tf = grouping.get_track_fitting();
+    if (!tf) return;
+
+    auto main_vertex = tf->get_main_vertex();
+    if (!main_vertex) {
+        SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': no main vertex, skipping", cfg.name);
+        return;
+    }
+
+    const auto& showers = tf->get_showers();
+
+    // Vertex-ptr -> node-descriptor lookup.
+    std::map<PR::VertexPtr, PR::node_descriptor, PR::VertexIndexCmp> vtx_to_nd;
+    for (auto nd : PR::ordered_nodes(*pr_graph)) {
+        auto vtx = (*pr_graph)[nd].vertex;
+        if (vtx) vtx_to_nd[vtx] = nd;
+    }
+    if (!vtx_to_nd.count(main_vertex)) return;
+
+    // Segment -> shower map.
+    std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
+    for (const auto& shower : showers) {
+        PR::IndexedVertexSet sv;
+        PR::IndexedSegmentSet ss;
+        shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+        for (const auto& seg : ss) {
+            seg_to_shower[seg] = shower;
+        }
+    }
+
+    // Visited sets prevent re-traversal in the undirected graph.
+    std::set<PR::SegmentPtr, PR::SegmentIndexCmp> visited_segs;
+    std::set<PR::ShowerPtr,  PR::ShowerIndexCmp>  visited_showers;
+    std::set<PR::VertexPtr,  PR::VertexIndexCmp>  visited_vtxs;
+    int next_id = 1;
+
+    auto get_vtx_pt = [](PR::VertexPtr v) -> WireCell::Point {
+        return v->fit().valid() ? v->fit().point : v->wcpt().point;
+    };
+
+    // Helper: build a jsTree-compatible particle node in the prototype format.
+    // data only has "start" and "end".  Leaves get "icon":"jstree-file".
+    auto make_node = [&](int id,
+                         const std::string& text,
+                         const WireCell::Point& start,
+                         const WireCell::Point& end) -> Configuration {
+        Configuration node;
+        node["id"]   = id;
+        node["text"] = text;
+        Configuration data;
+        data["start"][0] = start.x() / units::cm;
+        data["start"][1] = start.y() / units::cm;
+        data["start"][2] = start.z() / units::cm;
+        data["end"][0]   = end.x() / units::cm;
+        data["end"][1]   = end.y() / units::cm;
+        data["end"][2]   = end.z() / units::cm;
+        node["data"] = data;
+        node["children"] = Json::arrayValue;
+        return node;
+    };
+
+    // Recursive DFS building the jsTree JSON array.
+    std::function<void(PR::VertexPtr, Configuration&)> dfs =
+        [&](PR::VertexPtr cur_vtx, Configuration& children) {
+
+        visited_vtxs.insert(cur_vtx);
+        auto cur_nd = vtx_to_nd.at(cur_vtx);
+
+        for (auto [eit, eit_end] = boost::out_edges(cur_nd, *pr_graph);
+             eit != eit_end; ++eit) {
+
+            auto seg = (*pr_graph)[*eit].segment;
+            if (!seg || visited_segs.count(seg)) continue;
+
+            auto src_nd  = boost::source(*eit, *pr_graph);
+            auto tgt_nd  = boost::target(*eit, *pr_graph);
+            auto far_nd  = (src_nd == cur_nd) ? tgt_nd : src_nd;
+            auto far_vtx = (*pr_graph)[far_nd].vertex;
+
+            auto shower_it = seg_to_shower.find(seg);
+            if (shower_it != seg_to_shower.end()) {
+                // --- Shower particle: leaf node using aggregated kinematics ---
+                auto shower = shower_it->second;
+                if (visited_showers.count(shower)) continue;
+                visited_showers.insert(shower);
+
+                PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
+                shower->fill_sets(sv, ss, false);
+                for (const auto& s : ss) visited_segs.insert(s);
+
+                const int    pdg = shower->get_particle_type();
+                const int    ke  = static_cast<int>(shower->get_kine_best() / units::MeV);
+                const auto&  sp  = shower->get_start_point();
+                const auto&  ep  = shower->get_end_point();
+
+                auto node = make_node(next_id++,
+                                      pf_pdg_to_name(pdg) + "  " + std::to_string(ke) + " MeV",
+                                      sp, ep);
+                node["icon"] = "jstree-file";   // shower = leaf
+                children.append(node);
+
+            } else {
+                // --- Track segment: recurse into far vertex ---
+                visited_segs.insert(seg);
+
+                std::string pname = "particle";
+                int ke_int = 0;
+                if (seg->has_particle_info()) {
+                    auto pi = seg->particle_info();
+                    pname  = pi->name();
+                    ke_int = static_cast<int>(pi->kinetic_energy() / units::MeV);
+                }
+
+                WireCell::Point start_pt = get_vtx_pt(cur_vtx);
+                WireCell::Point end_pt   = far_vtx ? get_vtx_pt(far_vtx) : start_pt;
+
+                auto node = make_node(next_id++,
+                                      pname + "  " + std::to_string(ke_int) + " MeV",
+                                      start_pt, end_pt);
+
+                if (far_vtx && !visited_vtxs.count(far_vtx)) {
+                    dfs(far_vtx, node["children"]);
+                }
+                if (node["children"].empty()) {
+                    node["icon"] = "jstree-file";
+                }
+                children.append(node);
+            }
+        }
+    };
+
+    Configuration particles = Json::arrayValue;
+    dfs(main_vertex, particles);
+    tree.set_particles(particles);
+
+    SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} top-level particles",
+                        cfg.name, particles.size());
 }
 
 
@@ -1000,6 +1206,17 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                 fill_bee_points(config.name, *gs[0]);
                 // std::cout << "Filled bee points from clusters for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
             }
+        }
+
+        // Particle-flow dump triggered by the same visitor
+        for (const auto& pf_cfg : m_bee_pf_configs) {
+            if (pf_cfg.visitor.empty() || pf_cfg.visitor != cmeth.name) continue;
+            auto pf_gs = ensemble.with_name(pf_cfg.grouping);
+            if (pf_gs.empty()) continue;
+            const auto& pf_grouping = *pf_gs[0];
+            auto tf = pf_grouping.get_track_fitting();
+            if (!tf) continue;
+            fill_bee_pf_tree(pf_cfg, pf_grouping);
         }
     }
 

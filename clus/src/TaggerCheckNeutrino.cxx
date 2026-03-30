@@ -335,28 +335,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     //                     n_main_cluster_segments, n_main_cluster_fit_points);
 
 
-    // Mark each cluster's main vertex so bee output can identify it
-    // for (auto& [cluster, vtx] : map_cluster_main_vertices) {
-    //     if (vtx) {
-    //         vtx->set_flags(PR::VertexFlags::kNeutrinoVertex);
-
-    //         const auto& wcpt = vtx->wcpt().point;
-    //         if (vtx->fit().valid()) {
-    //             const auto& fitpt = vtx->fit().point;
-    //             SPDLOG_LOGGER_DEBUG(log,
-    //                                 "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=({:.2f}, {:.2f}, {:.2f}) cm",
-    //                                 cluster->get_cluster_id(),
-    //                                 wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm,
-    //                                 fitpt.x() / units::cm, fitpt.y() / units::cm, fitpt.z() / units::cm);
-    //         }
-    //         else {
-    //             SPDLOG_LOGGER_DEBUG(log,
-    //                                 "Cluster {} neutrino vertex wcpt=({:.2f}, {:.2f}, {:.2f}) cm fit=invalid",
-    //                                 cluster->get_cluster_id(),
-    //                                 wcpt.x() / units::cm, wcpt.y() / units::cm, wcpt.z() / units::cm);
-    //         }
-    //     }
-    // }
+    // Mark the main neutrino vertex and store neutrino results in TrackFitting
+    // so that downstream consumers (e.g., Bee particle-flow output in MultiAlgBlobClustering)
+    // can access them without re-running pattern recognition.
+    if (final_main_vertex) {
+        final_main_vertex->set_flags(PR::VertexFlags::kNeutrinoVertex);
+    }
+    m_track_fitter->set_main_vertex(final_main_vertex);
+    m_track_fitter->set_showers(showers);
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);

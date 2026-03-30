@@ -4,6 +4,7 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellClus/PRGraph.h"
+#include "WireCellClus/PRShower.h"
 
 #include <Eigen/IterativeLinearSolvers>
 #include <unordered_map>
@@ -157,6 +158,14 @@ namespace WireCell::Clus {
         // multi-track fitting utilized the Graph ... 
         void add_graph(std::shared_ptr<PR::Graph> graph);
         std::shared_ptr<PR::Graph> get_graph() const { return m_graph; }
+
+        /// Store / retrieve the identified neutrino interaction vertex.
+        void set_main_vertex(PR::VertexPtr v) { m_main_vertex = v; }
+        PR::VertexPtr get_main_vertex() const { return m_main_vertex; }
+
+        /// Store / retrieve the full set of reconstructed showers.
+        void set_showers(PR::IndexedShowerSet showers) { m_showers = std::move(showers); }
+        const PR::IndexedShowerSet& get_showers() const { return m_showers; }
         void clear_graph();
 
         void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
@@ -550,8 +559,12 @@ namespace WireCell::Clus {
         // input segment
         std::set<std::shared_ptr<PR::Segment> > m_segments;
 
-        // input graph 
+        // input graph
         std::shared_ptr<PR::Graph> m_graph{nullptr};
+
+        // Neutrino pattern-recognition results (set by TaggerCheckNeutrino)
+        PR::VertexPtr        m_main_vertex{nullptr};
+        PR::IndexedShowerSet m_showers;
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION
