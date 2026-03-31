@@ -73,7 +73,7 @@ void PatternAlgorithms::update_shower_maps(IndexedShowerSet& showers, ShowerVert
     }
 }
 
-void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon){
+void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, VertexPtr main_vertex, IndexedShowerSet& showers, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
     if (!main_vertex || !main_vertex->descriptor_valid()) return;
 
     // BFS from main_vertex: find shower-flagged segments anywhere in the segment tree.
@@ -142,6 +142,19 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // used_segments (populated during BFS) prevents overlapping segment claims.
     for (auto shower : new_showers) {
         shower->complete_structure_with_start_segment(used_segments);
+        // Enforce electron type on start segment:
+        //  - update_particle_type() handles multi-segment showers via majority vote
+        //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
+        //    (long-muon start segments retain PDG=13 and are handled by the post-pass below)
+        shower->update_particle_type(particle_data, recomb_model);
+        auto start_seg = shower->start_segment();
+        if (start_seg && start_seg->has_particle_info() && start_seg->particle_info() &&
+            start_seg->particle_info()->pdg() == 0) {
+            auto four_momentum = segment_cal_4mom(start_seg, 11, particle_data, recomb_model);
+            start_seg->particle_info(std::make_shared<Aux::ParticleInfo>(
+                11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11),
+                four_momentum));
+        }
         showers.insert(shower);
     }
 
@@ -1405,9 +1418,25 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                 }
             }
             
+            // Force PDG=0 or short+weak-muon start segment to electron before majority-vote.
+            // Mirrors the pattern in sub-pass 2 (and shower_clustering_with_nv_from_vertices).
+            {
+                int particle_type_sp1 = 0;
+                if (sg->has_particle_info() && sg->particle_info())
+                    particle_type_sp1 = sg->particle_info()->pdg();
+                if (particle_type_sp1 == 0 ||
+                    (std::abs(particle_type_sp1) == 13 &&
+                     segment_track_length(sg) < 40 * units::cm && sg->dir_weak())) {
+                    auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model);
+                    sg->particle_info(std::make_shared<Aux::ParticleInfo>(
+                        11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11),
+                        four_momentum));
+                }
+            }
+
             // Update particle type
             shower->update_particle_type(particle_data, recomb_model);
-            
+
             // Check with other showers and merge if needed
             std::vector<ShowerPtr> showers_to_be_removed;
             for (auto shower1 : showers) {
@@ -1552,11 +1581,14 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             // Complete shower structure
             std::set<SegmentPtr> used_segments;
             shower->complete_structure_with_start_segment(used_segments);
+            // Majority-vote correction for multi-segment showers whose start segment
+            // has an unexpected PDG not covered by the explicit force-to-11 above.
+            shower->update_particle_type(particle_data, recomb_model);
             showers.insert(shower);
         }
     }
-    
-    update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, 
+
+    update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                       map_vertex_to_shower, used_shower_clusters);
 }
 
@@ -3093,10 +3125,11 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // };
 
     // Connect to the main cluster
-    shower_clustering_with_nv_in_main_cluster(graph, main_vertex, showers, 
-                                              map_vertex_in_shower, map_segment_in_shower, 
+    shower_clustering_with_nv_in_main_cluster(graph, main_vertex, showers,
+                                              map_vertex_in_shower, map_segment_in_shower,
                                               map_vertex_to_shower, used_shower_clusters,
-                                              vertices_in_long_muon, segments_in_long_muon);
+                                              vertices_in_long_muon, segments_in_long_muon,
+                                              particle_data, recomb_model);
     t_in_main_cluster = MS(Clock::now() - t0); t0 = Clock::now();
     // check_used_shower_cluster_933("shower_clustering_with_nv_in_main_cluster");
     
