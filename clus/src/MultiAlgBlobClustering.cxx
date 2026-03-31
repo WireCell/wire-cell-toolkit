@@ -667,6 +667,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                                const Facade::Grouping& grouping,
                                                bool flag_print)
 {
+    flag_print = true;
+    
     auto map_it = m_bee_pf_trees.find(cfg.name);
     if (map_it == m_bee_pf_trees.end()) {
         SPDLOG_LOGGER_WARN(log, "bee_pf tree storage '{}' not found", cfg.name);
