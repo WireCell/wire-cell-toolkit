@@ -297,7 +297,9 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     t_rec_charge->Branch("flag_shower", &point_tree.reco_flag_track_shower, "flag_shower/I");
     t_rec_charge->Branch("rr", &point_tree.reco_rr, "rr/D");
     t_rec_charge->Branch("cluster_id", &point_tree.reco_mother_cluster_id, "cluster_id/I");
-    t_rec_charge->Branch("real_cluster_id", &point_tree.reco_cluster_id, "real_cluster_id/I");
+    // Keep compatibility with legacy format where real/sub cluster ids
+    // both carry the per-segment encoded proto id.
+    t_rec_charge->Branch("real_cluster_id", &point_tree.reco_proto_cluster_id, "real_cluster_id/I");
     t_rec_charge->Branch("sub_cluster_id", &point_tree.reco_proto_cluster_id, "sub_cluster_id/I");
     t_rec_charge->Branch("particle_id", &point_tree.reco_particle_id, "particle_id/I");
 
@@ -394,7 +396,7 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
 
             point_tree.reco_cluster_id = cluster->get_cluster_id();   // cluster id ...
             point_tree.reco_ndf = cluster->get_cluster_id();   
-            point_tree.reco_proto_cluster_id = cluster->get_cluster_id() * 1000 + seg->id();
+            point_tree.reco_proto_cluster_id = seg->cluster()->get_cluster_id() * 1000 + static_cast<int>(seg->get_graph_index());
             point_tree.reco_flag_vertex = 0;
 
             // Determine track/shower flag
@@ -402,8 +404,9 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
                            seg->flags_any(PR::SegmentFlags::kShowerTopology);
             point_tree.reco_flag_track_shower = is_shower ? 1 : 0;
             
-            // Set particle ID (simple classification: shower=1, track=4)
-            point_tree.reco_particle_id = is_shower ? 1 : 4;
+            // Prefer per-segment particle hypothesis when available.
+            point_tree.reco_particle_id = seg->has_particle_info() ? seg->particle_info()->pdg()
+                                                                    : (is_shower ? 1 : 4);
 
             // Calculate residual range vector
             std::vector<double> rr_vec(fits.size(), 0);

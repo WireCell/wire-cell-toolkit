@@ -1285,45 +1285,42 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
             // Access the points through the cluster's scoped view
             const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
             const auto& spcs = sv.pcs();
-            const auto& nodes = sv.nodes(); // Get the nodes in the scoped view
 
-            // Create a map to cache blob information to avoid recalculating for points in the same blob
-            std::unordered_map<const WireCell::Clus::Facade::Blob*, std::pair<double, size_t>> blob_info;
+            // Dead-channel threshold: uncertainty > 1e10 flags a dead wire
+            // (matches PointTreeBuilding m_dead_threshold and Facade_Cluster::is_wire_dead).
+            const double dead_threshold = 1e10;
 
-            // std::cout << "Test: " << cluster.get_cluster_id() << " " << spcs.size() << std::endl;
-
-            // For each scoped pointcloud (each corresponds to a blob)
+            // For each scoped point cloud (one per blob), compute per-point wire charge.
+            // Each point gets q = mean(Q_U, Q_V, Q_W) over the non-dead planes for the
+            // specific wires that define this 3D point — matching the prototype formula.
+            // The global cluster point index is obtained via a KD-tree nearest-neighbour
+            // lookup (exact match: every scoped-view point is also in the cluster PC).
             for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
                 const auto& spc = spcs[spc_idx];
                 auto x = spc.get().get(coords[0])->elements<double>();
                 auto y = spc.get().get(coords[1])->elements<double>();
                 auto z = spc.get().get(coords[2])->elements<double>();
 
-                // Get the blob associated with this spc
-                // The node_with_major() function gets the node for this major index (blob)
-                const auto* node = nodes[spc_idx];
-                const auto* blob = node->value.facade<WireCell::Clus::Facade::Blob>();
-                
-                // Calculate blob information if not already cached
-                if (blob_info.find(blob) == blob_info.end()) {
-                    double blob_charge = blob->charge();
-                    size_t blob_npoints = blob->npoints();
-                    blob_info[blob] = {blob_charge, blob_npoints};
-                }
-                
-                // Get cached blob info
-                const auto& [blob_charge, blob_npoints] = blob_info[blob];
-                
-                // Calculate charge per point
-                double point_charge = 0.0;
-                if (blob_npoints > 0) {
-                    point_charge = blob_charge / blob_npoints;
-                }
-                
                 const size_t size = x.size();
                 for (size_t ind = 0; ind < size; ++ind) {
-                    // Use the calculated point_charge instead of the original charge
-                    bpts.append(Point(x[ind], y[ind], z[ind]), point_charge, clid, clid);
+                    // Resolve global point index via spatial lookup.
+                    // charge_value() caches all per-plane charge vectors on first call,
+                    // so subsequent lookups are O(1) vector reads.
+                    const WireCell::Point pt(x[ind], y[ind], z[ind]);
+                    const size_t pt_idx = cluster.get_closest_point_index(pt);
+
+                    // Per-plane charge mean (prototype formula), excluding dead planes.
+                    double sum = 0.0;
+                    int nplanes = 0;
+                    for (int plane = 0; plane < 3; ++plane) {
+                        if (!cluster.is_wire_dead(pt_idx, plane, dead_threshold)) {
+                            sum += cluster.charge_value(pt_idx, plane);
+                            ++nplanes;
+                        }
+                    }
+                    const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
+
+                    bpts.append(pt, point_charge, clid, clid);
                 }
             }
 
