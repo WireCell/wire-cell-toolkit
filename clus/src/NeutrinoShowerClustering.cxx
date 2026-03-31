@@ -1234,6 +1234,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
         VertexPtr v1 = graph[source_vdesc].vertex;
         VertexPtr v2 = graph[target_vdesc].vertex;
 
+
         if (map_segment_vertices.find(seg) == map_segment_vertices.end()) {
             seg_order.push_back(seg);
         }
@@ -1320,6 +1321,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             if (!sg->dpcloud("fit") && !sg->fits().empty()) {
                 create_segment_fit_point_cloud(sg, dv, "fit");
             }
+
 
             // Create new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);
@@ -1409,6 +1411,8 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
     for (auto cluster : other_clusters) {
         if (used_shower_clusters.find(cluster) != used_shower_clusters.end()) continue;
         
+        // std::cout << "shower_clustering_in_other_clusters: Processing cluster " << cluster->get_cluster_id() << std::endl;
+
         double min_dis = 1e9;
         VertexPtr min_vertex = nullptr;
         double main_dis = 1e9;
@@ -1454,6 +1458,9 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             if (!sg->dpcloud("fit") && !sg->fits().empty()) {
                 create_segment_fit_point_cloud(sg, dv, "fit");
             }
+
+            // std::cout << "shower_clustering_in_other_clusters: Found shower segment " << sg->id() << " for cluster " << cluster->get_cluster_id() << " " << sg->fits().size() << std::endl;
+
 
             // Create new shower
             ShowerPtr shower = std::make_shared<Shower>(graph);

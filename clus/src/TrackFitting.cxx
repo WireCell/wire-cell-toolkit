@@ -1122,6 +1122,13 @@ void TrackFitting::check_and_reset_close_vertices() {
                 end_fit.point = end_v->wcpt().point;
                 end_v->fit(end_fit);
             }
+            // Also rebuild the segment's fits so the first and last fit points are
+            // consistent with the (now corrected) vertex fit positions.
+            if (segment->cluster()) {
+                segment->fits(generate_fits_with_projections(
+                    segment,
+                    {start_v->fit().point, end_v->fit().point}));
+            }
         }
     }
 }
@@ -1255,13 +1262,41 @@ void TrackFitting::organize_segments_path_3rd(double step_size){
                 curr_pts.push_back(wcpt.point);
             }
         }
-        
+
         // Examine end points
         curr_pts = examine_end_ps_vec(segment, curr_pts, flag_startv_end, flag_endv_end);
-        
-        WireCell::Point start_p = curr_pts.front();
-        WireCell::Point end_p = curr_pts.back();
-        
+
+        // If all fit points collapsed to the same location (degenerate 2-point segment),
+        // fall back to the vertex wcpt positions so downstream logic sees a real extent.
+        if (curr_pts.size() <= 1 ||
+            (curr_pts.front() - curr_pts.back()).magnitude() < 0.01 * units::cm) {
+            curr_pts.clear();
+            curr_pts.push_back(start_v->fit().point);
+            curr_pts.push_back(end_v->fit().point);
+        }
+
+        WireCell::Point start_p, end_p;
+
+        // Update start vertex fit to match the segment endpoint (or use fixed fit)
+        if (!start_v->fit().flag_fix) {
+            start_p = curr_pts.front();
+            PR::Fit sf = start_v->fit();
+            sf.point = start_p;
+            start_v->fit(sf);
+        } else {
+            start_p = start_v->fit().point;
+        }
+
+        // Update end vertex fit to match the segment endpoint (or use fixed fit)
+        if (!end_v->fit().flag_fix) {
+            end_p = curr_pts.back();
+            PR::Fit ef = end_v->fit();
+            ef.point = end_p;
+            end_v->fit(ef);
+        } else {
+            end_p = end_v->fit().point;
+        }
+
         // Build points with uniform step size
         pts.push_back(start_p);
         double extra_dis = 0;
@@ -1379,16 +1414,26 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
                 curr_pts.push_back(wcpt.point);
             }
         }
-        
+
+
         // Examine end points
         curr_pts = examine_end_ps_vec(segment, curr_pts, flag_startv_end, flag_endv_end);
-        
+
+        // If all fit points collapsed to the same location (degenerate 2-point segment),
+        // fall back to the vertex wcpt positions so downstream logic sees a real extent.
+        if (curr_pts.size() <= 1 ||
+            (curr_pts.front() - curr_pts.back()).magnitude() < 0.01 * units::cm) {
+            curr_pts.clear();
+            curr_pts.push_back(start_v->fit().point);
+            curr_pts.push_back(end_v->fit().point);
+        }
+
         WireCell::Point start_p, end_p;
-        
+
         // Process start vertex
         if (!start_v->fit().flag_fix) {
             start_p = curr_pts.front();
-            
+
             if (flag_startv_end) {
                 WireCell::Point p2 = curr_pts.front();
                 double dis1 = 0;
@@ -1405,7 +1450,7 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
                     );
                 }
             }
-            
+
             // Set fit point for start vertex
             PR::Fit start_fit = start_v->fit();
             start_fit.point = start_p;
@@ -1413,7 +1458,7 @@ void TrackFitting::organize_segments_path_2nd(double low_dis_limit, double end_p
         } else {
             start_p = start_v->fit().point;
         }
-        
+
         // Process end vertex
         if (!end_v->fit().flag_fix) {
             end_p = curr_pts.back();
@@ -7818,6 +7863,39 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         organize_segments_path_3rd(low_dis_limit);
         // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path_3rd took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
+
+        // if (cluster_filter && cluster_filter->get_cluster_id() == 933){
+        //     std::cout << "After third organization " << std::endl;
+        //     auto edge_range = boost::edges(*m_graph);
+        //     for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+        //         auto& edge_bundle = (*m_graph)[*e_it];
+        //         if (!edge_bundle.segment) continue;
+        //         if (edge_bundle.segment->cluster() != cluster_filter) continue;
+        //         auto seg = edge_bundle.segment;
+        //         auto vd_src = boost::source(*e_it, *m_graph);
+        //         auto vd_tgt = boost::target(*e_it, *m_graph);
+        //         auto vtx_a = (*m_graph)[vd_src].vertex;
+        //         auto vtx_b = (*m_graph)[vd_tgt].vertex;
+        //         std::cout << "  SEG nfits=" << seg->id() << " " << seg->fits().size() << " nwcpts=" << seg->wcpts().size() << std::endl;
+        //         if (vtx_a) {
+        //             std::cout << "    VTX_A wcpt=" << vtx_a->wcpt().point
+        //                       << "  fit=" << vtx_a->fit().point
+        //                       << "  fit_valid=" << vtx_a->fit().valid() << std::endl;
+        //         }
+        //         for (size_t i = 0; i < seg->fits().size(); ++i) {
+        //             const auto& f = seg->fits()[i];
+        //             std::cout << "    fit[" << i << "] point=" << f.point
+        //                       << "  index=" << f.index
+        //                       << "  dx=" << f.dx / units::cm << "cm"
+        //                       << "  valid=" << f.valid() << std::endl;
+        //         }
+        //         if (vtx_b) {
+        //             std::cout << "    VTX_B wcpt=" << vtx_b->wcpt().point
+        //                       << "  fit=" << vtx_b->fit().point
+        //                       << "  fit_valid=" << vtx_b->fit().valid() << std::endl;
+        //         }
+        //     }
+        // }
 
         // std::cout << "After third organization " << std::endl;
         //  for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {

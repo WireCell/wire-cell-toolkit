@@ -785,8 +785,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                   << "  encoded_id=" << (cluster_id >= 0 ? cluster_id * 1000 + graph_idx : graph_idx)
                   << "  length_cm=" << std::fixed << std::setprecision(2) << length
                   << "  particle=" << pi_name
-                  << "  has_va=" << (va ? 1 : 0)
-                  << "  has_vb=" << (vb ? 1 : 0)
+                  << "  has_va=" << (va ? 1 : 0) << " " << (va ? va->fit().point : WireCell::Point(0,0,0)) << " " <<  va->wcpt().point << " " << seg->fits().size()  << " " << seg->fits()[0].point << " " << seg->fits()[1].point
+                  << "  has_vb=" << (vb ? 1 : 0) << " " << (vb ? vb->fit().point : WireCell::Point(0,0,0)) << " " << vb->wcpt().point 
                   << "\n";
     }
 
