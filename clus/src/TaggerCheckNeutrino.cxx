@@ -341,6 +341,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     if (final_main_vertex) {
         final_main_vertex->set_flags(PR::VertexFlags::kNeutrinoVertex);
     }
+    m_track_fitter->set_pi0_data(pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass);
     m_track_fitter->set_main_vertex(final_main_vertex);
     m_track_fitter->set_showers(showers);
 

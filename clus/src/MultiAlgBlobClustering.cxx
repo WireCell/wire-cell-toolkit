@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <cstdio>
 
 WIRECELL_FACTORY(MultiAlgBlobClustering, WireCell::Clus::MultiAlgBlobClustering, WireCell::INamed,
                  WireCell::ITensorSetFilter, WireCell::IConfigurable)
@@ -663,7 +664,8 @@ static std::string pf_pdg_to_name(int pdg)
 //                                  inserted first, then the shower under it.
 //   4. Node IDs follow the prototype convention: cluster_id*1000 + seg_id.
 void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
-                                               const Facade::Grouping& grouping)
+                                               const Facade::Grouping& grouping,
+                                               bool flag_print)
 {
     auto map_it = m_bee_pf_trees.find(cfg.name);
     if (map_it == m_bee_pf_trees.end()) {
@@ -685,7 +687,10 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     }
     const auto* main_cluster = main_vertex->cluster();
 
-    const auto& showers = tf->get_showers();
+    const auto& showers            = tf->get_showers();
+    const auto& pi0_showers        = tf->get_pi0_showers();
+    const auto& map_shower_pio_id  = tf->get_map_shower_pio_id();
+    const auto& map_pio_id_mass    = tf->get_map_pio_id_mass();
     PR::IndexedSegmentSet conn4_skip_segs;
 
     // --- Vertex → node-descriptor map ---
@@ -866,91 +871,109 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
         // type 4 = "not clearly connected"; skip entirely (prototype behaviour)
         if (conn_type == 4) {
-            auto start_seg = shower->start_segment();
-            const auto* cl = start_seg ? start_seg->cluster() : nullptr;
-            std::cout << "[fill_bee_pf_tree] SKIP shower (conn_type=4)"
-                      << "  pdg=" << shower->get_particle_type()
-                      << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
-                      << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
-                      << "\n";
+            if (flag_print) {
+                auto start_seg = shower->start_segment();
+                const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                std::cout << "[fill_bee_pf_tree] SKIP shower (conn_type=4)"
+                          << "  pdg=" << shower->get_particle_type()
+                          << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                          << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                          << "\n";
+            }
             continue;
         }
 
         bool direct = (conn_type == 1);
 
         if (!start_vtx || start_vtx == main_vertex) {
-            auto start_seg = shower->start_segment();
-            const auto* cl = start_seg ? start_seg->cluster() : nullptr;
-            WireCell::Point sp = shower->get_start_point();
-            std::cout << "[fill_bee_pf_tree] ROOT shower"
-                      << "  conn_type=" << conn_type
-                      << "  reason=" << (!start_vtx ? "null_start_vtx" : "start_vtx==main_vertex")
-                      << "  pdg=" << shower->get_particle_type()
-                      << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
-                      << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
-                      << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
-                      << "\n";
-            auto& vec = direct ? root_direct_showers : root_indirect_showers;
-            vec.push_back({shower, main_vertex});
-        } else {
-            auto it = vtx_incoming_seg.find(start_vtx);
-            if (it != vtx_incoming_seg.end()) {
+            if (flag_print) {
                 auto start_seg = shower->start_segment();
                 const auto* cl = start_seg ? start_seg->cluster() : nullptr;
                 WireCell::Point sp = shower->get_start_point();
-                const int parent_seg_id = (it->second->id() >= 0)
-                                            ? it->second->id()
-                                            : static_cast<int>(it->second->get_graph_index());
-                std::cout << "[fill_bee_pf_tree] SEGMENT-attached shower"
+                std::cout << "[fill_bee_pf_tree] ROOT shower"
                           << "  conn_type=" << conn_type
-                          << "  parent_seg=" << parent_seg_id
+                          << "  reason=" << (!start_vtx ? "null_start_vtx" : "start_vtx==main_vertex")
                           << "  pdg=" << shower->get_particle_type()
                           << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                           << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                           << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
                           << "\n";
-                auto& mp = direct ? seg_direct_showers : seg_indirect_showers;
-                mp[it->second].push_back({shower, start_vtx});
-            } else {
-                // start_vtx not reachable from main_vertex → check for parent shower
-                auto start_seg = shower->start_segment();
-                const auto* cl = start_seg ? start_seg->cluster() : nullptr;
-                WireCell::Point sp = shower->get_start_point();
-                if (root_reachable_vtxs.count(start_vtx)) {
-                    // start_vtx is inside a root-level shower → attach to that parent shower
-                    auto parent_shower_it = vtx_to_parent_shower.find(start_vtx);
-                    if (parent_shower_it != vtx_to_parent_shower.end()) {
-                        PR::ShowerPtr parent_shower = parent_shower_it->second;
-                        std::cout << "[fill_bee_pf_tree] SHOWER-attached shower (via parent shower vtx)"
-                                  << "  conn_type=" << conn_type
-                                  << "  parent_shower_pdg=" << parent_shower->get_particle_type()
-                                  << "  pdg=" << shower->get_particle_type()
-                                  << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
-                                  << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
-                                  << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
-                                  << "\n";
-                        auto& mp = direct ? shower_direct_showers : shower_indirect_showers;
-                        mp[parent_shower].push_back({shower, start_vtx});
-                    } else {
-                        std::cout << "[fill_bee_pf_tree] ROOT shower (via root-reachable shower vtx, no parent found)"
-                                  << "  conn_type=" << conn_type
-                                  << "  pdg=" << shower->get_particle_type()
-                                  << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
-                                  << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
-                                  << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
-                                  << "\n";
-                        auto& vec = direct ? root_direct_showers : root_indirect_showers;
-                        vec.push_back({shower, main_vertex});
-                    }
-                } else {
-                    // start_vtx truly isolated from main_vertex → fallback to root
-                    std::cout << "[fill_bee_pf_tree] ROOT shower (fallback: start_vtx not in BFS tree)"
+            }
+            auto& vec = direct ? root_direct_showers : root_indirect_showers;
+            vec.push_back({shower, main_vertex});
+        } else {
+            auto it = vtx_incoming_seg.find(start_vtx);
+            if (it != vtx_incoming_seg.end()) {
+                if (flag_print) {
+                    auto start_seg = shower->start_segment();
+                    const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                    WireCell::Point sp = shower->get_start_point();
+                    const int parent_seg_id = (it->second->id() >= 0)
+                                                ? it->second->id()
+                                                : static_cast<int>(it->second->get_graph_index());
+                    std::cout << "[fill_bee_pf_tree] SEGMENT-attached shower"
                               << "  conn_type=" << conn_type
+                              << "  parent_seg=" << parent_seg_id
                               << "  pdg=" << shower->get_particle_type()
                               << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                               << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                               << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
                               << "\n";
+                }
+                auto& mp = direct ? seg_direct_showers : seg_indirect_showers;
+                mp[it->second].push_back({shower, start_vtx});
+            } else {
+                // start_vtx not reachable from main_vertex → check for parent shower
+                if (root_reachable_vtxs.count(start_vtx)) {
+                    // start_vtx is inside a root-level shower → attach to that parent shower
+                    auto parent_shower_it = vtx_to_parent_shower.find(start_vtx);
+                    if (parent_shower_it != vtx_to_parent_shower.end()) {
+                        PR::ShowerPtr parent_shower = parent_shower_it->second;
+                        if (flag_print) {
+                            auto start_seg = shower->start_segment();
+                            const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                            WireCell::Point sp = shower->get_start_point();
+                            std::cout << "[fill_bee_pf_tree] SHOWER-attached shower (via parent shower vtx)"
+                                      << "  conn_type=" << conn_type
+                                      << "  parent_shower_pdg=" << parent_shower->get_particle_type()
+                                      << "  pdg=" << shower->get_particle_type()
+                                      << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                                      << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                                      << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                                      << "\n";
+                        }
+                        auto& mp = direct ? shower_direct_showers : shower_indirect_showers;
+                        mp[parent_shower].push_back({shower, start_vtx});
+                    } else {
+                        if (flag_print) {
+                            auto start_seg = shower->start_segment();
+                            const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                            WireCell::Point sp = shower->get_start_point();
+                            std::cout << "[fill_bee_pf_tree] ROOT shower (via root-reachable shower vtx, no parent found)"
+                                      << "  conn_type=" << conn_type
+                                      << "  pdg=" << shower->get_particle_type()
+                                      << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                                      << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                                      << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                                      << "\n";
+                        }
+                        auto& vec = direct ? root_direct_showers : root_indirect_showers;
+                        vec.push_back({shower, main_vertex});
+                    }
+                } else {
+                    // start_vtx truly isolated from main_vertex → fallback to root
+                    if (flag_print) {
+                        auto start_seg = shower->start_segment();
+                        const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+                        WireCell::Point sp = shower->get_start_point();
+                        std::cout << "[fill_bee_pf_tree] ROOT shower (fallback: start_vtx not in BFS tree)"
+                                  << "  conn_type=" << conn_type
+                                  << "  pdg=" << shower->get_particle_type()
+                                  << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
+                                  << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                                  << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                                  << "\n";
+                    }
                     auto& vec = direct ? root_direct_showers : root_indirect_showers;
                     vec.push_back({shower, start_vtx});
                 }
@@ -993,9 +1016,9 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     };
 
     auto format_mev = [](double energy) -> std::string {
-        std::ostringstream ss;
-        ss << std::fixed << std::setprecision(2) << (energy / units::MeV);
-        return ss.str();
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.2f", energy / units::MeV);
+        return std::string(buf);
     };
 
     // Forward declare as std::function to handle mutual recursion with make_shower_leaf
@@ -1007,19 +1030,21 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         const std::string ke = format_mev(shower->get_kine_best());
         auto [svtx, sconn] = shower->get_start_vertex_and_type();
         auto start_seg = shower->start_segment();
-        const auto* cl = start_seg ? start_seg->cluster() : nullptr;
         int id = start_seg ? seg_display_id(start_seg) : (next_id++);
         auto node = make_node(id,
                               pf_pdg_to_name(pdg) + "  " + ke + " MeV",
                               shower->get_start_point(), shower->get_end_point());
-        std::cout << "[fill_bee_pf_tree] ADD shower-leaf"
-                  << "  id=" << id
-                  << "  pdg=" << pdg
-                  << "  conn_type=" << sconn
-                  << "  ke=" << ke << " MeV"
-                  << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
-                  << "  has_start_vtx=" << (svtx ? 1 : 0)
-                  << "\n";
+        if (flag_print) {
+            const auto* cl = start_seg ? start_seg->cluster() : nullptr;
+            std::cout << "[fill_bee_pf_tree] ADD shower-leaf"
+                      << "  id=" << id
+                      << "  pdg=" << pdg
+                      << "  conn_type=" << sconn
+                      << "  ke=" << ke << " MeV"
+                      << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                      << "  has_start_vtx=" << (svtx ? 1 : 0)
+                      << "\n";
+        }
         
         // Append any showers attached to this shower
         static const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>> empty_showers;
@@ -1034,33 +1059,73 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return node;
     };
 
-    // Append all showers (direct + indirect via pseudo-gamma) into a children array,
-    // given the connection vertex for the indirect case.
-    append_showers = [&](Configuration& children,
-                               const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>& direct,
-                               const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>& indirect,
-                               PR::VertexPtr fallback_conn_vtx) {
-        for (auto& [sh, _] : direct) {
-            children.append(make_shower_leaf(sh));
-        }
-        for (auto& [sh, conn_vtx] : indirect) {
-            // Insert pseudo-gamma between track endpoint and shower
-            PR::VertexPtr cv = conn_vtx ? conn_vtx : fallback_conn_vtx;
-            WireCell::Point gstart = cv ? get_vtx_pt(cv) : sh->get_start_point();
-            WireCell::Point gend   = sh->get_start_point();
-            const double gamma_energy = sh->get_kine_best();
-            const std::string gamma_ke = format_mev(gamma_energy);
-            const int gamma_id = next_id++;
-            auto gamma = make_node(gamma_id,
-                                   "gamma  " + gamma_ke + " MeV",
-                                   gstart, gend);
+    // Helper: insert one gamma pseudo-node + shower-leaf into a parent children array.
+    auto append_gamma_shower = [&](Configuration& parent_children, PR::ShowerPtr sh, PR::VertexPtr conn_vtx) {
+        PR::VertexPtr cv = conn_vtx;
+        WireCell::Point gstart = cv ? get_vtx_pt(cv) : sh->get_start_point();
+        WireCell::Point gend   = sh->get_start_point();
+        const std::string gamma_ke = format_mev(sh->get_kine_best());
+        const int gamma_id = next_id++;
+        auto gamma = make_node(gamma_id, "gamma  " + gamma_ke + " MeV", gstart, gend);
+        if (flag_print) {
             std::cout << "[fill_bee_pf_tree] ADD pseudo-gamma"
                       << "  id=" << gamma_id
                       << "  ke=" << gamma_ke << " MeV"
                       << "  child_pdg=" << sh->get_particle_type()
                       << "\n";
-            gamma["children"].append(make_shower_leaf(sh));
-            children.append(gamma);
+        }
+        gamma["children"].append(make_shower_leaf(sh));
+        if (gamma["children"].empty()) gamma["icon"] = "jstree-file";
+        parent_children.append(gamma);
+    };
+
+    // Append all showers (direct + indirect via pseudo-gamma) into a children array,
+    // given the connection vertex for the indirect case.
+    // Pi0 showers are grouped by pi0_id and rendered as: pi0 node → gamma → shower_leaf.
+    append_showers = [&](Configuration& children,
+                               const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>& direct,
+                               const std::vector<std::pair<PR::ShowerPtr,PR::VertexPtr>>& indirect,
+                               PR::VertexPtr fallback_conn_vtx) {
+        // --- Non-pi0 direct showers ---
+        for (auto& [sh, _] : direct) {
+            if (pi0_showers.count(sh)) continue;
+            children.append(make_shower_leaf(sh));
+        }
+        // --- Non-pi0 indirect showers (pseudo-gamma) ---
+        for (auto& [sh, conn_vtx] : indirect) {
+            if (pi0_showers.count(sh)) continue;
+            PR::VertexPtr cv = conn_vtx ? conn_vtx : fallback_conn_vtx;
+            append_gamma_shower(children, sh, cv);
+        }
+
+        // --- Pi0 showers: group by pi0_id, emit one pi0 node per group ---
+        // Collect from both direct and indirect lists.
+        std::map<int, std::vector<std::pair<PR::ShowerPtr, PR::VertexPtr>>> pi0_groups;
+        for (auto& [sh, cv] : direct)   if (pi0_showers.count(sh)) pi0_groups[map_shower_pio_id.at(sh)].push_back({sh, cv});
+        for (auto& [sh, cv] : indirect) if (pi0_showers.count(sh)) pi0_groups[map_shower_pio_id.at(sh)].push_back({sh, cv});
+
+        for (auto& [pi0_id, group] : pi0_groups) {
+            auto mass_it = map_pio_id_mass.find(pi0_id);
+            const double pi0_ke = (mass_it != map_pio_id_mass.end()) ? mass_it->second.first : 0.0;
+            // Pi0 sits at the connection vertex (point particle: start == end)
+            PR::VertexPtr conn_vtx = group[0].second ? group[0].second : fallback_conn_vtx;
+            WireCell::Point pi0_pt = conn_vtx ? get_vtx_pt(conn_vtx) : WireCell::Point(0,0,0);
+            const int pi0_node_id = next_id++;
+            auto pi0_node = make_node(pi0_node_id, "pi0  " + format_mev(pi0_ke) + " MeV", pi0_pt, pi0_pt);
+            if (flag_print) {
+                std::cout << "[fill_bee_pf_tree] ADD pi0-node"
+                          << "  id=" << pi0_node_id
+                          << "  pi0_id=" << pi0_id
+                          << "  ke=" << format_mev(pi0_ke) << " MeV"
+                          << "  n_showers=" << group.size()
+                          << "\n";
+            }
+            for (auto& [sh, cv] : group) {
+                PR::VertexPtr gcv = cv ? cv : fallback_conn_vtx;
+                append_gamma_shower(pi0_node["children"], sh, gcv);
+            }
+            if (pi0_node["children"].empty()) pi0_node["icon"] = "jstree-file";
+            children.append(pi0_node);
         }
     };
 
@@ -1085,24 +1150,25 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             far_vtx  = ep_it->second.second;
         }
 
-        // Debug print: every track node that is added to the PF tree.
-        const auto* seg_cluster = seg->cluster();
-        const bool in_main_cluster = (main_cluster && seg_cluster == main_cluster);
-        const bool is_shower_seg = (seg_to_shower.count(seg) > 0);
-        auto pit = seg_parent.find(seg);
-        auto parent_seg = (pit != seg_parent.end()) ? pit->second : nullptr;
-        const std::string parent_text = parent_seg ? std::to_string(seg_display_id(parent_seg)) : "ROOT";
-        std::cout << "[fill_bee_pf_tree] ADD track-node"
-                  << "  seg=" << seg_display_id(seg)
-                  << "  parent=" << parent_text
-                  << "  name=" << pname
-                  << "  ke=" << ke_str << " MeV"
-                  << "  cluster=" << (seg_cluster ? std::to_string(seg_cluster->get_cluster_id()) : "?")
-                  << "  in_main_cluster=" << (in_main_cluster ? 1 : 0)
-                  << "  is_shower_seg=" << (is_shower_seg ? 1 : 0)
-                  << "  start=(" << start_pt.x()/units::cm << "," << start_pt.y()/units::cm << "," << start_pt.z()/units::cm << ") cm"
-                  << "  end=(" << end_pt.x()/units::cm << "," << end_pt.y()/units::cm << "," << end_pt.z()/units::cm << ") cm"
-                  << "\n";
+        if (flag_print) {
+            const auto* seg_cluster = seg->cluster();
+            const bool in_main_cluster = (main_cluster && seg_cluster == main_cluster);
+            const bool is_shower_seg = (seg_to_shower.count(seg) > 0);
+            auto pit = seg_parent.find(seg);
+            auto parent_seg_dbg = (pit != seg_parent.end()) ? pit->second : nullptr;
+            const std::string parent_text = parent_seg_dbg ? std::to_string(seg_display_id(parent_seg_dbg)) : "ROOT";
+            std::cout << "[fill_bee_pf_tree] ADD track-node"
+                      << "  seg=" << seg_display_id(seg)
+                      << "  parent=" << parent_text
+                      << "  name=" << pname
+                      << "  ke=" << ke_str << " MeV"
+                      << "  cluster=" << (seg_cluster ? std::to_string(seg_cluster->get_cluster_id()) : "?")
+                      << "  in_main_cluster=" << (in_main_cluster ? 1 : 0)
+                      << "  is_shower_seg=" << (is_shower_seg ? 1 : 0)
+                      << "  start=(" << start_pt.x()/units::cm << "," << start_pt.y()/units::cm << "," << start_pt.z()/units::cm << ") cm"
+                      << "  end=(" << end_pt.x()/units::cm << "," << end_pt.y()/units::cm << "," << end_pt.z()/units::cm << ") cm"
+                      << "\n";
+        }
 
         auto node = make_node(seg_display_id(seg),
                               pname + "  " + ke_str + " MeV",

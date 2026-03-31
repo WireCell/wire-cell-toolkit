@@ -166,6 +166,23 @@ namespace WireCell::Clus {
         /// Store / retrieve the full set of reconstructed showers.
         void set_showers(PR::IndexedShowerSet showers) { m_showers = std::move(showers); }
         const PR::IndexedShowerSet& get_showers() const { return m_showers; }
+
+        /// Store / retrieve pi0 identification results from TaggerCheckNeutrino.
+        void set_pi0_data(PR::IndexedShowerSet pi0_showers,
+                          PR::ShowerIntMap map_shower_pio_id,
+                          std::map<int, std::vector<PR::ShowerPtr>> map_pio_id_showers,
+                          std::map<int, std::pair<double, int>> map_pio_id_mass)
+        {
+            m_pi0_showers        = std::move(pi0_showers);
+            m_map_shower_pio_id  = std::move(map_shower_pio_id);
+            m_map_pio_id_showers = std::move(map_pio_id_showers);
+            m_map_pio_id_mass    = std::move(map_pio_id_mass);
+        }
+        const PR::IndexedShowerSet& get_pi0_showers() const { return m_pi0_showers; }
+        const PR::ShowerIntMap& get_map_shower_pio_id() const { return m_map_shower_pio_id; }
+        const std::map<int, std::vector<PR::ShowerPtr>>& get_map_pio_id_showers() const { return m_map_pio_id_showers; }
+        const std::map<int, std::pair<double, int>>& get_map_pio_id_mass() const { return m_map_pio_id_mass; }
+
         void clear_graph();
 
         void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
@@ -565,6 +582,12 @@ namespace WireCell::Clus {
         // Neutrino pattern-recognition results (set by TaggerCheckNeutrino)
         PR::VertexPtr        m_main_vertex{nullptr};
         PR::IndexedShowerSet m_showers;
+
+        // Pi0 identification results (set by TaggerCheckNeutrino via set_pi0_data)
+        PR::IndexedShowerSet                      m_pi0_showers;
+        PR::ShowerIntMap                          m_map_shower_pio_id;
+        std::map<int, std::vector<PR::ShowerPtr>> m_map_pio_id_showers;
+        std::map<int, std::pair<double, int>>     m_map_pio_id_mass;
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION

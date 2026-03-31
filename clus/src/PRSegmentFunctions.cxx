@@ -1637,7 +1637,7 @@ namespace WireCell::Clus::PR {
             segment->particle_score(particle_score);
         }
                 
-        if (flag_print) {
+        // if (flag_print) {
             // Match WCPPID output format: id, length, "Track", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
             double particle_mass = pdg_code != 0 ? particle_data->get_particle_mass(pdg_code) : 0.0;
             double kinetic_energy = 0.0;
@@ -1649,7 +1649,7 @@ namespace WireCell::Clus::PR {
             SPDLOG_LOGGER_DEBUG(s_log, "segment_determine_dir_track: Seg {} cm Track {} {} {} {} MeV {} MeV {}",
                 length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0),
                 pdg_code, particle_mass/units::MeV, kinetic_energy/units::MeV, particle_score);
-        }
+        // }
     }
 
      void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print){

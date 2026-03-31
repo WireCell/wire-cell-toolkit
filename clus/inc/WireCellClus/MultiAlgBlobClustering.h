@@ -114,7 +114,7 @@ namespace WireCell::Clus {
         // Storage: flushed at end of each event (same lifecycle as m_bee_points)
         std::map<std::string, WireCell::Bee::ParticleTree> m_bee_pf_trees;
 
-        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping);
+        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
         // Bee::Patches m_bee_dead; // dead region ...
