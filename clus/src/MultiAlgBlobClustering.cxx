@@ -764,31 +764,31 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         bfs_cur = std::move(bfs_next);
     }
 
-    // Log disconnected non-shower track segments (not added to particle flow).
-    for (auto edge_desc : mir(boost::edges(*pr_graph))) {
-        auto seg = (*pr_graph)[edge_desc].segment;
-        if (!seg || seg_to_shower.count(seg) || seg_parent.count(seg)) continue;
-        auto [va, vb] = PR::find_vertices(*pr_graph, seg);
-        const int cluster_id = seg->cluster() ? seg->cluster()->get_cluster_id() : -1;
-        const int graph_idx  = static_cast<int>(seg->get_graph_index());
-        const auto& fits = seg->fits();
-        const double length  = fits.empty() ? -1.0
-            : PR::walk_length(fits.begin(), fits.end(),
-                              [](const PR::Fit& f) -> WireCell::Point { return f.point; }) / units::cm;
-        std::string pi_name = "?";
-        if (seg->has_particle_info()) {
-            pi_name = seg->particle_info()->name();
-        }
-        std::cout << "[fill_bee_pf_tree] DISCONNECTED track seg"
-                  << "  cluster=" << cluster_id
-                  << "  graph_idx=" << graph_idx
-                  << "  encoded_id=" << (cluster_id >= 0 ? cluster_id * 1000 + graph_idx : graph_idx)
-                  << "  length_cm=" << std::fixed << std::setprecision(2) << length
-                  << "  particle=" << pi_name
-                  << "  has_va=" << (va ? 1 : 0) << " " << (va ? va->fit().point : WireCell::Point(0,0,0)) << " " <<  va->wcpt().point << " " << seg->fits().size()  << " " << seg->fits()[0].point << " " << seg->fits()[1].point
-                  << "  has_vb=" << (vb ? 1 : 0) << " " << (vb ? vb->fit().point : WireCell::Point(0,0,0)) << " " << vb->wcpt().point 
-                  << "\n";
-    }
+    // // Log disconnected non-shower track segments (not added to particle flow).
+    // for (auto edge_desc : mir(boost::edges(*pr_graph))) {
+    //     auto seg = (*pr_graph)[edge_desc].segment;
+    //     if (!seg || seg_to_shower.count(seg) || seg_parent.count(seg)) continue;
+    //     auto [va, vb] = PR::find_vertices(*pr_graph, seg);
+    //     const int cluster_id = seg->cluster() ? seg->cluster()->get_cluster_id() : -1;
+    //     const int graph_idx  = static_cast<int>(seg->get_graph_index());
+    //     const auto& fits = seg->fits();
+    //     const double length  = fits.empty() ? -1.0
+    //         : PR::walk_length(fits.begin(), fits.end(),
+    //                           [](const PR::Fit& f) -> WireCell::Point { return f.point; }) / units::cm;
+    //     std::string pi_name = "?";
+    //     if (seg->has_particle_info()) {
+    //         pi_name = seg->particle_info()->name();
+    //     }
+    //     std::cout << "[fill_bee_pf_tree] DISCONNECTED track seg"
+    //               << "  cluster=" << cluster_id
+    //               << "  graph_idx=" << graph_idx
+    //               << "  encoded_id=" << (cluster_id >= 0 ? cluster_id * 1000 + graph_idx : graph_idx)
+    //               << "  length_cm=" << std::fixed << std::setprecision(2) << length
+    //               << "  particle=" << pi_name
+    //               << "  has_va=" << (va ? 1 : 0) << " " << (va ? va->fit().point : WireCell::Point(0,0,0)) << " " <<  va->wcpt().point << " " << seg->fits().size()  << " " << seg->fits()[0].point << " " << seg->fits()[1].point
+    //               << "  has_vb=" << (vb ? 1 : 0) << " " << (vb ? vb->fit().point : WireCell::Point(0,0,0)) << " " << vb->wcpt().point 
+    //               << "\n";
+    // }
 
     // --- Extend vtx_incoming_seg through shower vertex sets (mirrors prototype) ---
     // The prototype guarantees a shower's start_vtx is always picked from
