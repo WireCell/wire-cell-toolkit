@@ -209,9 +209,13 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
             
             if (!vtx1 || !vtx2) continue;
             
-            // Use fitted points if available, otherwise use wcpt points
-            Facade::geo_point_t start_p = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
-            Facade::geo_point_t end_p = vtx2->fit().valid() ? vtx2->fit().point : vtx2->wcpt().point;
+            // Always use wcpts endpoints for the straight-line scan direction.
+            // Using fit().point here caused a mismatch: fit positions can differ from
+            // wcpt positions, so the scan would miss the wcpt anchor, the 0.01 cm
+            // stop/append condition would not fire correctly, and end_wcp would be
+            // force-appended as a kink at the end of the new path.
+            Facade::geo_point_t start_p = vtx1->wcpt().point;
+            Facade::geo_point_t end_p   = vtx2->wcpt().point;
             
             // Test points along a straight line between the two endpoints
             double step_size = 0.6 * units::cm;
