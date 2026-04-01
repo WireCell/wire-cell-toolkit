@@ -157,6 +157,8 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
 
     if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "determine_direction timing: shower_traj={:.3f}ms shower_topo={:.3f}ms track={:.3f}ms TOTAL={:.3f}ms",
         t_shower_traj.count(), t_shower_topo.count(), t_track.count(), MS(Clock::now() - t_total).count());
+
+   
 }
 
 std::pair<int, double> PatternAlgorithms::calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower) {
@@ -1752,6 +1754,8 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
     }
 }
 
+
+
 void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, IDetectorVolumes::pointer dv){
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
@@ -1762,7 +1766,7 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
     examine_good_tracks(graph, cluster, particle_data);
     MS t_examine_good_tracks(Clock::now() - t0); t0 = Clock::now();
 
-    // If multiple tracks in, make them undetermined
+    // If multiple tracks in, make them undetermined 
     fix_maps_multiple_tracks_in(graph, cluster);
     MS t_fix_multiple_tracks_in(Clock::now() - t0); t0 = Clock::now();
 
@@ -1804,6 +1808,9 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
 
     // Examine all showers comprehensively
     examine_all_showers(graph, cluster, particle_data);
+
+    
+
     MS t_examine_all_showers(Clock::now() - t0);
 
     if (m_perf) {

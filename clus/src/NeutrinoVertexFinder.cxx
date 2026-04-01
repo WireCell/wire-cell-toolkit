@@ -1125,14 +1125,18 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             auto prev_edge_range = boost::out_edges(prev_vd, graph);
             for (auto e_it = prev_edge_range.first; e_it != prev_edge_range.second; ++e_it) {
                 SegmentPtr sg = graph[*e_it].segment;
-                if (!sg) continue;
-                
+                if (!sg || sg == current_sg) continue;
+                // Only count a segment as "incoming shower" if it was already processed
+                // in an earlier BFS level. Sibling segments in the same BFS level may
+                // not have their direction set yet, causing order-dependent results.
+                if (used_segments.find(sg) == used_segments.end()) continue;
+
                 const auto& wcps = sg->wcpts();
                 if (wcps.empty()) continue;
-                
+
                 bool flag_start = (ray_length(Ray{wcps.front().point, prev_vtx->wcpt().point}) <
                                   ray_length(Ray{wcps.back().point, prev_vtx->wcpt().point}));
-                
+
                 int dir_sign = sg->dirsign();
                 if ((flag_start && dir_sign == -1) || (!flag_start && dir_sign == 1)) {
                     if (sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1620,6 +1624,11 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         }
     }
     
+    // Final pass: ensure every shower segment has particle_info set to electron.
+    // Mirrors prototype get_particle_type() which returns 11 for any shower regardless
+    // of whether determine_dir_shower_trajectory was called.
+    set_default_shower_particle_info(graph, cluster, particle_data, recomb_model);
+
     return examine_maps(graph, cluster);
 }
 
@@ -2554,6 +2563,8 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     } else {
         s_log->debug("determine_main_vertex: cluster {} done, main_vertex is null", cluster.ident());
     }
+
+   
 }
 
 void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, SegmentPtr segment, int particle_type, double mass, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){

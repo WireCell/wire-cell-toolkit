@@ -135,6 +135,22 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_perf = m_perf;
     m_track_fitter->set_perf(m_perf);
 
+    int acc_segment_id = 0;
+    IndexedShowerSet pi0_showers;
+    ShowerIntMap map_shower_pio_id;
+    std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
+    std::map<int, std::pair<double, int>> map_pio_id_mass;
+    std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
+    Pi0KineFeatures pio_kine{};
+    ShowerVertexMap map_vertex_in_shower;
+    ShowerSegmentMap map_segment_in_shower;
+    VertexShowerSetMap map_vertex_to_shower;
+    ClusterPtrSet used_shower_clusters;
+    IndexedShowerSet showers;
+
+    VertexPtr final_main_vertex = nullptr;
+    bool flag_dl_changed = false;
+
     {
         // initial pattern recognitions
         pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
@@ -156,6 +172,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             map_cluster_main_vertices[main_cluster] = main_vertex;
             main_vertex = nullptr;
         }
+
+        std::cout << "After first round of main cluster PR" << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
     }
 
 
@@ -206,8 +224,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // Fall back to traditional algorithm if DL is disabled or does not change the vertex.
     // DL path updates map_cluster_main_vertices[main_cluster] directly (by-ref parameter).
     // Traditional path returns the chosen vertex; capture it and sync to the map.
-    VertexPtr final_main_vertex = nullptr;
-    bool flag_dl_changed = false;
+ 
     if (!m_dl_weights.empty()) {
         flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
             *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
@@ -235,44 +252,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     
 
-    // // Post-vertex refinement (matches prototype block after determine_overall_main_vertex):
-    // //   1. Minuit-based vertex position fit
-    // //   2. Re-cluster EM shower points with refined vertex
-    // //   3. Re-examine track directions (flag_final=true)
-    // //   4. Re-separate tracks and showers
-    // std::size_t n_main_cluster_vertices = 0;
-    // std::size_t n_main_cluster_segments = 0;
-    // std::size_t n_main_cluster_fit_points = 0;
-    // for (const auto& nd : PR::graph_nodes(*pr_graph)) {
-    //     const auto& vtx = (*pr_graph)[nd].vertex;
-    //     if (vtx && vtx->cluster() == main_cluster) {
-    //         ++n_main_cluster_vertices;
-    //     }
-    // }
-    // for (const auto& ed : PR::ordered_edges(*pr_graph)) {
-    //     const auto& seg = (*pr_graph)[ed].segment;
-    //     if (seg && seg->cluster() == main_cluster) {
-    //         ++n_main_cluster_segments;
-    //         n_main_cluster_fit_points += seg->fits().size();
-    //     }
-    // }
-    // SPDLOG_LOGGER_DEBUG(log,
-    //                     "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
-    //                     main_cluster->get_cluster_id(), n_main_cluster_vertices,
-    //                     n_main_cluster_segments, n_main_cluster_fit_points);
-
-    int acc_segment_id = 0;
-    IndexedShowerSet pi0_showers;
-    ShowerIntMap map_shower_pio_id;
-    std::map<int, std::vector<ShowerPtr>> map_pio_id_showers;
-    std::map<int, std::pair<double, int>> map_pio_id_mass;
-    std::map<int, std::pair<int, int>> map_pio_id_saved_pair;
-    Pi0KineFeatures pio_kine{};
-    ShowerVertexMap map_vertex_in_shower;
-    ShowerSegmentMap map_segment_in_shower;
-    VertexShowerSetMap map_vertex_to_shower;
-    ClusterPtrSet used_shower_clusters;
-    IndexedShowerSet showers;
+  
 
     if (final_main_vertex) {
    
@@ -284,10 +264,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // improve_vertex may update final_main_vertex pointer; sync back to map
         map_cluster_main_vertices[main_cluster] = final_main_vertex;
 
+        std::cout << "After improve vertex:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
 
-        
-
+        std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+ 
         // examine_direction runs last and has the final word on segment orientations
         // relative to the main vertex.
         pattern_algos.examine_direction(*pr_graph, final_main_vertex, final_main_vertex,
@@ -295,7 +277,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                         particle_data(), m_recomb_model, true);
 
         SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
-        // pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+        
+        std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
 
         pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
                                                 map_shower_pio_id, map_pio_id_showers,
@@ -310,29 +293,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                 *m_track_fitter, m_dv, particle_data(),
                                                 m_recomb_model);
 
-        
-    }
+        std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
 
-    // n_main_cluster_vertices = 0;
-    // n_main_cluster_segments = 0;
-    // n_main_cluster_fit_points = 0;
-    // for (const auto& nd : PR::graph_nodes(*pr_graph)) {
-    //     const auto& vtx = (*pr_graph)[nd].vertex;
-    //     if (vtx && vtx->cluster() == main_cluster) {
-    //         ++n_main_cluster_vertices;
-    //     }
-    // }
-    // for (const auto& ed : PR::ordered_edges(*pr_graph)) {
-    //     const auto& seg = (*pr_graph)[ed].segment;
-    //     if (seg && seg->cluster() == main_cluster) {
-    //         ++n_main_cluster_segments;
-    //         n_main_cluster_fit_points += seg->fits().size();
-    //     }
-    // }
-    // SPDLOG_LOGGER_DEBUG(log,
-    //                     "Debug Cluster {} has vertices={} segments={} fit_points={} in PR graph",
-    //                     main_cluster->get_cluster_id(), n_main_cluster_vertices,
-    //                     n_main_cluster_segments, n_main_cluster_fit_points);
+    }
 
 
     // Mark the main neutrino vertex and store neutrino results in TrackFitting

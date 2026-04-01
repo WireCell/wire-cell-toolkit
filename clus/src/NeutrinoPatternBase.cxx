@@ -4,6 +4,7 @@
 
 #include <Eigen/Dense>
 #include <chrono>
+#include <iostream>
 #include <limits>
 
 using namespace WireCell::Clus::PR;
@@ -100,6 +101,32 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::
         return path_points;
 }
 
+void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model) {
+    // Mirrors prototype ProtoSegment::get_particle_type() which always returns 11 for
+    // any shower segment (flag_shower_trajectory || flag_shower_topology).
+    // Any segment flagged as a shower but missing particle_info (e.g. because it was
+    // newly classified as kShowerTrajectory after determine_direction ran) gets PDG=11.
+    const int pdg_code = 11;
+    auto [ebegin, eend] = boost::edges(graph);
+    for (auto eit = ebegin; eit != eend; ++eit) {
+        SegmentPtr sg = graph[*eit].segment; 
+        if (!sg || sg->cluster() != &cluster) continue;
+        if (!sg->flags_any(SegmentFlags::kShowerTrajectory) &&
+            !sg->flags_any(SegmentFlags::kShowerTopology)) continue;
+        if (sg->has_particle_info()) continue;  // already set, leave it
+
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, 43000/units::cm);
+        auto pinfo = std::make_shared<Aux::ParticleInfo>(
+            pdg_code,
+            particle_data->get_particle_mass(pdg_code),
+            particle_data->pdg_to_name(pdg_code),
+            four_momentum
+        );
+        sg->particle_info(pinfo);
+        sg->particle_score(100.0);
+    }
+}
+
 std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path_reg_pc(const Facade::Cluster& cluster, Facade::geo_point_t& first_point, Facade::geo_point_t& last_point,  std::string graph_name){
     // Find closest indices in the regular point cloud using kd_knn
     auto first_knn_results = cluster.kd_knn(1, first_point);
@@ -184,6 +211,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
     const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
     const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    const auto& flag_steiner_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
 
     // Add the two boundary points as additional extreme point groups
     Facade::geo_point_t boundary_point_first(x_coords[boundary_indices.first], 
@@ -201,7 +229,116 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     Facade::geo_point_t first_pt = boundary_point_first;
     Facade::geo_point_t second_pt = boundary_point_second;
 
-    
+    // Local PCA refinement of each boundary endpoint.
+    //
+    // The global boundary search returns the extreme Steiner point along a fixed
+    // projection axis.  When the cluster curves near its end, the true tip may lie
+    // "around a corner" and be missed.
+    //
+    // Fix: collect all Steiner points within r_local of the candidate endpoint,
+    // compute their local PCA direction (first principal component via power
+    // iteration), then find whichever of those points lies furthest from the local
+    // centroid along that direction.  Using all neighbours equally via PCA avoids
+    // the bias that arises from using the candidate endpoint itself to define the
+    // direction.  The power iteration is seeded with fallback_dir (the global
+    // outward direction) so the sign is consistent and convergence is fast.
+    {
+        const double r_local = 10.0 * units::cm;
+
+        Facade::geo_vector_t global_dir(
+            boundary_point_second.x() - boundary_point_first.x(),
+            boundary_point_second.y() - boundary_point_first.y(),
+            boundary_point_second.z() - boundary_point_first.z());
+        const double global_mag = global_dir.magnitude();
+
+        if (global_mag > 0) {
+            global_dir = global_dir * (1.0 / global_mag);  // unit vector first→second
+
+            auto refine_endpoint = [&](const Facade::geo_point_t& pt,
+                                       const Facade::geo_vector_t& fallback_dir) -> Facade::geo_point_t {
+                // Gather local Steiner neighbourhood and filter to terminal nodes.
+                // Terminal nodes are the original cluster data points; intermediate
+                // Steiner nodes are auxiliary connectivity points that would pull the
+                // centroid and covariance off the true track axis.
+                // Fall back to all Steiner points if there are too few terminals.
+                auto all_nbrs = cluster.kd_steiner_radius(r_local, pt, "steiner_pc");
+
+                std::vector<size_t> term_idx;
+                term_idx.reserve(all_nbrs.size());
+                for (auto& [idx, d2] : all_nbrs) {
+                    if (flag_steiner_terminal[idx]) term_idx.push_back(idx);
+                }
+                // Use terminals if we have enough; otherwise fall back to all neighbours
+                const bool use_terminals = (term_idx.size() >= 3);
+                const std::vector<size_t>* use_idx = &term_idx;
+                std::vector<size_t> all_idx;
+                if (!use_terminals) {
+                    if (all_nbrs.size() < 3) return pt;
+                    all_idx.reserve(all_nbrs.size());
+                    for (auto& [idx, d2] : all_nbrs) all_idx.push_back(idx);
+                    use_idx = &all_idx;
+                }
+
+                // Centroid (from terminals, or all points as fallback)
+                double cx = 0.0, cy = 0.0, cz = 0.0;
+                for (size_t idx : *use_idx) {
+                    cx += x_coords[idx]; cy += y_coords[idx]; cz += z_coords[idx];
+                }
+                const double nn = static_cast<double>(use_idx->size());
+                cx /= nn;  cy /= nn;  cz /= nn;
+
+                // Covariance matrix (unnormalised — scaling cancels in power iteration)
+                double Sxx=0, Sxy=0, Sxz=0, Syy=0, Syz=0, Szz=0;
+                for (size_t idx : *use_idx) {
+                    double dx = x_coords[idx] - cx;
+                    double dy = y_coords[idx] - cy;
+                    double dz = z_coords[idx] - cz;
+                    Sxx += dx*dx;  Sxy += dx*dy;  Sxz += dx*dz;
+                    Syy += dy*dy;  Syz += dy*dz;  Szz += dz*dz;
+                }
+
+                // Power iteration: converges to the first principal component.
+                // Seed with fallback_dir so the sign is correct from the start.
+                double vx = fallback_dir.x(), vy = fallback_dir.y(), vz = fallback_dir.z();
+                for (int iter = 0; iter < 10; ++iter) {
+                    double wx = Sxx*vx + Sxy*vy + Sxz*vz;
+                    double wy = Sxy*vx + Syy*vy + Syz*vz;
+                    double wz = Sxz*vx + Syz*vy + Szz*vz;
+                    double mag = std::sqrt(wx*wx + wy*wy + wz*wz);
+                    if (mag < 1e-12) break;
+                    vx = wx/mag;  vy = wy/mag;  vz = wz/mag;
+                }
+
+                // Ensure final direction agrees with fallback (flip if anti-parallel)
+                if (vx*fallback_dir.x() + vy*fallback_dir.y() + vz*fallback_dir.z() < 0) {
+                    vx = -vx;  vy = -vy;  vz = -vz;
+                }
+
+                // std::cout << "Refine endpoint: " << pt << " centroid(" << cx << "," << cy << "," << cz << ") local_dir(" << vx << "," << vy << "," << vz << ") fallback_dir(" << fallback_dir.x() << "," << fallback_dir.y() << "," << fallback_dir.z() << ") use_terminals=" << use_terminals << std::endl;
+
+                // Find the terminal neighbour with the greatest projection from centroid
+                // along local_dir.  Search only among terminals (or all points as fallback)
+                // so the returned endpoint is a physical cluster point.
+                // Initialise with pt so we only move if a genuinely further point exists.
+                Facade::geo_point_t best = pt;
+                double best_proj = (pt.x()-cx)*vx + (pt.y()-cy)*vy + (pt.z()-cz)*vz;
+                for (size_t idx : *use_idx) {
+                    Facade::geo_point_t nb(x_coords[idx], y_coords[idx], z_coords[idx]);
+                    double proj = (nb.x()-cx)*vx + (nb.y()-cy)*vy + (nb.z()-cz)*vz;
+                    if (proj > best_proj) { best_proj = proj; best = nb; }
+                }
+                return best;
+            };
+
+            Facade::geo_vector_t neg_global_dir(
+                -global_dir.x(), -global_dir.y(), -global_dir.z());
+            first_pt  = refine_endpoint(boundary_point_first,  neg_global_dir);
+            second_pt = refine_endpoint(boundary_point_second, global_dir);
+
+            // std::cout << boundary_point_first << " -> " << first_pt << std::endl;
+            // std::cout << boundary_point_second << " -> " << second_pt << std::endl;
+        }
+    }
 
     // Determine the starting point based on whether this is the main cluster or not
     const bool is_main_flag = cluster.get_flag(Facade::Flags::main_cluster);
@@ -1347,6 +1484,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         return false;
     }
 
+
     // Break tracks and examine structure
     if (flag_break_track) {
         t0 = Clock::now();
@@ -1628,11 +1766,17 @@ void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, 
         
         // Determine segment type and print
         if (sg->flags_any(SegmentFlags::kShowerTopology)) {
-            SPDLOG_LOGGER_DEBUG(s_log, "print_segs_info: {} {} S_topo {} {} {} {} {} {}", seg_id, length, flag_dir, particle_type, particle_mass, kinetic_energy, is_dir_weak, in_vertex);
+            std::cout << "print_segs_info: " << seg_id << " " << length << " S_topo "
+                      << flag_dir << " " << particle_type << " " << particle_mass << " "
+                      << kinetic_energy << " " << is_dir_weak << " " << in_vertex << "\n";
         } else if (sg->flags_any(SegmentFlags::kShowerTrajectory)) {
-            SPDLOG_LOGGER_DEBUG(s_log, "print_segs_info: {} {} S_traj {} {} {} {} {} {}", seg_id, length, flag_dir, particle_type, particle_mass, kinetic_energy, is_dir_weak, in_vertex);
+            std::cout << "print_segs_info: " << seg_id << " " << length << " S_traj "
+                      << flag_dir << " " << particle_type << " " << particle_mass << " "
+                      << kinetic_energy << " " << is_dir_weak << " " << in_vertex << "\n";
         } else {
-            SPDLOG_LOGGER_DEBUG(s_log, "print_segs_info: {} {} Track  {} {} {} {} {} {}", seg_id, length, flag_dir, particle_type, particle_mass, kinetic_energy, is_dir_weak, in_vertex);
+            std::cout << "print_segs_info: " << seg_id << " " << length << " Track  "
+                      << flag_dir << " " << particle_type << " " << particle_mass << " "
+                      << kinetic_energy << " " << is_dir_weak << " " << in_vertex << "\n";
         }
     }
 }
