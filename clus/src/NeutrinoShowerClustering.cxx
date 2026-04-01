@@ -617,7 +617,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
                 }
 
                 if (min_shower && min_dis < 3.5 * units::cm) {
-                    min_shower->add_segment(seg1);
+                    min_shower->add_segment(seg1, true);
                     map_shower_length[min_shower] = min_shower->get_total_length();
                     flag_continue = true;
                 }
@@ -692,7 +692,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
         }
 
         if (min_shower) {
-            min_shower->add_segment(seg1);
+            min_shower->add_segment(seg1, true);
         }
     }
     
@@ -717,7 +717,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
             if (map_segment_in_shower.count(seg1)) continue;
             auto it = cluster_to_shower.find(seg1->cluster());
             if (it == cluster_to_shower.end()) continue;
-            it->second->add_segment(seg1);
+            it->second->add_segment(seg1, true);
             if (seg1->has_particle_info() && seg1->particle_info()) {
                 seg1->particle_info()->set_pdg(11);
                 seg1->particle_info()->set_mass(0.511 * units::MeV);
@@ -1097,7 +1097,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                         }
                     }
                 }
-                shower->add_segment(seg1);
+                shower->add_segment(seg1, true);
             }
         }
 
@@ -1166,7 +1166,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                     }
 
                     if (min_shower && min_dis < 3.5 * units::cm) {
-                        min_shower->add_segment(seg1);
+                        min_shower->add_segment(seg1, true);
                         map_shower_length[min_shower] = min_shower->get_total_length();
                         flag_continue = true;
                     }
@@ -1414,10 +1414,10 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                 
                 if ((angle < 25 && pair_dis < 80 * units::cm) ||
                     (angle < 12.5 && pair_dis < 120 * units::cm)) {
-                    shower->add_segment(seg1);
+                    shower->add_segment(seg1, true);
                 }
             }
-            
+
             // Force PDG=0 or short+weak-muon start segment to electron before majority-vote.
             // Mirrors the pattern in sub-pass 2 (and shower_clustering_with_nv_from_vertices).
             {

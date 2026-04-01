@@ -503,6 +503,23 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
     SPDLOG_LOGGER_DEBUG(log, "Filling bee points '{}' from PR graph with {} vertices and {} edges",
                name, boost::num_vertices(*pr_graph), boost::num_edges(*pr_graph));
 
+    // Build segment → shower map for shower_track mode so each point gets
+    // the shower's ID as cluster_id (all points from the same shower share
+    // the same color in Bee).
+    std::map<PR::SegmentPtr, PR::ShowerPtr, PR::SegmentIndexCmp> seg_to_shower;
+    if (config.use_associate_points) {
+        auto tf = grouping.get_track_fitting();
+        if (tf) {
+            for (const auto& shower : tf->get_showers()) {
+                PR::IndexedVertexSet sv; PR::IndexedSegmentSet ss;
+                shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
+                for (const auto& seg : ss) {
+                    seg_to_shower[seg] = shower;
+                }
+            }
+        }
+    }
+
     // Iterate through all segments (edges) in the graph
     int segment_count = 0;
     for (auto edge_desc : mir(boost::edges(*pr_graph))) {
@@ -528,9 +545,23 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
                 segment_count++;
                 continue;
             }
+            // Use the shower's start-segment encoded ID as cluster_id when the
+            // segment belongs to a shower (mirrors seg_display_id in fill_bee_pf_tree:
+            // cluster_id * 1000 + seg_id), so all points from the same shower share
+            // the same ID in Bee.
+            auto shower_it = seg_to_shower.find(segment);
+            const int shower_cluster_id = [&]() -> int {
+                if (shower_it == seg_to_shower.end()) return cluster_id;
+                auto start_seg = shower_it->second->start_segment();
+                if (!start_seg) return cluster_id;
+                int sid = start_seg->id();
+                if (sid < 0) sid = static_cast<int>(start_seg->get_graph_index());
+                const auto* cl = start_seg->cluster();
+                return cl ? cl->get_cluster_id() * 1000 + sid : sid;
+            }();
             for (const auto& dp : dpc->get_points()) {
                 WireCell::Point point(dp.x, dp.y, dp.z);
-                apa_bpts.global.append(point, charge, cluster_id, encoded_id);
+                apa_bpts.global.append(point, charge, cluster_id, shower_cluster_id);
             }
         } else {
             // --- default mode: use fitted points with dQdx scale/offset ---
@@ -880,6 +911,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                           << "  pdg=" << shower->get_particle_type()
                           << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                           << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
+                          << " nsegments=" << shower->get_num_segments() 
                           << "\n";
             }
             continue;
@@ -892,6 +924,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 auto start_seg = shower->start_segment();
                 const auto* cl = start_seg ? start_seg->cluster() : nullptr;
                 WireCell::Point sp = shower->get_start_point();
+                WireCell::Point ep = shower->get_end_point();
                 std::cout << "[fill_bee_pf_tree] ROOT shower"
                           << "  conn_type=" << conn_type
                           << "  reason=" << (!start_vtx ? "null_start_vtx" : "start_vtx==main_vertex")
@@ -899,6 +932,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                           << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                           << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                           << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                          << "  end=(" << ep.x()/units::cm << "," << ep.y()/units::cm << "," << ep.z()/units::cm << ") cm"
+                        << " nsegments=" << shower->get_num_segments() 
                           << "\n";
             }
             auto& vec = direct ? root_direct_showers : root_indirect_showers;
@@ -910,6 +945,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                     auto start_seg = shower->start_segment();
                     const auto* cl = start_seg ? start_seg->cluster() : nullptr;
                     WireCell::Point sp = shower->get_start_point();
+                    WireCell::Point ep = shower->get_end_point();
                     const int parent_seg_id = (it->second->id() >= 0)
                                                 ? it->second->id()
                                                 : static_cast<int>(it->second->get_graph_index());
@@ -920,6 +956,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                               << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                               << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                               << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                              << " end=(" << ep.x()/units::cm << "," << ep.y()/units::cm << "," << ep.z()/units::cm << ") cm"
+                              << " nsegments=" << shower->get_num_segments() 
                               << "\n";
                 }
                 auto& mp = direct ? seg_direct_showers : seg_indirect_showers;
@@ -935,6 +973,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                             auto start_seg = shower->start_segment();
                             const auto* cl = start_seg ? start_seg->cluster() : nullptr;
                             WireCell::Point sp = shower->get_start_point();
+                            WireCell::Point ep = shower->get_end_point();
                             std::cout << "[fill_bee_pf_tree] SHOWER-attached shower (via parent shower vtx)"
                                       << "  conn_type=" << conn_type
                                       << "  parent_shower_pdg=" << parent_shower->get_particle_type()
@@ -942,6 +981,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                       << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                                       << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                                       << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                                      << "  end=(" << ep.x()/units::cm << "," << ep.y()/units::cm << "," << ep.z()/units::cm << ") cm"
+                                        << " nsegments=" << shower->get_num_segments()
                                       << "\n";
                         }
                         auto& mp = direct ? shower_direct_showers : shower_indirect_showers;
@@ -951,12 +992,15 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                             auto start_seg = shower->start_segment();
                             const auto* cl = start_seg ? start_seg->cluster() : nullptr;
                             WireCell::Point sp = shower->get_start_point();
+                            WireCell::Point ep = shower->get_end_point();
                             std::cout << "[fill_bee_pf_tree] ROOT shower (via root-reachable shower vtx, no parent found)"
                                       << "  conn_type=" << conn_type
                                       << "  pdg=" << shower->get_particle_type()
                                       << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                                       << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                                       << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                                      << "  end=(" << ep.x()/units::cm << "," << ep.y()/units::cm << "," << ep.z()/units::cm << ") cm"
+                                        << " nsegments=" << shower->get_num_segments()
                                       << "\n";
                         }
                         auto& vec = direct ? root_direct_showers : root_indirect_showers;
@@ -968,12 +1012,16 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                         auto start_seg = shower->start_segment();
                         const auto* cl = start_seg ? start_seg->cluster() : nullptr;
                         WireCell::Point sp = shower->get_start_point();
+                        WireCell::Point ep = shower->get_end_point();
+
                         std::cout << "[fill_bee_pf_tree] ROOT shower (fallback: start_vtx not in BFS tree)"
                                   << "  conn_type=" << conn_type
                                   << "  pdg=" << shower->get_particle_type()
                                   << "  ke=" << shower->get_kine_best() / units::MeV << " MeV"
                                   << "  cluster=" << (cl ? std::to_string(cl->get_cluster_id()) : "?")
                                   << "  start=(" << sp.x()/units::cm << "," << sp.y()/units::cm << "," << sp.z()/units::cm << ") cm"
+                                    << "  end=(" << ep.x()/units::cm << "," << ep.y()/units::cm << "," << ep.z()/units::cm << ") cm"
+                                        << " nsegments=" << shower->get_num_segments()
                                   << "\n";
                     }
                     auto& vec = direct ? root_direct_showers : root_indirect_showers;

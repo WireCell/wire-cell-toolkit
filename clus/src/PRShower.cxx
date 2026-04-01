@@ -206,6 +206,10 @@ namespace WireCell::Clus::PR {
     }
 
     void Shower::add_shower(Shower& shower, const std::string& cloud_name_fit, const std::string& cloud_name_associate){
+
+        // std::cout << "Added Shower" << std::endl;
+
+
         for (auto vdesc : shower.nodes()) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
             if (vtx && vtx->descriptor_valid()) this->add_vertex(vtx);
@@ -255,6 +259,7 @@ namespace WireCell::Clus::PR {
         if (!batch_associate.empty()) {
             if (auto dpc = this->dpcloud(cloud_name_associate)) dpc->add_points(batch_associate);
         }
+
     }
 
     void Shower::complete_structure_with_start_segment(std::set<SegmentPtr>& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate) {
@@ -910,6 +915,7 @@ namespace WireCell::Clus::PR {
                         data.start_point = fits.back().point;
                         data.end_point = fits.front().point;
                     }
+                    // std::cout << "cluster: " << m_start_segment->cluster()->get_cluster_id() << " segment: " << m_start_segment->get_graph_index() << " " << data.end_point << std::endl;
                 }
                 SPDLOG_LOGGER_DEBUG(s_log,
                     "calculate_kinematics start_point:   branch=fits start=({:.1f},{:.1f},{:.1f})cm",
@@ -947,6 +953,8 @@ namespace WireCell::Clus::PR {
                             data.end_point = vtx->fit().point;
                         }
                     }
+                    // std::cout << "Vertex 1: " <<  data.end_point << std::endl;
+
                 }
             }
             
@@ -1028,6 +1036,8 @@ namespace WireCell::Clus::PR {
                         data.end_point = vtx->fit().point;
                     }
                 }
+                // std::cout << "Vertex 2: " <<  data.end_point << std::endl;
+
                 
                 // Collect all dQ and dx from all segments
                 double total_length = 0;
@@ -1122,8 +1132,11 @@ namespace WireCell::Clus::PR {
                     if (dis > max_dis) {
                         max_dis = dis;
                         data.end_point = vtx->fit().point;
+                        // std::cout << "New farthest vertex: " << data.end_point << " Cluster IDs:" << vtx->cluster()->get_cluster_id() << std::endl;
                     }
                 }
+                // std::cout << "Vertex 3: " <<  data.end_point << std::endl;
+
 
                 // Collect all dQ and dx from all segments
                 std::vector<double> vec_dQ, vec_dx;
@@ -1145,6 +1158,28 @@ namespace WireCell::Clus::PR {
             }
         }
 
+        // size_t nclusters = 0;
+        // {
+        //     std::unordered_set<const Facade::Cluster*> cluster_set;
+        //     const auto& view = this->view_graph();
+        //     for (auto edesc : this->edges()) {
+        //         SegmentPtr seg = view[edesc].segment;
+        //         if (seg && seg->cluster()) {
+        //             cluster_set.insert(seg->cluster());
+        //         }
+        //     }
+        //     nclusters = cluster_set.size();
+        // }
+
+        // std::cout << "Shower::calculate_kinematics: nsegments=" << nsegments << " nvertices=" << this->nodes().size() << " " << this->edges().size()
+        //           << " nclusters:" << nclusters
+        //           << " particle_type=" << data.particle_type
+        //           << " kenergy_range=" << data.kenergy_range / units::MeV << " MeV"
+        //           << " kenergy_dQdx=" << data.kenergy_dQdx / units::MeV << " MeV"
+        //           << " kenergy_best=" << data.kenergy_best / units::MeV << " MeV"
+        //           << " kenergy_charge=" << data.kenergy_charge / units::MeV << " MeV"
+        //           << " end_point=(" << data.end_point.x() / units::cm << "," << data.end_point.y() / units::cm << "," << data.end_point.z() / units::cm << ") cm"
+        //           << std::endl;
     }
 
     void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
@@ -1229,5 +1264,4 @@ namespace WireCell::Clus::PR {
             }
         }
     }
-
 }
