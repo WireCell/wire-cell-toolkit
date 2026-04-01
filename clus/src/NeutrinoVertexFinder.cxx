@@ -1117,6 +1117,8 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         for (const auto& [prev_vtx, current_sg] : segments_to_be_examined) {
             if (!prev_vtx->descriptor_valid()) continue;
             
+            // std::cout << "examine segment " << current_sg->get_graph_index() << std::endl;
+
             // Check for incoming showers
             bool flag_shower_in = false;
             std::vector<SegmentPtr> in_showers;
@@ -1291,8 +1293,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 current_sg->particle_info(pinfo);
                             } else {
                                 double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
-                                s_log->debug("examine_direction: cluster {} dqdx_ratio={:.3f} length={:.2f}cm nfits={}",
-                                    cluster.ident(), dqdx_ratio, length/units::cm, current_sg->fits().size());
+                                s_log->debug("examine_direction: cluster {} segment_graph_index={} dqdx_ratio={:.3f} length={:.2f}cm nfits={}",
+                                    cluster.ident(), current_sg->get_graph_index(), dqdx_ratio, length/units::cm, current_sg->fits().size());
+                                // std::cout << "examine_direction: A segment graph index " << current_sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " length=" << length/units::cm << "cm nfits=" << current_sg->fits().size() << std::endl;
                                 if (dqdx_ratio > 1.4) {
                                     auto four_momentum = segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
                                     auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
@@ -1321,6 +1324,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 if (current_pdg == 2212 && flag_shower_in && num_daughter_showers == 0) {
                     for (auto in_shower : in_showers) {
                         double dqdx_ratio = segment_median_dQ_dx(in_shower) / (43e3 / units::cm);
+
+                        // std::cout << "examine_direction: B segment graph index " << current_sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " length=" << length/units::cm << "cm nfits=" << current_sg->fits().size() << std::endl;
+
                         if (dqdx_ratio > 1.3) {
                             auto four_momentum = segment_cal_4mom(in_shower, 2212, particle_data, recomb_model);
                             auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
@@ -1471,6 +1477,9 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 
                 if (n_proton > 0) {
                     double dqdx_ratio = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+
+                    // std::cout << "examine_direction: C segment graph index " << sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " nfits=" << sg->fits().size() << std::endl;
+
                     if (dqdx_ratio > 1.3) {
                         auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);

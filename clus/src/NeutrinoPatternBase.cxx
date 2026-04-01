@@ -1756,7 +1756,7 @@ void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, 
         }
         
         // Get segment properties
-        int seg_id = sg->id();
+        int seg_id = sg->get_graph_index();
         double length = segment_track_length(sg) / units::cm;
         int flag_dir = sg->dirsign();
         int particle_type = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
