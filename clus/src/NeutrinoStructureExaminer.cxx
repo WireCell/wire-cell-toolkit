@@ -58,18 +58,13 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
             const auto& wcpts = sg->wcpts();
             if (wcpts.size() < 2) continue;
             
-            // Use fitted points if available, fall back to wcpts otherwise
-            Facade::geo_point_t start_p, end_p;
-            const auto& fitted_fits = sg->fits();
-            if (fitted_fits.size() >= 2) {
-                // Use fitted/smoothed points
-                start_p = fitted_fits.front().point;
-                end_p = fitted_fits.back().point;
-            } else {
-                // Fall back to raw Steiner WCPoint positions
-                start_p = wcpts.front().point;
-                end_p = wcpts.back().point;
-            }
+            // Always use wcpts endpoints for the straight-line scan direction.
+            // Using fits here caused a mismatch: fits can span a larger range than
+            // wcpts, so the scan would go beyond wcpts_back, the stop condition
+            // would never fire, and wcpts_back would be force-appended as a reverse
+            // kink at the end of the new path.
+            Facade::geo_point_t start_p = wcpts.front().point;
+            Facade::geo_point_t end_p   = wcpts.back().point;
             
             // Check the track by testing points along a straight line
             double step_size = 0.6 * units::cm;

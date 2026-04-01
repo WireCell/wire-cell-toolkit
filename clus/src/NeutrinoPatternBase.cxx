@@ -1469,7 +1469,6 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (!sg1) return false;
     // std::cout << "Fits: " << sg1->fits().size() << std::endl;
 
-
     // Store initial pair of vertices for main cluster
     std::pair<VertexPtr, VertexPtr> main_cluster_initial_pair_vertices{nullptr, nullptr};
     bool is_main_cluster = cluster.get_flag(Facade::Flags::main_cluster);
@@ -1484,6 +1483,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         return false;
     }
 
+  
 
     // Break tracks and examine structure
     if (flag_break_track) {
@@ -1492,8 +1492,6 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         remaining_segments.push_back(sg1);
         break_segments(graph, track_fitter, dv, remaining_segments);
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
-
-        
 
         //  // Debug: print all segments and vertices
         // {
@@ -1549,6 +1547,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
+   
 
     // Find other segments
     for (int i = 0; i < nrounds_find_other_tracks; i++) {
@@ -1556,6 +1555,8 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
     }
+
+  
 
     // For main cluster, merge tracks if angles are consistent
     if (is_main_cluster) {
