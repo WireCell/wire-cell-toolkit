@@ -1579,12 +1579,13 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 WireCell::Point start_pt = start_v->fit().valid() ? start_v->fit().point : start_v->wcpt().point;
                 
                 bool should_calc = false;
-                
+                bool flag_Michel_triggered = false;
+
                 // Case 1: Direction is outward and endpoint is isolated in fiducial volume
-                if (dir_sign == 1 && num_segs_end == 1 && fiducial_utils && 
+                if (dir_sign == 1 && num_segs_end == 1 && fiducial_utils &&
                     fiducial_utils->inside_fiducial_volume(end_pt)) {
                     should_calc = true;
-                } else if (dir_sign == -1 && num_segs_start == 1 && fiducial_utils && 
+                } else if (dir_sign == -1 && num_segs_start == 1 && fiducial_utils &&
                           fiducial_utils->inside_fiducial_volume(start_pt)) {
                     should_calc = true;
                 }
@@ -1603,7 +1604,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             break;
                         }
                     }
-                    if (flag_Michel) should_calc = true;
+                    if (flag_Michel) { should_calc = true; flag_Michel_triggered = true; }
                 }
                 // Case 3: Check for Michel electron topology at start vertex (2 segments, one is shower)
                 else if (num_segs_start == 2 && start_v->descriptor_valid()) {
@@ -1620,11 +1621,14 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             break;
                         }
                     }
-                    if (flag_Michel) should_calc = true;
+                    if (flag_Michel) { should_calc = true; flag_Michel_triggered = true; }
                 }
-                
+
                 if (should_calc) {
                     int pdg = sg->particle_info()->pdg();
+                    // A stopped proton cannot produce a Michel electron; if Michel topology is
+                    // present at the endpoint, this track is more likely a misidentified muon.
+                    if (flag_Michel_triggered && pdg == 2212) pdg = 13;
                     auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model);
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(pdg, particle_data->get_particle_mass(pdg), particle_data->pdg_to_name(pdg), four_momentum);
                     sg->particle_info(pinfo);

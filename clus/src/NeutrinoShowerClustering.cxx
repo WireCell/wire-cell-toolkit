@@ -2702,6 +2702,12 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
                 if (std::abs(pdg) == 13 || pdg == 0) {
                     sg->particle_info()->set_pdg(211);
                     sg->particle_info()->set_mass(139.57 * units::MeV);
+                    // Recalculate 4-momentum under pion hypothesis, mirroring prototype:
+                    // if (sg->get_particle_4mom(3)>0) sg->cal_4mom();
+                    if (sg->particle_info()->kinetic_energy() > 0) {
+                        auto four_momentum = segment_cal_4mom(sg, 211, particle_data, recomb_model);
+                        sg->particle_info()->set_four_momentum(four_momentum);
+                    }
                 }
             }
         }

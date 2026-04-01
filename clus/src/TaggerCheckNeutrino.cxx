@@ -155,15 +155,27 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // initial pattern recognitions
         pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
 
+        // std::cout << "After first round of main cluster A: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
+
+
         // shower related operations
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
         pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+
+        // std::cout << "After first round of main cluster B: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
+
         
         // direction determination
         pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
 
+        // std::cout << "After first round of main cluster C: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
+
+
         // shower clustering
         pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
+
+        // std::cout << "After first round of main cluster D: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
+
 
         // main vertex determination
         pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
@@ -173,7 +185,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             main_vertex = nullptr;
         }
 
-        std::cout << "After first round of main cluster PR" << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
+        std::cout << "After first round of main cluster PR" << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
     }
 
 
@@ -264,11 +276,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // improve_vertex may update final_main_vertex pointer; sync back to map
         map_cluster_main_vertices[main_cluster] = final_main_vertex;
 
-        std::cout << "After improve vertex:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+        std::cout << "After improve vertex:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
 
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
 
-        std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+        std::cout << "After shower clustering :" << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
  
         // examine_direction runs last and has the final word on segment orientations
         // relative to the main vertex.
@@ -278,7 +290,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
         SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
         
-        std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+        std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
 
         pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
                                                 map_shower_pio_id, map_pio_id_showers,
@@ -293,7 +305,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                 *m_track_fitter, m_dv, particle_data(),
                                                 m_recomb_model);
 
-        std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, final_main_vertex);
+        std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
 
     }
 
