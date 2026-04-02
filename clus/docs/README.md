@@ -11,9 +11,14 @@ codebase. Start with the overview, then follow the links to each deep-dive docum
 | [pipeline_stages.md](pipeline_stages.md) | Each of the 6 IEnsembleVisitor stages in detail |
 | [steiner_graph.md](steiner_graph.md) | Steiner tree construction from blob point clouds |
 | [pattern_recognition.md](pattern_recognition.md) | `find_proto_vertex` and the full PR loop |
-| [track_shower_separation.md](track_shower_separation.md) | Classifying particles, shower clustering, kinematics |
+| [particle_identification.md](particle_identification.md) | Segment-level PID: topology/trajectory tests, direction, PDG assignment, map consistency fixers |
+| [examine_direction.md](examine_direction.md) | BFS direction propagation from the primary vertex outward |
+| [vertex_determination.md](vertex_determination.md) | Per-cluster and global vertex selection; DL vertex refinement |
+| [shower_clustering.md](shower_clustering.md) | `PR::Shower` objects, BFS grouping, kinematics, π0 handling |
 | [track_fitting.md](track_fitting.md) | Calorimetry, dE/dx, wire-coordinate fitting |
 | [data_structures.md](data_structures.md) | Facade layer, PR::Graph, PR::Vertex, PR::Segment |
+| [bee_output.md](bee_output.md) | Bee ZIP format: point-cloud dumps and particle-flow tree |
+| [magnify_tracking_output.md](magnify_tracking_output.md) | ROOT tracking output, conversion tool, Magnify-tracking viewer |
 
 ## Quick Reference: Pipeline Stages
 
