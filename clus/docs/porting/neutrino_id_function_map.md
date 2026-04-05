@@ -125,6 +125,8 @@ Track/shower classification for all segments.
 | `judge_no_dir_tracks_close_to_showers(cluster_id)` | `judge_no_dir_tracks_close_to_showers(graph, cluster, particle_data, dv)` | |
 | `examine_all_showers(cluster_id)` | `examine_all_showers(graph, cluster, particle_data)` | |
 | `calculate_num_daughter_showers(vtx, sg, flag)` | `calculate_num_daughter_showers(graph, vtx, sg, flag)` | |
+| `calculate_num_daughter_tracks(vtx, sg, flag_count_shower, length_cut)` | `calculate_num_daughter_tracks(graph, vtx, sg, flag_count_shower, length_cut)` | BFS count of non-shower (or all) segments beyond `sg` from `vtx` |
+| `find_cont_muon_segment_nue(sg, vtx, flag_ignore_dQ_dx)` | `find_cont_muon_segment_nue(graph, sg, vtx, flag_ignore_dQ_dx)` | Like `find_cont_muon_segment` but 30 cm angle threshold instead of 50 cm; used in `bad_reconstruction` |
 | `set_default_shower_particle_info(cluster)` | `set_default_shower_particle_info(graph, cluster, particle_data, recomb_model)` | → `NeutrinoPatternBase.cxx` |
 | `change_daughter_type(vtx, sg, type, mass)` | `change_daughter_type(graph, vtx, sg, type, mass, particle_data, recomb_model)` | → `NeutrinoVertexFinder.cxx` |
 
@@ -231,9 +233,19 @@ Charge-based energy reconstruction.
 The following prototype headers have corresponding **empty** toolkit `.cxx` files.
 These are the next porting targets.
 
-### `NeutrinoID_cosmic_tagger.h` → `NeutrinoTaggerCosmic.cxx` (EMPTY)
+### `NeutrinoID_cosmic_tagger.h` + parts of `NeutrinoID_nue_tagger.h` → `NeutrinoTaggerCosmic.cxx` ✓ PORTED
 
-Entry point: `bool WCPPID::NeutrinoID::cosmic_tagger()`
+| Prototype (`WCPPID::NeutrinoID::`) | Toolkit (`PatternAlgorithms::`) | Notes |
+|---|---|---|
+| `cosmic_tagger()` | `cosmic_tagger(graph, main_vertex, showers, map_segment_in_shower, map_vertex_to_shower, segments_in_long_muon, main_cluster, all_clusters, dv, ti)` | 10 cosmic rejection flags; fills `TaggerInfo` BDT features |
+| `bad_reconstruction(shower)` | `bad_reconstruction(graph, main_vertex, shower, flag_fill, ti)` | 3 sub-checks: long stem, muon continuation via `find_cont_muon_segment_nue`, track-like continuation near shower start |
+
+**Key translation notes for this file:**
+- `TVector3::Theta()` / `TVector3::Phi()` → `vec_theta(dir)` / `vec_phi(dir)` (static helpers, since `D3Vector` has no spherical angle methods)
+- `Shower::get_last_segment_vertex_long_muon(IndexedSegmentSet)` takes a plain `std::set<SegmentPtr>` (no comparator); convert from `IndexedSegmentSet` at call site
+- `main_cluster->get_cluster_id()` used for flag 9 cluster-PCA block and flag 10 front-face vertex check
+
+
 
 ### `NeutrinoID_numu_tagger.h` → `NeutrinoTaggerNuMu.cxx` (EMPTY)
 
@@ -344,7 +356,7 @@ shower_clustering_with_nv()             → pattern_algos.shower_clustering_with
 ─────── NOT YET IN TOOLKIT visit() ─────────────────────────────────────────────
 init_tagger_info(tagger_info)           → NeutrinoKinematics.cxx  [PORTED]
 fill_kine_tree(kine_info)               → NeutrinoKinematics.cxx  [PORTED]
-cosmic_tagger()                         → NeutrinoTaggerCosmic.cxx [EMPTY]
+cosmic_tagger()                         → NeutrinoTaggerCosmic.cxx [PORTED]
 numu_tagger()                           → NeutrinoTaggerNuMu.cxx  [EMPTY]
 ssm_tagger()                            → NeutrinoTaggerSSM.cxx   [EMPTY]
 nue_tagger(muon_length)                 → NeutrinoTaggerNuE.cxx   [EMPTY]

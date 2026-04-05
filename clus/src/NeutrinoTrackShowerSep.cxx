@@ -212,7 +212,117 @@ std::pair<int, double> PatternAlgorithms::calculate_num_daughter_showers(Graph& 
     }
     
     return std::make_pair(number_showers, acc_length);
-} 
+}
+
+// calculate_num_daughter_tracks: count tracks (non-shower segments) reachable from vertex
+// via segment sg, skipping sg itself (used to find activity at the far end of a muon).
+// Prototype: NeutrinoID::calculate_num_daughter_tracks in NeutrinoID_track_shower.h:724.
+// flag_count_shower: if true also count shower segments; length_cut: only count if > cut.
+std::pair<int, double> PatternAlgorithms::calculate_num_daughter_tracks(
+    Graph& graph, VertexPtr vtx, SegmentPtr sg,
+    bool flag_count_shower, double length_cut)
+{
+    int    number_tracks = 0;
+    double acc_length    = 0;
+
+    std::set<VertexPtr>  used_vertices;
+    std::set<SegmentPtr> used_segments;
+
+    std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
+    segments_to_be_examined.push_back(std::make_pair(vtx, sg));
+    used_vertices.insert(vtx);
+
+    while (!segments_to_be_examined.empty()) {
+        std::vector<std::pair<VertexPtr, SegmentPtr>> temp_segments;
+        for (auto& [prev_vtx, current_sg] : segments_to_be_examined) {
+            if (!used_segments.insert(current_sg).second) continue; // already seen
+
+            bool is_shower = current_sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                             current_sg->flags_any(SegmentFlags::kShowerTopology) ||
+                             (current_sg->has_particle_info() &&
+                              std::abs(current_sg->particle_info()->pdg()) == 11);
+
+            if (!is_shower || flag_count_shower) {
+                double length = segment_track_length(current_sg);
+                if (length > length_cut) {
+                    acc_length += length;
+                    number_tracks++;
+                }
+            }
+
+            VertexPtr curr_vertex = find_other_vertex(graph, current_sg, prev_vtx);
+            if (!curr_vertex || used_vertices.count(curr_vertex)) continue;
+            used_vertices.insert(curr_vertex);
+
+            if (curr_vertex->descriptor_valid()) {
+                auto vd = curr_vertex->get_descriptor();
+                for (auto [eit, eit_end] = boost::out_edges(vd, graph); eit != eit_end; ++eit) {
+                    SegmentPtr next_sg = graph[*eit].segment;
+                    if (next_sg) temp_segments.push_back({curr_vertex, next_sg});
+                }
+            }
+        }
+        segments_to_be_examined = std::move(temp_segments);
+    }
+
+    return {number_tracks, acc_length};
+}
+
+// find_cont_muon_segment_nue: from vertex vtx, find a segment adjacent to sg that continues
+// in roughly the same direction (opening angle < 12.5 deg) and has MIP-like dQ/dx.
+// Returns {nullptr, nullptr} if no such continuation exists.
+// Prototype: NeutrinoID::find_cont_muon_segment_nue in NeutrinoID_track_shower.h:2372.
+std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
+    Graph& graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx)
+{
+    SegmentPtr sg1  = nullptr;
+    VertexPtr  vtx1 = nullptr;
+
+    double sg_length  = segment_track_length(sg);
+    WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+
+    WireCell::Vector dir1 = segment_cal_dir_3vector(sg, vtx_pt, 15 * units::cm);
+    WireCell::Vector dir3 = (sg_length > 30 * units::cm)
+                                ? segment_cal_dir_3vector(sg, vtx_pt, 30 * units::cm)
+                                : dir1;
+
+    double max_length = 0;
+
+    if (!vtx->descriptor_valid()) return {nullptr, nullptr};
+    auto vd = vtx->get_descriptor();
+    for (auto [eit, eit_end] = boost::out_edges(vd, graph); eit != eit_end; ++eit) {
+        SegmentPtr sg2 = graph[*eit].segment;
+        if (!sg2 || sg2 == sg) continue;
+        VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
+
+        double length = segment_track_length(sg2);
+        double ratio  = segment_median_dQ_dx(sg2) / (43e3 / units::cm);
+
+        WireCell::Vector dir2 = segment_cal_dir_3vector(sg2, vtx_pt, 15 * units::cm);
+        double angle = (M_PI - dir1.angle(dir2)) / M_PI * 180.0;
+
+        double angle1 = angle;
+        if (length > 30 * units::cm || sg_length > 30 * units::cm) {
+            WireCell::Vector dir4 = segment_cal_dir_3vector(sg2, vtx_pt, 30 * units::cm);
+            angle1 = (M_PI - dir3.angle(dir4)) / M_PI * 180.0;
+        }
+
+        bool angle_ok = (angle < 12.5 || angle1 < 12.5 ||
+                         (sg_length < 6 * units::cm && (angle < 15 || angle1 < 15)));
+        bool dqdx_ok  = (ratio < 1.3 || flag_ignore_dQ_dx);
+
+        if (angle_ok && dqdx_ok) {
+            double proj = length * std::cos(angle / 180.0 * M_PI);
+            if (proj > max_length) {
+                max_length = proj;
+                sg1  = sg2;
+                vtx1 = vtx2;
+            }
+        }
+    }
+
+    return {sg1, vtx1};
+}
 
 void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data) {
     // Iterate through all edges (segments) in the graph

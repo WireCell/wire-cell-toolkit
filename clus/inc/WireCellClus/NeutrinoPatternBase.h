@@ -131,7 +131,10 @@ namespace WireCell::Clus::PR {
         void separate_track_shower(Graph&graph, Facade::Cluster& cluster);
         // Direction
         void determine_direction(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
-        std::pair<int, double> calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower = true); 
+        std::pair<int, double> calculate_num_daughter_showers(Graph& graph, VertexPtr vertex, SegmentPtr segment, bool flag_count_shower = true);
+        std::pair<int, double> calculate_num_daughter_tracks(Graph& graph, VertexPtr vtx, SegmentPtr sg, bool flag_count_shower = false, double length_cut = 0);
+        // find_cont_muon_segment_nue: find adjacent segment continuing in same direction (MIP-like)
+        std::pair<SegmentPtr, VertexPtr> find_cont_muon_segment_nue(Graph& graph, SegmentPtr sg, VertexPtr vtx, bool flag_ignore_dQ_dx = false);
         void examine_good_tracks(Graph& graph, Facade::Cluster& cluster, const Clus::ParticleDataSet::pointer& particle_data);
         // about fix maps
         void fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluster& cluster);
@@ -215,6 +218,20 @@ namespace WireCell::Clus::PR {
 
         // kinematics output ...
         void init_tagger_info(TaggerInfo& ti);
+
+        // cosmic tagger
+        bool bad_reconstruction(Graph& graph, VertexPtr main_vertex, ShowerPtr shower,
+                                bool flag_fill = false, TaggerInfo* ti = nullptr);
+        bool cosmic_tagger(Graph& graph, VertexPtr main_vertex,
+                           IndexedShowerSet& showers,
+                           ShowerSegmentMap& map_segment_in_shower,
+                           VertexShowerSetMap& map_vertex_to_shower,
+                           IndexedSegmentSet& segments_in_long_muon,
+                           Facade::Cluster* main_cluster,
+                           std::vector<Facade::Cluster*>& all_clusters,
+                           IDetectorVolumes::pointer dv,
+                           TaggerInfo& ti);
+
         KineInfo fill_kine_tree(VertexPtr main_vertex, IndexedShowerSet& showers,
                                 const Pi0KineFeatures& pio_kine,
                                 Graph& graph, TrackFitting& track_fitter,
