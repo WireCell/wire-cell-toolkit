@@ -96,7 +96,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dl_vtx_cut=20.0, dQdx_scale=0.1, dQdx_offset=-1000.0) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dl_vtx_cut=20.0, dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="") :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -109,12 +109,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 dl_vtx_cut: dl_vtx_cut,     // max distance mm to accept DL vertex (default 20mm = 2cm)
                 dQdx_scale: dQdx_scale,     // scale factor for dQ passed to SCN network
                 dQdx_offset: dQdx_offset,   // offset for dQ passed to SCN network
+                clus_geom_helper: clus_geom_helper, // type/name of SimpleClusGeomHelper; empty = no SCE
             } + dv_cfg + pcts_cfg
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.
         // mode is passed for future use (e.g. "multiple" for multi-track mode).
-        do_tracking(name="", mode="", perf=false) :: $.tagger_check_neutrino(name=name, perf=perf),
+        do_tracking(name="", mode="", perf=false, clus_geom_helper="") :: $.tagger_check_neutrino(name=name, perf=perf, clus_geom_helper=clus_geom_helper),
 
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",

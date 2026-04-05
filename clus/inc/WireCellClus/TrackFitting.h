@@ -5,6 +5,7 @@
 #include "WireCellUtil/Logging.h"
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRShower.h"
+#include "WireCellClus/NeutrinoTaggerInfo.h"
 
 #include <Eigen/IterativeLinearSolvers>
 #include <unordered_map>
@@ -182,6 +183,14 @@ namespace WireCell::Clus {
         const PR::ShowerIntMap& get_map_shower_pio_id() const { return m_map_shower_pio_id; }
         const std::map<int, std::vector<PR::ShowerPtr>>& get_map_pio_id_showers() const { return m_map_pio_id_showers; }
         const std::map<int, std::pair<double, int>>& get_map_pio_id_mass() const { return m_map_pio_id_mass; }
+
+        /// Store / retrieve reconstructed neutrino kinematics (filled by TaggerCheckNeutrino).
+        void set_kine_info(PR::KineInfo ki)  { m_kine_info = std::move(ki); }
+        const PR::KineInfo& get_kine_info()  const { return m_kine_info; }
+
+        /// Store / retrieve BDT input features (filled by TaggerCheckNeutrino).
+        void set_tagger_info(PR::TaggerInfo ti) { m_tagger_info = std::move(ti); }
+        const PR::TaggerInfo& get_tagger_info() const { return m_tagger_info; }
 
         void clear_graph();
 
@@ -588,6 +597,10 @@ namespace WireCell::Clus {
         PR::ShowerIntMap                          m_map_shower_pio_id;
         std::map<int, std::vector<PR::ShowerPtr>> m_map_pio_id_showers;
         std::map<int, std::pair<double, int>>     m_map_pio_id_mass;
+
+        // Kinematics and tagger features (set by TaggerCheckNeutrino)
+        PR::KineInfo   m_kine_info{};
+        PR::TaggerInfo m_tagger_info{};
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION

@@ -88,7 +88,7 @@ local ub = {
         uses: [detector_volumes]
     },
 
-    local detector_volumes = 
+    local detector_volumes =
     {
         type: "DetectorVolumes",
         name: "",

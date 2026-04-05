@@ -44,6 +44,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     NeedPCTS::configure(config);
     NeedRecombModel::configure(config);
     NeedParticleData::configure(config);
+    NeedClusGeomHelper::configure(config);
 }
 
 Configuration TaggerCheckNeutrino::default_configuration() const
@@ -61,6 +62,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_cut"] = 20.0;   // mm (= 2 cm)
     cfg["dQdx_scale"]  = 0.1;   // dQ scale factor for SCN network input
     cfg["dQdx_offset"] = -1000.0; // dQ offset for SCN network input
+    cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
 
     return cfg;
 }
@@ -310,6 +312,21 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     }
 
 
+    // Initialize tagger features to their default values unconditionally —
+    // even if no vertex was found the struct must be value-initialized.
+    TaggerInfo tagger_info;
+    pattern_algos.init_tagger_info(tagger_info);
+
+    // Fill reconstructed neutrino kinematics if a vertex was found.
+    KineInfo kine_info{};
+    if (final_main_vertex) {
+        kine_info = pattern_algos.fill_kine_tree(
+            final_main_vertex, showers, pio_kine,
+            *pr_graph, *m_track_fitter, m_dv,
+            m_geom_helper,          // nullptr when clus_geom_helper is not configured
+            particle_data(), m_recomb_model);
+    }
+
     // Mark the main neutrino vertex and store neutrino results in TrackFitting
     // so that downstream consumers (e.g., Bee particle-flow output in MultiAlgBlobClustering)
     // can access them without re-running pattern recognition.
@@ -319,6 +336,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     m_track_fitter->set_pi0_data(pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass);
     m_track_fitter->set_main_vertex(final_main_vertex);
     m_track_fitter->set_showers(showers);
+    m_track_fitter->set_kine_info(kine_info);
+    m_track_fitter->set_tagger_info(tagger_info);
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);

@@ -6,6 +6,7 @@
 
 #include "WireCellClus/IPCTransform.h"
 #include "WireCellClus/ParticleDataSet.h"
+#include "WireCellClus/IClusGeomHelper.h"
 
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/IRecombinationModel.h"
@@ -64,8 +65,19 @@ namespace WireCell::Clus {
         void configure(const WireCell::Configuration &cfg);
     };
 
+    // A mixin to get an IClusGeomHelper (optional).
+    //
+    // Configuration:
+    //
+    // "clus_geom_helper" : string type/name of an IClusGeomHelper.
+    //                      Empty string (default) means no helper — m_geom_helper is nullptr.
+    struct NeedClusGeomHelper {
+        IClusGeomHelper::pointer m_geom_helper;
+        void configure(const WireCell::Configuration &cfg);
+    };
+
     // A mixin to get an IPCTransformSet
-    // 
+    //
     // Configuration:
     //
     // "pc_transforms" : string type/name of an IPCTransformSet

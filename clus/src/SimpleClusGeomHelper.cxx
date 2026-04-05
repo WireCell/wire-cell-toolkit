@@ -2,6 +2,7 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/Units.h"
 
 #include <string>
 
@@ -45,8 +46,8 @@ void Clus::SimpleClusGeomHelper::configure(const WireCell::Configuration& cfg)
         fv.m_FV_ymax_margin = get<double>(tpcparam, "FV_ymax_margin", fv.m_FV_ymax_margin);
         fv.m_FV_zmin_margin = get<double>(tpcparam, "FV_zmin_margin", fv.m_FV_zmin_margin);
         fv.m_FV_zmax_margin = get<double>(tpcparam, "FV_zmax_margin", fv.m_FV_zmax_margin);
+        m_FV_map[apaface] = fv;
     }
-    
 }
 
 WireCell::Configuration Clus::SimpleClusGeomHelper::get_params(const int apa, const int face) const
@@ -106,7 +107,7 @@ bool Clus::SimpleClusGeomHelper::is_in_FV_dim(const WireCell::Point& point, cons
 WireCell::Point Clus::SimpleClusGeomHelper::get_corrected_point(const WireCell::Point& point, const WireCell::IClusGeomHelper::CorrectionType type, const int apa, const int face) const
 {
     if (type != WireCell::IClusGeomHelper::CorrectionType::NONE) {
-        raise<ValueError>("failed to find face for wpid %d", type);
+        raise<ValueError>("SimpleClusGeomHelper does not support CorrectionType %d; use UbooneGeomHelper for SCE correction", static_cast<int>(type));
     }
     return point;
 }

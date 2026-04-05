@@ -1,5 +1,6 @@
 
 #include "WireCellClus/ClusteringFuncsMixins.h"
+#include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellUtil/NamedFactory.h"
 
 using namespace WireCell;
@@ -20,6 +21,16 @@ void NeedFiducial:: configure(const WireCell::Configuration &cfg)
 {
     auto tn = get<std::string>(cfg, "fiducial", "DetectorVolumes");
     m_fiducial = Factory::find_tn<IFiducial>(tn);
+}
+
+void NeedClusGeomHelper::configure(const WireCell::Configuration &cfg)
+{
+    auto tn = get<std::string>(cfg, "clus_geom_helper", "");
+    if (tn.empty()) {
+        m_geom_helper = nullptr;
+        return;
+    }
+    m_geom_helper = Factory::find_tn<IClusGeomHelper>(tn);
 }
 
 void NeedPCTS::configure(const WireCell::Configuration &cfg)
