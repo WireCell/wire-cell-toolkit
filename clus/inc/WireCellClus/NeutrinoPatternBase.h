@@ -2,6 +2,8 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/PRShower.h"
+#include "WireCellClus/NeutrinoTaggerInfo.h"
+#include "WireCellClus/IClusGeomHelper.h"
 
 namespace WireCell::Clus::PR {
 
@@ -210,6 +212,16 @@ namespace WireCell::Clus::PR {
 
         // energy calculation ...
         double cal_corr_factor(WireCell::Point& pt, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
+
+        // kinematics output ...
+        void init_tagger_info(TaggerInfo& ti);
+        KineInfo fill_kine_tree(VertexPtr main_vertex, IndexedShowerSet& showers,
+                                const Pi0KineFeatures& pio_kine,
+                                Graph& graph, TrackFitting& track_fitter,
+                                IDetectorVolumes::pointer dv,
+                                WireCell::IClusGeomHelper::pointer geom_helper,
+                                const Clus::ParticleDataSet::pointer& particle_data,
+                                const IRecombinationModel::pointer& recomb_model);
         // Convenience overloads: collect 2D charge maps internally (safe for isolated calls).
         double cal_kine_charge(ShowerPtr Shower, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
         double cal_kine_charge(SegmentPtr segment, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);

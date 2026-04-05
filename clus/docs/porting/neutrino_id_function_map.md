@@ -277,11 +277,30 @@ BDT score calculation for nue selection:
 - `cal_bdts_xgboost()`, `cal_bdts()`
 - Many individual BDT sub-scores: `cal_mipid_bdt`, `cal_gap_bdt`, `cal_hol_lol_bdt`, `cal_cme_anc_bdt`, `cal_mgo_mgt_bdt`, `cal_br1_bdt`, `cal_br3_bdt`, `cal_br3_3_bdt`, `cal_br3_5_bdt`, `cal_br3_6_bdt`, `cal_stemdir_br2_bdt`, `cal_trimuon_bdt`, `cal_br4_tro_bdt`, `cal_mipquality_bdt`, `cal_pio_1_bdt`, `cal_pio_2_bdt`, `cal_stw_spt_bdt`, `cal_vis_1_bdt`, and more.
 
-### `NeutrinoID_kine.h` → `NeutrinoKinematics.cxx` (EMPTY)
+### `NeutrinoID_kine.h` → `NeutrinoKinematics.cxx`
 
-Entry point: `void WCPPID::NeutrinoID::fill_kine_tree(WCPPID::KineInfo& ktree)`
+| Prototype (`WCPPID::NeutrinoID::`) | Toolkit (`PatternAlgorithms::`) | Notes |
+|---|---|---|
+| `init_tagger_info()` (NeutrinoID.cxx:2217) | `init_tagger_info(TaggerInfo& ti)` | Body: `ti = TaggerInfo{}`; C++ default-member-initializers on `TaggerInfo` replace 1200-line assignment list. Data structs live in `NeutrinoTaggerInfo.h` |
+| `fill_kine_tree(KineInfo& ktree)` | `fill_kine_tree(main_vertex, showers, pio_kine, graph, track_fitter, dv, geom_helper, particle_data, recomb_model) → KineInfo` | Returns by value instead of out-param. `geom_helper` (IClusGeomHelper::pointer) added for SCE vertex correction (pass nullptr to skip). `pio_kine` (Pi0KineFeatures) replaces `kine_pio_*` member vars. |
 
-This fills the kinematics output tree (particle energies, directions, etc.) from the reconstructed particle flow. Needed for downstream analysis.
+**Data format** (`clus/inc/WireCellClus/NeutrinoTaggerInfo.h`, namespace `WireCell::Clus::PR`):
+- `struct KineInfo` — reconstructed neutrino kinematics output (~20 fields)
+- `struct TaggerInfo` — ~500+ BDT input features for all sub-taggers (cosmic/numu/nue/ssm/singlephoton), all with correct C++ in-class defaults
+
+**Key prototype→toolkit translation in `fill_kine_tree`**:
+- `map_vertex_segments[vtx]` → `boost::out_edges(vtx->get_descriptor(), graph)` + `graph[*ei].segment`
+- `find_other_vertex(seg, vtx)` → `find_other_vertex(graph, seg, vtx)`
+- `shower->get_start_segment()` → `shower->start_segment()`
+- `shower->get_start_segment()->get_particle_type()` → `shower->get_particle_type()`
+- `seg->get_particle_type()` → `seg->particle_info()->pdg()`
+- `seg->get_kine_best()` → `seg->particle_info()->kinetic_energy()`
+- `seg->get_particle_mass()` → `seg->particle_info()->mass()`
+- `cal_kine_charge(seg)` → `cal_kine_charge(seg, graph, track_fitter, dv)`
+- `seg->cal_kine_dQdx()` → `segment_cal_kine_dQdx(seg, recomb_model)`
+- `seg->cal_kine_range()` → `cal_kine_range(segment_track_length(seg), pdg, particle_data)`
+- `shower->get_start_vertex()` → `shower->get_start_vertex_and_type()`
+- SCE: `mp.func_pos_SCE_correction(nu_vtx)` → `geom_helper->get_corrected_point(nu_vtx, IClusGeomHelper::SCE, apa, face)`
 
 ---
 
@@ -323,7 +342,8 @@ collect_2D_charges()                    → (called internally in shower_cluster
 shower_clustering_with_nv()             → pattern_algos.shower_clustering_with_nv(...)
 
 ─────── NOT YET IN TOOLKIT visit() ─────────────────────────────────────────────
-fill_kine_tree(kine_info)               → NeutrinoKinematics.cxx  [EMPTY]
+init_tagger_info(tagger_info)           → NeutrinoKinematics.cxx  [PORTED]
+fill_kine_tree(kine_info)               → NeutrinoKinematics.cxx  [PORTED]
 cosmic_tagger()                         → NeutrinoTaggerCosmic.cxx [EMPTY]
 numu_tagger()                           → NeutrinoTaggerNuMu.cxx  [EMPTY]
 ssm_tagger()                            → NeutrinoTaggerSSM.cxx   [EMPTY]
