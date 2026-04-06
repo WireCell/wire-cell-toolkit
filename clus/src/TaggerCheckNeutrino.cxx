@@ -343,6 +343,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                   tagger_info);
     }
 
+    // Compute match_isFC: 1 if the main cluster is fully contained inside the
+    // fiducial volume, 0 otherwise.  Uses the same two-round boundary check as
+    // TaggerCheckSTM so the definition is consistent across both users.
+    if (main_cluster) {
+        auto fc_result = Facade::cluster_fc_check(*main_cluster, m_dv);
+        tagger_info.match_isFC = fc_result.is_fc ? 1.0f : 0.0f;
+    }
+
     // Fill reconstructed neutrino kinematics if a vertex was found.
     KineInfo kine_info{};
     if (final_main_vertex) {

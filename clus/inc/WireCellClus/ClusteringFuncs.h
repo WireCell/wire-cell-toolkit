@@ -190,6 +190,35 @@ namespace WireCell::Clus::Facade {
     // Calculate PCA direction for a set of points around a center point
     geo_vector_t calc_pca_dir(const geo_point_t& center, const std::vector<geo_point_t>& points);
 
+    /// Result of a cluster fully-contained (FC) boundary check.
+    /// Shared between TaggerCheckNeutrino (which only needs is_fc) and
+    /// TaggerCheckSTM (which also needs the exit endpoint data to drive STM analysis).
+    struct FCCheckResult {
+        /// True if every cluster endpoint lies inside the fiducial volume.
+        bool is_fc{false};
+        /// Candidate exit points (empty when is_fc == true).
+        std::vector<geo_point_t> exit_wcps;
+        /// Which steiner boundary endpoints (0=first, 1=second) are exit candidates.
+        std::set<int> exit_boundary_set;
+        /// The two steiner-graph boundary points (from round-1, flag_cosmic=true).
+        /// These are the reference endpoints used by TaggerCheckSTM for path tracking.
+        geo_point_t boundary_first{};
+        geo_point_t boundary_second{};
+    };
+
+    /// Perform the two-round cluster boundary check to determine whether the
+    /// cluster is fully contained inside the fiducial volume.
+    ///
+    /// The logic replicates the FC check originally embedded in
+    /// TaggerCheckSTM::check_stm_conditions (round 1 with flag_cosmic=true,
+    /// round 2 with flag_cosmic=false).  Returns a default FCCheckResult
+    /// (is_fc=false) if the cluster has no steiner_pc or FiducialUtils.
+    ///
+    /// Used by:
+    ///   - TaggerCheckNeutrino to fill tagger_info.match_isFC
+    ///   - TaggerCheckSTM to drive STM / TGM classification
+    FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv);
+
 
 }  // namespace WireCell::Clus::Facade
 
