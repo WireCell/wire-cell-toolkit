@@ -1347,6 +1347,9 @@ namespace WireCell::Clus::PR {
         float numu_cc_3_n_daughter_tracks{0};
         float numu_cc_3_n_daughter_all{0};
 
+        // ---- fiducial-volume flag (placeholder: filled by TaggerCheckNeutrino) //
+        float match_isFC{0};
+
         // ---- numu BDT scores ------------------------------------------- //
         float cosmict_2_4_score{0};
         float cosmict_3_5_score{0};

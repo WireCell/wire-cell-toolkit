@@ -317,6 +317,32 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     TaggerInfo tagger_info;
     pattern_algos.init_tagger_info(tagger_info);
 
+    // Build the full list of beam-flash clusters (main + others) once;
+    // used by cosmic_tagger and potentially other taggers.
+    std::vector<Cluster*> all_clusters;
+    all_clusters.push_back(main_cluster);
+    all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
+
+    // Run cosmic and numu taggers to fill BDT input features in tagger_info.
+    // Both require a valid neutrino vertex to have been found.
+    if (final_main_vertex) {
+        pattern_algos.cosmic_tagger(*pr_graph, final_main_vertex,
+                                    showers,
+                                    map_segment_in_shower,
+                                    map_vertex_to_shower,
+                                    segments_in_long_muon,
+                                    main_cluster,
+                                    all_clusters,
+                                    m_dv,
+                                    tagger_info);
+
+        pattern_algos.numu_tagger(*pr_graph, final_main_vertex,
+                                  showers,
+                                  segments_in_long_muon,
+                                  main_cluster,
+                                  tagger_info);
+    }
+
     // Fill reconstructed neutrino kinematics if a vertex was found.
     KineInfo kine_info{};
     if (final_main_vertex) {

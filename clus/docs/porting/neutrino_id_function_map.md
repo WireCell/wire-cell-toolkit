@@ -247,11 +247,25 @@ These are the next porting targets.
 
 
 
-### `NeutrinoID_numu_tagger.h` → `NeutrinoTaggerNuMu.cxx` (EMPTY)
+### `NeutrinoID_numu_tagger.h` → `NeutrinoTaggerNuMu.cxx` ✓ PORTED
 
-Entry points:
-- `std::pair<bool, double> WCPPID::NeutrinoID::numu_tagger()`
-- `std::pair<int, int> WCPPID::NeutrinoID::count_daughters(ProtoSegment*)` / `count_daughters(WCShower*)`
+| Prototype (`WCPPID::NeutrinoID::`) | Toolkit (`PatternAlgorithms::`) | Notes |
+|---|---|---|
+| `numu_tagger()` | `numu_tagger(graph, main_vertex, showers, segments_in_long_muon, main_cluster, ti)` | Returns `{flag_long_muon, max_muon_length}`; prototype also sets `neutrino_type` bits — omitted, caller uses returned bool |
+| `count_daughters(ProtoSegment*)` | `count_daughters(graph, sg, main_vertex)` | BFS from vertex closer to main_vertex through sg, counts daughters at far end |
+| `count_daughters(WCShower*)` | `count_daughters(graph, shower, main_vertex, segments_in_long_muon_plain)` | `segments_in_long_muon_plain` is a plain `std::set<SegmentPtr>` (no comparator); convert from `IndexedSegmentSet` at call site |
+
+**Key translation notes:**
+- `map_vertex_segments[main_vertex]` → `boost::out_edges(main_vertex->get_descriptor(), graph)`
+- `map_segment_vertices` (all segs) → `boost::edges(graph)` filtered by cluster id
+- `sg->get_length()` → `segment_track_length(sg)`, `sg->get_direct_length()` → `segment_track_direct_length(sg)`
+- `sg->get_medium_dQ_dx()` → `segment_median_dQ_dx(sg)`
+- `sg->get_flag_shower_topology()` → `sg->flags_any(SegmentFlags::kShowerTopology)`
+- `sg->get_flag_avoid_muon_check()` → `sg->flags_any(SegmentFlags::kAvoidMuonCheck)`
+- Prototype condition `(shower && !topo) || !shower || len>50cm` simplifies to `!is_shower_topo || len>50cm`
+- `find_cont_muon_segment(sg, vtx)` → `find_cont_muon_segment(graph, sg, vtx)` (default `flag_ignore_dQ_dx=false`)
+
+**NOT ported (require TMVA, no toolkit dependency yet):** `cal_numu_bdts`, `cal_numu_bdts_xgboost`, and all sub-BDT functions (`cal_cosmict_2_4_bdt`, `cal_numu_1_bdt`, etc.) — see `NeutrinoID_numu_bdts.h` section below.
 
 ### `NeutrinoID_nue_tagger.h` → `NeutrinoTaggerNuE.cxx` (EMPTY)
 

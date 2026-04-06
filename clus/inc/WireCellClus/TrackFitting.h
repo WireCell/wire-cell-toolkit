@@ -191,6 +191,7 @@ namespace WireCell::Clus {
         /// Store / retrieve BDT input features (filled by TaggerCheckNeutrino).
         void set_tagger_info(PR::TaggerInfo ti) { m_tagger_info = std::move(ti); }
         const PR::TaggerInfo& get_tagger_info() const { return m_tagger_info; }
+        PR::TaggerInfo& get_tagger_info_mutable() { return m_tagger_info; }
 
         void clear_graph();
 

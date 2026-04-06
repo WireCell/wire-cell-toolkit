@@ -117,6 +117,28 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // mode is passed for future use (e.g. "multiple" for multi-track mode).
         do_tracking(name="", mode="", perf=false, clus_geom_helper="") :: $.tagger_check_neutrino(name=name, perf=perf, clus_geom_helper=clus_geom_helper),
 
+        // Run numu CC BDT scoring (TMVA/xgboost).
+        // Must run AFTER tagger_check_neutrino in the visitor list.
+        // XML weight files should be resolved from wire-cell-data uboone/weights/.
+        // Pass empty strings to disable (scorer will skip booking and EvaluateMVA).
+        numu_bdt_scorer(name="",
+                        numu1_weights_xml="",
+                        numu2_weights_xml="",
+                        numu3_weights_xml="",
+                        cosmict10_weights_xml="",
+                        numu_xgboost_xml="") :: {
+            type: "UbooneNumuBDTScorer",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                numu1_weights_xml:    numu1_weights_xml,
+                numu2_weights_xml:    numu2_weights_xml,
+                numu3_weights_xml:    numu3_weights_xml,
+                cosmict10_weights_xml: cosmict10_weights_xml,
+                numu_xgboost_xml:     numu_xgboost_xml,
+            }
+        },
+
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",
             name: prefix+name,

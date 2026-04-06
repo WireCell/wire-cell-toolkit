@@ -232,6 +232,23 @@ namespace WireCell::Clus::PR {
                            IDetectorVolumes::pointer dv,
                            TaggerInfo& ti);
 
+        // numu tagger
+        // count_daughters: counts track branches and total branches at the far end of a muon.
+        // For a segment: BFS from the vertex closer to main_vertex through sg, count what is beyond.
+        // For a shower:  finds the last segment of the long-muon chain, then counts from its near end.
+        std::pair<int, int> count_daughters(Graph& graph, SegmentPtr sg, VertexPtr main_vertex);
+        std::pair<int, int> count_daughters(Graph& graph, ShowerPtr shower, VertexPtr main_vertex,
+                                            std::set<SegmentPtr>& segments_in_long_muon_plain);
+        // numu_tagger: fills TaggerInfo numu_cc_* BDT features and returns
+        //   {flag_long_muon, max_muon_length}.
+        // Prototype: WCPPID::NeutrinoID::numu_tagger() in NeutrinoID_numu_tagger.h.
+        std::pair<bool, double> numu_tagger(Graph& graph,
+                                            VertexPtr main_vertex,
+                                            IndexedShowerSet& showers,
+                                            IndexedSegmentSet& segments_in_long_muon,
+                                            Facade::Cluster* main_cluster,
+                                            TaggerInfo& ti);
+
         KineInfo fill_kine_tree(VertexPtr main_vertex, IndexedShowerSet& showers,
                                 const Pi0KineFeatures& pio_kine,
                                 Graph& graph, TrackFitting& track_fitter,
