@@ -1111,3 +1111,471 @@ static bool other_showers(NuEContext& ctx, ShowerPtr shower,
 
     return flag_bad;
 }
+
+// ===========================================================================
+// vertex_inside_shower
+//
+// Detects two failure modes where vertex topology suggests the "shower" is
+// actually a kink or nuclear interaction rather than an EM shower:
+//
+//   flag_bad1 (vis_1): A non-shower segment at the vertex is nearly
+//     anti-parallel to the shower but has similar length — looks like a
+//     broken track rather than an e/m shower.
+//
+//   flag_bad2 (vis_2): A segment at the vertex is nearly collinear with the
+//     shower direction (nearly back-to-back after min over two reference
+//     directions), combined with weak direction determination or high dQ/dx —
+//     indicative of a crossing track or broken muon.
+//
+// Prototype: NeutrinoID_nue_functions.h, WCPPID::NeutrinoID::vertex_inside_shower()
+// Fills: ti.vis_1_*, ti.vis_2_*, ti.vis_flag
+//
+// Porting note: prototype line 456 assigns `max_sg = sg` instead of
+// `max_sg = sg1` — this is a prototype bug that is faithfully reproduced
+// here to preserve BDT input values.
+// ===========================================================================
+static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
+    bool flag_bad1 = false;
+    bool flag_bad2 = false;
+
+    Vector dir_drift(1, 0, 0);
+    Vector dir_beam(0, 0, 1);
+
+    double Eshower = (shower->get_kine_best() != 0)
+                     ? shower->get_kine_best() : shower->get_kine_charge();
+
+    VertexPtr  vertex = shower->get_start_vertex_and_type().first;
+    SegmentPtr sg     = shower->start_segment();
+    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+
+    // ------------------------------------------------------------------
+    // Block 1: check for segments nearly anti-parallel to the shower.
+    // ------------------------------------------------------------------
+    {
+        Vector dir1 = shower_cal_dir_3vector(*shower, vertex_point, 30*units::cm);
+
+        double     max_angle  = 0;
+        SegmentPtr max_sg     = nullptr;   // NOTE: set to sg (not sg1) — see porting note
+        int        num_good_tracks = 0;
+
+        if (vertex && vertex->descriptor_valid()) {
+            auto vd = vertex->get_descriptor();
+            for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
+                SegmentPtr sg1 = ctx.graph[*eit].segment;
+                if (!sg1 || sg1 == sg) continue;
+                Vector dir2    = segment_cal_dir_3vector(sg1, vertex_point, 15*units::cm);
+                double angle   = dir2.angle(dir1) / M_PI * 180.0;
+                if (!seg_is_shower(sg1) && !sg1->dir_weak()) ++num_good_tracks;
+                if (angle > max_angle && segment_track_length(sg1) > 1.0*units::cm) {
+                    max_angle = angle;
+                    max_sg = sg;    // prototype assigns sg (start seg), not sg1
+                }
+            }
+        }
+
+        // Competing showers: max angle from other showers relative to shower direction
+        double max_shower_angle = 0;
+        Vector dir_long = shower_cal_dir_3vector(*shower, vertex_point, 100*units::cm);
+        for (ShowerPtr shower1 : ctx.showers) {
+            if (shower1 == shower) continue;
+            if (shower1->get_start_vertex_and_type().second > 2) continue;
+            double energy = (shower1->get_kine_best() != 0)
+                            ? shower1->get_kine_best() : shower1->get_kine_charge();
+            Point  sp1  = shower1->get_start_point();
+            Vector dir2 = sp1 - vertex_point;
+            Vector dir3 = shower_cal_dir_3vector(*shower1, sp1, 100*units::cm);
+            if (energy > 30*units::MeV && energy > 0.2 * Eshower &&
+                dir2.angle(dir3) / M_PI * 180.0 < 20) {
+                double angle1 = dir_long.angle(dir3) / M_PI * 180.0;
+                if (max_shower_angle < angle1) max_shower_angle = angle1;
+            }
+        }
+
+        if (max_sg) {
+            // tmp_length1 = max_sg length; max_sg = sg (start seg) per prototype
+            double tmp_length1 = segment_track_length(max_sg);
+            double tmp_length2 = segment_track_length(sg);
+            size_t n_vtx_segs  = vertex && vertex->descriptor_valid()
+                                 ? boost::out_degree(vertex->get_descriptor(), ctx.graph) : 0;
+
+            if (n_vtx_segs >= 3 && Eshower < 500*units::MeV && num_good_tracks == 0 &&
+                ((max_angle > 150 &&
+                  (tmp_length1 < 15*units::cm || tmp_length2 < 15*units::cm) &&
+                  std::max(tmp_length1, tmp_length2) < 25*units::cm) ||
+                 ((max_angle > 170 || (max_shower_angle > 170 && max_angle > 120)) &&
+                  (tmp_length1 < 25*units::cm || tmp_length2 < 25*units::cm) &&
+                  std::max(tmp_length1, tmp_length2) < 35*units::cm)))
+                flag_bad1 = true;
+            else if (n_vtx_segs == 2 && Eshower < 500*units::MeV && num_good_tracks == 0 &&
+                     max_angle > 150 &&
+                     (sg->has_particle_info() && sg->particle_info()->pdg() == 13) &&
+                     (tmp_length1 < 35*units::cm || tmp_length2 < 35*units::cm))
+                flag_bad1 = true;
+
+            ti.vis_1_filled          = 1.0f;
+            ti.vis_1_n_vtx_segs      = n_vtx_segs;
+            ti.vis_1_energy          = Eshower / units::MeV;
+            ti.vis_1_num_good_tracks = num_good_tracks;
+            ti.vis_1_max_angle       = max_angle;
+            ti.vis_1_max_shower_angle = max_shower_angle;
+            ti.vis_1_tmp_length1     = tmp_length1 / units::cm;
+            ti.vis_1_tmp_length2     = tmp_length2 / units::cm;
+            ti.vis_1_particle_type   = sg->has_particle_info()
+                                       ? sg->particle_info()->pdg() : 0;
+            ti.vis_1_flag            = !flag_bad1;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Block 2: check for nearly-collinear segments (broken track topology).
+    // ------------------------------------------------------------------
+    {
+        size_t n_vtx_segs = vertex && vertex->descriptor_valid()
+                            ? boost::out_degree(vertex->get_descriptor(), ctx.graph) : 0;
+
+        if (n_vtx_segs > 1) {
+            // Shower direction (same logic as single_shower)
+            Vector dir_shower;
+            if (segment_track_length(sg) > 12*units::cm) {
+                dir_shower = segment_cal_dir_3vector(sg, vertex_point, 15*units::cm);
+            } else {
+                dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
+            }
+            if (std::fabs(dir_shower.angle(dir_drift) / M_PI * 180.0 - 90.0) < 10.0 ||
+                Eshower > 800*units::MeV)
+                dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 25*units::cm);
+            dir_shower = dir_shower.norm();
+
+            // Stem direction (short range, for collinearity test)
+            Vector dir2_sg = segment_cal_dir_3vector(sg, vertex_point, 6*units::cm);
+
+            double max_angle = 0, max_angle1 = 0, max_length = 0, max_medium_dQ_dx = 0;
+            int    max_weak_track = 0;
+            double min_angle = 180, min_angle1 = 0, min_length = 0, min_medium_dQ_dx = 0;
+            int    min_weak_track = 0;
+
+            if (vertex->descriptor_valid()) {
+                auto vd = vertex->get_descriptor();
+                for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
+                    SegmentPtr sg1 = ctx.graph[*eit].segment;
+                    if (!sg1 || sg1 == sg) continue;
+                    Vector dir1 = segment_cal_dir_3vector(sg1, vertex_point, 15*units::cm);
+
+                    // Minimum of "how back-to-back vs shower" and "how back-to-back vs stem"
+                    double angle = std::min(
+                        180.0 - dir1.angle(dir_shower) / M_PI * 180.0,
+                        180.0 - dir1.angle(dir2_sg)   / M_PI * 180.0);
+
+                    double norm_dQ_dx = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+                    double length     = segment_track_length(sg1);
+                    bool   is_weak    = sg1->dir_weak();
+
+                    if (angle > max_angle) {
+                        max_angle        = angle;
+                        max_angle1       = std::fabs(M_PI/2.0 - dir1.angle(dir_drift)) / M_PI * 180.0;
+                        max_weak_track   = is_weak ? 1 : 0;
+                        max_length       = length;
+                        max_medium_dQ_dx = norm_dQ_dx;
+                    }
+                    if (angle < min_angle) {
+                        min_angle        = angle;
+                        min_angle1       = std::fabs(M_PI/2.0 - dir1.angle(dir_drift)) / M_PI * 180.0;
+                        min_weak_track   = is_weak ? 1 : 0;
+                        min_length       = length;
+                        min_medium_dQ_dx = norm_dQ_dx;
+                    }
+                }
+            }
+
+            double iso_angle1   = std::fabs(M_PI/2.0 - dir_drift.angle(dir_shower)) / M_PI * 180.0;
+            double angle_beam   = dir_beam.angle(dir_shower) / M_PI * 180.0;
+
+            // 6090_85_4300
+            if (n_vtx_segs == 2 &&
+                ((min_angle < 25 && min_weak_track == 1) || min_angle < 20) &&
+                angle_beam > 50)
+                flag_bad2 = true;
+
+            if (n_vtx_segs == 2 && min_angle < 70 && min_angle1 < 10 &&
+                iso_angle1 < 10 && (iso_angle1 + min_angle1) < 15 &&
+                min_medium_dQ_dx > 1.5 && min_medium_dQ_dx < 2.2) {
+                flag_bad2 = true;
+                // 7001_100_5003: short segment at large angle with long start seg is OK
+                if (min_length < 4*units::cm && min_angle > 45 &&
+                    segment_track_length(sg) > 30*units::cm)
+                    flag_bad2 = false;
+            }
+
+            // 7003_1740_87003
+            if (n_vtx_segs == 3 &&
+                ((min_angle < 15 && min_medium_dQ_dx < 2.1) ||
+                 (min_angle < 17.5 && min_length < 5.0*units::cm && min_medium_dQ_dx < 2.5)) &&
+                ((min_weak_track == 1 && max_angle > 120) ||
+                 (min_length < 6*units::cm && max_angle > 135 &&
+                  min_angle < 12.5 && max_weak_track == 1))) {
+                // 7004_8_428: exception for long non-weak max segment
+                if (max_length > 40*units::cm && max_weak_track == 0) {
+                    // no flag
+                } else {
+                    flag_bad2 = true;
+                }
+            }
+
+            if (n_vtx_segs == 3 && min_angle < 5 && min_medium_dQ_dx < 2.1 &&
+                min_length < 10*units::cm && max_angle > 90 && max_weak_track == 1)
+                flag_bad2 = true;
+
+            if (n_vtx_segs == 3 && min_angle < 35 && min_angle1 < 10 &&
+                iso_angle1 < 10 && (iso_angle1 + min_angle1) < 15 &&
+                min_medium_dQ_dx < 2.1 && min_weak_track == 1 && max_angle > 120)
+                flag_bad2 = true;
+
+            ti.vis_2_filled          = 1.0f;
+            ti.vis_2_n_vtx_segs      = n_vtx_segs;
+            ti.vis_2_min_angle       = min_angle;
+            ti.vis_2_min_weak_track  = min_weak_track;
+            ti.vis_2_angle_beam      = angle_beam;
+            ti.vis_2_min_angle1      = min_angle1;
+            ti.vis_2_iso_angle1      = iso_angle1;
+            ti.vis_2_min_medium_dQ_dx = min_medium_dQ_dx;
+            ti.vis_2_min_length      = min_length / units::cm;
+            ti.vis_2_sg_length       = segment_track_length(sg) / units::cm;
+            ti.vis_2_max_angle       = max_angle;
+            ti.vis_2_max_weak_track  = max_weak_track;
+            ti.vis_2_flag            = !flag_bad2;
+        }
+    }
+
+    ti.vis_flag = !(flag_bad1 || flag_bad2);
+    return flag_bad1 || flag_bad2;
+}
+
+// ===========================================================================
+// broken_muon_id
+//
+// Follows the shower stem forward to check if the shower is actually a
+// broken (gap-crossing) muon track.  Walks from the start segment outward,
+// greedily chaining nearly-collinear segments (first within the shower, then
+// across cluster gaps), and checks whether the resulting track length and
+// straightness are more consistent with a muon than an EM shower.
+//
+// Prototype: NeutrinoID_nue_tagger.h, WCPPID::NeutrinoID::broken_muon_id()
+// Fills: ti.brm_*
+//
+// Translation notes:
+//   shower->get_map_seg_vtxs() → shower->fill_sets() to get all shower segs
+//   shower->get_map_vtx_segs() → same fill_sets, then iterate out_edges
+//     filtered to shower-internal segments
+//   find_vertices(seg)         → find_vertices(ctx.graph, seg)
+//   find_other_vertex(seg, v)  → find_other_vertex(ctx.graph, seg, v)
+//   sg->get_direct_length()    → segment_track_direct_length(sg)  [defaults to full seg]
+//   tmp_ids (set<cluster_id>)  → tmp_clusters (set<Facade::Cluster*>)
+//   add_length                 → dropped (only in debug print, not in fills or cuts)
+// ===========================================================================
+static bool broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
+    bool flag_bad = false;
+
+    double Eshower = (shower->get_kine_best() != 0)
+                     ? shower->get_kine_best() : shower->get_kine_charge();
+
+    VertexPtr  vertex = shower->get_start_vertex_and_type().first;
+    SegmentPtr sg     = shower->start_segment();
+    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+
+    // Pre-fill shower internal segment/vertex sets (replaces get_map_seg_vtxs / get_map_vtx_segs)
+    IndexedSegmentSet shower_segs;
+    IndexedVertexSet  shower_vtxs;
+    shower->fill_sets(shower_vtxs, shower_segs, /*flag_exclude_start_segment=*/false);
+
+    // -----------------------------------------------------------------
+    // Walk the muon track: follow nearly-collinear segments forward from
+    // the shower start, chaining through connected and nearby segments.
+    // -----------------------------------------------------------------
+    Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
+
+    std::set<SegmentPtr> muon_segments;
+    SegmentPtr curr_seg = sg;
+    VertexPtr  curr_vtx = find_other_vertex(ctx.graph, curr_seg, vertex);
+    muon_segments.insert(curr_seg);
+
+    bool flag_continue = true;
+    while (flag_continue) {
+        flag_continue = false;
+
+        Point  curr_vtx_pt = vtx_fit_pt(curr_vtx);
+        Vector dir1 = segment_cal_dir_3vector(curr_seg, curr_vtx_pt, 15*units::cm);
+
+        // Step A: look for a shower-internal connected segment that continues
+        //         nearly collinearly (back-to-back, within 15°).
+        if (curr_vtx && curr_vtx->descriptor_valid()) {
+            auto vd = curr_vtx->get_descriptor();
+            for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
+                SegmentPtr sg1 = ctx.graph[*eit].segment;
+                if (!sg1 || !shower_segs.count(sg1)) continue;
+                if (muon_segments.count(sg1)) continue;
+                Vector dir2 = segment_cal_dir_3vector(sg1, curr_vtx_pt, 15*units::cm);
+                // back-to-back: 180° - angle < 15° AND length > 6cm
+                if (180.0 - dir1.angle(dir2) / M_PI * 180.0 < 15 &&
+                    segment_track_length(sg1) > 6*units::cm) {
+                    flag_continue  = true;
+                    curr_seg = sg1;
+                    curr_vtx = find_other_vertex(ctx.graph, sg1, curr_vtx);
+                    break;
+                }
+            }
+        }
+
+        // Step B: if no connected continuation found, look for a nearby segment
+        //         in a different cluster (gap crossing).
+        double min_dis  = 1e9;
+        SegmentPtr min_seg = nullptr;
+        VertexPtr  min_vtx_found = nullptr;
+
+        if (!flag_continue) {
+            for (SegmentPtr sg1 : shower_segs) {
+                // Skip segments whose cluster is already in the muon track
+                bool skip = false;
+                for (SegmentPtr mseg : muon_segments) {
+                    if (sg1->cluster() == mseg->cluster()) { skip = true; break; }
+                }
+                if (skip) continue;
+
+                const auto& fits1 = sg1->fits();
+                if (fits1.empty()) continue;
+                Point front1 = fits1.front().point;
+                Point back1  = fits1.back().point;
+
+                double dis1 = ray_length(Ray{curr_vtx_pt, front1});
+                double dis2 = ray_length(Ray{curr_vtx_pt, back1});
+
+                // Choose the nearer endpoint
+                Point  near_pt = (dis1 < dis2) ? front1 : back1;
+                double near_dis = std::min(dis1, dis2);
+                Vector dir2 = near_pt - curr_vtx_pt;
+                Vector dir3 = segment_cal_dir_3vector(sg1, near_pt, 15*units::cm);
+
+                double angle1 = 180.0 - dir1.angle(dir2) / M_PI * 180.0;
+                double angle2 = dir2.angle(dir3)          / M_PI * 180.0;
+                double angle3 = 180.0 - dir1.angle(dir3)  / M_PI * 180.0;
+
+                bool close_collinear = ((std::min(angle1, angle2) < 10 &&
+                                         angle1 + angle2 < 25) ||
+                                        (angle3 < 15 && near_dis < 5*units::cm)) &&
+                                       near_dis < 25*units::cm;
+                bool strict_collinear = (std::min(angle1, angle2) < 5 &&
+                                         angle1 + angle2 < 15) ||
+                                        (angle3 < 10 && near_dis < 5*units::cm);
+                bool far_collinear   = std::min(angle1, angle2) < 15 && angle3 < 30 &&
+                                       near_dis > 30*units::cm &&
+                                       segment_track_length(sg1) > 25*units::cm &&
+                                       near_dis < 60*units::cm;
+
+                bool passes = close_collinear ||
+                              (strict_collinear && near_dis < 30*units::cm) ||
+                              far_collinear;
+
+                if (passes && near_dis < min_dis) {
+                    min_dis = near_dis;
+                    min_seg = sg1;
+                    // Pick the farther endpoint as the new forward vertex
+                    auto pair_vtxs = find_vertices(ctx.graph, min_seg);
+                    double d3 = ray_length(Ray{curr_vtx_pt, vtx_fit_pt(pair_vtxs.first)});
+                    double d4 = ray_length(Ray{curr_vtx_pt, vtx_fit_pt(pair_vtxs.second)});
+                    min_vtx_found = (d4 > d3) ? pair_vtxs.second : pair_vtxs.first;
+                }
+            }
+
+            if (min_seg) {
+                flag_continue = true;
+                curr_seg = min_seg;
+                curr_vtx = min_vtx_found;
+            }
+        }
+
+        if (flag_continue) {
+            muon_segments.insert(curr_seg);
+            // add_length (gap distance) intentionally dropped — only used in debug print
+        }
+    } // while
+
+    // -----------------------------------------------------------------
+    // Accumulate track properties over all muon segments.
+    // -----------------------------------------------------------------
+    double acc_length        = 0;
+    double acc_direct_length = 0;
+    std::set<Facade::Cluster*> tmp_clusters;
+
+    for (SegmentPtr mseg : muon_segments) {
+        acc_length        += segment_track_length(mseg);
+        acc_direct_length += segment_track_direct_length(mseg);
+        tmp_clusters.insert(mseg->cluster());
+    }
+
+    auto muon_range_fn = ctx.particle_data->get_range_function("muon");
+    double Ep = muon_range_fn->scalar_function(acc_length / units::cm) * units::MeV;
+
+    // Connected length: total length of shower-internal segments in muon clusters.
+    // 7020_348_17421
+    double connected_length = 0;
+    for (SegmentPtr sg1 : shower_segs) {
+        if (tmp_clusters.count(sg1->cluster()))
+            connected_length += segment_track_length(sg1);
+    }
+
+    // 7022_42_2123: add segments in the main cluster that are nearly parallel
+    //               to the shower direction but not already in muon_segments.
+    {
+        Vector dir_sg = segment_cal_dir_3vector(sg, vertex_point, 15*units::cm);
+        for (SegmentPtr sg1 : shower_segs) {
+            if (muon_segments.count(sg1)) continue;
+            if (sg1->cluster() != sg->cluster()) continue;
+            auto pair_vtxs = find_vertices(ctx.graph, sg1);
+            Point pt1 = vtx_fit_pt(pair_vtxs.first);
+            Point pt2 = vtx_fit_pt(pair_vtxs.second);
+            Vector d1 = segment_cal_dir_3vector(sg1, pt1, 15*units::cm);
+            Vector d2 = segment_cal_dir_3vector(sg1, pt2, 15*units::cm);
+            double a1 = std::min(d1.angle(dir_sg) / M_PI * 180.0,
+                                 180.0 - d1.angle(dir_sg) / M_PI * 180.0);
+            double a2 = std::min(d2.angle(dir_sg) / M_PI * 180.0,
+                                 180.0 - d2.angle(dir_sg) / M_PI * 180.0);
+            if (std::min(a1, a2) < 10) muon_segments.insert(sg1);
+        }
+    }
+
+    int num_muon_main = 0;
+    for (SegmentPtr mseg : muon_segments) {
+        if (mseg->cluster() == sg->cluster()) ++num_muon_main;
+    }
+
+    // Primary cut: multi-cluster muon track with sufficient straightness/length
+    // at low shower energy.
+    if (muon_segments.size() > 1 &&
+        (Ep > Eshower * 0.55 ||
+         acc_length > 0.65 * shower->get_total_length() ||
+         connected_length > 0.95 * shower->get_total_length()) &&
+        tmp_clusters.size() > 1 &&
+        acc_direct_length > 0.94 * acc_length &&
+        Eshower < 350*units::MeV) {
+        // 7004_989_49482: cut only if shower is simple and muon dominates
+        if (shower->get_num_main_segments() <= 3 &&
+            shower->get_num_main_segments() - num_muon_main < 2 &&
+            (shower->get_num_segments() < (int)muon_segments.size() + 6 ||
+             acc_length > connected_length * 0.9 ||
+             acc_length > 0.8 * shower->get_total_length()))
+            flag_bad = true; // 6640_173_8673
+    }
+
+    ti.brm_n_mu_segs            = muon_segments.size();
+    ti.brm_Ep                   = Ep / units::MeV;
+    ti.brm_energy               = Eshower / units::MeV;
+    ti.brm_acc_length           = acc_length / units::cm;
+    ti.brm_shower_total_length  = shower->get_total_length() / units::cm;
+    ti.brm_connected_length     = connected_length / units::cm;
+    ti.brm_n_size               = tmp_clusters.size();
+    ti.brm_acc_direct_length    = acc_direct_length / units::cm;
+    ti.brm_n_shower_main_segs   = shower->get_num_segments();
+    ti.brm_n_mu_main            = num_muon_main;
+    ti.brm_flag                 = !flag_bad;
+
+    return flag_bad;
+}
