@@ -249,6 +249,23 @@ namespace WireCell::Clus::PR {
                                             Facade::Cluster* main_cluster,
                                             TaggerInfo& ti);
 
+        // nue_tagger: fills TaggerInfo NuE BDT features and returns flag_nue.
+        // Prototype: WCPPID::NeutrinoID::nue_tagger() in NeutrinoID_nue_tagger.h.
+        bool nue_tagger(Graph& graph,
+                        Facade::Cluster* main_cluster,
+                        VertexPtr main_vertex,
+                        int apa, int face,
+                        IndexedShowerSet& showers,
+                        VertexShowerSetMap& map_vertex_to_shower,
+                        IndexedShowerSet& pi0_showers,
+                        ShowerIntMap& map_shower_pio_id,
+                        std::map<int, std::vector<ShowerPtr>>& map_pio_id_showers,
+                        std::map<int, std::pair<double,int>>& map_pio_id_mass,
+                        IDetectorVolumes::pointer dv,
+                        ParticleDataSet::pointer particle_data,
+                        double muon_length,
+                        TaggerInfo& ti);
+
         KineInfo fill_kine_tree(VertexPtr main_vertex, IndexedShowerSet& showers,
                                 const Pi0KineFeatures& pio_kine,
                                 Graph& graph, TrackFitting& track_fitter,

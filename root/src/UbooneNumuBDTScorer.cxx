@@ -140,7 +140,6 @@ float UbooneNumuBDTScorer::cal_numu_1_bdt(Clus::PR::TaggerInfo& ti, float defaul
 {
     float val = default_val;
 
-    float numu_cc_flag_1;
     float numu_cc_1_particle_type;
     float numu_cc_1_length;
     float numu_cc_1_medium_dQ_dx;
@@ -163,7 +162,7 @@ float UbooneNumuBDTScorer::cal_numu_1_bdt(Clus::PR::TaggerInfo& ti, float defaul
     if (!ti.numu_cc_1_particle_type.empty()) {
         val = -1e9f;
         for (size_t i = 0; i < ti.numu_cc_1_particle_type.size(); ++i) {
-            numu_cc_flag_1            = ti.numu_cc_flag_1.at(i);
+            (void)ti.numu_cc_flag_1.at(i); // loaded but not used as BDT input variable
             numu_cc_1_particle_type   = ti.numu_cc_1_particle_type.at(i);
             numu_cc_1_length          = ti.numu_cc_1_length.at(i);
             numu_cc_1_medium_dQ_dx    = ti.numu_cc_1_medium_dQ_dx.at(i);

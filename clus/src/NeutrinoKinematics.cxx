@@ -141,7 +141,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             kine_best = seg->particle_info()->kinetic_energy();
         }
         double kine_charge = cal_kine_charge(seg, graph, track_fitter, dv);
-        double kine_dQdx   = segment_cal_kine_dQdx(seg, recomb_model);
+        (void)segment_cal_kine_dQdx(seg, recomb_model); // computed but not yet filled in ktree
         double kine_range  = cal_kine_range(segment_track_length(seg), pdg, particle_data);
 
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));

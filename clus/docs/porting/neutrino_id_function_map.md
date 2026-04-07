@@ -267,19 +267,22 @@ These are the next porting targets.
 
 **NOT ported (require TMVA, no toolkit dependency yet):** `cal_numu_bdts`, `cal_numu_bdts_xgboost`, and all sub-BDT functions (`cal_cosmict_2_4_bdt`, `cal_numu_1_bdt`, etc.) — see `NeutrinoID_numu_bdts.h` section below.
 
-### `NeutrinoID_nue_tagger.h` + `NeutrinoID_nue_functions.h` → `NeutrinoTaggerNuE.cxx` (EMPTY)
+### `NeutrinoID_nue_tagger.h` + `NeutrinoID_nue_functions.h` → `NeutrinoTaggerNuE.cxx` (**COMPLETE**)
 
 #### Design: `NuEContext` struct (file-local in `NeutrinoTaggerNuE.cxx`)
 
 All shared state is bundled into a file-local `NuEContext` struct, invisible to callers. The public entry point `nue_tagger` (declared in `NeutrinoPatternBase.h`) takes individual parameters and constructs `NuEContext` internally. All helper functions take `(NuEContext& ctx, <per-call args>, TaggerInfo& ti)` with `ti` always last as the output parameter.
 
+`PatternAlgorithms& self` is the first field so that file-local static helper functions can call member functions of `PatternAlgorithms` (e.g. `calculate_num_daughter_tracks`, `calc_PCA_main_axis`, `find_cont_muon_segment_nue`) via `ctx.self.method(...)`.
+
 ```cpp
 // file-local in NeutrinoTaggerNuE.cxx
 struct NuEContext {
+    PatternAlgorithms& self;                          // for calling member functions
     Graph& graph;
     Facade::Cluster* main_cluster;
     VertexPtr main_vertex;
-    int apa{0}, face{0};                        // for point-cloud queries — set by caller
+    int apa{0}, face{0};                              // for point-cloud queries — set by caller
     IndexedShowerSet& showers;
     VertexShowerSetMap& map_vertex_to_shower;
     IndexedShowerSet& pi0_showers;
@@ -291,68 +294,76 @@ struct NuEContext {
 };
 ```
 
-#### Entry point (declared in `NeutrinoPatternBase.h`)
+#### Entry point (declared in `NeutrinoPatternBase.h`, implemented in `NeutrinoTaggerNuE.cxx`)
 
 | Prototype | Toolkit | Notes |
 |---|---|---|
-| `nue_tagger(muon_length)` | `nue_tagger(graph, main_vertex, showers, map_vertex_to_shower, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass, main_cluster, dv, particle_data, muon_length, ti)` | Returns `bool`; `neutrino_type` bit-set omitted; constructs `NuEContext` internally then calls helpers |
+| `nue_tagger(muon_length)` | `nue_tagger(graph, main_cluster, main_vertex, apa, face, showers, map_vertex_to_shower, pi0_showers, map_shower_pio_id, map_pio_id_showers, map_pio_id_mass, dv, particle_data, muon_length, ti)` | Returns `bool`; `neutrino_type` bit-set omitted; constructs `NuEContext` internally and calls all 22 helpers in sequence |
 
-#### Small leaf helpers
+#### Small leaf helpers (from `NeutrinoID_nue_functions.h` + `NeutrinoID_nue_tagger.h`)
 
-| Prototype | Toolkit | Notes |
+| Prototype | Toolkit | Fills |
 |---|---|---|
-| `low_energy_michel(shower, flag_print, flag_fill)` | `low_energy_michel(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti)` | Pure on shower data; fills `lem_*` BDT features |
-| `single_shower(shower, flag_single_shower, flag_print, flag_fill)` | `single_shower(NuEContext& ctx, ShowerPtr shower, bool flag_single_shower, TaggerInfo& ti)` | `map_vertex_segments[vtx]` → `ctx.graph`; fills `spt_*` |
-| `track_overclustering(shower, flag_print, flag_fill)` | `track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti)` | Uses `find_vertices`, `map_vertex_segments` → `ctx.graph`; fills `tro_*` |
-| `stem_length(max_shower, max_energy, flag_print, flag_fill)` | `stem_length(NuEContext& ctx, ShowerPtr shower, double energy, TaggerInfo& ti)` | Calls `calculate_num_daughter_tracks` via `ctx.graph`; fills `stem_len_*` |
-| `vertex_inside_shower(shower, flag_print, flag_fill)` | `vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti)` | `map_vertex_segments[vtx]` via `ctx.graph` + `ctx.showers`; fills `vis_*` |
+| `low_energy_michel(shower, ...)` | `low_energy_michel(ctx, shower, ti)` | `lem_*` |
+| `stem_length(shower, energy, ...)` | `stem_length(ctx, shower, energy, ti)` | `stem_len_*` |
+| `angular_cut(shower, energy, angle, ...)` | `angular_cut(ctx, shower, energy, angle, ti)` | `anc_*` |
+| `compare_muon_energy(shower, energy, muon_length, ...)` | `compare_muon_energy(ctx, shower, energy, muon_length, ti)` | `cme_*`; `neutrino_type` flag dropped |
+| `stem_direction(shower, energy, ...)` | `stem_direction(ctx, shower, energy, ti)` | `stem_dir_*`; `ctx.self.calc_PCA_main_axis()` |
 
-#### Helpers with detector volume access
+#### Medium helpers — shower assessors
 
-| Prototype | Toolkit | Notes |
-|---|---|---|
-| `angular_cut(shower, energy, angle, flag_print, flag_fill)` | `angular_cut(NuEContext& ctx, ShowerPtr shower, double energy, double angle, TaggerInfo& ti)` | Graph traversal + `ctx.dv`; calls `calculate_num_daughter_tracks`; fills `anc_*` |
-| `bad_reconstruction_2(vertex, shower, flag_print, flag_fill)` | `bad_reconstruction_2(NuEContext& ctx, VertexPtr vertex, ShowerPtr shower, TaggerInfo& ti)` | `find_other_vertex` + `ctx.dv`; fills `br3_*` |
+| Prototype | Toolkit | Fills | Notes |
+|---|---|---|---|
+| `single_shower(shower, flag_single_shower, ...)` | `single_shower(ctx, shower, flag_single_shower, ti)` | `spt_*` | `get_stem_dQ_dx()` returns normalized values |
+| `multiple_showers(shower, energy, ...)` | `multiple_showers(ctx, shower, energy, ti)` | `mgo_*` | Calls `pi0_identification` + `bad_reconstruction` as predicates (via `ctx.self`) |
+| `other_showers(shower, flag_single_shower, ...)` | `other_showers(ctx, shower, flag_single_shower, ti)` | `mgt_*` | Calls `pi0_identification` as predicate |
+| `pi0_identification(vertex, sg, shower, threshold, ...)` | `pi0_identification(ctx, vertex, sg, shower, threshold, ti)` | `pio_*` | Predicate calls use local `TaggerInfo dummy{}`; `graph_nodes(ctx.graph)` replaces `map_vertex_segments` iteration |
 
-#### Helpers needing main_cluster (PCA or point cloud)
+#### Medium helpers — vertex/shower geometry
 
-| Prototype | Toolkit | Notes |
-|---|---|---|
-| `stem_direction(max_shower, max_energy, flag_print, flag_fill)` | `stem_direction(NuEContext& ctx, ShowerPtr shower, double energy, TaggerInfo& ti)` | `ctx.main_cluster->get_pca()` + `ctx.main_vertex`; fills `stem_dir_*` |
-| `bad_reconstruction_1(shower, flag_single_shower, num_valid_tracks, flag_fill)` | `bad_reconstruction_1(NuEContext& ctx, ShowerPtr shower, bool flag_single_shower, int num_valid_tracks, TaggerInfo& ti)` | `ctx.main_cluster->get_pca()` + graph traversal; fills `br2_*` |
-| `gap_identification(vertex, sg, flag_single_shower, num_valid_tracks, E_shower, flag_fill)` | `gap_identification(NuEContext& ctx, VertexPtr vertex, SegmentPtr sg, bool flag_single_shower, int num_valid_tracks, double E_shower, TaggerInfo& ti)` | File-local `nue_check_direction(dir)`; point cloud via `ctx.main_cluster->grouping()` with `ctx.apa`/`ctx.face`; fills `gap_*`; returns `std::pair<bool,int>` |
+| Prototype | Toolkit | Fills | Notes |
+|---|---|---|---|
+| `vertex_inside_shower(shower, ...)` | `vertex_inside_shower(ctx, shower, ti)` | `vis_*` | Block 1: prototype assigns `max_sg = sg` (not `sg1`) — faithfully reproduced |
+| `broken_muon_id(shower, ...)` | `broken_muon_id(ctx, shower, ti)` | `brm_*` | `map_seg_vtxs`/`map_vtx_segs` → `shower->fill_sets()`; `tmp_ids` → `std::set<Facade::Cluster*>` |
 
-**Key translation notes for `gap_identification`:**
-- `main_cluster->check_direction(dir)` is purely geometric — port as a file-local free function `nue_check_direction(dir)`.
-- `ct_point_cloud->get_closest_points(p, 0.2*cm, view)` → `ctx.main_cluster->grouping()->get_closest_points(p, 0.2*cm, ctx.apa, ctx.face, view)`.
-- `ct_point_cloud->get_closest_dead_chs(p, view, 0)` → `ctx.main_cluster->grouping()->get_closest_dead_chs(p, 0, ctx.apa, ctx.face, view)`.
+#### Medium helpers — dQ/dx and overlap quality
 
-#### Helpers needing particle data (muon range table)
+| Prototype | Toolkit | Fills | Notes |
+|---|---|---|---|
+| `mip_quality(vertex, sg, shower, ...)` | `mip_quality(ctx, vertex, sg, shower, ti)` | `mip_quality_*` | `get_closest_2d_dis()` → `segment_get_closest_2d_distances(sg,p,ctx.apa,ctx.face)` |
+| `high_energy_overlapping(shower, ...)` | `high_energy_overlapping(ctx, shower, ti)` | `hol_*` | `get_closest_point()` → `segment_get_closest_point()`; range dQ/dx via `segment_median_dQ_dx(sg,n1,n2)` |
+| `low_energy_overlapping(shower, ...)` | `low_energy_overlapping(ctx, shower, ti)` | `lol_*` | shower-internal `map_vtx_segs` → `boost::out_edges` filtered to `shower_segs` |
+| `bad_reconstruction_1(shower, flag_single_shower, num_valid_tracks, ...)` | `bad_reconstruction_1(ctx, shower, flag_single_shower, num_valid_tracks, ti)` | `br2_*` | PCA: `ctx.self.calc_PCA_main_axis(pts).second` |
 
-| Prototype | Toolkit | Notes |
-|---|---|---|
-| `broken_muon_id(shower, flag_print, flag_fill)` | `broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti)` | `TPCParams::get_muon_r2ke()` → `ctx.particle_data`; fills `brm_*` |
-| `compare_muon_energy(max_shower, max_energy, muon_length, flag_print, flag_fill)` | `compare_muon_energy(NuEContext& ctx, ShowerPtr shower, double energy, double muon_length, TaggerInfo& ti)` | `ctx.particle_data` + `ctx.main_vertex` via `ctx.graph`; fills `cme_*`; `neutrino_type` flag dropped |
+#### shower_to_wall
 
-#### Helpers needing shower maps (map_vertex_to_shower / pi0 maps)
+| Prototype | Toolkit | Fills | Notes |
+|---|---|---|---|
+| `shower_to_wall(shower, energy, flag_single_shower, ...)` | `shower_to_wall(ctx, shower, energy, flag_single_shower, ti)` | `stw_*` | fiducial walk: `fiducial_utils->inside_fiducial_volume(p, stm_tol_vec)`; `stw_3` uses `graph_nodes(ctx.graph)` + `vtx->wcpt().point` (faithful to prototype's wcpt not fit-pt); `D3Vector` lacks unary `-` → use `* (-1.0)` |
 
-| Prototype | Toolkit | Notes |
-|---|---|---|
-| `mip_quality(vertex, sg, shower, flag_print, flag_fill)` | `mip_quality(NuEContext& ctx, VertexPtr vertex, SegmentPtr sg, ShowerPtr shower, TaggerInfo& ti)` | `ctx.map_vertex_to_shower` + `ctx.pi0_showers` + `ctx.main_vertex`; fills `mip_quality_*` |
-| `mip_identification(vertex, sg, shower, flag_single_shower, flag_strong_check, flag_print, flag_fill)` | `mip_identification(NuEContext& ctx, VertexPtr vertex, SegmentPtr sg, ShowerPtr shower, bool flag_single_shower, bool flag_strong_check, TaggerInfo& ti)` | `ctx.showers` + graph traversal; fills `mip_*`; returns `int` |
-| `high_energy_overlapping(shower, flag_print, flag_fill)` | `high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti)` | `ctx.map_vertex_to_shower`; fills `hol_*` |
-| `low_energy_overlapping(shower, flag_print, flag_fill)` | `low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti)` | Graph traversal + shower internal maps; fills `lol_*` |
-| `pi0_identification(vertex, sg, shower, threshold, flag_fill)` | `pi0_identification(NuEContext& ctx, VertexPtr vertex, SegmentPtr sg, ShowerPtr shower, double threshold, TaggerInfo& ti)` | `ctx.map_shower_pio_id`, `ctx.map_pio_id_showers`, `ctx.map_pio_id_mass`; fills `pio_*`; returns `bool` |
-| `single_shower_pio_tagger(shower, flag_single_shower, flag_print, flag_fill)` | `single_shower_pio_tagger(NuEContext& ctx, ShowerPtr shower, bool flag_single_shower, TaggerInfo& ti)` | `ctx.map_vertex_to_shower`; fills `sig_*` |
-| `shower_to_wall(shower, shower_energy, flag_single_shower, flag_print, flag_fill)` | `shower_to_wall(NuEContext& ctx, ShowerPtr shower, double shower_energy, bool flag_single_shower, TaggerInfo& ti)` | `ctx.dv` + `ctx.map_vertex_to_shower` + `ctx.pi0_showers` + `ctx.showers`; fills `stw_*` |
-| `bad_reconstruction_3(vertex, shower, flag_print, flag_fill)` | `bad_reconstruction_3(NuEContext& ctx, VertexPtr vertex, ShowerPtr shower, TaggerInfo& ti)` | Graph traversal + shower maps; fills `br4_*` |
+#### Complex helpers
 
-#### Functions calling pi0_identification internally
+| Prototype | Toolkit | Fills | Notes |
+|---|---|---|---|
+| `single_shower_pio_tagger(shower, flag_single_shower, ...)` | `single_shower_pio_tagger(ctx, shower, flag_single_shower, ti)` | `sig_*` | start dQ/dx from `sg->fits()[i].dQ/dx` directly |
+| `gap_identification(vertex, sg, flag_single_shower, num_valid_tracks, E_shower, ...)` | `gap_identification(ctx, vertex, sg, flag_single_shower, num_valid_tracks, E_shower, ti)` | `gap_*` | `check_direction` inlined using `grouping->wire_angles(ctx.apa,ctx.face)`; point-cloud queries: `grouping->get_closest_points(p, 0.2*cm, apa, face, plane)`; returns `std::pair<bool,int>` |
+| `bad_reconstruction_3(vertex, shower, ...)` | `bad_reconstruction_3(ctx, vertex, shower, ti)` | `br4_*` | `segment_get_closest_point()` replaces `sg->get_closest_point()` |
+| `bad_reconstruction_2(vertex, shower, ...)` | `bad_reconstruction_2(ctx, vertex, shower, ti)` | `br3_*` | 8 sub-checks (br3_1…br3_8); sliding-window dQ/dx via `segment_median_dQ_dx(sg,i,i+5)` |
+| `bad_reconstruction(shower, ...)` | **reuses** `ctx.self.bad_reconstruction(ctx.graph, ctx.main_vertex, shower [, true, &ti])` | `br1_*` | Already ported in `NeutrinoTaggerCosmic.cxx`; not re-implemented in `NeutrinoTaggerNuE.cxx` |
+| `track_overclustering(shower, ...)` | `track_overclustering(ctx, shower, ti)` | `tro_*` | `shower_segs_at` lambda replaces `map_vtx_segs[v]`; `dir.cross(dir2).magnitude()` for transverse distance; `tro_2_v_stem_length` uses `/units::MeV` (prototype typo) — faithfully reproduced |
+| `mip_identification(vertex, sg, shower, flag_single_shower, flag_strong_check, ...)` | `mip_identification(ctx, vertex, sg, shower, flag_single_shower, flag_strong_check, ti)` | `mip_*` | Returns `int` (1/0/−1); `vec_dQ_dx` padded to 20 with 3.0 before fill (same as prototype); median computed on pre-padding vector |
 
-| Prototype | Toolkit | Notes |
-|---|---|---|
-| `multiple_showers(max_shower, max_energy, flag_print, flag_fill)` | `multiple_showers(NuEContext& ctx, ShowerPtr shower, double energy, TaggerInfo& ti)` | Calls `pi0_identification` + `bad_reconstruction` internally; `ctx.map_vertex_to_shower` + `ctx.showers`; fills `mgo_*` |
-| `other_showers(shower, flag_single_shower, flag_print, flag_fill)` | `other_showers(NuEContext& ctx, ShowerPtr shower, bool flag_single_shower, TaggerInfo& ti)` | Calls `pi0_identification` internally; `ctx.showers` + `ctx.main_vertex`; fills `mgt_*` |
+#### Key translation notes
+
+- **`shower->get_map_vtx_segs()` / `get_map_seg_vtxs()`** → `shower->fill_sets(vtxs, segs, false)` + `boost::out_edges` filtered to `shower_segs`
+- **`map_vertex_segments[vtx].size()`** → `boost::out_degree(vtx->get_descriptor(), graph)`
+- **`map_vertex_segments` (global iteration)** → `graph_nodes(ctx.graph)` with `ctx.graph[vd].vertex`
+- **`find_vertices(sg)` / `find_other_vertex(sg, vtx)`** → `find_vertices(ctx.graph, sg)` / `find_other_vertex(ctx.graph, sg, vtx)`
+- **`get_medium_dQ_dx(n1,n2)/(43e3/cm)`** → `segment_median_dQ_dx(sg, n1, n2) / (43e3/units::cm)`
+- **`fid->inside_fiducial_volume(p, offset_x)`** → `fiducial_utils->inside_fiducial_volume(p)` (offset handled internally)
+- **`pi0_identification` as predicate** (flag_fill=false) → pass `TaggerInfo dummy{}` locally
+- **`D3Vector` arithmetic**: lacks unary `-`; negate with `* (-1.0)`; supports `.dot()`, `.cross()`, `.magnitude()`, `.norm()`, `.angle()`
+- **`sg->get_stem_dQ_dx()`** → `shower->get_stem_dQ_dx(vertex, sg, 20)` returns **normalized** values (divided by 43e3/cm internally)
 
 ### `NeutrinoID_pio_tagger.h` → `NeutrinoTaggerPi0.cxx` (EMPTY)
 

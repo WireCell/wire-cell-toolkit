@@ -525,11 +525,8 @@ static bool stem_direction(NuEContext& ctx, ShowerPtr shower, double energy, Tag
 }
 
 // ===========================================================================
-// Forward declaration: bad_reconstruction (implemented in a later step).
-// Called as a predicate from multiple_showers and other_showers; callers
-// pass a local dummy TaggerInfo to avoid corrupting the real ti.
-// ===========================================================================
-static bool bad_reconstruction(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti);
+// Note: bad_reconstruction (NuE br1) is PatternAlgorithms::bad_reconstruction(),
+// already implemented in NeutrinoTaggerCosmic.cxx.  Called via ctx.self below.
 
 // ===========================================================================
 // pi0_identification
@@ -897,8 +894,8 @@ static bool multiple_showers(NuEContext& ctx, ShowerPtr max_shower,
         double E_shower = (shower->get_kine_best() != 0)
                           ? shower->get_kine_best() : shower->get_kine_charge();
 
+        if (ctx.self.bad_reconstruction(ctx.graph, ctx.main_vertex, shower)) continue;
         TaggerInfo dummy_ti{};
-        if (bad_reconstruction(ctx, shower, dummy_ti)) continue;
         bool flag_pi0 = pi0_identification(ctx, vtx, sg, shower, 15*units::MeV, dummy_ti);
 
         if (flag_pi0) {
@@ -1002,7 +999,6 @@ static bool other_showers(NuEContext& ctx, ShowerPtr shower,
     double E_direct_max_energy   = 0, E_direct_total_energy   = 0;
     double E_indirect_max_energy = 0, E_indirect_total_energy = 0;
     int    n_direct_showers      = 0;
-    bool   flag_direct_max_pi0   = false;
     bool   flag_indirect_max_pi0 = false;
     double max_energy_1          = 0;
 
@@ -1046,7 +1042,6 @@ static bool other_showers(NuEContext& ctx, ShowerPtr shower,
             E_direct_total_energy += E_shower1;
             if (E_shower1 > E_direct_max_energy && vtx1 == ctx.main_vertex) {
                 E_direct_max_energy = E_shower1;
-                flag_direct_max_pi0 = ctx.map_shower_pio_id.count(shower1) > 0;
             }
             if (E_shower1 > 80*units::MeV) ++n_direct_showers;
 
@@ -1249,7 +1244,7 @@ static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
             // Stem direction (short range, for collinearity test)
             Vector dir2_sg = segment_cal_dir_3vector(sg, vertex_point, 6*units::cm);
 
-            double max_angle = 0, max_angle1 = 0, max_length = 0, max_medium_dQ_dx = 0;
+            double max_angle = 0, max_length = 0;
             int    max_weak_track = 0;
             double min_angle = 180, min_angle1 = 0, min_length = 0, min_medium_dQ_dx = 0;
             int    min_weak_track = 0;
@@ -1272,10 +1267,8 @@ static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
 
                     if (angle > max_angle) {
                         max_angle        = angle;
-                        max_angle1       = std::fabs(M_PI/2.0 - dir1.angle(dir_drift)) / M_PI * 180.0;
                         max_weak_track   = is_weak ? 1 : 0;
                         max_length       = length;
-                        max_medium_dQ_dx = norm_dQ_dx;
                     }
                     if (angle < min_angle) {
                         min_angle        = angle;
@@ -1391,8 +1384,6 @@ static bool broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
     // Walk the muon track: follow nearly-collinear segments forward from
     // the shower start, chaining through connected and nearby segments.
     // -----------------------------------------------------------------
-    Vector dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
-
     std::set<SegmentPtr> muon_segments;
     SegmentPtr curr_seg = sg;
     VertexPtr  curr_vtx = find_other_vertex(ctx.graph, curr_seg, vertex);
@@ -1989,7 +1980,6 @@ static bool low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo
 
     VertexPtr  vtx      = shower->get_start_vertex_and_type().first;
     SegmentPtr sg       = shower->start_segment();
-    int        conn_type = shower->get_start_vertex_and_type().second;
     Point vtx_point = seg_endpoint_near(sg, vtx_fit_pt(vtx));
 
     // Pre-fill shower internal sets
@@ -2249,7 +2239,7 @@ static bool bad_reconstruction_1(NuEContext& ctx, ShowerPtr shower,
                 if (angle3 > 3) flag_bad = true;
             }
         } else {
-            if ((angle > 25 && shower->get_num_main_segments() > 1 || angle > 30) &&
+            if (((angle > 25 && shower->get_num_main_segments() > 1) || angle > 30) &&
                 (angle1 > 7.5 || angle2 > 7.5))
                 flag_bad = true;
         }
@@ -2935,7 +2925,7 @@ static bool bad_reconstruction_3(NuEContext& ctx,
         if (main_length < 0.10 * total_length && min_dis > 18*units::cm) flag_bad1 = true;
         if (main_length < 0.05 * total_length && min_dis >  8*units::cm) flag_bad1 = true;
         if (main_length < 8*units::cm && main_length < 0.1*total_length &&
-            (min_dis > 8*units::cm && Eshower < 300*units::MeV || min_dis > 14*units::cm))
+            ((min_dis > 8*units::cm && Eshower < 300*units::MeV) || min_dis > 14*units::cm))
             flag_bad1 = true;
 
         // Exceptions
@@ -3030,10 +3020,10 @@ static bool bad_reconstruction_3(NuEContext& ctx,
         double sg_dir_angle = dir_sg.angle(dir) / M_PI * 180.0;
 
         bool cut_b = (ncount1_15 < 0.35*ncount1 && iso_angle > 15 &&
-                      (ncount1_25 < 0.95*ncount1 && Eshower < 1000*units::MeV || Eshower >= 1000*units::MeV)) ||
+                      ((ncount1_25 < 0.95*ncount1 && Eshower < 1000*units::MeV) || Eshower >= 1000*units::MeV)) ||
                      (ncount1_15 < 0.2*ncount1 && ncount1_25 < 0.45*ncount1 && Eshower < 600*units::MeV) ||
                      (sg_dir_angle > 25 && std::max(iso_angle, iso_angle1) > 8 &&
-                      (ncount1_15 < 0.8*ncount1 && Eshower < 1000*units::MeV || Eshower >= 1000*units::MeV)) ||
+                      ((ncount1_15 < 0.8*ncount1 && Eshower < 1000*units::MeV) || Eshower >= 1000*units::MeV)) ||
                      (sg_dir_angle > 20 && std::max(iso_angle, iso_angle1) > 5 &&
                       ncount1_15 < 0.5*ncount1);
         if (cut_b) flag_bad2 = true;
@@ -3064,4 +3054,1361 @@ static bool bad_reconstruction_3(NuEContext& ctx,
     bool flag_bad = flag_bad1 || flag_bad2;
     ti.br4_flag = !flag_bad;
     return flag_bad;
+}
+
+// ===========================================================================
+// bad_reconstruction_2
+//
+// Eight sub-checks (br3_1…br3_8) detecting track-like or mis-reconstructed
+// topology in the shower:
+//   br3_1: low-energy straight single-segment shower (track masquerading as shower)
+//   br3_2: segment type composition in main cluster looks track-like
+//   br3_3: shower-internal segments with backward direction relative to stem
+//   br3_4: fraction of backward track length
+//   br3_5: average position of side segments vs stem far-end (Michel topology)
+//   br3_6: segments at the far end of the stem that are nearly anti-parallel
+//   br3_7: min angle at far-end + stem fraction (short stem in a long shower)
+//   br3_8: sliding-window dQ/dx peak across all main-cluster shower segments
+//
+// Prototype: NeutrinoID_nue_tagger.h, WCPPID::NeutrinoID::bad_reconstruction_2()
+// Fills: ti.br3_1_*, ti.br3_2_*, ti.br3_3_v_*, ti.br3_4_*, ti.br3_5_v_*,
+//        ti.br3_6_v_*, ti.br3_7_*, ti.br3_8_*, ti.br3_flag
+// ===========================================================================
+static bool bad_reconstruction_2(NuEContext& ctx,
+                                  VertexPtr vertex, ShowerPtr shower,
+                                  TaggerInfo& ti) {
+    bool flag_bad1 = false, flag_bad2 = false;
+    bool flag_bad3_save = false, flag_bad4 = false, flag_bad5 = false;
+    bool flag_bad6_save = false, flag_bad7 = false, flag_bad8 = false;
+
+    Vector drift_dir(1, 0, 0);
+    double Eshower = (shower->get_kine_best() != 0)
+                     ? shower->get_kine_best() : shower->get_kine_charge();
+
+    SegmentPtr sg           = shower->start_segment();
+    double total_length     = shower->get_total_length();
+    double total_main_length = sg->cluster() ? shower->get_total_length(sg->cluster()) : 0;
+    double length           = segment_track_length(sg);
+    double direct_length    = segment_track_direct_length(sg);
+
+    // End-to-end direction of start segment (front to back of fit points)
+    const auto& sg_fits = sg->fits();
+    Vector dir_two_end = sg_fits.empty() ? Vector(0,0,0)
+                         : (sg_fits.front().point - sg_fits.back().point);
+
+    // ------------------------------------------------------------------
+    // br3_1: straight low-energy shower
+    // ------------------------------------------------------------------
+    if (Eshower < 100*units::MeV && shower->get_num_segments() == 1 &&
+        !sg->flags_any(SegmentFlags::kShowerTrajectory) &&
+        direct_length / length > 0.95) flag_bad1 = true;
+    if (Eshower < 100*units::MeV && total_main_length/total_length > 0.95 &&
+        length/total_length > 0.85 &&
+        (direct_length/length > 0.95 ||
+         std::fabs(dir_two_end.angle(drift_dir)/M_PI*180.0 - 90.0) < 5.0) &&
+        sg->flags_any(SegmentFlags::kShowerTrajectory)) flag_bad1 = true;
+    if (Eshower < 200*units::MeV && total_main_length/total_length > 0.96 &&
+        length/total_length > 0.925 &&
+        (direct_length/length > 0.95 ||
+         (std::fabs(dir_two_end.angle(drift_dir)/M_PI*180.0 - 90.0) < 5.0 &&
+          sg->flags_any(SegmentFlags::kShowerTrajectory))) &&
+        length > 25*units::cm) flag_bad1 = true;
+    if (Eshower < 100*units::MeV && total_main_length/total_length > 0.95 &&
+        length/total_length > 0.95 && direct_length/length > 0.95 &&
+        sg->flags_any(SegmentFlags::kShowerTopology)) flag_bad1 = true;
+
+    ti.br3_1_energy             = Eshower / units::MeV;
+    ti.br3_1_n_shower_segments  = shower->get_num_segments();
+    ti.br3_1_sg_flag_trajectory = sg->flags_any(SegmentFlags::kShowerTrajectory);
+    ti.br3_1_sg_flag_topology   = sg->flags_any(SegmentFlags::kShowerTopology);
+    ti.br3_1_sg_direct_length   = direct_length / units::cm;
+    ti.br3_1_sg_length          = length / units::cm;
+    ti.br3_1_total_main_length  = total_main_length / units::cm;
+    ti.br3_1_total_length       = total_length / units::cm;
+    ti.br3_1_iso_angle          = std::fabs(dir_two_end.angle(drift_dir)/M_PI*180.0 - 90.0);
+    ti.br3_1_flag               = !flag_bad1;
+
+    // ------------------------------------------------------------------
+    // br3_2: shower segment type composition
+    // ------------------------------------------------------------------
+    IndexedSegmentSet shower_segs;
+    IndexedVertexSet  shower_vtxs;
+    shower->fill_sets(shower_vtxs, shower_segs, /*flag_exclude_start_segment=*/false);
+
+    int n_ele = 0, n_other = 0;
+    for (SegmentPtr sg1 : shower_segs) {
+        if (sg1->cluster() != sg->cluster()) continue;
+        double med   = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+        double ratio = segment_track_direct_length(sg1) / segment_track_length(sg1);
+        if (sg1->flags_any(SegmentFlags::kShowerTopology) ||
+            (sg1->flags_any(SegmentFlags::kShowerTrajectory) && med < 1.3) ||
+            ratio < 0.92) ++n_ele;
+        else if (med > 1.3 || ratio > 0.95) ++n_other;
+    }
+
+    VertexPtr other_vertex = find_other_vertex(ctx.graph, sg, vertex);
+
+    FiducialUtilsPtr fiducial_utils;
+    if (ctx.main_cluster && ctx.main_cluster->grouping())
+        fiducial_utils = ctx.main_cluster->grouping()->get_fiducialutils();
+    bool other_fid = fiducial_utils
+                     ? fiducial_utils->inside_fiducial_volume(vtx_fit_pt(other_vertex)) : true;
+
+    if (Eshower < 150*units::MeV && total_main_length/total_length > 0.95 &&
+        ((n_ele == 0 && n_other > 0) ||
+         (n_ele == 1 && n_ele < n_other && n_other <= 2))) flag_bad2 = true;
+    if (Eshower < 150*units::MeV && total_main_length/total_length > 0.95 &&
+        n_ele == 1 && n_other == 0 && !other_fid) flag_bad2 = true;
+
+    ti.br3_2_n_ele              = n_ele;
+    ti.br3_2_n_other            = n_other;
+    ti.br3_2_energy             = Eshower / units::MeV;
+    ti.br3_2_total_main_length  = total_main_length / units::cm;
+    ti.br3_2_total_length       = total_length / units::cm;
+    ti.br3_2_other_fid          = other_fid;
+    ti.br3_2_flag               = !flag_bad2;
+
+    // ------------------------------------------------------------------
+    // br3_3/br3_4: backward segments in main cluster
+    // ------------------------------------------------------------------
+    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+    Point other_point  = (ray_length(Ray{vtx_fit_pt(vertex), sg_fits.front().point}) <=
+                          ray_length(Ray{vtx_fit_pt(vertex), sg_fits.back().point}))
+                         ? sg_fits.back().point : sg_fits.front().point;
+
+    Vector dir_stem = segment_cal_dir_3vector(sg, vertex_point, 15*units::cm);
+
+    double acc_length = 0, total_main_len2 = 0;
+    for (SegmentPtr sg1 : shower_segs) {
+        if (sg1->cluster() != sg->cluster()) continue;
+        const auto& fits1 = sg1->fits();
+        Point front1 = fits1.front().point, back1 = fits1.back().point;
+        double d1 = ray_length(Ray{vertex_point, front1});
+        double d2 = ray_length(Ray{vertex_point, back1});
+        // Direction from near end to far end
+        Vector dir1 = (d1 < d2) ? (back1 - front1) : (front1 - back1);
+        double len1 = segment_track_length(sg1);
+        double angle = dir1.angle(dir_stem) / M_PI * 180.0;
+        bool flag_bad3 = false;
+        if (angle > 90  && dir1.magnitude() > 10*units::cm) acc_length += len1;
+        if (angle > 150 && dir1.magnitude() > 10*units::cm && Eshower < 600*units::MeV)
+            flag_bad3 = true;
+        if (angle > 105 && len1 > 15*units::cm && Eshower < 600*units::MeV)
+            flag_bad3 = true;
+
+        ti.br3_3_v_energy.push_back(Eshower / units::MeV);
+        ti.br3_3_v_angle.push_back(angle);
+        ti.br3_3_v_dir_length.push_back(dir1.magnitude() / units::cm);
+        ti.br3_3_v_length.push_back(len1 / units::cm);
+        ti.br3_3_v_flag.push_back(!flag_bad3);
+
+        total_main_len2 += len1;
+        if (flag_bad3) flag_bad3_save = true;
+    }
+    if (acc_length > 0.33 * total_main_len2 && Eshower < 600*units::MeV) flag_bad4 = true;
+
+    ti.br3_4_acc_length   = acc_length / units::cm;
+    ti.br3_4_total_length = total_main_len2 / units::cm;
+    ti.br3_4_energy       = Eshower / units::MeV;
+    ti.br3_4_flag         = !flag_bad4;
+
+    // ------------------------------------------------------------------
+    // br3_5: average position of other (non-stem) main-cluster segments
+    // ------------------------------------------------------------------
+    Point ave_p(0, 0, 0); int num_p = 0, n_seg = 0;
+    double side_total_length = 0;
+    for (SegmentPtr sg1 : shower_segs) {
+        if (sg1->cluster() != sg->cluster() || sg1 == sg) continue;
+        for (const auto& fit : sg1->fits()) {
+            ave_p = ave_p + fit.point * (1.0 / 1.0);  // accumulate
+            ave_p.x(ave_p.x() + fit.point.x()); // fallback: manual sum
+        }
+        // Actually simpler: just sum components
+    }
+    // Redo with clean accumulation
+    ave_p = Point(0, 0, 0); num_p = 0; n_seg = 0; side_total_length = 0;
+    for (SegmentPtr sg1 : shower_segs) {
+        if (sg1->cluster() != sg->cluster() || sg1 == sg) continue;
+        for (const auto& fit : sg1->fits()) {
+            ave_p = Point(ave_p.x() + fit.point.x(),
+                         ave_p.y() + fit.point.y(),
+                         ave_p.z() + fit.point.z());
+            ++num_p;
+        }
+        ++n_seg;
+        side_total_length += segment_track_length(sg1);
+    }
+
+    if (num_p > 0) {
+        ave_p = Point(ave_p.x()/num_p, ave_p.y()/num_p, ave_p.z()/num_p);
+        Vector dir1 = ave_p - other_point;
+        bool avoid_check = sg->flags_any(SegmentFlags::kAvoidMuonCheck);
+
+        if ((dir1.magnitude() > 3*units::cm || side_total_length > 6*units::cm) &&
+            (!avoid_check || n_seg > 1) &&
+            dir_stem.angle(dir1)/M_PI*180.0 > 60 &&
+            length > 10*units::cm && Eshower < 250*units::MeV)
+            flag_bad5 = true;
+        // 7018_888_44410
+        if (shower->get_num_main_segments() + 6 < shower->get_num_segments() &&
+            shower->get_total_length(sg->cluster()) < 0.7 * shower->get_total_length() &&
+            Eshower < 250*units::MeV)
+            flag_bad5 = false;
+
+        ti.br3_5_v_dir_length.push_back(dir1.magnitude() / units::cm);
+        ti.br3_5_v_total_length.push_back(side_total_length / units::cm);
+        ti.br3_5_v_flag_avoid_muon_check.push_back(avoid_check);
+        ti.br3_5_v_n_seg.push_back(n_seg);
+        ti.br3_5_v_angle.push_back(dir_stem.angle(dir1) / M_PI * 180.0);
+        ti.br3_5_v_sg_length.push_back(length / units::cm);
+        ti.br3_5_v_energy.push_back(Eshower / units::MeV);
+        ti.br3_5_v_n_main_segs.push_back(shower->get_num_main_segments());
+        ti.br3_5_v_n_segs.push_back(shower->get_num_segments());
+        ti.br3_5_v_shower_main_length.push_back(
+            sg->cluster() ? shower->get_total_length(sg->cluster()) / units::cm : 0);
+        ti.br3_5_v_shower_total_length.push_back(shower->get_total_length() / units::cm);
+        ti.br3_5_v_flag.push_back(!flag_bad5);
+    }
+
+    // ------------------------------------------------------------------
+    // br3_6/br3_7: segments at the far end of the stem
+    // ------------------------------------------------------------------
+    other_vertex = find_other_vertex(ctx.graph, sg, vertex);
+    double min_angle = 180;
+    if (other_vertex && other_vertex->descriptor_valid()) {
+        Point ovp = vtx_fit_pt(other_vertex);
+        size_t n_other_vtx_segs = boost::out_degree(other_vertex->get_descriptor(), ctx.graph);
+        auto ov_vd = other_vertex->get_descriptor();
+        for (auto [eit, eend] = boost::out_edges(ov_vd, ctx.graph); eit != eend; ++eit) {
+            SegmentPtr sg1 = ctx.graph[*eit].segment;
+            if (!sg1 || sg1 == sg) continue;
+            VertexPtr vtx_1 = find_other_vertex(ctx.graph, sg1, other_vertex);
+            if (!vtx_1) continue;
+            Vector dir1 = vtx_fit_pt(vtx_1) - ovp;
+            double angle = dir1.angle(dir_stem) / M_PI * 180.0;
+            double angle1 = std::max(
+                std::fabs(90.0 - dir_stem.angle(drift_dir)/M_PI*180.0),
+                std::fabs(90.0 - dir1.angle(drift_dir)/M_PI*180.0));
+            double sg1_len = segment_track_length(sg1);
+            double sg1_dir = segment_track_direct_length(sg1);
+            bool flag_bad6 = false;
+            // 7022_110_5530 + 6787_236_11833
+            if (angle > 150 && angle1 > 10 &&
+                !sg1->flags_any(SegmentFlags::kShowerTrajectory) &&
+                sg1_dir/sg1_len > 0.9 &&
+                sg1_len > 7.5*units::cm && n_other_vtx_segs <= 4 &&
+                Eshower < 600*units::MeV) flag_bad6 = true;
+            if (angle < min_angle && sg1_len > 6*units::cm) min_angle = angle;
+
+            ti.br3_6_v_angle.push_back(angle);
+            ti.br3_6_v_angle1.push_back(angle1);
+            ti.br3_6_v_flag_shower_trajectory.push_back(
+                sg1->flags_any(SegmentFlags::kShowerTrajectory));
+            ti.br3_6_v_direct_length.push_back(sg1_dir / units::cm);
+            ti.br3_6_v_length.push_back(sg1_len / units::cm);
+            ti.br3_6_v_n_other_vtx_segs.push_back(n_other_vtx_segs);
+            ti.br3_6_v_energy.push_back(Eshower / units::MeV);
+            ti.br3_6_v_flag.push_back(!flag_bad6);
+            if (flag_bad6) flag_bad6_save = true;
+        }
+    }
+
+    // br3_7: short stem relative to main-cluster length
+    double shower_main_len = vertex->cluster() ? shower->get_total_length(vertex->cluster()) : 0;
+    if (Eshower < 200*units::MeV && min_angle > 60 &&
+        length < 0.2 * shower_main_len) flag_bad7 = true;
+
+    ti.br3_7_energy             = Eshower / units::MeV;
+    ti.br3_7_min_angle          = min_angle;
+    ti.br3_7_sg_length          = length / units::cm;
+    ti.br3_7_shower_main_length = shower_main_len / units::cm;
+    ti.br3_7_flag               = !flag_bad7;
+
+    // ------------------------------------------------------------------
+    // br3_8: sliding-window dQ/dx peak across main-cluster shower segs
+    // ------------------------------------------------------------------
+    double max_dQ_dx = 0;
+    for (SegmentPtr sg1 : shower_segs) {
+        if (sg1->cluster() != vertex->cluster()) continue;
+        int n = (int)sg1->fits().size();
+        for (int i = 0; i < n - 5; ++i) {
+            double med = segment_median_dQ_dx(sg1, i, i+5) / (43e3/units::cm);
+            if (med > max_dQ_dx) max_dQ_dx = med;
+        }
+    }
+    if (max_dQ_dx > 1.85 && Eshower < 150*units::MeV &&
+        shower->get_num_main_segments() <= 2 &&
+        shower->get_total_length(vertex->cluster()) > shower->get_total_length() * 0.8)
+        flag_bad8 = true;
+
+    ti.br3_8_max_dQ_dx          = max_dQ_dx;
+    ti.br3_8_energy             = Eshower / units::MeV;
+    ti.br3_8_n_main_segs        = shower->get_num_main_segments();
+    ti.br3_8_shower_main_length = vertex->cluster()
+                                  ? shower->get_total_length(vertex->cluster()) / units::cm : 0;
+    ti.br3_8_shower_length      = shower->get_total_length() / units::cm;
+    ti.br3_8_flag               = !flag_bad8;
+
+    bool flag_bad = flag_bad1 || flag_bad2 || flag_bad3_save || flag_bad4 ||
+                    flag_bad5 || flag_bad6_save || flag_bad7 || flag_bad8;
+    ti.br3_flag = !flag_bad;
+    return flag_bad;
+}
+
+// NOTE: bad_reconstruction (br1) = PatternAlgorithms::bad_reconstruction()
+// already implemented in NeutrinoTaggerCosmic.cxx.
+// The file-local reimplementation below is REMOVED to avoid name collision.
+// Calls in multiple_showers and other_showers use ctx.self.bad_reconstruction().
+// ===========================================================================
+// bad_reconstruction (br1) = PatternAlgorithms::bad_reconstruction() in NeutrinoTaggerCosmic.cxx.
+// Calls: ctx.self.bad_reconstruction(ctx.graph, ctx.main_vertex, shower [, true, &ti]).
+
+// ===========================================================================
+// track_overclustering
+//
+// Five sub-checks (tro_1…tro_5) detecting shower-internal segments that look
+// more like a muon or proton track than EM shower fragments:
+//
+//   tro_1: shower-internal segment at a "leaf" vertex (global degree 1) has
+//     a non-electron particle type, good direction, and is well-separated from
+//     the shower vertex — likely an over-clustered track stub.
+//
+//   tro_2: from the end of the shower stem (via first muon walk through
+//     shower-internal edges), check how much the other shower vertices
+//     "fan out" transversely from the stem direction — low spread = track.
+//
+//   tro_3: continue the muon walk with gap-crossing (shower-internal only),
+//     flag if total walked length exceeds 120 cm.
+//
+//   tro_4: shower-internal leaf vertices (1 shower-internal segment) that are
+//     close to and angled relative to the start segment indicate a crossing track.
+//
+//   tro_5: segments at the far end of the start segment that have a
+//     distinctive angle structure indicating track-like branching.
+//
+// Prototype: NeutrinoID_nue_tagger.h, WCPPID::NeutrinoID::track_overclustering()
+// Fills: ti.tro_1_v_*, ti.tro_2_v_*, ti.tro_3_*, ti.tro_4_v_*, ti.tro_5_v_*,
+//        ti.tro_flag
+//
+// Translation notes:
+//   map_vtx_segs[v] (shower-internal)  → boost::out_edges filtered to shower_segs
+//   map_vtx_segs iteration (all)        → iterate shower_vtxs
+//   dir.Cross(dir2).Mag()               → dir.cross(dir2).magnitude()
+//   tro_2_v_stem_length: prototype uses /units::MeV (typo) — faithfully reproduced
+// ===========================================================================
+static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
+    bool flag_bad1_save = false, flag_bad2_save = false;
+    bool flag_bad3      = false, flag_bad4_save = false, flag_bad5 = false;
+
+    Vector drift_dir(1, 0, 0);
+    double Eshower = (shower->get_kine_best() != 0)
+                     ? shower->get_kine_best() : shower->get_kine_charge();
+
+    VertexPtr  vertex = shower->get_start_vertex_and_type().first;
+    SegmentPtr sg     = shower->start_segment();
+    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+
+    // Pre-fill shower internal sets
+    IndexedSegmentSet shower_segs;
+    IndexedVertexSet  shower_vtxs;
+    shower->fill_sets(shower_vtxs, shower_segs, /*flag_exclude_start_segment=*/false);
+
+    double total_length_main = vertex->cluster() ? shower->get_total_length(vertex->cluster()) : 0;
+
+    // Helper: get shower-internal segments at a vertex
+    auto shower_segs_at = [&](VertexPtr vtx) -> std::vector<SegmentPtr> {
+        std::vector<SegmentPtr> out;
+        if (!vtx || !vtx->descriptor_valid()) return out;
+        for (auto [eit,eend] = boost::out_edges(vtx->get_descriptor(), ctx.graph);
+             eit != eend; ++eit) {
+            SegmentPtr sg1 = ctx.graph[*eit].segment;
+            if (sg1 && shower_segs.count(sg1)) out.push_back(sg1);
+        }
+        return out;
+    };
+
+    // ------------------------------------------------------------------
+    // tro_1: leaf-vertex (global degree 1) shower-internal segments
+    // ------------------------------------------------------------------
+    for (SegmentPtr sg1 : shower_segs) {
+        if (sg1->cluster() != vertex->cluster()) continue;
+        auto [pv1, pv2] = find_vertices(ctx.graph, sg1);
+        size_t deg1 = pv1 && pv1->descriptor_valid()
+                      ? boost::out_degree(pv1->get_descriptor(), ctx.graph) : 0;
+        size_t deg2 = pv2 && pv2->descriptor_valid()
+                      ? boost::out_degree(pv2->get_descriptor(), ctx.graph) : 0;
+        if (deg1 != 1 && deg2 != 1) continue; // not a leaf
+
+        double dis1 = ray_length(Ray{vertex_point, vtx_fit_pt(pv1)});
+        double dis2 = ray_length(Ray{vertex_point, vtx_fit_pt(pv2)});
+        bool flag_bad1 = false;
+
+        int pdg = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
+        if (pdg != 11 && !sg1->dir_weak()) {
+            double len1 = segment_track_length(sg1);
+            size_t max_deg = std::max(deg1, deg2);
+            if (std::min(dis1, dis2) > 10*units::cm &&
+                ((len1 > 0.03*total_length_main && max_deg < 4) ||
+                 len1 > 0.06*total_length_main ||
+                 len1 > 3.6*units::cm))
+                flag_bad1 = true;
+        }
+
+        double tmp_length = segment_track_length(sg1);
+        double dQ_dx_cut  = 0.8866 + 0.9533 * std::pow(18*units::cm/tmp_length, 0.4234);
+        if (std::isinf(dQ_dx_cut) || std::isnan(dQ_dx_cut)) dQ_dx_cut = 10;
+        double med = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+
+        // 7055_677_33891
+        if (tmp_length > 12*units::cm &&
+            !sg1->flags_any(SegmentFlags::kShowerTopology) &&
+            tmp_length > 0.3*total_length_main &&
+            med > dQ_dx_cut * 1.1)
+            flag_bad1 = true;
+
+        ti.tro_1_v_particle_type.push_back(pdg);
+        ti.tro_1_v_flag_dir_weak.push_back(sg1->dir_weak());
+        ti.tro_1_v_min_dis.push_back(std::min(dis1,dis2) / units::cm);
+        ti.tro_1_v_sg1_length.push_back(tmp_length / units::cm);
+        ti.tro_1_v_shower_main_length.push_back(total_length_main / units::cm);
+        ti.tro_1_v_max_n_vtx_segs.push_back(std::max(deg1, deg2));
+        ti.tro_1_v_tmp_length.push_back(tmp_length / units::cm);
+        ti.tro_1_v_medium_dQ_dx.push_back(med);
+        ti.tro_1_v_dQ_dx_cut.push_back(dQ_dx_cut);
+        ti.tro_1_v_flag_shower_topology.push_back(sg1->flags_any(SegmentFlags::kShowerTopology));
+        ti.tro_1_v_flag.push_back(!flag_bad1);
+        if (flag_bad1) flag_bad1_save = true;
+    }
+
+    // ------------------------------------------------------------------
+    // tro_2: first muon walk (shower-internal edges only), then lateral
+    //        spread check at the walk endpoint
+    // ------------------------------------------------------------------
+
+    // Walk: follow nearly-collinear (180°-angle<15°, len>6cm) shower-internal
+    //       segments from start_segment forward.
+    std::set<SegmentPtr> muon_segs;
+    SegmentPtr curr_seg = sg;
+    VertexPtr  curr_vtx = find_other_vertex(ctx.graph, sg, vertex);
+    muon_segs.insert(curr_seg);
+    {
+        bool flag_cont = true;
+        while (flag_cont) {
+            flag_cont = false;
+            Point cvp = vtx_fit_pt(curr_vtx);
+            Vector dir1 = segment_cal_dir_3vector(curr_seg, cvp, 15*units::cm);
+            for (SegmentPtr sg1 : shower_segs_at(curr_vtx)) {
+                if (muon_segs.count(sg1)) continue;
+                Vector dir2 = segment_cal_dir_3vector(sg1, cvp, 15*units::cm);
+                if (180.0 - dir1.angle(dir2)/M_PI*180.0 < 15 &&
+                    segment_track_length(sg1) > 6*units::cm) {
+                    flag_cont = true;
+                    curr_seg = sg1;
+                    curr_vtx = find_other_vertex(ctx.graph, sg1, curr_vtx);
+                    break;
+                }
+            }
+            muon_segs.insert(curr_seg);
+        }
+    }
+
+    double stem_length_1 = 0;
+    for (SegmentPtr s : muon_segs) stem_length_1 += segment_track_length(s);
+
+    // Shower direction for use in tro_2 cross-product check
+    Vector dir_shower;
+    if (segment_track_length(sg) > 12*units::cm)
+        dir_shower = segment_cal_dir_3vector(sg, vertex_point, 15*units::cm);
+    else
+        dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
+    if (std::fabs(dir_shower.angle(drift_dir)/M_PI*180.0 - 90.0) < 10.0 ||
+        Eshower > 800*units::MeV)
+        dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 25*units::cm);
+    dir_shower = dir_shower.norm();
+
+    // Lateral spread check: for each non-muon shower-internal segment at curr_vtx,
+    //   measure how far other shower-internal vertices in the same cluster lie
+    //   transversely from the stem.
+    {
+        Point cvp = vtx_fit_pt(curr_vtx);
+        Vector dir1 = segment_cal_dir_3vector(curr_seg, cvp, 15*units::cm).norm();
+
+        for (SegmentPtr sg1 : shower_segs_at(curr_vtx)) {
+            if (muon_segs.count(sg1)) continue;
+            Vector dir2 = segment_cal_dir_3vector(sg1, cvp, 15*units::cm).norm();
+            double angle = 180.0 - dir1.angle(dir2)/M_PI*180.0;
+
+            double max_length = 0;
+            // For each shower-internal vertex in the same cluster as curr_vtx:
+            for (VertexPtr vtx1 : shower_vtxs) {
+                if (vtx1->cluster() != curr_vtx->cluster()) continue;
+                Vector dir3 = vtx_fit_pt(vtx1) - cvp;
+                if (dir3.angle(dir2)/M_PI*180.0 < 30.0) {
+                    double length = (Eshower > 600*units::MeV)
+                                    ? dir3.cross(dir_shower).magnitude()
+                                    : dir3.cross(dir1).magnitude();
+                    if (length > max_length) max_length = length;
+                }
+            }
+
+            bool flag_bad2 = false;
+            double iso_angle = std::max(
+                std::fabs(drift_dir.angle(dir2)/M_PI*180.0 - 90.0),
+                std::fabs(drift_dir.angle(dir1)/M_PI*180.0 - 90.0));
+
+            if (Eshower < 800*units::MeV && stem_length_1 > 6*units::cm) {
+                if (stem_length_1 > 40*units::cm || iso_angle < 10.0) {
+                    if (max_length > 18*units::cm) flag_bad2 = true;
+                } else {
+                    if (max_length > 18*units::cm) flag_bad2 = true;
+                }
+            }
+            if (Eshower >= 800*units::MeV && stem_length_1 > 40*units::cm &&
+                iso_angle > 15 && max_length > 25*units::cm && angle > 30)
+                flag_bad2 = true;
+            if ((max_length > 30*units::cm && iso_angle > 25) ||
+                (max_length > 40*units::cm && iso_angle > 20))
+                flag_bad2 = true;
+
+            ti.tro_2_v_energy.push_back(Eshower / units::MeV);
+            ti.tro_2_v_stem_length.push_back(stem_length_1 / units::MeV); // prototype typo: /MeV not /cm
+            ti.tro_2_v_iso_angle.push_back(iso_angle);
+            ti.tro_2_v_max_length.push_back(max_length / units::cm);
+            ti.tro_2_v_angle.push_back(angle);
+            ti.tro_2_v_flag.push_back(!flag_bad2);
+            if (flag_bad2) flag_bad2_save = true;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // tro_3: continue muon walk with gap-crossing (shower-internal only)
+    // ------------------------------------------------------------------
+    {
+        bool flag_cont = true;
+        while (flag_cont) {
+            flag_cont = false;
+            Point cvp = vtx_fit_pt(curr_vtx);
+            Vector dir1 = segment_cal_dir_3vector(curr_seg, cvp, 15*units::cm);
+
+            // Step A: connected shower-internal segments
+            for (SegmentPtr sg1 : shower_segs_at(curr_vtx)) {
+                if (muon_segs.count(sg1)) continue;
+                Vector dir2 = segment_cal_dir_3vector(sg1, cvp, 15*units::cm);
+                if (180.0 - dir1.angle(dir2)/M_PI*180.0 < 15 &&
+                    segment_track_length(sg1) > 6*units::cm) {
+                    flag_cont = true;
+                    curr_seg = sg1;
+                    curr_vtx = find_other_vertex(ctx.graph, sg1, curr_vtx);
+                    break;
+                }
+            }
+
+            // Step B: gap-crossing (other-cluster shower-internal segments)
+            double    min_dis = 1e9;
+            SegmentPtr min_seg = nullptr;
+            VertexPtr  min_vtx_found = nullptr;
+            if (!flag_cont) {
+                for (SegmentPtr sg1 : shower_segs) {
+                    // Skip segments in same cluster as any muon segment
+                    bool skip = false;
+                    for (SegmentPtr ms : muon_segs) {
+                        if (sg1->cluster() == ms->cluster()) { skip = true; break; }
+                    }
+                    if (skip) continue;
+
+                    const auto& fits1 = sg1->fits();
+                    if (fits1.empty()) continue;
+                    Point front1 = fits1.front().point, back1 = fits1.back().point;
+                    double d1 = ray_length(Ray{cvp, front1});
+                    double d2 = ray_length(Ray{cvp, back1});
+                    Point  near = (d1 < d2) ? front1 : back1;
+                    double nd   = std::min(d1, d2);
+                    Vector dir2 = near - cvp;
+                    Vector dir3 = segment_cal_dir_3vector(sg1, near, 15*units::cm);
+
+                    double a1 = 180.0 - dir1.angle(dir2)/M_PI*180.0;
+                    double a2 = dir2.angle(dir3)/M_PI*180.0;
+                    double a3 = 180.0 - dir1.angle(dir3)/M_PI*180.0;
+
+                    bool passes = ((std::min(a1,a2) < 10 && a1+a2 < 25) ||
+                                   (a3 < 15 && nd < 5*units::cm)) && nd < 25*units::cm;
+                    bool far_pass = std::min(a1,a2) < 15 && a3 < 30 &&
+                                    nd > 30*units::cm && segment_track_length(sg1) > 25*units::cm &&
+                                    nd < 60*units::cm;
+                    if ((passes || far_pass) && nd < min_dis) {
+                        min_dis = nd;
+                        min_seg = sg1;
+                        auto [pv1, pv2] = find_vertices(ctx.graph, sg1);
+                        double d3 = ray_length(Ray{cvp, vtx_fit_pt(pv1)});
+                        double d4 = ray_length(Ray{cvp, vtx_fit_pt(pv2)});
+                        min_vtx_found = (d4 > d3) ? pv2 : pv1;
+                    }
+                }
+                if (min_seg) {
+                    flag_cont = true;
+                    curr_seg = min_seg;
+                    curr_vtx = min_vtx_found;
+                }
+            }
+            if (flag_cont) muon_segs.insert(curr_seg);
+        }
+    }
+
+    double stem_length_3 = 0;
+    for (SegmentPtr s : muon_segs) stem_length_3 += segment_track_length(s);
+    if (stem_length_3 > 120*units::cm) flag_bad3 = true;
+
+    ti.tro_3_stem_length = stem_length_3 / units::cm;
+    ti.tro_3_n_muon_segs = muon_segs.size();
+    ti.tro_3_energy      = Eshower / units::MeV;
+    ti.tro_3_flag        = !flag_bad3;
+
+    // ------------------------------------------------------------------
+    // tro_4: shower-internal leaf vertices close to and angled from stem
+    // ------------------------------------------------------------------
+    {
+        Vector dir1_stem = segment_cal_dir_3vector(sg, vertex_point, 15*units::cm);
+        double len_stem  = segment_track_length(sg);
+
+        for (VertexPtr vtx1 : shower_vtxs) {
+            if (!vtx1->cluster() || vtx1->cluster() != vertex->cluster()) continue;
+            if (vtx1 == vertex) continue;
+            // Must be a shower-internal "leaf" (exactly 1 shower-internal segment)
+            auto ss_at_vtx1 = shower_segs_at(vtx1);
+            if (ss_at_vtx1.size() != 1) continue;
+            SegmentPtr sg1 = ss_at_vtx1.front();
+
+            Vector dir2  = vtx_fit_pt(vtx1) - vertex_point;
+            double len1  = segment_track_length(sg1);
+            double angle = dir1_stem.angle(dir2) / M_PI * 180.0;
+            double angle1 = std::max(
+                std::fabs(M_PI/2.0 - dir1_stem.angle(drift_dir)) / M_PI * 180.0,
+                std::fabs(M_PI/2.0 - dir2.angle(drift_dir)) / M_PI * 180.0);
+            double angle2 = std::min(
+                std::fabs(M_PI/2.0 - dir1_stem.angle(drift_dir)) / M_PI * 180.0,
+                std::fabs(M_PI/2.0 - dir2.angle(drift_dir)) / M_PI * 180.0);
+            double med    = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+
+            // end_dQ_dx: dQ/dx at the vtx1 end of sg1
+            const auto& f1 = sg1->fits();
+            bool vtx1_at_front = !f1.empty() &&
+                (ray_length(Ray{vtx_fit_pt(vtx1), f1.front().point}) <=
+                 ray_length(Ray{vtx_fit_pt(vtx1), f1.back().point}));
+            int nf1 = (int)f1.size();
+            double end_dQ_dx = vtx1_at_front
+                ? segment_median_dQ_dx(sg1, 0, std::min(6, nf1-1)) / (43e3/units::cm)
+                : segment_median_dQ_dx(sg1, std::max(0, nf1-7), nf1-1) / (43e3/units::cm);
+
+            bool flag_bad4 = false;
+            double dir2_mag = dir2.magnitude();
+
+            // 7054_155_7797
+            if (dir2_mag < 10*units::cm && angle > 15 && len1 > 5*units::cm &&
+                med > 1.5 && angle2 > 5) flag_bad4 = true;
+            // 7054_767_38376 + 7020_1327_66376
+            if ((dir2_mag < 10*units::cm && dir2_mag < 0.5*len_stem && len_stem > 10*units::cm &&
+                 ((angle > 30 && angle1 > 10) || angle > 60) && len1 > 10*units::cm) ||
+                (dir2_mag < 12*units::cm && dir2_mag < 0.75*len_stem && len_stem > 12.5*units::cm &&
+                 (angle > 20 && angle1 > 10) && len1 > 20*units::cm))
+                flag_bad4 = true;
+            // 6649_42_2117
+            if (Eshower < 200*units::MeV && end_dQ_dx > 1.6 &&
+                len1 > shower->get_total_length(sg1->cluster()) * 0.33 &&
+                sg1->flags_any(SegmentFlags::kShowerTrajectory))
+                flag_bad4 = true;
+
+            ti.tro_4_v_dir2_mag.push_back(dir2_mag / units::cm);
+            ti.tro_4_v_angle.push_back(angle);
+            ti.tro_4_v_angle1.push_back(angle1);
+            ti.tro_4_v_angle2.push_back(angle2);
+            ti.tro_4_v_length.push_back(len_stem / units::cm);
+            ti.tro_4_v_length1.push_back(len1 / units::cm);
+            ti.tro_4_v_medium_dQ_dx.push_back(med);
+            ti.tro_4_v_end_dQ_dx.push_back(end_dQ_dx);
+            ti.tro_4_v_energy.push_back(Eshower / units::MeV);
+            ti.tro_4_v_shower_main_length.push_back(
+                sg1->cluster() ? shower->get_total_length(sg1->cluster()) / units::cm : 0);
+            ti.tro_4_v_flag_shower_trajectory.push_back(
+                sg1->flags_any(SegmentFlags::kShowerTrajectory));
+            ti.tro_4_v_flag.push_back(!flag_bad4);
+            if (flag_bad4) flag_bad4_save = true;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // tro_5: branching topology at far end of start segment
+    // ------------------------------------------------------------------
+    {
+        VertexPtr vtx1 = find_other_vertex(ctx.graph, sg, vertex);
+        if (vtx1) {
+            Point vtx1_pt = vtx_fit_pt(vtx1);
+            Vector dir1   = segment_cal_dir_3vector(sg, vtx1_pt, 15*units::cm);
+            auto ss_at_vtx1 = shower_segs_at(vtx1);
+
+            if (ss_at_vtx1.size() >= 2) {
+                double min_angle = 180;
+                int    min_count = 0;
+                double max_length = 0, max_angle = 0;
+                int    max_count = 0;
+
+                for (SegmentPtr sg1 : ss_at_vtx1) {
+                    if (sg1 == sg) continue;
+                    Point vp1 = vtx1_pt;
+                    Vector dir2 = segment_cal_dir_3vector(sg1, vp1, 6*units::cm);
+                    auto pair_result = ctx.self.calculate_num_daughter_tracks(
+                        ctx.graph, vtx1, sg1, /*count_shower=*/true, 0);
+                    double angle  = 180.0 - dir1.angle(dir2)/M_PI*180.0;
+
+                    if (angle < min_angle) {
+                        min_angle = angle;
+                        min_count = pair_result.first;
+                    }
+                    if (pair_result.second > max_length) {
+                        max_length = pair_result.second;
+                        max_angle  = angle;
+                        max_count  = pair_result.first;
+                    }
+                }
+
+                double dir1_iso = std::fabs(M_PI/2.0 - dir1.angle(drift_dir)) / M_PI * 180.0;
+                // 7006_293_14699
+                if (max_angle > 25 && min_angle < max_angle &&
+                    max_length > 10*units::cm && min_angle < 20 &&
+                    dir1_iso > 10 && ss_at_vtx1.size() == 3 &&
+                    min_count == 1 && max_count > 1 &&
+                    ((Eshower >= 600*units::MeV && dir1_iso < 40) ||
+                     (Eshower  < 600*units::MeV && dir1_iso < 25)))
+                    flag_bad5 = true;
+
+                ti.tro_5_v_max_angle.push_back(max_angle);
+                ti.tro_5_v_min_angle.push_back(min_angle);
+                ti.tro_5_v_max_length.push_back(max_length / units::cm);
+                ti.tro_5_v_iso_angle.push_back(dir1_iso);
+                ti.tro_5_v_n_vtx_segs.push_back(ss_at_vtx1.size());
+                ti.tro_5_v_min_count.push_back(min_count);
+                ti.tro_5_v_max_count.push_back(max_count);
+                ti.tro_5_v_energy.push_back(Eshower / units::MeV);
+                ti.tro_5_v_flag.push_back(!flag_bad5);
+            }
+        }
+    }
+
+    bool flag_bad = flag_bad1_save || flag_bad2_save || flag_bad3 ||
+                    flag_bad4_save || flag_bad5;
+    ti.tro_flag = !flag_bad;
+    return flag_bad;
+}
+
+// ===========================================================================
+// mip_identification
+//
+// Classifies the shower stem segment as EM-like (1), ambiguous (0), or
+// MIP/track-like (-1) using a detailed analysis of the per-fit-point dQ/dx
+// profile along the stem.
+//
+// Returns: 1 = shower-like (good), -1 = track-like (bad), 0 = ambiguous
+//
+// Prototype: NeutrinoID_nue_tagger.h, WCPPID::NeutrinoID::mip_identification()
+// Fills: ti.mip_*
+//
+// Translation notes:
+//   shower->get_stem_dQ_dx() returns NORMALIZED values (already divided by MIP)
+//   vec_dQ_dx is padded to ≥ 20 elements with 3.0 before the fill section
+//   (prototype does the same padding explicitly before fill)
+// ===========================================================================
+static int mip_identification(NuEContext& ctx,
+                              VertexPtr vertex, SegmentPtr sg, ShowerPtr shower,
+                              bool flag_single_shower, bool flag_strong_check,
+                              TaggerInfo& ti) {
+    int mip_id = 1;
+
+    Vector dir_beam(0, 0, 1);
+    Vector drift_dir(1, 0, 0);
+    double Eshower = (shower->get_kine_best() != 0)
+                     ? shower->get_kine_best() : shower->get_kine_charge();
+
+    Point vertex_point = seg_endpoint_near(sg, vtx_fit_pt(vertex));
+
+    // Shower direction (same logic as single_shower / bad_reconstruction_1)
+    Vector dir_shower;
+    if (segment_track_length(shower->start_segment()) > 12*units::cm)
+        dir_shower = segment_cal_dir_3vector(shower->start_segment(), vertex_point, 15*units::cm);
+    else
+        dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
+    if (std::fabs(dir_shower.angle(drift_dir)/M_PI*180.0 - 90.0) < 10.0 ||
+        Eshower > 800*units::MeV)
+        dir_shower = shower_cal_dir_3vector(*shower, vertex_point, 25*units::cm);
+    dir_shower = dir_shower.norm();
+
+    // Energy-dependent dQ/dx threshold for MIP-like classification
+    double dQ_dx_cut = 1.45;
+    if      (Eshower > 1200*units::MeV) dQ_dx_cut = 1.85;
+    else if (Eshower > 1000*units::MeV) dQ_dx_cut = 1.6;
+    else if (Eshower  < 550*units::MeV) dQ_dx_cut = 1.3;
+    if      (Eshower  < 300*units::MeV) dQ_dx_cut = 1.3;
+
+    // Per-fit-point normalized dQ/dx along the stem (up to 20 points)
+    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20);
+    // Ensure at least 2 elements for early accesses
+    while (vec_dQ_dx.size() < 2) vec_dQ_dx.push_back(0.0);
+
+    // Threshold mask
+    std::vector<int> vec_threshold(vec_dQ_dx.size(), 0);
+    for (size_t i = 0; i < vec_dQ_dx.size(); ++i)
+        if (vec_dQ_dx[i] > dQ_dx_cut) vec_threshold[i] = 1;
+
+    // n_end_reduction: index of last monotonically decreasing step that
+    // falls below threshold (finds the "end" of the MIP plateau)
+    int n_end_reduction = 0;
+    double prev = vec_dQ_dx.front();
+    for (size_t i = 1; i < vec_dQ_dx.size(); ++i) {
+        if (vec_dQ_dx[i] < prev) {
+            n_end_reduction = i;
+            prev = vec_dQ_dx[i];
+            if (vec_dQ_dx[i] < dQ_dx_cut) break;
+        }
+    }
+
+    // n_first_mip: first fit point where dQ/dx drops below threshold
+    int n_first_mip = 0;
+    for (size_t i = 0; i < vec_dQ_dx.size(); ++i) {
+        n_first_mip = i;
+        if (vec_threshold[i] == 0) break;
+    }
+
+    // n_first_non_mip: first fit point AFTER n_first_mip where dQ/dx is above threshold
+    int n_first_non_mip = n_first_mip;
+    for (size_t i = n_first_mip; i < vec_dQ_dx.size(); ++i) {
+        n_first_non_mip = i;
+        if (vec_threshold[i] == 1) break;
+    }
+
+    // n_first_non_mip_1: first run of 2 consecutive above-threshold points
+    int n_first_non_mip_1 = n_first_mip;
+    for (size_t i = n_first_non_mip; i < vec_dQ_dx.size(); ++i) {
+        n_first_non_mip_1 = i;
+        if (vec_threshold[i] == 1 && i+1 < vec_dQ_dx.size() && vec_threshold[i+1] == 1)
+            break;
+    }
+
+    // n_first_non_mip_2: first run of 3 consecutive above-threshold points
+    int n_first_non_mip_2 = n_first_mip;
+    for (size_t i = n_first_non_mip; i < vec_dQ_dx.size(); ++i) {
+        n_first_non_mip_2 = i;
+        if (vec_threshold[i] == 1 && i+1 < vec_dQ_dx.size() && vec_threshold[i+1] == 1
+            && i+2 < vec_dQ_dx.size() && vec_threshold[i+2] == 1) break;
+    }
+
+    // Statistics over the "MIP region" [n_first_mip, n_first_non_mip_2)
+    double lowest_dQ_dx = 100; int n_lowest = 0;
+    double highest_dQ_dx = 0;  int n_highest = 0;
+    int n_below_threshold = 0, n_below_zero = 0;
+    for (size_t i = n_first_mip; i < (size_t)n_first_non_mip_2; ++i) {
+        if (vec_dQ_dx[i] < lowest_dQ_dx && i <= 12) {
+            lowest_dQ_dx = vec_dQ_dx[i]; n_lowest = i;
+        }
+        if (vec_dQ_dx[i] > highest_dQ_dx) {
+            highest_dQ_dx = vec_dQ_dx[i]; n_highest = i;
+        }
+        if (vec_dQ_dx[i] < dQ_dx_cut) ++n_below_threshold;
+        if (vec_dQ_dx[i] < 0)         ++n_below_zero;
+    }
+
+    // Primary MIP classification
+    int run = n_first_non_mip_2 - n_first_mip;
+    bool early_mip = (n_first_mip <= 2) ||
+        (n_first_mip <= n_end_reduction &&
+         (n_first_mip <= 3 ||
+          (n_first_mip <= 4 && n_first_non_mip_1 - n_first_mip > 5 && Eshower > 150*units::MeV) ||
+          (n_first_mip <= 4 && Eshower > 600*units::MeV) ||
+          (n_first_mip <= 5 && Eshower > 800*units::MeV) ||
+          (n_first_mip <= 6 && Eshower > 1000*units::MeV) ||
+          (n_first_mip <= 10 && Eshower > 1000*units::MeV && n_first_non_mip_1 - n_first_mip > 5) ||
+          (n_first_mip <= 10 && Eshower > 1250*units::MeV)));
+    if (run >= 2 && early_mip) mip_id = 1;
+    else mip_id = -1;
+
+    // max dQ/dx just after the MIP region
+    double max_dQ_dx_sample = 0;
+    for (size_t i = n_first_non_mip_2; i < (size_t)n_first_non_mip_2 + 3; ++i) {
+        if (i >= vec_dQ_dx.size()) break;
+        if (vec_dQ_dx[i] > max_dQ_dx_sample) max_dQ_dx_sample = vec_dQ_dx[i];
+    }
+
+    // 7013_63_3191 + 7004_498_24922 + 7014_786_39346 + 6583_143_7192
+    if (mip_id == -1 && n_first_mip <= n_end_reduction && n_first_mip <= 5 &&
+        ((((run >= 8 && n_first_non_mip - n_first_mip >= 7) ||
+           (run >= 5 && max_dQ_dx_sample < 1.6)) &&
+          std::max(vec_dQ_dx[0], vec_dQ_dx[1]) > 1.75) ||
+         (run >= 5 && std::max(vec_dQ_dx[0], vec_dQ_dx[1]) > 3.0)))
+        mip_id = 0;
+
+    // 6640_171_8560 + 7014_954_47722
+    if (mip_id == -1 && n_first_mip <= n_end_reduction &&
+        std::max(vec_dQ_dx[0], vec_dQ_dx[1]) < 1.45 &&
+        (run + n_end_reduction >= 12 && n_below_threshold + n_end_reduction >= 10) &&
+        run >= 4 &&
+        ((n_end_reduction < 4 && Eshower < 100*units::MeV) ||
+         (n_end_reduction < 7 && Eshower < 200*units::MeV && Eshower >= 100*units::MeV) ||
+         Eshower >= 200*units::MeV)) {
+        mip_id = flag_single_shower ? 0 : 1;
+    }
+
+    // Strong-check override
+    if (flag_strong_check) {
+        bool strong_early = (n_first_mip <= 2) ||
+            (n_first_mip <= n_end_reduction &&
+             (n_first_mip <= 3 ||
+              (n_first_mip <= 4 && Eshower > 600*units::MeV) ||
+              (n_first_mip <= 5 && Eshower > 800*units::MeV) ||
+              (n_first_mip <= 6 && Eshower > 1000*units::MeV) ||
+              (n_first_mip <= 10 && Eshower > 1250*units::MeV)));
+        bool strong_run = (run > 3 ||
+                           (run == 3 && std::max(vec_dQ_dx[0], vec_dQ_dx[1]) > 3.3));
+        if (!(strong_early && strong_run)) mip_id = -1;
+        if (mip_id == -1 && n_first_mip <= n_end_reduction &&
+            n_first_mip <= 5 && run >= 7 &&
+            std::max(vec_dQ_dx[0], vec_dQ_dx[1]) > 3.3)
+            mip_id = 0;
+    }
+
+    // n_good_tracks: non-shower non-weak (or long) tracks at main vertex
+    size_t vtx_n_segs = vertex && vertex->descriptor_valid()
+                        ? boost::out_degree(vertex->get_descriptor(), ctx.graph) : 0;
+    int n_good_tracks = 0;
+    if (vertex && vertex->descriptor_valid()) {
+        for (auto [eit,eend] = boost::out_edges(vertex->get_descriptor(), ctx.graph);
+             eit != eend; ++eit) {
+            SegmentPtr sg1 = ctx.graph[*eit].segment;
+            if (!sg1 || sg1 == sg) continue;
+            if (!sg1->dir_weak() || segment_track_length(sg1) > 10*units::cm)
+                ++n_good_tracks;
+        }
+    }
+    if (Eshower < 600*units::MeV && n_good_tracks > 1 && n_first_non_mip_2 <= 2)
+        mip_id = -1;
+
+    // flag_all_above: all of first 6 stem points are above 1.2
+    bool flag_all_above = true;
+    for (size_t i = 0; i < vec_dQ_dx.size() && i <= 5; ++i)
+        if (vec_dQ_dx[i] < 1.2) { flag_all_above = false; break; }
+
+    // Single-shower + low-energy special cases
+    if (mip_id == 1 && vtx_n_segs == 1 && Eshower < 500*units::MeV) {
+        if (Eshower < 180*units::MeV || n_first_mip > 0 ||
+            (vec_dQ_dx[0] > 1.15 && n_end_reduction >= n_first_mip && Eshower < 360*units::MeV))
+            mip_id = 0;
+        if (flag_single_shower && Eshower < 400*units::MeV && n_end_reduction > 0)
+            mip_id = 0;
+    } else if (mip_id == 1 && vtx_n_segs > 1 && Eshower < 300*units::MeV) {
+        if (vec_dQ_dx.size() >= 3 && (vec_dQ_dx[1] < 0.6 || vec_dQ_dx[2] < 0.6))
+            mip_id = 0;
+    } else if (mip_id == 1 && vtx_n_segs > 1 && Eshower < 600*units::MeV) {
+        Vector dir_v = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
+        if (dir_v.angle(dir_beam)/M_PI*180.0 > 60 || n_first_non_mip_1 == 1) mip_id = 0;
+        if (flag_all_above) mip_id = 0;
+    } else if (mip_id == 1 && flag_single_shower && Eshower < 900*units::MeV) {
+        if (flag_single_shower && n_first_mip != 0) mip_id = 0;
+    }
+
+    // Short-range shower direction for angle cut
+    Vector dir = shower_cal_dir_3vector(*shower, vertex_point, 15*units::cm);
+
+    if (Eshower < 300*units::MeV) {
+        double ab = dir.angle(dir_beam)/M_PI*180.0;
+        if (ab > 40) {
+            if (((run <= 3 && n_first_non_mip_2 <= 3) || run <= 2) &&
+                n_first_mip <= 1 && max_dQ_dx_sample > 1.9)
+                mip_id = -1;
+            if (flag_single_shower && n_first_mip >= 3 &&
+                n_first_non_mip - n_first_mip <= 1 &&
+                std::max(vec_dQ_dx[0], vec_dQ_dx[1]) < 2.7)
+                mip_id = -1;
+            if (flag_single_shower && n_first_mip >= 2 &&
+                std::max(vec_dQ_dx[0], vec_dQ_dx[1]) < 2.7)
+                mip_id = -1;
+        }
+        if (ab > 30 && Eshower < 200*units::MeV && flag_single_shower &&
+            vec_dQ_dx[0] > 1.5 && n_first_mip > 0 &&
+            std::max(vec_dQ_dx[0], vec_dQ_dx[1]) < 2.7)
+            mip_id = -1;
+    }
+
+    // min_dQ_dx_5: minimum of first 6 stem points (used in single-shower cut)
+    double min_dQ_dx_5 = 1;
+    if (flag_single_shower && Eshower < 500*units::MeV && vertex->cluster() &&
+        shower->get_total_length(vertex->cluster()) > shower->get_total_length() * 0.95) {
+        min_dQ_dx_5 = 1e9;
+        for (size_t i = 0; i < vec_dQ_dx.size(); ++i) {
+            if (vec_dQ_dx[i] < min_dQ_dx_5) min_dQ_dx_5 = vec_dQ_dx[i];
+            if (i > 5) break;
+        }
+        if (run <= 2 && min_dQ_dx_5 > 1.3) mip_id = -1;
+    }
+
+    // dQ/dx quality cuts using lowest/highest in MIP region
+    double iso_angle = std::fabs(M_PI/2.0 - dir_shower.angle(drift_dir)) / M_PI * 180.0;
+    if (mip_id == 1 && n_below_threshold <= 5 &&
+        (lowest_dQ_dx < 0.7 ||
+         (lowest_dQ_dx > 1.1 && iso_angle < 15.0)))
+        mip_id = 0;
+    if (lowest_dQ_dx > 1.3 && iso_angle < 15.0 && Eshower < 1000*units::MeV) mip_id = -1;
+    if (lowest_dQ_dx < 0 && Eshower < 800*units::MeV && n_below_zero > 2) mip_id = -1;
+    if (lowest_dQ_dx < 0 && Eshower < 800*units::MeV && n_below_zero <= 2 &&
+        highest_dQ_dx > 1.3) mip_id = -1;
+    if (lowest_dQ_dx < 0 && n_lowest <= 1 && n_highest < n_lowest &&
+        highest_dQ_dx < 0.9) mip_id = -1;
+    if (lowest_dQ_dx < 0.6 && highest_dQ_dx < 0.8 && n_lowest <= 1 && n_highest <= 1 &&
+        run <= 2 && max_dQ_dx_sample > 1.8) mip_id = -1;
+    if (lowest_dQ_dx < 0.6 && highest_dQ_dx > 1.3 && n_highest > 1 && n_highest < 4 &&
+        Eshower < 1000*units::MeV && std::abs(n_lowest - n_highest) > 1) mip_id = -1;
+    if (lowest_dQ_dx < 0.9 && n_lowest <= 1 && highest_dQ_dx > 1.2 &&
+        n_below_threshold <= 4 && Eshower < 1000*units::MeV && iso_angle > 10 &&
+        n_first_non_mip_2 < 5 && max_dQ_dx_sample > 1.9) mip_id = -1;
+    if (n_lowest <= 2 && n_highest > n_lowest && lowest_dQ_dx > 1.1 && iso_angle < 5 &&
+        vtx_n_segs > 1) mip_id = -1;
+    if (n_lowest <= 3 && lowest_dQ_dx < 0.7 && highest_dQ_dx > 1.3 &&
+        n_highest < n_lowest && iso_angle < 5) mip_id = -1;
+    if (flag_single_shower && n_below_threshold <= 3 && highest_dQ_dx > 1.2 &&
+        Eshower < 800*units::MeV && iso_angle > 7.5) {
+        mip_id = -1;
+        if (n_below_threshold == 3 && std::max(vec_dQ_dx[0], vec_dQ_dx[1]) > 3.5)
+            mip_id = 0;
+    }
+    if (Eshower < 800*units::MeV && lowest_dQ_dx < 0.2 && n_lowest <= 3 &&
+        iso_angle > 15 && segment_track_length(sg) < 5*units::cm) mip_id = -1;
+
+    // Indirect shower energy (for single-shower override)
+    double E_indirect_max_energy = 0;
+    for (ShowerPtr shower1 : ctx.showers) {
+        if (shower1 == shower) continue;
+        SegmentPtr sg1 = shower1->start_segment();
+        if (!sg1 || !sg1->has_particle_info() || sg1->particle_info()->pdg() != 11) continue;
+        auto [vtx1, conn1] = shower1->get_start_vertex_and_type();
+        double E1 = (shower1->get_kine_best() != 0)
+                    ? shower1->get_kine_best() : shower1->get_kine_charge();
+        if (conn1 == 2 && E1 > E_indirect_max_energy) E_indirect_max_energy = E1;
+    }
+
+    // 7049_1070_53534
+    if (flag_single_shower &&
+        std::max(vec_dQ_dx[0], vec_dQ_dx[1]) > 1.6 &&
+        std::max(vec_dQ_dx[0], vec_dQ_dx[1]) < 3.5 &&
+        Eshower < 350*units::MeV && E_indirect_max_energy > 70*units::MeV)
+        mip_id = -1;
+    // 7012_1450_72525
+    if (flag_single_shower && E_indirect_max_energy > 0.33 * Eshower && mip_id == 1)
+        mip_id = 0;
+    // 7023_28_1419
+    if (mip_id == 0 && Eshower < 250*units::MeV &&
+        sg->flags_any(SegmentFlags::kShowerTrajectory) &&
+        segment_track_length(sg) < 5*units::cm)
+        mip_id = -1;
+
+    // min_dis: minimum distance between off-cluster shower-internal segment endpoints
+    // and main-cluster shower-internal vertices
+    double min_dis = 1e9;
+    double length1 = sg->cluster() ? shower->get_total_length(sg->cluster()) : 0;
+    double length2 = shower->get_total_length();
+    {
+        IndexedSegmentSet shower_segs;
+        IndexedVertexSet  shower_vtxs;
+        shower->fill_sets(shower_vtxs, shower_segs, /*flag_exclude_start_segment=*/false);
+
+        // Collect main-cluster shower vertices
+        std::vector<VertexPtr> main_cluster_vtxs;
+        for (VertexPtr v : shower_vtxs)
+            if (v->cluster() == sg->cluster()) main_cluster_vtxs.push_back(v);
+
+        for (SegmentPtr sg1 : shower_segs) {
+            if (sg1->cluster() == sg->cluster()) continue;
+            if (segment_track_length(sg1) < 3*units::cm) continue;
+            auto [pv1, pv2] = find_vertices(ctx.graph, sg1);
+            for (VertexPtr vtx1 : {pv1, pv2}) {
+                if (!vtx1) continue;
+                Point p1 = vtx_fit_pt(vtx1);
+                for (VertexPtr vtx2 : main_cluster_vtxs) {
+                    double d = ray_length(Ray{p1, vtx_fit_pt(vtx2)});
+                    if (d < min_dis) min_dis = d;
+                }
+            }
+        }
+    }
+    // 7012_1646_82342
+    if (mip_id == 1 && length1 < 0.1*length2 && length1 < 10*units::cm &&
+        min_dis > 8*units::cm)
+        mip_id = 0;
+
+    // Other-vertex connectivity
+    int n_other_vertex = 0;
+    {
+        VertexPtr other_vtx = find_other_vertex(ctx.graph, sg, vertex);
+        if (other_vtx && other_vtx->descriptor_valid()) {
+            size_t other_deg = boost::out_degree(other_vtx->get_descriptor(), ctx.graph);
+            size_t n_fits = sg->fits().size();
+            // 7017_969_48489
+            if (other_deg > 2 && n_fits <= (size_t)(n_first_mip + 1) && n_first_mip > 2)
+                mip_id = -1;
+            n_other_vertex = (int)other_deg;
+        }
+    }
+
+    // Median dQ/dx quality check
+    double medium_dQ_dx = 1.0;
+    {
+        std::vector<double> tmp = vec_dQ_dx;
+        // Remove the padding (values == 3.0 added later) — median computed on original
+        size_t n = vec_dQ_dx.size();  // at this point not yet padded
+        std::nth_element(tmp.begin(), tmp.begin() + n/2, tmp.end());
+        medium_dQ_dx = tmp[n/2];
+    }
+    if (medium_dQ_dx < 0.75 && Eshower < 150*units::MeV) mip_id = -1;
+
+    // Pad vec_dQ_dx to >= 20 elements (mirroring prototype's pad-before-fill)
+    while (vec_dQ_dx.size() < 20) vec_dQ_dx.push_back(3.0);
+
+    // ------------------------------------------------------------------
+    // Fill ti.mip_*
+    // ------------------------------------------------------------------
+    if (min_dis > 1000*units::cm) min_dis = 1000*units::cm;
+
+    ti.mip_flag                = (mip_id != -1);
+    ti.mip_n_first_non_mip_2   = n_first_non_mip_2;
+    ti.mip_n_first_mip         = n_first_mip;
+    ti.mip_n_end_reduction     = n_end_reduction;
+    ti.mip_n_first_non_mip_1   = n_first_non_mip_1;
+    ti.mip_n_first_non_mip     = n_first_non_mip;
+    ti.mip_energy              = Eshower / units::MeV;
+    ti.mip_max_dQ_dx_sample    = max_dQ_dx_sample;
+    ti.mip_vec_dQ_dx_0         = vec_dQ_dx[0];
+    ti.mip_vec_dQ_dx_1         = vec_dQ_dx[1];
+    ti.mip_n_below_threshold   = n_below_threshold;
+    ti.mip_n_good_tracks       = n_good_tracks;
+    ti.mip_n_vertex            = vtx_n_segs;
+    ti.mip_angle_beam          = dir.angle(dir_beam) / M_PI * 180.0;
+    ti.mip_flag_all_above      = flag_all_above;
+    ti.mip_length_main         = length1 / units::cm;
+    ti.mip_length_total        = length2 / units::cm;
+    ti.mip_min_dQ_dx_5         = min_dQ_dx_5;
+    ti.mip_lowest_dQ_dx        = lowest_dQ_dx;
+    ti.mip_iso_angle           = iso_angle;
+    ti.mip_n_below_zero        = n_below_zero;
+    ti.mip_highest_dQ_dx       = highest_dQ_dx;
+    ti.mip_n_lowest            = n_lowest;
+    ti.mip_n_highest           = n_highest;
+    ti.mip_stem_length         = segment_track_length(sg) / units::cm;
+    ti.mip_E_indirect_max_energy = E_indirect_max_energy / units::MeV;
+    ti.mip_flag_stem_trajectory  = sg->flags_any(SegmentFlags::kShowerTrajectory);
+    ti.mip_min_dis             = min_dis / units::cm;
+    ti.mip_n_other_vertex      = n_other_vertex;
+    ti.mip_n_stem_size         = sg->fits().size();
+    ti.mip_medium_dQ_dx        = medium_dQ_dx;
+    ti.mip_filled              = 1;
+
+    ti.mip_vec_dQ_dx_2  = vec_dQ_dx[2];   ti.mip_vec_dQ_dx_3  = vec_dQ_dx[3];
+    ti.mip_vec_dQ_dx_4  = vec_dQ_dx[4];   ti.mip_vec_dQ_dx_5  = vec_dQ_dx[5];
+    ti.mip_vec_dQ_dx_6  = vec_dQ_dx[6];   ti.mip_vec_dQ_dx_7  = vec_dQ_dx[7];
+    ti.mip_vec_dQ_dx_8  = vec_dQ_dx[8];   ti.mip_vec_dQ_dx_9  = vec_dQ_dx[9];
+    ti.mip_vec_dQ_dx_10 = vec_dQ_dx[10];  ti.mip_vec_dQ_dx_11 = vec_dQ_dx[11];
+    ti.mip_vec_dQ_dx_12 = vec_dQ_dx[12];  ti.mip_vec_dQ_dx_13 = vec_dQ_dx[13];
+    ti.mip_vec_dQ_dx_14 = vec_dQ_dx[14];  ti.mip_vec_dQ_dx_15 = vec_dQ_dx[15];
+    ti.mip_vec_dQ_dx_16 = vec_dQ_dx[16];  ti.mip_vec_dQ_dx_17 = vec_dQ_dx[17];
+    ti.mip_vec_dQ_dx_18 = vec_dQ_dx[18];  ti.mip_vec_dQ_dx_19 = vec_dQ_dx[19];
+
+    return mip_id;
+}
+
+// ===========================================================================
+// PatternAlgorithms::nue_tagger  (public entry point)
+//
+// Selects the highest-energy electron shower at the main vertex, then runs
+// all NuE BDT feature helpers in sequence.  Returns true if the event
+// passes all cuts and looks like a nue CC interaction.
+//
+// Prototype: NeutrinoID_nue_tagger.h, WCPPID::NeutrinoID::nue_tagger()
+//
+// NuEContext is constructed internally; callers pass individual parameters
+// to keep the public API clean (mirrors the numu_tagger pattern).
+// ===========================================================================
+bool PatternAlgorithms::nue_tagger(
+    Graph& graph,
+    Facade::Cluster* main_cluster,
+    VertexPtr main_vertex,
+    int apa, int face,
+    IndexedShowerSet& showers,
+    VertexShowerSetMap& map_vertex_to_shower,
+    IndexedShowerSet& pi0_showers,
+    ShowerIntMap& map_shower_pio_id,
+    std::map<int, std::vector<ShowerPtr>>& map_pio_id_showers,
+    std::map<int, std::pair<double,int>>& map_pio_id_mass,
+    IDetectorVolumes::pointer dv,
+    ParticleDataSet::pointer particle_data,
+    double muon_length,
+    TaggerInfo& ti)
+{
+    bool flag_nue = false;
+
+    NuEContext ctx{*this, graph, main_cluster, main_vertex, apa, face,
+                   showers, map_vertex_to_shower, pi0_showers,
+                   map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
+                   dv, particle_data};
+
+    // ------------------------------------------------------------------
+    // Find the best electron shower at main_vertex
+    // ------------------------------------------------------------------
+    ShowerPtr max_shower = nullptr;
+    double    max_energy = 0;
+    std::set<ShowerPtr> good_showers;
+
+    if (!main_vertex || !main_vertex->descriptor_valid()) return false;
+    size_t main_vtx_segs = boost::out_degree(main_vertex->get_descriptor(), graph);
+    bool flag_single_shower = (main_vtx_segs == 1);
+
+    auto mv_it = map_vertex_to_shower.find(main_vertex);
+    if (mv_it != map_vertex_to_shower.end()) {
+        for (ShowerPtr shower : mv_it->second) {
+            SegmentPtr sg = shower->start_segment();
+            if (!sg || !sg->has_particle_info() || sg->particle_info()->pdg() != 11) continue;
+
+            double tmp_energy = (shower->get_kine_best() != 0)
+                                ? shower->get_kine_best() : shower->get_kine_charge();
+
+            // n_3seg: number of shower-internal main-cluster vertices with ≥3 shower segs
+            IndexedSegmentSet sh_segs; IndexedVertexSet sh_vtxs;
+            shower->fill_sets(sh_vtxs, sh_segs, false);
+            int n_segs = shower->get_num_main_segments();
+            int n_3seg = 0;
+            for (VertexPtr vtx1 : sh_vtxs) {
+                if (vtx1->cluster() != sg->cluster()) continue;
+                if (!vtx1->descriptor_valid()) continue;
+                int cnt = 0;
+                for (auto [eit,eend] = boost::out_edges(vtx1->get_descriptor(), graph);
+                     eit != eend; ++eit)
+                    if (sh_segs.count(graph[*eit].segment)) ++cnt;
+                if (cnt >= 3) ++n_3seg;
+            }
+
+            // Check sg is directly connected to main_vertex in the global graph
+            bool sg_at_main = false;
+            for (auto [eit,eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
+                 eit != eend; ++eit)
+                if (graph[*eit].segment == sg) { sg_at_main = true; break; }
+
+            if (sg_at_main && (tmp_energy > 80*units::MeV ||
+                               (tmp_energy > 60*units::MeV && n_segs >= 3 && n_3seg > 0))) {
+                double E = (shower->get_kine_best() != 0)
+                           ? shower->get_kine_best() : shower->get_kine_charge();
+                if (E > max_energy) { max_shower = shower; max_energy = E; }
+                good_showers.insert(shower);
+            }
+        }
+    }
+
+    if (!good_showers.count(max_shower) || !max_shower) return false;
+
+    // ------------------------------------------------------------------
+    // Main evaluation block
+    // ------------------------------------------------------------------
+    flag_nue = true;
+
+    SegmentPtr sg = max_shower->start_segment();
+    Point test_p  = seg_endpoint_near(sg, vtx_fit_pt(main_vertex));
+    Vector dir_beam(0, 0, 1);
+    Vector dir    = shower_cal_dir_3vector(*max_shower, test_p, 15*units::cm);
+    double angle_beam = dir.angle(dir_beam) / M_PI * 180.0;
+
+    // Count valid tracks at main_vertex
+    int num_valid_tracks = 0;
+    for (auto [eit,eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
+         eit != eend; ++eit) {
+        SegmentPtr sg1 = graph[*eit].segment;
+        if (!sg1 || sg1 == sg) continue;
+        double len1 = segment_track_length(sg1);
+        if (!seg_is_shower(sg1) && (len1 > 8*units::cm ||
+            (!sg1->dir_weak() && len1 > 5*units::cm)))
+            ++num_valid_tracks;
+    }
+
+    // gap_identification
+    {
+        auto [flag_gap, n_bad] = gap_identification(ctx, main_vertex, sg,
+                                                     flag_single_shower,
+                                                     num_valid_tracks, max_energy, ti);
+        if (flag_gap) flag_nue = false;
+    }
+
+    // mip_quality
+    if (mip_quality(ctx, main_vertex, sg, max_shower, ti)) flag_nue = false;
+
+    // mip_identification
+    bool flag_strong_check = (flag_single_shower && max_energy < 400*units::MeV);
+    int mip_id = mip_identification(ctx, main_vertex, sg, max_shower,
+                                    flag_single_shower, flag_strong_check, ti);
+    if (mip_id == -1) flag_nue = false;
+
+    // pi0_identification (with fill)
+    bool flag_pi0 = pi0_identification(ctx, main_vertex, sg, max_shower, 0.0, ti);
+    ti.pio_flag    = !flag_pi0;
+    ti.pio_mip_id  = mip_id;
+    ti.pio_filled  = 1;
+    if (flag_pi0 && mip_id == 0) flag_nue = false;
+
+    // single_shower_pio_tagger
+    if (single_shower_pio_tagger(ctx, max_shower, flag_single_shower, ti))
+        flag_nue = false;
+
+    // multiple_showers
+    if (multiple_showers(ctx, max_shower, max_energy, ti)) flag_nue = false;
+
+    // other_showers
+    if (other_showers(ctx, max_shower, flag_single_shower, ti)) flag_nue = false;
+
+    // shower_to_wall
+    if (shower_to_wall(ctx, max_shower, max_energy, flag_single_shower, ti))
+        flag_nue = false;
+
+    // single_shower
+    if (single_shower(ctx, max_shower, flag_single_shower, ti)) flag_nue = false;
+
+    // stem_length
+    if (stem_length(ctx, max_shower, max_energy, ti)) flag_nue = false;
+
+    // low_energy_michel
+    if (low_energy_michel(ctx, max_shower, ti)) flag_nue = false;
+
+    // broken_muon_id
+    if (broken_muon_id(ctx, max_shower, ti)) flag_nue = false;
+
+    // compare_muon_energy
+    if (compare_muon_energy(ctx, max_shower, max_energy, muon_length, ti)) flag_nue = false;
+
+    // angular_cut
+    if (angular_cut(ctx, max_shower, max_energy, angle_beam, ti)) flag_nue = false;
+
+    // stem_direction — also fill stem_dir_flag_single_shower (only done here)
+    bool flag_stem_dir = stem_direction(ctx, max_shower, max_energy, ti);
+    ti.stem_dir_flag_single_shower = flag_single_shower;
+    if (flag_single_shower && flag_stem_dir) flag_nue = false;
+
+    // vertex_inside_shower
+    if (vertex_inside_shower(ctx, max_shower, ti)) flag_nue = false;
+
+    // bad_reconstruction (br1), bad_reconstruction_1 (br2), low_energy_overlapping
+    ti.br_filled = 1;
+    bool flag_br1 = ctx.self.bad_reconstruction(ctx.graph, main_vertex, max_shower, true, &ti);
+    bool flag_br2 = bad_reconstruction_1(ctx, max_shower, flag_single_shower,
+                                          num_valid_tracks, ti);
+    bool flag_lol = low_energy_overlapping(ctx, max_shower, ti);
+    if (flag_br1 || flag_br2 || flag_lol) flag_nue = false;
+
+    // bad_reconstruction_2 (br3), bad_reconstruction_3 (br4), high_energy_overlapping
+    bool flag_br3 = bad_reconstruction_2(ctx, main_vertex, max_shower, ti);
+    bool flag_br4 = bad_reconstruction_3(ctx, main_vertex, max_shower, ti);
+    bool flag_hol = high_energy_overlapping(ctx, max_shower, ti);
+    if (flag_br3 || flag_br4 || flag_hol) flag_nue = false;
+
+    // track_overclustering
+    if (track_overclustering(ctx, max_shower, ti)) flag_nue = false;
+
+    return flag_nue;
 }

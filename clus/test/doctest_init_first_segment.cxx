@@ -152,7 +152,7 @@ TEST_CASE("init_first_segment end-to-end")
     // Usage:
     //   - Without env vars: uses default data files in clus/test/data/
     //   - With env vars (for development):
-    //     WCT_TEST_DUMP=/path/to/dump.json WCT_TEST_CONFIG=/path/to/config.json \
+    //     WCT_TEST_DUMP=/path/to/dump.json WCT_TEST_CONFIG=/path/to/config.json
     //       wcdoctest-clus -tc="init_first_segment end-to-end"
 
     // Default paths to test data (relative to build directory)
@@ -254,6 +254,7 @@ TEST_CASE("init_first_segment end-to-end")
             }
         }
     } else {
-        WARN("init_first_segment returned nullptr (path too short or fitting failed)");
+        const bool segment_returned = false; // nullptr means path too short or fitting failed
+        WARN(segment_returned);
     }
 }
