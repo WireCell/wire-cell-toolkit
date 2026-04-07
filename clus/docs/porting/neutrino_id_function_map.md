@@ -379,17 +379,71 @@ Helper: `low_energy_michel_sp`
 
 Entry point: `bool WCPPID::NeutrinoID::ssm_tagger()`
 
-### `NeutrinoID_numu_bdts.h` (no toolkit file yet)
+### `NeutrinoID_numu_bdts.h` → `root/src/UbooneNumuBDTScorer.cxx` ✓ PORTED
 
-BDT score calculation for numu selection:
-- `cal_numu_bdts_xgboost()`, `cal_numu_bdts()`
-- Individual BDT sub-scores: `cal_cosmict_2_4_bdt`, `cal_cosmict_3_5_bdt`, `cal_cosmict_6_bdt`, `cal_cosmict_7_bdt`, `cal_cosmict_8_bdt`, `cal_cosmict_10_bdt`, `cal_numu_1_bdt`, `cal_numu_2_bdt`, `cal_numu_3_bdt`
+BDT score calculation for numu selection implemented as `WireCell::Root::UbooneNumuBDTScorer`
+(`IConfigurable` + `IEnsembleVisitor` in the `root` package to isolate TMVA dependency).
 
-### `NeutrinoID_nue_bdts.h` (no toolkit file yet)
+| Prototype | Toolkit | Notes |
+|---|---|---|
+| `cal_numu_bdts_xgboost()` | `UbooneNumuBDTScorer::cal_numu_bdts_xgboost(ti, ki)` | Writes `ti.numu_score` |
+| `cal_cosmict_10_bdt()` | `UbooneNumuBDTScorer::cal_cosmict_10_bdt(ti, default_val)` | Per-cluster vector, min score |
+| `cal_numu_1_bdt()` | `UbooneNumuBDTScorer::cal_numu_1_bdt(ti, default_val)` | Per-segment vector, max score |
+| `cal_numu_2_bdt()` | `UbooneNumuBDTScorer::cal_numu_2_bdt(ti, default_val)` | Per-shower vector, max score |
+| `cal_numu_3_bdt()` | `UbooneNumuBDTScorer::cal_numu_3_bdt(ti, default_val)` | Per-segment vector, max score |
 
-BDT score calculation for nue selection:
-- `cal_bdts_xgboost()`, `cal_bdts()`
-- Many individual BDT sub-scores: `cal_mipid_bdt`, `cal_gap_bdt`, `cal_hol_lol_bdt`, `cal_cme_anc_bdt`, `cal_mgo_mgt_bdt`, `cal_br1_bdt`, `cal_br3_bdt`, `cal_br3_3_bdt`, `cal_br3_5_bdt`, `cal_br3_6_bdt`, `cal_stemdir_br2_bdt`, `cal_trimuon_bdt`, `cal_br4_tro_bdt`, `cal_mipquality_bdt`, `cal_pio_1_bdt`, `cal_pio_2_bdt`, `cal_stw_spt_bdt`, `cal_vis_1_bdt`, and more.
+**NOT ported:** `cal_numu_bdts()` (old TMVA combination variant), `cal_cosmict_{2_4,3_5,6,7,8}_bdt()` (only used by old variant).
+
+### `NeutrinoID_nue_bdts.h` → `root/src/UbooneNueBDTScorer.cxx` ✓ PORTED
+
+BDT score calculation for nueCC selection implemented as `WireCell::Root::UbooneNueBDTScorer`
+(`IConfigurable` + `IEnsembleVisitor` in the `root` package to isolate TMVA dependency).
+
+**Design:** same pattern as `UbooneNumuBDTScorer`. Each sub-BDT is a private method taking
+`(TaggerInfo& ti, float default_val) const`. All 30 sub-BDTs run inside `cal_bdts_xgboost(ti, ki)`.
+
+| Prototype | Toolkit | Fill gate | Notes |
+|---|---|---|---|
+| `cal_bdts_xgboost()` | `cal_bdts_xgboost(ti, ki)` | — | Writes `ti.nue_score = log10((1+v)/(1-v))` |
+| `cal_mipid_bdt` | same | `mip_filled==1` | Scalar; 30 mip features |
+| `cal_gap_bdt` | same | `gap_filled==1` | Scalar; 9 gap features |
+| `cal_hol_lol_bdt` | same | `br_filled==1` | Scalar; hol+lol_3 features |
+| `cal_cme_anc_bdt` | same | `br_filled==1` | Scalar; cme+anc features |
+| `cal_mgo_mgt_bdt` | same | `br_filled==1` | Scalar; mgo+mgt features |
+| `cal_br1_bdt` | same | `br_filled==1` | Scalar; br1_1,2,3 sub-checks |
+| `cal_br3_bdt` | same | `br_filled==1` | Scalar; br3_1,2,4,7,8 sub-checks |
+| `cal_stemdir_br2_bdt` | same | `br_filled==1` | Scalar; stem_dir+br2 features |
+| `cal_trimuon_bdt` | same | `br_filled==1` | Scalar; stem_len+brm+lem features |
+| `cal_br4_tro_bdt` | same | `br_filled==1` | Scalar; br4+tro_3 features |
+| `cal_mipquality_bdt` | same | `mip_quality_filled==1` | Scalar; 10 mip_quality features |
+| `cal_pio_1_bdt` | same | `pio_filled==1 && pio_flag_pio==1` | Scalar; pio_1 features |
+| `cal_stw_spt_bdt` | same | `br_filled==1` | Scalar; stw_1+spt features |
+| `cal_vis_1_bdt` | same | `vis_1_filled==1` | Scalar; vis_1 features |
+| `cal_vis_2_bdt` | same | `vis_2_filled==1` | Scalar; vis_2 features |
+| `cal_br3_3_bdt` | same | none (check empty) | Vector; 4 vars, min score |
+| `cal_br3_5_bdt` | same | none | Vector; 10 vars (n_main_segs commented out), min score |
+| `cal_br3_6_bdt` | same | none | Vector; 7 vars, min score |
+| `cal_pio_2_bdt` | same | `pio_filled==1 && pio_flag_pio==0` | Vector; 3 vec vars + scalar pio_mip_id, min score |
+| `cal_stw_2_bdt` | same | none | Vector; 5 vars, min score |
+| `cal_stw_3_bdt` | same | none | Vector; 4 vars, min score |
+| `cal_stw_4_bdt` | same | none | Vector; 3 vars, min score |
+| `cal_sig_1_bdt` | same | none | Vector; 4 vars, min score |
+| `cal_sig_2_bdt` | same | none | Vector; 5 vars, min score |
+| `cal_lol_1_bdt` | same | none | Vector; 4 vars, min score |
+| `cal_lol_2_bdt` | same | none | Vector; 7 vars, min score |
+| `cal_tro_1_bdt` | same | none | Vector; 10 vars, min score |
+| `cal_tro_2_bdt` | same | none | Vector; 5 vars, min score |
+| `cal_tro_4_bdt` | same | none | Vector; 11 vars, min score |
+| `cal_tro_5_bdt` | same | none | Vector; 8 vars, min score |
+
+**Translation conventions:**
+- `tagger_info.xxx` → `ti.xxx`; `kine_info.kine_reco_Enu` → local `float` copy of `ki.kine_reco_Enu` (TMVA needs non-const `float*`)
+- `"input_data_files/weights/foo.xml"` → `m_*_xml` configured via `wc.resolve`
+- `TMath::Log10((1+v)/(1-v))` → `std::log10((1.0+v)/(1.0-v))`
+- Variable protection (clamps/NaN guards) applied in `cal_bdts_xgboost` before final evaluation
+- `cal_bdts_xgboost` gates final evaluation on `ti.br_filled==1`; leaves `ti.nue_score` at default (0) otherwise
+
+**NOT ported:** `cal_bdts()` (old TMVA combination variant, analogous to `cal_numu_bdts()`)
 
 ### `NeutrinoID_kine.h` → `NeutrinoKinematics.cxx`
 
@@ -459,12 +513,13 @@ shower_clustering_with_nv()             → pattern_algos.shower_clustering_with
 init_tagger_info(tagger_info)           → NeutrinoKinematics.cxx  [PORTED]
 fill_kine_tree(kine_info)               → NeutrinoKinematics.cxx  [PORTED]
 cosmic_tagger()                         → NeutrinoTaggerCosmic.cxx [PORTED]
-numu_tagger()                           → NeutrinoTaggerNuMu.cxx  [EMPTY]
+numu_tagger()                           → NeutrinoTaggerNuMu.cxx  [PORTED]
 ssm_tagger()                            → NeutrinoTaggerSSM.cxx   [EMPTY]
-nue_tagger(muon_length)                 → NeutrinoTaggerNuE.cxx   [EMPTY]
+nue_tagger(muon_length)                 → NeutrinoTaggerNuE.cxx   [PORTED]
 singlephoton_tagger(muon_length)        → NeutrinoTaggerSinglePhoton.cxx [EMPTY]
-cal_numu_bdts_xgboost()                 → (no toolkit file yet)
-cal_bdts_xgboost() / cal_bdts()         → (no toolkit file yet)
+cal_numu_bdts_xgboost()                 → root/UbooneNumuBDTScorer.cxx  [PORTED]
+cal_bdts_xgboost()                      → root/UbooneNueBDTScorer.cxx   [PORTED]
+cal_bdts()                              → (NOT ported — old TMVA variant)
 ```
 
 ---
