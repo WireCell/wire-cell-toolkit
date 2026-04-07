@@ -266,6 +266,20 @@ namespace WireCell::Clus::PR {
                         double muon_length,
                         TaggerInfo& ti);
 
+        // ssm_tagger: fills TaggerInfo ssm_* and ssmsp_* features and returns flag_ssm.
+        // Prototype: WCPPID::NeutrinoID::ssm_tagger() in NeutrinoID_ssm_tagger.h.
+        bool ssm_tagger(Graph& graph,
+                        VertexPtr main_vertex,
+                        IndexedShowerSet& showers,
+                        ShowerVertexMap& map_vertex_in_shower,
+                        ShowerSegmentMap& map_segment_in_shower,
+                        const Pi0KineFeatures& pio_kine,
+                        int flag_ssmsp,
+                        int& acc_segment_id,
+                        const ParticleDataSet::pointer& particle_data,
+                        const IRecombinationModel::pointer& recomb_model,
+                        TaggerInfo& ti);
+
         KineInfo fill_kine_tree(VertexPtr main_vertex, IndexedShowerSet& showers,
                                 const Pi0KineFeatures& pio_kine,
                                 Graph& graph, TrackFitting& track_fitter,

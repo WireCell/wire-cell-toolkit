@@ -375,9 +375,35 @@ Entry point: `bool WCPPID::NeutrinoID::singlephoton_tagger(double muon_length)`
 
 Helper: `low_energy_michel_sp`
 
-### `NeutrinoID_ssm_tagger.h` → `NeutrinoTaggerSSM.cxx` (EMPTY)
+### `NeutrinoID_ssm_tagger.h` → `clus/src/NeutrinoTaggerSSM.cxx` ✓ PORTED
 
-Entry point: `bool WCPPID::NeutrinoID::ssm_tagger()`
+Entry point: `bool PatternAlgorithms::ssm_tagger(graph, main_vertex, showers, map_vertex_in_shower, map_segment_in_shower, pio_kine, flag_ssmsp, acc_segment_id, particle_data, recomb_model, ti)`
+
+**No BDT code** in the prototype — pure physics tagger. 11 functions ported (print_ssm_tagger omitted as logging-only).
+
+| Prototype | Toolkit | Notes |
+|---|---|---|
+| `ssm_tagger()` | `PatternAlgorithms::ssm_tagger(...)` | Main SSM/KDAR tagger |
+| `get_scores(sg)` | local `get_scores(sg, particle_data)` | `do_track_comp` wrapper |
+| `get_scores(sg, bp, dir)` | local `get_scores_bp(sg, bp, dir, particle_data)` | With break-point |
+| `fill_ssmsp(sg, pdg, mother, dir)` | local `fill_ssmsp(...)` | Space point tree filling |
+| `fill_ssmsp_psuedo(shower, mother, acc_id)` | local `fill_ssmsp_pseudo_1(...)` | Vertex→shower start |
+| `fill_ssmsp_psuedo(shower, sg, mother, acc_id)` | local `fill_ssmsp_pseudo_2(...)` | Shower→parent seg |
+| `fill_ssmsp_psuedo(shower, mother_sg, acc_id)` | local `fill_ssmsp_pseudo_3(...)` | Mother seg→daughter |
+| `calc_kine_range_multi_pdg(l)` | inlined: 3× `cal_kine_range()` | |
+| `calc_kine_range_pdg(l, pdg)` | `cal_kine_range(l, pdg, particle_data)` | |
+| `get_containing_shower_id(sg)` | local `get_containing_shower_info(sg, map)` | Returns {id, ke, flag} |
+| `exit_ssm_tagger()` | merged as early-return lambda in `ssm_tagger()` | |
+| `print_ssm_tagger()` | **OMITTED** | Pure logging |
+
+New local helper added: `find_incoming_segment(graph, vtx, used_segments)` — finds parent segment at vertex from BFS context.
+
+**Key translation notes:**
+- `sg->get_flag_dir()` → `sg->dirsign()`; `sg->get_dQ_vec()[i]` → `sg->fits()[i].dQ`
+- `TVector3 dir` → `WireCell::Vector dir`; `.Unit()` → `.normalized()`; `.Dot()` → `.dot()`
+- `TPCParams::get_muon_r2ke()->Eval(L)` → `cal_kine_range(L, 13, particle_data)`
+- `kine_pio_mass` (class member) → `pio_kine.mass` (Pi0KineFeatures)
+- SSMSP IDs: real segments use `(int)sg->get_graph_index()`; pseudo-particles use `-(acc_id+1)`
 
 ### `NeutrinoID_numu_bdts.h` → `root/src/UbooneNumuBDTScorer.cxx` ✓ PORTED
 
@@ -514,7 +540,7 @@ init_tagger_info(tagger_info)           → NeutrinoKinematics.cxx  [PORTED]
 fill_kine_tree(kine_info)               → NeutrinoKinematics.cxx  [PORTED]
 cosmic_tagger()                         → NeutrinoTaggerCosmic.cxx [PORTED]
 numu_tagger()                           → NeutrinoTaggerNuMu.cxx  [PORTED]
-ssm_tagger()                            → NeutrinoTaggerSSM.cxx   [EMPTY]
+ssm_tagger()                            → NeutrinoTaggerSSM.cxx   [PORTED]
 nue_tagger(muon_length)                 → NeutrinoTaggerNuE.cxx   [PORTED]
 singlephoton_tagger(muon_length)        → NeutrinoTaggerSinglePhoton.cxx [EMPTY]
 cal_numu_bdts_xgboost()                 → root/UbooneNumuBDTScorer.cxx  [PORTED]
