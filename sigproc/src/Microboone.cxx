@@ -1124,6 +1124,8 @@ WireCell::Waveform::ChannelMaskMap Microboone::ADCBitShift::apply(int ch, signal
 
     for (int i = 0; i != nbin; i++) {
         int x = signal.at(i);
+        if(x < 0)
+            x = 0;
         s.clear();
         do {
             s.push_back((x & 1));
