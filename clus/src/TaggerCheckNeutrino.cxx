@@ -336,11 +336,32 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                     m_dv,
                                     tagger_info);
 
-        pattern_algos.numu_tagger(*pr_graph, final_main_vertex,
-                                  showers,
-                                  segments_in_long_muon,
-                                  main_cluster,
-                                  tagger_info);
+        auto [flag_long_muon, muon_length] =
+            pattern_algos.numu_tagger(*pr_graph, final_main_vertex,
+                                      showers,
+                                      segments_in_long_muon,
+                                      main_cluster,
+                                      tagger_info);
+        (void)flag_long_muon;  // result stored in tagger_info.numu_cc_flag
+
+        pattern_algos.ssm_tagger(*pr_graph, final_main_vertex,
+                                 showers,
+                                 map_vertex_in_shower,
+                                 map_segment_in_shower,
+                                 pio_kine,
+                                 /*flag_ssmsp=*/-1,
+                                 acc_segment_id,
+                                 particle_data(),
+                                 m_recomb_model,
+                                 tagger_info);
+
+        pattern_algos.nue_tagger(*pr_graph, main_cluster, final_main_vertex,
+                                 /*apa=*/0, /*face=*/0,
+                                 showers, map_vertex_to_shower,
+                                 pi0_showers, map_shower_pio_id,
+                                 map_pio_id_showers, map_pio_id_mass,
+                                 m_dv, particle_data(),
+                                 muon_length, tagger_info);
 
         pattern_algos.singlephoton_tagger(*pr_graph, main_cluster,
                                           final_main_vertex,
