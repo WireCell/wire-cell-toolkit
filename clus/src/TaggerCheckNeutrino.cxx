@@ -341,6 +341,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                   segments_in_long_muon,
                                   main_cluster,
                                   tagger_info);
+
+        pattern_algos.singlephoton_tagger(*pr_graph, main_cluster,
+                                          final_main_vertex,
+                                          showers,
+                                          map_vertex_to_shower,
+                                          map_shower_pio_id,
+                                          map_pio_id_showers,
+                                          map_pio_id_mass,
+                                          m_dv,
+                                          tagger_info);
     }
 
     // Compute match_isFC: 1 if the main cluster is fully contained inside the

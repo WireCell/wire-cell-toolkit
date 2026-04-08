@@ -266,6 +266,21 @@ namespace WireCell::Clus::PR {
                         double muon_length,
                         TaggerInfo& ti);
 
+        // singlephoton_tagger: fills TaggerInfo shw_sp_* BDT features and returns flag_sp.
+        // Prototype: WCPPID::NeutrinoID::singlephoton_tagger() in NeutrinoID_singlephoton_tagger.h.
+        // apa/face are derived internally from dv->contained_by(main_vertex_pt) so callers
+        // do not need to know detector geometry details.
+        bool singlephoton_tagger(Graph& graph,
+                                 Facade::Cluster* main_cluster,
+                                 VertexPtr main_vertex,
+                                 IndexedShowerSet& showers,
+                                 VertexShowerSetMap& map_vertex_to_shower,
+                                 ShowerIntMap& map_shower_pio_id,
+                                 std::map<int, std::vector<ShowerPtr>>& map_pio_id_showers,
+                                 std::map<int, std::pair<double,int>>& map_pio_id_mass,
+                                 IDetectorVolumes::pointer dv,
+                                 TaggerInfo& ti);
+
         // ssm_tagger: fills TaggerInfo ssm_* and ssmsp_* features and returns flag_ssm.
         // Prototype: WCPPID::NeutrinoID::ssm_tagger() in NeutrinoID_ssm_tagger.h.
         bool ssm_tagger(Graph& graph,

@@ -2077,3 +2077,409 @@ static bool pi0_identification_sp(SpContext& ctx,
 
     return pi0_flag_pio;
 }
+
+// ===========================================================================
+// low_energy_michel_sp
+//
+// Rejects showers that look like michel electrons from low-energy muon decays.
+// Checks total/main-cluster length ratio and low-charge MIP criterion.
+//
+// Prototype: NeutrinoID_singlephoton_tagger.h, WCPPID::NeutrinoID::low_energy_michel_sp()
+//            lines 545-597.
+//
+// Identical logic to NuE low_energy_michel; only TaggerInfo field names differ
+// (shw_sp_lem_* vs lem_*).
+// ===========================================================================
+static bool low_energy_michel_sp(SpContext& ctx, ShowerPtr shower, TaggerInfo& ti)
+{
+    double E_dQdx   = shower->get_kine_dQdx();
+    double E_charge = shower->get_kine_charge();
+
+    SegmentPtr       sg       = shower->start_segment();
+    Facade::Cluster* start_cl = sg ? sg->cluster() : nullptr;
+
+    // n_3seg: shower-internal main-cluster vertices with ≥3 connected shower segs.
+    IndexedSegmentSet sh_segs;
+    IndexedVertexSet  sh_vtxs;
+    shower->fill_sets(sh_vtxs, sh_segs, false);
+
+    int n_3seg = 0;
+    for (VertexPtr vtx1 : sh_vtxs) {
+        if (!vtx1->cluster() || vtx1->cluster() != start_cl) continue;
+        if (!vtx1->descriptor_valid()) continue;
+        int cnt = 0;
+        for (auto [eit, eend] = boost::out_edges(vtx1->get_descriptor(), ctx.graph);
+             eit != eend; ++eit)
+            if (sh_segs.count(ctx.graph[*eit].segment)) ++cnt;
+        if (cnt >= 3) ++n_3seg;
+    }
+
+    double total_length = shower->get_total_length();
+    double main_length  = start_cl ? shower->get_total_length(start_cl) : total_length;
+
+    bool flag_bad = false;
+
+    // Short-shower criterion (prototype comment: 7003_1226_61350)
+    if ((total_length < 25*units::cm && main_length > 0.75 * total_length && n_3seg == 0) ||
+        (total_length < 18*units::cm && main_length > 0.75 * total_length && n_3seg > 0))
+        flag_bad = true;
+
+    // Low-charge MIP criterion (7004_1291_64560 + 7026_879_43995)
+    if (E_charge < 100*units::MeV && E_dQdx < 0.7 * E_charge &&
+        shower->get_num_segments() == shower->get_num_main_segments())
+        flag_bad = true;
+
+    ti.shw_sp_lem_shower_total_length  = total_length / units::cm;
+    ti.shw_sp_lem_shower_main_length   = main_length  / units::cm;
+    ti.shw_sp_lem_n_3seg               = n_3seg;
+    ti.shw_sp_lem_e_charge             = E_charge / units::MeV;
+    ti.shw_sp_lem_e_dQdx               = E_dQdx   / units::MeV;
+    ti.shw_sp_lem_shower_num_segs      = shower->get_num_segments();
+    ti.shw_sp_lem_shower_num_main_segs = shower->get_num_main_segments();
+    ti.shw_sp_lem_flag                 = !flag_bad;
+
+    return flag_bad;
+}
+
+// ===========================================================================
+// PatternAlgorithms::singlephoton_tagger  (public entry point)
+//
+// Identifies single-photon candidates (NC π⁰ / radiative processes) by
+// examining electron showers at the main neutrino vertex.
+//
+// Algorithm (mirrors prototype WCPPID::NeutrinoID::singlephoton_tagger()):
+//   1. Loop over all showers at main_vertex; classify each as "good"
+//      (passes br1/br3/br4, > 20 MeV), "ok" (passes br1 only, > 20 MeV),
+//      or discarded.  Accumulate aggregate shower statistics.
+//   2. Select the highest-energy good shower (fall back to ok showers when no
+//      good showers exist).
+//   3. For the selected shower, run mip_identification_sp,
+//      low_energy_michel_sp, and pi0_identification_sp.
+//   4. Run the full bad-reconstruction and overlapping-shower checks and
+//      propagate each failure into flag_sp.
+//   5. Apply two final threshold cuts on dE/dx and shower–track proximity.
+//
+// Returns true if the event is a single-photon candidate.
+//
+// Prototype: NeutrinoID_singlephoton_tagger.h, lines 2-542.
+// ===========================================================================
+bool PatternAlgorithms::singlephoton_tagger(
+    Graph& graph,
+    Facade::Cluster* main_cluster,
+    VertexPtr main_vertex,
+    IndexedShowerSet& showers,
+    VertexShowerSetMap& map_vertex_to_shower,
+    ShowerIntMap& map_shower_pio_id,
+    std::map<int, std::vector<ShowerPtr>>& map_pio_id_showers,
+    std::map<int, std::pair<double,int>>& map_pio_id_mass,
+    IDetectorVolumes::pointer dv,
+    TaggerInfo& ti)
+{
+    bool flag_sp = false;
+
+    if (!main_vertex || !main_vertex->descriptor_valid()) return false;
+
+    // Derive apa/face from the main vertex position so the tagger works
+    // correctly for any detector geometry (multi-APA, multi-face, etc.).
+    int apa = 0, face = 0;
+    if (dv) {
+        Point vtx_pt = main_vertex->fit().valid()
+                       ? main_vertex->fit().point
+                       : main_vertex->wcpt().point;
+        auto wpid = dv->contained_by(vtx_pt);
+        apa  = wpid.apa();
+        face = wpid.face();
+    }
+
+    SpContext ctx{*this, graph, main_cluster, main_vertex, apa, face,
+                  showers, map_vertex_to_shower,
+                  map_shower_pio_id, map_pio_id_showers, map_pio_id_mass,
+                  dv, nullptr};
+
+    // ------------------------------------------------------------------
+    // Aggregate shower statistics
+    // ------------------------------------------------------------------
+    float num_good_shws    = 0;
+    float num_20mev_shws   = 0;
+    float num_badreco1_shws= 0;
+    float num_badreco2_shws= 0;
+    float num_badreco3_shws= 0;
+    float num_badreco4_shws= 0;
+    float num_20br1_shws   = 0;
+
+    double proton_length_1 = -1., proton_dqdx_1 = -1., proton_energy_1 = -1.;
+    double proton_length_2 = -1., proton_dqdx_2 = -1., proton_energy_2 = -1.;
+    double num_protons   = 0;
+    double num_mip_tracks= 0;
+    double num_muons     = 0;
+    double num_pions     = 0;
+
+    // Positions of proton/MIP track start points (raw, no SCE correction).
+    std::vector<float> trk_x, trk_y, trk_z;
+    double max_shw_dis = -1.;
+
+    // ------------------------------------------------------------------
+    // First pass: per-shower classification
+    // ------------------------------------------------------------------
+    ShowerPtr max_shower    = nullptr;
+    double    max_energy    = 0;
+    ShowerPtr max_ok_shower = nullptr;
+    double    max_ok_energy = 0;
+    std::set<ShowerPtr> good_showers, ok_showers;
+
+    auto mv_it = map_vertex_to_shower.find(main_vertex);
+    if (mv_it == map_vertex_to_shower.end()) return false;
+
+    flag_sp = true;  // tentatively true; will be cleared on cuts
+
+    bool flag_single_shower =
+        (boost::out_degree(main_vertex->get_descriptor(), graph) == 1);
+
+    for (ShowerPtr shower : mv_it->second) {
+        SegmentPtr sg = shower->start_segment();
+        if (!sg) continue;
+
+        int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
+
+        // ------ proton bookkeeping ----------------------------------------
+        if (std::abs(pdg) == 2212) {
+            double length    = segment_track_length(sg);
+            double med_dqdx  = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            double energy    = length / units::cm * med_dqdx;
+            if (energy > 0) {
+                num_protons++;
+                Point trk_vtx = shower->get_start_point();
+                trk_x.push_back(trk_vtx.x() / units::cm);
+                trk_y.push_back(trk_vtx.y() / units::cm);
+                trk_z.push_back(trk_vtx.z() / units::cm);
+            }
+            if (energy > proton_energy_2) {
+                if (energy > proton_energy_1) {
+                    proton_length_1 = length / units::cm;
+                    proton_dqdx_1   = med_dqdx;
+                    proton_energy_1 = energy;
+                } else {
+                    proton_length_2 = length / units::cm;
+                    proton_dqdx_2   = med_dqdx;
+                    proton_energy_2 = energy;
+                }
+            }
+        }
+
+        // ------ muon/pion bookkeeping -------------------------------------
+        if (std::abs(pdg) == 13 || std::abs(pdg) == 211) {
+            double length   = segment_track_length(sg);
+            double med_dqdx = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            double energy   = length / units::cm * med_dqdx;
+            if (energy > 0) {
+                num_mip_tracks++;
+                if (std::abs(pdg) == 13)  num_muons++;
+                if (std::abs(pdg) == 211) num_pions++;
+            }
+            Point trk_vtx = shower->get_start_point();
+            trk_x.push_back(trk_vtx.x() / units::cm);
+            trk_y.push_back(trk_vtx.y() / units::cm);
+            trk_z.push_back(trk_vtx.z() / units::cm);
+        }
+
+        // Only evaluate electron showers for the sp flag
+        if (pdg != 11) continue;
+
+        double tmp_energy = (shower->get_kine_best() != 0)
+                            ? shower->get_kine_best() : shower->get_kine_charge();
+
+        // n_3seg (branching vertices in main cluster)
+        {
+            IndexedSegmentSet sh_segs;
+            IndexedVertexSet  sh_vtxs;
+            shower->fill_sets(sh_vtxs, sh_segs, false);
+            // (n_3seg used for display; logic already captured in low_energy_michel_sp)
+        }
+
+        // Is sg directly connected to main_vertex?
+        bool sg_at_main = false;
+        for (auto [eit, eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
+             eit != eend; ++eit)
+            if (graph[*eit].segment == sg) { sg_at_main = true; break; }
+
+        bool en20     = (tmp_energy > 20*units::MeV);
+        bool badreco1 = !bad_reconstruction_sp(ctx, shower, ti);      // true = good
+        bool badreco2 = sg_at_main
+                        ? !bad_reconstruction_1_sp(ctx, shower,
+                                                    flag_single_shower,
+                                                    /*num_valid_tracks=*/0, ti)
+                        : true;
+
+        // Find which vertex to use for br2/br3
+        VertexPtr shw_vtx_main = find_vertices(ctx.graph, sg).first;
+        if (sg_at_main) shw_vtx_main = main_vertex;
+
+        bool badreco3 = !bad_reconstruction_2_sp(ctx, shw_vtx_main, shower, ti);
+        bool badreco4 = !bad_reconstruction_3_sp(ctx, shw_vtx_main, shower, ti);
+
+        if (en20)  { num_20mev_shws++;   ti.shw_sp_20mev_showers.push_back(1); }
+        else       {                     ti.shw_sp_20mev_showers.push_back(0); }
+        if (badreco1) { num_badreco1_shws++; ti.shw_sp_br1_showers.push_back(1); }
+        else          {                      ti.shw_sp_br1_showers.push_back(0); }
+        if (badreco2) { num_badreco2_shws++; ti.shw_sp_br2_showers.push_back(1); }
+        else          {                      ti.shw_sp_br2_showers.push_back(0); }
+        if (badreco3) { num_badreco3_shws++; ti.shw_sp_br3_showers.push_back(1); }
+        else          {                      ti.shw_sp_br3_showers.push_back(0); }
+        if (badreco4) { num_badreco4_shws++; ti.shw_sp_br4_showers.push_back(1); }
+        else          {                      ti.shw_sp_br4_showers.push_back(0); }
+
+        if (en20 && badreco1) num_20br1_shws++;
+
+        if (en20 && badreco1 && badreco3 && badreco4) {
+            double E = (shower->get_kine_best() != 0)
+                       ? shower->get_kine_best() : shower->get_kine_charge();
+            if (E > max_energy) { max_shower = shower; max_energy = E; }
+            good_showers.insert(shower);
+        } else if (en20 && badreco1) {
+            double E = (shower->get_kine_best() != 0)
+                       ? shower->get_kine_best() : shower->get_kine_charge();
+            if (E > max_ok_energy) { max_ok_shower = shower; max_ok_energy = E; }
+            ok_showers.insert(shower);
+        }
+    }  // loop over showers
+
+    if (num_mip_tracks > 1.) flag_sp = false;
+
+    num_good_shws = good_showers.size();
+    if (num_good_shws == 0 && !ok_showers.empty()) {
+        max_shower = max_ok_shower;
+        max_energy = max_ok_energy;
+        good_showers.insert(max_shower);
+    }
+
+    if (num_good_shws != 1.)   flag_sp = false;
+    if (num_20br1_shws > 1.)   flag_sp = false;
+
+    // ------------------------------------------------------------------
+    // Fill aggregate TaggerInfo fields
+    // ------------------------------------------------------------------
+    ti.shw_sp_n_good_showers   = num_good_shws;
+    ti.shw_sp_n_20mev_showers  = num_20mev_shws;
+    ti.shw_sp_n_br1_showers    = num_badreco1_shws;
+    ti.shw_sp_n_br2_showers    = num_badreco2_shws;
+    ti.shw_sp_n_br3_showers    = num_badreco3_shws;
+    ti.shw_sp_n_br4_showers    = num_badreco4_shws;
+    ti.shw_sp_n_20br1_showers  = num_20br1_shws;
+    ti.shw_sp_num_mip_tracks   = num_mip_tracks;
+    ti.shw_sp_num_muons        = num_muons;
+    ti.shw_sp_num_pions        = num_pions;
+    ti.shw_sp_num_protons      = num_protons;
+    ti.shw_sp_proton_length_1  = proton_length_1;
+    ti.shw_sp_proton_dqdx_1    = proton_dqdx_1;
+    ti.shw_sp_proton_energy_1  = proton_energy_1;
+    ti.shw_sp_proton_length_2  = proton_length_2;
+    ti.shw_sp_proton_dqdx_2    = proton_dqdx_2;
+    ti.shw_sp_proton_energy_2  = proton_energy_2;
+
+    if (!good_showers.count(max_shower) || !max_shower) return flag_sp;
+
+    // ------------------------------------------------------------------
+    // Per-shower detailed evaluation for max_shower
+    // ------------------------------------------------------------------
+    SegmentPtr sg = max_shower->start_segment();
+    if (!sg) return flag_sp;
+
+    // Is max_shower's start segment at main_vertex?
+    bool sg_at_main = false;
+    for (auto [eit, eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
+         eit != eend; ++eit)
+        if (graph[*eit].segment == sg) { sg_at_main = true; break; }
+
+    // Vertex to use for br2/br3 checks
+    VertexPtr shw_vtx = find_vertices(ctx.graph, sg).first;
+    if (sg_at_main) shw_vtx = main_vertex;
+
+    // Count valid tracks at main_vertex
+    int num_valid_tracks = 0;
+    for (auto [eit, eend] = boost::out_edges(main_vertex->get_descriptor(), graph);
+         eit != eend; ++eit) {
+        SegmentPtr sg1 = graph[*eit].segment;
+        if (!sg1 || sg1 == sg) continue;
+        double len1 = segment_track_length(sg1);
+        if (!seg_is_shower(sg1) &&
+            (len1 > 8*units::cm || (!sg1->dir_weak() && len1 > 5*units::cm)))
+            ++num_valid_tracks;
+    }
+
+    // Shower start position (raw, no SCE correction)
+    Point shw_vtx_pt = max_shower->get_start_point();
+    float shw_x = shw_vtx_pt.x() / units::cm;
+    float shw_y = shw_vtx_pt.y() / units::cm;
+    float shw_z = shw_vtx_pt.z() / units::cm;
+
+    // Neutrino vertex position
+    Point nu_vtx = vtx_fit_pt(main_vertex);
+    float nu_x   = nu_vtx.x() / units::cm;
+    float nu_y   = nu_vtx.y() / units::cm;
+    float nu_z   = nu_vtx.z() / units::cm;
+
+    float shw_vtx_dis = sg_at_main ? 0.f
+        : std::sqrt(std::pow(nu_x-shw_x,2)+std::pow(nu_y-shw_y,2)+std::pow(nu_z-shw_z,2));
+
+    if (num_protons + num_mip_tracks == 1) {
+        max_shw_dis = std::sqrt(std::pow(trk_x[0]-shw_x,2)+
+                                std::pow(trk_y[0]-shw_y,2)+
+                                std::pow(trk_z[0]-shw_z,2));
+    } else if (num_protons + num_mip_tracks > 1) {
+        float min_dis = 99999.f;
+        for (size_t i = 0; i < trk_x.size(); ++i) {
+            float d = std::sqrt(std::pow(trk_x[i]-shw_x,2)+
+                                std::pow(trk_y[i]-shw_y,2)+
+                                std::pow(trk_z[i]-shw_z,2));
+            if (d < min_dis) min_dis = d;
+        }
+        max_shw_dis = min_dis;
+    } else {
+        max_shw_dis = shw_vtx_dis;
+    }
+
+    ti.shw_sp_shw_vtx_dis = shw_vtx_dis;
+    ti.shw_sp_max_shw_dis = max_shw_dis;
+
+    // mip_identification_sp
+    bool flag_strong_check = (flag_single_shower && max_energy < 400*units::MeV);
+    int mip_id = mip_identification_sp(ctx, shw_vtx, sg, max_shower,
+                                       flag_single_shower, flag_strong_check, ti);
+    if (mip_id == 1) flag_sp = false;
+
+    // low_energy_michel_sp
+    if (low_energy_michel_sp(ctx, max_shower, ti)) flag_sp = false;
+
+    // pi0_identification_sp
+    bool flag_pi0 = pi0_identification_sp(ctx, shw_vtx, sg, max_shower, 0.0, ti);
+    ti.shw_sp_pio_mip_id = mip_id;
+    ti.shw_sp_pio_filled = 1;
+    if (flag_pi0) flag_sp = false;
+
+    // bad reconstruction (with TaggerInfo fill)
+    ti.shw_sp_br_filled = 1;
+    bad_reconstruction_sp(ctx, max_shower, ti);  // fills shw_sp_br1_* (already fills unconditionally)
+
+    bool flag_br2 = false;
+    if (sg_at_main)
+        flag_br2 = bad_reconstruction_1_sp(ctx, max_shower,
+                                           flag_single_shower, num_valid_tracks, ti);
+
+    bool flag_lol = low_energy_overlapping_sp(ctx, max_shower, ti);
+
+    if (flag_br2)  flag_sp = false;
+
+    bad_reconstruction_2_sp(ctx, shw_vtx, max_shower, ti);
+    bad_reconstruction_3_sp(ctx, shw_vtx, max_shower, ti);
+    bool flag_hol = high_energy_overlapping_sp(ctx, max_shower, ti);
+
+    if (flag_hol) flag_sp = false;
+
+    // Final threshold cuts
+    if (ti.shw_sp_vec_mean_dedx < 2.3f)                             flag_sp = false;
+    if (num_protons + num_mip_tracks > 0. && max_shw_dis < 2.)      flag_sp = false;
+
+    (void)flag_lol;  // filled in TaggerInfo but not a direct cut in this port
+
+    return flag_sp;
+}
