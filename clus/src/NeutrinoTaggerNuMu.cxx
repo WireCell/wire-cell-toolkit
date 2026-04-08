@@ -324,11 +324,11 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
                     if (!is_shower_topo) {
                         auto [pv1, pv2] = find_vertices(graph, sg);
                         if (pv1) {
-                            auto [ext_sg1, ext_vtx1] = find_cont_muon_segment(graph, sg, pv1);
+                            SegmentPtr ext_sg1 = find_cont_muon_segment(graph, sg, pv1).first;
                             if (ext_sg1) tmp_length += segment_track_length(ext_sg1);
                         }
                         if (pv2) {
-                            auto [ext_sg2, ext_vtx2] = find_cont_muon_segment(graph, sg, pv2);
+                            SegmentPtr ext_sg2 = find_cont_muon_segment(graph, sg, pv2).first;
                             if (ext_sg2) tmp_length += segment_track_length(ext_sg2);
                         }
                     }

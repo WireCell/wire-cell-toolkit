@@ -78,14 +78,9 @@ static inline bool seg_is_shower(SegmentPtr seg) {
            (seg->has_particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
 }
 
-// ---------------------------------------------------------------------------
-// Helper: best energy for a shower (kine_best if non-zero, else kine_charge).
-// Prototype: shower->get_kine_best() != 0 ? get_kine_best() : get_kine_charge()
-// ---------------------------------------------------------------------------
-static inline double shower_energy(ShowerPtr shower) {
-    double e = shower->get_kine_best();
-    return (e != 0) ? e : shower->get_kine_charge();
-}
+// shower_energy helper was removed.
+// PRShower::get_kine_best() already falls back to kenergy_charge when kenergy_best==0,
+// so shower->get_kine_best() is the correct and sufficient call everywhere.
 
 // ===========================================================================
 // bad_reconstruction
@@ -109,7 +104,7 @@ bool PatternAlgorithms::bad_reconstruction(
     bool flag_bad_shower_2 = false;
     bool flag_bad_shower_3 = false;
 
-    double Eshower = shower_energy(shower);
+    double Eshower = shower->get_kine_best();
 
     SegmentPtr sg = shower->start_segment();
     if (!sg) return false;
@@ -613,7 +608,7 @@ bool PatternAlgorithms::cosmic_tagger(
         int connected_showers = 0;
         if (map_vertex_to_shower.count(main_vertex)) {
             for (ShowerPtr shower : map_vertex_to_shower.at(main_vertex)) {
-                double Eshower = shower_energy(shower);
+                double Eshower = shower->get_kine_best();
                 auto [sv, stype] = shower->get_start_vertex_and_type();
                 if (stype > 2) continue;
                 if (shower == long_muon) continue;
@@ -785,7 +780,7 @@ bool PatternAlgorithms::cosmic_tagger(
                 // Check if this segment starts a shower that could be michel
                 for (const ShowerPtr& shower : showers) {
                     if (shower->start_segment() != sg) continue;
-                    double E = shower_energy(shower);
+                    double E = shower->get_kine_best();
                     if (E > michel_energy) {
                         michel_energy = E;
                         michel_ele    = shower;
@@ -853,7 +848,7 @@ bool PatternAlgorithms::cosmic_tagger(
         if (map_vertex_to_shower.count(main_vertex)) {
             for (ShowerPtr shower : map_vertex_to_shower.at(main_vertex)) {
                 if (shower == michel_ele || shower == long_muon) continue;
-                double E = shower_energy(shower);
+                double E = shower->get_kine_best();
                 auto [sv, stype] = shower->get_start_vertex_and_type();
                 if (stype > 2) continue;
                 if (E > 150 * units::MeV && !bad_reconstruction(graph, main_vertex, shower))
@@ -963,7 +958,7 @@ bool PatternAlgorithms::cosmic_tagger(
             // Flag 6: muon_2nd exits FV in opposite direction from muon
             bool flag_sec = false;
             if (michel_ele) {
-                double Emi = shower_energy(michel_ele);
+                double Emi = michel_ele->get_kine_best();
                 if (Emi < 70 * units::MeV) {
                     flag_sec = true;
                 } else {
@@ -1225,7 +1220,7 @@ bool PatternAlgorithms::cosmic_tagger(
                 if (shower->start_segment() &&
                     shower->start_segment()->has_particle_info() &&
                     shower->start_segment()->particle_info()->pdg() != 11) continue;
-                double E = shower_energy(shower);
+                double E = shower->get_kine_best();
                 if (E <= 60 * units::MeV) continue;
 
                 auto [sv, stype] = shower->get_start_vertex_and_type();

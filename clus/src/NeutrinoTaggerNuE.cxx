@@ -2169,8 +2169,7 @@ static bool bad_reconstruction_1(NuEContext& ctx, ShowerPtr shower,
     bool flag_bad = false;
 
     Vector dir_drift(1, 0, 0);
-    double Eshower = (shower->get_kine_best() != 0)
-                     ? shower->get_kine_best() : shower->get_kine_charge();
+    double Eshower = shower->get_kine_best();
 
     SegmentPtr sg     = shower->start_segment();
     VertexPtr  vertex = shower->get_start_vertex_and_type().first;
@@ -2863,8 +2862,7 @@ static bool bad_reconstruction_3(NuEContext& ctx,
     bool flag_bad1 = false, flag_bad2 = false;
 
     Vector drift_dir(1, 0, 0);
-    double Eshower = (shower->get_kine_best() != 0)
-                     ? shower->get_kine_best() : shower->get_kine_charge();
+    double Eshower = shower->get_kine_best();
 
     double main_length  = vertex->cluster() ? shower->get_total_length(vertex->cluster()) : 0;
     double total_length = shower->get_total_length();
@@ -2918,6 +2916,11 @@ static bool bad_reconstruction_3(NuEContext& ctx,
         (start_sg && start_sg->flags_any(SegmentFlags::kAvoidMuonCheck)))
         min_dis = min_dis1;
 
+    // 7010_405_20296: start vertex with only 1 global edge
+    VertexPtr start_vtx = shower->get_start_vertex_and_type().first;
+    size_t n_vtx_segs = start_vtx && start_vtx->descriptor_valid()
+                        ? boost::out_degree(start_vtx->get_descriptor(), ctx.graph) : 0;
+
     if (min_dis < 1e7) {
         if (main_length < 0.40 * total_length && min_dis > 40*units::cm) flag_bad1 = true;
         if (main_length < 0.25 * total_length && min_dis > 33*units::cm) flag_bad1 = true;
@@ -2933,10 +2936,6 @@ static bool bad_reconstruction_3(NuEContext& ctx,
         if (flag_bad1 && start_sg && start_sg->flags_any(SegmentFlags::kAvoidMuonCheck) &&
             main_length > 12*units::cm && main_length > 0.1*total_length &&
             min_dis < 40*units::cm) flag_bad1 = false;
-        // 7010_405_20296: start vertex with only 1 global edge
-        VertexPtr start_vtx = shower->get_start_vertex_and_type().first;
-        size_t n_vtx_segs = start_vtx && start_vtx->descriptor_valid()
-                            ? boost::out_degree(start_vtx->get_descriptor(), ctx.graph) : 0;
         if (n_vtx_segs == 1 &&
             ((main_length > 20*units::cm && min_dis < 40*units::cm && main_length > 0.1*total_length) ||
              (main_length > 15*units::cm && min_dis < 32*units::cm && main_length > 0.15*total_length)))
@@ -2951,10 +2950,7 @@ static bool bad_reconstruction_3(NuEContext& ctx,
     ti.br4_1_min_dis                  = min_dis / units::cm;
     ti.br4_1_energy                   = Eshower / units::MeV;
     ti.br4_1_flag_avoid_muon_check    = (start_sg && start_sg->flags_any(SegmentFlags::kAvoidMuonCheck));
-    ti.br4_1_n_vtx_segs               = (start_sg ? [&](){
-        VertexPtr sv = shower->get_start_vertex_and_type().first;
-        return sv && sv->descriptor_valid() ? (int)boost::out_degree(sv->get_descriptor(), ctx.graph) : 0;
-    }() : 0);
+    ti.br4_1_n_vtx_segs               = (int)n_vtx_segs;
     ti.br4_1_n_main_segs              = shower->get_num_main_segments();
     ti.br4_1_flag                     = !flag_bad1;
 
@@ -3082,8 +3078,7 @@ static bool bad_reconstruction_2(NuEContext& ctx,
     bool flag_bad6_save = false, flag_bad7 = false, flag_bad8 = false;
 
     Vector drift_dir(1, 0, 0);
-    double Eshower = (shower->get_kine_best() != 0)
-                     ? shower->get_kine_best() : shower->get_kine_charge();
+    double Eshower = shower->get_kine_best();
 
     SegmentPtr sg           = shower->start_segment();
     double total_length     = shower->get_total_length();
@@ -3217,16 +3212,6 @@ static bool bad_reconstruction_2(NuEContext& ctx,
     // ------------------------------------------------------------------
     Point ave_p(0, 0, 0); int num_p = 0, n_seg = 0;
     double side_total_length = 0;
-    for (SegmentPtr sg1 : shower_segs) {
-        if (sg1->cluster() != sg->cluster() || sg1 == sg) continue;
-        for (const auto& fit : sg1->fits()) {
-            ave_p = ave_p + fit.point * (1.0 / 1.0);  // accumulate
-            ave_p.x(ave_p.x() + fit.point.x()); // fallback: manual sum
-        }
-        // Actually simpler: just sum components
-    }
-    // Redo with clean accumulation
-    ave_p = Point(0, 0, 0); num_p = 0; n_seg = 0; side_total_length = 0;
     for (SegmentPtr sg1 : shower_segs) {
         if (sg1->cluster() != sg->cluster() || sg1 == sg) continue;
         for (const auto& fit : sg1->fits()) {

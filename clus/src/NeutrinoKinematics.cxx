@@ -102,7 +102,6 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // -------------------------------------------------------------------------
     auto push_shower_kine = [&](const ShowerPtr& shower) {
         double kine_best   = shower->get_kine_best();
-        if (kine_best == 0) kine_best = shower->get_kine_charge();
         double kine_charge = shower->get_kine_charge();
         double kine_range  = shower->get_kine_range();
 
@@ -141,7 +140,6 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             kine_best = seg->particle_info()->kinetic_energy();
         }
         double kine_charge = cal_kine_charge(seg, graph, track_fitter, dv);
-        (void)segment_cal_kine_dQdx(seg, recomb_model); // computed but not yet filled in ktree
         double kine_range  = cal_kine_range(segment_track_length(seg), pdg, particle_data);
 
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
@@ -269,7 +267,6 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         if (vtx_type > 3) continue;
 
         double kine_best   = shower->get_kine_best();
-        if (kine_best == 0) kine_best = shower->get_kine_charge();
         double kine_charge = shower->get_kine_charge();
         double kine_range  = shower->get_kine_range();
 
