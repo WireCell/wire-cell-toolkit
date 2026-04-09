@@ -68,17 +68,14 @@ public:
         // check if the grouping's wpid ... 
         //std::cout << "Live: " << live_grouping.wpids().size() << " " << dead_grouping.wpids().size() << std::endl;
     
-        // Check that groupings has less than one wpid
-        if (live_grouping.wpids().size() > 1 || dead_grouping.wpids().size() > 1) {
-            for (const auto& wpid : live_grouping.wpids()) {
-                std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
-            }
-            for (const auto& wpid : dead_grouping.wpids()) {
-                std::cout << "Dead grouping wpid: " << wpid.name() << std::endl;
-            }
-            raise<ValueError>("Live %d > 1, Dead %d > 1", live_grouping.wpids().size(), dead_grouping.wpids().size());
-        }
-        auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, m_dv);
+        // Build per-APA/face wire geometry maps (supports multiple APAs/faces)
+        const auto& all_wpids = live_grouping.wpids();
+        std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_params;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_V_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
+        std::set<int> apas;
+        compute_wireplane_params(all_wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
     
 
 
@@ -217,12 +214,18 @@ public:
 
                                 bool flag_para = false;
 
+                                // Look up per-cluster APA/face geometry
+                                auto wpid_1 = cluster_1->wpid(mcell1_center);
+                                auto wpid_2 = cluster_2->wpid(mcell2_center);
+                                const auto& [drift_dir_1, angle_u_1, angle_v_1, angle_w_1] = wpid_params.at(wpid_1);
+                                const auto& [drift_dir_2, angle_u_2, angle_v_2, angle_w_2] = wpid_params.at(wpid_2);
+
                                 double angle1, angle2, angle3;
                                 if (!flag_merge) {
-                               
-                                    angle1 = dir1.angle(drift_dir);
-                                    angle2 = dir2.angle(drift_dir);
-                                    angle3 = dir3.angle(drift_dir);
+
+                                    angle1 = dir1.angle(drift_dir_1);
+                                    angle2 = dir2.angle(drift_dir_1);
+                                    angle3 = dir3.angle(drift_dir_2);
 
                                     if (fabs(angle1 - 3.1415926 / 2.) < 5 / 180. * 3.1415926 &&
                                         fabs(angle2 - 3.1415926 / 2.) < 5 / 180. * 3.1415926 &&
@@ -240,28 +243,28 @@ public:
                                         flag_para = true;
 
                                         if (WireCell::Clus::Facade::is_angle_consistent(
-                                                dir1, dir2, false, 15, angle_u, angle_v, angle_w, 3) &&
+                                                dir1, dir2, false, 15, angle_u_1, angle_v_1, angle_w_1, 3) &&
                                             WireCell::Clus::Facade::is_angle_consistent(
-                                                dir3, dir2, true, 15, angle_u, angle_v, angle_w, 3))
+                                                dir3, dir2, true, 15, angle_u_2, angle_v_2, angle_w_2, 3))
                                             flag_merge = true;
                                     }
                                     else {
                                         bool flag_const1 = WireCell::Clus::Facade::is_angle_consistent(
-                                            dir1, dir2, false, 10, angle_u, angle_v, angle_w, 2);
+                                            dir1, dir2, false, 10, angle_u_1, angle_v_1, angle_w_1, 2);
                                         bool flag_const2 = WireCell::Clus::Facade::is_angle_consistent(
-                                            dir3, dir2, true, 10, angle_u, angle_v, angle_w, 2);
+                                            dir3, dir2, true, 10, angle_u_2, angle_v_2, angle_w_2, 2);
 
                                         if (flag_const1 && flag_const2) {
                                             flag_merge = true;
                                         }
                                         else if (flag_const1 && length_2 < 6 * units::cm && length_1 > 15 * units::cm) {
                                             if (WireCell::Clus::Facade::is_angle_consistent(
-                                                    dir1, dir2, false, 5, angle_u, angle_v, angle_w, 3))
+                                                    dir1, dir2, false, 5, angle_u_1, angle_v_1, angle_w_1, 3))
                                                 flag_merge = true;
                                         }
                                         else if (flag_const2 && length_1 < 6 * units::cm && length_2 > 15 * units::cm) {
                                             if (WireCell::Clus::Facade::is_angle_consistent(
-                                                    dir3, dir2, true, 5, angle_u, angle_v, angle_w, 3))
+                                                    dir3, dir2, true, 5, angle_u_2, angle_v_2, angle_w_2, 3))
                                                 flag_merge = true;
                                         }
                                     }
