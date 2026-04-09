@@ -6,6 +6,9 @@
 
 #include "WireCellUtil/NamedFactory.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 class ClusteringExtend;
 class ClusteringExtendLoop;
 WIRECELL_FACTORY(ClusteringExtend, ClusteringExtend,
@@ -564,37 +567,28 @@ static void clustering_extend(
   // Get all the wire plane IDs from the grouping
 	const auto& wpids = live_grouping.wpids();
 
-	// Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
-	std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
 	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
 	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
 	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
-	std::set<int> apas;
 	for (const auto& wpid : wpids) {
 		int apa = wpid.apa();
 		int face = wpid.face();
-		apas.insert(apa);
-  
+
 		// Create wpids for all three planes with this APA and face
 		WirePlaneId wpid_u(kUlayer, face, apa);
 		WirePlaneId wpid_v(kVlayer, face, apa);
 		WirePlaneId wpid_w(kWlayer, face, apa);
-	 
-		// Get drift direction based on face orientation
-		int face_dirx = dv->face_dirx(wpid_u);
-		geo_point_t drift_dir(face_dirx, 0, 0);
-		
+
 		// Get wire directions for all planes
 		Vector wire_dir_u = dv->wire_direction(wpid_u);
 		Vector wire_dir_v = dv->wire_direction(wpid_v);
 		Vector wire_dir_w = dv->wire_direction(wpid_w);
-  
+
 		// Calculate angles
 		double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
 		double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
 		double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
-  
-		wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+
 		wpid_U_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_u), sin(angle_u)), angle_u);
 		wpid_V_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_v), sin(angle_v)), angle_v);
 		wpid_W_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_w), sin(angle_w)), angle_w);
@@ -602,16 +596,17 @@ static void clustering_extend(
 
 
   geo_point_t drift_dir_abs(1,0,0);
-  cluster_set_t used_clusters;
+  std::unordered_set<const Cluster*> used_clusters;
 
 
   // prepare graph ...
   typedef cluster_connectivity_graph_t Graph;
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
-  
+  std::unordered_map<const Cluster*, int> map_cluster_index;
+  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
+  sort_clusters(live_clusters);
+
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;
