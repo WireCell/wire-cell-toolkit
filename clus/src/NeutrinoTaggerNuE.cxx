@@ -2476,6 +2476,7 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
                 dir1 = dir1.norm();
 
                 double dis1 = 0;
+                bool flag_bad4 = false;  // per-element flag (prototype resets each iteration)
                 if (dir1.angle(dir) / M_PI * 180.0 < 30 && fiducial_utils) {
                     const double step = 1*units::cm;
                     Point end_pt = shower1->get_end_point();
@@ -2486,13 +2487,14 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
                     dis1 = ray_length(Ray{end_pt, test_p});
                     if (dis1 < 3*units::cm && shower_energy < 500*units::MeV &&
                         flag_single_shower)
-                        flag_bad4_save = true;
+                        flag_bad4 = true;
                 }
+                if (flag_bad4) flag_bad4_save = true;
 
                 ti.stw_4_v_angle.push_back(dir1.angle(dir) / M_PI * 180.0);
                 ti.stw_4_v_dis.push_back(dis1 / units::cm);
                 ti.stw_4_v_energy.push_back(shower_energy / units::MeV);
-                ti.stw_4_v_flag.push_back(!flag_bad4_save);
+                ti.stw_4_v_flag.push_back(!flag_bad4);
             }
         }
     }
