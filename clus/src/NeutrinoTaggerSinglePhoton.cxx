@@ -1219,7 +1219,7 @@ static int mip_identification_sp(SpContext& ctx,
         mip_id = -1;
 
     double max_dQ_dx_sample = 0;
-    for (size_t i = n_first_non_mip_2; i < n_first_non_mip_2 + 3; ++i) {
+    for (size_t i = n_first_non_mip_2; i < (size_t)n_first_non_mip_2 + 3; ++i) {
         if (i >= vec_dQ_dx.size()) break;
         if (vec_dQ_dx[i] > max_dQ_dx_sample) max_dQ_dx_sample = vec_dQ_dx[i];
     }
@@ -1238,8 +1238,8 @@ static int mip_identification_sp(SpContext& ctx,
         (n_first_non_mip_2 - n_first_mip + n_end_reduction >= 12 &&
          n_below_threshold + n_end_reduction >= 10) &&
         n_first_non_mip_2 - n_first_mip >= 4 &&
-        (n_end_reduction < 4 && Eshower < 100*units::MeV ||
-         n_end_reduction < 7 && Eshower < 200*units::MeV && Eshower >= 100*units::MeV ||
+        ((n_end_reduction < 4 && Eshower < 100*units::MeV) ||
+         (n_end_reduction < 7 && Eshower < 200*units::MeV && Eshower >= 100*units::MeV) ||
          Eshower >= 200*units::MeV)) {
         if (flag_single_shower) mip_id = 0;
         else                    mip_id = 1;
@@ -2302,20 +2302,43 @@ bool PatternAlgorithms::singlephoton_tagger(
              eit != eend; ++eit)
             if (graph[*eit].segment == sg) { sg_at_main = true; break; }
 
+        // Count valid tracks at main_vertex for this shower (skipping sg).
+        // Mirrors prototype lines 183-190.
+        int first_pass_valid_tracks = 0;
+        {
+            auto vd = main_vertex->get_descriptor();
+            for (auto [eit, eend] = boost::out_edges(vd, graph); eit != eend; ++eit) {
+                SegmentPtr sg1 = graph[*eit].segment;
+                if (!sg1 || sg1 == sg) continue;
+                double len1 = segment_track_length(sg1);
+                if (!seg_is_shower(sg1) &&
+                    (len1 > 8*units::cm || (!sg1->dir_weak() && len1 > 5*units::cm)))
+                    ++first_pass_valid_tracks;
+            }
+        }
+
+        // Use a throw-away TaggerInfo for the first pass so that scalar fields
+        // are not overwritten by non-max showers and vector fields are not
+        // prematurely populated.  The prototype passed flag_fill=false in this
+        // loop; the toolkit functions fill unconditionally, so we redirect into
+        // a temporary object here.  The real ti is filled in the second pass
+        // (for max_shower only).
+        TaggerInfo tmp_ti{};
+
         bool en20     = (tmp_energy > 20*units::MeV);
-        bool badreco1 = !bad_reconstruction_sp(ctx, shower, ti);      // true = good
+        bool badreco1 = !bad_reconstruction_sp(ctx, shower, tmp_ti);   // true = good
         bool badreco2 = sg_at_main
                         ? !bad_reconstruction_1_sp(ctx, shower,
                                                     flag_single_shower,
-                                                    /*num_valid_tracks=*/0, ti)
+                                                    first_pass_valid_tracks, tmp_ti)
                         : true;
 
         // Find which vertex to use for br2/br3
         VertexPtr shw_vtx_main = find_vertices(ctx.graph, sg).first;
         if (sg_at_main) shw_vtx_main = main_vertex;
 
-        bool badreco3 = !bad_reconstruction_2_sp(ctx, shw_vtx_main, shower, ti);
-        bool badreco4 = !bad_reconstruction_3_sp(ctx, shw_vtx_main, shower, ti);
+        bool badreco3 = !bad_reconstruction_2_sp(ctx, shw_vtx_main, shower, tmp_ti);
+        bool badreco4 = !bad_reconstruction_3_sp(ctx, shw_vtx_main, shower, tmp_ti);
 
         if (en20)  { num_20mev_shws++;   ti.shw_sp_20mev_showers.push_back(1); }
         else       {                     ti.shw_sp_20mev_showers.push_back(0); }

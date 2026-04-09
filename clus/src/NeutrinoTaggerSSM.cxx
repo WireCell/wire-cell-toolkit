@@ -896,10 +896,7 @@ bool PatternAlgorithms::ssm_tagger(
     if (backwards_muon) dir = -dir;
 
     // direction vectors
-    Vector init_dir    = segment_cal_dir_3vector(ssm_sg, dir,  5, 0).norm();
     Vector init_dir_10 = segment_cal_dir_3vector(ssm_sg, dir, 10, 0).norm();
-    Vector init_dir_15 = segment_cal_dir_3vector(ssm_sg, dir, 15, 0).norm();
-    Vector init_dir_20 = segment_cal_dir_3vector(ssm_sg, dir, 20, 0).norm();
 
     double x_dir = init_dir_10.x(), y_dir = init_dir_10.y(), z_dir = init_dir_10.z();
 
