@@ -1689,6 +1689,7 @@ void UbooneNueBDTScorer::cal_bdts_xgboost(Clus::PR::TaggerInfo& ti,
     if (ti.br_filled == 1) {
         float val1 = reader.EvaluateMVA("MyBDT");
         ti.nue_score = static_cast<float>(std::log10((1.0 + val1) / (1.0 - val1)));
+    } else {
+        ti.nue_score = -15.f;  // background-like default; matches prototype default_val = -15
     }
-    // else: ti.nue_score keeps its default (0) from TaggerInfo initialisation
 }

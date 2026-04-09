@@ -402,6 +402,152 @@ static void fill_ssmsp_all(
     acc_segment_id = temp_acc;
 }
 
+// ---------------------------------------------------------------------------
+// ParticleBlock: top-2 tracks and top-2 showers at a vertex, with all their
+// properties.  Used by ssm_tagger Phase C to replace the duplicate prim/daught
+// loops.  fill_particle_block_at_vtx populates one block from a vertex.
+// ---------------------------------------------------------------------------
+
+struct ParticleSlot {
+    double length        = -999;
+    double direct_length = -999;
+    int    pdg           = 0;
+    double medium_dq_dx  = -999;
+    double max_dev       = -999;
+    double ke_cal        = -999;
+    double ke_rng        = -999;
+    double ke_rng_mu     = -999;
+    double ke_rng_p      = -999;
+    double ke_rng_e      = -999;
+    double ke_best       = -999;   // showers: from shower obj; tracks: same as ke_rng
+    Vector dir;
+    double score_mu_fwd  = -999, score_p_fwd  = -999, score_e_fwd  = -999;
+    double score_mu_bck  = -999, score_p_bck  = -999, score_e_bck  = -999;
+    double add_daught_track_1  = -999, add_daught_all_1  = -999;
+    double add_daught_track_5  = -999, add_daught_all_5  = -999;
+    double add_daught_track_11 = -999, add_daught_all_11 = -999;
+    SegmentPtr sg = nullptr;
+};
+
+struct ParticleBlock {
+    int n_tracks_1=0, n_tracks_3=0, n_tracks_5=0, n_tracks_8=0, n_tracks_11=0;
+    int n_all_1=0,    n_all_3=0,    n_all_5=0,    n_all_8=0,    n_all_11=0;
+    ParticleSlot track1, track2;
+    ParticleSlot shw1,   shw2;
+};
+
+// Iterate segments at vtx, skipping skip_sg; rank top-2 tracks and top-2
+// showers by length.  Mirrors the two identical prim/daught loops in the
+// prototype (NeutrinoID_ssm_tagger.h lines 794-1224).
+static ParticleBlock fill_particle_block_at_vtx(
+    PatternAlgorithms& self,
+    Graph& graph,
+    VertexPtr vtx,
+    SegmentPtr skip_sg,
+    ShowerSegmentMap& map_segment_in_shower,
+    const ParticleDataSet::pointer& particle_data,
+    const IRecombinationModel::pointer& recomb_model)
+{
+    ParticleBlock pb;
+    if (!vtx || !vtx->descriptor_valid()) return pb;
+
+    // daughter_counts: mirrors ssm_tagger's inner lambda (prototype pattern).
+    auto dc = [&](SegmentPtr sg, double len_cm, bool is_shower) {
+        double cut = len_cm * units::cm;
+        int dt = self.calculate_num_daughter_tracks(graph, vtx, sg, false, cut).first;
+        int da = self.calculate_num_daughter_tracks(graph, vtx, sg, true,  cut).first;
+        if (!is_shower) { dt -= 1; da -= 1; }
+        else            { da -= 1; }
+        if (segment_track_length(sg)/units::cm < len_cm) {
+            if (!is_shower) dt++;
+            da++;
+        }
+        if (dt < 0) dt = 0;
+        if (da < 0) da = 0;
+        return std::make_pair(dt, da);
+    };
+
+    double len_t1=-1e9, len_t2=-1e9, len_s1=-1e9, len_s2=-1e9;
+
+    for (auto [eit,end] = boost::out_edges(vtx->get_descriptor(), graph); eit != end; ++eit) {
+        SegmentPtr sg = graph[*eit].segment;
+        if (!sg || sg == skip_sg) continue;
+
+        double sg_len    = segment_track_length(sg) / units::cm;
+        double sg_dlen   = segment_track_direct_length(sg) / units::cm;
+        int    sg_pdg    = std::abs(sg->has_particle_info() ? sg->particle_info()->pdg() : 0);
+        double sg_med    = segment_median_dQ_dx(sg) / (43e3/units::cm);
+        double sg_mdev   = segment_track_max_deviation(sg) / units::cm;
+        double sg_ke_cal = segment_cal_kine_dQdx(sg, recomb_model);
+        double sg_ke_rng = cal_kine_range(sg_len, sg_pdg ? sg_pdg : 13, particle_data);
+        double sg_ke_rng_mu = cal_kine_range(sg_len, 13,   particle_data);
+        double sg_ke_rng_p  = cal_kine_range(sg_len, 2212, particle_data);
+        double sg_ke_rng_e  = cal_kine_range(sg_len, 11,   particle_data);
+        Vector sg_dir = segment_cal_dir_3vector(sg);
+
+        if (sg_len > 1)  { pb.n_all_1++;  if (!seg_is_shower(sg)) pb.n_tracks_1++; }
+        if (sg_len > 3)  { pb.n_all_3++;  if (!seg_is_shower(sg)) pb.n_tracks_3++; }
+        if (sg_len > 5)  { pb.n_all_5++;  if (!seg_is_shower(sg)) pb.n_tracks_5++; }
+        if (sg_len > 8)  { pb.n_all_8++;  if (!seg_is_shower(sg)) pb.n_tracks_8++; }
+        if (sg_len > 11) { pb.n_all_11++; if (!seg_is_shower(sg)) pb.n_tracks_11++; }
+
+        bool is_shower = seg_is_shower(sg);
+        double& len1 = is_shower ? len_s1 : len_t1;
+        double& len2 = is_shower ? len_s2 : len_t2;
+        ParticleSlot& slot1 = is_shower ? pb.shw1 : pb.track1;
+        ParticleSlot& slot2 = is_shower ? pb.shw2 : pb.track2;
+
+        if (sg_len < len2) continue;
+
+        auto [dtr1,dal1]   = dc(sg, 1.0,  is_shower);
+        auto [dtr5,dal5]   = dc(sg, 5.0,  is_shower);
+        auto [dtr11,dal11] = dc(sg, 11.0, is_shower);
+
+        double ke_best = sg_ke_rng;
+        if (is_shower) {
+            auto it_sh = map_segment_in_shower.find(sg);
+            if (it_sh != map_segment_in_shower.end()) {
+                ke_best = it_sh->second->get_kine_best();
+                if (ke_best == 0.0) ke_best = it_sh->second->get_kine_charge();
+            }
+        }
+
+        ParticleSlot s;
+        s.length=sg_len; s.direct_length=sg_dlen; s.pdg=sg_pdg;
+        s.medium_dq_dx=sg_med; s.max_dev=sg_mdev;
+        s.ke_cal=sg_ke_cal; s.ke_rng=sg_ke_rng;
+        s.ke_rng_mu=sg_ke_rng_mu; s.ke_rng_p=sg_ke_rng_p; s.ke_rng_e=sg_ke_rng_e;
+        s.ke_best=ke_best; s.dir=sg_dir; s.sg=sg;
+        s.add_daught_track_1=dtr1; s.add_daught_all_1=dal1;
+        s.add_daught_track_5=dtr5; s.add_daught_all_5=dal5;
+        s.add_daught_track_11=dtr11; s.add_daught_all_11=dal11;
+
+        if (sg_len < len1) {
+            len2 = sg_len; slot2 = s;
+        } else {
+            len2 = len1; slot2 = slot1;
+            len1 = sg_len; slot1 = s;
+        }
+    }
+
+    // Compute PID scores for all filled slots.
+    auto fill_scores = [&](ParticleSlot& ps) {
+        if (!ps.sg) return;
+        auto sc = get_scores(ps.sg, particle_data);
+        ps.score_mu_fwd=sc[0]; ps.score_p_fwd=sc[1]; ps.score_e_fwd=sc[2];
+        ps.score_mu_bck=sc[3]; ps.score_p_bck=sc[4]; ps.score_e_bck=sc[5];
+        if (ps.sg->dirsign() == -1) {
+            std::swap(ps.score_mu_fwd, ps.score_mu_bck);
+            std::swap(ps.score_p_fwd,  ps.score_p_bck);
+            std::swap(ps.score_e_fwd,  ps.score_e_bck);
+        }
+    };
+    fill_scores(pb.track1); fill_scores(pb.track2);
+    fill_scores(pb.shw1);   fill_scores(pb.shw2);
+
+    return pb;
+}
+
 // ===========================================================================
 // ssm_tagger
 //
@@ -898,553 +1044,28 @@ bool PatternAlgorithms::ssm_tagger(
     // ------------------------------------------------------------------
     // Phase C: primary/daughter particle loops
     // Prototype lines 766-1224
+    // Two structurally identical loops (one per vertex) are replaced by two
+    // calls to fill_particle_block_at_vtx.  All per-particle data live in
+    // pb_prim / pb_daught; Phase D swaps them via std::swap if backwards_muon.
     // ------------------------------------------------------------------
-    // Accumulators (initialised to sentinel values from variable declarations)
-    double n_prim_tracks_1=0, n_prim_tracks_3=0, n_prim_tracks_5=0, n_prim_tracks_8=0, n_prim_tracks_11=0;
-    double n_prim_all_1=0, n_prim_all_3=0, n_prim_all_5=0, n_prim_all_8=0, n_prim_all_11=0;
-    double n_daughter_tracks_1=0, n_daughter_tracks_3=0, n_daughter_tracks_5=0, n_daughter_tracks_8=0, n_daughter_tracks_11=0;
-    double n_daughter_all_1=0, n_daughter_all_3=0, n_daughter_all_5=0, n_daughter_all_8=0, n_daughter_all_11=0;
-
-    // per-particle properties (track and shower, top-2 by length each)
-    double length_prim_track1=-999, length_prim_track2=-999;
-    double length_daught_track1=-999, length_daught_track2=-999;
-    double length_prim_shw1=-999, length_prim_shw2=-999;
-    double length_daught_shw1=-999, length_daught_shw2=-999;
-
-    double direct_length_prim_track1=-999, direct_length_prim_track2=-999;
-    double direct_length_daught_track1=-999, direct_length_daught_track2=-999;
-    double direct_length_prim_shw1=-999, direct_length_prim_shw2=-999;
-    double direct_length_daught_shw1=-999, direct_length_daught_shw2=-999;
-
-    double pdg_prim_track1=-999, pdg_prim_track2=-999;
-    double pdg_daught_track1=-999, pdg_daught_track2=-999;
-    double pdg_prim_shw1=-999, pdg_prim_shw2=-999;
-    double pdg_daught_shw1=-999, pdg_daught_shw2=-999;
-
-    double medium_dq_dx_prim_track1=-999, medium_dq_dx_prim_track2=-999;
-    double medium_dq_dx_daught_track1=-999, medium_dq_dx_daught_track2=-999;
-    double medium_dq_dx_prim_shw1=-999, medium_dq_dx_prim_shw2=-999;
-    double medium_dq_dx_daught_shw1=-999, medium_dq_dx_daught_shw2=-999;
-
-    double max_dev_prim_track1=-999, max_dev_prim_track2=-999;
-    double max_dev_daught_track1=-999, max_dev_daught_track2=-999;
-    double max_dev_prim_shw1=-999, max_dev_prim_shw2=-999;
-    double max_dev_daught_shw1=-999, max_dev_daught_shw2=-999;
-
-    double kine_energy_cal_prim_track1=-999, kine_energy_cal_prim_track2=-999;
-    double kine_energy_cal_daught_track1=-999, kine_energy_cal_daught_track2=-999;
-    double kine_energy_cal_prim_shw1=-999, kine_energy_cal_prim_shw2=-999;
-    double kine_energy_cal_daught_shw1=-999, kine_energy_cal_daught_shw2=-999;
-
-    double kine_energy_range_prim_track1=-999, kine_energy_range_prim_track2=-999;
-    double kine_energy_range_daught_track1=-999, kine_energy_range_daught_track2=-999;
-    double kine_energy_range_prim_shw1=-999, kine_energy_range_prim_shw2=-999;
-    double kine_energy_range_daught_shw1=-999, kine_energy_range_daught_shw2=-999;
-
-    double kine_energy_range_mu_prim_track1=-999, kine_energy_range_mu_prim_track2=-999;
-    double kine_energy_range_mu_daught_track1=-999, kine_energy_range_mu_daught_track2=-999;
-    double kine_energy_range_mu_prim_shw1=-999, kine_energy_range_mu_prim_shw2=-999;
-    double kine_energy_range_mu_daught_shw1=-999, kine_energy_range_mu_daught_shw2=-999;
-
-    double kine_energy_range_p_prim_track1=-999, kine_energy_range_p_prim_track2=-999;
-    double kine_energy_range_p_daught_track1=-999, kine_energy_range_p_daught_track2=-999;
-    double kine_energy_range_p_prim_shw1=-999, kine_energy_range_p_prim_shw2=-999;
-    double kine_energy_range_p_daught_shw1=-999, kine_energy_range_p_daught_shw2=-999;
-
-    double kine_energy_range_e_prim_track1=-999, kine_energy_range_e_prim_track2=-999;
-    double kine_energy_range_e_daught_track1=-999, kine_energy_range_e_daught_track2=-999;
-    double kine_energy_range_e_prim_shw1=-999, kine_energy_range_e_prim_shw2=-999;
-    double kine_energy_range_e_daught_shw1=-999, kine_energy_range_e_daught_shw2=-999;
-
-    double kine_energy_best_prim_shw1=-999, kine_energy_best_prim_shw2=-999;
-    double kine_energy_best_daught_shw1=-999, kine_energy_best_daught_shw2=-999;
-
-    Vector dir_prim_track1(0,0,0), dir_prim_track2(0,0,0);
-    Vector dir_daught_track1(0,0,0), dir_daught_track2(0,0,0);
-    Vector dir_prim_shw1(0,0,0), dir_prim_shw2(0,0,0);
-    Vector dir_daught_shw1(0,0,0), dir_daught_shw2(0,0,0);
-
-    double add_daught_track_counts_1_prim_track1=-999, add_daught_all_counts_1_prim_track1=-999;
-    double add_daught_track_counts_5_prim_track1=-999, add_daught_all_counts_5_prim_track1=-999;
-    double add_daught_track_counts_11_prim_track1=-999, add_daught_all_counts_11_prim_track1=-999;
-    double add_daught_track_counts_1_prim_track2=-999, add_daught_all_counts_1_prim_track2=-999;
-    double add_daught_track_counts_5_prim_track2=-999, add_daught_all_counts_5_prim_track2=-999;
-    double add_daught_track_counts_11_prim_track2=-999, add_daught_all_counts_11_prim_track2=-999;
-    double add_daught_track_counts_1_daught_track1=-999, add_daught_all_counts_1_daught_track1=-999;
-    double add_daught_track_counts_5_daught_track1=-999, add_daught_all_counts_5_daught_track1=-999;
-    double add_daught_track_counts_11_daught_track1=-999, add_daught_all_counts_11_daught_track1=-999;
-    double add_daught_track_counts_1_daught_track2=-999, add_daught_all_counts_1_daught_track2=-999;
-    double add_daught_track_counts_5_daught_track2=-999, add_daught_all_counts_5_daught_track2=-999;
-    double add_daught_track_counts_11_daught_track2=-999, add_daught_all_counts_11_daught_track2=-999;
-    double add_daught_track_counts_1_prim_shw1=-999, add_daught_all_counts_1_prim_shw1=-999;
-    double add_daught_track_counts_5_prim_shw1=-999, add_daught_all_counts_5_prim_shw1=-999;
-    double add_daught_track_counts_11_prim_shw1=-999, add_daught_all_counts_11_prim_shw1=-999;
-    double add_daught_track_counts_1_prim_shw2=-999, add_daught_all_counts_1_prim_shw2=-999;
-    double add_daught_track_counts_5_prim_shw2=-999, add_daught_all_counts_5_prim_shw2=-999;
-    double add_daught_track_counts_11_prim_shw2=-999, add_daught_all_counts_11_prim_shw2=-999;
-    double add_daught_track_counts_1_daught_shw1=-999, add_daught_all_counts_1_daught_shw1=-999;
-    double add_daught_track_counts_5_daught_shw1=-999, add_daught_all_counts_5_daught_shw1=-999;
-    double add_daught_track_counts_11_daught_shw1=-999, add_daught_all_counts_11_daught_shw1=-999;
-    double add_daught_track_counts_1_daught_shw2=-999, add_daught_all_counts_1_daught_shw2=-999;
-    double add_daught_track_counts_5_daught_shw2=-999, add_daught_all_counts_5_daught_shw2=-999;
-    double add_daught_track_counts_11_daught_shw2=-999, add_daught_all_counts_11_daught_shw2=-999;
-
-    SegmentPtr prim_track1_sg=nullptr, prim_track2_sg=nullptr;
-    SegmentPtr prim_shw1_sg=nullptr, prim_shw2_sg=nullptr;
-
-    // Helper: get segment-level daughter track/all counts beyond a length cut.
-    // Subtracts the segment itself (not a shower→subtract 1 from track count).
-    // Mirrors prototype's calculate_num_daughter_tracks calls with -1 correction.
-    auto daughter_counts = [&](VertexPtr vtx, SegmentPtr sg, double len_cm, bool is_shower_type) {
-        double cut = len_cm * units::cm;
-        int dt = calculate_num_daughter_tracks(graph, vtx, sg, false, cut).first;
-        int da = calculate_num_daughter_tracks(graph, vtx, sg, true,  cut).first;
-        // correct: subtract self (track subtracts 1 from track count, shower does not)
-        if (!is_shower_type) { dt -= 1; da -= 1; }
-        else                 { /* track count no subtract */; da -= 1; }
-        // add back if segment too short to have passed the length cut
-        if (segment_track_length(sg)/units::cm < len_cm) {
-            if (!is_shower_type) { dt++; }
-            da++;
-        }
-        if (dt < 0) dt = 0;
-        if (da < 0) da = 0;
-        return std::make_pair(dt, da);
-    };
-
-    // Loop A: primary segments at main_vertex (exclude ssm_sg)
-    // Prototype lines 794-1006
-    {
-        double len_pt1=-1e9, len_pt2=-1e9, len_ps1=-1e9, len_ps2=-1e9; // sentinel to rank
-
-        for (auto [eit,end] = boost::out_edges(main_vertex->get_descriptor(), graph); eit != end; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
-            if (!sg || sg == ssm_sg) continue;
-
-            double sg_len  = segment_track_length(sg) / units::cm;
-            double sg_dlen = segment_track_direct_length(sg) / units::cm;
-            int    sg_pdg  = std::abs(sg->has_particle_info() ? sg->particle_info()->pdg() : 0);
-            double sg_med  = segment_median_dQ_dx(sg) / (43e3/units::cm);
-            double sg_mdev = segment_track_max_deviation(sg) / units::cm;
-            double sg_ke_cal  = segment_cal_kine_dQdx(sg, recomb_model);
-            double sg_ke_rng  = cal_kine_range(sg_len, sg_pdg ? sg_pdg : 13, particle_data);
-            double sg_ke_rng_mu = cal_kine_range(sg_len, 13,   particle_data);
-            double sg_ke_rng_p  = cal_kine_range(sg_len, 2212, particle_data);
-            double sg_ke_rng_e  = cal_kine_range(sg_len, 11,   particle_data);
-            Vector sg_dir = segment_cal_dir_3vector(sg);
-
-            if (sg_len > 1) { n_prim_all_1++;  if (!seg_is_shower(sg)) n_prim_tracks_1++; }
-            if (sg_len > 3) { n_prim_all_3++;  if (!seg_is_shower(sg)) n_prim_tracks_3++; }
-            if (sg_len > 5) { n_prim_all_5++;  if (!seg_is_shower(sg)) n_prim_tracks_5++; }
-            if (sg_len > 8) { n_prim_all_8++;  if (!seg_is_shower(sg)) n_prim_tracks_8++; }
-            if (sg_len > 11){ n_prim_all_11++; if (!seg_is_shower(sg)) n_prim_tracks_11++; }
-
-            if (!seg_is_shower(sg)) {
-                // track: rank by length, keep top-2
-                if (sg_len < len_pt2) continue;
-
-                auto [dtr1,dal1] = daughter_counts(main_vertex, sg, 1.0,  false);
-                auto [dtr5,dal5] = daughter_counts(main_vertex, sg, 5.0,  false);
-                auto [dtr11,dal11]= daughter_counts(main_vertex, sg, 11.0, false);
-
-                if (sg_len < len_pt1) {
-                    // second longest
-                    len_pt2 = sg_len; direct_length_prim_track2 = sg_dlen;
-                    pdg_prim_track2 = sg_pdg; medium_dq_dx_prim_track2 = sg_med;
-                    max_dev_prim_track2 = sg_mdev; prim_track2_sg = sg;
-                    kine_energy_cal_prim_track2 = sg_ke_cal;
-                    kine_energy_range_prim_track2=sg_ke_rng; kine_energy_range_mu_prim_track2=sg_ke_rng_mu;
-                    kine_energy_range_p_prim_track2=sg_ke_rng_p; kine_energy_range_e_prim_track2=sg_ke_rng_e;
-                    dir_prim_track2 = sg_dir;
-                    add_daught_track_counts_1_prim_track2=dtr1; add_daught_all_counts_1_prim_track2=dal1;
-                    add_daught_track_counts_5_prim_track2=dtr5; add_daught_all_counts_5_prim_track2=dal5;
-                    add_daught_track_counts_11_prim_track2=dtr11; add_daught_all_counts_11_prim_track2=dal11;
-                } else {
-                    // new longest — demote current longest to second
-                    len_pt2 = len_pt1; direct_length_prim_track2 = direct_length_prim_track1;
-                    pdg_prim_track2 = pdg_prim_track1; medium_dq_dx_prim_track2 = medium_dq_dx_prim_track1;
-                    max_dev_prim_track2 = max_dev_prim_track1; prim_track2_sg = prim_track1_sg;
-                    kine_energy_cal_prim_track2 = kine_energy_cal_prim_track1;
-                    kine_energy_range_prim_track2=kine_energy_range_prim_track1;
-                    kine_energy_range_mu_prim_track2=kine_energy_range_mu_prim_track1;
-                    kine_energy_range_p_prim_track2=kine_energy_range_p_prim_track1;
-                    kine_energy_range_e_prim_track2=kine_energy_range_e_prim_track1;
-                    dir_prim_track2 = dir_prim_track1;
-                    add_daught_track_counts_1_prim_track2=add_daught_track_counts_1_prim_track1;
-                    add_daught_all_counts_1_prim_track2=add_daught_all_counts_1_prim_track1;
-                    add_daught_track_counts_5_prim_track2=add_daught_track_counts_5_prim_track1;
-                    add_daught_all_counts_5_prim_track2=add_daught_all_counts_5_prim_track1;
-                    add_daught_track_counts_11_prim_track2=add_daught_track_counts_11_prim_track1;
-                    add_daught_all_counts_11_prim_track2=add_daught_all_counts_11_prim_track1;
-
-                    len_pt1 = sg_len; direct_length_prim_track1 = sg_dlen;
-                    pdg_prim_track1 = sg_pdg; medium_dq_dx_prim_track1 = sg_med;
-                    max_dev_prim_track1 = sg_mdev; prim_track1_sg = sg;
-                    kine_energy_cal_prim_track1 = sg_ke_cal;
-                    kine_energy_range_prim_track1=sg_ke_rng; kine_energy_range_mu_prim_track1=sg_ke_rng_mu;
-                    kine_energy_range_p_prim_track1=sg_ke_rng_p; kine_energy_range_e_prim_track1=sg_ke_rng_e;
-                    dir_prim_track1 = sg_dir;
-                    add_daught_track_counts_1_prim_track1=dtr1; add_daught_all_counts_1_prim_track1=dal1;
-                    add_daught_track_counts_5_prim_track1=dtr5; add_daught_all_counts_5_prim_track1=dal5;
-                    add_daught_track_counts_11_prim_track1=dtr11; add_daught_all_counts_11_prim_track1=dal11;
-                }
-                // update length_prim_track1/2 after ranking
-                length_prim_track1 = len_pt1;
-                length_prim_track2 = len_pt2;
-            } else {
-                // shower: rank by length, keep top-2
-                if (sg_len < len_ps2) continue;
-
-                auto [dtr1,dal1] = daughter_counts(main_vertex, sg, 1.0,  true);
-                auto [dtr5,dal5] = daughter_counts(main_vertex, sg, 5.0,  true);
-                auto [dtr11,dal11]= daughter_counts(main_vertex, sg, 11.0, true);
-
-                // best kine energy: use shower's if available
-                double ke_best = sg_ke_rng;
-                auto it_sh = map_segment_in_shower.find(sg);
-                if (it_sh != map_segment_in_shower.end()) {
-                    ke_best = it_sh->second->get_kine_best();
-                    if (ke_best == 0.0) ke_best = it_sh->second->get_kine_charge();
-                }
-
-                if (sg_len < len_ps1) {
-                    len_ps2 = sg_len; direct_length_prim_shw2 = sg_dlen;
-                    pdg_prim_shw2 = sg_pdg; medium_dq_dx_prim_shw2 = sg_med;
-                    max_dev_prim_shw2 = sg_mdev; prim_shw2_sg = sg;
-                    kine_energy_cal_prim_shw2 = sg_ke_cal;
-                    kine_energy_range_prim_shw2=sg_ke_rng; kine_energy_range_mu_prim_shw2=sg_ke_rng_mu;
-                    kine_energy_range_p_prim_shw2=sg_ke_rng_p; kine_energy_range_e_prim_shw2=sg_ke_rng_e;
-                    kine_energy_best_prim_shw2=ke_best; dir_prim_shw2=sg_dir;
-                    add_daught_track_counts_1_prim_shw2=dtr1; add_daught_all_counts_1_prim_shw2=dal1;
-                    add_daught_track_counts_5_prim_shw2=dtr5; add_daught_all_counts_5_prim_shw2=dal5;
-                    add_daught_track_counts_11_prim_shw2=dtr11; add_daught_all_counts_11_prim_shw2=dal11;
-                } else {
-                    len_ps2 = len_ps1; direct_length_prim_shw2 = direct_length_prim_shw1;
-                    pdg_prim_shw2 = pdg_prim_shw1; medium_dq_dx_prim_shw2 = medium_dq_dx_prim_shw1;
-                    max_dev_prim_shw2 = max_dev_prim_shw1; prim_shw2_sg = prim_shw1_sg;
-                    kine_energy_cal_prim_shw2 = kine_energy_cal_prim_shw1;
-                    kine_energy_range_prim_shw2=kine_energy_range_prim_shw1;
-                    kine_energy_range_mu_prim_shw2=kine_energy_range_mu_prim_shw1;
-                    kine_energy_range_p_prim_shw2=kine_energy_range_p_prim_shw1;
-                    kine_energy_range_e_prim_shw2=kine_energy_range_e_prim_shw1;
-                    kine_energy_best_prim_shw2=kine_energy_best_prim_shw1; dir_prim_shw2=dir_prim_shw1;
-                    add_daught_track_counts_1_prim_shw2=add_daught_track_counts_1_prim_shw1;
-                    add_daught_all_counts_1_prim_shw2=add_daught_all_counts_1_prim_shw1;
-                    add_daught_track_counts_5_prim_shw2=add_daught_track_counts_5_prim_shw1;
-                    add_daught_all_counts_5_prim_shw2=add_daught_all_counts_5_prim_shw1;
-                    add_daught_track_counts_11_prim_shw2=add_daught_track_counts_11_prim_shw1;
-                    add_daught_all_counts_11_prim_shw2=add_daught_all_counts_11_prim_shw1;
-
-                    len_ps1 = sg_len; direct_length_prim_shw1 = sg_dlen;
-                    pdg_prim_shw1 = sg_pdg; medium_dq_dx_prim_shw1 = sg_med;
-                    max_dev_prim_shw1 = sg_mdev; prim_shw1_sg = sg;
-                    kine_energy_cal_prim_shw1 = sg_ke_cal;
-                    kine_energy_range_prim_shw1=sg_ke_rng; kine_energy_range_mu_prim_shw1=sg_ke_rng_mu;
-                    kine_energy_range_p_prim_shw1=sg_ke_rng_p; kine_energy_range_e_prim_shw1=sg_ke_rng_e;
-                    kine_energy_best_prim_shw1=ke_best; dir_prim_shw1=sg_dir;
-                    add_daught_track_counts_1_prim_shw1=dtr1; add_daught_all_counts_1_prim_shw1=dal1;
-                    add_daught_track_counts_5_prim_shw1=dtr5; add_daught_all_counts_5_prim_shw1=dal5;
-                    add_daught_track_counts_11_prim_shw1=dtr11; add_daught_all_counts_11_prim_shw1=dal11;
-                }
-                length_prim_shw1 = len_ps1;
-                length_prim_shw2 = len_ps2;
-            }
-        }
-    }
-
-    // Loop B: daughter segments at second_vtx (the far end of SSM)
-    // Prototype lines 1009-1224
-    SegmentPtr daught_track1_sg=nullptr, daught_track2_sg=nullptr;
-    SegmentPtr daught_shw1_sg=nullptr,   daught_shw2_sg=nullptr;
-    {
-        VertexPtr second_vtx = find_other_vertex(graph, ssm_sg, main_vertex);
-        if (second_vtx && second_vtx->descriptor_valid()) {
-            double len_dt1=-1e9, len_dt2=-1e9, len_ds1=-1e9, len_ds2=-1e9;
-
-            for (auto [eit,end] = boost::out_edges(second_vtx->get_descriptor(), graph); eit != end; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
-                if (!sg || sg == ssm_sg) continue;
-
-                double sg_len  = segment_track_length(sg) / units::cm;
-                double sg_dlen = segment_track_direct_length(sg) / units::cm;
-                int    sg_pdg  = std::abs(sg->has_particle_info() ? sg->particle_info()->pdg() : 0);
-                double sg_med  = segment_median_dQ_dx(sg) / (43e3/units::cm);
-                double sg_mdev = segment_track_max_deviation(sg) / units::cm;
-                double sg_ke_cal  = segment_cal_kine_dQdx(sg, recomb_model);
-                double sg_ke_rng  = cal_kine_range(sg_len, sg_pdg ? sg_pdg : 13, particle_data);
-                double sg_ke_rng_mu = cal_kine_range(sg_len, 13,   particle_data);
-                double sg_ke_rng_p  = cal_kine_range(sg_len, 2212, particle_data);
-                double sg_ke_rng_e  = cal_kine_range(sg_len, 11,   particle_data);
-                Vector sg_dir = segment_cal_dir_3vector(sg);
-
-                if (sg_len > 1) { n_daughter_all_1++;  if (!seg_is_shower(sg)) n_daughter_tracks_1++; }
-                if (sg_len > 3) { n_daughter_all_3++;  if (!seg_is_shower(sg)) n_daughter_tracks_3++; }
-                if (sg_len > 5) { n_daughter_all_5++;  if (!seg_is_shower(sg)) n_daughter_tracks_5++; }
-                if (sg_len > 8) { n_daughter_all_8++;  if (!seg_is_shower(sg)) n_daughter_tracks_8++; }
-                if (sg_len > 11){ n_daughter_all_11++; if (!seg_is_shower(sg)) n_daughter_tracks_11++; }
-
-                if (!seg_is_shower(sg)) {
-                    if (sg_len < len_dt2) continue;
-                    auto [dtr1,dal1] = daughter_counts(second_vtx, sg, 1.0,  false);
-                    auto [dtr5,dal5] = daughter_counts(second_vtx, sg, 5.0,  false);
-                    auto [dtr11,dal11]= daughter_counts(second_vtx, sg, 11.0, false);
-
-                    if (sg_len < len_dt1) {
-                        len_dt2=sg_len; direct_length_daught_track2=sg_dlen;
-                        pdg_daught_track2=sg_pdg; medium_dq_dx_daught_track2=sg_med;
-                        max_dev_daught_track2=sg_mdev; daught_track2_sg=sg;
-                        kine_energy_cal_daught_track2=sg_ke_cal;
-                        kine_energy_range_daught_track2=sg_ke_rng; kine_energy_range_mu_daught_track2=sg_ke_rng_mu;
-                        kine_energy_range_p_daught_track2=sg_ke_rng_p; kine_energy_range_e_daught_track2=sg_ke_rng_e;
-                        dir_daught_track2=sg_dir;
-                        add_daught_track_counts_1_daught_track2=dtr1; add_daught_all_counts_1_daught_track2=dal1;
-                        add_daught_track_counts_5_daught_track2=dtr5; add_daught_all_counts_5_daught_track2=dal5;
-                        add_daught_track_counts_11_daught_track2=dtr11; add_daught_all_counts_11_daught_track2=dal11;
-                    } else {
-                        len_dt2=len_dt1; direct_length_daught_track2=direct_length_daught_track1;
-                        pdg_daught_track2=pdg_daught_track1; medium_dq_dx_daught_track2=medium_dq_dx_daught_track1;
-                        max_dev_daught_track2=max_dev_daught_track1; daught_track2_sg=daught_track1_sg;
-                        kine_energy_cal_daught_track2=kine_energy_cal_daught_track1;
-                        kine_energy_range_daught_track2=kine_energy_range_daught_track1;
-                        kine_energy_range_mu_daught_track2=kine_energy_range_mu_daught_track1;
-                        kine_energy_range_p_daught_track2=kine_energy_range_p_daught_track1;
-                        kine_energy_range_e_daught_track2=kine_energy_range_e_daught_track1;
-                        dir_daught_track2=dir_daught_track1;
-                        add_daught_track_counts_1_daught_track2=add_daught_track_counts_1_daught_track1;
-                        add_daught_all_counts_1_daught_track2=add_daught_all_counts_1_daught_track1;
-                        add_daught_track_counts_5_daught_track2=add_daught_track_counts_5_daught_track1;
-                        add_daught_all_counts_5_daught_track2=add_daught_all_counts_5_daught_track1;
-                        add_daught_track_counts_11_daught_track2=add_daught_track_counts_11_daught_track1;
-                        add_daught_all_counts_11_daught_track2=add_daught_all_counts_11_daught_track1;
-
-                        len_dt1=sg_len; direct_length_daught_track1=sg_dlen;
-                        pdg_daught_track1=sg_pdg; medium_dq_dx_daught_track1=sg_med;
-                        max_dev_daught_track1=sg_mdev; daught_track1_sg=sg;
-                        kine_energy_cal_daught_track1=sg_ke_cal;
-                        kine_energy_range_daught_track1=sg_ke_rng; kine_energy_range_mu_daught_track1=sg_ke_rng_mu;
-                        kine_energy_range_p_daught_track1=sg_ke_rng_p; kine_energy_range_e_daught_track1=sg_ke_rng_e;
-                        dir_daught_track1=sg_dir;
-                        add_daught_track_counts_1_daught_track1=dtr1; add_daught_all_counts_1_daught_track1=dal1;
-                        add_daught_track_counts_5_daught_track1=dtr5; add_daught_all_counts_5_daught_track1=dal5;
-                        add_daught_track_counts_11_daught_track1=dtr11; add_daught_all_counts_11_daught_track1=dal11;
-                    }
-                    length_daught_track1 = len_dt1; length_daught_track2 = len_dt2;
-                } else {
-                    if (sg_len < len_ds2) continue;
-                    auto [dtr1,dal1] = daughter_counts(second_vtx, sg, 1.0,  true);
-                    auto [dtr5,dal5] = daughter_counts(second_vtx, sg, 5.0,  true);
-                    auto [dtr11,dal11]= daughter_counts(second_vtx, sg, 11.0, true);
-
-                    double ke_best = sg_ke_rng;
-                    auto it_sh = map_segment_in_shower.find(sg);
-                    if (it_sh != map_segment_in_shower.end()) {
-                        ke_best = it_sh->second->get_kine_best();
-                        if (ke_best == 0.0) ke_best = it_sh->second->get_kine_charge();
-                    }
-
-                    if (sg_len < len_ds1) {
-                        len_ds2=sg_len; direct_length_daught_shw2=sg_dlen;
-                        pdg_daught_shw2=sg_pdg; medium_dq_dx_daught_shw2=sg_med;
-                        max_dev_daught_shw2=sg_mdev; daught_shw2_sg=sg;
-                        kine_energy_cal_daught_shw2=sg_ke_cal;
-                        kine_energy_range_daught_shw2=sg_ke_rng; kine_energy_range_mu_daught_shw2=sg_ke_rng_mu;
-                        kine_energy_range_p_daught_shw2=sg_ke_rng_p; kine_energy_range_e_daught_shw2=sg_ke_rng_e;
-                        kine_energy_best_daught_shw2=ke_best; dir_daught_shw2=sg_dir;
-                        add_daught_track_counts_1_daught_shw2=dtr1; add_daught_all_counts_1_daught_shw2=dal1;
-                        add_daught_track_counts_5_daught_shw2=dtr5; add_daught_all_counts_5_daught_shw2=dal5;
-                        add_daught_track_counts_11_daught_shw2=dtr11; add_daught_all_counts_11_daught_shw2=dal11;
-                    } else {
-                        len_ds2=len_ds1; direct_length_daught_shw2=direct_length_daught_shw1;
-                        pdg_daught_shw2=pdg_daught_shw1; medium_dq_dx_daught_shw2=medium_dq_dx_daught_shw1;
-                        max_dev_daught_shw2=max_dev_daught_shw1; daught_shw2_sg=daught_shw1_sg;
-                        kine_energy_cal_daught_shw2=kine_energy_cal_daught_shw1;
-                        kine_energy_range_daught_shw2=kine_energy_range_daught_shw1;
-                        kine_energy_range_mu_daught_shw2=kine_energy_range_mu_daught_shw1;
-                        kine_energy_range_p_daught_shw2=kine_energy_range_p_daught_shw1;
-                        kine_energy_range_e_daught_shw2=kine_energy_range_e_daught_shw1;
-                        kine_energy_best_daught_shw2=kine_energy_best_daught_shw1; dir_daught_shw2=dir_daught_shw1;
-                        add_daught_track_counts_1_daught_shw2=add_daught_track_counts_1_daught_shw1;
-                        add_daught_all_counts_1_daught_shw2=add_daught_all_counts_1_daught_shw1;
-                        add_daught_track_counts_5_daught_shw2=add_daught_track_counts_5_daught_shw1;
-                        add_daught_all_counts_5_daught_shw2=add_daught_all_counts_5_daught_shw1;
-                        add_daught_track_counts_11_daught_shw2=add_daught_track_counts_11_daught_shw1;
-                        add_daught_all_counts_11_daught_shw2=add_daught_all_counts_11_daught_shw1;
-
-                        len_ds1=sg_len; direct_length_daught_shw1=sg_dlen;
-                        pdg_daught_shw1=sg_pdg; medium_dq_dx_daught_shw1=sg_med;
-                        max_dev_daught_shw1=sg_mdev; daught_shw1_sg=sg;
-                        kine_energy_cal_daught_shw1=sg_ke_cal;
-                        kine_energy_range_daught_shw1=sg_ke_rng; kine_energy_range_mu_daught_shw1=sg_ke_rng_mu;
-                        kine_energy_range_p_daught_shw1=sg_ke_rng_p; kine_energy_range_e_daught_shw1=sg_ke_rng_e;
-                        kine_energy_best_daught_shw1=ke_best; dir_daught_shw1=sg_dir;
-                        add_daught_track_counts_1_daught_shw1=dtr1; add_daught_all_counts_1_daught_shw1=dal1;
-                        add_daught_track_counts_5_daught_shw1=dtr5; add_daught_all_counts_5_daught_shw1=dal5;
-                        add_daught_track_counts_11_daught_shw1=dtr11; add_daught_all_counts_11_daught_shw1=dal11;
-                    }
-                    length_daught_shw1 = len_ds1; length_daught_shw2 = len_ds2;
-                }
-            }
-        }
-    }
+    auto pb_prim   = fill_particle_block_at_vtx(*this, graph, main_vertex, ssm_sg,
+                         map_segment_in_shower, particle_data, recomb_model);
+    VertexPtr second_vtx = find_other_vertex(graph, ssm_sg, main_vertex);
+    auto pb_daught = fill_particle_block_at_vtx(*this, graph, second_vtx, ssm_sg,
+                         map_segment_in_shower, particle_data, recomb_model);
 
     // PID scores for secondary particles (prototype lines 1226-1338)
-    double score_mu_fwd_prim_track1=-999, score_p_fwd_prim_track1=-999, score_e_fwd_prim_track1=-999;
-    double score_mu_bck_prim_track1=-999, score_p_bck_prim_track1=-999, score_e_bck_prim_track1=-999;
-    double score_mu_fwd_prim_track2=-999, score_p_fwd_prim_track2=-999, score_e_fwd_prim_track2=-999;
-    double score_mu_bck_prim_track2=-999, score_p_bck_prim_track2=-999, score_e_bck_prim_track2=-999;
-    double score_mu_fwd_daught_track1=-999, score_p_fwd_daught_track1=-999, score_e_fwd_daught_track1=-999;
-    double score_mu_bck_daught_track1=-999, score_p_bck_daught_track1=-999, score_e_bck_daught_track1=-999;
-    double score_mu_fwd_daught_track2=-999, score_p_fwd_daught_track2=-999, score_e_fwd_daught_track2=-999;
-    double score_mu_bck_daught_track2=-999, score_p_bck_daught_track2=-999, score_e_bck_daught_track2=-999;
-    double score_mu_fwd_prim_shw1=-999, score_p_fwd_prim_shw1=-999, score_e_fwd_prim_shw1=-999;
-    double score_mu_bck_prim_shw1=-999, score_p_bck_prim_shw1=-999, score_e_bck_prim_shw1=-999;
-    double score_mu_fwd_prim_shw2=-999, score_p_fwd_prim_shw2=-999, score_e_fwd_prim_shw2=-999;
-    double score_mu_bck_prim_shw2=-999, score_p_bck_prim_shw2=-999, score_e_bck_prim_shw2=-999;
-    double score_mu_fwd_daught_shw1=-999, score_p_fwd_daught_shw1=-999, score_e_fwd_daught_shw1=-999;
-    double score_mu_bck_daught_shw1=-999, score_p_bck_daught_shw1=-999, score_e_bck_daught_shw1=-999;
-    double score_mu_fwd_daught_shw2=-999, score_p_fwd_daught_shw2=-999, score_e_fwd_daught_shw2=-999;
-    double score_mu_bck_daught_shw2=-999, score_p_bck_daught_shw2=-999, score_e_bck_daught_shw2=-999;
-
-    auto apply_scores = [&](SegmentPtr sg,
-                             double& smu_f, double& sp_f, double& se_f,
-                             double& smu_b, double& sp_b, double& se_b) {
-        if (!sg) return;
-        auto sc2 = get_scores(sg, particle_data);
-        smu_f=sc2[0]; sp_f=sc2[1]; se_f=sc2[2];
-        smu_b=sc2[3]; sp_b=sc2[4]; se_b=sc2[5];
-        if (sg->dirsign() == -1) {
-            std::swap(smu_f,smu_b); std::swap(sp_f,sp_b); std::swap(se_f,se_b);
-        }
-    };
-    if (length_prim_track1   > 0) apply_scores(prim_track1_sg,   score_mu_fwd_prim_track1,   score_p_fwd_prim_track1,   score_e_fwd_prim_track1,   score_mu_bck_prim_track1,   score_p_bck_prim_track1,   score_e_bck_prim_track1);
-    if (length_prim_track2   > 0) apply_scores(prim_track2_sg,   score_mu_fwd_prim_track2,   score_p_fwd_prim_track2,   score_e_fwd_prim_track2,   score_mu_bck_prim_track2,   score_p_bck_prim_track2,   score_e_bck_prim_track2);
-    if (length_daught_track1 > 0) apply_scores(daught_track1_sg, score_mu_fwd_daught_track1, score_p_fwd_daught_track1, score_e_fwd_daught_track1, score_mu_bck_daught_track1, score_p_bck_daught_track1, score_e_bck_daught_track1);
-    if (length_daught_track2 > 0) apply_scores(daught_track2_sg, score_mu_fwd_daught_track2, score_p_fwd_daught_track2, score_e_fwd_daught_track2, score_mu_bck_daught_track2, score_p_bck_daught_track2, score_e_bck_daught_track2);
-    if (length_prim_shw1     > 0) apply_scores(prim_shw1_sg,     score_mu_fwd_prim_shw1,     score_p_fwd_prim_shw1,     score_e_fwd_prim_shw1,     score_mu_bck_prim_shw1,     score_p_bck_prim_shw1,     score_e_bck_prim_shw1);
-    if (length_prim_shw2     > 0) apply_scores(prim_shw2_sg,     score_mu_fwd_prim_shw2,     score_p_fwd_prim_shw2,     score_e_fwd_prim_shw2,     score_mu_bck_prim_shw2,     score_p_bck_prim_shw2,     score_e_bck_prim_shw2);
-    if (length_daught_shw1   > 0) apply_scores(daught_shw1_sg,   score_mu_fwd_daught_shw1,   score_p_fwd_daught_shw1,   score_e_fwd_daught_shw1,   score_mu_bck_daught_shw1,   score_p_bck_daught_shw1,   score_e_bck_daught_shw1);
-    if (length_daught_shw2   > 0) apply_scores(daught_shw2_sg,   score_mu_fwd_daught_shw2,   score_p_fwd_daught_shw2,   score_e_fwd_daught_shw2,   score_mu_bck_daught_shw2,   score_p_bck_daught_shw2,   score_e_bck_daught_shw2);
+    // Scores are now computed inside fill_particle_block_at_vtx and stored in
+    // each ParticleSlot (score_mu_fwd / score_p_fwd / score_e_fwd / _bck).
 
     // ------------------------------------------------------------------
     // Phase D: backwards_muon swap + momentum + off-vertex loop
     // Prototype lines 1340-1749
     // ------------------------------------------------------------------
 
-    // Swap prim<->daughter if muon is backwards (prototype lines 1340-1464)
-    if (backwards_muon) {
-        std::swap(n_prim_all_1,    n_daughter_all_1);
-        std::swap(n_prim_tracks_1, n_daughter_tracks_1);
-        std::swap(n_prim_all_3,    n_daughter_all_3);
-        std::swap(n_prim_tracks_3, n_daughter_tracks_3);
-        std::swap(n_prim_all_5,    n_daughter_all_5);
-        std::swap(n_prim_tracks_5, n_daughter_tracks_5);
-        std::swap(n_prim_all_8,    n_daughter_all_8);
-        std::swap(n_prim_tracks_8, n_daughter_tracks_8);
-        std::swap(n_prim_all_11,   n_daughter_all_11);
-        std::swap(n_prim_tracks_11,n_daughter_tracks_11);
-
-        // swap all prim_track1 <-> daught_track1 sub-fields
-        #define SWAP_PAIR(a,b) std::swap(a,b)
-        SWAP_PAIR(pdg_prim_track1,  pdg_daught_track1);
-        SWAP_PAIR(length_prim_track1, length_daught_track1);
-        SWAP_PAIR(direct_length_prim_track1, direct_length_daught_track1);
-        SWAP_PAIR(max_dev_prim_track1, max_dev_daught_track1);
-        SWAP_PAIR(kine_energy_range_prim_track1, kine_energy_range_daught_track1);
-        SWAP_PAIR(kine_energy_range_mu_prim_track1, kine_energy_range_mu_daught_track1);
-        SWAP_PAIR(kine_energy_range_p_prim_track1,  kine_energy_range_p_daught_track1);
-        SWAP_PAIR(kine_energy_range_e_prim_track1,  kine_energy_range_e_daught_track1);
-        SWAP_PAIR(kine_energy_cal_prim_track1, kine_energy_cal_daught_track1);
-        SWAP_PAIR(medium_dq_dx_prim_track1, medium_dq_dx_daught_track1);
-        SWAP_PAIR(dir_prim_track1, dir_daught_track1);
-        SWAP_PAIR(prim_track1_sg,  daught_track1_sg);
-        SWAP_PAIR(score_mu_fwd_prim_track1, score_mu_fwd_daught_track1);
-        SWAP_PAIR(score_p_fwd_prim_track1,  score_p_fwd_daught_track1);
-        SWAP_PAIR(score_e_fwd_prim_track1,  score_e_fwd_daught_track1);
-        SWAP_PAIR(score_mu_bck_prim_track1, score_mu_bck_daught_track1);
-        SWAP_PAIR(score_p_bck_prim_track1,  score_p_bck_daught_track1);
-        SWAP_PAIR(score_e_bck_prim_track1,  score_e_bck_daught_track1);
-        SWAP_PAIR(add_daught_track_counts_1_prim_track1, add_daught_track_counts_1_daught_track1);
-        SWAP_PAIR(add_daught_all_counts_1_prim_track1,   add_daught_all_counts_1_daught_track1);
-        SWAP_PAIR(add_daught_track_counts_5_prim_track1, add_daught_track_counts_5_daught_track1);
-        SWAP_PAIR(add_daught_all_counts_5_prim_track1,   add_daught_all_counts_5_daught_track1);
-        SWAP_PAIR(add_daught_track_counts_11_prim_track1, add_daught_track_counts_11_daught_track1);
-        SWAP_PAIR(add_daught_all_counts_11_prim_track1,   add_daught_all_counts_11_daught_track1);
-
-        SWAP_PAIR(pdg_prim_track2,  pdg_daught_track2);
-        SWAP_PAIR(length_prim_track2, length_daught_track2);
-        SWAP_PAIR(direct_length_prim_track2, direct_length_daught_track2);
-        SWAP_PAIR(max_dev_prim_track2, max_dev_daught_track2);
-        SWAP_PAIR(kine_energy_range_prim_track2, kine_energy_range_daught_track2);
-        SWAP_PAIR(kine_energy_range_mu_prim_track2, kine_energy_range_mu_daught_track2);
-        SWAP_PAIR(kine_energy_range_p_prim_track2,  kine_energy_range_p_daught_track2);
-        SWAP_PAIR(kine_energy_range_e_prim_track2,  kine_energy_range_e_daught_track2);
-        SWAP_PAIR(kine_energy_cal_prim_track2, kine_energy_cal_daught_track2);
-        SWAP_PAIR(medium_dq_dx_prim_track2, medium_dq_dx_daught_track2);
-        SWAP_PAIR(dir_prim_track2, dir_daught_track2);
-        SWAP_PAIR(score_mu_fwd_prim_track2, score_mu_fwd_daught_track2);
-        SWAP_PAIR(score_p_fwd_prim_track2,  score_p_fwd_daught_track2);
-        SWAP_PAIR(score_e_fwd_prim_track2,  score_e_fwd_daught_track2);
-        SWAP_PAIR(score_mu_bck_prim_track2, score_mu_bck_daught_track2);
-        SWAP_PAIR(score_p_bck_prim_track2,  score_p_bck_daught_track2);
-        SWAP_PAIR(score_e_bck_prim_track2,  score_e_bck_daught_track2);
-        SWAP_PAIR(add_daught_track_counts_1_prim_track2, add_daught_track_counts_1_daught_track2);
-        SWAP_PAIR(add_daught_all_counts_1_prim_track2,   add_daught_all_counts_1_daught_track2);
-        SWAP_PAIR(add_daught_track_counts_5_prim_track2, add_daught_track_counts_5_daught_track2);
-        SWAP_PAIR(add_daught_all_counts_5_prim_track2,   add_daught_all_counts_5_daught_track2);
-        SWAP_PAIR(add_daught_track_counts_11_prim_track2, add_daught_track_counts_11_daught_track2);
-        SWAP_PAIR(add_daught_all_counts_11_prim_track2,   add_daught_all_counts_11_daught_track2);
-
-        SWAP_PAIR(pdg_prim_shw1,  pdg_daught_shw1);
-        SWAP_PAIR(length_prim_shw1, length_daught_shw1);
-        SWAP_PAIR(direct_length_prim_shw1, direct_length_daught_shw1);
-        SWAP_PAIR(max_dev_prim_shw1, max_dev_daught_shw1);
-        SWAP_PAIR(kine_energy_range_prim_shw1, kine_energy_range_daught_shw1);
-        SWAP_PAIR(kine_energy_range_mu_prim_shw1, kine_energy_range_mu_daught_shw1);
-        SWAP_PAIR(kine_energy_range_p_prim_shw1, kine_energy_range_p_daught_shw1);
-        SWAP_PAIR(kine_energy_range_e_prim_shw1, kine_energy_range_e_daught_shw1);
-        SWAP_PAIR(kine_energy_cal_prim_shw1, kine_energy_cal_daught_shw1);
-        SWAP_PAIR(kine_energy_best_prim_shw1, kine_energy_best_daught_shw1);
-        SWAP_PAIR(medium_dq_dx_prim_shw1, medium_dq_dx_daught_shw1);
-        SWAP_PAIR(dir_prim_shw1, dir_daught_shw1);
-        SWAP_PAIR(score_mu_fwd_prim_shw1, score_mu_fwd_daught_shw1);
-        SWAP_PAIR(score_p_fwd_prim_shw1,  score_p_fwd_daught_shw1);
-        SWAP_PAIR(score_e_fwd_prim_shw1,  score_e_fwd_daught_shw1);
-        SWAP_PAIR(score_mu_bck_prim_shw1, score_mu_bck_daught_shw1);
-        SWAP_PAIR(score_p_bck_prim_shw1,  score_p_bck_daught_shw1);
-        SWAP_PAIR(score_e_bck_prim_shw1,  score_e_bck_daught_shw1);
-        SWAP_PAIR(add_daught_track_counts_1_prim_shw1, add_daught_track_counts_1_daught_shw1);
-        SWAP_PAIR(add_daught_all_counts_1_prim_shw1,   add_daught_all_counts_1_daught_shw1);
-        SWAP_PAIR(add_daught_track_counts_5_prim_shw1, add_daught_track_counts_5_daught_shw1);
-        SWAP_PAIR(add_daught_all_counts_5_prim_shw1,   add_daught_all_counts_5_daught_shw1);
-        SWAP_PAIR(add_daught_track_counts_11_prim_shw1, add_daught_track_counts_11_daught_shw1);
-        SWAP_PAIR(add_daught_all_counts_11_prim_shw1,   add_daught_all_counts_11_daught_shw1);
-
-        SWAP_PAIR(pdg_prim_shw2,  pdg_daught_shw2);
-        SWAP_PAIR(length_prim_shw2, length_daught_shw2);
-        SWAP_PAIR(direct_length_prim_shw2, direct_length_daught_shw2);
-        SWAP_PAIR(max_dev_prim_shw2, max_dev_daught_shw2);
-        SWAP_PAIR(kine_energy_range_prim_shw2, kine_energy_range_daught_shw2);
-        SWAP_PAIR(kine_energy_range_mu_prim_shw2, kine_energy_range_mu_daught_shw2);
-        SWAP_PAIR(kine_energy_range_p_prim_shw2, kine_energy_range_p_daught_shw2);
-        SWAP_PAIR(kine_energy_range_e_prim_shw2, kine_energy_range_e_daught_shw2);
-        SWAP_PAIR(kine_energy_cal_prim_shw2, kine_energy_cal_daught_shw2);
-        SWAP_PAIR(kine_energy_best_prim_shw2, kine_energy_best_daught_shw2);
-        SWAP_PAIR(medium_dq_dx_prim_shw2, medium_dq_dx_daught_shw2);
-        SWAP_PAIR(dir_prim_shw2, dir_daught_shw2);
-        SWAP_PAIR(score_mu_fwd_prim_shw2, score_mu_fwd_daught_shw2);
-        SWAP_PAIR(score_p_fwd_prim_shw2,  score_p_fwd_daught_shw2);
-        SWAP_PAIR(score_e_fwd_prim_shw2,  score_e_fwd_daught_shw2);
-        SWAP_PAIR(score_mu_bck_prim_shw2, score_mu_bck_daught_shw2);
-        SWAP_PAIR(score_p_bck_prim_shw2,  score_p_bck_daught_shw2);
-        SWAP_PAIR(score_e_bck_prim_shw2,  score_e_bck_daught_shw2);
-        SWAP_PAIR(add_daught_track_counts_1_prim_shw2, add_daught_track_counts_1_daught_shw2);
-        SWAP_PAIR(add_daught_all_counts_1_prim_shw2,   add_daught_all_counts_1_daught_shw2);
-        SWAP_PAIR(add_daught_track_counts_5_prim_shw2, add_daught_track_counts_5_daught_shw2);
-        SWAP_PAIR(add_daught_all_counts_5_prim_shw2,   add_daught_all_counts_5_daught_shw2);
-        SWAP_PAIR(add_daught_track_counts_11_prim_shw2, add_daught_track_counts_11_daught_shw2);
-        SWAP_PAIR(add_daught_all_counts_11_prim_shw2,   add_daught_all_counts_11_daught_shw2);
-        #undef SWAP_PAIR
-    }
+    // Swap prim<->daughter if muon is backwards (prototype lines 1340-1464).
+    // ParticleBlock holds all fields, so a single std::swap replaces ~115 SWAP_PAIR lines.
+    if (backwards_muon) std::swap(pb_prim, pb_daught);
 
     // momentum vectors and SSM vertex assignment (prototype lines 1466-1562)
     // mass from particle_data; momentum magnitude = sqrt(KE^2 + 2*KE*m)
@@ -1458,14 +1079,22 @@ bool PatternAlgorithms::ssm_tagger(
     };
 
     Vector mom     = make_mom(init_dir_10, kine_energy, 13);
-    Vector mom_prim_track1  = (length_prim_track1  > 0 && prim_track1_sg)  ? make_mom(dir_prim_track1,  kine_energy_range_prim_track1,  (int)pdg_prim_track1)  : Vector(0,0,0);
-    Vector mom_prim_track2  = (length_prim_track2  > 0 && prim_track2_sg)  ? make_mom(dir_prim_track2,  kine_energy_range_prim_track2,  (int)pdg_prim_track2)  : Vector(0,0,0);
-    Vector mom_daught_track1= (length_daught_track1> 0 && daught_track1_sg)? make_mom(dir_daught_track1,kine_energy_range_daught_track1,(int)pdg_daught_track1): Vector(0,0,0);
-    Vector mom_daught_track2= (length_daught_track2> 0 && daught_track2_sg)? make_mom(dir_daught_track2,kine_energy_range_daught_track2,(int)pdg_daught_track2): Vector(0,0,0);
-    Vector mom_prim_shw1    = (length_prim_shw1    > 0 && prim_shw1_sg)    ? make_mom(dir_prim_shw1,    kine_energy_range_prim_shw1,    (int)pdg_prim_shw1)    : Vector(0,0,0);
-    Vector mom_prim_shw2    = (length_prim_shw2    > 0 && prim_shw2_sg)    ? make_mom(dir_prim_shw2,    kine_energy_range_prim_shw2,    (int)pdg_prim_shw2)    : Vector(0,0,0);
-    Vector mom_daught_shw1  = (length_daught_shw1  > 0 && daught_shw1_sg)  ? make_mom(dir_daught_shw1,  kine_energy_best_daught_shw1,   (int)pdg_daught_shw1)  : Vector(0,0,0);
-    Vector mom_daught_shw2  = (length_daught_shw2  > 0 && daught_shw2_sg)  ? make_mom(dir_daught_shw2,  kine_energy_best_daught_shw2,   (int)pdg_daught_shw2)  : Vector(0,0,0);
+    Vector mom_prim_track1  = (pb_prim.track1.length > 0 && pb_prim.track1.sg)
+        ? make_mom(pb_prim.track1.dir,   pb_prim.track1.ke_rng,  pb_prim.track1.pdg)  : Vector(0,0,0);
+    Vector mom_prim_track2  = (pb_prim.track2.length > 0 && pb_prim.track2.sg)
+        ? make_mom(pb_prim.track2.dir,   pb_prim.track2.ke_rng,  pb_prim.track2.pdg)  : Vector(0,0,0);
+    Vector mom_daught_track1= (pb_daught.track1.length > 0 && pb_daught.track1.sg)
+        ? make_mom(pb_daught.track1.dir, pb_daught.track1.ke_rng,pb_daught.track1.pdg): Vector(0,0,0);
+    Vector mom_daught_track2= (pb_daught.track2.length > 0 && pb_daught.track2.sg)
+        ? make_mom(pb_daught.track2.dir, pb_daught.track2.ke_rng,pb_daught.track2.pdg): Vector(0,0,0);
+    Vector mom_prim_shw1    = (pb_prim.shw1.length > 0 && pb_prim.shw1.sg)
+        ? make_mom(pb_prim.shw1.dir,     pb_prim.shw1.ke_rng,    pb_prim.shw1.pdg)    : Vector(0,0,0);
+    Vector mom_prim_shw2    = (pb_prim.shw2.length > 0 && pb_prim.shw2.sg)
+        ? make_mom(pb_prim.shw2.dir,     pb_prim.shw2.ke_rng,    pb_prim.shw2.pdg)    : Vector(0,0,0);
+    Vector mom_daught_shw1  = (pb_daught.shw1.length > 0 && pb_daught.shw1.sg)
+        ? make_mom(pb_daught.shw1.dir,   pb_daught.shw1.ke_best, pb_daught.shw1.pdg)  : Vector(0,0,0);
+    Vector mom_daught_shw2  = (pb_daught.shw2.length > 0 && pb_daught.shw2.sg)
+        ? make_mom(pb_daught.shw2.dir,   pb_daught.shw2.ke_best, pb_daught.shw2.pdg)  : Vector(0,0,0);
 
     // ssm vertex assignment (prototype line 1558-1562)
     VertexPtr ssm_main_vtx   = main_vertex;
@@ -1638,8 +1267,8 @@ bool PatternAlgorithms::ssm_tagger(
 
     // flag_st_kdar: KDAR cut-based decision (prototype lines 1871-1882)
     bool flag_st_kdar = false;
-    if (n_prim_tracks_1==0 && n_prim_all_3==0 && n_daughter_tracks_5==0 &&
-        n_daughter_all_5<2 && Nsm_wivtx==1 &&
+    if (pb_prim.n_tracks_1==0 && pb_prim.n_all_3==0 && pb_daught.n_tracks_5==0 &&
+        pb_daught.n_all_5<2 && Nsm_wivtx==1 &&
         !(pio_kine.mass > 70 && pio_kine.mass < 200))
         flag_st_kdar = true;
 
@@ -1679,163 +1308,163 @@ bool PatternAlgorithms::ssm_tagger(
     ti.ssm_max_dev = (float)max_dev;
 
     // particle counts
-    ti.ssm_n_prim_tracks_1=(float)n_prim_tracks_1; ti.ssm_n_prim_tracks_3=(float)n_prim_tracks_3; ti.ssm_n_prim_tracks_5=(float)n_prim_tracks_5;
-    ti.ssm_n_prim_tracks_8=(float)n_prim_tracks_8; ti.ssm_n_prim_tracks_11=(float)n_prim_tracks_11;
-    ti.ssm_n_all_tracks_1=(float)n_prim_all_1; ti.ssm_n_all_tracks_3=(float)n_prim_all_3; ti.ssm_n_all_tracks_5=(float)n_prim_all_5;
-    ti.ssm_n_all_tracks_8=(float)n_prim_all_8; ti.ssm_n_all_tracks_11=(float)n_prim_all_11;
-    ti.ssm_n_daughter_tracks_1=(float)n_daughter_tracks_1; ti.ssm_n_daughter_tracks_3=(float)n_daughter_tracks_3; ti.ssm_n_daughter_tracks_5=(float)n_daughter_tracks_5;
-    ti.ssm_n_daughter_tracks_8=(float)n_daughter_tracks_8; ti.ssm_n_daughter_tracks_11=(float)n_daughter_tracks_11;
-    ti.ssm_n_daughter_all_1=(float)n_daughter_all_1; ti.ssm_n_daughter_all_3=(float)n_daughter_all_3; ti.ssm_n_daughter_all_5=(float)n_daughter_all_5;
-    ti.ssm_n_daughter_all_8=(float)n_daughter_all_8; ti.ssm_n_daughter_all_11=(float)n_daughter_all_11;
+    ti.ssm_n_prim_tracks_1=(float)pb_prim.n_tracks_1; ti.ssm_n_prim_tracks_3=(float)pb_prim.n_tracks_3; ti.ssm_n_prim_tracks_5=(float)pb_prim.n_tracks_5;
+    ti.ssm_n_prim_tracks_8=(float)pb_prim.n_tracks_8; ti.ssm_n_prim_tracks_11=(float)pb_prim.n_tracks_11;
+    ti.ssm_n_all_tracks_1=(float)pb_prim.n_all_1; ti.ssm_n_all_tracks_3=(float)pb_prim.n_all_3; ti.ssm_n_all_tracks_5=(float)pb_prim.n_all_5;
+    ti.ssm_n_all_tracks_8=(float)pb_prim.n_all_8; ti.ssm_n_all_tracks_11=(float)pb_prim.n_all_11;
+    ti.ssm_n_daughter_tracks_1=(float)pb_daught.n_tracks_1; ti.ssm_n_daughter_tracks_3=(float)pb_daught.n_tracks_3; ti.ssm_n_daughter_tracks_5=(float)pb_daught.n_tracks_5;
+    ti.ssm_n_daughter_tracks_8=(float)pb_daught.n_tracks_8; ti.ssm_n_daughter_tracks_11=(float)pb_daught.n_tracks_11;
+    ti.ssm_n_daughter_all_1=(float)pb_daught.n_all_1; ti.ssm_n_daughter_all_3=(float)pb_daught.n_all_3; ti.ssm_n_daughter_all_5=(float)pb_daught.n_all_5;
+    ti.ssm_n_daughter_all_8=(float)pb_daught.n_all_8; ti.ssm_n_daughter_all_11=(float)pb_daught.n_all_11;
 
     // prim track1
     auto lr = [](double dl, double l) -> float { return (dl>0&&l>0)?(float)(dl/l):-999.f; };
-    ti.ssm_prim_track1_pdg=(float)pdg_prim_track1;
-    ti.ssm_prim_track1_score_mu_fwd=(float)score_mu_fwd_prim_track1; ti.ssm_prim_track1_score_p_fwd=(float)score_p_fwd_prim_track1; ti.ssm_prim_track1_score_e_fwd=(float)score_e_fwd_prim_track1;
-    ti.ssm_prim_track1_score_mu_bck=(float)score_mu_bck_prim_track1; ti.ssm_prim_track1_score_p_bck=(float)score_p_bck_prim_track1; ti.ssm_prim_track1_score_e_bck=(float)score_e_bck_prim_track1;
-    ti.ssm_prim_track1_length=(float)length_prim_track1; ti.ssm_prim_track1_direct_length=(float)direct_length_prim_track1;
-    ti.ssm_prim_track1_length_ratio=lr(direct_length_prim_track1,length_prim_track1);
-    ti.ssm_prim_track1_max_dev=(float)max_dev_prim_track1;
-    ti.ssm_prim_track1_kine_energy_range=(float)kine_energy_range_prim_track1;
-    ti.ssm_prim_track1_kine_energy_range_mu=(float)kine_energy_range_mu_prim_track1;
-    ti.ssm_prim_track1_kine_energy_range_p=(float)kine_energy_range_p_prim_track1;
-    ti.ssm_prim_track1_kine_energy_range_e=(float)kine_energy_range_e_prim_track1;
-    ti.ssm_prim_track1_kine_energy_cal=(float)kine_energy_cal_prim_track1;
-    ti.ssm_prim_track1_medium_dq_dx=(float)medium_dq_dx_prim_track1;
-    ti.ssm_prim_track1_x_dir=(float)dir_prim_track1.x(); ti.ssm_prim_track1_y_dir=(float)dir_prim_track1.y(); ti.ssm_prim_track1_z_dir=(float)dir_prim_track1.z();
-    ti.ssm_prim_track1_add_daught_track_counts_1=(float)add_daught_track_counts_1_prim_track1; ti.ssm_prim_track1_add_daught_all_counts_1=(float)add_daught_all_counts_1_prim_track1;
-    ti.ssm_prim_track1_add_daught_track_counts_5=(float)add_daught_track_counts_5_prim_track1; ti.ssm_prim_track1_add_daught_all_counts_5=(float)add_daught_all_counts_5_prim_track1;
-    ti.ssm_prim_track1_add_daught_track_counts_11=(float)add_daught_track_counts_11_prim_track1; ti.ssm_prim_track1_add_daught_all_counts_11=(float)add_daught_all_counts_11_prim_track1;
+    ti.ssm_prim_track1_pdg=(float)pb_prim.track1.pdg;
+    ti.ssm_prim_track1_score_mu_fwd=(float)pb_prim.track1.score_mu_fwd; ti.ssm_prim_track1_score_p_fwd=(float)pb_prim.track1.score_p_fwd; ti.ssm_prim_track1_score_e_fwd=(float)pb_prim.track1.score_e_fwd;
+    ti.ssm_prim_track1_score_mu_bck=(float)pb_prim.track1.score_mu_bck; ti.ssm_prim_track1_score_p_bck=(float)pb_prim.track1.score_p_bck; ti.ssm_prim_track1_score_e_bck=(float)pb_prim.track1.score_e_bck;
+    ti.ssm_prim_track1_length=(float)pb_prim.track1.length; ti.ssm_prim_track1_direct_length=(float)pb_prim.track1.direct_length;
+    ti.ssm_prim_track1_length_ratio=lr(pb_prim.track1.direct_length,pb_prim.track1.length);
+    ti.ssm_prim_track1_max_dev=(float)pb_prim.track1.max_dev;
+    ti.ssm_prim_track1_kine_energy_range=(float)pb_prim.track1.ke_rng;
+    ti.ssm_prim_track1_kine_energy_range_mu=(float)pb_prim.track1.ke_rng_mu;
+    ti.ssm_prim_track1_kine_energy_range_p=(float)pb_prim.track1.ke_rng_p;
+    ti.ssm_prim_track1_kine_energy_range_e=(float)pb_prim.track1.ke_rng_e;
+    ti.ssm_prim_track1_kine_energy_cal=(float)pb_prim.track1.ke_cal;
+    ti.ssm_prim_track1_medium_dq_dx=(float)pb_prim.track1.medium_dq_dx;
+    ti.ssm_prim_track1_x_dir=(float)pb_prim.track1.dir.x(); ti.ssm_prim_track1_y_dir=(float)pb_prim.track1.dir.y(); ti.ssm_prim_track1_z_dir=(float)pb_prim.track1.dir.z();
+    ti.ssm_prim_track1_add_daught_track_counts_1=(float)pb_prim.track1.add_daught_track_1; ti.ssm_prim_track1_add_daught_all_counts_1=(float)pb_prim.track1.add_daught_all_1;
+    ti.ssm_prim_track1_add_daught_track_counts_5=(float)pb_prim.track1.add_daught_track_5; ti.ssm_prim_track1_add_daught_all_counts_5=(float)pb_prim.track1.add_daught_all_5;
+    ti.ssm_prim_track1_add_daught_track_counts_11=(float)pb_prim.track1.add_daught_track_11; ti.ssm_prim_track1_add_daught_all_counts_11=(float)pb_prim.track1.add_daught_all_11;
 
     // prim track2
-    ti.ssm_prim_track2_pdg=(float)pdg_prim_track2;
-    ti.ssm_prim_track2_score_mu_fwd=(float)score_mu_fwd_prim_track2; ti.ssm_prim_track2_score_p_fwd=(float)score_p_fwd_prim_track2; ti.ssm_prim_track2_score_e_fwd=(float)score_e_fwd_prim_track2;
-    ti.ssm_prim_track2_score_mu_bck=(float)score_mu_bck_prim_track2; ti.ssm_prim_track2_score_p_bck=(float)score_p_bck_prim_track2; ti.ssm_prim_track2_score_e_bck=(float)score_e_bck_prim_track2;
-    ti.ssm_prim_track2_length=(float)length_prim_track2; ti.ssm_prim_track2_direct_length=(float)direct_length_prim_track2;
-    ti.ssm_prim_track2_length_ratio=lr(direct_length_prim_track2,length_prim_track2);
-    ti.ssm_prim_track2_max_dev=(float)max_dev_prim_track2;
-    ti.ssm_prim_track2_kine_energy_range=(float)kine_energy_range_prim_track2;
-    ti.ssm_prim_track2_kine_energy_range_mu=(float)kine_energy_range_mu_prim_track2;
-    ti.ssm_prim_track2_kine_energy_range_p=(float)kine_energy_range_p_prim_track2;
-    ti.ssm_prim_track2_kine_energy_range_e=(float)kine_energy_range_e_prim_track2;
-    ti.ssm_prim_track2_kine_energy_cal=(float)kine_energy_cal_prim_track2;
-    ti.ssm_prim_track2_medium_dq_dx=(float)medium_dq_dx_prim_track2;
-    ti.ssm_prim_track2_x_dir=(float)dir_prim_track2.x(); ti.ssm_prim_track2_y_dir=(float)dir_prim_track2.y(); ti.ssm_prim_track2_z_dir=(float)dir_prim_track2.z();
-    ti.ssm_prim_track2_add_daught_track_counts_1=(float)add_daught_track_counts_1_prim_track2; ti.ssm_prim_track2_add_daught_all_counts_1=(float)add_daught_all_counts_1_prim_track2;
-    ti.ssm_prim_track2_add_daught_track_counts_5=(float)add_daught_track_counts_5_prim_track2; ti.ssm_prim_track2_add_daught_all_counts_5=(float)add_daught_all_counts_5_prim_track2;
-    ti.ssm_prim_track2_add_daught_track_counts_11=(float)add_daught_track_counts_11_prim_track2; ti.ssm_prim_track2_add_daught_all_counts_11=(float)add_daught_all_counts_11_prim_track2;
+    ti.ssm_prim_track2_pdg=(float)pb_prim.track2.pdg;
+    ti.ssm_prim_track2_score_mu_fwd=(float)pb_prim.track2.score_mu_fwd; ti.ssm_prim_track2_score_p_fwd=(float)pb_prim.track2.score_p_fwd; ti.ssm_prim_track2_score_e_fwd=(float)pb_prim.track2.score_e_fwd;
+    ti.ssm_prim_track2_score_mu_bck=(float)pb_prim.track2.score_mu_bck; ti.ssm_prim_track2_score_p_bck=(float)pb_prim.track2.score_p_bck; ti.ssm_prim_track2_score_e_bck=(float)pb_prim.track2.score_e_bck;
+    ti.ssm_prim_track2_length=(float)pb_prim.track2.length; ti.ssm_prim_track2_direct_length=(float)pb_prim.track2.direct_length;
+    ti.ssm_prim_track2_length_ratio=lr(pb_prim.track2.direct_length,pb_prim.track2.length);
+    ti.ssm_prim_track2_max_dev=(float)pb_prim.track2.max_dev;
+    ti.ssm_prim_track2_kine_energy_range=(float)pb_prim.track2.ke_rng;
+    ti.ssm_prim_track2_kine_energy_range_mu=(float)pb_prim.track2.ke_rng_mu;
+    ti.ssm_prim_track2_kine_energy_range_p=(float)pb_prim.track2.ke_rng_p;
+    ti.ssm_prim_track2_kine_energy_range_e=(float)pb_prim.track2.ke_rng_e;
+    ti.ssm_prim_track2_kine_energy_cal=(float)pb_prim.track2.ke_cal;
+    ti.ssm_prim_track2_medium_dq_dx=(float)pb_prim.track2.medium_dq_dx;
+    ti.ssm_prim_track2_x_dir=(float)pb_prim.track2.dir.x(); ti.ssm_prim_track2_y_dir=(float)pb_prim.track2.dir.y(); ti.ssm_prim_track2_z_dir=(float)pb_prim.track2.dir.z();
+    ti.ssm_prim_track2_add_daught_track_counts_1=(float)pb_prim.track2.add_daught_track_1; ti.ssm_prim_track2_add_daught_all_counts_1=(float)pb_prim.track2.add_daught_all_1;
+    ti.ssm_prim_track2_add_daught_track_counts_5=(float)pb_prim.track2.add_daught_track_5; ti.ssm_prim_track2_add_daught_all_counts_5=(float)pb_prim.track2.add_daught_all_5;
+    ti.ssm_prim_track2_add_daught_track_counts_11=(float)pb_prim.track2.add_daught_track_11; ti.ssm_prim_track2_add_daught_all_counts_11=(float)pb_prim.track2.add_daught_all_11;
 
     // daught track1
-    ti.ssm_daught_track1_pdg=(float)pdg_daught_track1;
-    ti.ssm_daught_track1_score_mu_fwd=(float)score_mu_fwd_daught_track1; ti.ssm_daught_track1_score_p_fwd=(float)score_p_fwd_daught_track1; ti.ssm_daught_track1_score_e_fwd=(float)score_e_fwd_daught_track1;
-    ti.ssm_daught_track1_score_mu_bck=(float)score_mu_bck_daught_track1; ti.ssm_daught_track1_score_p_bck=(float)score_p_bck_daught_track1; ti.ssm_daught_track1_score_e_bck=(float)score_e_bck_daught_track1;
-    ti.ssm_daught_track1_length=(float)length_daught_track1; ti.ssm_daught_track1_direct_length=(float)direct_length_daught_track1;
-    ti.ssm_daught_track1_length_ratio=lr(direct_length_daught_track1,length_daught_track1);
-    ti.ssm_daught_track1_max_dev=(float)max_dev_daught_track1;
-    ti.ssm_daught_track1_kine_energy_range=(float)kine_energy_range_daught_track1;
-    ti.ssm_daught_track1_kine_energy_range_mu=(float)kine_energy_range_mu_daught_track1;
-    ti.ssm_daught_track1_kine_energy_range_p=(float)kine_energy_range_p_daught_track1;
-    ti.ssm_daught_track1_kine_energy_range_e=(float)kine_energy_range_e_daught_track1;
-    ti.ssm_daught_track1_kine_energy_cal=(float)kine_energy_cal_daught_track1;
-    ti.ssm_daught_track1_medium_dq_dx=(float)medium_dq_dx_daught_track1;
-    ti.ssm_daught_track1_x_dir=(float)dir_daught_track1.x(); ti.ssm_daught_track1_y_dir=(float)dir_daught_track1.y(); ti.ssm_daught_track1_z_dir=(float)dir_daught_track1.z();
-    ti.ssm_daught_track1_add_daught_track_counts_1=(float)add_daught_track_counts_1_daught_track1; ti.ssm_daught_track1_add_daught_all_counts_1=(float)add_daught_all_counts_1_daught_track1;
-    ti.ssm_daught_track1_add_daught_track_counts_5=(float)add_daught_track_counts_5_daught_track1; ti.ssm_daught_track1_add_daught_all_counts_5=(float)add_daught_all_counts_5_daught_track1;
-    ti.ssm_daught_track1_add_daught_track_counts_11=(float)add_daught_track_counts_11_daught_track1; ti.ssm_daught_track1_add_daught_all_counts_11=(float)add_daught_all_counts_11_daught_track1;
+    ti.ssm_daught_track1_pdg=(float)pb_daught.track1.pdg;
+    ti.ssm_daught_track1_score_mu_fwd=(float)pb_daught.track1.score_mu_fwd; ti.ssm_daught_track1_score_p_fwd=(float)pb_daught.track1.score_p_fwd; ti.ssm_daught_track1_score_e_fwd=(float)pb_daught.track1.score_e_fwd;
+    ti.ssm_daught_track1_score_mu_bck=(float)pb_daught.track1.score_mu_bck; ti.ssm_daught_track1_score_p_bck=(float)pb_daught.track1.score_p_bck; ti.ssm_daught_track1_score_e_bck=(float)pb_daught.track1.score_e_bck;
+    ti.ssm_daught_track1_length=(float)pb_daught.track1.length; ti.ssm_daught_track1_direct_length=(float)pb_daught.track1.direct_length;
+    ti.ssm_daught_track1_length_ratio=lr(pb_daught.track1.direct_length,pb_daught.track1.length);
+    ti.ssm_daught_track1_max_dev=(float)pb_daught.track1.max_dev;
+    ti.ssm_daught_track1_kine_energy_range=(float)pb_daught.track1.ke_rng;
+    ti.ssm_daught_track1_kine_energy_range_mu=(float)pb_daught.track1.ke_rng_mu;
+    ti.ssm_daught_track1_kine_energy_range_p=(float)pb_daught.track1.ke_rng_p;
+    ti.ssm_daught_track1_kine_energy_range_e=(float)pb_daught.track1.ke_rng_e;
+    ti.ssm_daught_track1_kine_energy_cal=(float)pb_daught.track1.ke_cal;
+    ti.ssm_daught_track1_medium_dq_dx=(float)pb_daught.track1.medium_dq_dx;
+    ti.ssm_daught_track1_x_dir=(float)pb_daught.track1.dir.x(); ti.ssm_daught_track1_y_dir=(float)pb_daught.track1.dir.y(); ti.ssm_daught_track1_z_dir=(float)pb_daught.track1.dir.z();
+    ti.ssm_daught_track1_add_daught_track_counts_1=(float)pb_daught.track1.add_daught_track_1; ti.ssm_daught_track1_add_daught_all_counts_1=(float)pb_daught.track1.add_daught_all_1;
+    ti.ssm_daught_track1_add_daught_track_counts_5=(float)pb_daught.track1.add_daught_track_5; ti.ssm_daught_track1_add_daught_all_counts_5=(float)pb_daught.track1.add_daught_all_5;
+    ti.ssm_daught_track1_add_daught_track_counts_11=(float)pb_daught.track1.add_daught_track_11; ti.ssm_daught_track1_add_daught_all_counts_11=(float)pb_daught.track1.add_daught_all_11;
 
     // daught track2
-    ti.ssm_daught_track2_pdg=(float)pdg_daught_track2;
-    ti.ssm_daught_track2_score_mu_fwd=(float)score_mu_fwd_daught_track2; ti.ssm_daught_track2_score_p_fwd=(float)score_p_fwd_daught_track2; ti.ssm_daught_track2_score_e_fwd=(float)score_e_fwd_daught_track2;
-    ti.ssm_daught_track2_score_mu_bck=(float)score_mu_bck_daught_track2; ti.ssm_daught_track2_score_p_bck=(float)score_p_bck_daught_track2; ti.ssm_daught_track2_score_e_bck=(float)score_e_bck_daught_track2;
-    ti.ssm_daught_track2_length=(float)length_daught_track2; ti.ssm_daught_track2_direct_length=(float)direct_length_daught_track2;
-    ti.ssm_daught_track2_length_ratio=lr(direct_length_daught_track2,length_daught_track2);
-    ti.ssm_daught_track2_max_dev=(float)max_dev_daught_track2;
-    ti.ssm_daught_track2_kine_energy_range=(float)kine_energy_range_daught_track2;
-    ti.ssm_daught_track2_kine_energy_range_mu=(float)kine_energy_range_mu_daught_track2;
-    ti.ssm_daught_track2_kine_energy_range_p=(float)kine_energy_range_p_daught_track2;
-    ti.ssm_daught_track2_kine_energy_range_e=(float)kine_energy_range_e_daught_track2;
-    ti.ssm_daught_track2_kine_energy_cal=(float)kine_energy_cal_daught_track2;
-    ti.ssm_daught_track2_medium_dq_dx=(float)medium_dq_dx_daught_track2;
-    ti.ssm_daught_track2_x_dir=(float)dir_daught_track2.x(); ti.ssm_daught_track2_y_dir=(float)dir_daught_track2.y(); ti.ssm_daught_track2_z_dir=(float)dir_daught_track2.z();
-    ti.ssm_daught_track2_add_daught_track_counts_1=(float)add_daught_track_counts_1_daught_track2; ti.ssm_daught_track2_add_daught_all_counts_1=(float)add_daught_all_counts_1_daught_track2;
-    ti.ssm_daught_track2_add_daught_track_counts_5=(float)add_daught_track_counts_5_daught_track2; ti.ssm_daught_track2_add_daught_all_counts_5=(float)add_daught_all_counts_5_daught_track2;
-    ti.ssm_daught_track2_add_daught_track_counts_11=(float)add_daught_track_counts_11_daught_track2; ti.ssm_daught_track2_add_daught_all_counts_11=(float)add_daught_all_counts_11_daught_track2;
+    ti.ssm_daught_track2_pdg=(float)pb_daught.track2.pdg;
+    ti.ssm_daught_track2_score_mu_fwd=(float)pb_daught.track2.score_mu_fwd; ti.ssm_daught_track2_score_p_fwd=(float)pb_daught.track2.score_p_fwd; ti.ssm_daught_track2_score_e_fwd=(float)pb_daught.track2.score_e_fwd;
+    ti.ssm_daught_track2_score_mu_bck=(float)pb_daught.track2.score_mu_bck; ti.ssm_daught_track2_score_p_bck=(float)pb_daught.track2.score_p_bck; ti.ssm_daught_track2_score_e_bck=(float)pb_daught.track2.score_e_bck;
+    ti.ssm_daught_track2_length=(float)pb_daught.track2.length; ti.ssm_daught_track2_direct_length=(float)pb_daught.track2.direct_length;
+    ti.ssm_daught_track2_length_ratio=lr(pb_daught.track2.direct_length,pb_daught.track2.length);
+    ti.ssm_daught_track2_max_dev=(float)pb_daught.track2.max_dev;
+    ti.ssm_daught_track2_kine_energy_range=(float)pb_daught.track2.ke_rng;
+    ti.ssm_daught_track2_kine_energy_range_mu=(float)pb_daught.track2.ke_rng_mu;
+    ti.ssm_daught_track2_kine_energy_range_p=(float)pb_daught.track2.ke_rng_p;
+    ti.ssm_daught_track2_kine_energy_range_e=(float)pb_daught.track2.ke_rng_e;
+    ti.ssm_daught_track2_kine_energy_cal=(float)pb_daught.track2.ke_cal;
+    ti.ssm_daught_track2_medium_dq_dx=(float)pb_daught.track2.medium_dq_dx;
+    ti.ssm_daught_track2_x_dir=(float)pb_daught.track2.dir.x(); ti.ssm_daught_track2_y_dir=(float)pb_daught.track2.dir.y(); ti.ssm_daught_track2_z_dir=(float)pb_daught.track2.dir.z();
+    ti.ssm_daught_track2_add_daught_track_counts_1=(float)pb_daught.track2.add_daught_track_1; ti.ssm_daught_track2_add_daught_all_counts_1=(float)pb_daught.track2.add_daught_all_1;
+    ti.ssm_daught_track2_add_daught_track_counts_5=(float)pb_daught.track2.add_daught_track_5; ti.ssm_daught_track2_add_daught_all_counts_5=(float)pb_daught.track2.add_daught_all_5;
+    ti.ssm_daught_track2_add_daught_track_counts_11=(float)pb_daught.track2.add_daught_track_11; ti.ssm_daught_track2_add_daught_all_counts_11=(float)pb_daught.track2.add_daught_all_11;
 
     // prim shw1
-    ti.ssm_prim_shw1_pdg=(float)pdg_prim_shw1;
-    ti.ssm_prim_shw1_score_mu_fwd=(float)score_mu_fwd_prim_shw1; ti.ssm_prim_shw1_score_p_fwd=(float)score_p_fwd_prim_shw1; ti.ssm_prim_shw1_score_e_fwd=(float)score_e_fwd_prim_shw1;
-    ti.ssm_prim_shw1_score_mu_bck=(float)score_mu_bck_prim_shw1; ti.ssm_prim_shw1_score_p_bck=(float)score_p_bck_prim_shw1; ti.ssm_prim_shw1_score_e_bck=(float)score_e_bck_prim_shw1;
-    ti.ssm_prim_shw1_length=(float)length_prim_shw1; ti.ssm_prim_shw1_direct_length=(float)direct_length_prim_shw1;
-    ti.ssm_prim_shw1_length_ratio=lr(direct_length_prim_shw1,length_prim_shw1);
-    ti.ssm_prim_shw1_max_dev=(float)max_dev_prim_shw1;
-    ti.ssm_prim_shw1_kine_energy_best=(float)kine_energy_best_prim_shw1;
-    ti.ssm_prim_shw1_kine_energy_range=(float)kine_energy_range_prim_shw1;
-    ti.ssm_prim_shw1_kine_energy_range_mu=(float)kine_energy_range_mu_prim_shw1;
-    ti.ssm_prim_shw1_kine_energy_range_p=(float)kine_energy_range_p_prim_shw1;
-    ti.ssm_prim_shw1_kine_energy_range_e=(float)kine_energy_range_e_prim_shw1;
-    ti.ssm_prim_shw1_kine_energy_cal=(float)kine_energy_cal_prim_shw1;
-    ti.ssm_prim_shw1_medium_dq_dx=(float)medium_dq_dx_prim_shw1;
-    ti.ssm_prim_shw1_x_dir=(float)dir_prim_shw1.x(); ti.ssm_prim_shw1_y_dir=(float)dir_prim_shw1.y(); ti.ssm_prim_shw1_z_dir=(float)dir_prim_shw1.z();
-    ti.ssm_prim_shw1_add_daught_track_counts_1=(float)add_daught_track_counts_1_prim_shw1; ti.ssm_prim_shw1_add_daught_all_counts_1=(float)add_daught_all_counts_1_prim_shw1;
-    ti.ssm_prim_shw1_add_daught_track_counts_5=(float)add_daught_track_counts_5_prim_shw1; ti.ssm_prim_shw1_add_daught_all_counts_5=(float)add_daught_all_counts_5_prim_shw1;
-    ti.ssm_prim_shw1_add_daught_track_counts_11=(float)add_daught_track_counts_11_prim_shw1; ti.ssm_prim_shw1_add_daught_all_counts_11=(float)add_daught_all_counts_11_prim_shw1;
+    ti.ssm_prim_shw1_pdg=(float)pb_prim.shw1.pdg;
+    ti.ssm_prim_shw1_score_mu_fwd=(float)pb_prim.shw1.score_mu_fwd; ti.ssm_prim_shw1_score_p_fwd=(float)pb_prim.shw1.score_p_fwd; ti.ssm_prim_shw1_score_e_fwd=(float)pb_prim.shw1.score_e_fwd;
+    ti.ssm_prim_shw1_score_mu_bck=(float)pb_prim.shw1.score_mu_bck; ti.ssm_prim_shw1_score_p_bck=(float)pb_prim.shw1.score_p_bck; ti.ssm_prim_shw1_score_e_bck=(float)pb_prim.shw1.score_e_bck;
+    ti.ssm_prim_shw1_length=(float)pb_prim.shw1.length; ti.ssm_prim_shw1_direct_length=(float)pb_prim.shw1.direct_length;
+    ti.ssm_prim_shw1_length_ratio=lr(pb_prim.shw1.direct_length,pb_prim.shw1.length);
+    ti.ssm_prim_shw1_max_dev=(float)pb_prim.shw1.max_dev;
+    ti.ssm_prim_shw1_kine_energy_best=(float)pb_prim.shw1.ke_best;
+    ti.ssm_prim_shw1_kine_energy_range=(float)pb_prim.shw1.ke_rng;
+    ti.ssm_prim_shw1_kine_energy_range_mu=(float)pb_prim.shw1.ke_rng_mu;
+    ti.ssm_prim_shw1_kine_energy_range_p=(float)pb_prim.shw1.ke_rng_p;
+    ti.ssm_prim_shw1_kine_energy_range_e=(float)pb_prim.shw1.ke_rng_e;
+    ti.ssm_prim_shw1_kine_energy_cal=(float)pb_prim.shw1.ke_cal;
+    ti.ssm_prim_shw1_medium_dq_dx=(float)pb_prim.shw1.medium_dq_dx;
+    ti.ssm_prim_shw1_x_dir=(float)pb_prim.shw1.dir.x(); ti.ssm_prim_shw1_y_dir=(float)pb_prim.shw1.dir.y(); ti.ssm_prim_shw1_z_dir=(float)pb_prim.shw1.dir.z();
+    ti.ssm_prim_shw1_add_daught_track_counts_1=(float)pb_prim.shw1.add_daught_track_1; ti.ssm_prim_shw1_add_daught_all_counts_1=(float)pb_prim.shw1.add_daught_all_1;
+    ti.ssm_prim_shw1_add_daught_track_counts_5=(float)pb_prim.shw1.add_daught_track_5; ti.ssm_prim_shw1_add_daught_all_counts_5=(float)pb_prim.shw1.add_daught_all_5;
+    ti.ssm_prim_shw1_add_daught_track_counts_11=(float)pb_prim.shw1.add_daught_track_11; ti.ssm_prim_shw1_add_daught_all_counts_11=(float)pb_prim.shw1.add_daught_all_11;
 
     // prim shw2
-    ti.ssm_prim_shw2_pdg=(float)pdg_prim_shw2;
-    ti.ssm_prim_shw2_score_mu_fwd=(float)score_mu_fwd_prim_shw2; ti.ssm_prim_shw2_score_p_fwd=(float)score_p_fwd_prim_shw2; ti.ssm_prim_shw2_score_e_fwd=(float)score_e_fwd_prim_shw2;
-    ti.ssm_prim_shw2_score_mu_bck=(float)score_mu_bck_prim_shw2; ti.ssm_prim_shw2_score_p_bck=(float)score_p_bck_prim_shw2; ti.ssm_prim_shw2_score_e_bck=(float)score_e_bck_prim_shw2;
-    ti.ssm_prim_shw2_length=(float)length_prim_shw2; ti.ssm_prim_shw2_direct_length=(float)direct_length_prim_shw2;
-    ti.ssm_prim_shw2_length_ratio=lr(direct_length_prim_shw2,length_prim_shw2);
-    ti.ssm_prim_shw2_max_dev=(float)max_dev_prim_shw2;
-    ti.ssm_prim_shw2_kine_energy_best=(float)kine_energy_best_prim_shw2;
-    ti.ssm_prim_shw2_kine_energy_range=(float)kine_energy_range_prim_shw2;
-    ti.ssm_prim_shw2_kine_energy_range_mu=(float)kine_energy_range_mu_prim_shw2;
-    ti.ssm_prim_shw2_kine_energy_range_p=(float)kine_energy_range_p_prim_shw2;
-    ti.ssm_prim_shw2_kine_energy_range_e=(float)kine_energy_range_e_prim_shw2;
-    ti.ssm_prim_shw2_kine_energy_cal=(float)kine_energy_cal_prim_shw2;
-    ti.ssm_prim_shw2_medium_dq_dx=(float)medium_dq_dx_prim_shw2;
-    ti.ssm_prim_shw2_x_dir=(float)dir_prim_shw2.x(); ti.ssm_prim_shw2_y_dir=(float)dir_prim_shw2.y(); ti.ssm_prim_shw2_z_dir=(float)dir_prim_shw2.z();
-    ti.ssm_prim_shw2_add_daught_track_counts_1=(float)add_daught_track_counts_1_prim_shw2; ti.ssm_prim_shw2_add_daught_all_counts_1=(float)add_daught_all_counts_1_prim_shw2;
-    ti.ssm_prim_shw2_add_daught_track_counts_5=(float)add_daught_track_counts_5_prim_shw2; ti.ssm_prim_shw2_add_daught_all_counts_5=(float)add_daught_all_counts_5_prim_shw2;
-    ti.ssm_prim_shw2_add_daught_track_counts_11=(float)add_daught_track_counts_11_prim_shw2; ti.ssm_prim_shw2_add_daught_all_counts_11=(float)add_daught_all_counts_11_prim_shw2;
+    ti.ssm_prim_shw2_pdg=(float)pb_prim.shw2.pdg;
+    ti.ssm_prim_shw2_score_mu_fwd=(float)pb_prim.shw2.score_mu_fwd; ti.ssm_prim_shw2_score_p_fwd=(float)pb_prim.shw2.score_p_fwd; ti.ssm_prim_shw2_score_e_fwd=(float)pb_prim.shw2.score_e_fwd;
+    ti.ssm_prim_shw2_score_mu_bck=(float)pb_prim.shw2.score_mu_bck; ti.ssm_prim_shw2_score_p_bck=(float)pb_prim.shw2.score_p_bck; ti.ssm_prim_shw2_score_e_bck=(float)pb_prim.shw2.score_e_bck;
+    ti.ssm_prim_shw2_length=(float)pb_prim.shw2.length; ti.ssm_prim_shw2_direct_length=(float)pb_prim.shw2.direct_length;
+    ti.ssm_prim_shw2_length_ratio=lr(pb_prim.shw2.direct_length,pb_prim.shw2.length);
+    ti.ssm_prim_shw2_max_dev=(float)pb_prim.shw2.max_dev;
+    ti.ssm_prim_shw2_kine_energy_best=(float)pb_prim.shw2.ke_best;
+    ti.ssm_prim_shw2_kine_energy_range=(float)pb_prim.shw2.ke_rng;
+    ti.ssm_prim_shw2_kine_energy_range_mu=(float)pb_prim.shw2.ke_rng_mu;
+    ti.ssm_prim_shw2_kine_energy_range_p=(float)pb_prim.shw2.ke_rng_p;
+    ti.ssm_prim_shw2_kine_energy_range_e=(float)pb_prim.shw2.ke_rng_e;
+    ti.ssm_prim_shw2_kine_energy_cal=(float)pb_prim.shw2.ke_cal;
+    ti.ssm_prim_shw2_medium_dq_dx=(float)pb_prim.shw2.medium_dq_dx;
+    ti.ssm_prim_shw2_x_dir=(float)pb_prim.shw2.dir.x(); ti.ssm_prim_shw2_y_dir=(float)pb_prim.shw2.dir.y(); ti.ssm_prim_shw2_z_dir=(float)pb_prim.shw2.dir.z();
+    ti.ssm_prim_shw2_add_daught_track_counts_1=(float)pb_prim.shw2.add_daught_track_1; ti.ssm_prim_shw2_add_daught_all_counts_1=(float)pb_prim.shw2.add_daught_all_1;
+    ti.ssm_prim_shw2_add_daught_track_counts_5=(float)pb_prim.shw2.add_daught_track_5; ti.ssm_prim_shw2_add_daught_all_counts_5=(float)pb_prim.shw2.add_daught_all_5;
+    ti.ssm_prim_shw2_add_daught_track_counts_11=(float)pb_prim.shw2.add_daught_track_11; ti.ssm_prim_shw2_add_daught_all_counts_11=(float)pb_prim.shw2.add_daught_all_11;
 
     // daught shw1
-    ti.ssm_daught_shw1_pdg=(float)pdg_daught_shw1;
-    ti.ssm_daught_shw1_score_mu_fwd=(float)score_mu_fwd_daught_shw1; ti.ssm_daught_shw1_score_p_fwd=(float)score_p_fwd_daught_shw1; ti.ssm_daught_shw1_score_e_fwd=(float)score_e_fwd_daught_shw1;
-    ti.ssm_daught_shw1_score_mu_bck=(float)score_mu_bck_daught_shw1; ti.ssm_daught_shw1_score_p_bck=(float)score_p_bck_daught_shw1; ti.ssm_daught_shw1_score_e_bck=(float)score_e_bck_daught_shw1;
-    ti.ssm_daught_shw1_length=(float)length_daught_shw1; ti.ssm_daught_shw1_direct_length=(float)direct_length_daught_shw1;
-    ti.ssm_daught_shw1_length_ratio=lr(direct_length_daught_shw1,length_daught_shw1);
-    ti.ssm_daught_shw1_max_dev=(float)max_dev_daught_shw1;
-    ti.ssm_daught_shw1_kine_energy_best=(float)kine_energy_best_daught_shw1;
-    ti.ssm_daught_shw1_kine_energy_range=(float)kine_energy_range_daught_shw1;
-    ti.ssm_daught_shw1_kine_energy_range_mu=(float)kine_energy_range_mu_daught_shw1;
-    ti.ssm_daught_shw1_kine_energy_range_p=(float)kine_energy_range_p_daught_shw1;
-    ti.ssm_daught_shw1_kine_energy_range_e=(float)kine_energy_range_e_daught_shw1;
-    ti.ssm_daught_shw1_kine_energy_cal=(float)kine_energy_cal_daught_shw1;
-    ti.ssm_daught_shw1_medium_dq_dx=(float)medium_dq_dx_daught_shw1;
-    ti.ssm_daught_shw1_x_dir=(float)dir_daught_shw1.x(); ti.ssm_daught_shw1_y_dir=(float)dir_daught_shw1.y(); ti.ssm_daught_shw1_z_dir=(float)dir_daught_shw1.z();
-    ti.ssm_daught_shw1_add_daught_track_counts_1=(float)add_daught_track_counts_1_daught_shw1; ti.ssm_daught_shw1_add_daught_all_counts_1=(float)add_daught_all_counts_1_daught_shw1;
-    ti.ssm_daught_shw1_add_daught_track_counts_5=(float)add_daught_track_counts_5_daught_shw1; ti.ssm_daught_shw1_add_daught_all_counts_5=(float)add_daught_all_counts_5_daught_shw1;
-    ti.ssm_daught_shw1_add_daught_track_counts_11=(float)add_daught_track_counts_11_daught_shw1; ti.ssm_daught_shw1_add_daught_all_counts_11=(float)add_daught_all_counts_11_daught_shw1;
+    ti.ssm_daught_shw1_pdg=(float)pb_daught.shw1.pdg;
+    ti.ssm_daught_shw1_score_mu_fwd=(float)pb_daught.shw1.score_mu_fwd; ti.ssm_daught_shw1_score_p_fwd=(float)pb_daught.shw1.score_p_fwd; ti.ssm_daught_shw1_score_e_fwd=(float)pb_daught.shw1.score_e_fwd;
+    ti.ssm_daught_shw1_score_mu_bck=(float)pb_daught.shw1.score_mu_bck; ti.ssm_daught_shw1_score_p_bck=(float)pb_daught.shw1.score_p_bck; ti.ssm_daught_shw1_score_e_bck=(float)pb_daught.shw1.score_e_bck;
+    ti.ssm_daught_shw1_length=(float)pb_daught.shw1.length; ti.ssm_daught_shw1_direct_length=(float)pb_daught.shw1.direct_length;
+    ti.ssm_daught_shw1_length_ratio=lr(pb_daught.shw1.direct_length,pb_daught.shw1.length);
+    ti.ssm_daught_shw1_max_dev=(float)pb_daught.shw1.max_dev;
+    ti.ssm_daught_shw1_kine_energy_best=(float)pb_daught.shw1.ke_best;
+    ti.ssm_daught_shw1_kine_energy_range=(float)pb_daught.shw1.ke_rng;
+    ti.ssm_daught_shw1_kine_energy_range_mu=(float)pb_daught.shw1.ke_rng_mu;
+    ti.ssm_daught_shw1_kine_energy_range_p=(float)pb_daught.shw1.ke_rng_p;
+    ti.ssm_daught_shw1_kine_energy_range_e=(float)pb_daught.shw1.ke_rng_e;
+    ti.ssm_daught_shw1_kine_energy_cal=(float)pb_daught.shw1.ke_cal;
+    ti.ssm_daught_shw1_medium_dq_dx=(float)pb_daught.shw1.medium_dq_dx;
+    ti.ssm_daught_shw1_x_dir=(float)pb_daught.shw1.dir.x(); ti.ssm_daught_shw1_y_dir=(float)pb_daught.shw1.dir.y(); ti.ssm_daught_shw1_z_dir=(float)pb_daught.shw1.dir.z();
+    ti.ssm_daught_shw1_add_daught_track_counts_1=(float)pb_daught.shw1.add_daught_track_1; ti.ssm_daught_shw1_add_daught_all_counts_1=(float)pb_daught.shw1.add_daught_all_1;
+    ti.ssm_daught_shw1_add_daught_track_counts_5=(float)pb_daught.shw1.add_daught_track_5; ti.ssm_daught_shw1_add_daught_all_counts_5=(float)pb_daught.shw1.add_daught_all_5;
+    ti.ssm_daught_shw1_add_daught_track_counts_11=(float)pb_daught.shw1.add_daught_track_11; ti.ssm_daught_shw1_add_daught_all_counts_11=(float)pb_daught.shw1.add_daught_all_11;
 
     // daught shw2
-    ti.ssm_daught_shw2_pdg=(float)pdg_daught_shw2;
-    ti.ssm_daught_shw2_score_mu_fwd=(float)score_mu_fwd_daught_shw2; ti.ssm_daught_shw2_score_p_fwd=(float)score_p_fwd_daught_shw2; ti.ssm_daught_shw2_score_e_fwd=(float)score_e_fwd_daught_shw2;
-    ti.ssm_daught_shw2_score_mu_bck=(float)score_mu_bck_daught_shw2; ti.ssm_daught_shw2_score_p_bck=(float)score_p_bck_daught_shw2; ti.ssm_daught_shw2_score_e_bck=(float)score_e_bck_daught_shw2;
-    ti.ssm_daught_shw2_length=(float)length_daught_shw2; ti.ssm_daught_shw2_direct_length=(float)direct_length_daught_shw2;
-    ti.ssm_daught_shw2_length_ratio=lr(direct_length_daught_shw2,length_daught_shw2);
-    ti.ssm_daught_shw2_max_dev=(float)max_dev_daught_shw2;
-    ti.ssm_daught_shw2_kine_energy_best=(float)kine_energy_best_daught_shw2;
-    ti.ssm_daught_shw2_kine_energy_range=(float)kine_energy_range_daught_shw2;
-    ti.ssm_daught_shw2_kine_energy_range_mu=(float)kine_energy_range_mu_daught_shw2;
-    ti.ssm_daught_shw2_kine_energy_range_p=(float)kine_energy_range_p_daught_shw2;
-    ti.ssm_daught_shw2_kine_energy_range_e=(float)kine_energy_range_e_daught_shw2;
-    ti.ssm_daught_shw2_kine_energy_cal=(float)kine_energy_cal_daught_shw2;
-    ti.ssm_daught_shw2_medium_dq_dx=(float)medium_dq_dx_daught_shw2;
-    ti.ssm_daught_shw2_x_dir=(float)dir_daught_shw2.x(); ti.ssm_daught_shw2_y_dir=(float)dir_daught_shw2.y(); ti.ssm_daught_shw2_z_dir=(float)dir_daught_shw2.z();
-    ti.ssm_daught_shw2_add_daught_track_counts_1=(float)add_daught_track_counts_1_daught_shw2; ti.ssm_daught_shw2_add_daught_all_counts_1=(float)add_daught_all_counts_1_daught_shw2;
-    ti.ssm_daught_shw2_add_daught_track_counts_5=(float)add_daught_track_counts_5_daught_shw2; ti.ssm_daught_shw2_add_daught_all_counts_5=(float)add_daught_all_counts_5_daught_shw2;
-    ti.ssm_daught_shw2_add_daught_track_counts_11=(float)add_daught_track_counts_11_daught_shw2; ti.ssm_daught_shw2_add_daught_all_counts_11=(float)add_daught_all_counts_11_daught_shw2;
+    ti.ssm_daught_shw2_pdg=(float)pb_daught.shw2.pdg;
+    ti.ssm_daught_shw2_score_mu_fwd=(float)pb_daught.shw2.score_mu_fwd; ti.ssm_daught_shw2_score_p_fwd=(float)pb_daught.shw2.score_p_fwd; ti.ssm_daught_shw2_score_e_fwd=(float)pb_daught.shw2.score_e_fwd;
+    ti.ssm_daught_shw2_score_mu_bck=(float)pb_daught.shw2.score_mu_bck; ti.ssm_daught_shw2_score_p_bck=(float)pb_daught.shw2.score_p_bck; ti.ssm_daught_shw2_score_e_bck=(float)pb_daught.shw2.score_e_bck;
+    ti.ssm_daught_shw2_length=(float)pb_daught.shw2.length; ti.ssm_daught_shw2_direct_length=(float)pb_daught.shw2.direct_length;
+    ti.ssm_daught_shw2_length_ratio=lr(pb_daught.shw2.direct_length,pb_daught.shw2.length);
+    ti.ssm_daught_shw2_max_dev=(float)pb_daught.shw2.max_dev;
+    ti.ssm_daught_shw2_kine_energy_best=(float)pb_daught.shw2.ke_best;
+    ti.ssm_daught_shw2_kine_energy_range=(float)pb_daught.shw2.ke_rng;
+    ti.ssm_daught_shw2_kine_energy_range_mu=(float)pb_daught.shw2.ke_rng_mu;
+    ti.ssm_daught_shw2_kine_energy_range_p=(float)pb_daught.shw2.ke_rng_p;
+    ti.ssm_daught_shw2_kine_energy_range_e=(float)pb_daught.shw2.ke_rng_e;
+    ti.ssm_daught_shw2_kine_energy_cal=(float)pb_daught.shw2.ke_cal;
+    ti.ssm_daught_shw2_medium_dq_dx=(float)pb_daught.shw2.medium_dq_dx;
+    ti.ssm_daught_shw2_x_dir=(float)pb_daught.shw2.dir.x(); ti.ssm_daught_shw2_y_dir=(float)pb_daught.shw2.dir.y(); ti.ssm_daught_shw2_z_dir=(float)pb_daught.shw2.dir.z();
+    ti.ssm_daught_shw2_add_daught_track_counts_1=(float)pb_daught.shw2.add_daught_track_1; ti.ssm_daught_shw2_add_daught_all_counts_1=(float)pb_daught.shw2.add_daught_all_1;
+    ti.ssm_daught_shw2_add_daught_track_counts_5=(float)pb_daught.shw2.add_daught_track_5; ti.ssm_daught_shw2_add_daught_all_counts_5=(float)pb_daught.shw2.add_daught_all_5;
+    ti.ssm_daught_shw2_add_daught_track_counts_11=(float)pb_daught.shw2.add_daught_track_11; ti.ssm_daught_shw2_add_daught_all_counts_11=(float)pb_daught.shw2.add_daught_all_11;
 
     // event-level angles
     ti.ssm_nu_angle_z=(float)nu_angle_z; ti.ssm_nu_angle_target=(float)nu_angle_target;
