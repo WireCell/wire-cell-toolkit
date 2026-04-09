@@ -5,7 +5,8 @@
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
-#include "WireCellUtil/ExecMon.h"
+#include <unordered_map>
+#include <unordered_set>
 
 class ClusteringClose;
 WIRECELL_FACTORY(ClusteringClose, ClusteringClose,
@@ -60,14 +61,9 @@ static bool Clustering_3rd_round(
   geo_point_t p1;
   geo_point_t p2;
 
-  bool flag_print = false;
-  ExecMon em("starting");
-  
   double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
-
-  //  if (flag_print) std::cout << em("Find Closest Points") << std::endl;
 
   geo_point_t dir1, dir2;
   int num_p1{0}, num_p2{0}, num_tp1{0}, num_tp2{0};
@@ -85,8 +81,6 @@ static bool Clustering_3rd_round(
     dir1 = cluster1.vhough_transform(p1,50*units::cm); // cluster 1 direction based on hough
     dir2 = cluster2.vhough_transform(p2,50*units::cm); // cluster 1 direction based on hough
 
-    if (flag_print) std::cout << em("Hough Transform") << std::endl;
-    
     std::pair<int,int> num_ps_1 = cluster1.ndipole(p1,dir1);
     std::pair<int,int> num_ps_2 = cluster2.ndipole(p2,dir2);
 
@@ -95,8 +89,6 @@ static bool Clustering_3rd_round(
     num_tp1 = cluster1.npoints();
     num_tp2 = cluster2.npoints();
 
-    if (flag_print) std::cout << em("Get Number Points") << std::endl;
-    
     if (length_1 > 25*units::cm && length_2 > 25*units::cm){
       /* if (length_1 > 60*units::cm && length_2 > 60*units::cm ){ */
       /* 	//if (num_ps_1.second > num_ps_1.first * 0.05 || num_ps_2.second > num_ps_2.first * 0.05) */
@@ -177,14 +169,15 @@ static void clustering_close(
     const double length_cut)
 {
 
-  cluster_set_t used_clusters;
-  
+  std::unordered_set<const Cluster*> used_clusters;
+
   // prepare graph ...
   typedef cluster_connectivity_graph_t Graph;
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
+  std::unordered_map<const Cluster*, int> map_cluster_index;
+  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
+  sort_clusters(live_clusters);
 
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     const auto& live = live_clusters.at(ilive);

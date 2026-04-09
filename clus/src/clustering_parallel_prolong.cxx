@@ -1,6 +1,7 @@
 #include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
+#include <unordered_map>
 
 #include "WireCellIface/IConfigurable.h"
 
@@ -310,8 +311,9 @@ static void clustering_parallel_prolong(
   typedef cluster_connectivity_graph_t Graph;
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
+  std::unordered_map<const Cluster*, int> map_cluster_index;
+  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
+  sort_clusters(live_clusters);
   
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     auto& live = live_clusters[ilive];
