@@ -1826,7 +1826,7 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
             if (is_pdg11 || is_weak_muon) {
                 Point dir2_pt = vtx_point;
                 Vector dir2 = segment_cal_dir_3vector(sg1, dir2_pt, 5*units::cm);
-                if (dir2.magnitude() == 0) { flag_all_showers = false; continue; }
+                if (dir2.magnitude() == 0) { continue; }
                 double angle = dir1.angle(dir2) / M_PI * 180.0;
                 if (angle < min_angle) { min_angle = angle; min_length = segment_track_length(sg1); }
             } else {
