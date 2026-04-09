@@ -6,6 +6,9 @@
 
 #include "WireCellUtil/NamedFactory.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 class ClusteringLiveDead;
 WIRECELL_FACTORY(ClusteringLiveDead, ClusteringLiveDead,
                  WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
@@ -94,10 +97,7 @@ public:
         }
 
 
-        std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-            return cluster1->get_length() > cluster2->get_length();
-        });
-        // sort_clusters(live_clusters);
+        sort_clusters(live_clusters);
 
         auto dead_clusters = dead_grouping.children(); // copy
         sort_clusters(dead_clusters);
@@ -110,10 +110,11 @@ public:
 	
                 auto blobs = live->is_connected(*dead, dead_live_overlap_offset_);
                 if (blobs.size() > 0) {
-                    if (dead_live_cluster_mapping.find(dead) == dead_live_cluster_mapping.end()) {
+                    auto [it, inserted] = dead_live_cluster_mapping.emplace(dead, std::vector<Cluster*>{});
+                    if (inserted) {
                         dead_cluster_order.push_back(dead);
                     }
-                    dead_live_cluster_mapping[dead].push_back(live);
+                    it->second.push_back(live);
                     dead_live_mcells_mapping[dead].push_back(blobs);
                 }
             }
@@ -132,14 +133,23 @@ public:
 
         Graph g;
         std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-        std::map<const Cluster*, int> map_cluster_index;
+        std::unordered_map<const Cluster*, int> map_cluster_index;
         for (const Cluster* live : live_grouping.children()) {
-            size_t ilive = map_cluster_index.size();
+            int ilive = (int)map_cluster_index.size();
             map_cluster_index[live] = ilive;
             ilive2desc[ilive] = boost::add_vertex(ilive, g);
         }
+        const int nlive = (int)map_cluster_index.size();
 
-        std::set<std::pair<const Cluster*, const Cluster* > > tested_pairs;
+        // Index-based pair set: key = min_idx * nlive + max_idx.
+        // Symmetric by construction — no need to insert both (a,b) and (b,a).
+        std::unordered_set<size_t> tested_pairs;
+        auto pair_key = [&](const Cluster* a, const Cluster* b) -> size_t {
+            int ia = map_cluster_index.at(a);
+            int ib = map_cluster_index.at(b);
+            if (ia > ib) std::swap(ia, ib);
+            return (size_t)ia * nlive + ib;
+        };
 
         // start to form edges ...
         for (const auto& the_dead_cluster : dead_cluster_order) {
@@ -157,9 +167,7 @@ public:
                         const auto& cluster_2 = connected_live_clusters.at(j);
         
 
-                        if (tested_pairs.find(std::make_pair(cluster_1, cluster_2)) == tested_pairs.end()) {
-                            tested_pairs.insert(std::make_pair(cluster_1, cluster_2));
-                            tested_pairs.insert(std::make_pair(cluster_2, cluster_1));
+                        if (tested_pairs.insert(pair_key(cluster_1, cluster_2)).second) {
 
                             bool flag_merge = false;
                             const Blob* prev_mcell1 = 0;

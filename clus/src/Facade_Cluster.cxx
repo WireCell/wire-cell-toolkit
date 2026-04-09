@@ -2555,11 +2555,11 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         auto ac = a->get_pca().center;
         auto bc = b->get_pca().center;
         if (ac[0] < bc[0]) return true;
-        if (bc[0] < bc[0]) return false;
+        if (bc[0] < ac[0]) return false;
         if (ac[1] < bc[1]) return true;
-        if (bc[1] < bc[1]) return false;
+        if (bc[1] < ac[1]) return false;
         if (ac[2] < bc[2]) return true;
-        if (bc[2] < bc[2]) return false;
+        if (bc[2] < ac[2]) return false;
     }
 
     // After exhausting all "content" comparison, we are left with the question,
