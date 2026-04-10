@@ -104,15 +104,9 @@ protected:
     
     std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> m_samplers;
 
-    // fixme: this restricts the retiling to single-anode-face clusters.
-    // As such, it will likely freak out if fed clusters that have been
-    // stitched across anode faces.  Since tiling is inherently a per-face
-    // operation, this may be okay.
-    /** Configuration "face" (optional, default is 0)
-
-        The INDEX of the face in the anode's list of faces to use.
-    */
-    std::map<int, std::map<int, IAnodeFace::pointer>> m_face; // now apa/face --> m_face
+    // Per-(apa,face) map to IAnodeFace, populated in configure() from the "anodes" array.
+    // The per-face loop in mutate() iterates all faces a cluster spans via wpids_blob().
+    std::map<int, std::map<int, IAnodeFace::pointer>> m_face;
 
     // Step 3. Form IBlobs from activities.
     std::vector<WireCell::IBlob::pointer> make_iblobs(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;

@@ -95,10 +95,11 @@ static void clustering_isolated(
     }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // sort the clusters by length using a lambda function  (sort from small to large clusters ... )
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() > cluster2->get_length();
-    });
+    // Sort descending by length with deterministic tie-breaking via cluster_less (reversed).
+    // cluster_less defines a full content-based ordering (length, nchildren, npoints, per-wpid
+    // ranges), so reversing it gives a strict weak ordering for std::sort.
+    std::sort(live_clusters.begin(), live_clusters.end(),
+              [](const Cluster *a, const Cluster *b) { return cluster_less(b, a); });
 
     for (auto& cluster : live_clusters) {
           if (cluster->get_default_scope().hash() != scope.hash()) {
@@ -212,11 +213,20 @@ static void clustering_isolated(
     }
     // LogDebug("big_clusters.size() = " << big_clusters.size() << " small_clusters.size() = " << small_clusters.size());
 
-    std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
+    // Deterministic pair comparator (cluster_less_functor on first, then second element).
+    struct cluster_pair_less_t {
+        cluster_less_functor clf;
+        bool operator()(const std::pair<Cluster*,Cluster*>& a, const std::pair<Cluster*,Cluster*>& b) const {
+            if (clf(a.first, b.first)) return true;
+            if (clf(b.first, a.first)) return false;
+            return clf(a.second, b.second);
+        }
+    };
+    std::set<std::pair<Cluster *, Cluster *>, cluster_pair_less_t> to_be_merged_pairs;
 
     // clustering small with big ones ...
     double small_big_dis_cut = 80 * units::cm;
-    std::set<Cluster *> used_small_clusters;
+    std::set<Cluster *, cluster_less_functor> used_small_clusters;
     for (auto it = small_clusters.begin(); it != small_clusters.end(); it++) {
         Cluster *curr_cluster = (*it);
         // curr_cluster->Create_point_cloud();
@@ -300,41 +310,25 @@ static void clustering_isolated(
     // clustering big ones ...
     // cloud1 is the longer one
     // used_big_clusters holds the shorter one
-    std::set<Cluster *> used_big_clusters;
+    std::set<Cluster *, cluster_less_functor> used_big_clusters;
     double big_dis_cut = 3 * units::cm;
     double big_dis_range_cut = 16 * units::cm;
     for (size_t i = 0; i != big_clusters.size(); i++) {
-        Cluster *cluster1 = big_clusters.at(i);
         // cluster1->Create_point_cloud();
         for (size_t j = i + 1; j != big_clusters.size(); j++) {
-            Cluster *cluster2 = big_clusters.at(j);
+            // Use fresh inner-loop locals so that std::swap below does not corrupt
+            // cluster1 for subsequent j iterations (prototype bug fix).
+            Cluster *c1 = big_clusters.at(i);
+            Cluster *c2 = big_clusters.at(j);
             // cluster2->Create_point_cloud();
-            // ToyPointCloud *cloud1, *cloud2;
-            double pca_ratio, small_cluster_length;
-            // if (cluster1->get_length() > cluster2->get_length()) {
-            //     // cloud1 = cluster1->get_point_cloud();
-            //     // cloud2 = cluster2->get_point_cloud();
-            //     if (used_big_clusters.find(cluster2) != used_big_clusters.end()) continue;
-            //     // cluster2->Calc_pca();
-            //     pca_ratio = cluster2->get_pca().values.at(1) / cluster2->get_pca().values.at(0);
-            //     small_cluster_length = cluster2->get_length();
-            // }
-            // else {
-            //     // cloud1 = cluster2->get_point_cloud();
-            //     // cloud2 = cluster1->get_point_cloud();
-            //     if (used_big_clusters.find(cluster1) != used_big_clusters.end()) continue;
-            //     // cluster1->Calc_pca();
-            //     pca_ratio = cluster1->get_pca().values.at(1) / cluster1->get_pca().values.at(0);
-            //     small_cluster_length = cluster1->get_length();
-            // }
-            // make sure cluster1 is the longer one
-            if (!(cluster1->get_length() > cluster2->get_length())) std::swap(cluster1, cluster2);
-            if (used_big_clusters.find(cluster2) != used_big_clusters.end()) continue;
-            pca_ratio = cluster2->get_pca().values.at(1) / cluster2->get_pca().values.at(0);
-            small_cluster_length = cluster2->get_length();
+            // make sure c1 is the longer one
+            if (!(c1->get_length() > c2->get_length())) std::swap(c1, c2);
+            if (used_big_clusters.find(c2) != used_big_clusters.end()) continue;
+            double pca_ratio = c2->get_pca().values.at(1) / c2->get_pca().values.at(0);
+            double small_cluster_length = c2->get_length();
 
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
-            std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
+            std::tuple<int, int, double> results = c2->get_closest_points(*c1);
             double min_dis = std::get<2>(results);
             if (min_dis < big_dis_cut) {
                 bool flag_merge = true;
@@ -342,13 +336,13 @@ static void clustering_isolated(
                 int num_outside_points = 0;
                 /* int num_close_points = 0; */
                 // const int N = cloud2->get_num_points();
-                const int N = cluster2->npoints();
+                const int N = c2->npoints();
                 // WCP::WCPointCloud<double> &cloud = cloud2->get_cloud();
                 for (int k = 0; k != N; k++) {
                     // Point test_p1(cloud.pts[k].x, cloud.pts[k].y, cloud.pts[k].z);
-                    geo_point_t test_p1 = cluster2->point3d(k);
+                    geo_point_t test_p1 = c2->point3d(k);
                     // double close_dis = cloud1->get_closest_dis(test_p1);
-                    double close_dis = cluster1->get_closest_dis(test_p1);
+                    double close_dis = c1->get_closest_dis(test_p1);
                     if (close_dis > big_dis_range_cut) {
                         num_outside_points++;
                         if (num_outside_points > 400) break;
@@ -365,25 +359,22 @@ static void clustering_isolated(
                 if (flag_merge && small_cluster_length > 60 * units::cm && pca_ratio < 0.0015) flag_merge = false;
 
                 if (flag_merge) {
-                    to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
+                    to_be_merged_pairs.insert(std::make_pair(c1, c2));
 
-                    // std::cout << "BB: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center) << " " << cluster2->get_pca().center) << std::endl;
+                    // std::cout << "BB: " << c1->get_length()/units::cm << " " << c2->get_length()/units::cm << std::endl;
 
-                    if (cluster1->get_length() < cluster2->get_length()) {
-                        used_big_clusters.insert(cluster1);
-                    }
-                    else {
-                        used_big_clusters.insert(cluster2);
-                    }
+                    // c2 is always the shorter one (c1 >= c2 by construction above)
+                    used_big_clusters.insert(c2);
                 }
             }
         }
     }
     // LogDebug("clustering big ones " << to_be_merged_pairs.size());
 
-    // merge clusters
-    std::vector<std::set<Cluster *>> merged_clusters;
-    std::set<Cluster *> used_clusters;
+    // merge clusters — all inner sets use cluster_less_functor for deterministic iteration order.
+    using cluster_set_clf = std::set<Cluster *, cluster_less_functor>;
+    std::vector<cluster_set_clf> merged_clusters;
+    std::set<Cluster *, cluster_less_functor> used_clusters;
 
     for (auto it = to_be_merged_pairs.begin(); it != to_be_merged_pairs.end(); it++) {
         Cluster *cluster1 = (*it).first;
@@ -396,9 +387,9 @@ static void clustering_isolated(
         used_clusters.insert(cluster2);
 
         bool flag_new = true;
-        std::vector<std::set<Cluster *>> temp_set;
+        std::vector<cluster_set_clf> temp_set;
         for (auto it1 = merged_clusters.begin(); it1 != merged_clusters.end(); it1++) {
-            std::set<Cluster *> &clusters = (*it1);
+            cluster_set_clf &clusters = (*it1);
             if (clusters.find(cluster1) != clusters.end() || clusters.find(cluster2) != clusters.end()) {
                 clusters.insert(cluster1);
                 clusters.insert(cluster2);
@@ -408,14 +399,14 @@ static void clustering_isolated(
             }
         }
         if (flag_new) {
-            std::set<Cluster *> clusters;
+            cluster_set_clf clusters;
             clusters.insert(cluster1);
             clusters.insert(cluster2);
             merged_clusters.push_back(clusters);
         }
         if (temp_set.size() > 1) {
             // merge them further ...
-            std::set<Cluster *> clusters;
+            cluster_set_clf clusters;
             for (size_t i = 0; i != temp_set.size(); i++) {
                 for (auto it1 = temp_set.at(i).begin(); it1 != temp_set.at(i).end(); it1++) {
                     clusters.insert(*it1);
@@ -429,7 +420,7 @@ static void clustering_isolated(
     for (auto it = live_clusters.begin(); it != live_clusters.end(); it++) {
         Cluster *cluster = *it;
         if (used_clusters.find(cluster) == used_clusters.end()) {
-            std::set<Cluster *> temp_clusters;
+            cluster_set_clf temp_clusters;
             temp_clusters.insert(cluster);
             merged_clusters.push_back(temp_clusters);
         }
@@ -438,9 +429,9 @@ static void clustering_isolated(
     // new stuff ...
     std::map<Cluster*, std::vector<std::pair<Cluster*,double>>, cluster_less_functor> results;
     for (auto it = merged_clusters.begin(); it != merged_clusters.end(); it++) {
-        std::set<Cluster *> &cluster_set = (*it);
+        cluster_set_clf &cluster_set = (*it);
         double max_length = 0;
-        Cluster *max_cluster;
+        Cluster *max_cluster = nullptr;
         for (auto it1 = cluster_set.begin(); it1 != cluster_set.end(); it1++) {
             Cluster *temp_cluster = (*it1);
             if (temp_cluster->get_length() > max_length) {
@@ -469,23 +460,21 @@ static void clustering_isolated(
 
     {
         cluster_connectivity_graph_t g;
-        std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-        std::map<const Cluster*, int> map_cluster_index;
-        for (const Cluster* live : live_grouping.children()) {
-            size_t ilive = map_cluster_index.size();
-            map_cluster_index[live] = ilive;
-            ilive2desc[ilive] = boost::add_vertex(ilive, g);
+        // Use the deterministically-ordered children() vector for vertex indices.
+        const auto live_all = live_grouping.children();
+        std::unordered_map<const Cluster*, int> map_cluster_index;
+        map_cluster_index.reserve(live_all.size());
+        for (size_t ilive = 0; ilive < live_all.size(); ++ilive) {
+            map_cluster_index[live_all[ilive]] = static_cast<int>(ilive);
+            boost::add_vertex(ilive, g);
         }
         for (auto it = results.begin(); it != results.end(); it++) {
             const Cluster* live = it->first;
-            size_t ilive = ilive2desc[map_cluster_index[live]];
             for (const auto& pair : it->second) {
                 const Cluster* live2 = pair.first;
-                size_t ilive2 = ilive2desc[map_cluster_index[live2]];
-                /*auto edge =*/ add_edge(ilive, ilive2, g);
+                add_edge(map_cluster_index[live], map_cluster_index[live2], g);
             }
         }
-        cluster_set_t temp_clusters;
         merge_clusters(g, live_grouping, "isolated");
     }
 

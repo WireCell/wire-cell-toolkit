@@ -29,49 +29,8 @@ namespace WireCell::Clus {
 
     void ImproveCluster_1::configure(const WireCell::Configuration& cfg)
     {
-        // Configure base class first
+        // Base class configure() handles NeedDV, NeedPCTS, samplers, and anodes.
         RetileCluster::configure(cfg);
-        
-        NeedDV::configure(cfg);
-        NeedPCTS::configure(cfg);
-
-        if (cfg.isMember("samplers") && cfg["samplers"].isArray()) {
-            // Process array of samplers
-            for (const auto& sampler_cfg : cfg["samplers"]) {
-                int apa = sampler_cfg["apa"].asInt();
-                int face = sampler_cfg["face"].asInt();
-                std::string sampler_name = sampler_cfg["name"].asString();
-                
-                if (sampler_name.empty()) {
-                    raise<ValueError>("RetileCluster requires an IBlobSampler name for APA %d face %d", apa, face);
-                }
-                // std::cout << "Test: " << apa << " " << face << " " << sampler_name << std::endl;
-                auto sampler_ptr = Factory::find_tn<IBlobSampler>(sampler_name);
-                m_samplers[apa][face] = sampler_ptr;
-            }
-        }
-
-        std::vector<IAnodePlane::pointer> anodes_tn;
-        for (const auto& aname : cfg["anodes"]) {
-            auto anode = Factory::find_tn<IAnodePlane>(aname.asString());
-            anodes_tn.push_back(anode);
-            for (const auto& face1 : anode->faces()) {
-                int apa = anode->ident();
-                int face = face1->which();
-                m_face[apa][face] = face1;
-                const auto& coords = face1->raygrid();
-                if (coords.nlayers() != 5) {
-                    raise<ValueError>("unexpected number of ray grid layers: %d", coords.nlayers());
-                }
-                // std::cout <<"Test: " << apa << " " << face << " " << coords.nlayers() << std::endl;
-                // Get wire info for each plane
-                m_plane_infos[apa][face].clear();
-                m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kUlayer));
-                m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kVlayer));
-                m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kWlayer));
-
-            }
-        }
     }
 
     Configuration ImproveCluster_1::default_configuration() const
@@ -135,8 +94,10 @@ namespace WireCell::Clus {
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
             SPDLOG_LOGGER_DEBUG(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
-            // Step 2.
-            // hack_activity_improved(*orig_cluster, map_slices_measures, path_wcps, apa, face); // may need more args
+            // Step 2 (hack_activity_improved) is intentionally NOT called here.
+            // The prototype's Improve_PR3DCluster_1 adds dead/good channels only — it
+            // has no path-tube logic.  Path-tube hacking is performed exclusively by
+            // ImproveCluster_2::mutate, which calls hack_activity_improved twice.
 
             // test ...
             // std::cout << "Test: Improved: " << map_slices_measures.size() << " " << orig_cluster->children().size() << std::endl;
@@ -219,6 +180,7 @@ namespace WireCell::Clus {
 
             // remove bad blobs ...
             t0 = Clock::now();
+            if (map_slices_measures.empty()) continue; // no tiled blobs for this face
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
             auto blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
             for (const Blob* blob : blobs_to_remove) {
@@ -327,16 +289,26 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
 
     int tick_span = 1;
 
-    // Step 1: Fill maps according to existing blobs in cluster
+    // Step 1: Fill maps according to existing blobs in cluster (this face only).
     auto children = cluster.children();
     for (auto child : children) {
         auto blob = child->value().facade<Blob>();
         if (!blob) continue;
-        
+
+        // Skip blobs belonging to a different (apa, face) — wire indices are
+        // face-local and must not be mixed across faces.
+        auto blob_wpid = blob->wpid();
+        if (blob_wpid.apa() != apa || blob_wpid.face() != face) continue;
+
         // Get the time slice bounds for this blob
         int time_slice_min = blob->slice_index_min();
         int time_slice_max = blob->slice_index_max();
-        tick_span = time_slice_max - time_slice_min;
+        // Only record tick_span from the first encountered blob; all blobs on
+        // a given face should agree.  A later assertion/warning can catch
+        // discrepancies if they ever arise.
+        if (tick_span == 1 && time_slice_max > time_slice_min) {
+            tick_span = time_slice_max - time_slice_min;
+        }
         
         // Process each time slice in the blob
         for (int time_slice = time_slice_min; time_slice < time_slice_max; time_slice = time_slice + tick_span) {
@@ -577,6 +549,9 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
         // std::cout << "Test: " << apa << " " << face << " " << wire_limits[i].first << " " << wire_limits[i].second << std::endl;
     }
 
+    // Guard: if activity is empty there is nothing to hack.
+    if (map_slices_measures.empty()) return;
+
     // this is to get the end of the time tick range = start_tick + tick_span
     const int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
 
@@ -709,31 +684,42 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
 }
 
 
-std::set<const WireCell::Clus::Facade::Blob*> 
+std::vector<const WireCell::Clus::Facade::Blob*>
 ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
 {
-     // Get time-organized maps of original and new blobs
+    // Get time-organized maps of original and new blobs
     const auto& orig_time_blob_map = cluster.time_blob_map().at(apa).at(face);
     const auto& new_time_blob_map = shad_cluster.time_blob_map().at(apa).at(face);
-    
-    // Build index mappings for new blobs (similar to prototype's mcell indexing)
+
+    // Build index mappings for new blobs.  Sort by (time_slice, blob->ident())
+    // so vertex IDs are deterministic across runs regardless of heap layout.
     std::map<int, const Blob*> map_index_blob;
     std::map<const Blob*, int> map_blob_index;
     std::vector<const Blob*> all_new_blobs;
-    
+
     int index = 0;
     for (const auto& [time_slice, new_blobs] : new_time_blob_map) {
-        for (const Blob* blob : new_blobs) {
+        // Sort within each time slice by blob ident for determinism.
+        std::vector<const Blob*> sorted_blobs(new_blobs.begin(), new_blobs.end());
+        // Sort by wire-range corners for a deterministic, geometry-based order that
+        // is independent of heap-allocated pointer values.
+        std::sort(sorted_blobs.begin(), sorted_blobs.end(),
+                  [](const Blob* a, const Blob* b) {
+                      if (a->u_wire_index_min() != b->u_wire_index_min()) return a->u_wire_index_min() < b->u_wire_index_min();
+                      if (a->v_wire_index_min() != b->v_wire_index_min()) return a->v_wire_index_min() < b->v_wire_index_min();
+                      return a->w_wire_index_min() < b->w_wire_index_min();
+                  });
+        for (const Blob* blob : sorted_blobs) {
             map_index_blob[index] = blob;
-            map_blob_index[blob] = index;
+            map_blob_index[blob]  = index;
             all_new_blobs.push_back(blob);
             index++;
         }
     }
     
-    // If no new blobs or only one blob, return empty set (no graph needed)
+    // If no new blobs or only one blob, nothing to filter.
     if (all_new_blobs.size() <= 1) {
-        return std::set<const Blob*>();
+        return {};
     }
     
     // Create graph for new blobs - establish connectivity between adjacent time slices
@@ -765,8 +751,8 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     std::vector<int> component(num_vertices(temp_graph));
     const int num_components = connected_components(temp_graph, &component[0]);
     
-    std::set<const Blob*> blobs_to_remove;
-    
+    std::vector<const Blob*> blobs_to_remove;
+
     // If we have multiple disconnected components, validate each component
     if (num_components > 1) {
         std::set<int> good_components;
@@ -829,17 +815,17 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
             }
         }
         
-        // Collect blobs from bad components for removal
+        // Collect blobs from bad components for removal.
+        // Iterate in deterministic vertex-ID order (assigned from sorted blobs above).
         for (int i = 0; i < static_cast<int>(component.size()); ++i) {
             int comp_id = component[i];
             if (good_components.find(comp_id) == good_components.end()) {
-                // This component is not good, mark its blobs for removal
                 const Blob* blob = map_index_blob[i];
-                blobs_to_remove.insert(blob);
+                blobs_to_remove.push_back(blob);
             }
         }
     }
-    
+
     return blobs_to_remove;
 }
 

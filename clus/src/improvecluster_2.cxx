@@ -140,8 +140,8 @@ namespace WireCell::Clus {
         // this requires CTPC and ref_point cloud of original cluster
         auto& temp_graph = temp_cluster.find_graph("ctpc_ref_pid", *orig_cluster, m_dv, m_pcts);
         SPDLOG_LOGGER_DEBUG(log, "timing: Grapher+find_graph(ctpc_ref_pid) took {} ms", MS(Clock::now()-t0).count());
-        //temp_steiner_grapher.get_graph("basic_pid"); 
-        
+        // (temp_steiner_grapher used below for establish/remove_same_blob_steiner_edges)
+
 
         SPDLOG_LOGGER_DEBUG(log, "Temp Graph vertices: {}, edges: {}", boost::num_vertices(temp_graph), boost::num_edges(temp_graph));
         t0 = Clock::now();
@@ -238,6 +238,7 @@ namespace WireCell::Clus {
 
             // remove bad blobs
             t0 = Clock::now();
+            if (map_slices_measures.empty()) continue; // no tiled blobs for this face
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
             auto blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
             for (const Blob* blob : blobs_to_remove) {

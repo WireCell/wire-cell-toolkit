@@ -137,21 +137,15 @@ static void clustering_examine_bundles(
 
         //run the longest ...
         if (flag_largest){
-            // No main cluster existed, find longest cluster
+            // No main cluster existed, find longest cluster.
+            // Single sweep: compute length for each unique non-(-1) id and track the maximum.
             std::map<int, double> cluster_lengths;
-            std::set<int> unique_ids;
             for (const auto& id : b2groupid) {
-                if (id >= 0) {  // skip any existing -1 values
-                    unique_ids.insert(id);
+                if (id >= 0 && cluster_lengths.find(id) == cluster_lengths.end()) {
+                    cluster_lengths[id] = get_length(live_clusters.at(i), b2groupid, id);
                 }
             }
-            
-            // Calculate length for each unique cluster ID
-            for (const auto& id : unique_ids) {
-                double length = get_length(live_clusters.at(i) , b2groupid, id);
-                cluster_lengths[id] = length;
-            }
-            
+
             // Find cluster with maximum length
             double max_length = 0;
             int longest_cluster_id = -1;

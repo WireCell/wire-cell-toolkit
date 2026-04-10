@@ -105,16 +105,8 @@ static void clustering_neutrino(
 
     // get wpids ...
     std::map<WirePlaneId, double> map_wpid_time_slice_width;
-    std::map<WirePlaneId, double> map_FV_xmin;
-    std::map<WirePlaneId, double> map_FV_xmax;
-    std::map<WirePlaneId, double> map_FV_xmin_margin;
-    std::map<WirePlaneId, double> map_FV_xmax_margin;
     for (const auto& wpid : wpids) {
         map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
-        map_FV_xmin[wpid] = dv->metadata(wpid)["FV_xmin"].asDouble() ;
-        map_FV_xmax[wpid] = dv->metadata(wpid)["FV_xmax"].asDouble() ;
-        map_FV_xmin_margin[wpid] = dv->metadata(wpid)["FV_xmin_margin"].asDouble() ;
-        map_FV_xmax_margin[wpid] = dv->metadata(wpid)["FV_xmax_margin"].asDouble() ;
     }
     WirePlaneId wpid_all(0);
     double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
@@ -123,8 +115,8 @@ static void clustering_neutrino(
     double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
     double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
     double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
-    // double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
-    // double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
+    double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
+    double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
 
 
 
@@ -175,7 +167,9 @@ static void clustering_neutrino(
         // el_wcps.first.x()/units::cm << " " << el_wcps.second.x()/units::cm << std::endl;
 
         // if (el_wcps.first.x() < -1 * units::cm || el_wcps.second.x() > 257 * units::cm ||
-        if (el_wcps.first.x() < map_FV_xmin.begin()->second - map_FV_xmin_margin.begin()->second || el_wcps.second.x() > map_FV_xmax.begin()->second + map_FV_xmax_margin.begin()->second || cluster->get_length() < 6.0 * units::cm)
+        // Use global detector-envelope bounds (wpid_all=0) to cover all TPCs, consistent
+        // with the clustering_separate convention (clustering_separate.cxx:360-380).
+        if (el_wcps.first.x() < det_FV_xmin - det_FV_xmin_margin || el_wcps.second.x() > det_FV_xmax + det_FV_xmax_margin || cluster->get_length() < 6.0 * units::cm)
             continue;
 
         bool flag_fy = false;
@@ -276,7 +270,7 @@ static void clustering_neutrino(
     }
 
     /// TODO: replace with graph? edges between closest clusters, edges are weighted by distance
-    std::map<Cluster *, std::pair<Cluster *, double>> cluster_close_cluster_map;
+    std::map<Cluster *, std::pair<Cluster *, double>, cluster_less_functor> cluster_close_cluster_map;
     // calculate the closest distance??? ...
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster1 = live_clusters.at(i);
@@ -311,14 +305,23 @@ static void clustering_neutrino(
 
     //  std::cout << contained_clusters.size() << " " << candidate_clusters.size() << std::endl;
 
-    std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
+    // Deterministic pair comparator: orders by cluster_less_functor on first element, then second.
+    struct cluster_pair_less_t {
+        cluster_less_functor clf;
+        bool operator()(const std::pair<Cluster*,Cluster*>& a, const std::pair<Cluster*,Cluster*>& b) const {
+            if (clf(a.first, b.first)) return true;
+            if (clf(b.first, a.first)) return false;
+            return clf(a.second, b.second);
+        }
+    };
+    std::set<std::pair<Cluster *, Cluster *>, cluster_pair_less_t> to_be_merged_pairs;
 
-    std::set<Cluster *> used_clusters;
+    std::set<Cluster *, cluster_less_functor> used_clusters;
 
-    std::map<Cluster *, std::shared_ptr<Simple3DPointCloud>> cluster_cloud_map;
+    std::map<Cluster *, std::shared_ptr<Simple3DPointCloud>, cluster_less_functor> cluster_cloud_map;
 
-    std::map<Cluster *, geo_point_t> cluster_dir1_map;
-    std::map<Cluster *, geo_point_t> cluster_dir2_map;
+    std::map<Cluster *, geo_point_t, cluster_less_functor> cluster_dir1_map;
+    std::map<Cluster *, geo_point_t, cluster_less_functor> cluster_dir2_map;
 
     // for (auto it = candidate_clusters.begin(); it != candidate_clusters.end(); it++) {
     //     Cluster *cluster1 = (*it);
@@ -957,19 +960,20 @@ static void clustering_neutrino(
     // }
 
     // prepare a graph ...
+    // Use the deterministically-ordered children() vector for vertex indices so that
+    // Boost connected_components produces the same component numbering every run.
     typedef cluster_connectivity_graph_t Graph;
     Graph g;
-    std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-    std::map<const Cluster*, int> map_cluster_index;
-    for (const Cluster* live : live_grouping.children()) {
-        size_t ilive = map_cluster_index.size();
-        map_cluster_index[live] = ilive;
-        ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    const auto live_all = live_grouping.children();  // stable, deterministic order
+    std::unordered_map<const Cluster*, int> map_cluster_index;
+    map_cluster_index.reserve(live_all.size());
+    for (size_t ilive = 0; ilive < live_all.size(); ++ilive) {
+        map_cluster_index[live_all[ilive]] = static_cast<int>(ilive);
+        boost::add_vertex(ilive, g);
     }
     for (auto [cluster1, cluster2] : to_be_merged_pairs) {
         // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
-        boost::add_edge(ilive2desc[map_cluster_index[cluster1]],
-                        ilive2desc[map_cluster_index[cluster2]], g);
+        boost::add_edge(map_cluster_index[cluster1], map_cluster_index[cluster2], g);
     }
 
     auto new_clusters = merge_clusters(g, live_grouping);
