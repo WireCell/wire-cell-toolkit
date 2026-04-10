@@ -77,28 +77,22 @@ void clustering_connect1(
 
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
-    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    // Key: WirePlaneId (one per APA/face), Value: drift_dir, angle_u, angle_v, angle_w
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
-    std::set<int> apas;
-
-    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_u_index; 
-    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index; 
-    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index; 
 
     for (const auto& wpid : wpids) {
         int apa = wpid.apa();
         int face = wpid.face();
-        apas.insert(apa);
 
         // Create wpids for all three planes with this APA and face
         WirePlaneId wpid_u(kUlayer, face, apa);
         WirePlaneId wpid_v(kVlayer, face, apa);
         WirePlaneId wpid_w(kWlayer, face, apa);
-     
+
         // Get drift direction based on face orientation
         int face_dirx = dv->face_dirx(wpid_u);
         geo_point_t drift_dir(face_dirx, 0, 0);
-        
+
         // Get wire directions for all planes
         Vector wire_dir_u = dv->wire_direction(wpid_u);
         Vector wire_dir_v = dv->wire_direction(wpid_v);
@@ -110,11 +104,6 @@ void clustering_connect1(
         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
         wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
-
-
-        af_dead_u_index[apa][face] = live_grouping.get_dead_winds(apa, face, 0);
-        af_dead_v_index[apa][face] = live_grouping.get_dead_winds(apa, face, 1);
-        af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
     }
 
 
@@ -153,20 +142,16 @@ void clustering_connect1(
     // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
     cluster_connectivity_graph_t  g;
     std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-    std::map<const Cluster*, int> map_cluster_index;
+    std::map<const Cluster*, int, ClusterLess> map_cluster_index;
     for (const Cluster* live : live_grouping.children()) {
+        if (!live->get_scope_filter(scope)) continue;
         size_t ilive = map_cluster_index.size();
         map_cluster_index[live] = ilive;
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
     }
 
-    // WCP::WCPointCloud<double> &global_cloud = global_skeleton_cloud->get_cloud();
-    // std::vector<int> global_cloud_indices_u;
-    // std::vector<int> global_cloud_indices_v;
-    // std::vector<int> global_cloud_indices_w;
-
-    std::map<const Cluster *, geo_point_t> map_cluster_dir1;
-    std::map<const Cluster *, geo_point_t> map_cluster_dir2;
+    std::map<const Cluster *, geo_point_t, ClusterLess> map_cluster_dir1;
+    std::map<const Cluster *, geo_point_t, ClusterLess> map_cluster_dir2;
 
     geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
     geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
@@ -363,211 +348,52 @@ void clustering_connect1(
             }
         }
         else {
+            // NB: && binds tighter than || — this parses as A || (B && C && D), matching prototype intent.
             if (cluster->get_length() < 100 * units::cm ||
                 fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
                     fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180. &&
                     cluster->get_length() < 200 * units::cm) {
-                // WCP::WCPointCloud<double> &cloud = cluster->get_point_cloud()->get_cloud();
                 int num_total_points = cluster->npoints();
                 const auto& winds = cluster->wire_indices();
-                int num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
-                std::map<const Cluster *, int> map_cluster_num[3];
+                int num_unique[3] = {0, 0, 0};  // points unique (not overlapping with any earlier cluster)
+                std::map<const Cluster *, int, ClusterLess> map_cluster_num[3];
+
+                // Lambda: process one wire plane per point.
+                // If the point falls in a dead wire region, use a fixed 2/3*loose_dis_cut threshold
+                // (prototype behaviour); otherwise use the per-extrapolation-point dist_cut stored
+                // in the skeleton cloud.  This avoids 3x code duplication across U/V/W planes.
+                const auto& skel_pts = global_skeleton_cloud->get_points();
+                auto process_plane = [&](int plane,
+                                         const std::map<int, std::pair<double, double>>& dead_index,
+                                         int wire_idx, double raw_x,
+                                         const geo_point_t& test_point,
+                                         int& num_unique_ref) {
+                    auto dit = dead_index.find(wire_idx);
+                    bool flag_dead = (dit != dead_index.end() &&
+                                      raw_x >= dit->second.first &&
+                                      raw_x <= dit->second.second);
+                    auto results = global_skeleton_cloud->get_2d_points_info(
+                        test_point, loose_dis_cut, plane, face, apa);
+                    bool flag_unique = true;
+                    if (!results.empty()) {
+                        std::set<const Cluster *, ClusterLess> tmp;
+                        for (const auto& [dist, cl, gidx] : results) {
+                            const double cut = flag_dead ? (loose_dis_cut / 3. * 2.)
+                                                         : skel_pts[gidx].dist_cut[plane];
+                            if (dist < cut) { flag_unique = false; tmp.insert(cl); }
+                        }
+                        for (const Cluster* cl : tmp) ++map_cluster_num[plane][cl];
+                    }
+                    if (flag_unique) ++num_unique_ref;
+                };
+
                 for (int j = 0; j != num_total_points; j++) {
-                    geo_point_t test_point(cluster->point3d(j).x(), cluster->point3d(j).y(), cluster->point3d(j).z());
-
-                    bool flag_dead = false;
-                    if (dead_u_index.find(winds[0][j]) != dead_u_index.end()) {
-                        if (cluster->point3d_raw(j).x() >= dead_u_index[winds[0][j]].first &&
-                            cluster->point3d_raw(j).x() <= dead_u_index[winds[0][j]].second) {
-                            flag_dead = true;
-                        }
-                    }
-
-                    if (!flag_dead) {
-                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
-                        std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, face, apa); 
-                        bool flag_unique = true;
-                        if (results.size() > 0) {
-                            std::set<const Cluster *> temp_clusters;
-                            for (size_t k = 0; k != results.size(); k++) {
-                                // if (cluster->children().size() == 215 && k == 0) {
-                                // if (k == 0) {
-                                //     std::cout
-                                //     << " cluster->children().size() " << cluster->children().size()
-                                //     << " k " << k
-                                //     // <<" global_skeleton_cloud->get_num_points() " << global_skeleton_cloud->get_num_points()
-                                //     <<" global_skeleton_cloud->get_points().size() " << global_skeleton_cloud->get_points().size()
-                                //     <<" results.at(k) " << std::get<0>(results.at(k))
-                                //     // << " " << global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k))) << std::endl;
-                                //     << " " << global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0] << std::endl;
-                                // }
-                                if (std::get<0>(results.at(k)) <
-                                    // global_skeleton_cloud->dist_cut(0,std::get<2>(results.at(k)))) {
-                                    global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[0]) {
-                                    flag_unique = false;
-                                    temp_clusters.insert(std::get<1>(results.at(k)));
-                                }
-                            }
-                            for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
-                                if (map_cluster_num[0].find(*it) == map_cluster_num[0].end()) {
-                                    map_cluster_num[0][*it] = 1;
-                                }
-                                else {
-                                    map_cluster_num[0][*it]++;
-                                }
-                            }
-                        }
-                        if (flag_unique) num_unique[0]++;
-                    }
-                    else {
-                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0);
-                        std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 0, face, apa); 
-                        bool flag_unique = true;
-                        if (results.size() > 0) {
-                            std::set<const Cluster *> temp_clusters;
-                            for (size_t k = 0; k != results.size(); k++) {
-                                if (std::get<0>(results.at(k)) < loose_dis_cut / 3. * 2.) {
-                                    flag_unique = false;
-                                    temp_clusters.insert(std::get<1>(results.at(k)));
-                                }
-                            }
-                            for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
-                                if (map_cluster_num[0].find(*it) == map_cluster_num[0].end()) {
-                                    map_cluster_num[0][*it] = 1;
-                                }
-                                else {
-                                    map_cluster_num[0][*it]++;
-                                }
-                            }
-                        }
-                        if (flag_unique) num_unique[0]++;
-                    }
-
-                    flag_dead = false;
-                    if (dead_v_index.find(winds[1][j]) != dead_v_index.end()) {
-                        if (cluster->point3d_raw(j).x() >= dead_v_index[winds[1][j]].first &&
-                            cluster->point3d_raw(j).x() <= dead_v_index[winds[1][j]].second) {
-                            flag_dead = true;
-                        }
-                    }
-
-                    if (!flag_dead) {
-                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
-                        std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, face, apa);
-                        bool flag_unique = true;
-                        if (results.size() > 0) {
-                            std::set<const Cluster *> temp_clusters;
-                            for (size_t k = 0; k != results.size(); k++) {
-                                if (std::get<0>(results.at(k)) <
-                                    // global_skeleton_cloud->dist_cut(1,std::get<2>(results.at(k)))) {
-                                    global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[1]) {
-                                    flag_unique = false;
-                                    temp_clusters.insert(std::get<1>(results.at(k)));
-                                }
-                            }
-                            for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
-                                if (map_cluster_num[1].find(*it) == map_cluster_num[1].end()) {
-                                    map_cluster_num[1][*it] = 1;
-                                }
-                                else {
-                                    map_cluster_num[1][*it]++;
-                                }
-                            }
-                        }
-                        if (flag_unique) num_unique[1]++;
-                    }
-                    else {
-                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1);
-                        std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 1, face, apa); 
-                        bool flag_unique = true;
-                        if (results.size() > 0) {
-                            std::set<const Cluster *> temp_clusters;
-                            for (size_t k = 0; k != results.size(); k++) {
-                                if (std::get<0>(results.at(k)) < loose_dis_cut / 3. * 2.) {
-                                    flag_unique = false;
-                                    temp_clusters.insert(std::get<1>(results.at(k)));
-                                }
-                            }
-                            for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
-                                if (map_cluster_num[1].find(*it) == map_cluster_num[1].end()) {
-                                    map_cluster_num[1][*it] = 1;
-                                }
-                                else {
-                                    map_cluster_num[1][*it]++;
-                                }
-                            }
-                        }
-                        if (flag_unique) num_unique[1]++;
-                    }
-
-                    flag_dead = false;
-                    if (dead_w_index.find(winds[2][j]) != dead_w_index.end()) {
-                        if (cluster->point3d_raw(j).x() >= dead_w_index[winds[2][j]].first &&
-                            cluster->point3d_raw(j).x() <= dead_w_index[winds[2][j]].second) {
-                            flag_dead = true;
-                        }
-                    }
-
-                    if (!flag_dead) {
-                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
-                        std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, face, apa); 
-                        bool flag_unique = true;
-                        if (results.size() > 0) {
-                            std::set<const Cluster *> temp_clusters;
-                            for (size_t k = 0; k != results.size(); k++) {
-                                if (std::get<0>(results.at(k)) <
-                                    // global_skeleton_cloud->dist_cut(2,std::get<2>(results.at(k)))) {
-                                    global_skeleton_cloud->get_points().at(std::get<2>(results.at(k))).dist_cut[2]) {
-                                    flag_unique = false;
-                                    temp_clusters.insert(std::get<1>(results.at(k)));
-                                }
-                            }
-                            for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
-                                if (map_cluster_num[2].find(*it) == map_cluster_num[2].end()) {
-                                    map_cluster_num[2][*it] = 1;
-                                }
-                                else {
-                                    map_cluster_num[2][*it]++;
-                                }
-                            }
-                        }
-                        if (flag_unique) num_unique[2]++;
-                    }
-                    else {
-                        // std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                        //     global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2);
-                        std::vector<std::tuple<double, const Cluster *, size_t>> results =
-                            global_skeleton_cloud->get_2d_points_info(test_point, loose_dis_cut, 2, face, apa); 
-                        bool flag_unique = true;
-                        if (results.size() > 0) {
-                            std::set<const Cluster *> temp_clusters;
-                            for (size_t k = 0; k != results.size(); k++) {
-                                if (std::get<0>(results.at(k)) < loose_dis_cut / 3. * 2.) {
-                                    flag_unique = false;
-                                    temp_clusters.insert(std::get<1>(results.at(k)));
-                                }
-                            }
-                            for (auto it = temp_clusters.begin(); it != temp_clusters.end(); it++) {
-                                if (map_cluster_num[2].find(*it) == map_cluster_num[2].end()) {
-                                    map_cluster_num[2][*it] = 1;
-                                }
-                                else {
-                                    map_cluster_num[2][*it]++;
-                                }
-                            }
-                        }
-                        if (flag_unique) num_unique[2]++;
-                    }
+                    const auto p3 = cluster->point3d(j);
+                    const geo_point_t test_point(p3.x(), p3.y(), p3.z());
+                    const double raw_x = cluster->point3d_raw(j).x();
+                    process_plane(0, dead_u_index, winds[0][j], raw_x, test_point, num_unique[0]);
+                    process_plane(1, dead_v_index, winds[1][j], raw_x, test_point, num_unique[1]);
+                    process_plane(2, dead_w_index, winds[2][j], raw_x, test_point, num_unique[2]);
                 } // loop over points
                 
 
@@ -579,62 +405,33 @@ void clustering_connect1(
                     int max_value_v[3] = {0, 0, 0};
                     int max_value_w[3] = {0, 0, 0};
 
-                    for (auto it = map_cluster_num[0].begin(); it != map_cluster_num[0].end(); it++) {
-                        if (it->second > max_value_u[0]) {
-                            max_value_u[0] = it->second;
-                            max_cluster_u = it->first;
+                    auto lookup_count = [&](int plane, const Cluster* cl) -> int {
+                        auto it = map_cluster_num[plane].find(cl);
+                        return (it != map_cluster_num[plane].end()) ? it->second : 0;
+                    };
 
-                            if (map_cluster_num[1].find(max_cluster_u) != map_cluster_num[1].end()) {
-                                max_value_u[1] = map_cluster_num[1][max_cluster_u];
-                            }
-                            else {
-                                max_value_u[1] = 0;
-                            }
-
-                            if (map_cluster_num[2].find(max_cluster_u) != map_cluster_num[2].end()) {
-                                max_value_u[2] = map_cluster_num[2][max_cluster_u];
-                            }
-                            else {
-                                max_value_u[2] = 0;
-                            }
+                    for (const auto& [cl, cnt] : map_cluster_num[0]) {
+                        if (cnt > max_value_u[0]) {
+                            max_value_u[0] = cnt;
+                            max_cluster_u = cl;
+                            max_value_u[1] = lookup_count(1, cl);
+                            max_value_u[2] = lookup_count(2, cl);
                         }
                     }
-                    for (auto it = map_cluster_num[1].begin(); it != map_cluster_num[1].end(); it++) {
-                        if (it->second > max_value_v[1]) {
-                            max_value_v[1] = it->second;
-                            max_cluster_v = it->first;
-
-                            if (map_cluster_num[0].find(max_cluster_v) != map_cluster_num[0].end()) {
-                                max_value_v[0] = map_cluster_num[0][max_cluster_v];
-                            }
-                            else {
-                                max_value_v[0] = 0;
-                            }
-                            if (map_cluster_num[2].find(max_cluster_v) != map_cluster_num[2].end()) {
-                                max_value_v[2] = map_cluster_num[2][max_cluster_v];
-                            }
-                            else {
-                                max_value_v[2] = 0;
-                            }
+                    for (const auto& [cl, cnt] : map_cluster_num[1]) {
+                        if (cnt > max_value_v[1]) {
+                            max_value_v[1] = cnt;
+                            max_cluster_v = cl;
+                            max_value_v[0] = lookup_count(0, cl);
+                            max_value_v[2] = lookup_count(2, cl);
                         }
                     }
-                    for (auto it = map_cluster_num[2].begin(); it != map_cluster_num[2].end(); it++) {
-                        if (it->second > max_value_w[2]) {
-                            max_value_w[2] = it->second;
-                            max_cluster_w = it->first;
-
-                            if (map_cluster_num[1].find(max_cluster_w) != map_cluster_num[1].end()) {
-                                max_value_w[1] = map_cluster_num[1][max_cluster_w];
-                            }
-                            else {
-                                max_value_w[1] = 0;
-                            }
-                            if (map_cluster_num[0].find(max_cluster_w) != map_cluster_num[0].end()) {
-                                max_value_w[0] = map_cluster_num[0][max_cluster_w];
-                            }
-                            else {
-                                max_value_w[0] = 0;
-                            }
+                    for (const auto& [cl, cnt] : map_cluster_num[2]) {
+                        if (cnt > max_value_w[2]) {
+                            max_value_w[2] = cnt;
+                            max_cluster_w = cl;
+                            max_value_w[1] = lookup_count(1, cl);
+                            max_value_w[0] = lookup_count(0, cl);
                         }
                     }
 
@@ -845,6 +642,7 @@ void clustering_connect1(
     ilive2desc.clear();  // added live index to graph descriptor
     map_cluster_index.clear();
     for (const Cluster* live : live_grouping.children()) {
+        if (!live->get_scope_filter(scope)) continue;
         size_t ilive = map_cluster_index.size();
         map_cluster_index[live] = ilive;
         ilive2desc[ilive] = boost::add_vertex(ilive, g2);
