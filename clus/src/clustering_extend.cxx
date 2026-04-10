@@ -749,13 +749,15 @@ static void clustering_extend(
 	   for (size_t j=0;j!=live_clusters.size();j++){
 	     auto cluster_2 = live_clusters.at(j);
        if (!cluster_2->get_scope_filter(scope)) continue;
+	     if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	     if (cluster_2==cluster_1) continue;
 	     if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),lowest_p,dir_lowp,length_cut)){
 	       // to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
 	       boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
 			       ilive2desc[map_cluster_index[cluster_2]], g);
 
-
+	       if (cluster_2->get_length()<15*units::cm)
+		 used_clusters.insert(cluster_2);
 	     }
 	   }
 	   

@@ -9,7 +9,7 @@ MicroBooNE geometry to support multiple APAs and faces.
 
 | Function | Multi-APA mechanism | Status |
 |---|---|---|
-| `ClusteringLiveDead` | Single-APA only; hard exception if grouping has >1 wpid | **BUG** |
+| `ClusteringLiveDead` | Per-wpid `wpid_params` map; per-cluster wpid lookup (same pattern as Extend) | Fixed |
 | `ClusteringExtend` | Per-wpid `wpid_U/V/W_dir` maps; per-cluster wpid lookup | Correct |
 | `ClusteringRegular` | Per-wpid `wpid_U/V/W_dir` maps; `get_wireplaneid` for cross-APA pairs | Correct |
 | `ClusteringParallelProlong` | Per-wpid maps via `compute_wireplane_params`; `wpid_ps` dominant-APA | Correct |
@@ -42,81 +42,40 @@ which returns the wpid whose APA bounding box has the longer ray intersection.
 
 ---
 
-## Bug: `ClusteringLiveDead` — Hard Exception for Multi-APA
+## `ClusteringLiveDead` Multi-APA Support — **Fixed**
 
-### Location
-`clus/src/clustering_live_dead.cxx`, lines 71–81.
+### What Was Fixed
 
-### Code
-```cpp
-// Check that groupings has less than one wpid
-if (live_grouping.wpids().size() > 1 || dead_grouping.wpids().size() > 1) {
-    for (const auto& wpid : live_grouping.wpids()) {
-        std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
-    }
-    for (const auto& wpid : dead_grouping.wpids()) {
-        std::cout << "Dead grouping wpid: " << wpid.name() << std::endl;
-    }
-    raise<ValueError>("Live %d > 1, Dead %d > 1",
-                      live_grouping.wpids().size(), dead_grouping.wpids().size());
-}
-auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, m_dv);
-```
+An earlier version of `clustering_live_dead.cxx` raised a `ValueError` for any
+grouping with `wpids().size() > 1` and used a single `extract_geometry_params`
+call that returned one `(drift_dir, angle_u, angle_v, angle_w)` tuple shared
+across all clusters regardless of their APA/face.
 
-### Problem
-
-1. **Hard crash for any multi-APA grouping.** `grouping.wpids()` returns all
-   distinct blob WirePlaneIds across all clusters. Any real multi-APA detector
-   produces groupings with `wpids().size() > 1`, causing a `ValueError` at
-   runtime before any geometry is processed.
-
-2. **Single-APA geometry for all clusters.** `extract_geometry_params` reads
-   only the first wpid and returns a single `(drift_dir, angle_u, angle_v,
-   angle_w)` tuple. The `angle_u/v/w` values are then used in
-   `is_angle_consistent` calls for both cluster 1 and cluster 2 regardless of
-   which APA they belong to.
-
-### Contrast with Other Functions
-
-`clustering_extend`, `clustering_regular`, and `clustering_parallel_prolong` all:
-- Do NOT raise an exception for multi-APA groupings.
-- Build per-wpid maps from all grouping wpids.
-- Look up geometry per-cluster using `cluster.wpid(point)`.
-- Apply cluster-1's angles to cluster-1's direction check and cluster-2's
-  angles to cluster-2's direction check.
-
-### Fix Required
-
-Replace lines 71–81 with per-wpid map building via `compute_wireplane_params`:
+This has been fixed. Current `clustering_live_dead.cxx` lines 71–78:
 
 ```cpp
 // Build per-APA/face wire geometry maps (supports multiple APAs/faces)
 const auto& all_wpids = live_grouping.wpids();
-std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_angle_params;
-std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir_ld, wpid_V_dir_ld, wpid_W_dir_ld;
-std::set<int> apas_ld;
-compute_wireplane_params(all_wpids, m_dv,
-    wpid_angle_params, wpid_U_dir_ld, wpid_V_dir_ld, wpid_W_dir_ld, apas_ld);
+std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_params;
+std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir;
+std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_V_dir;
+std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
+std::set<int> apas;
+compute_wireplane_params(all_wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
 ```
 
-Then, in the inner merge-decision loop (lines ~221–265), replace the single
-`angle_u, angle_v, angle_w` with per-cluster lookups:
+The inner merge-decision loop (lines 217–221) now uses per-cluster lookups:
 
 ```cpp
-// Look up per-cluster APA geometry
 auto wpid_1 = cluster_1->wpid(mcell1_center);
 auto wpid_2 = cluster_2->wpid(mcell2_center);
-const auto& [drift_dir_1, angle_u_1, angle_v_1, angle_w_1] = wpid_angle_params.at(wpid_1);
-const auto& [drift_dir_2, angle_u_2, angle_v_2, angle_w_2] = wpid_angle_params.at(wpid_2);
-
-// drift angles (sign-insensitive for fabs(angle-π/2) checks, but use correct APA)
-angle1 = dir1.angle(drift_dir_1);
-angle2 = dir2.angle(drift_dir_1);
-angle3 = dir3.angle(drift_dir_2);
+const auto& [drift_dir_1, angle_u_1, angle_v_1, angle_w_1] = wpid_params.at(wpid_1);
+const auto& [drift_dir_2, angle_u_2, angle_v_2, angle_w_2] = wpid_params.at(wpid_2);
 ```
 
-And replace each `is_angle_consistent(dir1, ..., angle_u, angle_v, angle_w, ...)` call
-with `angle_u_1/v_1/w_1` (cluster 1's APA) and each `is_angle_consistent(dir3, ..., angle_u, angle_v, angle_w, ...)` with `angle_u_2/v_2/w_2` (cluster 2's APA).
+Each `is_angle_consistent` call uses `angle_u_1/v_1/w_1` for cluster-1 direction
+checks and `angle_u_2/v_2/w_2` for cluster-2 direction checks — identical to the
+pattern in `clustering_extend`, `clustering_regular`, and `clustering_parallel_prolong`.
 
 ---
 
