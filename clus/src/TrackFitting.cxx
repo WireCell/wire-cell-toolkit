@@ -810,36 +810,35 @@ void TrackFitting::prepare_data() {
                     
                     int num_wires = wire_max - wire_min;
                     if (num_wires <= 0) continue;
-                    
-                    // Get time range
-                    int time_min = blob->slice_index_min();
-                    // int time_max = blob->slice_index_max();
-                    
-                    // Process each dead pixel
-                    int time_slice = time_min;
+
+                    // Get time range — loop over ALL slices the blob spans (S1.8 fix)
+                    int time_slice_min = blob->slice_index_min();
+                    int time_slice_max = blob->slice_index_max();
+                    int num_slices = time_slice_max - time_slice_min;
+                    if (num_slices <= 0) num_slices = 1;
+                    double charge_per_cell = blob_charge / (num_wires * num_slices);
+                    double charge_err_per_cell = sqrt(pow(charge_per_cell * m_params.rel_charge_uncer, 2) + pow(m_params.add_charge_uncer, 2));
+
+                    for (int time_slice = time_slice_min; time_slice < time_slice_max; ++time_slice) {
                     for (int wire_index = wire_min; wire_index < wire_max; ++wire_index) {
                         int channel = fetch_channel_from_anode(apa, face, plane, wire_index);
                         CoordReadout data_key(apa, time_slice, channel);
-                            
+
                         // Check if content exists
                         auto it = m_charge_data.find(data_key);
-                        
+
                         if (it == m_charge_data.end()) {
                             // No existing content
-                            double charge = blob_charge / num_wires;
-                            double charge_err = sqrt(pow(charge * m_params.rel_charge_uncer, 2) + pow(m_params.add_charge_uncer, 2));
-                            m_charge_data[data_key] = {charge, charge_err, 0};
-                            m_cluster_charge_data[cluster][data_key] = {charge, charge_err, 0};
+                            m_charge_data[data_key] = {charge_per_cell, charge_err_per_cell, 0};
+                            m_cluster_charge_data[cluster][data_key] = {charge_per_cell, charge_err_per_cell, 0};
                         } else if (it->second.flag == 0) {
                             // Existing content with flag = 0
-                            double new_charge = blob_charge / num_wires;
-                            double new_charge_err = sqrt(pow(new_charge * m_params.rel_charge_uncer, 2) + pow(m_params.add_charge_uncer, 2));
-
-                            it->second.charge += new_charge;
-                            it->second.charge_err = sqrt(pow(it->second.charge_err, 2) + pow(new_charge_err, 2));
+                            it->second.charge += charge_per_cell;
+                            it->second.charge_err = sqrt(pow(it->second.charge_err, 2) + pow(charge_err_per_cell, 2));
                             m_cluster_charge_data[cluster][data_key] = it->second;
                         }
                         // If flag != 0, do nothing
+                    }
                     }
                 }
             }
@@ -1831,7 +1830,14 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 }
             }
         } else {
-            ps_list.push_front(temp_start);
+            // S1.7: only re-insert temp_start if it has a valid face; if the entire
+            // list was drained because all points were face-invalid, returning an
+            // empty list lets the caller (organize_ps_path) fall back to the
+            // original pts rather than handing back an out-of-detector point.
+            auto ts_wpid = m_dv->contained_by(temp_start);
+            if (ts_wpid.face() != -1 && ts_wpid.apa() != -1) {
+                ps_list.push_front(temp_start);
+            }
         }
     }
 
@@ -1869,7 +1875,11 @@ std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR
                 }
             }
         } else {
-            ps_list.push_back(temp_end);
+            // S1.7: only re-insert temp_end if it has a valid face (symmetric with start branch).
+            auto te_wpid = m_dv->contained_by(temp_end);
+            if (te_wpid.face() != -1 && te_wpid.apa() != -1) {
+                ps_list.push_back(temp_end);
+            }
         }
     }
 
@@ -1985,31 +1995,10 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     double temp_dis = sqrt(pow(closest_point.x() - p.x(), 2) + 
                         pow(closest_point.y() - p.y(), 2) + 
                         pow(closest_point.z() - p.z(), 2));
-    // find the WPID for this point ...
-    WirePlaneId wpid = cluster->wire_plane_id(closest_point_index);
-    int apa = wpid.apa();
-    int face = wpid.face();
-
-    // Get geometry information from TrackFitting internal data
-    auto paras = wpid_params.find(wpid);
-    auto geoms = wpid_geoms.find(wpid);
-
-    double angle_u = std::get<1>(paras->second);
-    double angle_v = std::get<2>(paras->second);
-    double angle_w = std::get<3>(paras->second);
-
-    double time_tick_width = std::get<0>(geoms->second);
-    double pitch_u = std::get<1>(geoms->second);
-    double pitch_v = std::get<2>(geoms->second);
-    double pitch_w = std::get<3>(geoms->second);
-
-     // Get wire indices and time slice for current point
-    WirePlaneId current_wpid = wpid;
-    int cur_wire_u = cluster->wire_index(closest_point_index, 0);
-    int cur_wire_v = cluster->wire_index(closest_point_index, 1);
-    int cur_wire_w = cluster->wire_index(closest_point_index, 2);
-    int cur_time_slice =  cluster->blob_with_point(closest_point_index)->slice_index_min();
-    int cur_ntime_ticks = cluster->blob_with_point(closest_point_index)->slice_index_max() - cur_time_slice;
+    // cur_ntime_ticks: number of time ticks per slice, derived from the closest blob.
+    // Used to round projected time coordinates to the nearest slice boundary across all faces.
+    int cur_ntime_ticks = cluster->blob_with_point(closest_point_index)->slice_index_max()
+                        - cluster->blob_with_point(closest_point_index)->slice_index_min();
 
 
     // std::cout << "Closest " << closest_point << " " << p << " " << temp_dis/units::cm << " " << dis_cut/units::cm << std::endl;
@@ -2029,166 +2018,128 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
         auto total_vertices_found = ga.find_neighbors_nlevel(closest_point_index, nlevel);
         // std::cout << "Neighbors: " << closest_point_index << " " << total_vertices_found.size() << std::endl;
         
-        // Collect nearby blobs and their properties
+        // S1.4/S5.1: Collect nearby blobs from ALL faces (not just the primary face).
+        // Blobs on a neighbouring face that are close to the trajectory point p must also
+        // contribute charge measurements; previously they were silently discarded.
         std::unordered_set<const Facade::Blob*> nearby_blobs_set;
         for (auto vertex_idx : total_vertices_found) {
             const Facade::Blob* blob = cluster->blob_with_point(vertex_idx);
             if (blob) {
-                auto blob_wpid = blob->wpid();
-                if (blob_wpid.apa()==apa && blob_wpid.face()==face)
-                    nearby_blobs_set.insert(blob);
+                nearby_blobs_set.insert(blob);  // no face filter — collect across all faces
             }
-            // // print out the distance between the vertex_idx and the original point 
-            // geo_point_t vertex_point = cluster->point3d(vertex_idx);
-            // double distance = sqrt(pow(vertex_point.x() - p.x(), 2) + 
-            //                       pow(vertex_point.y() - p.y(), 2) + 
-            //                       pow(vertex_point.z() - p.z(), 2));
-            // std::cout << "Vertex " << vertex_idx << " distance to original point: " 
-            //           << distance/units::cm << " cm" << std::endl;
         }
-        
-       
-        // std::cout << nearby_blobs_set.size() << " nearby blobs found for point " <<  cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << " " << dis_cut <<  std::endl;
-        
-        // Calculate adaptive distance cuts for each plane
-        double dis_cut_u = dis_cut;
-        double dis_cut_v = dis_cut;
-        double dis_cut_w = dis_cut;
-        double max_time_slice_u = 0, max_time_slice_v = 0, max_time_slice_w = 0;
-        
-        // Find maximum time slice differences for adaptive cuts
+
+        // Group blobs by (apa, face) so each face is processed with its own geometry
+        // and its own projection of p into that face's wire/time coordinates.
+        std::map<std::pair<int,int>, std::vector<const Facade::Blob*>> blobs_by_face;
         for (const auto* blob : nearby_blobs_set) {
-            int this_time_slice = blob->slice_index_min();
-            
-            // Check U plane
-            if (cur_wire_u >= blob->u_wire_index_min()-1 && cur_wire_u < blob->u_wire_index_max() + 1) {
-                max_time_slice_u = std::max(max_time_slice_u, static_cast<double>(abs(this_time_slice - cur_time_slice)));
-            }
-            
-            // Check V plane
-            if (cur_wire_v >= blob->v_wire_index_min()-1 && cur_wire_v < blob->v_wire_index_max() + 1) {
-                max_time_slice_v = std::max(max_time_slice_v, static_cast<double>(abs(this_time_slice - cur_time_slice)));
-            }
-            
-            // Check W plane
-            if (cur_wire_w >= blob->w_wire_index_min()-1 && cur_wire_w < blob->w_wire_index_max() + 1) {
-                max_time_slice_w = std::max(max_time_slice_w, static_cast<double>(abs(this_time_slice - cur_time_slice)));
-            }
+            auto bwpid = blob->wpid();
+            blobs_by_face[{bwpid.apa(), bwpid.face()}].push_back(blob);
         }
-        
-        // Update distance cuts based on time slice spans
-        if (max_time_slice_u * time_tick_width * 1.2 < dis_cut_u)
-            dis_cut_u = max_time_slice_u * time_tick_width * 1.2;
-        if (max_time_slice_v * time_tick_width * 1.2 < dis_cut_v)
-            dis_cut_v = max_time_slice_v * time_tick_width * 1.2;
-        if (max_time_slice_w * time_tick_width * 1.2 < dis_cut_w)
-            dis_cut_w = max_time_slice_w * time_tick_width * 1.2;
 
-        // std::cout << dis_cut_u << " " << dis_cut_v << " " << dis_cut_w << std::endl;
-        
-        // Process each nearby blob for wire range calculations
-        for (const auto* blob : nearby_blobs_set) {
-            int this_time_slice = blob->slice_index_min();
+        for (const auto& [af, face_blobs] : blobs_by_face) {
+            int apa2 = af.first;
+            int face2 = af.second;
 
-            // std::cout << "Blob info: " << blob->u_wire_index_min() << " " << blob->u_wire_index_max() << " " << blob->v_wire_index_min() << " " << blob->v_wire_index_max() << " " << blob->w_wire_index_min() << " " << blob->w_wire_index_max() << " " << this_time_slice << std::endl; 
-            
-            // Calculate remaining distance cuts accounting for time offset
-            double rem_dis_sq_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
-            double rem_dis_sq_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
-            double rem_dis_sq_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - this_time_slice) * time_tick_width, 2);
+            // Look up geometry for this face using the first blob's wpid as the map key.
+            WirePlaneId face_wpid = face_blobs.front()->wpid();
+            auto paras2 = wpid_params.find(face_wpid);
+            auto geoms2 = wpid_geoms.find(face_wpid);
+            if (paras2 == wpid_params.end() || geoms2 == wpid_geoms.end()) continue;
 
-            // std::cout << rem_dis_cut_u << " " << rem_dis_cut_v << " " << rem_dis_cut_w << " " << cur_time_slice << " " <<this_time_slice << " " << time_tick_cut << std::endl;
+            double angle_u2      = std::get<1>(paras2->second);
+            double angle_v2      = std::get<2>(paras2->second);
+            double angle_w2      = std::get<3>(paras2->second);
+            double time_tick_width2 = std::get<0>(geoms2->second);
+            double pitch_u2      = std::get<1>(geoms2->second);
+            double pitch_v2      = std::get<2>(geoms2->second);
+            double pitch_w2      = std::get<3>(geoms2->second);
 
-            if ((rem_dis_sq_cut_u > 0 || rem_dis_sq_cut_v > 0 || rem_dis_sq_cut_w > 0) && abs(cur_time_slice - this_time_slice) <= time_tick_cut) {
+            // Project the fit point p into this face's wire/time coordinates.
+            auto p_raw2 = transform->backward(geo_point_t(p.x(), p.y(), p.z()), cluster_t0, face2, apa2);
+            auto ch_u2  = m_grouping->convert_3Dpoint_time_ch(p_raw2, apa2, face2, 0);
+            auto ch_v2  = m_grouping->convert_3Dpoint_time_ch(p_raw2, apa2, face2, 1);
+            auto ch_w2  = m_grouping->convert_3Dpoint_time_ch(p_raw2, apa2, face2, 2);
+            int cur_wire_u2      = std::get<1>(ch_u2);
+            int cur_wire_v2      = std::get<1>(ch_v2);
+            int cur_wire_w2      = std::get<1>(ch_w2);
+            int cur_time_slice2  = std::floor(std::get<0>(ch_u2) / cur_ntime_ticks) * cur_ntime_ticks;
 
-                // Calculate minimum wire distances
-                float min_u_dis, min_v_dis, min_w_dis;
-                
-                // U wire distance
-                if (cur_wire_u < blob->u_wire_index_min()) {
-                    min_u_dis = blob->u_wire_index_min() - cur_wire_u;
-                } else if (cur_wire_u < blob->u_wire_index_max()) {
-                    min_u_dis = 0;
-                } else {
-                    min_u_dis = cur_wire_u - blob->u_wire_index_max()+1;
-                }
-                
-                // V wire distance
-                if (cur_wire_v < blob->v_wire_index_min()) {
-                    min_v_dis = blob->v_wire_index_min() - cur_wire_v;
-                } else if (cur_wire_v < blob->v_wire_index_max()) {
-                    min_v_dis = 0;
-                } else {
-                    min_v_dis = cur_wire_v - blob->v_wire_index_max()+1;
-                }
-                
-                // W wire distance
-                if (cur_wire_w < blob->w_wire_index_min()) {
-                    min_w_dis = blob->w_wire_index_min() - cur_wire_w;
-                } else if (cur_wire_w < blob->w_wire_index_max()) {
-                    min_w_dis = 0;
-                } else {
-                    min_w_dis = cur_wire_w - blob->w_wire_index_max()+1;
-                }
-                
-                // Use the dedicated calculate_ranges_simplified function
-                float range_sq_u, range_sq_v, range_sq_w;
-                WireCell::Clus::TrackFittingUtil::calculate_ranges_simplified(
-                    angle_u, angle_v, angle_w,
-                    rem_dis_sq_cut_u, rem_dis_sq_cut_v, rem_dis_sq_cut_w,
-                    min_u_dis, min_v_dis, min_w_dis,
-                    pitch_u, pitch_v, pitch_w,
-                    range_sq_u, range_sq_v, range_sq_w);
+            // Adaptive distance cuts for this face.
+            double dis_cut_u2 = dis_cut, dis_cut_v2 = dis_cut, dis_cut_w2 = dis_cut;
+            double max_ts_u2 = 0, max_ts_v2 = 0, max_ts_w2 = 0;
 
-                // std::cout << "Cuts: " << range_sq_u << " " << range_sq_v << " " << range_sq_w << std::endl;
+            for (const auto* blob : face_blobs) {
+                int this_time_slice = blob->slice_index_min();
+                if (cur_wire_u2 >= blob->u_wire_index_min()-1 && cur_wire_u2 < blob->u_wire_index_max()+1)
+                    max_ts_u2 = std::max(max_ts_u2, static_cast<double>(abs(this_time_slice - cur_time_slice2)));
+                if (cur_wire_v2 >= blob->v_wire_index_min()-1 && cur_wire_v2 < blob->v_wire_index_max()+1)
+                    max_ts_v2 = std::max(max_ts_v2, static_cast<double>(abs(this_time_slice - cur_time_slice2)));
+                if (cur_wire_w2 >= blob->w_wire_index_min()-1 && cur_wire_w2 < blob->w_wire_index_max()+1)
+                    max_ts_w2 = std::max(max_ts_w2, static_cast<double>(abs(this_time_slice - cur_time_slice2)));
+            }
 
+            if (max_ts_u2 * time_tick_width2 * 1.2 < dis_cut_u2) dis_cut_u2 = max_ts_u2 * time_tick_width2 * 1.2;
+            if (max_ts_v2 * time_tick_width2 * 1.2 < dis_cut_v2) dis_cut_v2 = max_ts_v2 * time_tick_width2 * 1.2;
+            if (max_ts_w2 * time_tick_width2 * 1.2 < dis_cut_w2) dis_cut_w2 = max_ts_w2 * time_tick_width2 * 1.2;
 
-                // If all ranges are positive, add wire indices to associations
-                if (range_sq_u > 0 && range_sq_v > 0 && range_sq_w > 0) {
-                    // Calculate wire limits (cache each half-range to avoid redundant sqrt)
-                    float half_u = sqrt(range_sq_u) / pitch_u;
-                    float half_v = sqrt(range_sq_v) / pitch_v;
-                    float half_w = sqrt(range_sq_w) / pitch_w;
-                    float low_u_limit = cur_wire_u - half_u;
-                    float high_u_limit = cur_wire_u + half_u;
-                    float low_v_limit = cur_wire_v - half_v;
-                    float high_v_limit = cur_wire_v + half_v;
-                    float low_w_limit = cur_wire_w - half_w;
-                    float high_w_limit = cur_wire_w + half_w;
+            // Process each blob in this face group.
+            for (const auto* blob : face_blobs) {
+                int this_time_slice = blob->slice_index_min();
 
-                    // std::cout << low_u_limit << " " << high_u_limit << " "
-                    //           << low_v_limit << " " << high_v_limit << " "
-                    //           << low_w_limit << " " << high_w_limit << " " << this_time_slice << std::endl;
+                double rem_dis_sq_cut_u = pow(dis_cut_u2,2) - pow((cur_time_slice2-this_time_slice)*time_tick_width2, 2);
+                double rem_dis_sq_cut_v = pow(dis_cut_v2,2) - pow((cur_time_slice2-this_time_slice)*time_tick_width2, 2);
+                double rem_dis_sq_cut_w = pow(dis_cut_w2,2) - pow((cur_time_slice2-this_time_slice)*time_tick_width2, 2);
 
-                    // Add U plane associations
-                    for (int j = std::round(low_u_limit); j <= std::round(high_u_limit); j++) {
-                        Coord2D coord(current_wpid.apa(), current_wpid.face(), 
-                                    this_time_slice, j, 
-                                    get_channel_for_wire(current_wpid.apa(), current_wpid.face(), 0, j), 
-                                    WirePlaneLayer_t::kUlayer);
-                        temp_2dut.associated_2d_points.insert(coord);
-                    }
-                    
-                    // Add V plane associations
-                    for (int j = std::round(low_v_limit); j <= std::round(high_v_limit); j++) {
-                        Coord2D coord(current_wpid.apa(), current_wpid.face(), 
-                                    this_time_slice, j, 
-                                    get_channel_for_wire(current_wpid.apa(), current_wpid.face(), 1, j), 
-                                    WirePlaneLayer_t::kVlayer);
-                        temp_2dvt.associated_2d_points.insert(coord);
-                    }
-                    
-                    // Add W plane associations
-                    for (int j = std::round(low_w_limit); j <= std::round(high_w_limit); j++) {
-                        Coord2D coord(current_wpid.apa(), current_wpid.face(), 
-                                    this_time_slice, j, 
-                                    get_channel_for_wire(current_wpid.apa(), current_wpid.face(), 2, j), 
-                                    WirePlaneLayer_t::kWlayer);
-                        temp_2dwt.associated_2d_points.insert(coord);
+                if ((rem_dis_sq_cut_u > 0 || rem_dis_sq_cut_v > 0 || rem_dis_sq_cut_w > 0)
+                        && abs(cur_time_slice2 - this_time_slice) <= time_tick_cut) {
+
+                    float min_u_dis, min_v_dis, min_w_dis;
+
+                    if (cur_wire_u2 < blob->u_wire_index_min())       min_u_dis = blob->u_wire_index_min() - cur_wire_u2;
+                    else if (cur_wire_u2 < blob->u_wire_index_max())   min_u_dis = 0;
+                    else                                                min_u_dis = cur_wire_u2 - blob->u_wire_index_max() + 1;
+
+                    if (cur_wire_v2 < blob->v_wire_index_min())       min_v_dis = blob->v_wire_index_min() - cur_wire_v2;
+                    else if (cur_wire_v2 < blob->v_wire_index_max())   min_v_dis = 0;
+                    else                                                min_v_dis = cur_wire_v2 - blob->v_wire_index_max() + 1;
+
+                    if (cur_wire_w2 < blob->w_wire_index_min())       min_w_dis = blob->w_wire_index_min() - cur_wire_w2;
+                    else if (cur_wire_w2 < blob->w_wire_index_max())   min_w_dis = 0;
+                    else                                                min_w_dis = cur_wire_w2 - blob->w_wire_index_max() + 1;
+
+                    float range_sq_u2, range_sq_v2, range_sq_w2;
+                    WireCell::Clus::TrackFittingUtil::calculate_ranges_simplified(
+                        angle_u2, angle_v2, angle_w2,
+                        rem_dis_sq_cut_u, rem_dis_sq_cut_v, rem_dis_sq_cut_w,
+                        min_u_dis, min_v_dis, min_w_dis,
+                        pitch_u2, pitch_v2, pitch_w2,
+                        range_sq_u2, range_sq_v2, range_sq_w2);
+
+                    if (range_sq_u2 > 0 && range_sq_v2 > 0 && range_sq_w2 > 0) {
+                        float half_u = sqrt(range_sq_u2) / pitch_u2;
+                        float half_v = sqrt(range_sq_v2) / pitch_v2;
+                        float half_w = sqrt(range_sq_w2) / pitch_w2;
+
+                        for (int j = std::round(cur_wire_u2 - half_u); j <= std::round(cur_wire_u2 + half_u); j++) {
+                            Coord2D coord(apa2, face2, this_time_slice, j,
+                                         get_channel_for_wire(apa2, face2, 0, j), WirePlaneLayer_t::kUlayer);
+                            temp_2dut.associated_2d_points.insert(coord);
+                        }
+                        for (int j = std::round(cur_wire_v2 - half_v); j <= std::round(cur_wire_v2 + half_v); j++) {
+                            Coord2D coord(apa2, face2, this_time_slice, j,
+                                         get_channel_for_wire(apa2, face2, 1, j), WirePlaneLayer_t::kVlayer);
+                            temp_2dvt.associated_2d_points.insert(coord);
+                        }
+                        for (int j = std::round(cur_wire_w2 - half_w); j <= std::round(cur_wire_w2 + half_w); j++) {
+                            Coord2D coord(apa2, face2, this_time_slice, j,
+                                         get_channel_for_wire(apa2, face2, 2, j), WirePlaneLayer_t::kWlayer);
+                            temp_2dwt.associated_2d_points.insert(coord);
+                        }
                     }
                 }
             }
-        }
+        } // end per-face-group loop
     }
 
     // std::cout << "Pixels: " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
@@ -2222,62 +2173,69 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
         // std::cout << "Steiner " << temp_dis << " " << dis_cut << " " <<apa << " " << closest_point_wpid.apa() << " " << face << " " << closest_point_wpid.face() << std::endl;
 
-        if (temp_dis < dis_cut && apa == closest_point_wpid.apa() && face == closest_point_wpid.face()){
+        if (temp_dis < dis_cut){
+            // S1.4: Use the Steiner closest-point's own (apa, face) for all projections.
+            // The outer scope 'apa'/'face' come from the primary blob's closest cluster point,
+            // which may be in a different face when the trajectory crosses an APA boundary.
+            int st_apa  = closest_point_wpid.apa();
+            int st_face = closest_point_wpid.face();
+
+            // Look up geometry for this Steiner face.
+            auto st_paras = wpid_params.find(closest_point_wpid);
+            auto st_geoms  = wpid_geoms.find(closest_point_wpid);
+            if (st_paras != wpid_params.end() && st_geoms != wpid_geoms.end()) {
+            double st_angle_u        = std::get<1>(st_paras->second);
+            double st_angle_v        = std::get<2>(st_paras->second);
+            double st_angle_w        = std::get<3>(st_paras->second);
+            double st_time_tick_width = std::get<0>(st_geoms->second);
+            double st_pitch_u        = std::get<1>(st_geoms->second);
+            double st_pitch_v        = std::get<2>(st_geoms->second);
+            double st_pitch_w        = std::get<3>(st_geoms->second);
+
             // Get graph algorithms interface
             const auto& ga = cluster->graph_algorithms(graph_name);
 
-            // // Print Steiner graph statistics
-            // const auto& graph_steiner = cluster->get_graph("steiner_graph");
-            // std::cout << "Steiner graph: vertices = " << boost::num_vertices(graph_steiner)
-            //           << ", edges = " << boost::num_edges(graph_steiner) << std::endl;
-            
             // Find nearby points using graph traversal (equivalent to original nested loop)
             auto total_vertices_found = ga.find_neighbors_nlevel(closest_point_index, nlevel);
 
-            // find the raw point ...
-            auto closest_point_raw = transform->backward(closest_point, cluster_t0, face, apa);
+            // Project the closest Steiner point into its own face's wire/time space.
+            auto closest_point_raw = transform->backward(closest_point, cluster_t0, st_face, st_apa);
 
-            // std::cout << p << " " << closest_point << " "  << closest_point_raw << std::endl;
-
-            auto cur_u = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 0);
-            auto cur_v = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 1);
-            auto cur_w = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, apa, face, 2);
+            auto cur_u = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, st_apa, st_face, 0);
+            auto cur_v = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, st_apa, st_face, 1);
+            auto cur_w = m_grouping->convert_3Dpoint_time_ch(closest_point_raw, st_apa, st_face, 2);
 
             int cur_time_slice = std::floor(std::get<0>(cur_u)/cur_ntime_ticks)*cur_ntime_ticks;
             int cur_wire_u = std::get<1>(cur_u);
             int cur_wire_v = std::get<1>(cur_v);
             int cur_wire_w = std::get<1>(cur_w);
 
-            // std::cout << "B: " << cluster_t0 << " " << std::get<0>(cur_u) << " " << cur_time_slice << " " << cur_wire_u << " " << cur_wire_v << " " << cur_wire_w << " " << total_vertices_found.size() << " " << nlevel << std::endl;
-        
             // Calculate adaptive distance cuts (equivalent to original max_time_slice_u/v/w calculation)
             double dis_cut_u = dis_cut;
             double dis_cut_v = dis_cut;
             double dis_cut_w = dis_cut;
-            
+
             double max_time_slice_u = 0;
             double max_time_slice_v = 0;
             double max_time_slice_w = 0;
 
             std::map<int, std::tuple<int, int, int, int, int, int> > map_time_wires;
 
-            // std::map<int, std::tuple<int, int, int, int>> map_vertex_info;
-            // Collect point indices 
+            // Collect point indices — only those in the same (apa, face) as the Steiner entry point.
             for (auto vertex_idx : total_vertices_found) {
                     auto vertex_wpid = wpid_array[vertex_idx];
-                    // std::cout << vertex_wpid << " " << std::endl;
 
-                    if (vertex_wpid.apa() != apa || vertex_wpid.face() != face) continue;
+                    if (vertex_wpid.apa() != st_apa || vertex_wpid.face() != st_face) continue;
 
                     // Handle points not associated with blobs
-                    geo_point_t vertex_point = {x_coords[vertex_idx], 
-                                                y_coords[vertex_idx], 
+                    geo_point_t vertex_point = {x_coords[vertex_idx],
+                                                y_coords[vertex_idx],
                                                 z_coords[vertex_idx]};
 
-                    auto vertex_point_raw = transform->backward(vertex_point, cluster_t0, face, apa);
-                    auto vertex_u = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 0);
-                    auto vertex_v = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 1);
-                    auto vertex_w = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, apa, face, 2);
+                    auto vertex_point_raw = transform->backward(vertex_point, cluster_t0, st_face, st_apa);
+                    auto vertex_u = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, st_apa, st_face, 0);
+                    auto vertex_v = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, st_apa, st_face, 1);
+                    auto vertex_w = m_grouping->convert_3Dpoint_time_ch(vertex_point_raw, st_apa, st_face, 2);
 
                     int vertex_time_slice = std::floor(std::get<0>(vertex_u)/cur_ntime_ticks)*cur_ntime_ticks;
                     int vertex_wire_u = std::get<1>(vertex_u);
@@ -2289,10 +2247,8 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                     int wmin = vertex_wire_w, wmax = vertex_wire_w+1;
                     auto it = map_time_wires.find(vertex_time_slice);
                     if (it == map_time_wires.end()) {
-                        // No entry yet, insert new boundaries
                         map_time_wires[vertex_time_slice] = std::make_tuple(umin, umax, vmin, vmax, wmin, wmax);
                     } else {
-                        // Update boundaries if needed
                         auto& tup = it->second;
                         std::get<0>(tup) = std::min(std::get<0>(tup), umin);
                         std::get<1>(tup) = std::max(std::get<1>(tup), umax);
@@ -2312,144 +2268,98 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                 int wmax = std::get<5>(wire_ranges);
 
                 for (auto vertex_wire_u = umin; vertex_wire_u < umax; ++vertex_wire_u) {
-                    // Check U, V, W wire proximity
-                    if (abs(vertex_wire_u - cur_wire_u)*pitch_u<=dis_cut) {
+                    if (abs(vertex_wire_u - cur_wire_u)*st_pitch_u<=dis_cut) {
                         if (abs(vertex_time_slice - cur_time_slice) > max_time_slice_u)
                             max_time_slice_u = abs(vertex_time_slice - cur_time_slice);
                     }
                 }
                 for (auto vertex_wire_v = vmin; vertex_wire_v < vmax; ++vertex_wire_v) {
-                    // Check U, V, W wire proximity
-                    if (abs(vertex_wire_v - cur_wire_v)*pitch_v<=dis_cut) {
+                    if (abs(vertex_wire_v - cur_wire_v)*st_pitch_v<=dis_cut) {
                         if (abs(vertex_time_slice - cur_time_slice) > max_time_slice_v)
                             max_time_slice_v = abs(vertex_time_slice - cur_time_slice);
                     }
                 }
                 for (auto vertex_wire_w = wmin; vertex_wire_w < wmax; ++vertex_wire_w) {
-                    // Check U, V, W wire proximity
-                    if (abs(vertex_wire_w - cur_wire_w)*pitch_w<=dis_cut) {
+                    if (abs(vertex_wire_w - cur_wire_w)*st_pitch_w<=dis_cut) {
                         if (abs(vertex_time_slice - cur_time_slice) > max_time_slice_w)
                             max_time_slice_w = abs(vertex_time_slice - cur_time_slice);
                     }
                 }
             }
 
-            // Apply adaptive cuts (equivalent to original adaptive cut logic)
-            if (max_time_slice_u * time_tick_width * 1.2 < dis_cut_u)
-                dis_cut_u = max_time_slice_u * time_tick_width * 1.2;
-            if (max_time_slice_v * time_tick_width * 1.2 < dis_cut_v)
-                dis_cut_v = max_time_slice_v * time_tick_width * 1.2;
-            if (max_time_slice_w * time_tick_width * 1.2 < dis_cut_w)
-                dis_cut_w = max_time_slice_w * time_tick_width * 1.2;
+            if (max_time_slice_u * st_time_tick_width * 1.2 < dis_cut_u)
+                dis_cut_u = max_time_slice_u * st_time_tick_width * 1.2;
+            if (max_time_slice_v * st_time_tick_width * 1.2 < dis_cut_v)
+                dis_cut_v = max_time_slice_v * st_time_tick_width * 1.2;
+            if (max_time_slice_w * st_time_tick_width * 1.2 < dis_cut_w)
+                dis_cut_w = max_time_slice_w * st_time_tick_width * 1.2;
 
-            // std::cout << "Steiner dis: " << dis_cut_u << " " << dis_cut_v << " " << dis_cut_w << " " << std::endl;
-
-            // Process each nearby blob for wire range calculations (equivalent to final loop)
             for (const auto& [vertex_time_slice, wire_ranges] : map_time_wires) {
                 int umin = std::get<0>(wire_ranges);
                 int umax = std::get<1>(wire_ranges);
-                int vmin = std::get<2>(wire_ranges); 
+                int vmin = std::get<2>(wire_ranges);
                 int vmax = std::get<3>(wire_ranges);
                 int wmin = std::get<4>(wire_ranges);
                 int wmax = std::get<5>(wire_ranges);
-        
 
-                // Calculate remaining distance cuts accounting for time offset
-                double rem_dis_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - vertex_time_slice) * time_tick_width, 2);
-                double rem_dis_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - vertex_time_slice) * time_tick_width, 2);
-                double rem_dis_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - vertex_time_slice) * time_tick_width, 2);
-
-                // std::cout << rem_dis_cut_u << " " << rem_dis_cut_v << " " << rem_dis_cut_w << " " << std::endl;
+                double rem_dis_cut_u = pow(dis_cut_u, 2) - pow((cur_time_slice - vertex_time_slice) * st_time_tick_width, 2);
+                double rem_dis_cut_v = pow(dis_cut_v, 2) - pow((cur_time_slice - vertex_time_slice) * st_time_tick_width, 2);
+                double rem_dis_cut_w = pow(dis_cut_w, 2) - pow((cur_time_slice - vertex_time_slice) * st_time_tick_width, 2);
 
                 if ((rem_dis_cut_u > 0 || rem_dis_cut_v > 0 || rem_dis_cut_w > 0) && abs(cur_time_slice - vertex_time_slice) <= time_tick_cut) {
-                
-                // Calculate minimum wire distances (equivalent to original min_u/v/w_dis calculation)
+
                 float min_u_dis, min_v_dis, min_w_dis;
-                
-                // U wire distance
-                if (cur_wire_u < umin) {
-                    min_u_dis = umin - cur_wire_u;
-                } else if (cur_wire_u >= umax) {
-                    min_u_dis = cur_wire_u - umax + 1;
-                } else {
-                    min_u_dis = 0;
-                }
 
-                // V wire distance
-                if (cur_wire_v < vmin) {
-                    min_v_dis = vmin - cur_wire_v;
-                } else if (cur_wire_v >= vmax) {
-                    min_v_dis = cur_wire_v - vmax + 1;
-                } else {
-                    min_v_dis = 0;
-                }
+                if (cur_wire_u < umin)       min_u_dis = umin - cur_wire_u;
+                else if (cur_wire_u >= umax)  min_u_dis = cur_wire_u - umax + 1;
+                else                          min_u_dis = 0;
 
-                // W wire distance
-                if (cur_wire_w < wmin) {
-                    min_w_dis = wmin - cur_wire_w;
-                } else if (cur_wire_w >= wmax) {
-                    min_w_dis = cur_wire_w - wmax + 1;
-                } else {
-                    min_w_dis = 0;
-                }
+                if (cur_wire_v < vmin)       min_v_dis = vmin - cur_wire_v;
+                else if (cur_wire_v >= vmax)  min_v_dis = cur_wire_v - vmax + 1;
+                else                          min_v_dis = 0;
 
-                // min_u_dis -=1; if (min_u_dis<0) min_u_dis=0;
-                // min_v_dis -=1; if (min_v_dis<0) min_v_dis=0;
-                // min_w_dis -=1; if (min_w_dis<0) min_w_dis=0;
+                if (cur_wire_w < wmin)       min_w_dis = wmin - cur_wire_w;
+                else if (cur_wire_w >= wmax)  min_w_dis = cur_wire_w - wmax + 1;
+                else                          min_w_dis = 0;
 
-
-                // Use the dedicated calculate_ranges_simplified function (replaces original range calculation)
                 float range_u, range_v, range_w;
                 WireCell::Clus::TrackFittingUtil::calculate_ranges_simplified(
-                    angle_u, angle_v, angle_w,
+                    st_angle_u, st_angle_v, st_angle_w,
                     rem_dis_cut_u, rem_dis_cut_v, rem_dis_cut_w,
                     min_u_dis, min_v_dis, min_w_dis,
-                    pitch_u, pitch_v, pitch_w,
+                    st_pitch_u, st_pitch_v, st_pitch_w,
                     range_u, range_v, range_w);
 
-                //    std::cout << vertex_time_slice << " " << min_u_dis << " " << min_v_dis << " " << min_w_dis << " " << range_u << " " << range_v << " " << range_w << std::endl;
-                
-                    // If all ranges are positive, add wire indices to associations
                     if (range_u > 0 && range_v > 0 && range_w > 0) {
-                        // Calculate wire limits (cache each half-range to avoid redundant sqrt)
-                        float half_u = sqrt(range_u) / pitch_u;
-                        float half_v = sqrt(range_v) / pitch_v;
-                        float half_w = sqrt(range_w) / pitch_w;
+                        float half_u = sqrt(range_u) / st_pitch_u;
+                        float half_v = sqrt(range_v) / st_pitch_v;
+                        float half_w = sqrt(range_w) / st_pitch_w;
                         float low_u_limit = cur_wire_u - half_u;
                         float high_u_limit = cur_wire_u + half_u;
                         float low_v_limit = cur_wire_v - half_v;
                         float high_v_limit = cur_wire_v + half_v;
                         float low_w_limit = cur_wire_w - half_w;
                         float high_w_limit = cur_wire_w + half_w;
-                        
-                        // Add U plane associations (equivalent to temp_2dut.insert)
+
                         for (int j = std::round(low_u_limit); j <= std::round(high_u_limit); j++) {
-                            Coord2D coord(apa, face, 
-                                        vertex_time_slice, j, 
-                                        get_channel_for_wire(apa, face, 0, j), 
-                                        WirePlaneLayer_t::kUlayer);
+                            Coord2D coord(st_apa, st_face, vertex_time_slice, j,
+                                        get_channel_for_wire(st_apa, st_face, 0, j), WirePlaneLayer_t::kUlayer);
                             temp_2dut.associated_2d_points.insert(coord);
                         }
-                        // Add V
                         for (int j = std::round(low_v_limit); j <= std::round(high_v_limit); j++) {
-                            Coord2D coord(apa, face, 
-                                        vertex_time_slice, j, 
-                                        get_channel_for_wire(apa, face, 1, j), 
-                                        WirePlaneLayer_t::kVlayer);
+                            Coord2D coord(st_apa, st_face, vertex_time_slice, j,
+                                        get_channel_for_wire(st_apa, st_face, 1, j), WirePlaneLayer_t::kVlayer);
                             temp_2dvt.associated_2d_points.insert(coord);
                         }
-
-                        // Add W
                         for (int j = std::round(low_w_limit); j <= std::round(high_w_limit); j++) {
-                            Coord2D coord(apa, face, 
-                                        vertex_time_slice, j, 
-                                        get_channel_for_wire(apa, face, 2, j), 
-                                        WirePlaneLayer_t::kWlayer);
+                            Coord2D coord(st_apa, st_face, vertex_time_slice, j,
+                                        get_channel_for_wire(st_apa, st_face, 2, j), WirePlaneLayer_t::kWlayer);
                             temp_2dwt.associated_2d_points.insert(coord);
                         }
                     }
                 }
             }
+            } // end geometry-lookup guard
         }
     }
 
@@ -3355,7 +3265,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 
     // std::cout << "Form Map: " << ptss.size() << " " << saved_pts.size() << " " << m_2d_to_3d.size() << " " << m_3d_to_2d.size() << std::endl;
     
-    ptss = saved_pts;
+    ptss = std::move(saved_pts);  // S3.6: move instead of copy
 
 
     // {
@@ -3667,6 +3577,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                 auto offset_it = wpid_offsets.find(wpid);
                 auto slope_it = wpid_slopes.find(wpid);
                 auto geom_it = wpid_geoms.find(wpid);
+                // S1.15: guard against unknown wpid (e.g. boundary-crossing points)
+                if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
 
                 auto offset_t = std::get<0>(offset_it->second);
                 auto offset_u = std::get<1>(offset_it->second);
@@ -4017,6 +3929,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 auto offset_it = wpid_offsets.find(wpid);
                 auto slope_it = wpid_slopes.find(wpid);
                 auto geom_it = wpid_geoms.find(wpid);
+                // S1.15: guard against unknown wpid (e.g. boundary-crossing points)
+                if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
 
                 auto offset_t = std::get<0>(offset_it->second);
                 auto offset_u = std::get<1>(offset_it->second);
@@ -4052,9 +3966,10 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                     double cluster_t0 = cluster->get_cluster_t0();
 
-                    auto test_wpid = m_dv->contained_by(pss_vec[idx].first);
-                    // Initialization with its raw position
-                    auto p_raw = transform->backward(pss_vec[idx].first, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    // S1.3: project the 3D point into the PIXEL's (apa, face) frame so that
+                    // central_t and central_ch are in the same coordinate system as the 2D pixel.
+                    // Using the point's own face (test_wpid) was wrong for boundary-crossing tracks.
+                    auto p_raw = transform->backward(pss_vec[idx].first, cluster_t0, face, apa);
 
                     double central_t = slope_x * p_raw.x() + offset_t;
                     double central_ch = 0;
@@ -4183,6 +4098,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             WirePlaneId wpid(kAllLayers, it->face, it->apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
+            // S1.15: guard against unknown wpid
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) { index++; continue; }
 
             auto offset_t = std::get<0>(offset_it->second);
             auto offset_u = std::get<1>(offset_it->second);
@@ -4248,6 +4165,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             WirePlaneId wpid(kAllLayers, it->face, it->apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
+            // S1.15: guard against unknown wpid
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) { index++; continue; }
 
             auto offset_t = std::get<0>(offset_it->second);
             auto offset_v = std::get<2>(offset_it->second);
@@ -4316,6 +4235,8 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             WirePlaneId wpid(kAllLayers, it->face, it->apa);
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
+            // S1.15: guard against unknown wpid
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) { index++; continue; }
 
             auto offset_t = std::get<0>(offset_it->second);
             auto offset_w = std::get<3>(offset_it->second);
@@ -4709,9 +4630,25 @@ std::vector<WireCell::Point> TrackFitting::examine_segment_trajectory(std::share
 
 
 bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>& apa_face, int i, std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec,  std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& fine_tracking_path){
-      // Extract APA and face information
+    // Extract APA and face information from the reference (comparison) point
     int apa = apa_face.first;
     int face = apa_face.second;
+
+    // S1.2: resolve the fitted point p's actual (apa, face) — the fit may have moved p
+    // to a different face than the reference point pss_vec[i].first.
+    {
+        auto p_actual_wpid = m_dv->contained_by(p);
+        if (p_actual_wpid.apa() != -1 && p_actual_wpid.face() != -1) {
+            if (p_actual_wpid.apa() != apa || p_actual_wpid.face() != face) {
+                // p crossed a face boundary — cross-face charge comparison is ill-posed;
+                // conservatively do not skip this point.
+                return false;
+            }
+            // Confirm apa/face from the fitted point's actual location
+            apa = p_actual_wpid.apa();
+            face = p_actual_wpid.face();
+        }
+    }
     const int total_pss = static_cast<int>(pss_vec.size());
     
     // Get geometry parameters for this APA/face
@@ -4743,8 +4680,11 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
     double cluster_t0 = cluster->get_cluster_t0();
 
-     auto first_blob = cluster->children()[0];
+    // S1.13: guard against empty cluster
+    if (cluster->children().empty()) return false;
+    auto first_blob = cluster->children()[0];
     int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+    if (cur_ntime_ticks <= 0) cur_ntime_ticks = 1;
 
     // Initialization with its raw position
     auto p_raw = transform->backward(p, cluster_t0, face, apa);
@@ -4937,8 +4877,12 @@ bool TrackFitting::skip_trajectory_point(WireCell::Point& p, std::pair<int, int>
             }
         }
         
-        // Get hit information for dead channel detection
-        // Check if we have valid 3D to 2D mapping for current point index
+        // Get hit information for dead channel detection.
+        // Invariant: pss_vec here equals the cleaned ptss produced by form_map (which
+        // does ptss = saved_pts after filtering zero-charge points), so the loop index
+        // i corresponds exactly to the m_3d_to_2d key 'count' assigned in form_map.
+        // A find() miss means this point legitimately had no 2D associations (e.g. it
+        // is a vertex point whose slot was shared with another segment).
         bool has_u_hits = false, has_v_hits = false, has_w_hits = false;
         // float n_u_hits = 0, n_v_hits = 0, n_w_hits = 0;
         if (m_3d_to_2d.find(i) != m_3d_to_2d.end()) {
@@ -5139,8 +5083,10 @@ double TrackFitting::cal_gaus_integral_seg(int tbin, int wbin, std::vector<doubl
     // std::cout << cal_gaus_integral(tbin,wbin,t_centers.at(i), t_sigmas.at(i), w_centers.at(i), w_sigmas.at(i),flag,nsigma,cur_ntime_ticks) << " " << weights.at(i) << std::endl;
   }
 
-  result /= result1;
-  
+  // S1.12: guard against divide-by-zero when all weights are zero (degenerate segment)
+  if (result1 > 0) result /= result1;
+  else result = 0;
+
   return result;
 }
 
@@ -5654,11 +5600,14 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     
     // Count total 3D positions from all segments and vertices
     int n_3D_pos = 0;
-    // reset fit_index for all vertices and segment points
-    
-    std::map<std::shared_ptr<PR::Vertex>, int> vertex_index_map;
-    std::map<std::pair<std::shared_ptr<PR::Segment>, int>, int> segment_point_index_map;
-    
+
+    // S2.D1: Use stable integer keys to eliminate pointer-address non-determinism.
+    // vertex_index_map: fit_index (int) → vertex ptr (for iteration at the connected_vec step)
+    // segment_point_index_map: {segment_graph_index, i} → matrix row index
+    // Iteration over vertex_index_map is now in stable fit_index order (not pointer order).
+    std::map<int, std::shared_ptr<PR::Vertex>> vertex_index_map;   // key = fit().index (stable)
+    std::map<std::pair<size_t, size_t>, int> segment_point_index_map; // key = {get_graph_index(), i}
+
     // First pass: assign indices to vertices and segments
     for (const auto& ed : get_segment_edges()) {
         auto& edge_bundle = (*m_graph)[ed];
@@ -5673,7 +5622,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         auto vd2 = boost::target(ed, *m_graph);
         auto& v_bundle1 = (*m_graph)[vd1];
         auto& v_bundle2 = (*m_graph)[vd2];
-        
+
         std::shared_ptr<PR::Vertex> start_v = nullptr, end_v = nullptr;
         // std::cout << "Check: " << v_bundle1.vertex->fit().index << " " << v_bundle2.vertex->fit().index << " " << fits.front().index << " " << fits.back().index << " " << fits.size() << std::endl;
         if (v_bundle1.vertex && v_bundle2.vertex) {
@@ -5685,35 +5634,35 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                 end_v = v_bundle1.vertex;
             }
         }
-        
+
+        size_t seg_gidx = segment->get_graph_index();
+
         // Assign indices to points
         for (size_t i = 0; i < fits.size(); i++) {
             int idx = fits[i].index;
             if (i == 0) {
-                // Start vertex
-                if (start_v && vertex_index_map.find(start_v) == vertex_index_map.end()) {
-                    vertex_index_map[start_v] = start_v->fit().index;
-                    idx = start_v->fit().index;
-                }
+                // Start vertex — register in vertex_index_map keyed by fit_index
                 if (start_v) {
-                    segment_point_index_map[std::make_pair(segment, i)] = vertex_index_map[start_v];
+                    int vfit_idx = start_v->fit().index;
+                    vertex_index_map.emplace(vfit_idx, start_v);
+                    idx = vfit_idx;
+                    segment_point_index_map[{seg_gidx, i}] = idx;
                 } else {
-                    segment_point_index_map[std::make_pair(segment, i)] = idx;
+                    segment_point_index_map[{seg_gidx, i}] = idx;
                 }
             } else if (i + 1 == fits.size()) {
-                // End vertex
-                if (end_v && vertex_index_map.find(end_v) == vertex_index_map.end()) {
-                    vertex_index_map[end_v] = end_v->fit().index;
-                    idx = end_v->fit().index;
-                }
+                // End vertex — register in vertex_index_map keyed by fit_index
                 if (end_v) {
-                    segment_point_index_map[std::make_pair(segment, i)] = vertex_index_map[end_v];
+                    int vfit_idx = end_v->fit().index;
+                    vertex_index_map.emplace(vfit_idx, end_v);
+                    idx = vfit_idx;
+                    segment_point_index_map[{seg_gidx, i}] = idx;
                 } else {
-                    segment_point_index_map[std::make_pair(segment, i)] = idx;
+                    segment_point_index_map[{seg_gidx, i}] = idx;
                 }
             } else {
                 // Middle points
-                segment_point_index_map[std::make_pair(segment, i)] = idx;
+                segment_point_index_map[{seg_gidx, i}] = idx;
             }
             // Track maximum index to determine n_3D_pos
             if (idx + 1 > n_3D_pos) n_3D_pos = idx + 1;
@@ -5884,9 +5833,11 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         }
 
         // Cache segment_point_index_map lookups for this segment
+        // S1.10/S2.D1: .at() catches missing-key bugs; key uses stable graph index
         std::vector<int> pt_idx(fits.size());
+        size_t seg_gidx_lookup = segment->get_graph_index();
         for (size_t i = 0; i < fits.size(); i++) {
-            pt_idx[i] = segment_point_index_map[std::make_pair(segment, i)];
+            pt_idx[i] = segment_point_index_map.at({seg_gidx_lookup, i});
         }
 
         // Fill trajectory points
@@ -5930,7 +5881,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             
             // Get geometry parameters
             auto test_wpid = m_dv->contained_by(curr_pos);
-            if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+            if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
+                // S5.2(c): point lies exactly on an APA boundary or outside the detector.
+                // The Eigen row for this point is left unconstrained (regulariser only).
+                SPDLOG_LOGGER_DEBUG(s_log, "dQ_dx_multi_fit: trajectory point at ({:.2f},{:.2f},{:.2f}) has face=-1; regulariser-only constraint for this row", curr_pos.x(), curr_pos.y(), curr_pos.z());
+                continue;
+            }
             int apa = test_wpid.apa();
             int face = test_wpid.face();
 
@@ -5938,7 +5894,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             auto offset_it = wpid_offsets.find(wpid);
             auto slope_it = wpid_slopes.find(wpid);
             auto geom_it = wpid_geoms.find(wpid);
-            
+
             if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
             auto cluster = segment->cluster();
             const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
@@ -6213,8 +6169,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     }
 
 
-     // Calculate dx for vertices (endpoints)
-    for (const auto& [vertex, vertex_idx] : vertex_index_map) {
+     // Calculate dx for vertices (endpoints) — key=fit_index(int), value=vertex ptr
+    for (const auto& [vertex_idx, vertex] : vertex_index_map) {
         std::vector<WireCell::Point> connected_pts;
         
         WireCell::Clus::Facade::Cluster* cluster = nullptr;
@@ -6281,7 +6237,12 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         
         // Get geometry parameters
         auto test_wpid = m_dv->contained_by(curr_pos);
-        if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+        if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
+            // S5.2(c): point lies exactly on an APA boundary or outside the detector.
+            // The Eigen row for this point is left unconstrained (regulariser only).
+            SPDLOG_LOGGER_DEBUG(s_log, "dQ_dx_fit: trajectory point at ({:.2f},{:.2f},{:.2f}) has face=-1; regulariser-only constraint for this row", curr_pos.x(), curr_pos.y(), curr_pos.z());
+            continue;
+        }
         int apa = test_wpid.apa();
         int face = test_wpid.face();
 
@@ -6494,9 +6455,13 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         auto& fits = segment->fits();
         if (fits.empty()) continue;
         
+        // S1.10/S2.D1: .at() catches missing-key bugs; key uses stable graph index
         std::vector<int> pt_idx(fits.size());
-        for (size_t i = 0; i < fits.size(); i++) {
-            pt_idx[i] = segment_point_index_map[std::make_pair(segment, i)];
+        {
+            size_t sg = segment->get_graph_index();
+            for (size_t i = 0; i < fits.size(); i++) {
+                pt_idx[i] = segment_point_index_map.at({sg, i});
+            }
         }
         for (size_t i = 1; i + 1 < fits.size(); i++) {
             connected_vec[pt_idx[i]].push_back(pt_idx[i-1]);
@@ -6504,8 +6469,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         }
     }
     
-    // Add vertex connections
-    for (const auto& [vertex, vertex_idx] : vertex_index_map) {
+    // Add vertex connections — iterate in stable fit_index order (key is int, value is vertex ptr)
+    for (const auto& [vertex_idx, vertex] : vertex_index_map) {
         // Find connected segments
         auto vertex_desc = vertex->get_descriptor();
         if (vertex_desc != PR::Graph::null_vertex()) {
@@ -6624,18 +6589,22 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     // std::vector<int> traj_ndf(n_3D_pos, 0);
     
     // Calculate chi-squared contributions from U plane
+    // S1.11: guard against zero predicted charge (matches guard in single-track dQ_dx_fit)
     for (int k = 0; k < RU.outerSize(); ++k) {
         double sum[3]={0,0,0};
         double sum1[3] = {0,0,0};
         for (Eigen::SparseMatrix<double>::InnerIterator it(RU, k); it; ++it) {
+            if (pred_data_u_2D(it.row()) <= 0) continue;
             sum[0] += pow(data_u_2D(it.row()) - pred_data_u_2D(it.row()),2) * (it.value() * pos_3D(k) )/pred_data_u_2D(it.row());
-            sum1[0] += (it.value() * pos_3D(k) )/pred_data_u_2D(it.row());      
+            sum1[0] += (it.value() * pos_3D(k) )/pred_data_u_2D(it.row());
         }
         for (Eigen::SparseMatrix<double>::InnerIterator it(RV, k); it; ++it) {
+            if (pred_data_v_2D(it.row()) <= 0) continue;
             sum[1] += pow(data_v_2D(it.row()) - pred_data_v_2D(it.row()),2) * (it.value() * pos_3D(k))/pred_data_v_2D(it.row());
             sum1[1] += (it.value() * pos_3D(k))/pred_data_v_2D(it.row());
         }
         for (Eigen::SparseMatrix<double>::InnerIterator it(RW, k); it; ++it) {
+            if (pred_data_w_2D(it.row()) <= 0) continue;
             sum[2] += pow(data_w_2D(it.row()) - pred_data_w_2D(it.row()),2) * (it.value() * pos_3D(k))/pred_data_w_2D(it.row());
             sum1[2] += (it.value()*pos_3D(k))/pred_data_w_2D(it.row());
         }
@@ -6644,8 +6613,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     
    
     
-    // Update vertex and segment fit results
-    for (const auto& [vertex, vertex_idx] : vertex_index_map) {
+    // Update vertex and segment fit results — key=fit_index(int), value=vertex ptr
+    for (const auto& [vertex_idx, vertex] : vertex_index_map) {
         if (vertex_idx >= n_3D_pos) continue;
         
         double dQ = pos_3D(vertex_idx);
@@ -6668,9 +6637,13 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         if (fits.empty()) continue;
 
         // Update segment fit information
+        // S1.10/S2.D1: .at() catches missing-key bugs; key uses stable graph index
         std::vector<int> pt_idx(fits.size());
-        for (size_t i = 0; i < fits.size(); i++) {
-            pt_idx[i] = segment_point_index_map[std::make_pair(segment, i)];
+        {
+            size_t sg = segment->get_graph_index();
+            for (size_t i = 0; i < fits.size(); i++) {
+                pt_idx[i] = segment_point_index_map.at({sg, i});
+            }
         }
         for (size_t i = 0; i < fits.size(); i++) {
             int idx = pt_idx[i];
@@ -6942,9 +6915,11 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         auto cluster = segment->cluster();
         const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
         double cluster_t0 = cluster->get_cluster_t0();
+        // S1.13: guard against empty cluster; S1.14: guard degenerate slice width
+        if (cluster->children().empty()) continue;
         auto first_blob = cluster->children()[0];
         int cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
-
+        if (cur_ntime_ticks <= 0) cur_ntime_ticks = 1;
 
         int apa = paf.at(i).first;
         int face = paf.at(i).second;

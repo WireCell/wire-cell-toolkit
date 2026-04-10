@@ -53,6 +53,15 @@ public:
 
         m_grouping_name = get<std::string>(config, "grouping", "live");
 
+        // Optional detector-specific shorted-wire-region guard for find_first_kink.
+        // Provide as a 2-element array [w_min, w_max] (W-wire indices, exclusive).
+        // Leave empty (default) to disable. Example for UBoone: [7135, 7264].
+        auto syw = config["shorted_y_w_range"];
+        if (!syw.isNull() && syw.isArray() && syw.size() == 2) {
+            m_shorted_y_w_min = syw[0].asInt();
+            m_shorted_y_w_max = syw[1].asInt();
+        }
+
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
     
         if (!m_trackfitting_config_file.empty()) {
@@ -72,7 +81,10 @@ public:
         cfg["recombination_model"] = "BoxRecombination";  
         cfg["particle_dataset"] = "ParticleDataSet"; 
 
-        cfg["trackfitting_config_file"] = ""; 
+        cfg["trackfitting_config_file"] = "";
+        // Detector-specific shorted-wire-region guard (disabled by default).
+        // Set to [w_min, w_max] W-wire index range to enable. Example: [7135, 7264] for UBoone.
+        cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
 
         return cfg;
     }
@@ -489,7 +501,11 @@ public:
 private:
     std::string m_grouping_name{"live"};
     std::string m_trackfitting_config_file;  // Path to TrackFitting config file
-    mutable TrackFitting m_track_fitter; 
+    // Shorted-wire-region guard for find_first_kink: W-wire index range [w_min, w_max).
+    // -1/-1 means disabled (default, detector-agnostic).
+    int m_shorted_y_w_min{-1};
+    int m_shorted_y_w_max{-1};
+    mutable TrackFitting m_track_fitter;
 
     void load_trackfitting_config(const std::string& config_file) {
         try {
@@ -1061,10 +1077,10 @@ private:
                 if ((angle3 > 30 && (refl_angles.at(i) > 25.5 && ave_angles.at(i) > 12.5)) ||
                     (angle3 > 40 && angle3 > angle3p && v10.magnitude() > 5*units::cm && v20.magnitude() > 5*units::cm)) {
                     
-                    // Shorted-Y region guard (UBoone-specific W-wire range [7135, 7264]):
-                    // in this region some V-plane wires are dead; if a V wire near this
-                    // point is dead the apparent kink may be a reconstruction artifact.
-                    if (pw.at(i) > 7135 && pw.at(i) < 7264) {
+                    // Shorted-wire-region guard (sweep 1): configurable via shorted_y_w_range.
+                    // Disabled by default (m_shorted_y_w_min == -1). Enable for detectors
+                    // where a W-wire range has nearby dead V-plane wires that cause false kinks.
+                    if (m_shorted_y_w_min >= 0 && pw.at(i) > m_shorted_y_w_min && pw.at(i) < m_shorted_y_w_max) {
                         bool flag_bad = false;
                         for (int k = -1; k != 2; k++) {
                             if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1,
@@ -1140,8 +1156,8 @@ private:
                     angle3 < 7.5 || i <= 4) continue;
                 
                 if (angle3 > 30){
-                    // Shorted-Y region guard (UBoone-specific W-wire range [7135, 7264])
-                    if (pw.at(i) > 7135 && pw.at(i) < 7264) {
+                    // Shorted-wire-region guard (sweep 2): configurable via shorted_y_w_range.
+                    if (m_shorted_y_w_min >= 0 && pw.at(i) > m_shorted_y_w_min && pw.at(i) < m_shorted_y_w_max) {
                         bool flag_bad = false;
                         for (int k = -1; k != 2; k++) {
                             if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1,
