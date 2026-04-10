@@ -67,10 +67,11 @@ static void clustering_separate(
     geo_point_t drift_dir_abs(1,0,0);
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // sort the clusters by length descending; pointer as stable tiebreaker
+    // sort the clusters by length descending; use cluster ident() as tiebreaker
+    // to guarantee a deterministic order across runs (pointer address is not stable).
     std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *c1, const Cluster *c2) {
         if (c1->get_length() != c2->get_length()) return c1->get_length() > c2->get_length();
-        return c1 < c2;
+        return c1->ident() < c2->ident();
     });
 
     auto wpids = live_grouping.wpids();
@@ -109,16 +110,24 @@ static void clustering_separate(
             // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
         }
 
-        if (cluster->get_length() > 100 * units::cm) {
+        // Cache the length and PCA once — both are expensive for large clusters.
+        const double cluster_length = cluster->get_length();
+
+        if (cluster_length > 100 * units::cm) {
             std::vector<geo_point_t> boundary_points;
             std::vector<geo_point_t> independent_points;
 
-            bool flag_proceed =
-                JudgeSeparateDec_2(cluster, dv, drift_dir_abs, boundary_points, independent_points, cluster->get_length());
-        
-            if (!flag_proceed && cluster->get_length() > 100 * units::cm &&
-                JudgeSeparateDec_1(cluster, drift_dir_abs, cluster->get_length()) &&
-                independent_points.size() > 0) {
+            // JudgeSeparateDec_2 populates boundary_points / independent_points;
+            // cache the return value so we don't re-run it below.
+            bool flag_dec2 =
+                JudgeSeparateDec_2(cluster, dv, drift_dir_abs, boundary_points, independent_points, cluster_length);
+            // JudgeSeparateDec_1 is cheap compared to Dec_2 but still calls PCA —
+            // cache for the second call inside flag_proceed block.
+            bool flag_dec1 = JudgeSeparateDec_1(cluster, drift_dir_abs, cluster_length);
+
+            bool flag_proceed = flag_dec2;
+
+            if (!flag_proceed && flag_dec1 && independent_points.size() > 0) {
                 bool flag_top = false;
                 for (size_t j = 0; j != independent_points.size(); j++) {
                     if (independent_points.at(j).y() > det_FV_ymax) {
@@ -127,26 +136,28 @@ static void clustering_separate(
                     }
                 }
 
-                geo_point_t main_dir(cluster->get_pca().axis.at(0).x(), cluster->get_pca().axis.at(0).y(),
-                                     cluster->get_pca().axis.at(0).z());
+                // Cache PCA result to avoid repeated calls in the condition chain.
+                const auto& pca = cluster->get_pca();
+                geo_point_t main_dir(pca.axis.at(0).x(), pca.axis.at(0).y(), pca.axis.at(0).z());
+                const double pca_ratio1 = pca.values.at(1) / pca.values.at(0);
 
                 if (flag_top) {
                     if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 16 ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 33 &&
-                            cluster->get_length() > 160 * units::cm ||
+                            cluster_length > 160 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
-                            cluster->get_length() > 260 * units::cm ||
+                            cluster_length > 260 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 65 &&
-                            cluster->get_length() > 360 * units::cm ||
+                            cluster_length > 360 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 45 &&
-                            cluster->get_pca().values.at(1) > 0.75 * cluster->get_pca().values.at(0) ||
+                            pca_ratio1 > 0.75 ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
-                            cluster->get_pca().values.at(1) > 0.55 * cluster->get_pca().values.at(0)) {
+                            pca_ratio1 > 0.55) {
                         flag_proceed = true;
                     }
                     else {
                         if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 40 &&
-                            cluster->get_pca().values.at(1) > 0.2 * cluster->get_pca().values.at(0)) {
+                            pca_ratio1 > 0.2) {
                             // std::vector<Cluster *> temp_sep_clusters = Separate_2(cluster, 10 * units::cm);
                             const auto b2id = Separate_2(cluster, scope, 10 * units::cm);
                             std::set<int> ids;
@@ -154,7 +165,7 @@ static void clustering_separate(
                                 ids.insert(id);
                             }
                             int num_clusters = 0;
-                    
+
                             for (const auto id : ids) {
                                 double length_1 = get_length(cluster, b2id, id);
                                 if (length_1 > 60 * units::cm) num_clusters++;
@@ -165,30 +176,31 @@ static void clustering_separate(
                 }
                 else {
                     if (fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 4 &&
-                            cluster->get_length() > 170 * units::cm ||
+                            cluster_length > 170 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 25 &&
-                            cluster->get_length() > 210 * units::cm ||
+                            cluster_length > 210 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 28 &&
-                            cluster->get_length() > 270 * units::cm ||
+                            cluster_length > 270 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 35 &&
-                            cluster->get_length() > 330 * units::cm ||
+                            cluster_length > 330 * units::cm ||
                         fabs(main_dir.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < 30 &&
-                            cluster->get_pca().values.at(1) > 0.55 * cluster->get_pca().values.at(0)) {
+                            pca_ratio1 > 0.55) {
                         flag_proceed = true;
                     }
                 }
                 //	std::cout << flag_top << " " << flag_proceed << std::endl;
             }
-     
+
 
             if (flag_proceed) {
-                if (JudgeSeparateDec_1(cluster, drift_dir_abs, cluster->get_length())) {
+                // flag_dec1 was already computed above; reuse it here.
+                if (flag_dec1) {
                     //	  std::cerr << em("sep prepare sep") << std::endl;
 
                     const size_t orig_nchildren = cluster->nchildren();
-                    //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster->get_length() << std::endl;
+                    //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster_length << std::endl;
                     std::vector<Cluster *> sep_clusters =
-                        Separate_1(use_ctpc, cluster, boundary_points, independent_points,  cluster->get_length(), vertical_dir, beam_dir, dv, pcts, scope);
+                        Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster_length, vertical_dir, beam_dir, dv, pcts, scope);
                     
                     std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
@@ -268,9 +280,9 @@ static void clustering_separate(
 
                     }
                 }
-                else if (cluster->get_length() < 6 * units::m) {
+                else if (cluster_length < 6 * units::m) {
                     std::vector<Cluster *> sep_clusters =
-                        Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster->get_length(), vertical_dir, beam_dir, dv, pcts, scope);
+                        Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster_length, vertical_dir, beam_dir, dv, pcts, scope);
 
                     if (sep_clusters.size() >= 2) {
                         Cluster *final_sep_cluster = sep_clusters.at(1);
@@ -313,7 +325,10 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
 
     double angle1 = fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180.;
 
-    /// CHECKME: is "time_slice_length" drift_speed * tick?
+    // temp_angle1 uses the x-extent of the earliest/latest 3D points as a proxy
+    // for the drift-axis extent.  The prototype used num_time_slices * tick_width
+    // instead; the toolkit formulation is equivalent for dense clusters and is
+    // naturally multi-APA/face because it operates directly on 3D positions.
     auto points = cluster->get_earliest_latest_points();
     double temp_angle1 = asin(fabs(points.first.x() - points.second.x()) / length) / 3.1415926 * 180.;
 
@@ -323,7 +338,11 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
 
     // std::cout << ratio1 << " " <<  pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2)  << " "  << ratio1 << " " << pow(10, exp(1.38115 - 1.19312 * pow(temp_angle1, 1. / 3.)) - 2.2) << " " << ratio2 << " " << pow(10, exp(1.38115 - 1.19312 * pow(angle2, 1. / 3.)) - 2.2) << " " << ratio1 << " " << angle1 << " " << angle2 << std::endl;
 
-    // add some additional check ... PDHD
+    // PDHD-specific guard: long (>3 m), nearly drift-aligned (angle1 < 5°), very
+    // thin (ratio2 < 5%) clusters are through-going cosmics with excellent 3D
+    // reconstruction — separating them would be wrong.  The ratio thresholds
+    // below would falsely trigger on such tracks because the PCA is dominated by
+    // the long drift direction.
     if (angle1 < 5 && ratio2 < 0.05 && length > 300*units::cm) return false;
 
     if (ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2) ||
@@ -338,23 +357,14 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
                                const double cluster_length)
 {
-    // const auto &mp = cluster->grouping()->get_params();
-
-    // Per-APA/face x-bound maps: built but not used — cosmic muon boundary detection
-    // uses the global outer detector bounds (det_FV_xmax/xmin from wpid_all) which
-    // is correct since we are checking for tracks exiting the full detector, not
-    // individual TPC cathode boundaries.
-    // auto wpids = cluster->grouping()->wpids();
-    // std::map<WirePlaneId, double> map_FV_xmin;
-    // std::map<WirePlaneId, double> map_FV_xmax;
-    // std::map<WirePlaneId, double> map_FV_xmin_margin;
-    // std::map<WirePlaneId, double> map_FV_xmax_margin;
-    // for (const auto& wpid : wpids) {
-    //     map_FV_xmin[wpid] = dv->metadata(wpid)["FV_xmin"].asDouble();
-    //     map_FV_xmax[wpid] = dv->metadata(wpid)["FV_xmax"].asDouble();
-    //     map_FV_xmin_margin[wpid] = dv->metadata(wpid)["FV_xmin_margin"].asDouble();
-    //     map_FV_xmax_margin[wpid] = dv->metadata(wpid)["FV_xmax_margin"].asDouble();
-    // }
+    // Use global detector-envelope bounds (wpid_all=0) throughout this function.
+    // Rationale: this function detects whether a cluster exits the *cryostat* — the
+    // outer physical boundary of the full detector.  Per-TPC (per-APA/face) FV bounds
+    // would be wrong here because a cosmic that traverses only one drift volume does
+    // NOT exit the cryostat.  The global envelope correctly captures exiting tracks
+    // regardless of how many APAs/faces they span.
+    // Note: FV_xmin/xmax etc. in the metadata are the *inner fiducial* values;
+    // FV_xmin_margin / FV_xmax_margin are added outward to reach the physical boundary.
     WirePlaneId wpid_all(0);
     double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
     double det_FV_xmax = dv->metadata(wpid_all)["FV_xmax"].asDouble();
@@ -520,7 +530,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                 hy_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || hy_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
                 hy_points.at(j).x() < det_FV_xmin || hy_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (hy_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hy_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
+            if (hy_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hy_points.at(j).x() > det_FV_xmax + det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != ly_points.size(); j++) {
@@ -562,7 +572,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                 ly_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || ly_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
                 ly_points.at(j).x() < det_FV_xmin || ly_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (ly_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || ly_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
+            if (ly_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || ly_points.at(j).x() > det_FV_xmax + det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != hz_points.size(); j++) {
@@ -604,7 +614,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                 hz_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || hz_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
                 hz_points.at(j).x() < det_FV_xmin || hz_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (hz_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hz_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
+            if (hz_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hz_points.at(j).x() > det_FV_xmax + det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != lz_points.size(); j++) {
@@ -646,7 +656,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                 lz_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || lz_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
                 lz_points.at(j).x() < det_FV_xmin || lz_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (lz_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || lz_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) num_outx_points++;
+            if (lz_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || lz_points.at(j).x() > det_FV_xmax + det_FV_xmax_margin) num_outx_points++;
         }
     }
     for (size_t j = 0; j != hx_points.size(); j++) {
@@ -669,26 +679,29 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                 hx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || hx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
                 hx_points.at(j).x() < det_FV_xmin || hx_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (hx_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hx_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) {
+            if (hx_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || hx_points.at(j).x() > det_FV_xmax + det_FV_xmax_margin) {
                 num_outx_points++;
             }
 
-            if (lx_points.at(j).x() > det_FV_xmax) {
+            // Bug fix: prototype mistakenly read lx_points.at(j) inside this hx_points
+            // loop, causing an out-of-bounds access when hx_points.size() > lx_points.size().
+            // Corrected to hx_points.at(j).
+            if (hx_points.at(j).x() > det_FV_xmax) {
                 independent_surfaces.insert(4);
             }
-            else if (lx_points.at(j).x() < det_FV_xmin) {
+            else if (hx_points.at(j).x() < det_FV_xmin) {
                 independent_surfaces.insert(5);
             }
-            else if (lx_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
+            else if (hx_points.at(j).y() > det_FV_ymax + det_FV_ymax_margin) {
                 independent_surfaces.insert(0);
             }
-            else if (lx_points.at(j).y() < det_FV_ymin) {
+            else if (hx_points.at(j).y() < det_FV_ymin) {
                 independent_surfaces.insert(1);
             }
-            else if (lx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
+            else if (hx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin) {
                 independent_surfaces.insert(2);
             }
-            else if (lx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
+            else if (hx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin) {
                 independent_surfaces.insert(3);
             }
         }
@@ -713,7 +726,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ID
                 lx_points.at(j).z() < det_FV_zmin - det_FV_zmin_margin || lx_points.at(j).z() > det_FV_zmax + det_FV_zmax_margin ||
                 lx_points.at(j).x() < det_FV_xmin || lx_points.at(j).x() > det_FV_xmax)
                 num_outside_points++;
-            if (lx_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || lx_points.at(j).x() > det_FV_xmax - det_FV_xmax_margin) {
+            if (lx_points.at(j).x() < det_FV_xmin - det_FV_xmin_margin || lx_points.at(j).x() > det_FV_xmax + det_FV_xmax_margin) {
                 num_outx_points++;
             }
 
@@ -1194,18 +1207,43 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
 
     const auto& winds = cluster->wire_indices();
 
+    // For clusters spanning multiple (apa,face) pairs (e.g. PDHD dual-drift), a path
+    // point recorded under face A may be the closest representative for a cluster point
+    // that lives in face B.  To avoid missing such matches, when is_multi_face is true
+    // we take the minimum 2D distance across ALL face projections rather than only the
+    // test point's own face.  Dead-channel lookups still use the test point's own wpid.
+    const bool is_multi_face = (gwpids.size() > 1);
+
+    // Helper: minimum get_closest_2d_dis across all (apa,face) in af_temp_cloud.
+    auto min_2d_dis = [&](const geo_point_t& p, int plane) -> double {
+        double best = 1e9;
+        for (const auto& [apa, face_map] : af_temp_cloud) {
+            for (const auto& [face, cloud] : face_map) {
+                double d = cloud->get_closest_2d_dis(p, plane).second;
+                if (d < best) best = d;
+            }
+        }
+        return best;
+    };
+
     for (size_t j = 0; j != flag_u_pts.size(); j++) {
         geo_point_t test_p = cluster->point3d(j);
-        auto test_wpid = cluster->wire_plane_id(j) ;
-        std::pair<int, double> temp_results = af_temp_cloud.at(test_wpid.apa()).at(test_wpid.face())->get_closest_2d_dis(test_p, 0);
-        double dis = temp_results.second;
-        // if (flag_debug_porting && cluster->blob_with_point(j)->slice_index_min() == 8060) {
-        //     std::cout << "get_closest_2d_dis(test_p, 0) " << test_p << " " << dis / units::cm << " cm " << (dis <= 2.4 * units::cm) << std::endl;
-        //     auto closest_point = temp_cloud->point(0, temp_results.first);
-        //     std::cout << "closest_point " << closest_point[0] << " " << closest_point[1] << std::endl;
-        // }
+        auto test_wpid = cluster->wire_plane_id(j);
+        // Symmetric guard to the one in the path-building loop above:
+        // skip points that don't map to any (apa,face) to avoid at(-1) crashes.
+        if (test_wpid.apa() == -1) continue;
+
+        // 2D distance from test_p to the path projection.
+        // Single-face (common case): use only the test point's own face projection.
+        // Multi-face: widen to the minimum across all face projections so that a path
+        // crossing an APA boundary is not "invisible" to cluster points near the boundary.
+        double dis;
+        if (is_multi_face) {
+            dis = min_2d_dis(test_p, 0);
+        } else {
+            dis = af_temp_cloud.at(test_wpid.apa()).at(test_wpid.face())->get_closest_2d_dis(test_p, 0).second;
+        }
         if (dis <= 1.5 * units::cm) {
-            // flag_u_pts.at(j) = true;
             flag_u_pts.at(j) = true;
         }
         if (dis <= 2.4 * units::cm) {
@@ -1222,8 +1260,11 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
                 }
             }
         }
-        temp_results = af_temp_cloud.at(test_wpid.apa()).at(test_wpid.face())->get_closest_2d_dis(test_p, 1);
-        dis = temp_results.second;
+        if (is_multi_face) {
+            dis = min_2d_dis(test_p, 1);
+        } else {
+            dis = af_temp_cloud.at(test_wpid.apa()).at(test_wpid.face())->get_closest_2d_dis(test_p, 1).second;
+        }
         if (dis <= 1.5 * units::cm) {
             flag_v_pts.at(j) = true;
         }
@@ -1241,8 +1282,11 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
                 }
             }
         }
-        temp_results = af_temp_cloud.at(test_wpid.apa()).at(test_wpid.face())->get_closest_2d_dis(test_p, 2);
-        dis = temp_results.second;
+        if (is_multi_face) {
+            dis = min_2d_dis(test_p, 2);
+        } else {
+            dis = af_temp_cloud.at(test_wpid.apa()).at(test_wpid.face())->get_closest_2d_dis(test_p, 2).second;
+        }
         if (dis <= 1.5 * units::cm) {
             flag_w_pts.at(j) = true;
         }
@@ -1299,6 +1343,9 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
 
     // std::vector<Blob*>
     const auto &mcells = cluster->children();
+    // Pointer-keyed maps: iteration order is non-deterministic, but these maps are
+    // only ever accessed by direct key lookup (operator[] / find), never iterated.
+    // Determinism is preserved because iteration over mcells (a vector) drives all loops.
     std::map<const Blob *, int> mcell_np_map, mcell_np_map1;
     for (auto it = mcells.begin(); it != mcells.end(); it++) {
         mcell_np_map[*it] = 0;
@@ -1350,7 +1397,6 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
             groupids.insert(1);
         }
     }
-    auto scope_transform = cluster->get_scope_transform(scope);
     auto clusters_step0 = grouping->separate(cluster, b2groupid, true);
     assert(cluster == nullptr);
 
@@ -1369,8 +1415,7 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
     }
 
 
-//    if (clusters_step0.find(0) != clusters_step0.end()) {
-    if (clusters_step0[0]->nchildren() > 0) {
+    if (clusters_step0.find(0) != clusters_step0.end()) {
         // merge some clusters from other_clusters to clusters_step0[0]
         {
             // cluster1->Create_point_cloud();
@@ -1519,7 +1564,13 @@ std::vector<Cluster *> WireCell::Clus::Facade::Separate_1(const bool use_ctpc, C
         Cluster& cluster2 = grouping->make_child();
         cluster2.set_default_scope(scope);
         cluster2.set_scope_filter(scope, true);
-        if (to_be_merged_clusters.size() > 0) cluster2.set_scope_transform(scope, to_be_merged_clusters[0]->get_scope_transform(scope));
+        // Inherit scope_transform from the first to-be-merged cluster when possible;
+        // fall back to the path cluster's transform so cluster2 is always valid even
+        // when to_be_merged_clusters is empty (nothing left after the saved-cluster split).
+        if (to_be_merged_clusters.size() > 0)
+            cluster2.set_scope_transform(scope, to_be_merged_clusters[0]->get_scope_transform(scope));
+        else
+            cluster2.set_scope_transform(scope, clusters_step0[0]->get_scope_transform(scope));
         for (size_t i = 0; i != to_be_merged_clusters.size(); i++) {
             cluster2.take_children(*to_be_merged_clusters[i], true);
             grouping->destroy_child(to_be_merged_clusters[i]);
@@ -1640,6 +1691,7 @@ std::vector<int> WireCell::Clus::Facade::Separate_2(Cluster *cluster,
     const int N = mcells.size();
     Weighted::Graph graph(N);
 
+    // Pointer-keyed map: iteration-order safe — only used for direct key lookups, not iteration.
     std::map<const Blob *, int> mcell_index_map;
     for (size_t i = 0; i != mcells.size(); i++) {
         Blob *curr_mcell = mcells.at(i);

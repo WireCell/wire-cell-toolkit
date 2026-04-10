@@ -1795,17 +1795,17 @@ std::map<WirePlaneId, std::tuple<int, int, int, int> > Facade::get_uvwt_range(co
     for (size_t i = 0; i != b2id.size(); i++) {
         if (b2id.at(i) != id) continue;
         const auto* blob = cluster->children().at(i);
-        for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
-            map_wpid_u_set[blob->wpid()].insert(i);
+        for (int wi = blob->u_wire_index_min(); wi < blob->u_wire_index_max(); ++wi) {
+            map_wpid_u_set[blob->wpid()].insert(wi);
         }
-        for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
-            map_wpid_v_set[blob->wpid()].insert(i);
+        for (int wi = blob->v_wire_index_min(); wi < blob->v_wire_index_max(); ++wi) {
+            map_wpid_v_set[blob->wpid()].insert(wi);
         }
-        for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
-            map_wpid_w_set[blob->wpid()].insert(i);
+        for (int wi = blob->w_wire_index_min(); wi < blob->w_wire_index_max(); ++wi) {
+            map_wpid_w_set[blob->wpid()].insert(wi);
         }
-        for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
-            map_wpid_t_set[blob->wpid()].insert(i);
+        for (int ti = blob->slice_index_min(); ti < blob->slice_index_max(); ++ti) {
+            map_wpid_t_set[blob->wpid()].insert(ti);
         }
     }
 
