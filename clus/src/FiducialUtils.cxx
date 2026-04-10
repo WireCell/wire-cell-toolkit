@@ -103,7 +103,8 @@ namespace WireCell::Clus {
                         double cluster_t0 = main_cluster.get_cluster_t0();
                         auto temp_p_raw = transform->backward(temp_p, cluster_t0, test_wpid.face(), test_wpid.apa());
 
-                        if (inside_dead_region(temp_p_raw, test_wpid.apa(), test_wpid.face())) num_points_dead ++;
+                        // minimal_views=2 matches prototype's 2-plane (UV/UW/VW) intersection semantics
+                    if (inside_dead_region(temp_p_raw, test_wpid.apa(), test_wpid.face(), 2)) num_points_dead ++;
                     }
                     if (num_points - num_points_dead >=cut_value) return true;
                     

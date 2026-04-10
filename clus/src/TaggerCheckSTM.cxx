@@ -1,4 +1,5 @@
 #include "WireCellClus/IEnsembleVisitor.h"
+#include <optional>
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
 #include "WireCellClus/ParticleDataSet.h"
@@ -77,57 +78,51 @@ public:
     }
 
     virtual void visit(Ensemble& ensemble) const {
-        
+
         // Configure the track fitter with detector volume
         m_track_fitter.set_detector_volume(m_dv);
-        m_track_fitter.set_pc_transforms(m_pcts); 
+        m_track_fitter.set_pc_transforms(m_pcts);
 
         // Get the specified grouping (default: "live")
         auto groupings = ensemble.with_name(m_grouping_name);
         if (groupings.empty()) {
             return;
         }
-        
+
         auto& grouping = *groupings.at(0);
-        
-        // Find clusters that have the main_cluster flag (set by clustering_recovering_bundle)
+
+        // Find the main cluster and all associated clusters
         Cluster* main_cluster = nullptr;
+        std::vector<Cluster*> associated_clusters;
 
         for (auto* cluster : grouping.children()) {
             if (cluster->get_flag(Flags::main_cluster)) {
                 main_cluster = cluster;
+            } else if (cluster->get_flag(Flags::associated_cluster)) {
+                associated_clusters.push_back(cluster);
             }
         }
 
-        SPDLOG_LOGGER_DEBUG(s_log, "visit: TaggerCheckSTM: Found {} main clusters to check for STM conditions.", (main_cluster ? 1 : 0));
+        SPDLOG_LOGGER_DEBUG(s_log, "visit: TaggerCheckSTM: Found {} main cluster; {} associated clusters.",
+            (main_cluster ? 1 : 0), associated_clusters.size());
 
-        // For each main cluster, find its associated clusters
-        std::map<Cluster*, std::vector<Cluster*>> main_to_associated;
-        if (main_cluster) {
-            std::vector<Cluster*> associated_clusters;
-            
-            // Find all clusters with the associated_cluster flag
-            for (auto* cluster : grouping.children()) {
-                if (cluster->get_flag(Flags::associated_cluster)) {
-                    associated_clusters.push_back(cluster);
-                }
-            }
-            
-            main_to_associated[main_cluster] = associated_clusters;
-            
-            // std::cout << "TaggerCheckSTM: Main cluster " << main_cluster->ident() 
-            //           << " has " << associated_clusters.size() << " associated clusters: ";
-            // for (auto* assoc : associated_clusters) {
-            //     std::cout << assoc->ident() << " ";
-            // }
-            // std::cout << std::endl;
+        if (!main_cluster) return;
+
+        bool is_stm = check_stm_conditions(*main_cluster, associated_clusters);
+
+        // TGM is set inside check_stm_conditions; set STM only when not TGM
+        if (is_stm && !main_cluster->get_flag(Flags::TGM)) {
+            main_cluster->set_flag(Flags::STM);
         }
 
-        // Process each main cluster
-        // size_t stm_count = 0;
+        SPDLOG_LOGGER_DEBUG(s_log, "visit: TaggerCheckSTM: cluster {} → STM={} TGM={}",
+            main_cluster->ident(),
+            main_cluster->get_flag(Flags::STM),
+            main_cluster->get_flag(Flags::TGM));
 
-        // validation check ... temporary ...
-        if (main_cluster->has_pc("steiner_pc"))
+        // (dead-code stub removed — see git history for the tracking-infrastructure
+        //  validation harness that used a hard-coded 48-point wcpts() override)
+        if (false && main_cluster->has_pc("steiner_pc"))
         {
             auto boundary_indices = main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", true);
 
@@ -893,7 +888,7 @@ private:
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
             SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
-            return -1;
+            return static_cast<int>(segment->fits().size()); // no-kink sentinel
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
         double cluster_t0 = cluster.get_cluster_t0();
@@ -918,7 +913,7 @@ private:
         }
 
         if (fine_tracking_path.empty()) {
-            return -1;
+            return static_cast<int>(fine_tracking_path.size()); // no-kink sentinel (0 == fits.size())
         }
         const int dq_size = static_cast<int>(dQ.size());
 
@@ -1066,17 +1061,21 @@ private:
                 if ((angle3 > 30 && (refl_angles.at(i) > 25.5 && ave_angles.at(i) > 12.5)) ||
                     (angle3 > 40 && angle3 > angle3p && v10.magnitude() > 5*units::cm && v20.magnitude() > 5*units::cm)) {
                     
-        //             // Special handling for shortened Y region
-        //             if (pw.at(i) > 7135-5 && pw.at(i) < 7264+5) {
-        //                 bool flag_bad = false;
-        //                 // Check for dead channels around this position
-        //                 // This would need access to ch_mcell_set_map equivalent in toolkit
-        //                 // For now, apply stricter angle cuts in this region
-        //                 if (pw.at(i) > 7135 && pw.at(i) < 7264) {
-        //                     if (refl_angles.at(i) < 27 || ave_angles.at(i) < 15) continue;
-        //                 }
-        //             }
-                    
+                    // Shorted-Y region guard (UBoone-specific W-wire range [7135, 7264]):
+                    // in this region some V-plane wires are dead; if a V wire near this
+                    // point is dead the apparent kink may be a reconstruction artifact.
+                    if (pw.at(i) > 7135 && pw.at(i) < 7264) {
+                        bool flag_bad = false;
+                        for (int k = -1; k != 2; k++) {
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1,
+                                                                  std::round(pv.at(i) + k), std::round(pt.at(i)))) {
+                                flag_bad = true;
+                                break;
+                            }
+                        }
+                        if (flag_bad) continue;
+                    }
+
                     // Calculate charge density before and after kink
                     double sum_fQ = 0;
                     double sum_fx = 0;
@@ -1141,17 +1140,18 @@ private:
                     angle3 < 7.5 || i <= 4) continue;
                 
                 if (angle3 > 30){
-            //         // shorted Y ...
-            //         if (pw.at(i) > 7135 && pw.at(i) < 7264){
-            //             bool flag_bad = false;
-            //             for (int k=-1;k!=2;k++){
-            //                 if (grouping->is_wire_dead(paf.at(i).first, paf.at(i).second, 1, std::round(pv.at(i)+k), std::round(pt.at(i)))){
-            //                     flag_bad = true;
-            //                     break;
-            //                 }
-            //             }
-            //             if (flag_bad) continue;
-            //         }
+                    // Shorted-Y region guard (UBoone-specific W-wire range [7135, 7264])
+                    if (pw.at(i) > 7135 && pw.at(i) < 7264) {
+                        bool flag_bad = false;
+                        for (int k = -1; k != 2; k++) {
+                            if (cluster.grouping()->is_wire_dead(paf.at(i).first, paf.at(i).second, 1,
+                                                                  std::round(pv.at(i) + k), std::round(pt.at(i)))) {
+                                flag_bad = true;
+                                break;
+                            }
+                        }
+                        if (flag_bad) continue;
+                    }
                     bool flag_bad_u = false;
                     {
                         for (int k=-1;k!=2;k++){
@@ -1218,8 +1218,8 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
-            return -1;
+            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: TaggerCheckSTM: No FiducialUtils available");
+            return false; // cannot determine → assume no proton, allow STM
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
         
@@ -1475,55 +1475,42 @@ private:
         return false;
     }
 
-    bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num, double peak_range = 40*units::cm, double offset_length = 0*units::cm, double com_range = 35*units::cm, bool flag_strong_check = false) const{
-        auto& cluster = *segment->cluster();
-        // Get FiducialUtils from the grouping
-        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
-        if (!fiducial_utils) {
-            SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
-            return -1;
-        }
-        const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
-        
-        // Extract fit results from the segment
-        const auto& fits = segment->fits();
-        
-        // Convert fit data to vectors matching the TrackFitting interface
-        std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
-        std::vector<double> dQ, dx;
-        std::vector<std::pair<int,int>> paf;
-        
-        for (const auto& fit : fits) {
-            fine_tracking_path.emplace_back(fit.point, segment);
-            dQ.push_back(fit.dQ);
-            dx.push_back(fit.dx);
-            paf.push_back(fit.paf);
-        }
-
-        if (fine_tracking_path.empty()) {
-            return false;
-        }
-
-        // Extract points vector for compatibility with prototype algorithm
+    // Pre-computed per-segment data shared across multiple eval_stm calls with the same segment.
+    struct STMEvalArrays {
         std::vector<WireCell::Point> pts;
-        for (const auto& path_point : fine_tracking_path) {
-            pts.push_back(path_point.first);
-        }
-        const int num_pts = static_cast<int>(pts.size());
-        
-        std::vector<double> L(pts.size(), 0);
-        std::vector<double> dQ_dx(pts.size(), 0);
-        double dis = 0;
-        L[0] = dis;
-        dQ_dx[0] = dQ[0] / (dx[0] / units::cm + 1e-9);
+        std::vector<double> L;
+        std::vector<double> dQ_dx;
+        bool valid{false};
+    };
 
-        for (size_t i = 1; i != pts.size(); i++) {
-            dis += sqrt(pow(pts[i].x() - pts[i-1].x(), 2) + 
-                        pow(pts[i].y() - pts[i-1].y(), 2) + 
-                        pow(pts[i].z() - pts[i-1].z(), 2));
-            L[i] = dis;
-            dQ_dx[i] = dQ[i] / (dx[i] / units::cm + 1e-9);
+    STMEvalArrays build_eval_arrays(std::shared_ptr<PR::Segment> segment) const {
+        STMEvalArrays arrs;
+        const auto& fits = segment->fits();
+        if (fits.empty()) return arrs;
+        for (const auto& fit : fits) {
+            arrs.pts.push_back(fit.point);
+            arrs.L.push_back(0);
+            arrs.dQ_dx.push_back(fit.dQ / (fit.dx / units::cm + 1e-9));
         }
+        double dis = 0;
+        for (size_t i = 1; i < arrs.pts.size(); i++) {
+            const auto& a = arrs.pts[i-1];
+            const auto& b = arrs.pts[i];
+            dis += sqrt(pow(b.x()-a.x(),2) + pow(b.y()-a.y(),2) + pow(b.z()-a.z(),2));
+            arrs.L[i] = dis;
+        }
+        arrs.valid = true;
+        return arrs;
+    }
+
+    // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
+    bool eval_stm_core(const STMEvalArrays& arrs, int kink_num,
+                       double peak_range, double offset_length, double com_range,
+                       bool flag_strong_check = false) const {
+        const auto& pts   = arrs.pts;
+        const auto& L     = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int num_pts = static_cast<int>(pts.size());
 
         double end_L;
         size_t max_num;
@@ -1682,9 +1669,24 @@ private:
 
 
         return false;
+    } // end eval_stm_core
+
+    // Public wrapper: builds arrays once and delegates to core.
+    bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num,
+                  double peak_range = 40*units::cm, double offset_length = 0*units::cm,
+                  double com_range = 35*units::cm, bool flag_strong_check = false) const {
+        auto& cluster = *segment->cluster();
+        auto fiducial_utils = cluster.grouping()->get_fiducialutils();
+        if (!fiducial_utils) {
+            SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: TaggerCheckSTM: No FiducialUtils available");
+            return false;
+        }
+        auto arrs = build_eval_arrays(segment);
+        if (!arrs.valid) return false;
+        return eval_stm_core(arrs, kink_num, peak_range, offset_length, com_range, flag_strong_check);
     }
 
-    std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster, 
+    std::shared_ptr<PR::Segment> create_segment_for_cluster(WireCell::Clus::Facade::Cluster& cluster,
                                const std::vector<geo_point_t>& path_points) const{
     
         // Step 3: Prepare segment data
@@ -2173,6 +2175,22 @@ private:
             }
         }
 
+        // Per-face distance-to-anode helper: replaces hardcoded x < threshold comparisons.
+        // face_dirx < 0  → drift in +x → anode is at xmin of inner_bounds.
+        // face_dirx > 0  → drift in -x → anode is at xmax of inner_bounds.
+        // Falls back to |x| if the point is outside all known volumes (preserves UBoone behaviour).
+        auto dist_to_anode = [this](const WireCell::Point& pt) -> double {
+            WirePlaneId wpid = m_dv->contained_by(pt);
+            if (wpid.apa() < 0 || wpid.face() < 0) {
+                return std::abs(pt.x());
+            }
+            WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
+            int fdx = m_dv->face_dirx(wpid_u);
+            WireCell::BoundingBox bb = m_dv->inner_bounds(wpid_u);
+            double anode_x = (fdx < 0) ? bb.bounds().first.x() : bb.bounds().second.x();
+            return std::abs(pt.x() - anode_x);
+        };
+
         SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: end_point: {} {}", temp_set.size(), candidate_exit_wcps.size());
 
         // Determine first and last points for further analysis
@@ -2219,75 +2237,58 @@ private:
 
         SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: STM analysis: flag_double_end={}, flag_other_clusters={}", flag_double_end, flag_other_clusters);
 
-        // Forward check
-        {
-            if (flag_double_end) SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Forward check!");
-            
-            // Do rough path tracking
-            auto path_points = do_rough_path(cluster, first_wcp, last_wcp);
-            
+        // Unified forward/backward pass.
+        // Returns nullopt (continue), false (not STM), or true (STM/TGM, flag already set).
+        // Differences between passes:
+        //   is_forward=true:  early fits.size()<=3 exit; TGM dead-volume else-if branch;
+        //                     left_L>40cm only returns false when !flag_double_end;
+        //                     extra 5cm short-track reset condition.
+        //   is_forward=false: none of the above; always returns false if left_L>40cm.
+        auto run_pass = [&](const geo_point_t& start_wcp, const geo_point_t& end_wcp,
+                            bool is_forward) -> std::optional<bool> {
+            if (is_forward && flag_double_end)
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Forward check!");
+            if (!is_forward)
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Backward check!");
+
+            // do_rough_path takes non-const refs; use local copies.
+            geo_point_t start_copy = start_wcp;
+            geo_point_t end_copy   = end_wcp;
+            auto path_points = do_rough_path(cluster, start_copy, end_copy);
             {
-                // Create segment for tracking
                 m_track_fitter.clear_segments();
                 auto segment = create_segment_for_cluster(cluster, path_points);
                 m_track_fitter.add_segment(segment);
                 m_track_fitter.do_single_tracking(segment, false);
-                // Extract fit results from the segment
-                const auto& fits = segment->fits();
-                if (fits.size() <=3) return false;
+                if (is_forward && segment->fits().size() <= 3) return false;
             }
 
             SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Finish first round of fitting");
 
-            geo_point_t mid_point(0,0,0);
-            auto adjusted_path_points = adjust_rough_path(cluster, mid_point);            
-            if (adjusted_path_points.size()==0) adjusted_path_points = path_points;
+            geo_point_t mid_point(0, 0, 0);
+            auto adjusted_path_points = adjust_rough_path(cluster, mid_point);
+            if (adjusted_path_points.size() == 0) adjusted_path_points = path_points;
             auto adjusted_segment = create_segment_for_cluster(cluster, adjusted_path_points);
             m_track_fitter.clear_segments();
             m_track_fitter.add_segment(adjusted_segment);
             m_track_fitter.do_single_tracking(adjusted_segment);
 
             SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Finish second round of fitting");
-            
-            // // hack to test recombination model usage  ... 
-            // double kine_energy = segment_cal_kine_dQdx(adjusted_segment, m_recomb_model);
-            // std::cout << "Kine energy: " << kine_energy/units::MeV << std::endl;
-            // // check ...
 
-
-            std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
             std::vector<double> dQ, dx;
-            std::vector<std::pair<int,int>> paf;
-
-            const auto& fits = adjusted_segment->fits();
-            for (const auto& fit : fits) {
-                fine_tracking_path.emplace_back(fit.point, adjusted_segment);
+            std::vector<WireCell::Point> pts;
+            for (const auto& fit : adjusted_segment->fits()) {
                 dQ.push_back(fit.dQ);
                 dx.push_back(fit.dx);
-                paf.push_back(fit.paf);
-            }
-
-            // Extract points for compatibility
-            std::vector<WireCell::Point> pts;
-            for (const auto& path_point : fine_tracking_path) {
-                pts.push_back(path_point.first);
+                pts.push_back(fit.point);
             }
             const int total_pts = static_cast<int>(pts.size());
 
-            // std::cout << "Collect points " << pts.size() << std::endl;
-
             int kink_num = find_first_kink(adjusted_segment);
 
-            // std::cout << "Kink Number: " << kink_num << std::endl;
-
-            double left_L = 0; 
-            double left_Q = 0;
-            double exit_L = 0; 
-            double exit_Q = 0;
-            
+            double left_L = 0, left_Q = 0, exit_L = 0, exit_Q = 0;
             const size_t dx_size = dx.size();
-            size_t first_loop_end = dx_size;
-            size_t second_loop_start = dx_size;
+            size_t first_loop_end = dx_size, second_loop_start = dx_size;
             if (kink_num == 0) {
                 first_loop_end = 0;
                 second_loop_start = 0;
@@ -2296,54 +2297,49 @@ private:
                 first_loop_end = kink_idx;
                 second_loop_start = kink_idx;
             }
-            for (size_t i = 0; i < first_loop_end; i++){
-                exit_L += dx.at(i);
-                exit_Q += dQ.at(i);
-            }
-            for (size_t i = second_loop_start; i < dx_size; i++){
-                left_L += dx.at(i);
-                left_Q += dQ.at(i);
-            }
-            
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Left: {} {} {} {}", exit_L/units::cm, left_L/units::cm, (left_Q/(left_L/units::cm+1e-9))/50e3, (exit_Q/(exit_L/units::cm+1e-9)/50e3));
+            for (size_t i = 0; i < first_loop_end; i++) { exit_L += dx[i]; exit_Q += dQ[i]; }
+            for (size_t i = second_loop_start; i < dx_size; i++) { left_L += dx[i]; left_Q += dQ[i]; }
 
-            // TGM (Through-Going Muon) check
-            if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && (!fiducial_utils->inside_fiducial_volume(pts.back()))){
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Left: {} {} {} {}",
+                exit_L/units::cm, left_L/units::cm,
+                (left_Q/(left_L/units::cm+1e-9))/50e3,
+                (exit_Q/(exit_L/units::cm+1e-9))/50e3);
+
+            // TGM check
+            if (!fiducial_utils->inside_fiducial_volume(pts.front()) &&
+                !fiducial_utils->inside_fiducial_volume(pts.back())) {
 
                 bool flag_TGM_anode = false;
-                if ((pts.back().x() < 2*units::cm || pts.front().x() < 2*units::cm) && 
+                if ((dist_to_anode(pts.back()) < 2*units::cm || dist_to_anode(pts.front()) < 2*units::cm) &&
                     kink_num >= 0 && kink_num < total_pts) {
                     const size_t kink_idx = static_cast<size_t>(kink_num);
-                    if (pts.at(kink_idx).x() < 6*units::cm){
-                        geo_point_t v10(pts.back().x()-pts.at(kink_idx).x(),
-                                       pts.back().y()-pts.at(kink_idx).y(),
-                                       pts.back().z()-pts.at(kink_idx).z());
-                        geo_point_t v20(pts.front().x()-pts.at(kink_idx).x(),
-                                       pts.front().y()-pts.at(kink_idx).y(),
-                                       pts.front().z()-pts.at(kink_idx).z());
-                        
-                        if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90)<12.5 && v10.magnitude()>15*units::cm) || 
-                            (fabs(v20.angle(drift_dir)/3.1415926*180.-90)<12.5 && v20.magnitude()>15*units::cm)) {
+                    if (dist_to_anode(pts[kink_idx]) < 6*units::cm) {
+                        geo_point_t v10(pts.back().x()-pts[kink_idx].x(),
+                                        pts.back().y()-pts[kink_idx].y(),
+                                        pts.back().z()-pts[kink_idx].z());
+                        geo_point_t v20(pts.front().x()-pts[kink_idx].x(),
+                                        pts.front().y()-pts[kink_idx].y(),
+                                        pts.front().z()-pts[kink_idx].z());
+                        if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90) < 12.5 && v10.magnitude() > 15*units::cm) ||
+                            (fabs(v20.angle(drift_dir)/3.1415926*180.-90) < 12.5 && v20.magnitude() > 15*units::cm)) {
                             flag_TGM_anode = true;
                         }
                     }
                 }
-                
-                if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode){
+                if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode) {
                     SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                     cluster.set_flag(Flags::TGM);
                     return true;
                 }
-
-            }
-            else if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && left_L < 3*units::cm){
-                // Check dead volume
+            } else if (is_forward &&
+                       !fiducial_utils->inside_fiducial_volume(pts.front()) &&
+                       left_L < 3*units::cm) {
+                // Forward pass only: dead-volume check for single-end-outside case.
                 WireCell::Point p1 = pts.back();
                 geo_point_t dir_vec = cluster.vhough_transform(p1, 30*units::cm);
                 dir_vec *= -1;
-                
-                if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)){
-                    if (exit_L < 3*units::cm || left_L < 3*units::cm){
+                if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)) {
+                    if (exit_L < 3*units::cm || left_L < 3*units::cm) {
                         SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                         cluster.set_flag(Flags::TGM);
                         return true;
@@ -2351,278 +2347,105 @@ private:
                 }
             }
 
-            // STM evaluation logic
-            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)){
-                if (!flag_double_end){
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}", mid_point, left_L, (left_Q/(left_L/units::cm+1e-9)/50e3));
+            // STM evaluation
+            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)) {
+                if (!is_forward) {
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}",
+                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
                     return false;
                 }
-            } else {
-                bool flag_fix_end = false;
-                if (exit_L < 35*units::cm || ((left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0 && left_L > 2*units::cm)) {
-                    flag_fix_end = true;
+                if (!flag_double_end) {
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}",
+                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
+                    return false;
                 }
-                
-                // Readjust parameters for short tracks
-                if ((left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3)< 1.5) ||
-                    (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.7) ||
-                    (left_L < 5*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.8) ||
-                    (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.9)){
-                    left_L = 0;
-                    kink_num = dQ.size();
-                    exit_L = 40*units::cm;
-                    flag_fix_end = false;
-                }
+                // is_forward && flag_double_end: no decision — let backward pass run.
+                return std::nullopt;
+            }
 
-                bool flag_pass = false;
+            bool flag_fix_end = (exit_L < 35*units::cm ||
+                                  ((left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0 && left_L > 2*units::cm));
 
-                if (!flag_other_clusters){
-                    if (left_L < 40*units::cm) {
-                        if (flag_fix_end){
-                            flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
-                                       eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
-                        } else {
-                            flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 35*units::cm) ||
-                                       eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 35*units::cm);
-                        }
-                        
-                        if (!flag_pass){
-                            if (flag_fix_end){
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
-                            } else {
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 15*units::cm);
-                            }
-                        }
-                    }
-                    
-                    if (left_L < 20*units::cm){
-                        if (!flag_pass){
-                            if (flag_fix_end){
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
-                            } else {
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 35*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 35*units::cm);
-                            }
-                        }
-                        
-                        if (!flag_pass){
-                            if (flag_fix_end){
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
-                            } else {
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 15*units::cm);
-                            }
-                        }
-                    }
-                } else {
+            // Short-track reset; forward pass has an extra 5cm condition (prototype-faithful).
+            bool short_track = (left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.5) ||
+                               (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.7) ||
+                               (is_forward && left_L < 5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.8) ||
+                               (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.9);
+            if (short_track) {
+                left_L = 0;
+                kink_num = static_cast<int>(dQ.size());
+                exit_L = 40*units::cm;
+                flag_fix_end = false;
+            }
+
+            // Pre-build arrays once; all eval_stm_core calls below reuse them.
+            auto eval_arrs = build_eval_arrays(adjusted_segment);
+            bool flag_pass = false;
+            if (!eval_arrs.valid) {
+                flag_pass = false;
+            } else if (!flag_other_clusters) {
+                if (left_L < 40*units::cm) {
                     if (flag_fix_end) {
-                        flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
+                        flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                    eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
                     } else {
-                        flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm, 0., 35*units::cm, true);
+                        flag_pass = eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 0., 35*units::cm) ||
+                                    eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 3.*units::cm, 35*units::cm);
                     }
-                }
-                
-                if (flag_pass) {
-                    std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
-                    fitted_segments.push_back(adjusted_segment);
-                    search_other_tracks(cluster, fitted_segments);
-
-                    if (check_other_tracks(cluster, fitted_segments)){
-                        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point Tracks");
-                        return false;
-                    }
-
-                    if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
-                }
-            }
-        }
-
-        // Backward check (if double-ended)
-        if (flag_double_end){
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Backward check!");
-            
-            // Do backward path tracking
-            auto path_points = do_rough_path(cluster, last_wcp, first_wcp);
-            {
-                m_track_fitter.clear_segments();
-                auto segment = create_segment_for_cluster(cluster, path_points);
-                m_track_fitter.add_segment(segment);
-                m_track_fitter.do_single_tracking(segment, false);
-
-            }
-            geo_point_t mid_point(0,0,0);
-            auto adjusted_path_points = adjust_rough_path(cluster, mid_point);
-            if (adjusted_path_points.size()==0) adjusted_path_points = path_points;
-            auto adjusted_segment = create_segment_for_cluster(cluster, adjusted_path_points);
-            m_track_fitter.clear_segments();
-            m_track_fitter.add_segment(adjusted_segment);
-            m_track_fitter.do_single_tracking(adjusted_segment);
-
-            std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> fine_tracking_path;
-            std::vector<double> dQ, dx;
-            std::vector<std::pair<int,int>> paf;
-
-            const auto& fits = adjusted_segment->fits();
-            for (const auto& fit : fits) {
-                fine_tracking_path.emplace_back(fit.point, adjusted_segment);
-                dQ.push_back(fit.dQ);
-                dx.push_back(fit.dx);
-                paf.push_back(fit.paf);
-            }
-
-            // Extract points for compatibility
-            std::vector<WireCell::Point> pts;
-            for (const auto& path_point : fine_tracking_path) {
-                pts.push_back(path_point.first); 
-            }
-            const int total_pts = static_cast<int>(pts.size());
-
-            int kink_num = find_first_kink(adjusted_segment);
-            
-            double left_L = 0;
-            double left_Q = 0;
-            double exit_L = 0;
-            double exit_Q = 0;
-            
-            const size_t dx_size = dx.size();
-            size_t first_loop_end = dx_size;
-            size_t second_loop_start = dx_size;
-            if (kink_num == 0) {
-                first_loop_end = 0;
-                second_loop_start = 0;
-            } else if (kink_num > 0) {
-                const size_t kink_idx = std::min(static_cast<size_t>(kink_num), dx_size);
-                first_loop_end = kink_idx;
-                second_loop_start = kink_idx;
-            }
-            for (size_t i=0; i < first_loop_end; i++){
-                exit_L += dx.at(i);
-                exit_Q += dQ.at(i);
-            }
-            for (size_t i = second_loop_start; i < dx_size; i++){
-                left_L += dx.at(i);
-                left_Q += dQ.at(i);
-            }
-            
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Left: {} {} {} {}", exit_L/units::cm, left_L/units::cm, (left_Q/(left_L/units::cm+1e-9))/50e3, (exit_Q/(exit_L/units::cm+1e-9)/50e3));
-
-            // TGM check for backward direction
-            if ((!fiducial_utils->inside_fiducial_volume(pts.front())) && 
-                (!fiducial_utils->inside_fiducial_volume(pts.back()))){
-                
-                bool flag_TGM_anode = false;
-                
-                if ((pts.back().x() < 2*units::cm || pts.front().x() < 2*units::cm) && 
-                    kink_num >= 0 && kink_num < total_pts) {
-                    const size_t kink_idx = static_cast<size_t>(kink_num);
-                    if (pts.at(kink_idx).x() < 6*units::cm){
-                        geo_point_t v10(pts.back().x()-pts.at(kink_idx).x(),
-                                       pts.back().y()-pts.at(kink_idx).y(),
-                                       pts.back().z()-pts.at(kink_idx).z());
-                        geo_point_t v20(pts.front().x()-pts.at(kink_idx).x(),
-                                       pts.front().y()-pts.at(kink_idx).y(),
-                                       pts.front().z()-pts.at(kink_idx).z());
-                        
-                        if ((fabs(v10.angle(drift_dir)/3.1415926*180.-90)<12.5 && v10.magnitude()>15*units::cm) || 
-                            (fabs(v20.angle(drift_dir)/3.1415926*180.-90)<12.5 && v20.magnitude()>15*units::cm)) {
-                            flag_TGM_anode = true;
-                        }
-                    }
-                }
-                
-                if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode){
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
-                    cluster.set_flag(Flags::TGM);
-                    return true;
-                }
-            }
-
-            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)){
-                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}", mid_point, left_L, (left_Q/(left_L/units::cm+1e-9)/50e3));
-                return false;
-            } else {
-                bool flag_fix_end = false;
-                if (exit_L < 35*units::cm || ((left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0 && left_L > 2*units::cm)) {
-                    flag_fix_end = true;
-                }
-                
-                if ((left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3)< 1.5) ||
-                    (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.7) ||
-                    (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9)/50e3) < 1.9)){
-                    left_L = 0;
-                    kink_num = dQ.size();
-                    exit_L = 40*units::cm;
-                    flag_fix_end = false;
-                }
-
-                bool flag_pass = false;
-                if (!flag_other_clusters){
-                    if (left_L < 40*units::cm) {
-                        if (flag_fix_end){
-                            flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
-                                       eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                    if (!flag_pass) {
+                        if (flag_fix_end) {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
                         } else {
-                            flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 35*units::cm) ||
-                                       eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 40*units::cm - left_L, 3.*units::cm, 15*units::cm);
                         }
-                        
-                        if (!flag_pass){
-                            if (flag_fix_end){
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
-                            } else {
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 40*units::cm - left_L, 3.*units::cm, 15*units::cm);
-                            }
-                        }
-                    }
-                    
-                    if (left_L < 20*units::cm){
-                        if (!flag_pass){
-                            if (flag_fix_end){
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
-                            } else {
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 35*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 35*units::cm);
-                            }
-                        }
-                        
-                        if (!flag_pass){
-                            if (flag_fix_end){
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
-                            } else {
-                                flag_pass = eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 0., 15*units::cm) ||
-                                           eval_stm(adjusted_segment, kink_num, 20*units::cm - left_L, 3.*units::cm, 15*units::cm);
-                            }
-                        }
-                    }
-                } else {
-                    if (flag_fix_end) {
-                        flag_pass = eval_stm(adjusted_segment, kink_num, 5*units::cm, 0., 35*units::cm, true);
-                    } else {
-                        flag_pass = eval_stm(adjusted_segment, kink_num, 40*units::cm, 0., 35*units::cm, true);
                     }
                 }
-
-                if (flag_pass) {
-                    std::vector<std::shared_ptr<PR::Segment>> fitted_segments;
-                    fitted_segments.push_back(adjusted_segment);
-                    search_other_tracks(cluster, fitted_segments);
-                    
-                    if (check_other_tracks(cluster, fitted_segments)){
-                        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point Tracks");
-                        return false;
+                if (left_L < 20*units::cm) {
+                    if (!flag_pass) {
+                        if (flag_fix_end) {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 35*units::cm);
+                        } else {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 0., 35*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 3.*units::cm, 35*units::cm);
+                        }
                     }
-
-                    if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
+                    if (!flag_pass) {
+                        if (flag_fix_end) {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 5*units::cm, 3.*units::cm, 15*units::cm);
+                        } else {
+                            flag_pass = eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 0., 15*units::cm) ||
+                                        eval_stm_core(eval_arrs, kink_num, 20*units::cm - left_L, 3.*units::cm, 15*units::cm);
+                        }
+                    }
                 }
+            } else {
+                flag_pass = flag_fix_end
+                    ? eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm, true)
+                    : eval_stm_core(eval_arrs, kink_num, 40*units::cm, 0., 35*units::cm, true);
             }
+
+            if (flag_pass) {
+                std::vector<std::shared_ptr<PR::Segment>> fitted_segments{adjusted_segment};
+                search_other_tracks(cluster, fitted_segments);
+                if (check_other_tracks(cluster, fitted_segments)) {
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point Tracks");
+                    return false;
+                }
+                if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
+            }
+            return std::nullopt;
+        };
+
+        // Forward pass
+        if (auto fwd = run_pass(first_wcp, last_wcp, true); fwd.has_value()) return *fwd;
+
+        // Backward pass (only for double-ended clusters)
+        if (flag_double_end) {
+            if (auto bwd = run_pass(last_wcp, first_wcp, false); bwd.has_value()) return *bwd;
         }
 
         SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point ");
