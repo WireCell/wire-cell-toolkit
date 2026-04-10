@@ -148,249 +148,112 @@ static std::map<int, Cluster *> Separate_overclustering(
 
                 //	std::cout << "S0: " << common_set.size() << std::endl;
 
+                const geo_point_t wcp1 = cluster->point3d(index1);
                 for (const int index2 : common_set) {
-                    // WCPointCloud<double>::WCPoint &wcp2 = cloud.pts[*it4];
                     if (index2 != index1) {
-                       
-                        const geo_point_t wcp1 = cluster->point3d(index1);
                         const geo_point_t wcp2 = cluster->point3d(index2);
-                        double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
-                       
-                        add_edge(index1, index2, dis,*graph);
+                        const double dis = sqrt(pow(wcp1.x()-wcp2.x(),2)+pow(wcp1.y()-wcp2.y(),2)+pow(wcp1.z()-wcp2.z(),2));
+                        add_edge(index1, index2, dis, *graph);
                     }
                 }
-                //}
             }
         }
     }
 
-    const auto &time_cells_set_map = cluster->time_blob_map();
+    // Build connected blob pairs from same-slice and adjacent-slice overlaps.
+    // Iterate time_blob_map() directly (no intermediate af_time_slices copy).
+    const auto& time_cells_set_map = cluster->time_blob_map();
+    std::vector<std::pair<const Blob*, const Blob*>> connected_mcells;
 
-    // std::vector<int> time_slices;
-    // for (auto it1 = time_cells_set_map.begin(); it1 != time_cells_set_map.end(); it1++) {
-        // time_slices.push_back((*it1).first);
-    // }
+    for (const auto& [apa, face_map] : time_cells_set_map) {
+        for (const auto& [face, slice_map] : face_map) {
+            const int nticks = grouping->get_nticks_per_slice().at(apa).at(face);
+            for (auto it_s = slice_map.begin(); it_s != slice_map.end(); ++it_s) {
+                const int t = it_s->first;
+                const BlobSet& mcells_set = it_s->second;
 
-    std::map<int, std::map<int, std::vector<int> > > af_time_slices; // apa,face --> time slices 
-    for (auto it = cluster->time_blob_map().begin(); it != cluster->time_blob_map().end(); it++) {
-        int apa = it->first;
-        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
-            int face = it1->first;
-            std::vector<int> time_slices_vec;
-            for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
-                time_slices_vec.push_back(it2->first);
-            }
-            af_time_slices[apa][face] = time_slices_vec;
-        }
-    }
-
-
-    std::vector<std::pair<const Blob *, const Blob *>> connected_mcells;
-    for (auto it = af_time_slices.begin(); it != af_time_slices.end(); it++) {
-        int apa = it->first;
-        for (auto it1 = it->second.begin(); it1 != it->second.end(); it1++) {
-            int face = it1->first;
-            std::vector<int>& time_slices = it1->second;
-            for (size_t i = 0; i != time_slices.size(); i++) {
-                const BlobSet &mcells_set = time_cells_set_map.at(apa).at(face).at(time_slices.at(i));
-
-                // create graph for points in mcell inside the same time slice
+                // same time-slice pairs
                 if (mcells_set.size() >= 2) {
-                    for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); it2++) {
-                        const Blob *mcell1 = *it2;
-                        auto it2p = it2;
-                        if (it2p != mcells_set.end()) {
-                            it2p++;
-                            for (auto it3 = it2p; it3 != mcells_set.end(); it3++) {
-                                const Blob *mcell2 = *(it3);
-                                // std::cout << mcell1 << " " << mcell2 << " " << mcell1->Overlap_fast(mcell2,2) << std::endl;
-                                if (mcell1->overlap_fast(*mcell2, 2)) connected_mcells.push_back(std::make_pair(mcell1, mcell2));
-                            }
-                        }
+                    for (auto it2 = mcells_set.begin(); it2 != mcells_set.end(); ++it2) {
+                        for (auto it3 = std::next(it2); it3 != mcells_set.end(); ++it3)
+                            if ((*it2)->overlap_fast(**it3, 2))
+                                connected_mcells.push_back({*it2, *it3});
                     }
                 }
-                // create graph for points between connected mcells in adjacent time slices + 1, if not, + 2
-                std::vector<BlobSet> vec_mcells_set;
-                if (i + 1 < time_slices.size()) {
-                    if (time_slices.at(i + 1) - time_slices.at(i) == 1*grouping->get_nticks_per_slice().at(apa).at(face)) {
-                        vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 1)));
-                        if (i + 2 < time_slices.size())
-                            if (time_slices.at(i + 2) - time_slices.at(i) == 2*grouping->get_nticks_per_slice().at(apa).at(face))
-                                vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 2)));
-                    }
-                    else if (time_slices.at(i + 1) - time_slices.at(i) == 2*grouping->get_nticks_per_slice().at(apa).at(face)) {
-                        vec_mcells_set.push_back(time_cells_set_map.at(apa).at(face).at(time_slices.at(i + 1)));
+
+                // adjacent slices (+1 tick, possibly +2 ticks)
+                std::vector<const BlobSet*> next_sets;
+                auto it_next = std::next(it_s);
+                if (it_next != slice_map.end()) {
+                    const int dt = it_next->first - t;
+                    if (dt == nticks) {
+                        next_sets.push_back(&it_next->second);
+                        auto it_next2 = std::next(it_next);
+                        if (it_next2 != slice_map.end() && it_next2->first - t == 2*nticks)
+                            next_sets.push_back(&it_next2->second);
+                    } else if (dt == 2*nticks) {
+                        next_sets.push_back(&it_next->second);
                     }
                 }
-                //    bool flag = false;
-                for (size_t j = 0; j != vec_mcells_set.size(); j++) {
-                    //      if (flag) break;
-                    BlobSet &next_mcells_set = vec_mcells_set.at(j);
-                    for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); it1++) {
-                        const Blob *mcell1 = (*it1);
-                        for (auto it2 = next_mcells_set.begin(); it2 != next_mcells_set.end(); it2++) {
-                            const Blob *mcell2 = (*it2);
-                            if (mcell1->overlap_fast(*mcell2, 2)) {
-                                //	    flag = true; // correct???
-                                connected_mcells.push_back(std::make_pair(mcell1, mcell2));
-                            }
-                        }
-                    }
+                for (const BlobSet* nset : next_sets) {
+                    for (auto it1 = mcells_set.begin(); it1 != mcells_set.end(); ++it1)
+                        for (auto it2 = nset->begin(); it2 != nset->end(); ++it2)
+                            if ((*it1)->overlap_fast(**it2, 2))
+                                connected_mcells.push_back({*it1, *it2});
                 }
             }
         }
     }
 
-    // establish edge ...
+    // For each connected blob pair, accumulate the top-5 nearest-neighbour candidates
+    // into closest_index.  The lambda runs the wire-overlap intersection from the src
+    // blob's interval against the dst blob's wire-index map.
     const size_t max_num_nodes = 5;
     std::map<std::pair<int, int>, std::set<std::pair<double, int>>> closest_index;
 
-    // std::cout << connected_mcells.size() << std::endl;
-    for (auto it = connected_mcells.begin(); it != connected_mcells.end(); it++) {
-        const Blob *mcell1 = (*it).first;
-        const Blob *mcell2 = (*it).second;
+    auto accumulate_closest = [&](const Blob* mcell_src, const Blob* mcell_dst,
+                                   const std::vector<int>& wcps_src) {
+        const int max_w_interval = mcell_src->get_max_wire_interval();
+        const int min_w_interval = mcell_src->get_min_wire_interval();
+        const int max_wtype     = mcell_src->get_max_wire_type();
+        const int min_wtype     = mcell_src->get_min_wire_type();
+        const auto& map_max = map_mcell_wind_wcps[max_wtype][blob_to_idx.at(mcell_dst)];
+        const auto& map_min = map_mcell_wind_wcps[min_wtype][blob_to_idx.at(mcell_dst)];
 
-        const std::vector<int>& wcps1 = cluster->get_blob_indices(mcell1);
-        const std::vector<int>& wcps2 = cluster->get_blob_indices(mcell2);
+        for (const int index1 : wcps_src) {
+            const int idx_max = winds[max_wtype][index1];
+            const int idx_min = winds[min_wtype][index1];
 
-        // test 2 against 1 ...
-        int max_wire_interval = mcell1->get_max_wire_interval();
-        int min_wire_interval = mcell1->get_min_wire_interval();
-        std::map<int, std::set<int>> *map_max_index_wcps;
-        std::map<int, std::set<int>> *map_min_index_wcps;
+            std::set<int> wcps_set1, wcps_set2;
+            for (const auto& [wind, pts] : map_max)
+                if (std::abs(wind - idx_max) <= max_w_interval)
+                    wcps_set1.insert(pts.begin(), pts.end());
+            for (const auto& [wind, pts] : map_min)
+                if (std::abs(wind - idx_min) <= min_w_interval)
+                    wcps_set2.insert(pts.begin(), pts.end());
 
-      
-        map_max_index_wcps = &map_mcell_wind_wcps[mcell1->get_max_wire_type()][blob_to_idx.at(mcell2)];
-        map_min_index_wcps = &map_mcell_wind_wcps[mcell1->get_min_wire_type()][blob_to_idx.at(mcell2)];
+            std::set<int> common_set;
+            set_intersection(wcps_set1.begin(), wcps_set1.end(),
+                             wcps_set2.begin(), wcps_set2.end(),
+                             std::inserter(common_set, common_set.begin()));
 
-        for (const int index1 : wcps1) {
-            // WCPointCloud<double>::WCPoint &wcp1 = cloud.pts[*it1];
-            // int index1 = wcp1.index;
-            int index_max_wire = winds[mcell1->get_max_wire_type()][index1];
-            int index_min_wire = winds[mcell1->get_min_wire_type()][index1];
-         
-            std::vector<std::set<int> *> max_wcps_set;
-            std::vector<std::set<int> *> min_wcps_set;
-            // go through the first map and find the ones satisfying the condition
-            for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
-                    max_wcps_set.push_back(&(it2->second));
-                }
-            }
-            // go through the second map and find the ones satisfying the condition
-            for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
-                    min_wcps_set.push_back(&(it2->second));
-                }
-            }
-
-            std::set<int> wcps_set1;
-            std::set<int> wcps_set2;
-
-            for (auto it2 = max_wcps_set.begin(); it2 != max_wcps_set.end(); it2++) {
-                wcps_set1.insert((*it2)->begin(), (*it2)->end());
-            }
-            for (auto it3 = min_wcps_set.begin(); it3 != min_wcps_set.end(); it3++) {
-                wcps_set2.insert((*it3)->begin(), (*it3)->end());
-            }
-
-
-            {
-                std::set<int> common_set;
-                set_intersection(wcps_set1.begin(), wcps_set1.end(), wcps_set2.begin(), wcps_set2.end(),
-                                 std::inserter(common_set, common_set.begin()));
-
-                for (const int index2 : common_set) {
-                    // WCPointCloud<double>::WCPoint &wcp2 = cloud.pts[*it4];
-                    if (index2 != index1) {
-                        // int index2 = wcp2.index;
-                        const geo_point_t wcp1 = cluster->point3d(index1);
-                        const geo_point_t wcp2 = cluster->point3d(index2);
-                        double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
-                        const int time2 = cluster->blob_with_point(index2)->slice_index_min();
-                        auto key = std::make_pair(index1, time2);
-
-                        auto& ci_entry = closest_index[key];
-                        ci_entry.insert(std::make_pair(dis, index2));
-                        if (ci_entry.size() > max_num_nodes) {
-                            ci_entry.erase(std::next(ci_entry.begin(), max_num_nodes), ci_entry.end());
-                        }
-                    }
-                }
+            const geo_point_t wcp1 = cluster->point3d(index1);
+            for (const int index2 : common_set) {
+                if (index2 == index1) continue;
+                const geo_point_t wcp2 = cluster->point3d(index2);
+                const double dis = sqrt(pow(wcp1.x()-wcp2.x(),2)+pow(wcp1.y()-wcp2.y(),2)+pow(wcp1.z()-wcp2.z(),2));
+                const int time2 = cluster->blob_with_point(index2)->slice_index_min();
+                auto& ci_entry = closest_index[{index1, time2}];
+                ci_entry.insert({dis, index2});
+                if (ci_entry.size() > max_num_nodes)
+                    ci_entry.erase(std::next(ci_entry.begin(), max_num_nodes), ci_entry.end());
             }
         }
+    };
 
-        // test 1 against 2 ...
-        max_wire_interval = mcell2->get_max_wire_interval();
-        min_wire_interval = mcell2->get_min_wire_interval();
-        
-        map_max_index_wcps = &map_mcell_wind_wcps[mcell2->get_max_wire_type()][blob_to_idx.at(mcell1)];
-        map_min_index_wcps = &map_mcell_wind_wcps[mcell2->get_min_wire_type()][blob_to_idx.at(mcell1)];
-
-        // for (auto it1 = wcps2.begin(); it1 != wcps2.end(); it1++) {
-        for (const int index1 : wcps2) {
-            // WCPointCloud<double>::WCPoint &wcp1 = cloud.pts[*it1];
-            // int index1 = wcp1.index;
-            int index_max_wire = winds[mcell2->get_max_wire_type()][index1];
-            int index_min_wire = winds[mcell2->get_min_wire_type()][index1];
-            
-            std::vector<std::set<int> *> max_wcps_set;
-            std::vector<std::set<int> *> min_wcps_set;
-            // go through the first map and find the ones satisfying the condition
-            for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
-                    max_wcps_set.push_back(&(it2->second));
-                }
-            }
-            // go through the second map and find the ones satisfying the condition
-            for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
-                    min_wcps_set.push_back(&(it2->second));
-                }
-            }
-
-            std::set<int> wcps_set1;
-            std::set<int> wcps_set2;
-
-            for (auto it2 = max_wcps_set.begin(); it2 != max_wcps_set.end(); it2++) {
-                wcps_set1.insert((*it2)->begin(), (*it2)->end());
-            }
-            for (auto it3 = min_wcps_set.begin(); it3 != min_wcps_set.end(); it3++) {
-                wcps_set2.insert((*it3)->begin(), (*it3)->end());
-            }
-
-            // for (auto it2 = max_wcps_set.begin(); it2!=max_wcps_set.end(); it2++){
-            // 	for (auto it3 = min_wcps_set.begin(); it3!=min_wcps_set.end(); it3++){
-            {
-                std::set<int> common_set;
-                set_intersection(wcps_set1.begin(), wcps_set1.end(), wcps_set2.begin(), wcps_set2.end(),
-                                 std::inserter(common_set, common_set.begin()));
-
-                //	std::cout << "S2: " << common_set.size() << std::endl;
-
-                //	std::map<int,std::pair<int,double> > closest_index;
-
-                // for (auto it4 = common_set.begin(); it4 != common_set.end(); it4++) {
-                for (const int index2 : common_set) {
-                    // WCPointCloud<double>::WCPoint &wcp2 = cloud.pts[*it4];
-                    if (index2 != index1) {
-                        // int index2 = wcp2.index;
-                        const geo_point_t wcp1 = cluster->point3d(index1);
-                        const geo_point_t wcp2 = cluster->point3d(index2);
-                        double dis = sqrt(pow(wcp1.x() - wcp2.x(), 2) + pow(wcp1.y() - wcp2.y(), 2) + pow(wcp1.z() - wcp2.z(), 2));
-
-                        const int time2 = cluster->blob_with_point(index2)->slice_index_min();
-                        auto key = std::make_pair(index1, time2);
-
-                        auto& ci_entry = closest_index[key];
-                        ci_entry.insert(std::make_pair(dis, index2));
-                        if (ci_entry.size() > max_num_nodes) {
-                            ci_entry.erase(std::next(ci_entry.begin(), max_num_nodes), ci_entry.end());
-                        }
-                    }
-                }
-            }
-        }
+    for (const auto& [mcell1, mcell2] : connected_mcells) {
+        accumulate_closest(mcell1, mcell2, cluster->get_blob_indices(mcell1)); // test mcell2 wires against mcell1 points
+        accumulate_closest(mcell2, mcell1, cluster->get_blob_indices(mcell2)); // test mcell1 wires against mcell2 points
     }
 
     for (auto it4 = closest_index.begin(); it4 != closest_index.end(); it4++) {
@@ -483,6 +346,40 @@ static std::map<int, Cluster *> Separate_overclustering(
             : std::shared_ptr<IPCTransform>{};
         const double cluster_t0 = needs_scope_transform ? cluster->get_cluster_t0() : 0.0;
 
+        // Walk a 1 cm-step path between the two closest points and count steps
+        // that fail is_good_point. If too many bad steps, invalidate the entry.
+        // Guard: if std::get<0>(entry) < 0 the entry is already invalid — skip.
+        auto check_path = [&](std::tuple<int,int,double>& entry,
+                               const Simple3DPointCloud& cloud_j,
+                               const std::vector<size_t>& gidx_j,
+                               const Simple3DPointCloud& cloud_k,
+                               const std::vector<size_t>& gidx_k) {
+            if (std::get<0>(entry) < 0) return;
+            geo_point_t p1 = cloud_j.point(std::get<0>(entry));
+            auto wpid_p1 = cluster->wire_plane_id(gidx_j.at(std::get<0>(entry)));
+            geo_point_t p2 = cloud_k.point(std::get<1>(entry));
+            auto wpid_p2 = cluster->wire_plane_id(gidx_k.at(std::get<1>(entry)));
+            const double dis = sqrt(pow(p1.x()-p2.x(),2)+pow(p1.y()-p2.y(),2)+pow(p1.z()-p2.z(),2));
+            const int num_steps = dis / (1.0*units::cm) + 1;
+            int num_bad = 0;
+            geo_point_t test_p;
+            for (int ii = 0; ii != num_steps; ++ii) {
+                test_p.set(p1.x() + (p2.x()-p1.x())/num_steps*(ii+1),
+                           p1.y() + (p2.y()-p1.y())/num_steps*(ii+1),
+                           p1.z() + (p2.z()-p1.z())/num_steps*(ii+1));
+                auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
+                if (test_wpid.apa() != -1) {
+                    geo_point_t test_p_raw = test_p;
+                    if (needs_scope_transform)
+                        test_p_raw = scope_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    if (!cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face()))
+                        ++num_bad;
+                }
+            }
+            if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))
+                entry = std::make_tuple(-1, -1, 1e9);
+        };
+
         // check against the closest distance ...
         // no need to have MST ...
         for (int j = 0; j != num; j++) {
@@ -526,101 +423,16 @@ static std::map<int, Cluster *> Separate_overclustering(
                     }
                 }
 
-                // Now check the path ...
-                {
-                    geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
-                    auto wpid_p1 = cluster->wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis[j][k])));
-                    geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
-                    auto wpid_p2 = cluster->wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis[j][k])));
-                    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-
-                    double step_dis = 1.0 * units::cm;
-                    int num_steps = dis / step_dis + 1;
-                    int num_bad = 0;
-                    geo_point_t test_p;
-                    for (int ii = 0; ii != num_steps; ii++) {
-                        test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
-                                   p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
-                                   p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
-                        if (test_wpid.apa()!=-1){
-                            geo_point_t test_p_raw = test_p;
-                            if (needs_scope_transform) {
-                                test_p_raw = scope_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                            }
-                            const bool good_point = cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
-                            if (!good_point) num_bad++;
-                        }
-                    }
-
-                    if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
-                        index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
-                    }
-                }
-
-                // Now check the path ...
-                if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
-                    geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir1[j][k]));
-                    auto wpid_p1 = cluster->wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k])));
-                    geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir1[j][k]));
-                    auto wpid_p2 = cluster->wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k])));
-
-                    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-                    double step_dis = 1.0 * units::cm;
-                    int num_steps = dis / step_dis + 1;
-                    int num_bad = 0;
-                    geo_point_t test_p;
-                    for (int ii = 0; ii != num_steps; ii++) {
-                        test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
-                                   p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
-                                   p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
-                        if (test_wpid.apa()!=-1){
-                            geo_point_t test_p_raw = test_p;
-                            if (needs_scope_transform) {
-                                test_p_raw = scope_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                            }
-                            const bool good_point = cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
-                            if (!good_point) num_bad++;
-                        }
-                    }
-
-                    if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
-                        index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
-                    }
-                }
-
-                // Now check the path ...
-                if (std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
-                    geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis_dir2[j][k]));
-                    auto wpid_p1 = cluster->wire_plane_id(pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k])));
-                    geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis_dir2[j][k]));
-                    auto wpid_p2 = cluster->wire_plane_id(pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k])));
-
-                    double dis = sqrt(pow(p1.x() - p2.x(), 2) + pow(p1.y() - p2.y(), 2) + pow(p1.z() - p2.z(), 2));
-                    double step_dis = 1.0 * units::cm;
-                    int num_steps = dis / step_dis + 1;
-                    int num_bad = 0;
-                    geo_point_t test_p;
-                    for (int ii = 0; ii != num_steps; ii++) {
-                        test_p.set(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
-                                   p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
-                                   p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
-                        auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
-                        if (test_wpid.apa()!=-1){
-                            geo_point_t test_p_raw = test_p;
-                            if (needs_scope_transform) {
-                                test_p_raw = scope_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
-                            }
-                            const bool good_point = cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
-                            if (!good_point) num_bad++;
-                        }
-                    }
-
-                    if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
-                        index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
-                    }
-                }
+                // Check path quality; invalidate entries with too many bad steps.
+                check_path(index_index_dis[j][k],
+                           *pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                           *pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                check_path(index_index_dis_dir1[j][k],
+                           *pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                           *pt_clouds.at(k), pt_clouds_global_indices.at(k));
+                check_path(index_index_dis_dir2[j][k],
+                           *pt_clouds.at(j), pt_clouds_global_indices.at(j),
+                           *pt_clouds.at(k), pt_clouds_global_indices.at(k));
             }
         }
 

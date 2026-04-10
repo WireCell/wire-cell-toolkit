@@ -63,8 +63,11 @@ namespace WireCell::Clus::Steiner {
         using edge_set = WireCell::Clus::Graphs::Weighted::edge_set;
         using edge_weight_type = WireCell::Clus::Graphs::Weighted::edge_weight_type;
 
-        /// A type that maps blobs to graph vertices
-        using blob_vertex_map = std::map<const Facade::Blob*, vertex_set>;
+        /// A type that maps blob node indices (from sv.nodes()) to graph vertices.
+        /// Using a node-index key (size_t, deterministic traversal order) instead of
+        /// Blob* (heap-address-ordered, non-deterministic) ensures stable iteration
+        /// order across runs.
+        using blob_vertex_map = std::map<size_t, vertex_set>;
 
 
         ///
@@ -224,15 +227,16 @@ namespace WireCell::Clus::Steiner {
 
 
         // XIN: add any more data and methods you need here.  
-         /// Track edges added by each graph modification operation
-        /// Maps graph name to set of edges added to that graph
-        std::map<std::string, edge_set> m_added_edges_by_graph;
+         /// Track edges added by each graph modification operation.
+        /// Stored as a vector (not a set) because edge_type ordering is pointer-based
+        /// (non-deterministic) and removal is order-insensitive.
+        std::map<std::string, std::vector<edge_type>> m_added_edges_by_graph;
 
         /// Helper to invalidate GraphAlgorithms cache for a specific graph
         void invalidate_graph_algorithms_cache(const std::string& graph_name);
 
         /// Helper to store added edges for later removal
-        void store_added_edges(const std::string& graph_name, const edge_set& edges);
+        void store_added_edges(const std::string& graph_name, const std::vector<edge_type>& edges);
 
         /// Helper to check if two vertices (points) belong to the same blob
         bool same_blob(vertex_type v1, vertex_type v2) const;
