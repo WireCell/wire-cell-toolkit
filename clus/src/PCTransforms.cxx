@@ -108,15 +108,15 @@ public:
         const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
         const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
         const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
-        std::vector<double> arr_x_corr(arr_x.size());
+        std::vector<double> arr_x_raw(arr_x.size());
         for (size_t i = 0; i < arr_x.size(); ++i) {
-            arr_x_corr[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
+            arr_x_raw[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
                 m_drift_speeds.at(apa).at(face);
         }
         Dataset ds_raw;
-        ds_raw.add("x", Array(arr_x_corr));
-        ds_raw.add("y", Array(arr_y));
-        ds_raw.add("z", Array(arr_z));
+        ds_raw.add(arr_raw_names[0], Array(arr_x_raw));
+        ds_raw.add(arr_raw_names[1], Array(arr_y));
+        ds_raw.add(arr_raw_names[2], Array(arr_z));
         return ds_raw;
     }
 
@@ -142,10 +142,21 @@ public:
         return ds;
     }
  
+    virtual PointCloud::Tree::Scope output_scope() const override {
+        // T0 correction shifts x only; y and z are unchanged and already exist
+        // in the blob's 3d PC under their original names.
+        return {"3d", {"x_t0cor", "y", "z"}};
+    }
+
+    virtual std::vector<std::string> stored_array_names() const override {
+        // Only the corrected x coordinate needs to be added to the blob PC.
+        return {"x_t0cor"};
+    }
+
 private:
     IDetectorVolumes::pointer m_dv; // do not own
- 
-    // // m_time_global_offsets.at(apa).at(face) = time_global_offset
+
+    // m_time_global_offsets.at(apa).at(face) = time_global_offset
     std::map<int, std::map<int, double>> m_time_global_offsets;
     std::map<int, std::map<int, double>> m_drift_speeds;
 };

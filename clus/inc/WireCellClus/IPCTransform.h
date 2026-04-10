@@ -9,6 +9,7 @@
 #include "WireCellUtil/IComponent.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/PointCloudDataset.h"
+#include "WireCellUtil/PointTree.h"
 #include <vector>
 
 namespace WireCell::Clus {
@@ -28,6 +29,20 @@ namespace WireCell::Clus {
         virtual Dataset backward(const Dataset& pc_cor, const std::vector<std::string>& arr_cor_names, const std::vector<std::string>& arr_raw_names, double clustser_t0, int face, int apa) const = 0;
         virtual Dataset filter(const Dataset& pc_cor, const std::vector<std::string>& arr_cor_names, double clustser_t0, int face, int apa) const = 0;
 
+        /// Return the point cloud scope that this transform produces.
+        /// This scope is registered as Cluster::m_scopes[correction_name] by
+        /// Cluster::add_corrected_points().  Downstream components (e.g.
+        /// ClusteringRetile) must be configured with a matching scope.
+        virtual PointCloud::Tree::Scope output_scope() const = 0;
+
+        /// Return the subset of corrected array names that must be persisted in
+        /// each blob's local "3d" point cloud.  Only coordinates that actually
+        /// change need to be stored; unchanged coordinates already exist in the
+        /// original blob PC under their raw names.
+        ///
+        /// Example — T0Correction shifts x only, so {"x_t0cor"} is sufficient.
+        /// A full 3D SCE correction would return {"x_sce", "y_sce", "z_sce"}.
+        virtual std::vector<std::string> stored_array_names() const = 0;
     };
 
     class IPCTransformSet : public IComponent<IPCTransformSet> {

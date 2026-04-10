@@ -1,11 +1,12 @@
 #include "WireCellClus/IEnsembleVisitor.h"
-#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/ClusteringFuncsMixins.h"
-
 
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Spdlog.h"
 
 class ClusteringSwitchScope;
 WIRECELL_FACTORY(ClusteringSwitchScope, ClusteringSwitchScope,
@@ -20,135 +21,70 @@ using namespace WireCell::PointCloud::Tree;
 static void clustering_switch_scope(
         Grouping& live_grouping,
         IPCTransformSet::pointer pcts,
-        const Tree::Scope& scope,
-        const std::string& correction_name // name of correction to apply
+        const std::string& correction_name
     );
 
-class ClusteringSwitchScope : public IConfigurable, public Clus::IEnsembleVisitor, private NeedPCTS, private NeedScope {
+class ClusteringSwitchScope : public IConfigurable, public Clus::IEnsembleVisitor, private NeedPCTS {
 public:
     ClusteringSwitchScope() {}
     virtual ~ClusteringSwitchScope() {}
 
     void configure(const WireCell::Configuration& config) {
         NeedPCTS::configure(config);
-        NeedScope::configure(config);
-        
-        // Get configuration parameters
         correction_name_ = convert<std::string>(config["correction_name"], "T0Correction");
     }
-    
+
     void visit(Ensemble& ensemble) const {
-        auto& live = *ensemble.with_name("live").at(0);
-        clustering_switch_scope(live, m_pcts, m_scope, correction_name_);
+        auto live_vec = ensemble.with_name("live");
+        if (live_vec.empty()) {
+            spdlog::warn("ClusteringSwitchScope: no 'live' grouping found, skipping");
+            return;
+        }
+        clustering_switch_scope(*live_vec.at(0), m_pcts, correction_name_);
     }
 
 private:
     std::string correction_name_{"T0Correction"};
 };
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wparentheses"
-
 static void clustering_switch_scope(
     Grouping& live_grouping,
-    const Clus::IPCTransformSet::pointer pcts,          // detector volumes
-    const Tree::Scope& default_scope,
-    const std::string& correction_name          // name of correction to apply
+    const Clus::IPCTransformSet::pointer pcts,
+    const std::string& correction_name
 )
 {
-    using spdlog::debug;
-    using spdlog::info;
-
-    // Check that live_grouping has at least one wpid
     if (live_grouping.wpids().empty()) {
         throw std::runtime_error("Live grouping must have at least one wpid");
     }
 
-    // Get all clusters from the grouping
-    std::vector<Cluster*> live_clusters = live_grouping.children(); // copy
-    
-    
-    // std::cout << "Test: " << pc_name << " " << correction_name << " " << live_clusters.size() << std::endl;
+    // Snapshot the cluster list before separation modifies the grouping.
+    const std::vector<Cluster*> live_clusters = live_grouping.children();
 
-    // Process each cluster
-    for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
-        Cluster* cluster = live_clusters.at(iclus);
-                
-        if (correction_name == "T0Correction") {
-            // Get original bounds before correction
-            // info("Cluster {} original bounds:", iclus);
-            // const auto [earliest_orig, latest_orig] = cluster->get_earliest_latest_points();
-            // info("  earliest: {}", earliest_orig);
-            // info("  latest: {}", latest_orig);
-            
-            // Add corrected points - this returns filter values for each blob
-            // cluster->set_cluster_t0(-1000 * units::us); // Set cluster t0 for correction
-            std::vector<int> filter_results = cluster->add_corrected_points(pcts, correction_name);
-            // Get the new scope with corrected points
-            const auto correction_scope = cluster->get_scope(correction_name);
+    for (Cluster* cluster : live_clusters) {
+        // Apply the named correction to each blob's 3d point cloud.
+        // Returns a per-blob filter flag: 1 if any corrected point is inside the
+        // active detector volume, 0 otherwise.
+        // add_corrected_points() dispatches to the appropriate IPCTransform and
+        // raises RuntimeError for unrecognised correction names.
+        const std::vector<int> filter_results = cluster->add_corrected_points(pcts, correction_name);
 
-            // std::cout << "Test: " << correction_name << " " << correction_scope.pcname << " " << correction_scope.coords[0] << " " << correction_scope.coords[1] << " " << correction_scope.coords[2] << std::endl;
-            // Set this as the default scope for viewing
-            cluster->set_default_scope(correction_scope);
-            cluster->set_scope_transform(correction_scope, correction_name);
-            
-            // Get bounds after correction
-            // info("Cluster {} corrected bounds:", iclus);
-            // const auto [earliest_corr, latest_corr] = cluster->get_earliest_latest_points();
-            // info("  earliest: {}", earliest_corr);
-            // info("  latest: {}", latest_corr);
-            
-            // Get unique filter result values
-            std::set<int> filter_result_set(filter_results.begin(), filter_results.end());
-            // info("Cluster {} has {} unique filter results:", iclus, filter_result_set.size());
-            // for (const auto& result : filter_result_set) {
-            //     info("  filter result: {}", result);
-            // }
-            
-            // Separate the cluster based on filter results
-            // This will create new clusters in the grouping
-            auto separated_clusters = live_grouping.separate(cluster, filter_results, true);
-            
-            // Process each separated cluster
-            for (auto& [id, new_cluster] : separated_clusters) {
-                // info("  Separated cluster filter={}, nchildren={}", id, new_cluster->nchildren());
+        // Retrieve the correction scope registered by add_corrected_points().
+        const auto correction_scope = cluster->get_scope(correction_name);
 
-                // std::cout << "Test: " << id << " " << new_cluster->nchildren() << std::endl;
+        // Set the correction scope as the cluster's default before separation so
+        // that Grouping::separate() -> Cluster::from() propagates it to all children.
+        cluster->set_default_scope(correction_scope);
+        cluster->set_scope_transform(correction_scope, correction_name);
 
-                // Set the new scope as default for the separated cluster
-                new_cluster->set_default_scope(correction_scope);
-                if (id == 0)
-                    new_cluster->set_scope_filter(correction_scope, false); 
-                else if (id==1)
-                    new_cluster->set_scope_filter(correction_scope, true);
-                new_cluster->set_scope_transform(correction_scope, correction_name);
+        // Split into two sub-clusters: id=0 (all blobs failed filter),
+        // id=1 (at least one blob passed filter).
+        // 'cluster' is destroyed by separate() (remove=true); do not use it after this line.
+        auto separated_clusters = live_grouping.separate(cluster, filter_results, true);
 
-                
-                // Get bounds of the separated cluster
-                // const auto [earliest_sep, latest_sep] = new_cluster->get_earliest_latest_points();
-                // info("    earliest: {}", earliest_sep);
-                // info("    latest: {}", latest_sep);
-            }
+        // from() (called inside separate()) already copied default_scope and
+        // scope_transform to each separated cluster. Only the scope_filter is new.
+        for (auto& [id, new_cluster] : separated_clusters) {
+            new_cluster->set_scope_filter(correction_scope, id == 1);
         }
     }
-
-    // live_clusters = live_grouping.children(); // copy
-    // std::cout << "Test: " << pc_name << " " << correction_name << " " << live_clusters.size() << std::endl;
-    // // Process each cluster
-    // for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
-    //     Cluster* cluster = live_clusters.at(iclus);
-    //     auto& scope = cluster->get_default_scope();
-    //     std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< std::endl;
-    // }
-
-
-
-
-
-
-
-    
-    // info("Completed scope switching with correction: {}", correction_name);
 }
-
-#pragma GCC diagnostic pop

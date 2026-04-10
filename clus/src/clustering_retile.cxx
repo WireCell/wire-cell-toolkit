@@ -26,6 +26,7 @@
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Spdlog.h"
 
 #include "WireCellAux/SimpleBlob.h"
 #include "WireCellAux/SamplingHelpers.h"
@@ -58,10 +59,26 @@ public:
     void configure(const WireCell::Configuration& cfg) {
         NeedScope::configure(cfg);
         m_retiler = Factory::find_tn<IPCTreeMutate>(get<std::string>(cfg, "retiler", "RetileCluster"));
+
+        // Warn if the configured scope does not match the T0Correction scope produced by
+        // ClusteringSwitchScope.  In that pipeline the scope filter is set for
+        // kT0CorrectionScope = {"3d", {"x_t0cor","y","z"}}, so any other scope will
+        // silently pass no clusters through to shadow.
+        if (m_scope != Facade::kT0CorrectionScope) {
+            spdlog::warn("ClusteringRetile: configured scope (pc_name=\"{}\") does not match "
+                         "the T0Correction scope (pc_name=\"3d\", coords=[x_t0cor,y,z]). "
+                         "All clusters will be filtered out if this follows ClusteringSwitchScope.",
+                         m_scope.pcname);
+        }
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
         cfg["retiler"] = "RetileCluster";
+        // These defaults match kT0CorrectionScope for use after ClusteringSwitchScope.
+        cfg["pc_name"] = "3d";
+        cfg["coords"][0] = "x_t0cor";
+        cfg["coords"][1] = "y";
+        cfg["coords"][2] = "z";
         return cfg;
     }
 
@@ -83,27 +100,46 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
 {
     // fixme: make grouping names configurable
 
-    auto& orig_grouping = *ensemble.with_name("live").at(0);
+    auto live_vec = ensemble.with_name("live");
+    if (live_vec.empty()) {
+        spdlog::warn("ClusteringRetile: no 'live' grouping found, skipping");
+        return;
+    }
+    auto& orig_grouping = *live_vec.at(0);
     auto& shad_grouping = ensemble.make_grouping("shadow");
     shad_grouping.from(orig_grouping);
     auto* shad_root = shad_grouping.node();
 
+    const size_t nclusters = orig_grouping.nchildren();
+    size_t nretiled = 0;
+
+    // Precompute scope hash once to avoid repeated string hashing in the loop.
+    const auto scope_hash = m_scope.hash();
+
     for (auto* orig_cluster : orig_grouping.children()) {
 
         if (!orig_cluster->get_scope_filter(m_scope)) {
-            // move on if the cluster is not in the scope filter ...
+            // cluster is not in the scope filter (e.g. failed detector-volume test)
             continue;
         }
 
-        if (orig_cluster->get_default_scope().hash() != m_scope.hash()) {
+        if (orig_cluster->get_default_scope().hash() != scope_hash) {
             orig_cluster->set_default_scope(m_scope);
         }
 
         auto shad_node = m_retiler->mutate(*orig_cluster->node());
-        if (! shad_node) {
+        if (!shad_node) {
             continue;
         }
         shad_root->insert(std::move(shad_node));
+        ++nretiled;
+    }
+
+    if (nclusters > 0 && nretiled == 0) {
+        spdlog::warn("ClusteringRetile: 0/{} clusters passed scope filter."
+                     " If this follows ClusteringSwitchScope with T0Correction,"
+                     " configure: pc_name=\"3d\", coords=[x_t0cor,y,z].",
+                     nclusters);
     }
 }
 

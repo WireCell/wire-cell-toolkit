@@ -791,6 +791,14 @@ namespace WireCell::Clus::Facade {
         }
     };
 
+    /// The point cloud scope produced by the T0Correction transform
+    /// (i.e. T0Correction::output_scope()).  Defined here as a compile-time
+    /// constant so that ClusteringRetile can validate its configured scope at
+    /// configure() time without needing a live IPCTransform instance.
+    ///
+    /// Must stay in sync with T0Correction::output_scope() in PCTransforms.cxx.
+    inline const PointCloud::Tree::Scope kT0CorrectionScope{"3d", {"x_t0cor", "y", "z"}};
+
 }  // namespace WireCell::Clus::Facade
 
 template <> struct fmt::formatter<WireCell::Clus::Facade::Cluster> : fmt::ostream_formatter {};
