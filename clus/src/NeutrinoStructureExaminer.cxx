@@ -2502,35 +2502,52 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         if (direct_length >= 5.0 * units::cm) continue;
         
         // Check if all points on this segment are close to other segments in 2D
-        // (use fit points, matching prototype's get_point_vec())
+        // (use fit points, matching prototype's get_point_vec()).
+        //
+        // Efficiency: two early-exit shortcuts keep the inner work small:
+        //   (a) Per-point inner loop: once all three per-view minima are already
+        //       below 0.6 cm no remaining segment can make the point "unique" —
+        //       break immediately.
+        //   (b) Per-segment outer loop: as soon as one unique point is found the
+        //       segment will NOT be removed — no need to test remaining points.
+        // Pre-snapshot the other-segment list once (outside the point loop) so
+        // we avoid re-iterating boost::edges and re-filtering on every point.
+        std::vector<SegmentPtr> other_segs;
+        for (auto [e2b, e2e] = boost::edges(graph); e2b != e2e; ++e2b) {
+            SegmentPtr sg1 = graph[*e2b].segment;
+            if (sg1 && sg1 != sg) other_segs.push_back(sg1);
+        }
+
         const auto& pts = sg->fits();
         int num_unique = 0;
-        
+
         for (size_t i = 0; i < pts.size(); i++) {
             // Get APA and face for this point
             auto wpid = dv->contained_by(pts[i].point);
             if (wpid.apa() == -1 || wpid.face() == -1) continue;
-            
+
             double min_u = 1e9;
             double min_v = 1e9;
             double min_w = 1e9;
-            
-            // Compare with all other segments
-            auto [e2begin, e2end] = boost::edges(graph);
-            for (auto e2it = e2begin; e2it != e2end; ++e2it) {
-                SegmentPtr sg1 = graph[*e2it].segment;
-                if (!sg1 || sg1 == sg) continue;
-                
+
+            for (SegmentPtr sg1 : other_segs) {
                 auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(sg1, pts[i].point, wpid.apa(), wpid.face(), "fit");
-                
+
                 if (dist_u < min_u) min_u = dist_u;
                 if (dist_v < min_v) min_v = dist_v;
                 if (dist_w < min_w) min_w = dist_w;
+
+                // (a) Point already fully covered in all views — no need to
+                //     check remaining segments.
+                if (min_u <= 0.6 * units::cm &&
+                    min_v <= 0.6 * units::cm &&
+                    min_w <= 0.6 * units::cm) break;
             }
-            
+
             // If point is far from all other segments in any view, it's unique
             if (min_u > 0.6 * units::cm || min_v > 0.6 * units::cm || min_w > 0.6 * units::cm) {
                 num_unique++;
+                break;  // (b) Segment has a unique point — it will not be removed.
             }
         }
         

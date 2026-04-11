@@ -457,24 +457,47 @@ takes explicit `apa` and `face` parameters, obtained per-point via
 
 ### [E2] O(segments × points × edges) inner loop
 
-Phase 2, inner loop at line 2466:
+**Applied 2026-04-11.**
+
+Original inner loop (phase 2, ~line 2466) re-iterated `boost::edges(graph)` and
+re-applied the `sg1 != sg` filter on every fit point, giving O(S × P × E) work.
+
+Three improvements were applied:
+
+1. **Pre-snapshot** the other-segment list once per candidate segment (outside
+   the point loop), eliminating repeated `boost::edges` iteration and the
+   `sg1 == sg` filter per point.
+2. **Early-exit (a)** from the inner segment loop: once `min_u`, `min_v`,
+   `min_w` are all ≤ 0.6 cm, no remaining segment can make the point "unique" —
+   break immediately.
+3. **Early-exit (b)** from the outer point loop: as soon as one unique point is
+   found (`num_unique++`), the segment will not be removed regardless of
+   remaining points — break immediately.
 
 ```cpp
+// Pre-snapshot once per candidate segment
+std::vector<SegmentPtr> other_segs;
+for (auto [e2b, e2e] = boost::edges(graph); e2b != e2e; ++e2b) {
+    SegmentPtr sg1 = graph[*e2b].segment;
+    if (sg1 && sg1 != sg) other_segs.push_back(sg1);
+}
 for (size_t i = 0; i < pts.size(); i++) {
-    auto [e2begin, e2end] = boost::edges(graph);    // ALL edges
-    for (auto e2it = e2begin; e2it != e2end; ++e2it) {
-        SegmentPtr sg1 = graph[*e2it].segment;
-        if (!sg1 || sg1 == sg) continue;
-        segment_get_closest_2d_distances(sg1, pts[i].point, ...);
+    ...
+    for (SegmentPtr sg1 : other_segs) {
+        auto [du, dv, dw] = segment_get_closest_2d_distances(...);
+        // update min_u/v/w ...
+        if (min_u <= 0.6*cm && min_v <= 0.6*cm && min_w <= 0.6*cm) break;  // (a)
+    }
+    if (min_u > 0.6*cm || min_v > 0.6*cm || min_w > 0.6*cm) {
+        num_unique++; break;  // (b)
     }
 }
 ```
 
-For every fit point on every candidate short segment, this scans all edges in
-the graph. In the prototype the same O(segments × points × segments) structure
-exists. For typical clusters (10–30 segments, 10–30 fit points each), this is
-tolerable. For pathological clusters it can become expensive. No change needed
-unless profiling reveals a bottleneck.
+In the common case where most segments have at least one unique point, early-exit
+(b) fires after the first point checked, reducing per-candidate work to O(1 × E)
+instead of O(P × E). Early-exit (a) further reduces inner-loop iterations when a
+point is well-covered.
 
 ---
 
@@ -675,7 +698,7 @@ is efficient.
 | ID | Function | Description | Priority |
 |---|---|---|---|
 | **E1** | `examine_vertices_2` + `examine_vertices_3` | Isolated-vertex scan used unfiltered `boost::vertices(graph)` — could remove vertices from other clusters | Medium (latent bug) | ✅ Fixed |
-| **E2** | `examine_vertices_3` | Phase 2 inner loop is O(segments × points × all_edges); acceptable for current cluster sizes | Low | ➖ Deferred |
+| **E2** | `examine_vertices_3` | Phase 2 inner loop: pre-snapshot other-segs + two early-exit conditions; reduces common-case work to O(1 × E) per candidate | Low | ✅ Fixed |
 
 ### Determinism
 
@@ -721,5 +744,4 @@ the order in which `examine_structure_4` is called.
 - **B7** documented: `old_list` trim safety vs. prototype's index-based loop explained
   in comment (both symmetric branches).
 
-No remaining open correctness items. E2 (O(n³) inner loop in phase 2 of
-`examine_vertices_3`) is deferred as a future profiling-guided cleanup.
+All identified items have been resolved or documented as non-issues.
