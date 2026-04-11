@@ -493,6 +493,16 @@ BDT score calculation for nueCC selection implemented as `WireCell::Root::Uboone
 - `cal_kine_charge(seg)` → `cal_kine_charge(seg, graph, track_fitter, dv)`
 - `seg->cal_kine_dQdx()` → `segment_cal_kine_dQdx(seg, recomb_model)`
 - `seg->cal_kine_range()` → `cal_kine_range(segment_track_length(seg), pdg, particle_data)`
+- `seg->do_track_comp(L, dQ_dx, range, offset)` → `do_track_comp(L, dQ_dx, range, offset, particle_data, MIP_dQdx)` (`PRSegmentFunctions.cxx:1263`)
+- `seg->eval_ks_ratio(ks1,ks2,r1,r2)` → `eval_ks_ratio(ks1,ks2,r1,r2)` (`PRSegmentFunctions.cxx:940`)
+- `seg->do_track_pid(L, dQ_dx, ...)` → `segment_do_track_pid(seg, L, dQ_dx, ...)` (`PRSegmentFunctions.cxx:1350`)
+- `seg->cal_4mom()` → `segment_cal_4mom(seg, pdg, particle_data, recomb_model)` — **layout change**: returns `[E, px, py, pz]` vs. prototype's `[px, py, pz, E]`; use `D4Vector` accessors
+- `seg->determine_dir_track(start_n, end_n, flag)` → `segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, MIP_dQdx, flag)` (`PRSegmentFunctions.cxx:1489`)
+- `seg->determine_dir_shower_trajectory(start_n, end_n, flag)` → `segment_determine_shower_direction_trajectory(seg, start_n, end_n, ...)` (`PRSegmentFunctions.cxx:1664`)
+- `seg->determine_shower_direction()` → `segment_determine_shower_direction(seg, particle_data, recomb_model, cloud_name, MIP_dQdx, rms_cut)` (`PRSegmentFunctions.cxx:2025`)
+- `seg->break_segment_at_point(p, acc_seg_id, acc_vtx_id)` → `break_segment(graph, seg, p, particle_data, recomb_model, dv)` (`PRSegmentFunctions.cxx:442`)
+
+> **Detailed review** of the above ten functions (functional equivalence, bugs, efficiency, determinism, multi-APA): `clus/docs/patternrecognition/pid_direction_kinematics_review.md`
 - `shower->get_start_vertex()` → `shower->get_start_vertex_and_type()`
 - SCE: `mp.func_pos_SCE_correction(nu_vtx)` → `geom_helper->get_corrected_point(nu_vtx, IClusGeomHelper::SCE, apa, face)`
 

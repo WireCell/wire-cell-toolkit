@@ -228,6 +228,8 @@ The final portion of porting covers the transformation from clusters of blobs an
 
 Full function-by-function table: `clus/docs/patternrecognition/prvertex_prsegment_prshower_review.md §1`.
 
+PID / direction-finding / kinematics algorithms (`do_track_comp`, `eval_ks_ratio`, `do_track_pid`, `cal_kine_dQdx`, `cal_kine_range`, `cal_4mom`, `determine_dir_track`, `determine_dir_shower_trajectory`, `determine_shower_direction`, `break_segment_at_point`) — detailed review in `clus/docs/patternrecognition/pid_direction_kinematics_review.md`.
+
 ### [ProtoVertex](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594c4cc1775cb/docs/protovertex.md) (WCP) vs. **`WireCell::Clus::PR::Vertex`** (WCT)
 
 `PR::Vertex` (`clus/inc/WireCellClus/PRVertex.h`) is the WCT equivalent of `WCPPID::ProtoVertex`.

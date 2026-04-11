@@ -1016,9 +1016,14 @@ namespace WireCell::Clus::PR {
                 }
             } else {
                 if (m_start_vertex) {
-                    data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
-                    // Fallback: if "fit" pcloud is absent or empty, use fits directly
-                    if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {
+                    auto [sgcp_dist, sgcp_pt] = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit");
+                    if (sgcp_dist >= 0) {
+                        // Valid closest-point found in "fit" pcloud.
+                        data.start_point = sgcp_pt;
+                    } else {
+                        // Fallback: "fit" pcloud absent or empty — use segment endpoints directly.
+                        // NOTE: do NOT test sgcp_pt == (0,0,0) as sentinel; a legitimate hit at
+                        // the origin would falsely trigger the fallback (B16.1 in review).
                         if (!fits.empty()) {
                             data.start_point = (m_start_segment->dirsign() == -1) ? fits.back().point : fits.front().point;
                         }
@@ -1119,7 +1124,12 @@ namespace WireCell::Clus::PR {
     }
 
     void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
-        // Get particle type from start segment
+        // Invariant: this function is only called when shower->get_particle_type() == 13
+        // (NeutrinoEnergyReco.cxx), which requires shower->set_particle_type(13) to have been
+        // called (NeutrinoShowerClustering.cxx:118), which in turn requires m_start_segment to
+        // already have particle_info() with pdg ±13.  The guard below is therefore logically
+        // unreachable in normal execution; it is kept as a defensive check so that a caller
+        // mistake produces a silent no-op rather than a null-dereference.
         if (!m_start_segment || !m_start_segment->has_particle_info()) return;
         int particle_type = abs(m_start_segment->particle_info()->pdg());
         // double particle_mass = m_start_segment->particle_info()->mass();

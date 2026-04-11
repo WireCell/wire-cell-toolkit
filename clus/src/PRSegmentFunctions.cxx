@@ -496,9 +496,11 @@ namespace WireCell::Clus::PR {
         auto vtx2 = graph[vd2].vertex;
         auto vtx = make_vertex(graph);
 
-        // WARNING there is no "direction" in the graph.  You can not assume the
-        // "source()" of a segment is closest to the segments first point.  As
-        // of now, at least...
+        // WARNING: Boost graph edges have no inherent orientation — source(e)/target(e)
+        // do NOT necessarily correspond to wcpts.front()/wcpts.back().  Callers that need
+        // an oriented (start-vertex, end-vertex) pair should use find_vertices() in
+        // PRGraph.cxx, which disambiguates by comparing the wcpts.front() distance to each
+        // candidate vertex and returns (vertex nearest front, vertex nearest back).
         auto seg1 = make_segment(graph, vtx1, vtx);
         auto seg2 = make_segment(graph, vtx, vtx2);
 
@@ -1172,6 +1174,12 @@ namespace WireCell::Clus::PR {
         return v1;
     }
 
+    // NOTE (multi-APA): recomb_model is a single global instance shared across all fit points
+    // regardless of their per-fit paf{apa,face}.  For uBooNE (single APA+face) this is correct.
+    // For multi-APA detectors (SBND, DUNE) a per-face electron-lifetime correction and a
+    // per-face recombination model would be needed; callers must pre-apply lifetime corrections
+    // to dQ before this function is called.  This is a known limitation inherited from the
+    // prototype and deliberately deferred — see pid_direction_kinematics_review.md §0 G3.
     double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model){
         if (!seg || !recomb_model) {
             return 0.0;
@@ -1188,45 +1196,50 @@ namespace WireCell::Clus::PR {
         for (size_t i = 0; i < fits.size(); i++) {
             if (!fits[i].valid() || fits[i].dx <= 0) continue;
             
-            double dX = fits[i].dx;
+            double dX = fits[i].dx;  // path length used for energy accumulation (may be shortened)
             double dQ = fits[i].dQ;
+            // For the first and last fit points the fitted dx can be anomalously large because
+            // the fit window extends past the segment endpoint.  When dx > 1.5× the inter-point
+            // distance, use the inter-point distance as the path length instead.
+            // IMPORTANT: only shorten the *accumulation* path dX, not the path used for dQ/dx —
+            // the Box model is non-linear so computing dE/dx from a shortened dx would inflate
+            // the dQ/dx and thus bias the energy upward.  Match the prototype (ProtoSegment.cxx:1356):
+            //   dEdx = f(dQ/fits[i].dx);  kine_energy += dEdx * dX
+            double dx_for_dQdx = fits[i].dx;  // always the true fitted path for dQ/dx computation
             if (i == 0 && fits.size() > 1) {
                 // First point: check against distance to next point
                 double dis = (fits[1].point - fits[0].point).magnitude();
-                if (dX> dis * 1.5) {
+                if (dis > 0 && dX > dis * 1.5) {
                     dX = dis;
                 }
             } else if (i + 1 == fits.size() && fits.size() > 1) {
                 // Last point: check against distance to previous point
                 double dis = (fits[i].point - fits[i-1].point).magnitude();
-                if (dX > dis * 1.5) {
+                if (dis > 0 && dX > dis * 1.5) {
                     dX = dis;
                 }
             }
-            // Skip if dX became zero (e.g. degenerate segment with coincident fit points);
-            // prototype avoids this by accumulating dEdx*dis where dis=0 → 0 contribution
-            if (dX <=0) dX = fits[i].dx;
             if (dX <= 0) continue;
             // std::cout << i << " " << fits[i].dQ << " " << fits[i].dx/units::cm << " " << dX/units::cm << std::endl;
-            // Filter out unreasonable values (same threshold as original)
-            if (dQ/dX / (43e3/units::cm) > 1000) dQ = 0;
-            
-            // Calculate dE/dx using Box model inverse formula from original code
-            double dE = recomb_model->dE(dQ, dX);
+            // Filter out unreasonable values using the true fitted dx (matches prototype)
+            if (dQ/dx_for_dQdx / (43e3/units::cm) > 1000) dQ = 0;
+
+            // Compute dE using the true fitted dx; accumulate over the (possibly shortened) dX
+            double dE_per_dx = recomb_model->dE(dQ, dx_for_dQdx) / dx_for_dQdx;
+            double dE = dE_per_dx * dX;
 
             // std::cout << dQ << " " << dX << " " << dE << std::endl;
 
-            // Apply bounds (same as original)
+            // Clamp to [0, 50 MeV/cm * dX]
             if (dE < 0) dE = 0;
             if (dE > 50 * units::MeV / units::cm * dX) dE = 50 * units::MeV / units::cm * dX;
 
-            // Calculate path length with special handling for first and last points
             kine_energy += dE;
         }
-        
+
         return kine_energy;
     }
-    
+
     double cal_kine_dQdx(std::vector<double>& vec_dQ, std::vector<double>& vec_dx, const IRecombinationModel::pointer& recomb_model){
         if (vec_dQ.size() != vec_dx.size() || vec_dQ.empty() || !recomb_model) {
             return 0.0;
@@ -1276,6 +1289,11 @@ namespace WireCell::Clus::PR {
             }
         }
         
+        // If no points fall inside the comparison window, return "no direction signal" defaults.
+        if (ncount == 0) {
+            return {1.0, 1e9, 1e9, 1e9};
+        }
+
         // Create reference vectors for different particles
         const size_t count = static_cast<size_t>(ncount);
         std::vector<double> muon_ref(count);
@@ -1446,9 +1464,9 @@ namespace WireCell::Clus::PR {
             return std::make_tuple(true, flag_dir, particle_type, particle_score);
         }
         
-        segment->dirsign(flag_dir);
-
-        // Reset before return - failure case
+        // Failure path: neither forward nor backward PID succeeded (and flag_force==false).
+        // Do NOT write to segment->dirsign() here — this function has no segment side-effects;
+        // callers (segment_determine_dir_track) set dirsign from the returned flag_dir.
         return std::make_tuple(false, 0, 0, 100.0);
     }
 
@@ -1514,6 +1532,12 @@ namespace WireCell::Clus::PR {
         std::vector<double> dQ_dx(npoints, 0);
         
         double dis = 0;
+        // Unit convention: fits[i].dx is stored in WireCell length units (cm), so
+        // dQ_dx[i] = dQ / dx has units of [charge / cm].  The reference tables used
+        // by segment_do_track_pid are also in [charge / cm], so the ratio is self-consistent.
+        // Do NOT divide by units::cm here — the prototype member function operated the
+        // same way (ProtoSegment.cxx: dQ_dx[i] = dQ_vec[i] / (dx_vec[i]/units::cm + 1e-9)
+        // where dx_vec carried raw WCP units == cm).
         for (int i = start_n1; i <= end_n1; i++) {
             L.at(i - start_n1) = dis;
             if (fits[i].dx > 0) {
@@ -1572,11 +1596,12 @@ namespace WireCell::Clus::PR {
         }
         
         double length = segment_track_length(segment, 0);
-        
+
+        // Compute median dQ/dx once over the trimmed range — reused in three branches below.
+        double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
+
         // Short track what to do???
         if (pdg_code == 0) {
-            // Calculate median dQ/dx over trimmed range (excluding vertex points)
-            double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
             if (medium_dQ_dx > MIP_dQdx * 1.75) {
                 pdg_code = 2212; // proton
             } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
@@ -1585,7 +1610,7 @@ namespace WireCell::Clus::PR {
                 pdg_code = 13;
             }
         }
-        
+
         // Electron and both end contain stuff
         if (abs(pdg_code) == 11 && (start_n > 1 && end_n > 1)) {
             segment->dir_weak(true);
@@ -1598,12 +1623,11 @@ namespace WireCell::Clus::PR {
         } else if (length < 1.5*units::cm) {
             segment->dir_weak(true);
         }
-        
+
         // Vertex activities
         if (length < 1.5*units::cm && (start_n == 1 || end_n == 1)) {
             if (start_n == 1 && end_n > 2) {
                 segment->dirsign(-1);
-                double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
                 if (medium_dQ_dx > MIP_dQdx * 1.75) {
                     pdg_code = 2212;
                 } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
@@ -1611,7 +1635,6 @@ namespace WireCell::Clus::PR {
                 }
             } else if (end_n == 1 && start_n > 2) {
                 segment->dirsign(1);
-                double medium_dQ_dx = segment_median_dQ_dx(segment, start_n1, end_n1);
                 if (medium_dQ_dx > MIP_dQdx * 1.75) {
                     pdg_code = 2212;
                 } else if (medium_dQ_dx < MIP_dQdx * 1.2) {
@@ -1646,26 +1669,30 @@ namespace WireCell::Clus::PR {
             segment->particle_score(particle_score);
         }
                 
-        // if (flag_print) {
+        if (flag_print) {
             // Match WCPPID output format: id, length, "Track", flag_dir, is_dir_weak, particle_type, mass, KE, particle_score
             double particle_mass = pdg_code != 0 ? particle_data->get_particle_mass(pdg_code) : 0.0;
             double kinetic_energy = 0.0;
-            
+
             if (segment->has_particle_info()) {
                 kinetic_energy = segment->particle_info()->kinetic_energy();
             }
-            
+
             SPDLOG_LOGGER_DEBUG(s_log, "segment_determine_dir_track: Seg {} cm Track {} {} {} {} MeV {} MeV {}",
                 length/units::cm, segment->dirsign(), (segment->dir_weak() ? 1 : 0),
                 pdg_code, particle_mass/units::MeV, kinetic_energy/units::MeV, particle_score);
-        // }
+        }
     }
 
      void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print){
         segment->dirsign(0);
         double length = segment_track_length(segment, 0);
-        
-        // hack for now ...
+
+        // For shower-trajectory segments PDG is always forced to electron (11).
+        // particle_score = 100.0 is a sentinel meaning "PID not performed; score not applicable."
+        // Callers must not interpret this score as a PID quality metric.
+        // The prototype (ProtoSegment.cxx:1647) also did not compute a meaningful particle_score
+        // for this code path; the sentinel is intentional, not a placeholder.
         int pdg_code = 11; // electron
         double particle_score = 100.0;
         
@@ -2082,10 +2109,10 @@ namespace WireCell::Clus::PR {
             
             WireCell::Vector dir_1 = v1.magnitude() > 0 ? v1.norm() : WireCell::Vector(1, 0, 0);
             vec_dir.at(i) = dir_1;
-            
+
             // Set up orthogonal coordinate system
             WireCell::Vector dir_2, dir_3;
-            double angle_deg = std::acos(dir_1.dot(drift_dir_abs)) * 180.0 / M_PI;
+            double angle_deg = std::acos(std::clamp(dir_1.dot(drift_dir_abs), -1.0, 1.0)) * 180.0 / M_PI;
             
             if (angle_deg < 7.5) {
                 dir_1 = WireCell::Vector(1, 0, 0);
@@ -2185,12 +2212,12 @@ namespace WireCell::Clus::PR {
             if (fits.front().point.z() < fits.back().point.z()) {
                 main_dir1 = segment_cal_dir_3vector(segment, front_pt, 15*units::cm);
                 main_dir2 = segment_cal_dir_3vector(segment, back_pt, 6*units::cm);
-                double angle1 = std::acos(main_dir1.dot(drift_dir_abs)) * 180.0 / M_PI;
+                double angle1 = std::acos(std::clamp(main_dir1.dot(drift_dir_abs), -1.0, 1.0)) * 180.0 / M_PI;
                 if (std::fabs(angle1 - 90) < 10) flag_skip_angle1 = true;
             } else {
                 main_dir1 = segment_cal_dir_3vector(segment, front_pt, 6*units::cm);
                 main_dir2 = segment_cal_dir_3vector(segment, back_pt, 15*units::cm);
-                double angle2 = std::acos(main_dir2.dot(drift_dir_abs)) * 180.0 / M_PI;
+                double angle2 = std::acos(std::clamp(main_dir2.dot(drift_dir_abs), -1.0, 1.0)) * 180.0 / M_PI;
                 if (std::fabs(angle2 - 90) < 10) flag_skip_angle2 = true;
             }
             
@@ -2200,7 +2227,7 @@ namespace WireCell::Clus::PR {
             const int sample_count = static_cast<int>(vec_dQ_dx.size());
             
             for (int i = 0; i < sample_count; i++) {
-                double angle = std::acos(main_dir1.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                double angle = std::acos(std::clamp(main_dir1.dot(vec_dir.at(i)), -1.0, 1.0)) * 180.0 / M_PI;
                 if ((angle < 30 || (flag_skip_angle1 && angle < 60)) &&
                     (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4 || vec_dQ_dx.at(i) > 1.6)) {
 
@@ -2245,7 +2272,7 @@ namespace WireCell::Clus::PR {
             threshold_segs.clear();
             
             for (int i = vec_dQ_dx.size() - 1; i >= 0; i--) {
-                double angle = 180 - std::acos(main_dir2.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                double angle = 180 - std::acos(std::clamp(main_dir2.dot(vec_dir.at(i)), -1.0, 1.0)) * 180.0 / M_PI;
                 if ((angle < 30 || (flag_skip_angle2 && angle < 60)) &&
                     (std::get<2>(vec_rms_vals.at(i))/units::cm > 0.4 || vec_dQ_dx.at(i) > 1.6)) {
 
@@ -2301,14 +2328,14 @@ namespace WireCell::Clus::PR {
                 WireCell::Vector main_dir_front = segment_cal_dir_3vector(segment, front_pt, 6*units::cm); 
                 int ncount_front = 0;
                 for (size_t i = 0; i < vec_dQ_dx.size(); i++) {
-                    double angle = std::acos(main_dir_front.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                    double angle = std::acos(std::clamp(main_dir_front.dot(vec_dir.at(i)), -1.0, 1.0)) * 180.0 / M_PI;
                     if (angle < 30) ncount_front++;
                 }
 
                 WireCell::Vector main_dir_back = segment_cal_dir_3vector(segment, back_pt, 6*units::cm);
                 int ncount_back = 0;
                 for (int i = vec_dQ_dx.size() - 1; i >= 0; i--) {
-                    double angle = 180 - std::acos(main_dir_back.dot(vec_dir.at(i))) * 180.0 / M_PI;
+                    double angle = 180 - std::acos(std::clamp(main_dir_back.dot(vec_dir.at(i)), -1.0, 1.0)) * 180.0 / M_PI;
                     if (angle < 30) ncount_back++;
                 }
                 
@@ -2383,10 +2410,10 @@ namespace WireCell::Clus::PR {
             }
             
             WireCell::Vector dir_1 = v1.magnitude() > 0 ? v1.norm() : WireCell::Vector(1, 0, 0);
-            
+
             // Set up orthogonal coordinate system
             WireCell::Vector dir_2, dir_3;
-            double angle_deg = std::acos(dir_1.dot(drift_dir_abs)) * 180.0 / M_PI;
+            double angle_deg = std::acos(std::clamp(dir_1.dot(drift_dir_abs), -1.0, 1.0)) * 180.0 / M_PI;
             
             if (angle_deg < 7.5) {
                 dir_1 = WireCell::Vector(1, 0, 0);
