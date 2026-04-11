@@ -66,8 +66,11 @@ UbooneNueBDTScorer::UbooneNueBDTScorer()
 
 void UbooneNueBDTScorer::configure(const WireCell::Configuration& cfg)
 {
-    auto resolve = [](const std::string& p) {
-        return p.empty() ? p : Persist::resolve(p);
+    auto resolve = [&](const std::string& p) {
+        if (p.empty()) return p;
+        std::string r = Persist::resolve(p);
+        if (r.empty()) log->error("UbooneNueBDTScorer: weight file not found: {}", p);
+        return r;
     };
     m_grouping_name   = get<std::string>(cfg, "grouping", "live");
 
@@ -144,6 +147,11 @@ Configuration UbooneNueBDTScorer::default_configuration() const
 
 void UbooneNueBDTScorer::visit(Clus::Facade::Ensemble& ensemble) const
 {
+    if (m_nue_xgboost_xml.empty()) {
+        log->warn("UbooneNueBDTScorer: nue_xgboost_xml not set or file not found — skipping nue BDT scoring");
+        return;
+    }
+
     auto groupings = ensemble.with_name(m_grouping_name);
     if (groupings.empty()) {
         log->debug("UbooneNueBDTScorer: no grouping '{}'", m_grouping_name);
