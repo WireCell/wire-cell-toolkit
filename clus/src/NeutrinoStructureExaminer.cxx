@@ -1183,28 +1183,44 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
     int v2_apa = v2_wpid.apa();
     int v2_face = v2_wpid.face();
     
-    // Get time normalization factor from first blob
+    // Time normalization factor.
+    // convert_3Dpoint_time_ch returns tind = round(time/tick) in raw ADC tick units,
+    // and Blob::slice_index is also in raw ADC tick units (see Facade_Blob.h comment
+    // "unit: tick").  For a typical blob that spans exactly one readout bin:
+    //   ntime_ticks = nrebin  (e.g. 4 for SBND/MicroBooNE)
+    // This makes tind/ntime_ticks equivalent to the prototype's
+    //   offset_t + slope_xt * x  (time-slice index, in units comparable to wire pitch)
+    // which is what the 2D-distance threshold of 2.5 is calibrated to.
+    // Assumption: children()[0] spans exactly one readout bin.  This holds for all
+    // standard wire-cell chunked blobs.  If the first blob unusually spans multiple
+    // readout bins (ntime_ticks > nrebin), the threshold comparison becomes too loose
+    // by that factor — safe but imprecise.
     auto first_blob = cluster.children()[0];
     int ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
-    if (ntime_ticks <= 0) ntime_ticks = 1;  // avoid division by zero
-    
-    // Convert vertices to U/V/W/T coordinates
+    if (ntime_ticks <= 0) ntime_ticks = 1;  // guard against degenerate blob
+
+    // Convert vertices to U/V/W/T coordinates.
+    // convert_3Dpoint_time_ch returns (tind, wind): tind is view-independent
+    // (drift2time depends only on point[0] = x, not on the plane index), so tind
+    // is identical for all three pind values for the same point.  We read it once
+    // (pind=0) and discard the time component from the pind=1,2 calls.
     auto [v1_t_raw, v1_u_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 0);
-    auto [v1_t_u, v1_v_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 1);
-    auto [v1_t_v, v1_w_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 2);
-    
+    auto [v1_t1,    v1_v_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 1);
+    auto [v1_t2,    v1_w_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v1_p, v1_apa, v1_face, 2);
+    (void)v1_t1; (void)v1_t2;  // tind is view-independent; only wire channels differ
+
     auto [v2_t_raw, v2_u_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 0);
-    auto [v2_t_u, v2_v_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 1);
-    auto [v2_t_v, v2_w_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 2);
-    
-    // Normalize time by ntime_ticks to account for convention difference
+    auto [v2_t1,    v2_v_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 1);
+    auto [v2_t2,    v2_w_ch] = cluster.grouping()->convert_3Dpoint_time_ch(v2_p, v2_apa, v2_face, 2);
+    (void)v2_t1; (void)v2_t2;
+
     double v1_t = double(v1_t_raw) / ntime_ticks;
     double v2_t = double(v2_t_raw) / ntime_ticks;
-    
+
     double v1_u = v1_u_ch;
     double v1_v = v1_v_ch;
     double v1_w = v1_w_ch;
-    
+
     double v2_u = v2_u_ch;
     double v2_v = v2_v_ch;
     double v2_w = v2_w_ch;
@@ -1270,7 +1286,10 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
                 Facade::geo_point_t start_p = v2_p;
                 Facade::geo_point_t end_p;
                 
-                // Find point on sg1 that's approximately 9 units away from v1
+                // Find point on sg1 that's approximately 9 units away from v1.
+                // p_t_raw from convert_3Dpoint_time_ch is view-independent (tind depends
+                // only on x / drift_speed), so passing pind here is harmless — p_t_raw
+                // equals what pind=0 would return.  p_wire_ch is the plane-correct channel.
                 for (size_t i = 0; i < pts_2.size(); i++) {
                     auto test_wpid = dv->contained_by(pts_2[i].point);
                     auto [p_t_raw, p_wire_ch] = cluster.grouping()->convert_3Dpoint_time_ch(pts_2[i].point, test_wpid.apa(), test_wpid.face(), pind);
@@ -1543,18 +1562,19 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
             // Remove v2 vertex
             remove_vertex(graph, v2);
             
-            // Clean up isolated vertices (vertices with no connections)
+            // Clean up isolated vertices (vertices with no connections) that belong
+            // to this cluster.  Must filter by cluster: the graph may contain vertices
+            // from other clusters, and we must not touch them here.
             std::vector<VertexPtr> isolated_vertices;
-            auto [vbegin, vend] = boost::vertices(graph);
-            for (auto vit = vbegin; vit != vend; ++vit) {
-                if (boost::degree(*vit, graph) == 0) {
-                    VertexPtr vtx = graph[*vit].vertex;
-                    if (vtx) {
+            for (const auto& vd : ordered_nodes(graph)) {
+                if (boost::degree(vd, graph) == 0) {
+                    VertexPtr vtx = graph[vd].vertex;
+                    if (vtx && vtx->cluster() == &cluster) {
                         isolated_vertices.push_back(vtx);
                     }
                 }
             }
-            
+
             for (auto vtx : isolated_vertices) {
                 remove_vertex(graph, vtx);
             }
@@ -1571,9 +1591,12 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
 
 
 bool PatternAlgorithms::examine_vertices_4p(Graph&graph, VertexPtr v1, VertexPtr v2, TrackFitting& track_fitter, IDetectorVolumes::pointer dv){
-    // Find the segment between v1 and v2
+    // Find the segment between v1 and v2.
+    // sg1 may be nullptr if the direct edge was already removed by an earlier step in
+    // the same examine_vertices_4 pass.  When sg1 is nullptr the loop below skips
+    // nothing (sg != nullptr is true for all surviving segments), so all of v1's
+    // remaining segments are tested against v2 — this is conservative but correct.
     SegmentPtr sg1 = find_segment(graph, v1, v2);
-    // if (!sg1) return true;
     
     bool flag = true;
     
@@ -1807,17 +1830,24 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                     }
                     new_list.push_back(min_wcp);
                     
-                    // Combine with rest of segment
+                    // Combine with rest of segment.
+                    // The prototype trims old_list by WCPoint::index equality, which
+                    // assumes min_wcp.index appears exactly once in vec_wcps.  Here we
+                    // use a 0.01 cm position tolerance instead, which is safer when
+                    // WCPoint::index is not reliably populated.  If min_wcp were somehow
+                    // absent from old_list (should not happen for well-formed Steiner data),
+                    // the while-loop would drain old_list to empty — the empty() guard
+                    // ensures the subsequent pop_front/pop_back is a no-op.
                     std::list<WCPoint> old_list(vec_wcps.begin(), vec_wcps.end());
-                    
+
                     if (flag_front) {
                         // Remove points up to min_wcp from front
-                        while (!old_list.empty() && 
+                        while (!old_list.empty() &&
                                ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01 * units::cm) {
                             old_list.pop_front();
                         }
                         if (!old_list.empty()) old_list.pop_front();
-                        
+
                         // Prepend new path
                         for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
                             old_list.push_front(*it);
@@ -1948,17 +1978,24 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                     }
                     new_list.push_back(min_wcp);
                     
-                    // Combine with rest of segment
+                    // Combine with rest of segment.
+                    // The prototype trims old_list by WCPoint::index equality, which
+                    // assumes min_wcp.index appears exactly once in vec_wcps.  Here we
+                    // use a 0.01 cm position tolerance instead, which is safer when
+                    // WCPoint::index is not reliably populated.  If min_wcp were somehow
+                    // absent from old_list (should not happen for well-formed Steiner data),
+                    // the while-loop would drain old_list to empty — the empty() guard
+                    // ensures the subsequent pop_front/pop_back is a no-op.
                     std::list<WCPoint> old_list(vec_wcps.begin(), vec_wcps.end());
-                    
+
                     if (flag_front) {
                         // Remove points up to min_wcp from front
-                        while (!old_list.empty() && 
+                        while (!old_list.empty() &&
                                ray_length(Ray{old_list.front().point, min_wcp.point}) > 0.01 * units::cm) {
                             old_list.pop_front();
                         }
                         if (!old_list.empty()) old_list.pop_front();
-                        
+
                         // Prepend new path
                         for (auto it = new_list.rbegin(); it != new_list.rend(); ++it) {
                             old_list.push_front(*it);
@@ -2022,10 +2059,16 @@ void PatternAlgorithms::examine_vertices(Graph& graph, Facade::Cluster& cluster,
         // Merge vertex if the kink is not at right location (Type I)
         flag_continue = flag_continue || examine_vertices_1(graph, cluster, track_fitter, dv, main_vertex);
         
-        size_t num_vertices = boost::num_vertices(graph); 
+        // Count only vertices belonging to this cluster (matches prototype's
+        // find_vertices(cluster).size() check — graph may hold other clusters' vertices).
+        size_t num_cluster_vertices = 0;
+        for (const auto& vd : ordered_nodes(graph)) {
+            VertexPtr vtx = graph[vd].vertex;
+            if (vtx && vtx->cluster() == &cluster) num_cluster_vertices++;
+        }
 
         // Merge vertices if they are too close (Type II) - only if cluster has more than 2 vertices
-        if (num_vertices > 2) {
+        if (num_cluster_vertices > 2) {
             flag_continue = flag_continue || examine_vertices_2(graph, cluster, track_fitter, dv, main_vertex);
         }
         
@@ -2523,14 +2566,16 @@ void PatternAlgorithms::examine_vertices_3(Graph& graph, Facade::Cluster& main_c
         remove_segment(graph, sg);
     }
     
-    // Remove isolated vertices
+    // Remove isolated vertices that belong to this cluster.
+    // Must filter by cluster: the graph may hold vertices from other clusters
+    // that happen to be degree-0 (pre-existing orphans); do not touch them here.
     bool flag_cont = true;
     while (flag_cont) {
         flag_cont = false;
         for (const auto& vd : ordered_nodes(graph)) {
             if (boost::degree(vd, graph) == 0) {
                 VertexPtr vtx = graph[vd].vertex;
-                if (vtx) {
+                if (vtx && vtx->cluster() == &main_cluster) {
                     remove_vertex(graph, vtx);
                     flag_cont = true;
                     break;
