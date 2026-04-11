@@ -1027,7 +1027,7 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
 
         // Add the flag_steiner_terminal boolean array to point cloud
         // Convert std::vector<bool> to std::vector<uint8_t> to avoid std::vector<bool> specialization issues
-        std::vector<int> steiner_flags_uint8(result.flag_steiner_terminal.begin(), result.flag_steiner_terminal.end());
+        std::vector<uint8_t> steiner_flags_uint8(result.flag_steiner_terminal.begin(), result.flag_steiner_terminal.end());
         PointCloud::Array steiner_flag_array(steiner_flags_uint8);
         result.point_cloud.add("flag_steiner_terminal", std::move(steiner_flag_array));
     }

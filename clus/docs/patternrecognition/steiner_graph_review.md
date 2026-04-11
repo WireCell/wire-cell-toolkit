@@ -202,11 +202,11 @@ The prototype is single-TPC only. The toolkit port must support multiple APAs an
 
 ---
 
-## 8. Minor / Cosmetic Notes
+## 8. Minor / Cosmetic Notes (APPLIED 2026-04-11)
 
-- `steiner_flags_uint8` in `create_enhanced_steiner_graph` (`:1033`) uses `std::vector<int>` though the comment says uint8_t. Should be `std::vector<uint8_t>` to save 4× memory for large point clouds.
-- `m_steiner_graph_terminal_indices` declared in `SteinerGrapher.h:296` is never written. Can be removed or repurposed as the backing store when `recover_steiner_graph` is ported.
-- Commented-out debug blocks in `CreateSteinerGraph.cxx:280-348` can be cleaned up in a follow-up.
+- **`steiner_flags_uint8` type** — Fixed `SteinerGrapher.cxx:1030`: changed `std::vector<int>` → `std::vector<uint8_t>`, saving 4× memory for large point clouds.
+- **`m_steiner_graph_terminal_indices`** — Removed the member from `SteinerGrapher.h` (was declared but never written). Replaced with a comment reserving the name for a future `recover_steiner_graph()` port if needed.
+- **Commented-out debug blocks** — Removed the entire dead comment block (`// for (auto* cluster ...`) from `CreateSteinerGraph.cxx` (was lines 203–271).
 
 ---
 

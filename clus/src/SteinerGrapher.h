@@ -296,8 +296,8 @@ namespace WireCell::Clus::Steiner {
         /// (matches prototype map_new_old_indices)
         std::map<vertex_type, vertex_type> m_new_to_old_index;
         
-        /// Set of vertices that are steiner graph terminals (for edge creation logic)
-        vertex_set m_steiner_graph_terminal_indices;
+        // m_steiner_graph_terminal_indices removed — not populated; reserved for
+        // recover_steiner_graph() if that function is ported in the future.
     };
 
 
