@@ -38,6 +38,26 @@ The member `form_cell_points_map` (`:573-575`) already guards against `blob == n
 
 **Fix applied:** Added `if (!blob) continue;` after the facade cast.
 
+### 2.2 `flag_steiner_terminal` stored as `uint8_t` but read as `int` — element-size mismatch crash (FIXED)
+
+**File:** `SteinerGrapher.cxx:1028-1031`  
+**Error:** `WireCell::ValueError: element size mismatch 4 != 1`  
+**Stack:** `Facade_Cluster.cxx:3279` → `get_two_boundary_steiner_graph_idx` → `->elements<int>()`
+
+The §8 cosmetic note (2026-04-11) changed the intermediate vector from `std::vector<int>` to `std::vector<uint8_t>` (element size 1) to save memory. However, every read site calls `->elements<int>()` which expects element size 4. The `PointCloud::Array` API enforces a strict size match and throws at runtime.
+
+```cpp
+// Before (broken — stored uint8_t, read as int):
+std::vector<uint8_t> steiner_flags_uint8(...);
+PointCloud::Array steiner_flag_array(steiner_flags_uint8);  // dtype = uint8
+
+// After (fixed — matches all read sites):
+std::vector<int> steiner_flags_int(...);
+PointCloud::Array steiner_flag_array(steiner_flags_int);    // dtype = int32
+```
+
+All call sites (`Facade_Cluster.cxx:3282`, `MultiAlgBlobClustering.cxx:1296`, `NeutrinoPatternBase.cxx:214`, `NeutrinoVertexFinder.cxx:36`, `NeutrinoStructureExaminer.cxx:502`, `NeutrinoOtherSegments.cxx:124`, `TaggerCheckSTM.cxx:1818`) use `elements<int>()` — store as `int`.
+
 ---
 
 ## 3. Determinism Issues (FIXED)
@@ -204,7 +224,7 @@ The prototype is single-TPC only. The toolkit port must support multiple APAs an
 
 ## 8. Minor / Cosmetic Notes (APPLIED 2026-04-11)
 
-- **`steiner_flags_uint8` type** — Fixed `SteinerGrapher.cxx:1030`: changed `std::vector<int>` → `std::vector<uint8_t>`, saving 4× memory for large point clouds.
+- **`steiner_flags_uint8` type** — See §2.2 below for the runtime crash fix; the original cosmetic note here was incorrect.
 - **`m_steiner_graph_terminal_indices`** — Removed the member from `SteinerGrapher.h` (was declared but never written). Replaced with a comment reserving the name for a future `recover_steiner_graph()` port if needed.
 - **Commented-out debug blocks** — Removed the entire dead comment block (`// for (auto* cluster ...`) from `CreateSteinerGraph.cxx` (was lines 203–271).
 
