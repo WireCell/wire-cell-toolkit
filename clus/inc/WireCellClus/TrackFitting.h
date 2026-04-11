@@ -373,7 +373,9 @@ namespace WireCell::Clus {
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
 
         void examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point = false, double charge_cut = 2000);
-        void update_association(std::shared_ptr<PR::Segment> segment, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
+        void update_association(std::shared_ptr<PR::Segment> segment,
+                                const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
 
         void form_map(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
         void form_map_graph(bool flag_exclusion, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);

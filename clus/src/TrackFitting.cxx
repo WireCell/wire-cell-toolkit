@@ -2423,7 +2423,9 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
 
  }
 
-void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt){
+void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
+                                      const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                      PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt){
     if (!m_graph || !segment) return;
 
     // Get cluster and transformation info
@@ -2431,16 +2433,8 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
     // double cluster_t0 = cluster->get_cluster_t0();
 
-    // Collect segments from the same cluster for comparison.
-    // Using boost::edges(*m_graph) would include segments from ALL clusters, causing
-    // charge 2D-points to be incorrectly stolen by another cluster's nearby segment.
-    std::vector<std::shared_ptr<PR::Segment>> all_segments;
-    for (const auto& ed : get_segment_edges()) {
-        auto& edge_bundle = (*m_graph)[ed];
-        if (edge_bundle.segment && edge_bundle.segment != segment) {
-            all_segments.push_back(edge_bundle.segment);
-        }
-    }
+    // all_segments is pre-built by the caller (form_map_graph) and shared across all points
+    // of a segment, avoiding a redundant O(S) rebuild per fit point (S3.4.1).
 
     // Process U plane (plane 0)
     std::set<Coord2D> save_2dut;
@@ -2471,6 +2465,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
 
         double min_dis1_track = 1e9;
         for (const auto& other_seg : all_segments) {
+            if (other_seg == segment) continue;
             auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
             double temp_dis = std::get<0>(other_distances);
             if (temp_dis < min_dis1_track) {
@@ -2511,6 +2506,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
 
         double min_dis1_track = 1e9;
         for (const auto& other_seg : all_segments) {
+            if (other_seg == segment) continue;
             auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
             double temp_dis = std::get<1>(other_distances);
             if (temp_dis < min_dis1_track) {
@@ -2553,6 +2549,7 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment, Plan
 
         double min_dis1_track = 1e9;
         for (const auto& other_seg : all_segments) {
+            if (other_seg == segment) continue;
             auto other_distances = segment_get_closest_2d_distances(other_seg, test_point, apa, face, "fit");
             double temp_dis = std::get<2>(other_distances);
             if (temp_dis < min_dis1_track) {
@@ -3061,7 +3058,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
 
                 if (flag_exclusion) {
-                    update_association(segment, temp_2dut, temp_2dvt, temp_2dwt);
+                    update_association(segment, segments, temp_2dut, temp_2dvt, temp_2dwt);
                 }
 
                 // Examine point association
@@ -3615,9 +3612,12 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
                     double cluster_t0 = cluster->get_cluster_t0();
 
-                    auto test_wpid = m_dv->contained_by(pss_vec_it->second.first);
-                    // Initialization with its raw position
-                    auto p_raw = transform->backward(pss_vec_it->second.first, cluster_t0, test_wpid.face(), test_wpid.apa());
+                    // S2.2: project the 3D point into the PIXEL's (apa, face), not the point's own face.
+                    // The pixel belongs to apa_face (the outer loop key); slope_x/offset_t etc. were
+                    // looked up for that same apa_face.  Using the point's own face here would mix
+                    // frames when the track crosses an APA boundary.
+                    int pixel_apa = apa_face.first, pixel_face = apa_face.second;
+                    auto p_raw = transform->backward(pss_vec_it->second.first, cluster_t0, pixel_face, pixel_apa);
 
                     double central_t = slope_x * p_raw.x() + offset_t;
                     double central_ch = 0;
@@ -3657,6 +3657,32 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         }
     }
     
+    // S3.4.2: Build per-(apa,face) geometry cache once here instead of doing two O(log F)
+    // map lookups per vertex and per segment fit point.  F is small (2–8 for typical detectors)
+    // so the cache fits easily in L1 cache and eliminates repeated std::map traversals.
+    struct FaceGeom {
+        double offset_t, offset_u, offset_v, offset_w;
+        double slope_x;
+        double slope_yu, slope_zu;
+        double slope_yv, slope_zv;
+        double slope_yw, slope_zw;
+    };
+    std::map<std::pair<int,int>, FaceGeom> face_geom_cache;
+    for (const auto& [wpid, offsets] : wpid_offsets) {
+        auto slope_it = wpid_slopes.find(wpid);
+        if (slope_it == wpid_slopes.end()) continue;
+        auto key = std::make_pair(wpid.apa(), wpid.face());
+        if (face_geom_cache.count(key)) continue;
+        const auto& slopes = slope_it->second;
+        face_geom_cache[key] = FaceGeom{
+            std::get<0>(offsets), std::get<1>(offsets), std::get<2>(offsets), std::get<3>(offsets),
+            std::get<0>(slopes),
+            std::get<1>(slopes).first,  std::get<1>(slopes).second,
+            std::get<2>(slopes).first,  std::get<2>(slopes).second,
+            std::get<3>(slopes).first,  std::get<3>(slopes).second
+        };
+    }
+
     // Process vertices first
     for (auto vd : m_ordered_nodes_vec) {
         auto& v_bundle = (*m_graph)[vd];
@@ -3686,27 +3712,18 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             auto cluster = segment->cluster();
             auto cluster_t0 = cluster->get_cluster_t0();
             const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-            // Get geometry parameters for this point
+            // Get geometry parameters for this point (via cache)
             auto test_wpid = m_dv->contained_by(init_p);
             if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
-            
-            WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
-            auto offset_it = wpid_offsets.find(wpid);
-            auto slope_it = wpid_slopes.find(wpid);
-            
-            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) continue;
-            
-            auto offset_t = std::get<0>(offset_it->second);
-            auto offset_u = std::get<1>(offset_it->second);
-            auto offset_v = std::get<2>(offset_it->second);
-            auto offset_w = std::get<3>(offset_it->second);
-            auto slope_x = std::get<0>(slope_it->second);
-            auto slope_yu = std::get<1>(slope_it->second).first;
-            auto slope_zu = std::get<1>(slope_it->second).second;
-            auto slope_yv = std::get<2>(slope_it->second).first;
-            auto slope_zv = std::get<2>(slope_it->second).second;
-            auto slope_yw = std::get<3>(slope_it->second).first;
-            auto slope_zw = std::get<3>(slope_it->second).second;
+            auto fg_it = face_geom_cache.find({test_wpid.apa(), test_wpid.face()});
+            if (fg_it == face_geom_cache.end()) continue;
+            const auto& fg = fg_it->second;
+            auto offset_t = fg.offset_t, offset_u = fg.offset_u,
+                 offset_v = fg.offset_v, offset_w = fg.offset_w;
+            auto slope_x  = fg.slope_x;
+            auto slope_yu = fg.slope_yu, slope_zu = fg.slope_zu;
+            auto slope_yv = fg.slope_yv, slope_zv = fg.slope_zv;
+            auto slope_yw = fg.slope_yw, slope_zw = fg.slope_zw;
             
             // Fit the vertex point
             WireCell::Point fitted_p = fit_point(init_p, i, segment, map_Udiv_fac, map_Vdiv_fac, map_Wdiv_fac,
@@ -3720,14 +3737,32 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             vertex_fit.point = fitted_p;
             vertex_fit.index = -1;
 
-            // Store 2D projections (following WCP pattern with offsets)
-            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0,  test_wpid.face(), test_wpid.apa());
-            vertex_fit.pu = offset_u  + (slope_yu * fitted_p_raw.y() + slope_zu * fitted_p_raw.z());
-            vertex_fit.pv = offset_v  + (slope_yv * fitted_p_raw.y() + slope_zv * fitted_p_raw.z());
-            vertex_fit.pw = offset_w  + (slope_yw * fitted_p_raw.y() + slope_zw * fitted_p_raw.z());
-            vertex_fit.pt = offset_t  + slope_x * fitted_p_raw.x();
+            // S2.4: re-query (apa, face) for the FITTED position — fit_point may have moved
+            // the vertex across an APA boundary, so test_wpid (from init_p) is no longer valid.
+            auto fitted_wpid = m_dv->contained_by(fitted_p);
+            if (fitted_wpid.apa() == -1 || fitted_wpid.face() == -1) {
+                // fitted_p landed outside known geometry; fall back to init_p frame
+                fitted_wpid = test_wpid;
+            }
+            // Re-look up geometry for the fitted position's face via cache (may differ from init_p's)
+            const FaceGeom* proj_fg = &fg;  // default: same face as init_p
+            if (fitted_wpid.apa() != test_wpid.apa() || fitted_wpid.face() != test_wpid.face()) {
+                auto pfg_it = face_geom_cache.find({fitted_wpid.apa(), fitted_wpid.face()});
+                if (pfg_it != face_geom_cache.end()) proj_fg = &pfg_it->second;
+            }
+            double proj_offset_t = proj_fg->offset_t, proj_offset_u = proj_fg->offset_u;
+            double proj_offset_v = proj_fg->offset_v, proj_offset_w = proj_fg->offset_w;
+            double proj_slope_x  = proj_fg->slope_x;
+            double proj_slope_yu = proj_fg->slope_yu, proj_slope_zu = proj_fg->slope_zu;
+            double proj_slope_yv = proj_fg->slope_yv, proj_slope_zv = proj_fg->slope_zv;
+            double proj_slope_yw = proj_fg->slope_yw, proj_slope_zw = proj_fg->slope_zw;
+            auto fitted_p_raw = transform->backward(fitted_p, cluster_t0, fitted_wpid.face(), fitted_wpid.apa());
+            vertex_fit.pu = proj_offset_u + (proj_slope_yu * fitted_p_raw.y() + proj_slope_zu * fitted_p_raw.z());
+            vertex_fit.pv = proj_offset_v + (proj_slope_yv * fitted_p_raw.y() + proj_slope_zv * fitted_p_raw.z());
+            vertex_fit.pw = proj_offset_w + (proj_slope_yw * fitted_p_raw.y() + proj_slope_zw * fitted_p_raw.z());
+            vertex_fit.pt = proj_offset_t + proj_slope_x * fitted_p_raw.x();
 
-            vertex_fit.paf = std::make_pair(test_wpid.apa(), test_wpid.face());
+            vertex_fit.paf = std::make_pair(fitted_wpid.apa(), fitted_wpid.face());
         }
     }
     
@@ -3795,30 +3830,19 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                 WireCell::Point temp_p = init_ps[i];
                 
                 if (!init_fit_skip[i] && init_indices[i] >= 0) {
-                    // Get geometry parameters
+                    // Get geometry parameters via cache
                     auto test_wpid = m_dv->contained_by(init_ps[i]);
                     if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
-                        WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
-                        auto offset_it = wpid_offsets.find(wpid);
-                        auto slope_it = wpid_slopes.find(wpid);
-                        
-                        if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
-                            auto offset_t = std::get<0>(offset_it->second);
-                            auto offset_u = std::get<1>(offset_it->second);
-                            auto offset_v = std::get<2>(offset_it->second);
-                            auto offset_w = std::get<3>(offset_it->second);
-                            auto slope_x = std::get<0>(slope_it->second);
-                            auto slope_yu = std::get<1>(slope_it->second).first;
-                            auto slope_zu = std::get<1>(slope_it->second).second;
-                            auto slope_yv = std::get<2>(slope_it->second).first;
-                            auto slope_zv = std::get<2>(slope_it->second).second;
-                            auto slope_yw = std::get<3>(slope_it->second).first;
-                            auto slope_zw = std::get<3>(slope_it->second).second;
-                            
+                        auto sfg_it = face_geom_cache.find({test_wpid.apa(), test_wpid.face()});
+                        if (sfg_it != face_geom_cache.end()) {
+                            const auto& sfg = sfg_it->second;
                             // Fit the point
-                            temp_p = fit_point(init_ps[i], init_indices[i], segment, map_Udiv_fac, map_Vdiv_fac, map_Wdiv_fac,
-                                             offset_t, slope_x, offset_u, slope_yu, slope_zu,
-                                             offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
+                            temp_p = fit_point(init_ps[i], init_indices[i], segment,
+                                               map_Udiv_fac, map_Vdiv_fac, map_Wdiv_fac,
+                                               sfg.offset_t, sfg.slope_x,
+                                               sfg.offset_u, sfg.slope_yu, sfg.slope_zu,
+                                               sfg.offset_v, sfg.slope_yv, sfg.slope_zv,
+                                               sfg.offset_w, sfg.slope_yw, sfg.slope_zw);
                         }
                     }
                 }
@@ -3845,30 +3869,16 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
 
 
             if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
-                WirePlaneId wpid(kAllLayers, test_wpid.face(), test_wpid.apa());
-                auto offset_it = wpid_offsets.find(wpid);
-                auto slope_it = wpid_slopes.find(wpid);
-                
-                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0,  test_wpid.face(), test_wpid.apa());
+                auto pfg_it = face_geom_cache.find({test_wpid.apa(), test_wpid.face()});
+                auto examined_p_raw = transform->backward(examined_ps[i], cluster_t0, test_wpid.face(), test_wpid.apa());
                 fit.paf = std::make_pair(test_wpid.apa(), test_wpid.face());
 
-                if (offset_it != wpid_offsets.end() && slope_it != wpid_slopes.end()) {
-                    auto offset_t = std::get<0>(offset_it->second);
-                    auto offset_u = std::get<1>(offset_it->second);
-                    auto offset_v = std::get<2>(offset_it->second);
-                    auto offset_w = std::get<3>(offset_it->second);
-                    auto slope_x = std::get<0>(slope_it->second);
-                    auto slope_yu = std::get<1>(slope_it->second).first;
-                    auto slope_zu = std::get<1>(slope_it->second).second;
-                    auto slope_yv = std::get<2>(slope_it->second).first;
-                    auto slope_zv = std::get<2>(slope_it->second).second;
-                    auto slope_yw = std::get<3>(slope_it->second).first;
-                    auto slope_zw = std::get<3>(slope_it->second).second;
-
-                    fit.pu = offset_u + (slope_yu * examined_p_raw.y() + slope_zu * examined_p_raw.z());
-                    fit.pv = offset_v + (slope_yv * examined_p_raw.y() + slope_zv * examined_p_raw.z());
-                    fit.pw = offset_w + (slope_yw * examined_p_raw.y() + slope_zw * examined_p_raw.z());
-                    fit.pt = offset_t + slope_x * examined_p_raw.x();
+                if (pfg_it != face_geom_cache.end()) {
+                    const auto& pfg = pfg_it->second;
+                    fit.pu = pfg.offset_u + (pfg.slope_yu * examined_p_raw.y() + pfg.slope_zu * examined_p_raw.z());
+                    fit.pv = pfg.offset_v + (pfg.slope_yv * examined_p_raw.y() + pfg.slope_zv * examined_p_raw.z());
+                    fit.pw = pfg.offset_w + (pfg.slope_yw * examined_p_raw.y() + pfg.slope_zw * examined_p_raw.z());
+                    fit.pt = pfg.offset_t + pfg.slope_x * examined_p_raw.x();
                 }
             }
             
