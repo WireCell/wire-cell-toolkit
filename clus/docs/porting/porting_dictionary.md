@@ -208,11 +208,58 @@ The final portion of porting covers the transformation from clusters of blobs an
 - [wcp-data-notes](./tjft/wcp-data-notes.org) notes and questions from reviewing the links to data summaries below.
 
 
-### [ProtoSegment](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/protosegment.md) (WCP) vs. **xxx** :warning: (WCT)
+### [ProtoSegment](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594c4cc1775cb/docs/protosegment.md) (WCP) vs. **`WireCell::Clus::PR::Segment`** (WCT)
 
-### [ProtoVertex](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/protovertex.md) (WCP) vs. **xxx** :warning: (WCT)
+`PR::Segment` (`clus/inc/WireCellClus/PRSegment.h`, `clus/src/PRSegment.cxx`) is the WCT equivalent of `WCPPID::ProtoSegment`.  Key mapping:
 
-### [WCShower](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/wcshower.md) (WCP) vs. **xxx** :warning: (WCT)
+| WCP (ProtoSegment) | WCT | Notes |
+|---|---|---|
+| `ProtoSegment(id, cluster, flag_shower)` | `PR::Segment` constructed via `PR::add_segment(graph, seg, vtx1, vtx2)` | Graph-owned; no raw constructor |
+| `m_fit_pt_vec` | `PR::Segment::m_fits` (`std::vector<PR::Fit>`) | Same data; WCT adds `paf{apa,face}` per fit |
+| `get_point_vec()` | `seg->fits()` | |
+| `set_fit_associate_vec(pts, skip, idx)` | `seg->set_fit_associate_vec(fits, dv, cloud_name)` | Now takes by value + `IDetectorVolumes` |
+| `get_closest_wcpt(point)` | `segment_get_closest_point(seg, point, cloud_name)` | In `PRSegmentFunctions.cxx` |
+| `get_flag_shower()` | `seg->flags_any(SegmentFlags::kShowerTrajectory \| kShowerTopology)` | Split into two flags |
+| `get_direct_length()` | `segment_track_direct_length(seg)` | In `PRSegmentFunctions.cxx` |
+| `get_length()` | `segment_track_length(seg)` | |
+| `search_kink(start, cloud, threshold)` | `segment_search_kink(seg, start, cloud, threshold)` | |
+| `get_closest_2d_dis(point, apa, face)` | `segment_get_closest_2d_distances(seg, point, apa, face, cloud)` | |
+| `update_point_cloud(map_seg_vtxs)` | `create_segment_point_cloud(seg, points, dv, cloud)` | Maps replaced by graph |
+
+Full function-by-function table: `clus/docs/patternrecognition/prvertex_prsegment_prshower_review.md §1`.
+
+### [ProtoVertex](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594c4cc1775cb/docs/protovertex.md) (WCP) vs. **`WireCell::Clus::PR::Vertex`** (WCT)
+
+`PR::Vertex` (`clus/inc/WireCellClus/PRVertex.h`) is the WCT equivalent of `WCPPID::ProtoVertex`.
+
+| WCP (ProtoVertex) | WCT | Notes |
+|---|---|---|
+| `ProtoVertex(id, wcpt, flag_vertex)` | `std::make_shared<PR::Vertex>(wcpt)` + `PR::add_vertex(graph, vtx)` | Graph-owned |
+| `get_wcpt()` | `vtx->wcpt()` | |
+| `get_fit_pt()` | `vtx->fit().point` | |
+| `get_cluster()` | `vtx->cluster()` | Via `HasCluster<Vertex>` mixin |
+| `add_segment(seg)` | `PR::add_segment(graph, seg, vtx1, vtx2)` | Graph edge; no per-vertex list |
+| `get_all_segments()` | `ordered_out_edges(graph, vtx->get_descriptor())` (caller iterates) | |
+
+### [WCShower](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594c4cc1775cb/docs/wcshower.md) (WCP) vs. **`WireCell::Clus::PR::Shower`** (WCT)
+
+`PR::Shower` (`clus/inc/WireCellClus/PRShower.h`, `clus/src/PRShower.cxx`) is the WCT equivalent of `WCPPID::WCShower`.
+
+| WCP (WCShower) | WCT | Notes |
+|---|---|---|
+| `WCShower(seg, map_vtx_segs, map_seg_vtxs)` | `std::make_shared<PR::Shower>(graph)` then `shower->set_start_segment(seg)` | Maps eliminated |
+| `get_start_vertex()` / `get_start_segment()` | `shower->start_vertex()` / `shower->start_segment()` | |
+| `calculate_kinematics(particle_data, recomb)` | `shower->calculate_kinematics(particle_data, recomb)` | DI replaces singleton |
+| `get_kine_range()` / `get_kine_dQdx()` / `get_kine_best()` | `shower->get_kine_range()` / `get_kine_dQdx()` / `get_kine_best()` | |
+| `get_start_point()` / `get_end_point()` | `shower->data.start_point` / `shower->data.end_point` | Direct struct access |
+| `fill_maps(map_vtx_shower, map_seg_shower)` | `shower->fill_maps()` (no out-params; callers iterate the view) | API change |
+| `add_segment(seg, maps)` | `shower->add_segment(seg)` | Maps replaced by graph |
+| `add_shower(other)` | `shower->add_shower(other)` | Batched DPC merge (improvement) |
+| `complete_structure_with_start_segment(maps, used)` | `shower->complete_structure_with_start_segment(used_segs)` | |
+| `get_total_length()` | `shower->get_total_length()` | Cached after S2 fixes |
+| `get_num_segments()` | `shower->get_num_segments()` | O(1) via Boost `edges().size()` |
+
+Full function-by-function table: `clus/docs/patternrecognition/prvertex_prsegment_prshower_review.md §1`.
 
 ### [Steiner Tree](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_steiner.md) (WCP) vvs. **xxx** :warning: (WCT)
 

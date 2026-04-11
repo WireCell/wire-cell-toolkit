@@ -3120,7 +3120,7 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
 
 
         // Set fit associate vector for the segment
-        segment->set_fit_associate_vec(saved_fits, m_dv, "fit");
+        segment->set_fit_associate_vec(std::move(saved_fits), m_dv, "fit");
     }
 
     // Deal with all vertices again

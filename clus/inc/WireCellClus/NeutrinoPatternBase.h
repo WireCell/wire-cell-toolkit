@@ -238,7 +238,7 @@ namespace WireCell::Clus::PR {
         // For a shower:  finds the last segment of the long-muon chain, then counts from its near end.
         std::pair<int, int> count_daughters(Graph& graph, SegmentPtr sg, VertexPtr main_vertex);
         std::pair<int, int> count_daughters(Graph& graph, ShowerPtr shower, VertexPtr main_vertex,
-                                            std::set<SegmentPtr>& segments_in_long_muon_plain);
+                                            IndexedSegmentSet& segments_in_long_muon);
         // numu_tagger: fills TaggerInfo numu_cc_* BDT features and returns
         //   {flag_long_muon, max_muon_length}.
         // Prototype: WCPPID::NeutrinoID::numu_tagger() in NeutrinoID_numu_tagger.h.

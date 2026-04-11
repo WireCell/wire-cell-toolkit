@@ -78,6 +78,19 @@ namespace WireCell::Clus::Facade {
         /// @brief Return (angle_u, angle_v, angle_w) for the given face/apa from the stored wpid_params.
         /// Returns {0,0,0} if the face/apa combination is not found.
         std::array<double, 3> get_angles(int face, int apa) const;
+
+        /// @brief Read-only access to the full wpid_params map.
+        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& get_wpid_params() const {
+            return m_wpid_params;
+        }
+
+        /// @brief Merge in any wpid_params entries from @p other not already present.
+        /// Used when building a shower DPC that spans segments from multiple APAs/faces.
+        void merge_wpid_params(const DynamicPointCloud& other) {
+            for (const auto& [wpid, params] : other.m_wpid_params) {
+                m_wpid_params.emplace(wpid, params);  // no-op if key already present
+            }
+        }
         
 
         std::pair<double, double> hough_transform(const geo_point_t &origin, const double dis) const;

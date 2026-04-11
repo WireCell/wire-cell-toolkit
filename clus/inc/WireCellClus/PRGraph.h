@@ -15,6 +15,7 @@
 
 #include "WireCellUtil/Graph.h"
 #include "WireCellUtil/Exceptions.h"
+#include <set>
 
 namespace WireCell::Clus::PR {
 
@@ -136,6 +137,27 @@ namespace WireCell::Clus::PR {
     /// This function searches for an edge between the two given vertices and
     /// returns the associated segment if found.
     SegmentPtr find_segment(Graph& graph, VertexPtr vtx1, VertexPtr vtx2);
+
+    /** Comparators for VertexPtr and SegmentPtr that order by the stable graph
+     *  index stored directly in the object rather than by raw pointer address.
+     *  No graph reference is required.
+     *
+     *  Use these (via IndexedVertexSet / IndexedSegmentSet) wherever a
+     *  std::set<VertexPtr> or std::set<SegmentPtr> must produce a deterministic
+     *  iteration order across runs.
+     */
+    struct VertexIndexCmp {
+        bool operator()(const VertexPtr& a, const VertexPtr& b) const {
+            return a->get_graph_index() < b->get_graph_index();
+        }
+    };
+    struct SegmentIndexCmp {
+        bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
+            return a->get_graph_index() < b->get_graph_index();
+        }
+    };
+    using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;
+    using IndexedSegmentSet = std::set<SegmentPtr, SegmentIndexCmp>;
 
 };
 #endif

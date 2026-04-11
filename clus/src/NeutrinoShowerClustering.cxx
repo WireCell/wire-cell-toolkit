@@ -80,7 +80,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
     // Segment ordering is guaranteed by sorted_out_edges() which sorts by stable graph index,
     // eliminating any pointer-address-dependent randomness.
     // std::set is required here because complete_structure_with_start_segment() takes set&.
-    std::set<SegmentPtr> used_segments;
+    IndexedSegmentSet used_segments;
     std::vector<ShowerPtr> new_showers;
 
     // Seed BFS: all segments incident to main_vertex in stable index order.
@@ -250,7 +250,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
         return sa < sb;
     });
 
-    std::set<SegmentPtr> used_segments;
+    IndexedSegmentSet used_segments;
     for (auto& shower : main_vtx_showers) {
         for (auto edesc : shower->edges()) {
             auto seg = shower->view_graph()[edesc].segment;
@@ -1045,7 +1045,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
         
         // Complete shower structure
-        std::set<SegmentPtr> used_segments;
+        IndexedSegmentSet used_segments;
         shower->complete_structure_with_start_segment(used_segments);
         
         // Calculate shower direction
@@ -1391,7 +1391,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
             
             // Complete shower structure
-            std::set<SegmentPtr> used_segments;
+            IndexedSegmentSet used_segments;
             shower->complete_structure_with_start_segment(used_segments);
             
             // Calculate shower direction
@@ -1579,7 +1579,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
             
             // Complete shower structure
-            std::set<SegmentPtr> used_segments;
+            IndexedSegmentSet used_segments;
             shower->complete_structure_with_start_segment(used_segments);
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
@@ -1640,7 +1640,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
         std::map<SegmentPtr, std::set<ShowerPtr>, SegmentIndexCmp> map_segment_showers;
         ShowerSegmentMap map_segment_new_shower;
         std::vector<SegmentPtr> seg_order;  // preserves outer-loop order for deterministic processing
-        std::set<SegmentPtr> used_segments;
+        IndexedSegmentSet used_segments;
         IndexedShowerSet del_showers;
 
         WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
@@ -2282,7 +2282,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         shower->set_start_vertex(main_vertex, 1);
         shower->set_start_segment(sg);
         shower->set_start_point(main_vtx_pt);
-        std::set<SegmentPtr> tmp_used_segments;
+        IndexedSegmentSet tmp_used_segments;
         shower->complete_structure_with_start_segment(tmp_used_segments);
         if (pair_conn_type != 1) {
             if (segment_track_length(sg) > 44 * units::cm || sg->dir_weak())

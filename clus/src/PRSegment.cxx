@@ -34,9 +34,9 @@ namespace WireCell::Clus::PR {
         m_fits[i].flag_fix = flag;
     }
 
-    void Segment::set_fit_associate_vec(std::vector<PR::Fit >& tmp_fit_vec, const IDetectorVolumes::pointer& dv,const std::string& cloud_name){        
-        // Store fit points in m_fits vector
-        m_fits = tmp_fit_vec;
+    void Segment::set_fit_associate_vec(std::vector<PR::Fit> tmp_fit_vec, const IDetectorVolumes::pointer& dv, const std::string& cloud_name){
+        // Store fit points in m_fits vector (move to avoid a copy)
+        m_fits = std::move(tmp_fit_vec);
 
         // for (size_t i = 0; i < tmp_fit_pt_vec.size(); ++i) {
         //     Fit fit;
@@ -97,6 +97,11 @@ namespace WireCell::Clus::PR {
             m_fits.at(i).index = -1;
             m_fits.at(i).range = -1;
             m_fits.at(i).flag_fix = false;
+            // Populate apa/face so downstream multi-APA consumers retain face info after re-fit
+            if (dv) {
+                auto wpid = dv->contained_by(m_wcpts.at(i).point);
+                m_fits.at(i).paf = {wpid.apa(), wpid.face()};
+            }
         }
         
         // Reset direction and particle information

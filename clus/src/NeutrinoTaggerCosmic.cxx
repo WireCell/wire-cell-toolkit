@@ -485,10 +485,6 @@ bool PatternAlgorithms::cosmic_tagger(
     const Vector dir_drift   (1, 0, 0);
     const Vector dir_vertical(0, 1, 0);
 
-    // get_last_segment_vertex_long_muon takes std::set<SegmentPtr> (no comparator),
-    // but IndexedSegmentSet uses SegmentIndexCmp.  Build a plain set once.
-    std::set<SegmentPtr> segments_in_long_muon_plain(
-        segments_in_long_muon.begin(), segments_in_long_muon.end());
 
     bool flag_cosmic_1  = false;
     bool flag_cosmic_2  = false;
@@ -676,7 +672,7 @@ bool PatternAlgorithms::cosmic_tagger(
         } else if (long_muon) {
             // Flag 3: long muon shower chain going in wrong direction
             SegmentPtr start_sg = long_muon->start_segment();
-            auto [last_sg, other_vtx] = long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon_plain);
+            auto [last_sg, other_vtx] = long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon);
 
             Point test_p1 = vtx_fit_pt(other_vtx);
             Vector dir    = shower_cal_dir_3vector(*long_muon, mv_pt, 30 * units::cm);
@@ -743,7 +739,7 @@ bool PatternAlgorithms::cosmic_tagger(
                 flag_cosmic_4 = true;
 
         } else if (long_muon) {
-            auto [last_sg, other_vtx] = long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon_plain);
+            auto [last_sg, other_vtx] = long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon);
             Point test_p1 = vtx_fit_pt(other_vtx);
             Vector dir    = shower_cal_dir_3vector(*long_muon, mv_pt, 30 * units::cm);
             bool flag_inside = inside_fv(test_p1);
@@ -929,7 +925,7 @@ bool PatternAlgorithms::cosmic_tagger(
 
             } else if (long_muon) {
                 SegmentPtr start_sg = long_muon->start_segment();
-                auto [last_sg, other_vtx] = long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon_plain);
+                auto [last_sg, other_vtx] = long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon);
                 flag_inside = inside_fv(vtx_fit_pt(other_vtx));
                 dir = shower_cal_dir_3vector(*long_muon, mv_pt, 30 * units::cm);
                 if (start_sg) {

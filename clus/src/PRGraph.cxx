@@ -78,13 +78,18 @@ namespace WireCell::Clus::PR {
         auto vd1 = boost::source(ed, graph);
         auto vd2 = boost::target(ed, graph);
 
-        auto [ed2,ingraph] = boost::edge(vd1, vd2, graph);
-        if (!ingraph)  { return std::pair<VertexPtr, VertexPtr>{}; }
-
         auto vtx1 = graph[vd1].vertex;
         auto vtx2 = graph[vd2].vertex;
 
-        auto ept = seg->wcpts().front().point;
+        // Use wcpts if available, fall back to fits, then return unordered pair.
+        WireCell::Point ept;
+        if (!seg->wcpts().empty()) {
+            ept = seg->wcpts().front().point;
+        } else if (!seg->fits().empty()) {
+            ept = seg->fits().front().point;
+        } else {
+            return std::make_pair(vtx1, vtx2);
+        }
 
         double d1 = ray_length(Ray{vtx1->wcpt().point, ept});
         double d2 = ray_length(Ray{vtx2->wcpt().point, ept});

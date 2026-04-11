@@ -45,7 +45,7 @@ namespace WireCell::Clus::PR {
     class Vertex
         : public Flagged<VertexFlags> // can set flags
         , public Graphed<node_descriptor> // may live in a graph
-        , public HasCluster<Segment>      // has an associated Cluster*.
+        , public HasCluster<Vertex>       // has an associated Cluster*.
     {
     public:        
 

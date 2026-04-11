@@ -120,7 +120,7 @@ namespace WireCell::Clus::PR {
         bool fit_flag_skip(int i);
         void fit_flag_skip(int i, bool flag);
 
-        void set_fit_associate_vec(std::vector<PR::Fit >& tmp_fit_vec, const IDetectorVolumes::pointer& dv,const std::string& cloud_name="fit");
+        void set_fit_associate_vec(std::vector<PR::Fit> tmp_fit_vec, const IDetectorVolumes::pointer& dv, const std::string& cloud_name="fit");
         
         // Global indices management for point clouds
         void set_global_indices(const std::string& cloud_name, std::vector<size_t> indices) {

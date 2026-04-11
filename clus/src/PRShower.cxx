@@ -64,7 +64,7 @@ namespace WireCell::Clus::PR {
     /// Chainable setter of start vertex
     Shower& Shower::set_start_vertex(VertexPtr vtx, int type)
     {
-        if (! vtx->descriptor_valid()) {
+        if (!vtx || ! vtx->descriptor_valid()) {
             m_start_vertex = nullptr;
             return *this;
         }
@@ -87,7 +87,8 @@ namespace WireCell::Clus::PR {
         }
         TrajectoryView::add_segment(seg);
         m_start_segment = seg;
-        
+        invalidate_segment_caches();
+
         // If flag_include_vertices is true, add all vertices connected to this segment
         if (flag_include_vertices) {
             // Get the two vertices connected to this segment from the full graph
@@ -108,31 +109,32 @@ namespace WireCell::Clus::PR {
             if (seg_dpc_fit) {
                 auto shower_dpc_fit = this->dpcloud(cloud_name_fit);
                 if (!shower_dpc_fit) {
-                    // Create new DPC if it doesn't exist in shower, copying wpid_params from segment's DPC
-                    // We need the wpid_params to construct a new DPC, but it's private
-                    // For now, just share the pointer - we'll need to modify this if independent DPCs are needed
+                    // First segment: seed the shower DPC from this segment's DPC.
+                    // Shared pointer is acceptable here; subsequent add_segment calls
+                    // merge additional wpid_params and add_points to this same object.
                     this->dpcloud(cloud_name_fit, seg_dpc_fit);
                 } else {
-                    // Add points from segment's DPC to existing shower's DPC
+                    // F14: merge wpid_params so the shower DPC can answer queries for
+                    // all (apa,face) pairs present in any constituent segment's DPC.
+                    shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);
                     shower_dpc_fit->add_points(seg_dpc_fit->get_points());
                 }
             }
         }
-        
+
         if (!cloud_name_associate.empty()) {
             auto seg_dpc_associate = seg->dpcloud(cloud_name_associate);
             if (seg_dpc_associate) {
                 auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
                 if (!shower_dpc_associate) {
-                    // Create new DPC if it doesn't exist in shower
                     this->dpcloud(cloud_name_associate, seg_dpc_associate);
                 } else {
-                    // Add points from segment's DPC to existing shower's DPC
+                    shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);
                     shower_dpc_associate->add_points(seg_dpc_associate->get_points());
                 }
             }
         }
-        
+
         return *this;
     }
 
@@ -142,7 +144,8 @@ namespace WireCell::Clus::PR {
             return;
         }
         TrajectoryView::add_segment(seg);
-        
+        invalidate_segment_caches();
+
         // If flag_include_vertices is true, add all vertices connected to this segment
         if (flag_include_vertices) {
             // Get the two vertices connected to this segment from the full graph
@@ -163,26 +166,22 @@ namespace WireCell::Clus::PR {
             if (seg_dpc_fit) {
                 auto shower_dpc_fit = this->dpcloud(cloud_name_fit);
                 if (!shower_dpc_fit) {
-                    // Create new DPC if it doesn't exist in shower, copying wpid_params from segment's DPC
-                    // We need the wpid_params to construct a new DPC, but it's private
-                    // For now, just share the pointer - we'll need to modify this if independent DPCs are needed
                     this->dpcloud(cloud_name_fit, seg_dpc_fit);
                 } else {
-                    // Add points from segment's DPC to existing shower's DPC
+                    shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);  // F14
                     shower_dpc_fit->add_points(seg_dpc_fit->get_points());
                 }
             }
         }
-        
+
         if (!cloud_name_associate.empty()) {
             auto seg_dpc_associate = seg->dpcloud(cloud_name_associate);
             if (seg_dpc_associate) {
                 auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
                 if (!shower_dpc_associate) {
-                    // Create new DPC if it doesn't exist in shower
                     this->dpcloud(cloud_name_associate, seg_dpc_associate);
                 } else {
-                    // Add points from segment's DPC to existing shower's DPC
+                    shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);  // F14
                     shower_dpc_associate->add_points(seg_dpc_associate->get_points());
                 }
             }
@@ -207,8 +206,7 @@ namespace WireCell::Clus::PR {
 
     void Shower::add_shower(Shower& shower, const std::string& cloud_name_fit, const std::string& cloud_name_associate){
 
-        // std::cout << "Added Shower" << std::endl;
-
+        invalidate_segment_caches();
 
         for (auto vdesc : shower.nodes()) {
             VertexPtr vtx = m_full_graph[vdesc].vertex;
@@ -225,14 +223,19 @@ namespace WireCell::Clus::PR {
         for (auto edesc : shower.edges()) {
             SegmentPtr seg = m_full_graph[edesc].segment;
             if (!seg || !seg->descriptor_valid()) continue;
-            this->add_segment(seg);
+            // Graph-only add: DPCs are handled by the batch logic below to avoid
+            // double-adding points (Shower::add_segment would also merge DPCs).
+            TrajectoryView::add_segment(seg);
 
             if (!cloud_name_fit.empty()) {
                 auto seg_dpc = seg->dpcloud(cloud_name_fit);
                 if (seg_dpc) {
                     if (!this->dpcloud(cloud_name_fit)) {
-                        this->dpcloud(cloud_name_fit, seg_dpc);
+                        this->dpcloud(cloud_name_fit, seg_dpc);  // seed from first segment
                     } else {
+                        // F14: merge wpid_params before batching so the shower DPC
+                        // serves queries for all (apa,face) pairs across all segments.
+                        this->dpcloud(cloud_name_fit)->merge_wpid_params(*seg_dpc);
                         const auto& pts = seg_dpc->get_points();
                         batch_fit.insert(batch_fit.end(), pts.begin(), pts.end());
                     }
@@ -245,6 +248,7 @@ namespace WireCell::Clus::PR {
                     if (!this->dpcloud(cloud_name_associate)) {
                         this->dpcloud(cloud_name_associate, seg_dpc);
                     } else {
+                        this->dpcloud(cloud_name_associate)->merge_wpid_params(*seg_dpc);
                         const auto& pts = seg_dpc->get_points();
                         batch_associate.insert(batch_associate.end(), pts.begin(), pts.end());
                     }
@@ -262,7 +266,7 @@ namespace WireCell::Clus::PR {
 
     }
 
-    void Shower::complete_structure_with_start_segment(std::set<SegmentPtr>& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate) {
+    void Shower::complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit, const std::string& cloud_name_associate) {
         if (!m_start_segment || !m_start_segment->descriptor_valid()) return;
         
         std::vector<SegmentPtr> new_segments;
@@ -379,7 +383,24 @@ namespace WireCell::Clus::PR {
         if (flag_main && m_start_segment && m_start_segment->cluster()) {
             main_cluster = m_start_segment->cluster();
         }
-        
+
+        // Pre-count to avoid repeated reallocations
+        size_t n_pts = 0;
+        for (auto edesc : ordered_edges(*this, m_full_graph)) {
+            SegmentPtr seg = m_full_graph[edesc].segment;
+            if (!seg) continue;
+            if (flag_main && main_cluster && seg->cluster() != main_cluster) continue;
+            const auto& sz = seg->fits().size();
+            if (sz >= 2) n_pts += sz - 2;
+        }
+        for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
+            VertexPtr vtx = m_full_graph[vdesc].vertex;
+            if (!vtx) continue;
+            if (flag_main && main_cluster && vtx->cluster() != main_cluster) continue;
+            ++n_pts;
+        }
+        points.reserve(points.size() + n_pts);
+
         // Fill points from all segments in the shower's view (index-stable order)
         for (auto edesc : ordered_edges(*this, m_full_graph)) {
             SegmentPtr seg = m_full_graph[edesc].segment;
@@ -501,7 +522,7 @@ namespace WireCell::Clus::PR {
         return std::make_pair(result_vertices, result_segments);
     }
 
-    std::pair<SegmentPtr, VertexPtr> Shower::get_last_segment_vertex_long_muon(std::set<SegmentPtr>& segments_in_muons) {
+    std::pair<SegmentPtr, VertexPtr> Shower::get_last_segment_vertex_long_muon(IndexedSegmentSet& segments_in_muons) {
         VertexPtr s_vtx = m_start_vertex;
         SegmentPtr s_seg = m_start_segment;
         
@@ -554,33 +575,24 @@ namespace WireCell::Clus::PR {
     }
 
     int Shower::get_num_main_segments() {
+        if (m_num_main_segs_cache >= 0) return m_num_main_segs_cache;
+
         int num = 0;
-        
-        // If no start segment, return 0
         if (!m_start_segment) {
+            m_num_main_segs_cache = 0;
             return 0;
         }
-        
-        // Get the start segment's cluster
         auto start_cluster = m_start_segment->cluster();
         if (!start_cluster) {
+            m_num_main_segs_cache = 0;
             return 0;
         }
-        
-        // Get the view graph to access segments
         const auto& view = this->view_graph();
-        
-        // Iterate through all segments in the shower
         for (auto edesc : this->edges()) {
             SegmentPtr seg = view[edesc].segment;
-            if (!seg) continue;
-            
-            // Check if this segment's cluster matches the start segment's cluster
-            if (seg->cluster() == start_cluster) {
-                num++;
-            }
+            if (seg && seg->cluster() == start_cluster) ++num;
         }
-        
+        m_num_main_segs_cache = num;
         return num;
     }
 
@@ -589,20 +601,15 @@ namespace WireCell::Clus::PR {
     }
 
     double Shower::get_total_length(){
+        if (m_total_length_cache >= 0.0) return m_total_length_cache;
+
         double total_length = 0;
-        
-        // Get the view graph to access segments
         const auto& view = this->view_graph();
-        
-        // Iterate through all segments in the shower
         for (auto edesc : this->edges()) {
             SegmentPtr seg = view[edesc].segment;
-            if (!seg) continue;
-            
-            // Add segment length
-            total_length += segment_track_length(seg);
+            if (seg) total_length += segment_track_length(seg);
         }
-        
+        m_total_length_cache = total_length;
         return total_length;
     }
     double Shower::get_total_length(Facade::Cluster* cluster){
@@ -991,169 +998,98 @@ namespace WireCell::Clus::PR {
             if (flag_shower) set_flags(ShowerFlags::kShower);
             else unset_flags(ShowerFlags::kShower);
 
-            if (nsegments == nconnected_segs) {
-                // Single track (all connected)
-                
-                // Calculate start_point
-                const auto& fits = m_start_segment->fits();
-                if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
-                    if (!fits.empty()) {
-                        if (m_start_segment->dirsign() == 1) {
-                            data.start_point = fits.front().point;
-                        } else if (m_start_segment->dirsign() == -1) {
-                            data.start_point = fits.back().point;
+            // Common preamble for both single- and multi-track cases — start_point,
+            // init_dir, end_point, and dQ/dx collection are identical; only the
+            // final energy quantities differ.
+            const auto& fits = m_start_segment->fits();
+            double seg_length = segment_track_length(m_start_segment);
+            const auto& view = this->view_graph();
+
+            // Calculate start_point
+            if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
+                if (!fits.empty()) {
+                    if (m_start_segment->dirsign() == 1) {
+                        data.start_point = fits.front().point;
+                    } else if (m_start_segment->dirsign() == -1) {
+                        data.start_point = fits.back().point;
+                    }
+                }
+            } else {
+                if (m_start_vertex) {
+                    data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
+                    // Fallback: if "fit" pcloud is absent or empty, use fits directly
+                    if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {
+                        if (!fits.empty()) {
+                            data.start_point = (m_start_segment->dirsign() == -1) ? fits.back().point : fits.front().point;
                         }
                     }
-                } else {
-                    if (m_start_vertex) {
-                        data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
-                    }
                 }
-                
-                // Calculate init_dir
-                double seg_length = segment_track_length(m_start_segment);
-                if (data.start_connection_type == 1) {
-                    if (seg_length > 8 * units::cm) {
-                        data.init_dir = segment_cal_dir_3vector(m_start_segment);
-                    } else if (m_start_vertex) {
-                        data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
-                    }
-                } else if (data.start_connection_type == 2 || data.start_connection_type == 3) {
-                    if (m_start_vertex) {
-                        data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
-                    }
-                }
-                
-                // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
-                double max_dis = 0;
-                const auto& view = this->view_graph();
-                for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
-                    VertexPtr vtx = view[vdesc].vertex;
-                    if (!vtx) continue;
-                    double dis = (data.start_point - vtx->fit().point).magnitude();
-                    if (dis > max_dis) {
-                        max_dis = dis;
-                        data.end_point = vtx->fit().point;
-                    }
-                }
-                // std::cout << "Vertex 2: " <<  data.end_point << std::endl;
+            }
 
-                
-                // Collect all dQ and dx from all segments
-                double total_length = 0;
-                std::vector<double> vec_dQ, vec_dx;
-                for (auto edesc : this->edges()) {
-                    SegmentPtr seg = view[edesc].segment;
-                    if (!seg) continue;
-                    
-                    total_length += segment_track_length(seg);
-                    
-                    const auto& seg_fits = seg->fits();
-                    for (const auto& fit : seg_fits) {
-                        vec_dQ.push_back(fit.dQ);
-                        vec_dx.push_back(fit.dx);
-                    }
+            // Calculate init_dir
+            if (data.start_connection_type == 1) {
+                if (seg_length > 8 * units::cm) {
+                    data.init_dir = segment_cal_dir_3vector(m_start_segment);
+                } else if (m_start_vertex) {
+                    data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
                 }
-                
-                // Calculate energies
+            } else if (data.start_connection_type == 2 || data.start_connection_type == 3) {
+                if (m_start_vertex) {
+                    data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
+                }
+            }
+            // Fallback: if direction is still zero, use shower_cal_dir_3vector from start vertex
+            if (data.init_dir.magnitude() == 0) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "calculate_kinematics: nseg={} conn_type={} seg_length={:.1f}cm"
+                    " seg_nfits={} seg_dirsign={} — init_dir is zero, applying fallback",
+                    get_num_segments(), data.start_connection_type,
+                    seg_length / units::cm,
+                    m_start_segment->fits().size(), m_start_segment->dirsign());
+                if (m_start_vertex) {
+                    data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
+                }
+            }
+
+            // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
+            double max_dis = 0;
+            for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
+                VertexPtr vtx = view[vdesc].vertex;
+                if (!vtx) continue;
+                double dis = (data.start_point - vtx->fit().point).magnitude();
+                if (dis > max_dis) {
+                    max_dis = dis;
+                    data.end_point = vtx->fit().point;
+                }
+            }
+
+            // Collect dQ and dx from all segments; accumulate total_length for range-based energy
+            double total_length = 0;
+            std::vector<double> vec_dQ, vec_dx;
+            for (auto edesc : this->edges()) {
+                SegmentPtr seg = view[edesc].segment;
+                if (!seg) continue;
+                total_length += segment_track_length(seg);
+                const auto& seg_fits = seg->fits();
+                for (const auto& fit : seg_fits) {
+                    vec_dQ.push_back(fit.dQ);
+                    vec_dx.push_back(fit.dx);
+                }
+            }
+
+            // Calculate energies — only final quantities differ between single/multi-track
+            data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
+            if (nsegments == nconnected_segs) {
+                // Single track: range-based energy is meaningful
                 data.kenergy_range = cal_kine_range(total_length, data.particle_type, particle_data);
-                data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
-                
-                // Calculate kenergy_best
                 if (data.start_connection_type == 1) {
                     data.kenergy_best = (seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range;
                 } else {
-                    if (flag_shower) {
-                        data.kenergy_best = 0;
-                    } else {
-                        data.kenergy_best = (seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range;
-                    }
+                    data.kenergy_best = flag_shower ? 0 : ((seg_length < 4 * units::cm) ? data.kenergy_dQdx : data.kenergy_range);
                 }
-                
             } else {
-                // Multiple tracks (not all connected)
-                
-                // Calculate start_point
-                const auto& fits = m_start_segment->fits();
-                if (data.start_connection_type == 1 || !this->dpcloud("fit")) {
-                    if (!fits.empty()) {
-                        if (m_start_segment->dirsign() == 1) {
-                            data.start_point = fits.front().point;
-                        } else if (m_start_segment->dirsign() == -1) {
-                            data.start_point = fits.back().point;
-                        }
-                    }
-                } else {
-                    if (m_start_vertex) {
-                        data.start_point = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit").second;
-                        // // Fallback: if "fit" pcloud is absent or empty, use fits directly
-                        // if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {
-                        //     const auto& fits2 = m_start_segment->fits();
-                        //     if (!fits2.empty()) {
-                        //         data.start_point = (m_start_segment->dirsign() == -1) ? fits2.back().point : fits2.front().point;
-                        //     }
-                        // }
-                    }
-                }
-
-                // Calculate init_dir
-                double seg_length = segment_track_length(m_start_segment);
-                if (data.start_connection_type == 1) {
-                    if (seg_length > 8 * units::cm) {
-                        data.init_dir = segment_cal_dir_3vector(m_start_segment);
-                    } else if (m_start_vertex) {
-                        data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
-                    }
-                } else if (data.start_connection_type == 2 || data.start_connection_type == 3) {
-                    if (m_start_vertex) {
-                        data.init_dir = (data.start_point - m_start_vertex->fit().point).norm();
-                    }
-                }
-                // Fallback: if direction is still zero, use shower_cal_dir_3vector from start vertex
-                if (data.init_dir.magnitude() == 0) {
-                    SPDLOG_LOGGER_DEBUG(s_log,
-                        "calculate_kinematics: nseg={} conn_type={} seg_length={:.1f}cm"
-                        " seg_nfits={} seg_dirsign={} — init_dir is zero, applying fallback",
-                        get_num_segments(), data.start_connection_type,
-                        seg_length / units::cm,
-                        m_start_segment->fits().size(), m_start_segment->dirsign());
-                    if (m_start_vertex) {
-                        data.init_dir = shower_cal_dir_3vector(*this, m_start_vertex->fit().point, 12 * units::cm);
-                    }
-                }
-
-                // Find farthest vertex for end_point — ordered_nodes gives index-stable tie-breaking
-                double max_dis = 0;
-                const auto& view = this->view_graph();
-                for (auto vdesc : ordered_nodes(*this, m_full_graph)) {
-                    VertexPtr vtx = view[vdesc].vertex;
-                    if (!vtx) continue;
-                    double dis = (data.start_point - vtx->fit().point).magnitude();
-                    if (dis > max_dis) {
-                        max_dis = dis;
-                        data.end_point = vtx->fit().point;
-                        // std::cout << "New farthest vertex: " << data.end_point << " Cluster IDs:" << vtx->cluster()->get_cluster_id() << std::endl;
-                    }
-                }
-                // std::cout << "Vertex 3: " <<  data.end_point << std::endl;
-
-
-                // Collect all dQ and dx from all segments
-                std::vector<double> vec_dQ, vec_dx;
-                for (auto edesc : this->edges()) {
-                    SegmentPtr seg = view[edesc].segment;
-                    if (!seg) continue;
-                    
-                    const auto& seg_fits = seg->fits();
-                    for (const auto& fit : seg_fits) {
-                        vec_dQ.push_back(fit.dQ);
-                        vec_dx.push_back(fit.dx);
-                    }
-                }
-                
-                // Calculate energies
+                // Multiple tracks: range energy not meaningful
                 data.kenergy_range = 0;
-                data.kenergy_dQdx = cal_kine_dQdx(vec_dQ, vec_dx, recomb_model);
                 data.kenergy_best = 0;
             }
         }
@@ -1184,6 +1120,7 @@ namespace WireCell::Clus::PR {
 
     void Shower::calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
         // Get particle type from start segment
+        if (!m_start_segment || !m_start_segment->has_particle_info()) return;
         int particle_type = abs(m_start_segment->particle_info()->pdg());
         // double particle_mass = m_start_segment->particle_info()->mass();
         

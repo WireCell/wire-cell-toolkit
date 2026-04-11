@@ -74,16 +74,14 @@ namespace WireCell::Clus::PR {
             raise<RuntimeError>("create_segment_fit_point_cloud: invalid segment or missing cluster");
         }
         
-        // Extract points from segment fits.
-        // fit.valid() checks index>=0, which is only set during full track fitting.
-        // Segments initialized from wcpts (e.g. via clear_fit) have index=-1 but
-        // still carry valid 3D positions. Include any fit whose point is non-zero.
+        // Include all fit points unconditionally.  The origin-rejection guard was overly
+        // cautious: fits from clear_fit carry valid wcpt-derived positions, and any fit
+        // with index>=0 (fit.valid()) should be included even if it happens to land at
+        // (0,0,0).  Downstream create_segment_point_cloud handles empty inputs safely.
         const auto& fits = segment->fits();
         fit_points.reserve(fits.size());
         for (const auto& fit : fits) {
-            if (fit.valid() || (fit.point.x() != 0 || fit.point.y() != 0 || fit.point.z() != 0)) {
-                fit_points.push_back(fit.point);
-            }
+            fit_points.push_back(fit.point);
         }
         create_segment_point_cloud(segment, fit_points, dv, cloud_name);
   
@@ -134,6 +132,12 @@ namespace WireCell::Clus::PR {
         return {min_dist, closest_point};
     }
 
+    // NOTE (multi-APA semantics): this function intentionally takes a single (apa,face)
+    // and returns the 2D distances from the segment's points that share that face.
+    // For cross-APA segments, points on the other face are excluded — this is correct
+    // behaviour because the query point is a 2D wire measurement at a specific face and
+    // the comparison must use the same wire-coordinate system.  Callers are responsible
+    // for passing the face that matches the query point.
     std::tuple<double, double, double> segment_get_closest_2d_distances(SegmentPtr seg, const WireCell::Point& point, int apa, int face, const std::string& cloud_name) {
         if (!seg) {
             raise<RuntimeError>("segment_get_closest_2d_distances: invalid segment");
@@ -191,6 +195,11 @@ namespace WireCell::Clus::PR {
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
 
+        // Drift direction used to compute para_angles[i] = |angle_to_drift - 90°|.
+        // The formula |acos(v·d/|v|) - 90°| is symmetric under negation of d, so
+        // (1,0,0) is correct for both +x and -x drift (opposing APA faces in SBND/MicroBooNE).
+        // For detectors with a non-x drift axis this would need to be resolved from
+        // IDetectorVolumes::contained_by(seg start/end) — a future extension.
         WireCell::Vector drift_dir_abs(1,0,0);
         
         const auto& fits = seg->fits();
@@ -736,9 +745,9 @@ namespace WireCell::Clus::PR {
         // Clamp indices to valid range (following WCPPID logic)
         if (n1 < 0) n1 = 0;
         if (n1 >= static_cast<int>(fits.size())) n1 = static_cast<int>(fits.size()) - 1;
-        if (n2 < 0) n2 = 0;
+        if (n2 < 0) n2 = static_cast<int>(fits.size()) - 1;
         if (n2 >= static_cast<int>(fits.size())) n2 = static_cast<int>(fits.size()) - 1;
-        
+
         const Point& p1 = fits[n1].point;
         const Point& p2 = fits[n2].point;
         WireCell::Vector temp_dir = p1 - p2;
@@ -1714,7 +1723,14 @@ namespace WireCell::Clus::PR {
         // using MS = std::chrono::duration<double, std::milli>;
         // auto t_total = Clock::now();
 
-        std::map<Facade::Cluster*, std::vector<SegmentPtr> > map_cluster_segs;
+        // Use cluster_id-based comparator so map_cluster_segs is iterated in a
+        // deterministic, run-to-run stable order (not pointer-address order).
+        struct ClusterIdCmp {
+            bool operator()(Facade::Cluster* a, Facade::Cluster* b) const {
+                return a->get_cluster_id() < b->get_cluster_id();
+            }
+        };
+        std::map<Facade::Cluster*, std::vector<SegmentPtr>, ClusterIdCmp> map_cluster_segs;
         for (auto seg : segments){
             if (seg->cluster()){
                 map_cluster_segs[seg->cluster()].push_back(seg);
@@ -1727,9 +1743,10 @@ namespace WireCell::Clus::PR {
         // during ghost-removal — not just those belonging to the cluster being processed.
         using ApFaceKey = std::tuple<int, int, int>;  // (plane, apa, face)
         struct Pt2D { double x, y; };
-        std::map<SegmentPtr, std::shared_ptr<Facade::DynamicPointCloud>> seg_dpc_cache;
-        std::map<SegmentPtr, std::vector<std::array<double, 3>>>         seg_pts3d;
-        std::map<SegmentPtr, std::map<ApFaceKey, std::vector<Pt2D>>>     seg_pts2d;
+        // Use SegmentIndexCmp so iteration order is deterministic (graph index), not pointer-address.
+        std::map<SegmentPtr, std::shared_ptr<Facade::DynamicPointCloud>, SegmentIndexCmp> seg_dpc_cache;
+        std::map<SegmentPtr, std::vector<std::array<double, 3>>,         SegmentIndexCmp> seg_pts3d;
+        std::map<SegmentPtr, std::map<ApFaceKey, std::vector<Pt2D>>,     SegmentIndexCmp> seg_pts2d;
         for (auto seg : segments) {
             auto dpc = seg->dpcloud("fit");
             if (!dpc) continue;
@@ -1748,22 +1765,46 @@ namespace WireCell::Clus::PR {
             }
         }
 
-        // Cache projection angles per (apa, face).
-        // Segments in different clusters that share the same APA/face have the same angles,
-        // so one lookup per (apa, face) pair suffices across all clusters.
-        std::map<std::pair<int,int>, std::array<double, 3>> ang_cache;
-        auto get_angles_cached = [&](int apa, int face) -> const std::array<double, 3>& {
-            auto key = std::make_pair(apa, face);
-            auto it = ang_cache.find(key);
-            if (it == ang_cache.end()) {
-                std::array<double,3> a = {0.0, 0.0, 0.0};
-                for (auto& [s, dpc] : seg_dpc_cache) {
-                    a = dpc->get_angles(face, apa);
-                    if (a[0] != 0.0 || a[1] != 0.0 || a[2] != 0.0) break;
-                }
-                ang_cache[key] = a;
-                return ang_cache[key];
+        // F17: Build global per-(plane,apa,face) 2D KD-trees from all segment fit-point projections.
+        // Querying these once per cluster point replaces the O(S) inner loop over segments,
+        // reducing ghost-removal from O(P×S×F) to O(P×log(total_fits)) overall.
+        using nfkd2d_t = NFKDVec::Tree<double, NFKDVec::IndexDynamic>;
+        std::map<ApFaceKey, nfkd2d_t> global_kd2d;
+        for (const auto& [seg, pts2d_map] : seg_pts2d) {
+            for (const auto& [apfkey, pts] : pts2d_map) {
+                auto [it, inserted] = global_kd2d.try_emplace(apfkey, 2);
+                (void)inserted;
+                std::vector<double> xs, ys;
+                xs.reserve(pts.size());
+                ys.reserve(pts.size());
+                for (const auto& p : pts) { xs.push_back(p.x); ys.push_back(p.y); }
+                it->second.append(nfkd2d_t::points_type{xs, ys});
             }
+        }
+
+        // Pre-populate the angle cache for every (apa, face) pair that actually appears in
+        // seg_pts2d.  The old lazy approach iterated seg_dpc_cache at query time and could
+        // silently store (0,0,0) when the first segment in cache order lacked that face —
+        // giving wrong 2D projections for all subsequent points on that face.
+        std::map<std::pair<int,int>, std::array<double, 3>> ang_cache;
+        for (const auto& [seg, pts2d_map] : seg_pts2d) {
+            auto dpc_it = seg_dpc_cache.find(seg);
+            if (dpc_it == seg_dpc_cache.end()) continue;
+            const auto& dpc = dpc_it->second;
+            for (const auto& [apfkey, pts] : pts2d_map) {
+                const auto& [pind, apa, face] = apfkey;
+                auto key = std::make_pair(apa, face);
+                if (ang_cache.count(key)) continue;  // already populated for this (apa,face)
+                auto a = dpc->get_angles(face, apa);
+                if (a[0] != 0.0 || a[1] != 0.0 || a[2] != 0.0) {
+                    ang_cache[key] = a;
+                }
+            }
+        }
+        // O(1) lookup; unknown (apa,face) inserts (0,0,0) by default.
+        auto get_angles_cached = [&](int apa, int face) -> const std::array<double, 3>& {
+            auto [it, inserted] = ang_cache.emplace(
+                std::make_pair(apa, face), std::array<double, 3>{0.0, 0.0, 0.0});
             return it->second;
         };
 
@@ -1886,23 +1927,33 @@ namespace WireCell::Clus::PR {
                     std::pair<double, WireCell::Point> closest_dis_point = {get_3d_dist_fast(main_sg, gp), WireCell::Point(0,0,0)};
                     std::tuple<double, double, double> closest_2d_dis = get_2d_dist_fast(main_sg, qx, qy, apa, face);
 
+                    // F17: Replace O(S) inner loop with O(log N) global KD-tree queries.
+                    // The global trees include main_sg's own points, so global_min <= closest_2d_dis
+                    // for each plane.  Equality means main_sg achieves the global minimum — exactly
+                    // the condition the downstream flag_change comparisons check.
                     std::tuple<double, double, double> min_2d_dis = closest_2d_dis;
+                    {
+                        const std::array<double, 2> query_u = {qx, qy[0]};
+                        const std::array<double, 2> query_v = {qx, qy[1]};
+                        const std::array<double, 2> query_w = {qx, qy[2]};
+                        auto q2 = [&](int pind, const std::array<double,2>& q) {
+                            auto kit = global_kd2d.find({pind, apa, face});
+                            if (kit == global_kd2d.end()) return;
+                            auto res = kit->second.knn(1, q);
+                            if (!res.empty()) {
+                                double d = std::sqrt(res[0].second);
+                                if (pind == 0) std::get<0>(min_2d_dis) = d;
+                                else if (pind == 1) std::get<1>(min_2d_dis) = d;
+                                else               std::get<2>(min_2d_dis) = d;
+                            }
+                        };
+                        q2(0, query_u);
+                        q2(1, query_v);
+                        q2(2, query_w);
+                    }
 
                     // check against main_sg;
                     bool flag_change = true;
-
-                    // Compare against ALL segments (including from other clusters) to find minimum
-                    // 2D distances — matches prototype which compares against all segments globally.
-                    for (auto seg : segments) {
-                       if (main_sg == seg) continue;
-
-                        // Get 2D distances for this segment (linear scan)
-                        std::tuple<double, double, double> temp_2d_dis = get_2d_dist_fast(seg, qx, qy, apa, face);
-                        // Update minimum distances for each plane
-                        if (std::get<0>(temp_2d_dis) < std::get<0>(min_2d_dis)) std::get<0>(min_2d_dis) = std::get<0>(temp_2d_dis);
-                        if (std::get<1>(temp_2d_dis) < std::get<1>(min_2d_dis)) std::get<1>(min_2d_dis) = std::get<1>(temp_2d_dis);
-                        if (std::get<2>(temp_2d_dis) < std::get<2>(min_2d_dis)) std::get<2>(min_2d_dis) = std::get<2>(temp_2d_dis);
-                    }
                 
                     if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis)) // all closest
                     flag_change = false;

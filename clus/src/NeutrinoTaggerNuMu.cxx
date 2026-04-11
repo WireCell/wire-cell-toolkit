@@ -114,18 +114,16 @@ std::pair<int, int> PatternAlgorithms::count_daughters(
 // then counts daughters at its far end.
 //
 // Prototype: WCPPID::NeutrinoID::count_daughters(WCShower*) in NeutrinoID_numu_tagger.h.
-// segments_in_long_muon_plain: plain std::set (no comparator), as required by
-//   get_last_segment_vertex_long_muon. Convert from IndexedSegmentSet at call site.
 // ===========================================================================
 std::pair<int, int> PatternAlgorithms::count_daughters(
     Graph& graph,
     ShowerPtr max_long_muon,
     VertexPtr main_vertex,
-    std::set<SegmentPtr>& segments_in_long_muon_plain)
+    IndexedSegmentSet& segments_in_long_muon)
 {
     if (!max_long_muon || !main_vertex) return {0, 0};
 
-    auto [last_sg, other_vtx] = max_long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon_plain);
+    auto [last_sg, other_vtx] = max_long_muon->get_last_segment_vertex_long_muon(segments_in_long_muon);
     if (!last_sg) return {0, 0};
 
     auto [v1, v2] = find_vertices(graph, last_sg);
@@ -182,10 +180,6 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
     ShowerPtr  max_long_muon = nullptr;
 
     const int main_cl_id = main_cluster ? main_cluster->get_cluster_id() : -1;
-
-    // Convert IndexedSegmentSet → plain set for get_last_segment_vertex_long_muon
-    std::set<SegmentPtr> segments_in_long_muon_plain(
-        segments_in_long_muon.begin(), segments_in_long_muon.end());
 
     // -----------------------------------------------------------------------
     // Flag 1: direct muon check — segments at main_vertex.
@@ -249,7 +243,7 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
             double total_length = shower->get_total_length();
 
             auto [n_daughter_tracks, n_daughter_all] =
-                count_daughters(graph, shower, main_vertex, segments_in_long_muon_plain);
+                count_daughters(graph, shower, main_vertex, segments_in_long_muon);
 
             if (length > 18*units::cm &&
                 !(n_daughter_tracks > 1 || n_daughter_all - n_daughter_tracks > 2))

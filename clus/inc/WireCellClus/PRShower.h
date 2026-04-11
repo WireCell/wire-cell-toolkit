@@ -5,6 +5,7 @@
 #include "WireCellClus/PRTrajectoryView.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRSegment.h"
+#include "WireCellClus/PRGraph.h"
 #include "WireCellClus/Facade_Cluster.h"
 
 #include "WireCellUtil/Flagged.h"
@@ -17,27 +18,6 @@
 #include <set>
 
 namespace WireCell::Clus::PR {
-
-    /** Comparators for VertexPtr and SegmentPtr that order by the stable
-     *  graph index stored directly in the object rather than by raw pointer
-     *  address.  No graph reference is required.
-     *
-     *  Use these (via IndexedVertexSet / IndexedSegmentSet) wherever a
-     *  std::set<VertexPtr> or std::set<SegmentPtr> must produce a
-     *  deterministic iteration order across runs.
-     */
-    struct VertexIndexCmp {
-        bool operator()(const VertexPtr& a, const VertexPtr& b) const {
-            return a->get_graph_index() < b->get_graph_index();
-        }
-    };
-    struct SegmentIndexCmp {
-        bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
-            return a->get_graph_index() < b->get_graph_index();
-        }
-    };
-    using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;
-    using IndexedSegmentSet = std::set<SegmentPtr, SegmentIndexCmp>;
 
     /** The "flags" that may be set on a shower.
      */
@@ -185,7 +165,7 @@ namespace WireCell::Clus::PR {
 
         // Add all segments and vertices from another shower to this one
         void add_shower(Shower& temp_shower, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
-        void complete_structure_with_start_segment(std::set<SegmentPtr>& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
 
 
         // get the information from the shower
@@ -196,7 +176,7 @@ namespace WireCell::Clus::PR {
         int count_connected_segments(SegmentPtr seg);
         std::pair<IndexedVertexSet, IndexedSegmentSet> get_connected_pieces(SegmentPtr seg);
 
-        std::pair<SegmentPtr, VertexPtr> get_last_segment_vertex_long_muon(std::set<SegmentPtr>& segments_in_muons);
+        std::pair<SegmentPtr, VertexPtr> get_last_segment_vertex_long_muon(IndexedSegmentSet& segments_in_muons);
 
         // some simple get functions
         int get_num_main_segments();
@@ -219,6 +199,15 @@ namespace WireCell::Clus::PR {
         VertexPtr m_start_vertex;
         SegmentPtr m_start_segment;
         int m_shower_id{-1};
+
+        // Lazy caches — invalidated whenever segments are added.
+        mutable double m_total_length_cache{-1.0};
+        mutable int    m_num_main_segs_cache{-1};
+
+        void invalidate_segment_caches() {
+            m_total_length_cache  = -1.0;
+            m_num_main_segs_cache = -1;
+        }
 
     };
 
