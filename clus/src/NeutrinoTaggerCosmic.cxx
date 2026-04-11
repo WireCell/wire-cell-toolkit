@@ -56,6 +56,7 @@ static inline double vec_phi(const Vector& v) {
 // NeutrinoVertexFinder.cxx.
 // ---------------------------------------------------------------------------
 static inline Point vtx_fit_pt(VertexPtr v) {
+    if (!v) return Point{};
     return v->fit().valid() ? v->fit().point : v->wcpt().point;
 }
 
@@ -290,9 +291,9 @@ bool PatternAlgorithms::bad_reconstruction(
         double main_length  = segment_track_length(sg);
 
         VertexPtr other_vtx = find_other_vertex(graph, sg, vtx);
-        Point     other_pt  = vtx_fit_pt(other_vtx);
 
         if (main_length > 10 * units::cm && other_vtx) {
+            Point  other_pt = vtx_fit_pt(other_vtx);
             Vector dir1 = segment_cal_dir_3vector(sg, other_pt, 15 * units::cm);
 
             // Examine all other shower segments for track-like continuations

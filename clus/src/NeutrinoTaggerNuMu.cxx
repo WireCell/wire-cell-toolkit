@@ -47,6 +47,7 @@ static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 // ---------------------------------------------------------------------------
 
 static inline Point vtx_fit_pt(VertexPtr v) {
+    if (!v) return Point{};
     return v->fit().valid() ? v->fit().point : v->wcpt().point;
 }
 

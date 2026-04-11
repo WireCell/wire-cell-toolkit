@@ -21,6 +21,7 @@
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Persist.h"
 
 #include "TMVA/Reader.h"
 
@@ -39,12 +40,15 @@ UbooneNumuBDTScorer::UbooneNumuBDTScorer()
 
 void UbooneNumuBDTScorer::configure(const WireCell::Configuration& cfg)
 {
-    m_grouping_name  = get<std::string>(cfg, "grouping",        "live");
-    m_numu1_xml      = get<std::string>(cfg, "numu1_weights_xml",    "");
-    m_numu2_xml      = get<std::string>(cfg, "numu2_weights_xml",    "");
-    m_numu3_xml      = get<std::string>(cfg, "numu3_weights_xml",    "");
-    m_cosmict10_xml  = get<std::string>(cfg, "cosmict10_weights_xml","");
-    m_numu_xgboost_xml = get<std::string>(cfg, "numu_xgboost_xml",  "");
+    auto resolve = [](const std::string& p) {
+        return p.empty() ? p : Persist::resolve(p);
+    };
+    m_grouping_name    = get<std::string>(cfg, "grouping",             "live");
+    m_numu1_xml        = resolve(get<std::string>(cfg, "numu1_weights_xml",     ""));
+    m_numu2_xml        = resolve(get<std::string>(cfg, "numu2_weights_xml",     ""));
+    m_numu3_xml        = resolve(get<std::string>(cfg, "numu3_weights_xml",     ""));
+    m_cosmict10_xml    = resolve(get<std::string>(cfg, "cosmict10_weights_xml", ""));
+    m_numu_xgboost_xml = resolve(get<std::string>(cfg, "numu_xgboost_xml",      ""));
 }
 
 Configuration UbooneNumuBDTScorer::default_configuration() const

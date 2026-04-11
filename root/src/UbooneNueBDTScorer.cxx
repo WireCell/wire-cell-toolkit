@@ -47,6 +47,7 @@
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade_Grouping.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Persist.h"
 
 #include "TMVA/Reader.h"
 
@@ -65,39 +66,42 @@ UbooneNueBDTScorer::UbooneNueBDTScorer()
 
 void UbooneNueBDTScorer::configure(const WireCell::Configuration& cfg)
 {
+    auto resolve = [](const std::string& p) {
+        return p.empty() ? p : Persist::resolve(p);
+    };
     m_grouping_name   = get<std::string>(cfg, "grouping", "live");
 
-    m_mipid_xml       = get<std::string>(cfg, "mipid_weights_xml",       "");
-    m_gap_xml         = get<std::string>(cfg, "gap_weights_xml",         "");
-    m_hol_lol_xml     = get<std::string>(cfg, "hol_lol_weights_xml",     "");
-    m_cme_anc_xml     = get<std::string>(cfg, "cme_anc_weights_xml",     "");
-    m_mgo_mgt_xml     = get<std::string>(cfg, "mgo_mgt_weights_xml",     "");
-    m_br1_xml         = get<std::string>(cfg, "br1_weights_xml",         "");
-    m_br3_xml         = get<std::string>(cfg, "br3_weights_xml",         "");
-    m_br3_3_xml       = get<std::string>(cfg, "br3_3_weights_xml",       "");
-    m_br3_5_xml       = get<std::string>(cfg, "br3_5_weights_xml",       "");
-    m_br3_6_xml       = get<std::string>(cfg, "br3_6_weights_xml",       "");
-    m_stemdir_br2_xml = get<std::string>(cfg, "stemdir_br2_weights_xml", "");
-    m_trimuon_xml     = get<std::string>(cfg, "trimuon_weights_xml",     "");
-    m_br4_tro_xml     = get<std::string>(cfg, "br4_tro_weights_xml",     "");
-    m_mipquality_xml  = get<std::string>(cfg, "mipquality_weights_xml",  "");
-    m_pio_1_xml       = get<std::string>(cfg, "pio_1_weights_xml",       "");
-    m_pio_2_xml       = get<std::string>(cfg, "pio_2_weights_xml",       "");
-    m_stw_spt_xml     = get<std::string>(cfg, "stw_spt_weights_xml",     "");
-    m_vis_1_xml       = get<std::string>(cfg, "vis_1_weights_xml",       "");
-    m_vis_2_xml       = get<std::string>(cfg, "vis_2_weights_xml",       "");
-    m_stw_2_xml       = get<std::string>(cfg, "stw_2_weights_xml",       "");
-    m_stw_3_xml       = get<std::string>(cfg, "stw_3_weights_xml",       "");
-    m_stw_4_xml       = get<std::string>(cfg, "stw_4_weights_xml",       "");
-    m_sig_1_xml       = get<std::string>(cfg, "sig_1_weights_xml",       "");
-    m_sig_2_xml       = get<std::string>(cfg, "sig_2_weights_xml",       "");
-    m_lol_1_xml       = get<std::string>(cfg, "lol_1_weights_xml",       "");
-    m_lol_2_xml       = get<std::string>(cfg, "lol_2_weights_xml",       "");
-    m_tro_1_xml       = get<std::string>(cfg, "tro_1_weights_xml",       "");
-    m_tro_2_xml       = get<std::string>(cfg, "tro_2_weights_xml",       "");
-    m_tro_4_xml       = get<std::string>(cfg, "tro_4_weights_xml",       "");
-    m_tro_5_xml       = get<std::string>(cfg, "tro_5_weights_xml",       "");
-    m_nue_xgboost_xml = get<std::string>(cfg, "nue_xgboost_xml",         "");
+    m_mipid_xml       = resolve(get<std::string>(cfg, "mipid_weights_xml",       ""));
+    m_gap_xml         = resolve(get<std::string>(cfg, "gap_weights_xml",         ""));
+    m_hol_lol_xml     = resolve(get<std::string>(cfg, "hol_lol_weights_xml",     ""));
+    m_cme_anc_xml     = resolve(get<std::string>(cfg, "cme_anc_weights_xml",     ""));
+    m_mgo_mgt_xml     = resolve(get<std::string>(cfg, "mgo_mgt_weights_xml",     ""));
+    m_br1_xml         = resolve(get<std::string>(cfg, "br1_weights_xml",         ""));
+    m_br3_xml         = resolve(get<std::string>(cfg, "br3_weights_xml",         ""));
+    m_br3_3_xml       = resolve(get<std::string>(cfg, "br3_3_weights_xml",       ""));
+    m_br3_5_xml       = resolve(get<std::string>(cfg, "br3_5_weights_xml",       ""));
+    m_br3_6_xml       = resolve(get<std::string>(cfg, "br3_6_weights_xml",       ""));
+    m_stemdir_br2_xml = resolve(get<std::string>(cfg, "stemdir_br2_weights_xml", ""));
+    m_trimuon_xml     = resolve(get<std::string>(cfg, "trimuon_weights_xml",     ""));
+    m_br4_tro_xml     = resolve(get<std::string>(cfg, "br4_tro_weights_xml",     ""));
+    m_mipquality_xml  = resolve(get<std::string>(cfg, "mipquality_weights_xml",  ""));
+    m_pio_1_xml       = resolve(get<std::string>(cfg, "pio_1_weights_xml",       ""));
+    m_pio_2_xml       = resolve(get<std::string>(cfg, "pio_2_weights_xml",       ""));
+    m_stw_spt_xml     = resolve(get<std::string>(cfg, "stw_spt_weights_xml",     ""));
+    m_vis_1_xml       = resolve(get<std::string>(cfg, "vis_1_weights_xml",       ""));
+    m_vis_2_xml       = resolve(get<std::string>(cfg, "vis_2_weights_xml",       ""));
+    m_stw_2_xml       = resolve(get<std::string>(cfg, "stw_2_weights_xml",       ""));
+    m_stw_3_xml       = resolve(get<std::string>(cfg, "stw_3_weights_xml",       ""));
+    m_stw_4_xml       = resolve(get<std::string>(cfg, "stw_4_weights_xml",       ""));
+    m_sig_1_xml       = resolve(get<std::string>(cfg, "sig_1_weights_xml",       ""));
+    m_sig_2_xml       = resolve(get<std::string>(cfg, "sig_2_weights_xml",       ""));
+    m_lol_1_xml       = resolve(get<std::string>(cfg, "lol_1_weights_xml",       ""));
+    m_lol_2_xml       = resolve(get<std::string>(cfg, "lol_2_weights_xml",       ""));
+    m_tro_1_xml       = resolve(get<std::string>(cfg, "tro_1_weights_xml",       ""));
+    m_tro_2_xml       = resolve(get<std::string>(cfg, "tro_2_weights_xml",       ""));
+    m_tro_4_xml       = resolve(get<std::string>(cfg, "tro_4_weights_xml",       ""));
+    m_tro_5_xml       = resolve(get<std::string>(cfg, "tro_5_weights_xml",       ""));
+    m_nue_xgboost_xml = resolve(get<std::string>(cfg, "nue_xgboost_xml",         ""));
 }
 
 Configuration UbooneNueBDTScorer::default_configuration() const
