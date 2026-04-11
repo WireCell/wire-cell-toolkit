@@ -86,21 +86,24 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
                 );
                 new_pts.push_back(test_p);
                 
-                // Check if this point is good
+                // Check if this point is good.  Points outside any TPC (face==-1)
+                // are treated as bad — prototype's is_good_point returns false there.
                 auto test_wpid = dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                     if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                         n_bad++;
                     }
+                } else {
+                    n_bad++;  // outside all TPCs → bad sample (B.3)
                 }
-                
+
                 if (n_bad > 1) {
                     flag_replace = false;
                     break;
                 }
             }
-            
+
             // If the straight line is better, replace the segment path
             if (flag_replace) {
                 if (!cluster.has_pc("steiner_pc")) continue;
@@ -237,21 +240,24 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                 );
                 new_pts.push_back(test_p);
                 
-                // Check if this point is good
+                // Check if this point is good.  Points outside any TPC (face==-1)
+                // are treated as bad — prototype's is_good_point returns false there.
                 auto test_wpid = dv->contained_by(test_p);
                 if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
                     auto temp_p_raw = transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                     if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.2*units::cm, 0, 0)) {
                         n_bad++;
                     }
+                } else {
+                    n_bad++;  // outside all TPCs → bad sample (B.3)
                 }
-                
+
                 if (n_bad > 1) {
                     flag_replace = false;
                     break;
                 }
             }
-            
+
             // If the straight line is better, merge the two segments
             if (flag_replace) {
                 // std::cout << "Cluster: " << cluster.ident() << " Merge two segments with a straight one, vtx at (" 
@@ -264,14 +270,13 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                 const double distance_threshold = 0.01 * units::cm;
                 
                 if (dist_vtx1_vtx2 < distance_threshold) {
-                    // vtx1 and vtx2 are co-located: the two segments and
-                    // the middle vertex are removed by the common code
-                    // below.  Do NOT call merge_vertex_into_another here —
-                    // it would attempt to re-add sg2 as a vtx1-vtx edge,
-                    // but that edge already carries sg1.  With setS edges,
-                    // add_segment then aliases sg2's descriptor to sg1's,
-                    // so the subsequent remove_segment(sg2) crashes on a
-                    // dangling edge descriptor.
+                    // vtx1 and vtx2 are co-located: no new segment is created.
+                    // merge_vertex_into_another(vtx2, vtx1) is deferred until AFTER
+                    // sg1/sg2/vtx are removed below — calling it now would crash
+                    // because merge_vertex_into_another removes and re-adds sg2 as a
+                    // vtx1-vtx edge, but that slot is already occupied by sg1; with
+                    // setS edges add_segment aliases sg2's descriptor to sg1's, so the
+                    // subsequent remove_segment(sg2) destroys the shared edge. (B.7)
                 } else {
                     // Create a new segment with straight line path
                     if (!cluster.has_pc("steiner_pc")) continue;
@@ -326,7 +331,20 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                 remove_segment(graph, sg1);
                 remove_segment(graph, sg2);
                 remove_vertex(graph, vtx);
-                
+
+                // B.7: Co-located case — now that sg1/sg2/vtx are gone, safely
+                // merge vtx2 into vtx1 to preserve vtx2's other segments
+                // (matching prototype behavior of re-parenting vtx2's connections).
+                // The aliasing risk is gone: sg2 (vtx2→vtx) and sg1 (vtx1→vtx)
+                // are already removed, so no parallel-edge conflict can occur.
+                if (dist_vtx1_vtx2 < distance_threshold && vtx2->descriptor_valid()) {
+                    if (boost::degree(vtx2->get_descriptor(), graph) > 0) {
+                        merge_vertex_into_another(graph, vtx2, vtx1, dv);
+                    } else {
+                        remove_vertex(graph, vtx2);
+                    }
+                }
+
                 flag_update = true;
                 flag_continue = true;
                 break;
@@ -395,54 +413,52 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
                 if (angle_3cm < 27) {
                     SPDLOG_LOGGER_DEBUG(s_log, "examine_structure: Cluster: {} Merge two segments into one according to angle {}° (10cm) and {}° (3cm)", cluster.ident(), angle_10cm, angle_3cm);
                     
-                    // Merge the two segments by combining their WCPoint lists
+                    // Merge the two segments by combining their WCPoint lists.
+                    // Use graph topology to determine orientation — i.e. which wcpt
+                    // endpoint of each segment is at the shared vertex (vtx) — rather
+                    // than a geometric distance threshold.  A distance threshold (the
+                    // prior approach, 0.01 cm) can silently fail when ES1/ES2 kNN
+                    // projection shifts wcpts by up to ~0.15 cm. (E.2)
                     const auto& wcpts1 = sg1->wcpts();
                     const auto& wcpts2 = sg2->wcpts();
-                    
+
+                    // find_vertices returns (v_front, v_back) where v_front is the
+                    // vertex nearest to wcpts.front(). Compare by pointer identity.
+                    auto [sg1_front_vtx, sg1_back_vtx] = find_vertices(graph, sg1);
+                    auto [sg2_front_vtx, sg2_back_vtx] = find_vertices(graph, sg2);
+                    bool sg1_vtx_front = (sg1_front_vtx == vtx);  // vtx at wcpts1.front()
+                    bool sg2_vtx_front = (sg2_front_vtx == vtx);  // vtx at wcpts2.front()
+
                     std::vector<WCPoint> merged_wcpts;
                     merged_wcpts.reserve(wcpts1.size() + wcpts2.size());
-                    const double distance_threshold = 0.01 * units::cm;
-                    
-                    // Determine how to merge based on which endpoints connect
-                    if (ray_length(Ray{wcpts1.front().point, wcpts2.front().point}) < distance_threshold) {
-                        // front1 connects to front2: reverse wcpts2, skip duplicate, add wcpts1
-                        for (auto it = wcpts2.rbegin(); it != wcpts2.rend(); ++it) {
+
+                    if (sg1_vtx_front && sg2_vtx_front) {
+                        // front1 ↔ vtx ↔ front2: reverse wcpts2, then wcpts1 from idx 1
+                        for (auto it = wcpts2.rbegin(); it != wcpts2.rend(); ++it)
                             merged_wcpts.push_back(*it);
-                        }
-                        // Skip first point of wcpts1 as it's the same as last added
-                        for (size_t i = 1; i < wcpts1.size(); ++i) {
+                        for (size_t i = 1; i < wcpts1.size(); ++i)
                             merged_wcpts.push_back(wcpts1[i]);
-                        }
-                    } else if (ray_length(Ray{wcpts1.front().point, wcpts2.back().point}) < distance_threshold) {
-                        // front1 connects to back2: add wcpts2, skip duplicate, add wcpts1
-                        for (const auto& wcp : wcpts2) {
+                    } else if (sg1_vtx_front && !sg2_vtx_front) {
+                        // front1 ↔ vtx ↔ back2: wcpts2 forward, then wcpts1 from idx 1
+                        for (const auto& wcp : wcpts2)
                             merged_wcpts.push_back(wcp);
-                        }
-                        // Skip first point of wcpts1 as it's the same as last added
-                        for (size_t i = 1; i < wcpts1.size(); ++i) {
+                        for (size_t i = 1; i < wcpts1.size(); ++i)
                             merged_wcpts.push_back(wcpts1[i]);
-                        }
-                    } else if (ray_length(Ray{wcpts1.back().point, wcpts2.front().point}) < distance_threshold) {
-                        // back1 connects to front2: add wcpts1, skip duplicate, add wcpts2
-                        for (const auto& wcp : wcpts1) {
+                    } else if (!sg1_vtx_front && sg2_vtx_front) {
+                        // back1 ↔ vtx ↔ front2: wcpts1 forward, then wcpts2 from idx 1
+                        for (const auto& wcp : wcpts1)
                             merged_wcpts.push_back(wcp);
-                        }
-                        // Skip first point of wcpts2 as it's the same as last added
-                        for (size_t i = 1; i < wcpts2.size(); ++i) {
+                        for (size_t i = 1; i < wcpts2.size(); ++i)
                             merged_wcpts.push_back(wcpts2[i]);
-                        }
-                    } else if (ray_length(Ray{wcpts1.back().point, wcpts2.back().point}) < distance_threshold) {
-                        // back1 connects to back2: add wcpts1, skip duplicate, reverse wcpts2
-                        for (const auto& wcp : wcpts1) {
+                    } else {
+                        // back1 ↔ vtx ↔ back2: wcpts1 forward, then reverse wcpts2 from rbegin+1
+                        for (const auto& wcp : wcpts1)
                             merged_wcpts.push_back(wcp);
-                        }
-                        // Skip last point of wcpts2 (reverse order) as it's the same as last added
-                        for (auto it = wcpts2.rbegin() + 1; it != wcpts2.rend(); ++it) {
+                        for (auto it = wcpts2.rbegin() + 1; it != wcpts2.rend(); ++it)
                             merged_wcpts.push_back(*it);
-                        }
                     }
-                    
-                    if (merged_wcpts.empty()) continue;  // or log a warning and skip
+
+                    if (merged_wcpts.empty()) continue;  // degenerate: both wcpts lists empty
 
                     // Create new segment with merged points
                     auto new_seg = make_segment();
@@ -517,78 +533,82 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
         if (!flag_terminals[idx]) continue;
         
         WireCell::Point test_p(x_coords[idx], y_coords[idx], z_coords[idx]);
-        double dis = std::sqrt(std::pow(test_p.x() - vtx_point.x(), 2) + 
-                              std::pow(test_p.y() - vtx_point.y(), 2) + 
-                              std::pow(test_p.z() - vtx_point.z(), 2));
-        
-        // Find minimum distances to all segments
+        // Use sqrt of pre-computed squared distance from kd_steiner_radius (E.4)
+        double dis = std::sqrt(dist_sq);
+
+        // B.2/B.4: resolve (apa,face) for test_p once, outside the segment loop.
+        // Terminals outside every TPC are rejected immediately — without this guard,
+        // min_dis_{u,v,w} stay at 1e9 and the 2D-distance criterion trivially passes.
+        auto test_wpid = dv->contained_by(test_p);
+        if (test_wpid.face() == -1 || test_wpid.apa() == -1) continue;
+
+        // Find minimum distances to all segments.
+        // The graph is per-grouping (one graph for all clusters in the event),
+        // so this iterates segments from ALL clusters — matching the prototype's
+        // unconstrained map_segment_vertices scan. (B.6)
         double min_dis = 1e9;
         double min_dis_u = 1e9;
         double min_dis_v = 1e9;
         double min_dis_w = 1e9;
-        
-        // NOTE: prototype checks ALL segments from ALL clusters here (map_segment_vertices,
-        // with the cluster-filter line explicitly commented out). This toolkit only checks
-        // the current cluster's segments, which may lead to more false-positive vertex
-        // activities when a candidate terminal is close to a segment from a different cluster.
-        // Fixing this would require passing a cross-cluster segment collection as a parameter.
-        auto [ebegin, eend] = boost::edges(graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+
+        // B.5: use ordered_edges for deterministic tie-breaking in max_dis selection
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg = graph[ed].segment;
             if (!sg) continue;
-            
+
             // Get closest point distance from both fitted points and wcpts
             auto [dist_3d, closest_pt] = segment_get_closest_point(sg, test_p, "fit");
             if (dist_3d < min_dis) min_dis = dist_3d;
-            
+
             // Also check wcpts for closest distance
             auto [dist_wcpt, closest_wcp] = segment_get_closest_point(sg, test_p, "main");
             if (dist_wcpt < min_dis) min_dis = dist_wcpt;
-            
-            // Get 2D distances - need to determine apa and face
-            auto test_wpid = dv->contained_by(test_p);
-            if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(sg, test_p, test_wpid.apa(), test_wpid.face(), "fit");
-                if (dist_u < min_dis_u) min_dis_u = dist_u;
-                if (dist_v < min_dis_v) min_dis_v = dist_v;
-                if (dist_w < min_dis_w) min_dis_w = dist_w;
-            }
+
+            // 2D distances — only meaningful within the same APA/face as test_p
+            auto [dist_u, dist_v, dist_w] = segment_get_closest_2d_distances(sg, test_p, test_wpid.apa(), test_wpid.face(), "fit");
+            if (dist_u < min_dis_u) min_dis_u = dist_u;
+            if (dist_v < min_dis_v) min_dis_v = dist_v;
+            if (dist_w < min_dis_w) min_dis_w = dist_w;
         }
-        
+
         // Check distance criteria
-        if (min_dis > 0.9*units::cm && 
+        if (min_dis > 0.9*units::cm &&
             min_dis_u + min_dis_v + min_dis_w > 1.8*units::cm &&
             ((min_dis_u > 0.8*units::cm && min_dis_v > 0.8*units::cm) ||
              (min_dis_u > 0.8*units::cm && min_dis_w > 0.8*units::cm) ||
              (min_dis_v > 0.8*units::cm && min_dis_w > 0.8*units::cm))) {
-            
+
             // Test points along straight line for good points
             double step_size = 0.3 * units::cm;
             WireCell::Point start_p = vtx_point;
             WireCell::Point end_p = test_p;
-            double distance = std::sqrt(std::pow(start_p.x() - end_p.x(), 2) + 
-                                       std::pow(start_p.y() - end_p.y(), 2) + 
+            double distance = std::sqrt(std::pow(start_p.x() - end_p.x(), 2) +
+                                       std::pow(start_p.y() - end_p.y(), 2) +
                                        std::pow(start_p.z() - end_p.z(), 2));
             int ncount = std::round(distance / step_size);
-            
+
             bool flag_pass = true;
             int n_bad = 0;
-            
+
             for (int j = 1; j < ncount; j++) {
                 WireCell::Point test_p1(
                     start_p.x() + (end_p.x() - start_p.x()) / ncount * j,
                     start_p.y() + (end_p.y() - start_p.y()) / ncount * j,
                     start_p.z() + (end_p.z() - start_p.z()) / ncount * j
                 );
-                
-                auto test_wpid = dv->contained_by(test_p1);
-                if (test_wpid.face() != -1 && test_wpid.apa() != -1) {
-                    auto temp_p_raw = transform->backward(test_p1, cluster_t0, test_wpid.face(), test_wpid.apa());
-                    if (!grouping->is_good_point(temp_p_raw, test_wpid.apa(), test_wpid.face(), 0.3*units::cm, 0, 0)) {
+
+                // B.3: outside-TPC steps count as bad (prototype's is_good_point
+                // returns false for points with no wires/charge)
+                auto test_wpid1 = dv->contained_by(test_p1);
+                if (test_wpid1.face() != -1 && test_wpid1.apa() != -1) {
+                    auto temp_p_raw = transform->backward(test_p1, cluster_t0, test_wpid1.face(), test_wpid1.apa());
+                    if (!grouping->is_good_point(temp_p_raw, test_wpid1.apa(), test_wpid1.face(), 0.3*units::cm, 0, 0)) {
                         n_bad++;
                     }
+                } else {
+                    n_bad++;  // outside all TPCs → bad sample (B.3)
                 }
-                
+
                 if (n_bad > 0) {
                     flag_pass = false;
                     break;
