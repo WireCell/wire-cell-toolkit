@@ -5,6 +5,8 @@
 
 #include "connect_graphs.h"
 
+#include <unordered_map>
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 
@@ -14,10 +16,16 @@ void Graphs::connect_graph_closely(const Facade::Cluster& cluster, Weighted::Gra
     // What follows used to be in Cluster::Establish_close_connected_graph().
     // It is/was called from examine_graph() and Create_graph().
 
-    using mcell_wire_wcps_map_t = std::map<const Facade::Blob*, std::map<int, std::set<int>>, Facade::BlobLess>;
+    // C.1: use unordered_map with pointer hash — lookups are O(1) vs O(log N)*O(BlobLess).
+    // Iteration order of these maps is never the source of output determinism; all outer
+    // loops are driven by cluster.children() / time_blob_map() which are ordered.
+    struct BlobPtrHash {
+        std::size_t operator()(const Facade::Blob* b) const noexcept {
+            return std::hash<const void*>{}(static_cast<const void*>(b));
+        }
+    };
+    using mcell_wire_wcps_map_t = std::unordered_map<const Facade::Blob*, std::map<int, std::set<int>>, BlobPtrHash>;
     mcell_wire_wcps_map_t map_mcell_uindex_wcps, map_mcell_vindex_wcps, map_mcell_windex_wcps;
-
-    std::map<Facade::Blob*, std::set<int>, Facade::BlobLess> map_mcell_indices;
 
     const auto& points = cluster.points();
     const auto& winds = cluster.wire_indices();
@@ -478,7 +486,13 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
     const double protection_distance = 0.25 * units::cm;
     
     // Build wire index maps for each blob (equivalent to mcell in prototype)
-    using mcell_wire_wcps_map_t = std::map<const Facade::Blob*, std::map<int, std::set<int>>, Facade::BlobLess>;
+    // C.1: pointer-hash unordered_map for O(1) lookups (see connect_graph_closely above).
+    struct BlobPtrHash {
+        std::size_t operator()(const Facade::Blob* b) const noexcept {
+            return std::hash<const void*>{}(static_cast<const void*>(b));
+        }
+    };
+    using mcell_wire_wcps_map_t = std::unordered_map<const Facade::Blob*, std::map<int, std::set<int>>, BlobPtrHash>;
     mcell_wire_wcps_map_t map_mcell_uindex_wcps, map_mcell_vindex_wcps, map_mcell_windex_wcps;
 
     const auto& points = cluster.points();

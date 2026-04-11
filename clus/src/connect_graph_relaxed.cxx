@@ -23,26 +23,26 @@ void Graphs::connect_graph_relaxed(
     // Get all the wire plane IDs from the grouping
     const auto& wpids = grouping->wpids();
 
-    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
-    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
-    std::map<WirePlaneId, geo_point_t> wpid_U_dir;
-    std::map<WirePlaneId, geo_point_t> wpid_V_dir;
-    std::map<WirePlaneId, geo_point_t> wpid_W_dir;
-    std::set<int> apas;
+    // Key: {apa, face} pair.  Each apa/face has fixed U/V/W wire directions that
+    // are the same regardless of which layer's WirePlaneId is used for the lookup.
+    // Using a full WirePlaneId (which includes the layer) as the map key would cause
+    // std::out_of_range when get_wireplaneid() returns a wpid whose layer differs
+    // from those populated here.  Keying by {apa,face} avoids this entirely.
+    using af_pair_t = std::pair<int,int>;
+    std::map<af_pair_t, geo_point_t> af_U_dir;
+    std::map<af_pair_t, geo_point_t> af_V_dir;
+    std::map<af_pair_t, geo_point_t> af_W_dir;
     for (const auto& wpid : wpids) {
         int apa = wpid.apa();
         int face = wpid.face();
-        apas.insert(apa);
+        af_pair_t af{apa, face};
+        if (af_U_dir.count(af)) continue;  // already computed for this apa/face
 
-        // Create wpids for all three planes with this APA and face
+        // Create canonical wpids for all three planes with this APA and face
         WirePlaneId wpid_u(kUlayer, face, apa);
         WirePlaneId wpid_v(kVlayer, face, apa);
         WirePlaneId wpid_w(kWlayer, face, apa);
-     
-        // Get drift direction based on face orientation
-        int face_dirx = dv->face_dirx(wpid_u);
-        geo_point_t drift_dir(face_dirx, 0, 0);
-        
+
         // Get wire directions for all planes
         Vector wire_dir_u = dv->wire_direction(wpid_u);
         Vector wire_dir_v = dv->wire_direction(wpid_v);
@@ -53,10 +53,9 @@ void Graphs::connect_graph_relaxed(
         double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
-        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
-        wpid_U_dir[wpid] = geo_point_t(0, cos(angle_u), sin(angle_u));
-        wpid_V_dir[wpid] = geo_point_t(0, cos(angle_v), sin(angle_v));
-        wpid_W_dir[wpid] = geo_point_t(0, cos(angle_w), sin(angle_w));
+        af_U_dir[af] = geo_point_t(0, cos(angle_u), sin(angle_u));
+        af_V_dir[af] = geo_point_t(0, cos(angle_v), sin(angle_v));
+        af_W_dir[af] = geo_point_t(0, cos(angle_w), sin(angle_w));
     }
 
     // this drift direction is only used to calculate isochronous case, so this is OK ...
@@ -83,23 +82,15 @@ void Graphs::connect_graph_relaxed(
         pt_clouds_global_indices[c].push_back(i);
     }
 
-    // Initialize distance metrics 
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(num, std::vector<std::tuple<int, int, double>>(num));
-    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(num, std::vector<std::tuple<int, int, double>>(num));
-
-    // Initialize all distances to inf
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = 0; k != num; k++) {
-            index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
-            index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
-        }
-    }
+    // Initialize distance metrics — all sentinels (-1,-1,1e9) mean "no valid connection".
+    // Use direct construction to avoid a redundant zero-fill followed by an overwrite pass (C.3).
+    const auto sentinel = std::make_tuple(-1, -1, 1e9);
+    const std::vector<std::tuple<int,int,double>> sentinel_row(num, sentinel);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(num, sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(num, sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(num, sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(num, sentinel_row);
+    std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(num, sentinel_row);
 
     // Hoist scope-transform and cluster_t0 out of all per-step CTPC loops
     const bool needs_transform = (cluster.get_default_scope().hash() != cluster.get_raw_scope().hash());
@@ -112,11 +103,17 @@ void Graphs::connect_graph_relaxed(
             // Get closest points between components
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
 
+            // C.4: skip the expensive Hough probes when clouds are too far apart to benefit.
+            // get_closest_point_along_vec is called with max_dis=80 cm, so a closest-pair
+            // distance already >= 80 cm guarantees both directional probes return nothing.
+            const bool close_enough = std::get<2>(index_index_dis[j][k]) < 80 * units::cm;
+
             // Skip small clouds
-            if ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
-                 (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
-                (pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500)) {
-                
+            if (close_enough &&
+                ((num < 100 && pt_clouds.at(j)->get_num_points() > 100 && pt_clouds.at(k)->get_num_points() > 100 &&
+                  (pt_clouds.at(j)->get_num_points() + pt_clouds.at(k)->get_num_points()) > 400) ||
+                 (pt_clouds.at(j)->get_num_points() > 500 && pt_clouds.at(k)->get_num_points() > 500))) {
+
                 // Get closest points and calculate directions
                 geo_point_t p1 = pt_clouds.at(j)->point(std::get<0>(index_index_dis[j][k]));
                 geo_point_t p2 = pt_clouds.at(k)->point(std::get<1>(index_index_dis[j][k]));
@@ -180,7 +177,7 @@ void Graphs::connect_graph_relaxed(
                                 test_p_raw = ctpc_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                             }
                             scores = grouping->test_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
-                            
+
                             // Check overall quality
                             if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5])*2 < 3) {
                                 num_bad[0]++;
@@ -192,13 +189,18 @@ void Graphs::connect_graph_relaxed(
                             if (scores[3]!=0) num_bad2[0]++;
                             if (scores[4]!=0) num_bad2[1]++;
                             if (scores[5]!=0) num_bad2[2]++;
-                            
+
                             if (scores[0] + scores[3] + scores[1] + scores[4] + (scores[2]+scores[5]) < 3) {
                                 num_bad1[0]++;
                             }
                             if (scores[0]+scores[3]==0) num_bad1[1]++;
                             if (scores[1]+scores[4]==0) num_bad1[2]++;
                             if (scores[2]+scores[5]==0) num_bad1[3]++;
+                        } else {
+                            // Step is outside all APA volumes (between APAs).
+                            // Count as fully bad: no signal from any plane can validate this gap.
+                            num_bad[0]++;  num_bad[1]++;  num_bad[2]++;  num_bad[3]++;
+                            num_bad1[0]++; num_bad1[1]++; num_bad1[2]++; num_bad1[3]++;
                         }
                     }
                 }
@@ -209,19 +211,19 @@ void Graphs::connect_graph_relaxed(
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
 
-                double angle1 = tempV1.angle(wpid_U_dir.at(test_wpid)); 
+                double angle1 = tempV1.angle(af_U_dir.at({test_wpid.apa(), test_wpid.face()})); 
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir_abs);
 
-                double angle2 = tempV1.angle(wpid_V_dir.at(test_wpid));
+                double angle2 = tempV1.angle(af_V_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle2),
                         0);
                 angle2 = tempV5.angle(drift_dir_abs);
 
-                double angle1p = tempV1.angle(wpid_W_dir.at(test_wpid));
+                double angle1p = tempV1.angle(af_W_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2)) * sin(angle1p),
                         0); 
@@ -338,23 +340,27 @@ void Graphs::connect_graph_relaxed(
                             if (!grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
+                        } else {
+                            // Step is outside all APA volumes — count as bad.
+                            num_bad++;
+                            num_bad1++;
                         }
                     }
                 }
-                
+
                 auto test_wpid = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
 
                 // Calculate angles
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
-                
-                double angle1 = tempV1.angle(wpid_U_dir.at(test_wpid));
+
+                double angle1 = tempV1.angle(af_U_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir_abs);
                 
-                double angle2 = tempV1.angle(wpid_V_dir.at(test_wpid));
+                double angle2 = tempV1.angle(af_V_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
@@ -363,7 +369,7 @@ void Graphs::connect_graph_relaxed(
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
                 double angle3 = tempV5.angle(drift_dir_abs);
                 
-                double angle1p = tempV1.angle(wpid_W_dir.at(test_wpid));
+                double angle1p = tempV1.angle(af_W_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
@@ -424,6 +430,10 @@ void Graphs::connect_graph_relaxed(
                             if (!grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
+                        } else {
+                            // Step is outside all APA volumes — count as bad.
+                            num_bad++;
+                            num_bad1++;
                         }
                     }
                 }
@@ -434,13 +444,13 @@ void Graphs::connect_graph_relaxed(
                 geo_vector_t tempV1(0, p2.y() - p1.y(), p2.z() - p1.z());
                 geo_vector_t tempV5;
 
-                double angle1 = tempV1.angle(wpid_U_dir.at(test_wpid));
+                double angle1 = tempV1.angle(af_U_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1),
                         0);
                 angle1 = tempV5.angle(drift_dir_abs);
 
-                double angle2 = tempV1.angle(wpid_V_dir.at(test_wpid));
+                double angle2 = tempV1.angle(af_V_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle2),
                         0);
@@ -449,7 +459,7 @@ void Graphs::connect_graph_relaxed(
                 tempV5.set(p2.x() - p1.x(), p2.y() - p1.y(), p2.z() - p1.z());
                 double angle3 = tempV5.angle(drift_dir_abs);
 
-                double angle1p = tempV1.angle(wpid_W_dir.at(test_wpid));
+                double angle1p = tempV1.angle(af_W_dir.at({test_wpid.apa(), test_wpid.face()}));
                 tempV5.set(fabs(p2.x() - p1.x()),
                         sqrt(pow(p2.y() - p1.y(), 2) + pow(p2.z() - p1.z(), 2))*sin(angle1p),
                         0);
@@ -529,13 +539,7 @@ void Graphs::connect_graph_relaxed(
             if (std::get<0>(index_index_dis_mst[j][k]) >= 0) {
                 const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
                 const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
-                float dis;
-                if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
-                    dis = std::get<2>(index_index_dis_mst[j][k]);
-                }
-                else {
-                    dis = std::get<2>(index_index_dis_mst[j][k]);
-                }
+                const float dis = std::get<2>(index_index_dis_mst[j][k]);
                 if (!boost::edge(gind1, gind2, graph).second) {
                     /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
@@ -665,8 +669,12 @@ void Graphs::connect_graph_relaxed(
         
         // Get wire plane ID for test point
         auto test_wpid = get_wireplaneid(test_p, wpid_p1, wpid_p2, dv);
-        
-        if (test_wpid.apa() == -1) continue;
+
+        if (test_wpid.apa() == -1) {
+            // Step is outside all APA volumes — count as bad on all planes.
+            num_bad[0]++; num_bad[1]++; num_bad[2]++; num_bad[3]++;
+            continue;
+        }
         
         // Transform point if needed
         geo_point_t test_p_raw = test_p;

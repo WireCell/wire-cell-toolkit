@@ -44,10 +44,14 @@ public:
 
 };
 
+// NOTE: This function implements the same physics logic as
+// Graphs::connect_graph_relaxed() in connect_graph_relaxed.cxx.
+// Bug fixes applied there (especially multi-APA handling) must be
+// mirrored here.  See examine_graph_review.md §B.4 for details.
 static std::map<int, Cluster *> Separate_overclustering(
-    Cluster *cluster, 
+    Cluster *cluster,
     IDetectorVolumes::pointer dv,
-    IPCTransformSet::pointer pcts, 
+    IPCTransformSet::pointer pcts,
     const Scope& scope)
 {
     // can follow ToyClustering_separate to add clusters ...
@@ -117,17 +121,18 @@ static std::map<int, Cluster *> Separate_overclustering(
             std::vector<std::set<int> *> max_wcps_set;
             std::vector<std::set<int> *> min_wcps_set;
 
-            // go through the first map and find the ones satisfying the condition
-            for (auto it2 = map_max_index_wcps->begin(); it2 != map_max_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_max_wire) <= max_wire_interval) {
+            // Use lower/upper_bound for O(log W) range lookup instead of linear scan (C.2 fix).
+            {
+                auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
+                auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2)
                     max_wcps_set.push_back(&(it2->second));
-                }
             }
-            // go through the second map and find the ones satisfying the condition
-            for (auto it2 = map_min_index_wcps->begin(); it2 != map_min_index_wcps->end(); it2++) {
-                if (std::abs(it2->first - index_min_wire) <= min_wire_interval) {
+            {
+                auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
+                auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
+                for (auto it2 = lo; it2 != hi; ++it2)
                     min_wcps_set.push_back(&(it2->second));
-                }
             }
 
             std::set<int> wcps_set1;
@@ -278,7 +283,7 @@ static std::map<int, Cluster *> Separate_overclustering(
 
     // Create ordered components
     std::vector<ComponentInfo> ordered_components;
-    ordered_components.reserve(component.size());
+    ordered_components.reserve(num);  // num components, not num vertices (B.5 fix)
     for (size_t i = 0; i < component.size(); ++i) {
         ordered_components.emplace_back(i);
     }
@@ -317,27 +322,18 @@ static std::map<int, Cluster *> Separate_overclustering(
     }
 
 
+        // Sentinel (-1,-1,1e9): indices <0 means "no valid closest pair yet". (C.3 fix)
+        const auto kNoEntry = std::make_tuple(-1, -1, 1e9);
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
-            num, std::vector<std::tuple<int, int, double>>(num));
+            num, std::vector<std::tuple<int, int, double>>(num, kNoEntry));
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(
-            num, std::vector<std::tuple<int, int, double>>(num));
-
+            num, std::vector<std::tuple<int, int, double>>(num, kNoEntry));
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(
-            num, std::vector<std::tuple<int, int, double>>(num));
+            num, std::vector<std::tuple<int, int, double>>(num, kNoEntry));
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(
-            num, std::vector<std::tuple<int, int, double>>(num));
+            num, std::vector<std::tuple<int, int, double>>(num, kNoEntry));
         std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(
-            num, std::vector<std::tuple<int, int, double>>(num));
-
-        for (int j = 0; j != num; j++) {
-            for (int k = 0; k != num; k++) {
-                index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
-                index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
-                index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
-                index_index_dis_dir2[j][k] = std::make_tuple(-1, -1, 1e9);
-                index_index_dis_dir_mst[j][k] = std::make_tuple(-1, -1, 1e9);
-            }
-        }
+            num, std::vector<std::tuple<int, int, double>>(num, kNoEntry));
 
         // Hoist scope-transform computation out of per-step path-check loops.
         const bool needs_scope_transform = cluster->get_default_scope().hash() != cluster->get_raw_scope().hash();
@@ -374,6 +370,11 @@ static std::map<int, Cluster *> Separate_overclustering(
                         test_p_raw = scope_transform->backward(test_p, cluster_t0, test_wpid.face(), test_wpid.apa());
                     if (!cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face()))
                         ++num_bad;
+                }
+                else {
+                    // Point is between APA volumes — treat as a bad step so the
+                    // bad-step fraction is not artificially diluted (B.2 fix).
+                    ++num_bad;
                 }
             }
             if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))
@@ -489,13 +490,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                     // if (edge.second) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
                     const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
-                    float dis;
-                    if (std::get<2>(index_index_dis_mst[j][k]) > 5 * units::cm) {
-                        dis = std::get<2>(index_index_dis_mst[j][k]);
-                    }
-                    else {
-                        dis = std::get<2>(index_index_dis_mst[j][k]);
-                    }
+                    const float dis = std::get<2>(index_index_dis_mst[j][k]);  // B.6: collapsed dead if/else
                     // }
 
                     /*auto edge =*/ add_edge(gind1, gind2, dis,*graph);
@@ -508,13 +503,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         // if (edge.second) {
                         const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
                         const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
-                        float dis;
-                        if (std::get<2>(index_index_dis_dir1[j][k]) > 5 * units::cm) {
-                            dis = std::get<2>(index_index_dis_dir1[j][k]);
-                        }
-                        else {
-                            dis = std::get<2>(index_index_dis_dir1[j][k]);
-                        }
+                        const float dis = std::get<2>(index_index_dis_dir1[j][k]);  // B.6: collapsed dead if/else
                         // }
                         /*auto edge =*/ add_edge(gind1, gind2, dis,*graph);
                     }
@@ -524,13 +513,7 @@ static std::map<int, Cluster *> Separate_overclustering(
                         // if (edge.second) {
                         const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir2[j][k]));
                         const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir2[j][k]));
-                        float dis;
-                        if (std::get<2>(index_index_dis_dir2[j][k]) > 5 * units::cm) {
-                            dis = std::get<2>(index_index_dis_dir2[j][k]);
-                        }
-                        else {
-                            dis = std::get<2>(index_index_dis_dir2[j][k]);
-                        }
+                        const float dis = std::get<2>(index_index_dis_dir2[j][k]);  // B.6: collapsed dead if/else
                         // }
                         /*auto edge =*/ add_edge(gind1, gind2, dis, *graph);
                     }
