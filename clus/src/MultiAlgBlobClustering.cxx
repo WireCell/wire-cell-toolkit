@@ -533,8 +533,14 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         const int encoded_id = cluster_id * 1000 + static_cast<int>(segment->get_graph_index());
 
         if (config.use_associate_points) {
-            // --- shower_track mode: use associated points, charge from shower flags ---
-            const bool is_shower =
+            // --- shower_track mode: use associated points, charge from shower membership ---
+            // Shower membership is the authoritative shower-vs-track answer: segments
+            // absorbed from other clusters may not have kShowerTrajectory/kShowerTopology
+            // flags or pdg=11 updated, but they are correctly recorded in seg_to_shower
+            // by the clustering step. Fall back to per-segment flags only for segments
+            // that are not part of any shower (standalone shower-like segments).
+            auto shower_it = seg_to_shower.find(segment);
+            const bool is_shower = (shower_it != seg_to_shower.end()) ||
                 segment->flags_any(PR::SegmentFlags::kShowerTrajectory) ||
                 segment->flags_any(PR::SegmentFlags::kShowerTopology) ||
                 (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 11);
@@ -549,7 +555,6 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // segment belongs to a shower (mirrors seg_display_id in fill_bee_pf_tree:
             // cluster_id * 1000 + seg_id), so all points from the same shower share
             // the same ID in Bee.
-            auto shower_it = seg_to_shower.find(segment);
             const int shower_cluster_id = [&]() -> int {
                 if (shower_it == seg_to_shower.end()) return cluster_id;
                 auto start_seg = shower_it->second->start_segment();
