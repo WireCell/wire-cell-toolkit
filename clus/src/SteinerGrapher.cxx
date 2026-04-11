@@ -1026,9 +1026,9 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
         result.point_cloud = original_pc.subset(subset_indices);
 
         // Add the flag_steiner_terminal boolean array to point cloud
-        // Convert std::vector<bool> to std::vector<uint8_t> to avoid std::vector<bool> specialization issues
-        std::vector<uint8_t> steiner_flags_uint8(result.flag_steiner_terminal.begin(), result.flag_steiner_terminal.end());
-        PointCloud::Array steiner_flag_array(steiner_flags_uint8);
+        // Store as int to match all read sites that use elements<int>()
+        std::vector<int> steiner_flags_int(result.flag_steiner_terminal.begin(), result.flag_steiner_terminal.end());
+        PointCloud::Array steiner_flag_array(steiner_flags_int);
         result.point_cloud.add("flag_steiner_terminal", std::move(steiner_flag_array));
     }
     
