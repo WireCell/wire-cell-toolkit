@@ -43,6 +43,19 @@ def check_root(cfg, mandatory=False):
     cfg.check_cfg(path=cfg.env['ROOT_CONFIG'], uselib_store='ROOTSYS',
                   args = '--cflags --libs --ldflags', package='', mandatory=mandatory)
 
+    # TMVA is not included in root-config --libs in ROOT 6; add it explicitly if available
+    import subprocess
+    try:
+        root_libdir = subprocess.check_output([cfg.env['ROOT_CONFIG'][0], '--libdir']).decode().strip()
+        tmva_lib = osp.join(root_libdir, 'libTMVA.so')
+        if osp.exists(tmva_lib):
+            cfg.env.append_value('LIB_ROOTSYS', ['TMVA'])
+            cfg.env.append_value('LIBPATH_ROOTSYS', [root_libdir])
+            debug('root: found TMVA at %s, adding to ROOTSYS libs' % tmva_lib)
+        else:
+            debug('root: no libTMVA.so in %s, skipping' % root_libdir)
+    except Exception as e:
+        debug('root: could not check for TMVA: %s' % e)
 
     cfg.find_program('rootcling', var='ROOTCLING', path_list=path_list, mandatory=mandatory)
     # cfg.find_program('rootcint', var='ROOTCINT', path_list=path_list, mandatory=mandatory)
