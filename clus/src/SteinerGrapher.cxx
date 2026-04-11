@@ -164,8 +164,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
         return terminals;
     }
 
-    std::vector<WireCell::WirePlaneId> wpids_vec = m_cluster.wpids_blob();
-    std::set<WireCell::WirePlaneId> wpids_set(wpids_vec.begin(), wpids_vec.end());
+    const auto wpids_set = m_cluster.wpids_blob_set();
     std::vector<WireCell::WirePlaneId> wpids(wpids_set.begin(), wpids_set.end());
 
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;

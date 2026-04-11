@@ -386,7 +386,7 @@ local clus_all_apa (
                                        pc_transforms=pcts,
                                        coords=common_corr_coords),
         
-    local retiler = cm.retiler(anodes=anodes, 
+    local retiler = cm.retiler(anodes=anodes,
                                cut_time_low=3*wc.us,
                                cut_time_high=5*wc.us,
                                samplers=[
@@ -399,6 +399,20 @@ local clus_all_apa (
                                    clus.sampler(bs_rt_face(3,0), apa=3, face=0),
                                    clus.sampler(bs_rt_face(3,1), apa=3, face=1),
                                ]),
+
+    // ImproveCluster_2 retiler for the Steiner step (§6.8 integration test).
+    // Covers all 4 APAs × 2 faces = 8 (apa, face) pairs on protoDUNE-HD.
+    local improve_cluster_2 = cm.improve_cluster_2(anodes=anodes, samplers=[
+        clus.sampler(bs_rt_face(0,0), apa=0, face=0),
+        clus.sampler(bs_rt_face(0,1), apa=0, face=1),
+        clus.sampler(bs_rt_face(1,0), apa=1, face=0),
+        clus.sampler(bs_rt_face(1,1), apa=1, face=1),
+        clus.sampler(bs_rt_face(2,0), apa=2, face=0),
+        clus.sampler(bs_rt_face(2,1), apa=2, face=1),
+        clus.sampler(bs_rt_face(3,0), apa=3, face=0),
+        clus.sampler(bs_rt_face(3,1), apa=3, face=1),
+    ], verbose=true),
+
     local cm_pipeline = [
         // cm_old.examine_x_boundary(),
         cm_old.switch_scope(),
@@ -414,6 +428,8 @@ local clus_all_apa (
         cm.isolated(),
         cm.examine_bundles(),
         cm.retile(retiler=retiler),
+        // Steiner graph with ImproveCluster_2 retiling — multi-APA/multi-face integration test (§6.8).
+        cm.steiner(retiler=improve_cluster_2),
     ],
 
     local mabc = g.pnode({
@@ -422,36 +438,37 @@ local clus_all_apa (
         data:  {
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
-            // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
             perf: true,
-            bee_dir: bee_dir, // "data/0/0", // not used
+            bee_dir: bee_dir,
             bee_zip: "mabc-all-apa.zip",
-            bee_detector: "sbnd",
-            initial_index: index,   // New RSE configuration
-            use_config_rse: true,  // Enable use of configured RSE
+            bee_detector: "protodunehd",
+            initial_index: index,
+            use_config_rse: true,
             runNo: LrunNo,
             subRunNo: LsubRunNo,
             eventNo: LeventNo,
-            save_deadarea: true, 
+            save_deadarea: true,
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
-            bee_points_sets: [  // New configuration for multiple bee points sets
-            //    {
-            //        name: "img",                // Name of the bee points set
-            //        detector: "protodunehd",         // Detector name
-            //        algorithm: "img",           // Algorithm identifier
-            //        pcname: "3d",           // Which scope to use
-            //        coords: ["x", "y", "z"],    // Coordinates to use
-            //        individual: false           // Whether to output as a whole or individual APA/Face
-            //    },
-            {
-                    name: "clustering",         // Name of the bee points set
-                    detector: "protodunehd",         // Detector name
-                    algorithm: "clustering",    // Algorithm identifier
-                    pcname: "3d",           // Which scope to use
-                    coords: ["x_t0cor", "y", "z"],    // Coordinates to use
-                    individual: false            // Output individual APA/Face
-                }
+            bee_points_sets: [
+                {
+                    name: "clustering",
+                    detector: "protodunehd",
+                    algorithm: "clustering",
+                    pcname: "3d",
+                    coords: ["x_t0cor", "y", "z"],
+                    individual: false
+                },
+                {
+                    // Steiner PC output — exercises multi-face ImproveCluster_2 path.
+                    name: "steiner",
+                    visitor: "CreateSteinerGraph",
+                    detector: "protodunehd",
+                    algorithm: "steiner",
+                    pcname: "steiner_pc",
+                    coords: ["x_t0cor", "y", "z"],
+                    individual: false
+                },
             ],
             pipeline: wc.tns(cm_pipeline),
         },

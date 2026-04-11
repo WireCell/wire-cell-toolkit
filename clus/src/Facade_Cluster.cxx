@@ -264,6 +264,12 @@ std::vector<WireCell::WirePlaneId> Cluster::wpids_blob() const
     return wpids;
 }
 
+std::set<WireCell::WirePlaneId> Cluster::wpids_blob_set() const
+{
+    const auto& vec = wpids_blob();
+    return std::set<WireCell::WirePlaneId>(vec.begin(), vec.end());
+}
+
 WirePlaneId Cluster::wpid(const geo_point_t& point) const
 {
     // find the closest point_index to this point

@@ -846,15 +846,48 @@ void TrackFitting::prepare_data() {
     }
 
 
+    // §2.9: inflate charge_err for live pixels adjacent to dead channels.
+    // Prototype: PR3DCluster_trajectory_fit.h:1813-1857.
+    // Inflation factors: induction planes (U,V) × 5, collection plane (W) × 2.5.
+    // This down-weights measurements near dead regions in the trajectory/dQ-dx fits.
+    //
+    // Strategy: collect dead-channel keys introduced by new_clusters this call only,
+    // so that previously-loaded live pixels are not inflated a second time on
+    // incremental prepare_data() calls.
+    {
+        std::set<CoordReadout> new_dead_keys;
+        for (auto& cluster : new_clusters) {
+            auto it = m_cluster_charge_data.find(cluster);
+            if (it == m_cluster_charge_data.end()) continue;
+            for (const auto& [key, meas] : it->second) {
+                if (meas.flag == 0) new_dead_keys.insert(key);
+            }
+        }
+
+        if (!new_dead_keys.empty()) {
+            for (auto& [coord_key, meas] : m_charge_data) {
+                if (meas.flag == 0 || meas.charge <= 0) continue;
+
+                int apa  = coord_key.apa;
+                int time = coord_key.time;
+                int ch   = coord_key.channel;
+
+                bool near_dead =
+                    new_dead_keys.count(CoordReadout(apa, time, ch + 1)) > 0 ||
+                    new_dead_keys.count(CoordReadout(apa, time, ch - 1)) > 0;
+                if (!near_dead) continue;
+
+                // Determine induction vs collection to pick the right factor.
+                auto wire_info = get_wires_for_channel(apa, ch);
+                if (wire_info.empty()) continue;
+                int plane = std::get<1>(wire_info.front());  // (face, plane, wire)
+                double factor = (plane < 2) ? 5.0 : 2.5;    // U/V induction × 5, W collection × 2.5
+                meas.charge_err *= factor;
+            }
+        }
+    }
+
     // std::cout << "Number of Measurements: " << m_charge_data.size() << std::endl;
-    // for (const auto& [coord_key, charge_measurement] : m_charge_data) {
-    //     std::cout << "CoordReadout: (APA=" << coord_key.apa
-    //               << ", Time=" << coord_key.time
-    //               << ", Channel=" << coord_key.channel
-    //               << ") -> Charge=" << charge_measurement.charge
-    //               << ", ChargeErr=" << charge_measurement.charge_err
-    //               << ", Flag=" << charge_measurement.flag << std::endl;
-    // }
 
     // Mark these clusters as loaded so future calls skip them.
     m_loaded_clusters.insert(new_clusters.begin(), new_clusters.end());
@@ -2800,6 +2833,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                  const std::set<Coord2D>& temp_plane, int expected_wire, int expected_time) {
             if (!flag_end_point && saved_plane.size() > 0)
             {
+                // §5.5: after §2.4's multi-face fix, saved_plane may contain pixels from a
+                // different (apa,face) than the trajectory point.  Wire-index comparisons
+                // across faces are meaningless, so skip the outlier replacement in that case.
+                for (const auto& px : saved_plane) {
+                    if (px.apa != apa || px.face != face) return;
+                }
                 std::pair<double, double> ave_pos = std::make_pair(0,0);
                 double total_charge = 0;
                 for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
@@ -2841,6 +2880,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                  const std::set<Coord2D>& temp_plane, int expected_wire, int expected_time) {
             if (!flag_end_point && saved_plane.size() > 0)
             {
+                // §5.5: after §2.4's multi-face fix, saved_plane may contain pixels from a
+                // different (apa,face) than the trajectory point.  Wire-index comparisons
+                // across faces are meaningless, so skip the outlier replacement in that case.
+                for (const auto& px : saved_plane) {
+                    if (px.apa != apa || px.face != face) return;
+                }
                 std::pair<double, double> ave_pos = std::make_pair(0,0);
                 double total_charge = 0;
                 for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
@@ -2882,6 +2927,12 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                  const std::set<Coord2D>& temp_plane, int expected_wire, int expected_time) {
             if (!flag_end_point && saved_plane.size() > 0)
             {
+                // §5.5: after §2.4's multi-face fix, saved_plane may contain pixels from a
+                // different (apa,face) than the trajectory point.  Wire-index comparisons
+                // across faces are meaningless, so skip the outlier replacement in that case.
+                for (const auto& px : saved_plane) {
+                    if (px.apa != apa || px.face != face) return;
+                }
                 std::pair<double, double> ave_pos = std::make_pair(0,0);
                 double total_charge = 0;
                 for (auto it1 = saved_plane.begin(); it1 != saved_plane.end(); it1++){
@@ -4024,15 +4075,25 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
 
     // Main fitting loop using Eigen
     Eigen::VectorXd pos_3D(3 * pss_vec.size());
-    
+
+    // §4.1: per-cluster transform cache — pc_transform() is constant for a given cluster
+    IPCTransform::pointer fit_xform;
+    Facade::Cluster* fit_xform_cluster = nullptr;
+    double fit_xform_t0 = 0.0;
+
     for (size_t i = 0; i < pss_vec.size(); i++) {
-        // Get 2D associations for this 3D point
-        const auto& point_info = m_3d_to_2d[i];
+        // Get 2D associations for this 3D point — §4.7: use .at() to expose index mismatch
+        const auto& point_info = m_3d_to_2d.at(i);
 
         auto segment = pss_vec.at(i).second;
         auto cluster = segment->cluster();
-        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-        double cluster_t0 = cluster->get_cluster_t0();
+        if (cluster != fit_xform_cluster) {
+            fit_xform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+            fit_xform_t0 = cluster->get_cluster_t0();
+            fit_xform_cluster = cluster;
+        }
+        const auto& transform = fit_xform;
+        double cluster_t0 = fit_xform_t0;
 
         auto plane_data_u = point_info.get_plane_data(WirePlaneLayer_t::kUlayer);
         auto plane_data_v = point_info.get_plane_data(WirePlaneLayer_t::kVlayer);
@@ -4063,6 +4124,11 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         data_v_2D.setZero();
         data_w_2D.setZero();
         
+        // §4.2: last-value cache for U-plane wpid → offsets/slopes; updated only when (apa,face) changes
+        int u_cached_apa = -1, u_cached_face = -1;
+        auto u_offset_it = wpid_offsets.cend();
+        auto u_slope_it  = wpid_slopes.cend();
+
         // Fill U plane data
         int index = 0;
         for (auto it = plane_data_u.associated_2d_points.begin(); it != plane_data_u.associated_2d_points.end(); it++) {
@@ -4105,17 +4171,21 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 }
             } 
 
-            WirePlaneId wpid(kAllLayers, it->face, it->apa);
-            auto offset_it = wpid_offsets.find(wpid);
-            auto slope_it = wpid_slopes.find(wpid);
+            if (it->apa != u_cached_apa || it->face != u_cached_face) {
+                WirePlaneId wpid(kAllLayers, it->face, it->apa);
+                u_offset_it = wpid_offsets.find(wpid);
+                u_slope_it  = wpid_slopes.find(wpid);
+                u_cached_apa  = it->apa;
+                u_cached_face = it->face;
+            }
             // S1.15: guard against unknown wpid
-            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) { index++; continue; }
+            if (u_offset_it == wpid_offsets.end() || u_slope_it == wpid_slopes.end()) { index++; continue; }
 
-            auto offset_t = std::get<0>(offset_it->second);
-            auto offset_u = std::get<1>(offset_it->second);
-            auto slope_x = std::get<0>(slope_it->second);
-            auto slope_yu = std::get<1>(slope_it->second).first;
-            auto slope_zu = std::get<1>(slope_it->second).second;
+            auto offset_t = std::get<0>(u_offset_it->second);
+            auto offset_u = std::get<1>(u_offset_it->second);
+            auto slope_x = std::get<0>(u_slope_it->second);
+            auto slope_yu = std::get<1>(u_slope_it->second).first;
+            auto slope_zu = std::get<1>(u_slope_it->second).second;
                
             if (scaling != 0) {
                 data_u_2D(2 * index) = scaling * (it->wire - offset_u);
@@ -4129,6 +4199,11 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             index++;
         }
         
+        // §4.2: last-value cache for V-plane wpid → offsets/slopes
+        int v_cached_apa = -1, v_cached_face = -1;
+        auto v_offset_it = wpid_offsets.cend();
+        auto v_slope_it  = wpid_slopes.cend();
+
         // std::cout << "Fill V " << std::endl;
         // Fill V plane data (similar to U)
         index = 0;
@@ -4172,17 +4247,21 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 }
             } 
 
-            WirePlaneId wpid(kAllLayers, it->face, it->apa);
-            auto offset_it = wpid_offsets.find(wpid);
-            auto slope_it = wpid_slopes.find(wpid);
+            if (it->apa != v_cached_apa || it->face != v_cached_face) {
+                WirePlaneId wpid(kAllLayers, it->face, it->apa);
+                v_offset_it = wpid_offsets.find(wpid);
+                v_slope_it  = wpid_slopes.find(wpid);
+                v_cached_apa  = it->apa;
+                v_cached_face = it->face;
+            }
             // S1.15: guard against unknown wpid
-            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) { index++; continue; }
+            if (v_offset_it == wpid_offsets.end() || v_slope_it == wpid_slopes.end()) { index++; continue; }
 
-            auto offset_t = std::get<0>(offset_it->second);
-            auto offset_v = std::get<2>(offset_it->second);
-            auto slope_x = std::get<0>(slope_it->second);
-            auto slope_yv = std::get<2>(slope_it->second).first;
-            auto slope_zv = std::get<2>(slope_it->second).second;
+            auto offset_t = std::get<0>(v_offset_it->second);
+            auto offset_v = std::get<2>(v_offset_it->second);
+            auto slope_x = std::get<0>(v_slope_it->second);
+            auto slope_yv = std::get<2>(v_slope_it->second).first;
+            auto slope_zv = std::get<2>(v_slope_it->second).second;
             
             // std::cout << "Test: " << std::endl;
             if (scaling != 0) {
@@ -4198,6 +4277,11 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             index++;
         }
         
+        // §4.2: last-value cache for W-plane wpid → offsets/slopes
+        int w_cached_apa = -1, w_cached_face = -1;
+        auto w_offset_it = wpid_offsets.cend();
+        auto w_slope_it  = wpid_slopes.cend();
+
         // std::cout << "Fill W " << std::endl;
 
         // Fill W plane data (similar to U and V)
@@ -4242,17 +4326,21 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
                 }
             } 
 
-            WirePlaneId wpid(kAllLayers, it->face, it->apa);
-            auto offset_it = wpid_offsets.find(wpid);
-            auto slope_it = wpid_slopes.find(wpid);
+            if (it->apa != w_cached_apa || it->face != w_cached_face) {
+                WirePlaneId wpid(kAllLayers, it->face, it->apa);
+                w_offset_it = wpid_offsets.find(wpid);
+                w_slope_it  = wpid_slopes.find(wpid);
+                w_cached_apa  = it->apa;
+                w_cached_face = it->face;
+            }
             // S1.15: guard against unknown wpid
-            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) { index++; continue; }
+            if (w_offset_it == wpid_offsets.end() || w_slope_it == wpid_slopes.end()) { index++; continue; }
 
-            auto offset_t = std::get<0>(offset_it->second);
-            auto offset_w = std::get<3>(offset_it->second);
-            auto slope_x = std::get<0>(slope_it->second);
-            auto slope_yw = std::get<3>(slope_it->second).first;
-            auto slope_zw = std::get<3>(slope_it->second).second;
+            auto offset_t = std::get<0>(w_offset_it->second);
+            auto offset_w = std::get<3>(w_offset_it->second);
+            auto slope_x = std::get<0>(w_slope_it->second);
+            auto slope_yw = std::get<3>(w_slope_it->second).first;
+            auto slope_zw = std::get<3>(w_slope_it->second).second;
             
             if (scaling != 0) {
                 data_w_2D(2 * index) = scaling * (it->wire - offset_w);
@@ -4305,12 +4393,22 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     std::vector<std::pair<int, int> > saved_paf;
     int skip_count = 0;
     
+    // §4.1: per-cluster transform cache for the post-solve path-building pass
+    IPCTransform::pointer path_xform;
+    Facade::Cluster* path_xform_cluster = nullptr;
+    double path_xform_t0 = 0.0;
+
     for (size_t i = 0; i < pss_vec.size(); i++) {
         WireCell::Point p_raw(pos_3D(3 * i), pos_3D(3 * i + 1), pos_3D(3 * i + 2));
         auto segment = pss_vec.at(i).second;
         auto cluster = segment->cluster();
-        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
-        double cluster_t0 = cluster->get_cluster_t0();
+        if (cluster != path_xform_cluster) {
+            path_xform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+            path_xform_t0 = cluster->get_cluster_t0();
+            path_xform_cluster = cluster;
+        }
+        const auto& transform = path_xform;
+        double cluster_t0 = path_xform_t0;
         auto test_wpid = m_dv->contained_by(pss_vec[i].first);
 
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
@@ -5151,7 +5249,8 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
     // Maps for storing relationships between 2D and 3D indices
     std::map<int, std::set<int>> map_2d_to_3d;
     std::map<int, std::set<int>> map_3d_to_2d;
-    std::map<std::pair<int, int>, double> map_pair_values;
+    // §4.5: flat vector gives O(1) access vs O(log N) for std::map<pair<int,int>,double>
+    std::vector<double> pair_values(static_cast<size_t>(n_3d_positions) * n_2d_measurements, 0.0);
     
     // Build mapping structures by iterating through sparse matrix
     for (int k = 0; k < response_matrix_transpose.outerSize(); ++k) {
@@ -5181,7 +5280,7 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
             }
             
             // Store pair values for later lookup
-            map_pair_values[std::make_pair(row, col)] = value;
+            pair_values[static_cast<size_t>(row) * n_2d_measurements + col] = value;
             count++;
         }
         
@@ -5198,7 +5297,7 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int col = *it1;
-            double val = map_pair_values[std::make_pair(row, col)];
+            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
             sum1 += count_2d[col] * val;
             sum2 += val;
             if (count_2d[col] > 2) {
@@ -5217,7 +5316,7 @@ std::vector<std::vector<double>> TrackFitting::calculate_compact_matrix_multi(st
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int row = *it1;
-            double val = map_pair_values[std::make_pair(row, col)];
+            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
             if (average_count.at(row).second == 1) {
                 flag = 1;
             }
@@ -5296,7 +5395,8 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
     // Maps for storing relationships between 2D and 3D indices
     std::map<int, std::set<int>> map_2d_to_3d;
     std::map<int, std::set<int>> map_3d_to_2d;
-    std::map<std::pair<int, int>, double> map_pair_values;
+    // §4.5: flat vector gives O(1) access vs O(log N) for std::map<pair<int,int>,double>
+    std::vector<double> pair_values(static_cast<size_t>(n_3d_positions) * n_2d_measurements, 0.0);
     
     // Build mapping structures by iterating through sparse matrix
     for (int k = 0; k < response_matrix_transpose.outerSize(); ++k) {
@@ -5328,7 +5428,7 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
             }
             
             // Store pair values for later lookup
-            map_pair_values[std::make_pair(row, col)] = value;
+            pair_values[static_cast<size_t>(row) * n_2d_measurements + col] = value;
             count++;
         }
         
@@ -5345,7 +5445,7 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int col = *it1;
-            double val = map_pair_values[std::make_pair(row, col)];
+            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
             sum1 += count_2d[col] * val;
             sum2 += val;
             if (count_2d[col] > 2) {
@@ -5365,7 +5465,7 @@ std::vector<std::pair<double, double>> TrackFitting::calculate_compact_matrix(
         
         for (auto it1 = it->second.begin(); it1 != it->second.end(); ++it1) {
             int row = *it1;
-            double val = map_pair_values[std::make_pair(row, col)];
+            double val = pair_values[static_cast<size_t>(row) * n_2d_measurements + col];
             if (average_count.at(row).second == 1) {
                 flag = 1;
             }

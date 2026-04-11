@@ -162,8 +162,7 @@ namespace WireCell::Clus {
 
 
         // star to construct a new cluster
-        auto wpids = orig_cluster->wpids_blob();
-        std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
+        const auto wpid_set = orig_cluster->wpids_blob_set();
 
         // make a new node from the existing grouping
         auto& new_cluster = m_grouping->make_child(); // make a new cluster inside 

@@ -2,6 +2,7 @@
 
 **Reviewed:** 2026-04-10  
 **Fixes applied (2026-04-10):** §2.1 (comment added), §2.2 (FIXED), §2.3 (FIXED), §2.7 (FIXED), §2.8 (FIXED), §2.10 (FIXED), §2.11 (FIXED), §2.12 (FIXED), §2.13 (FIXED), §2.14 (FIXED), §2.15 (FIXED), §2.4/§5.1 (FIXED — multi-face blob+Steiner union in `form_point_association`), §5.2 (FIXED — option c: debug log on `contained_by()==(-1,-1)`), §3.D1 (FIXED — `vertex_index_map`/`segment_point_index_map` stable-int keys). §2.5, §2.6, §2.16 deferred per user request. §2.9 deferred (complex, requires channel→wire reverse lookup). §3.D2-D10 deferred (no stable ID on `Facade::Cluster`/`Facade::Blob`). S4 parameter parity verified — all defaults match prototype.  
+**Fixes applied (2026-04-11):** §2.9 (FIXED — dead-channel neighbour `charge_err` inflation in `prepare_data`). §4.1 (FIXED — per-cluster `pc_transform` last-value cache in both `trajectory_fit` loops). §4.2 (FIXED — per-(apa,face) last-value cache for `wpid_offsets`/`wpid_slopes` in U/V/W fill loops). §4.4 (CLOSED — already optimal: one `backward` + three `convert_3Dpoint_time_ch` per vertex, no plane loop). §4.5 (FIXED — `map_pair_values` replaced with flat `std::vector<double>` in both compact-matrix functions). §4.7 (FIXED — `m_3d_to_2d[i]` → `.at(i)`). §5.5 (FIXED — face-consistency guard added to all three `check_outliers` lambdas in `examine_point_association`). §2.17 verification deferred (end-to-end comparison needed). §4.3, §4.8 deferred.  
 **Entry point:** `TrackFitting::do_single_tracking` — `clus/src/TrackFitting.cxx:7985`  
 **Prototype entry:** `WCPPID::PR3DCluster::do_tracking` — `prototype-dev/wire-cell/pid/src/PR3DCluster.cxx:33`  
 **Scope:** Functional equivalence, bugs, efficiency, determinism, multi-APA/face correctness.  
@@ -171,7 +172,7 @@ A dead blob that spans slices `[min, max)` should contribute one charge entry pe
 
 ---
 
-### 2.9 `prepare_data` missing dead-channel neighbour error inflation — DEFERRED
+### 2.9 `prepare_data` missing dead-channel neighbour error inflation — FIXED
 
 **Prototype:** `PR3DCluster_trajectory_fit.h:1815-1857`
 
@@ -181,7 +182,7 @@ The prototype inflates `charge_err` for live pixels that are adjacent to dead ch
 
 This gives less weight to measurements near dead regions during the fit. The toolkit's `prepare_data` contains no equivalent logic.
 
-**Fix:** After populating `m_charge_data`, iterate the dead-blob pixel set (known from the blob loop at `:778-847`). For each dead `(time, wire)` entry, check `(time ± 1, wire)`, `(time, wire ± 1)` in `m_charge_data`; if found and non-dead, inflate their `charge_err` by the appropriate factor. Alternatively, apply the inflation at row-insertion time inside `trajectory_fit` / `dQ_dx_fit` using `m_charge_data[key].flag == 0` as the dead indicator.
+**Fix applied (`TrackFitting.cxx:849–888`):** After the dead-blob loop, a scoped block collects all `CoordReadout` keys with `flag == 0` that were introduced by `new_clusters` in this `prepare_data()` call. It then sweeps `m_charge_data` and inflates `charge_err` for every live pixel (`flag != 0`, `charge > 0`) whose `channel ± 1` at the same `(apa, time)` appears in that dead-key set. The inflation factor is determined via `get_wires_for_channel`: plane < 2 (U/V induction) → × 5, plane == 2 (W collection) → × 2.5. Dead keys are scoped to `new_clusters` only to prevent double-inflation on incremental `prepare_data()` calls.
 
 ---
 
@@ -452,23 +453,23 @@ std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash> m_charge_d
 
 ## 4. Efficiency Wins (S3)
 
-### 4.1 Hoist `m_pcts->pc_transform(...)` out of hot loops
+### 4.1 Hoist `m_pcts->pc_transform(...)` out of hot loops — FIXED
 
-**Files:** `TrackFitting.cxx:4109` (inside `trajectory_fit` per-point loop), `TrackFitting.cxx:7032, 7063` (inside `dQ_dx_fit`), and `cal_gaus_integral_seg` per-sample.
+**Files:** `TrackFitting.cxx:4028–4045` (main fitting loop), `TrackFitting.cxx:4318–4333` (post-solve path-building loop).
 
-The call chain `m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()))` is repeated for every 3D trajectory point inside the fitting loops. The transform is constant for the lifetime of a given cluster.
+The call chain `m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()))` was repeated for every 3D trajectory point inside the fitting loops. The transform is constant for the lifetime of a given cluster.
 
-**Fix:** Cache `auto transform = ...` per cluster BEFORE the per-point loop. For segments spanning one cluster (common case), this replaces N map lookups with 1.
+**Fix applied:** A `(fit_xform_cluster, fit_xform, fit_xform_t0)` last-value cache is declared before each loop. The cache is refreshed only when `cluster` changes. For the common case (all points in one cluster) this reduces N `pc_transform()` calls to 1 per `trajectory_fit` invocation. `dQ_dx_fit` and `cal_gaus_integral_seg` were found to already hoist the transform outside their inner loops.
 
 ---
 
-### 4.2 Hoist `wpid_offsets.find(wpid)` and `wpid_slopes.find(wpid)` out of per-pixel loops
+### 4.2 Hoist `wpid_offsets.find(wpid)` and `wpid_slopes.find(wpid)` out of per-pixel loops — FIXED
 
-**Files:** `TrackFitting.cxx:4184, 4249, 4317, 1994-1995`
+**Files:** `TrackFitting.cxx:4094–4097` (U cache), `4152–4155` (V cache), `4230–4233` (W cache).
 
-Per 2D pixel, `find()` on `wpid_offsets` and `wpid_slopes` (both `std::map<WirePlaneId,...>`) is repeated. Many pixels for the same trajectory point share one `(apa, face)` and therefore the same wpid.
+Per 2D pixel, `find()` on `wpid_offsets` and `wpid_slopes` (both `std::map<WirePlaneId,...>`) was repeated. Many pixels for the same trajectory point share one `(apa, face)` and therefore the same wpid.
 
-**Fix:** Group the 2D pixels by `(apa, face)` before the inner loop, look up offsets/slopes once per group.
+**Fix applied:** A `(x_cached_apa, x_cached_face, x_offset_it, x_slope_it)` last-value cache is declared inside the per-point loop but before each of the U/V/W per-pixel loops. The cache updates only when `it->apa != x_cached_apa || it->face != x_cached_face`. For the common single-face case this reduces 2×N `std::map::find()` calls per plane per point to 2 total. Cross-face tracks still work correctly via a cache miss on face change.
 
 ---
 
@@ -482,21 +483,21 @@ Per 2D pixel, `find()` on `wpid_offsets` and `wpid_slopes` (both `std::map<WireP
 
 ---
 
-### 4.4 `form_point_association` — cache backward-transform per vertex
+### 4.4 `form_point_association` — cache backward-transform per vertex — CLOSED (already optimal)
 
-**File:** `TrackFitting.cxx:2277-2280`
+**File:** `TrackFitting.cxx:2202–2247`
 
-For Steiner-path vertices, `transform->backward(vertex, ...)` plus three `convert_3Dpoint_time_ch(...)` are called per vertex per plane. These are three independent linear projections that could be computed once per vertex and reused.
-
-**Fix:** Compute and cache `(u_raw, v_raw, w_raw, t_raw)` once per vertex before the plane loop.
+Code inspection showed the current implementation already achieves the intended structure: `transform->backward(vertex_point, ...)` is called once per vertex (`:2235`), and the result is immediately used for all three `convert_3Dpoint_time_ch` calls (`:2236–2238`) within the same statement group. There is no redundant per-plane loop; the "plane loop" mentioned in the original concern does not exist in the current code. No further action needed.
 
 ---
 
-### 4.5 `calculate_compact_matrix(_multi)` — replace `std::map<pair<int,int>, double>` with dense structure
+### 4.5 `calculate_compact_matrix(_multi)` — replace `std::map<pair<int,int>, double>` with dense structure — FIXED
 
-**File:** `TrackFitting.cxx:5341-5372` (single), `TrackFitting.cxx:5188-5326` (multi)
+**File:** `TrackFitting.cxx:5154` (multi), `TrackFitting.cxx:5299` (single).
 
-`map_pair_values` is a `std::map<std::pair<int,int>, double>` used as a dense overlap-weight table. For typical trajectory sizes the keys are dense integer pairs in `[0, N) × [0, N)`. An `std::vector<std::vector<double>>` (or flat `std::vector<double>` with row-major indexing) indexed directly would be ~10× faster on random access.
+`map_pair_values` was a `std::map<std::pair<int,int>, double>` used as a dense overlap-weight table. For typical trajectory sizes the keys are dense integer pairs in `[0, n_3d_positions) × [0, n_2d_measurements)`.
+
+**Fix applied:** Replaced with `std::vector<double> pair_values(n_3d_positions * n_2d_measurements, 0.0)` (flat row-major). All write sites use `pair_values[row * n_2d_measurements + col] = value` and all four read sites use the same indexing. Gives O(1) access instead of O(log N) for all accesses in both `calculate_compact_matrix` and `calculate_compact_matrix_multi`.
 
 ---
 
@@ -512,11 +513,13 @@ ptss = saved_pts;   // full vector copy
 
 ---
 
-### 4.7 `m_3d_to_2d[i]` silent insertion → `m_3d_to_2d.at(i)`
+### 4.7 `m_3d_to_2d[i]` silent insertion → `m_3d_to_2d.at(i)` — FIXED
 
-**File:** `TrackFitting.cxx:4105`
+**File:** `TrackFitting.cxx:4035`
 
-`operator[]` on `std::map<int, Point3DInfo>` silently inserts a zero-initialised entry when `i` is missing, masking logic bugs. Switch to `at()` (throws on miss, making bugs visible). Related to bug §2.1.
+`operator[]` on `std::map<int, Point3DInfo>` silently inserts a zero-initialised entry when `i` is missing, masking logic bugs.
+
+**Fix applied:** Changed to `m_3d_to_2d.at(i)`. Throws `std::out_of_range` on a missing key, making any count-vs-position index mismatch (§2.1) immediately visible rather than silently producing garbage data. Related to bug §2.1.
 
 ---
 
@@ -568,17 +571,13 @@ See §2.2. For multi-APA tracks, this function must resolve (apa, face) per poin
 
 `examine_end_ps_vec` correctly calls `m_dv->contained_by(temp_start)` per test point and dispatches `m_grouping->is_good_point(raw, apa, face, ...)` with the per-point `(apa, face)`. This is the correct pattern — other functions should follow this model.
 
-### 5.5 `examine_point_association` — fallback pixels may land in wrong face
+### 5.5 `examine_point_association` — fallback pixels may land in wrong face — FIXED
 
-**File:** `TrackFitting.cxx:2892-3020`
+**File:** `TrackFitting.cxx:2801–2808` (guard applied to all three `check_outliers` lambdas).
 
-In the single-dead-plane fallback branches, the toolkit inserts pixels via:
-```cpp
-insert(Coord2D(apa, face, time_u, wire_u, channel_u, kUlayer))
-```
-using `(apa, face)` from `m_dv->contained_by(p)` at `:2676`. If the pre-existing associated pixels in `temp_2dut` were formed under a different `(apa, face)` (e.g., from `form_point_association` under the closest-cluster-point's face), the fallback pixels could be in a different face from the rest of the association. Downstream code that assumes all pixels for a given trajectory point share one (apa, face) will see mixed data.
+In the single-dead-plane fallback branches, the `check_outliers` lambda compares pixel wire indices in `saved_plane` against `expected_wire`/`expected_time` computed from `m_dv->contained_by(p)`. After §2.4's multi-face fix, `saved_plane` may contain pixels from a different `(apa, face)` than the trajectory point; comparing wire indices across faces is meaningless and the replacement synthetic pixel would be in the wrong frame.
 
-**Fix:** Once §2.4's face-filter fix is applied, the pixel set will already be properly multi-face; the fallback should either be disabled or keyed to the dominant face in the existing pixel set.
+**Fix applied:** A guard loop at the top of every `check_outliers` lambda body iterates `saved_plane` and returns immediately if any pixel has `px.apa != apa || px.face != face`. This conservatively skips the outlier replacement for cross-face pixel sets, which is safe because those sets are already handled correctly by the §2.4 multi-face collection logic. The guard is applied uniformly to all three lambda definitions (only-U-dead, only-V-dead, only-W-dead) via a single `replace_all` edit.
 
 ---
 
@@ -612,17 +611,17 @@ Verify that `TrackFittingParams` defaults match the prototype's hardcoded values
 
 The following order minimises rework: correctness first, then determinism, then efficiency.
 
-| Phase | Work | Severity |
-|---|---|---|
-| 1 (this doc) | Audit document — team review | — |
-| 2 | Verify parameter parity table (§6) | S4 |
-| 3 | §2.1–2.3: `skip_trajectory_point` index bug, face-per-point, frame mixing in `trajectory_fit` | S1 critical |
-| 4 | §2.4–2.7: `form_point_association` face filter, Steiner wire span, fallback diamond, `examine_end_ps_vec` | S1 multi-APA |
-| 5 | §3.D1–3.D9: pointer-keyed container elimination (especially `vertex_index_map`) | S2 determinism |
-| 6 | §2.8–2.9: `prepare_data` multi-slice dead blobs and error inflation | S1 feature |
-| 7 | §2.10–2.15: dQ/dx defensive guards (zero prediction, empty cluster, NaN, wpid guards) | S1 crashes |
-| 8 | §2.16: assess `collect_charge_trajectory` | S1/feature |
-| 9 | §4.1–4.8: efficiency wins | S3 |
+| Phase | Work | Severity | Status |
+|---|---|---|---|
+| 1 (this doc) | Audit document — team review | — | DONE |
+| 2 | Verify parameter parity table (§6) | S4 | DONE |
+| 3 | §2.1–2.3: `skip_trajectory_point` index bug, face-per-point, frame mixing in `trajectory_fit` | S1 critical | DONE (§2.1 comment, §2.2 FIXED, §2.3 FIXED) |
+| 4 | §2.4–2.7: `form_point_association` face filter, Steiner wire span, fallback diamond, `examine_end_ps_vec` | S1 multi-APA | DONE (§2.4/§5.1 FIXED, §2.5/§2.6 deferred, §2.7 FIXED) |
+| 5 | §3.D1–3.D9: pointer-keyed container elimination (especially `vertex_index_map`) | S2 determinism | §3.D1 FIXED; §3.D2–D10 deferred (no stable ID) |
+| 6 | §2.8–2.9: `prepare_data` multi-slice dead blobs and error inflation | S1 feature | DONE (§2.8 FIXED, §2.9 FIXED) |
+| 7 | §2.10–2.15: dQ/dx defensive guards (zero prediction, empty cluster, NaN, wpid guards) | S1 crashes | DONE |
+| 8 | §2.16: assess `collect_charge_trajectory` | S1/feature | Deferred |
+| 9 | §4.1–4.8: efficiency wins | S3 | §4.1/§4.2/§4.4/§4.5/§4.7 DONE; §4.3/§4.8 deferred; §5.5 FIXED |
 
 Each phase is a separate commit. Each phase must build cleanly before moving to the next.
 

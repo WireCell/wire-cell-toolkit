@@ -22,6 +22,7 @@
 #include "WireCellClus/Graphs.h"
 
 #include <functional>
+#include <set>
 
 namespace WireCell::Clus::Facade {
 
@@ -132,6 +133,10 @@ namespace WireCell::Clus::Facade {
 
         /// Order is synchronized with children().
         std::vector<WireCell::WirePlaneId> wpids_blob() const;
+
+        /// Unique set of WirePlaneIds over all blobs.  More efficient than
+        /// building a set from wpids_blob() at every call site.
+        std::set<WireCell::WirePlaneId> wpids_blob_set() const;
 
         /// return the wpid given a point ...
         WirePlaneId wpid(const geo_point_t& point) const;

@@ -85,8 +85,8 @@ it should be documented as an intentional divergence.
 
 | Parameter | Prototype PID (`_2`, single, dual) | Prototype 2dtoy | Toolkit (`hack_activity_improved`) |
 |---|---|---|---|
-| Coverage weight: self (delta=0) | 1 | 1 | **2** |
-| Coverage weight: left neighbor (delta=-1) | 2 | 2 | 1 |
+| Coverage weight: self (delta=0) | 2 | 1 | 2 |
+| Coverage weight: left neighbor (delta=-1) | 1 | 2 | 1 |
 | Coverage weight: right neighbor (delta=+1) | 1 | 1 | 1 |
 | Coverage threshold (per plane) | `>=2` | `>0` | `>=2` |
 | Coverage total threshold | n/a | `sum>=6` | n/a |
@@ -97,14 +97,14 @@ The toolkit uses the **PID variant** thresholds and geometry (L2 disk, per-plane
 not the 2dtoy variant (L1 diamond, total sum ≥6). This is the correct source-of-truth
 since `ImproveCluster_2` is the port of the PID `Improve_PR3DCluster_2`.
 
-The difference in coverage weights (`delta=0` weighted **2** in toolkit vs `delta=-1`
-weighted **2** in prototype) means the toolkit is slightly more generous: a point with
-activity only at `wire` (and not at `wire-1`) will still pass the threshold in the
-toolkit but not necessarily in the prototype. **Recommend verifying** whether this
-changes physics output on MicroBooNE-equivalent samples or if it is a considered change.
+**Coverage weights match the prototype.** The earlier draft of this table incorrectly
+stated `delta=-1` has weight 2 in the prototype. Reading `ImprovePR3DCluster.cxx:1011`
+shows `nu += 2` for `results.at(1)` (the self wire) and `nu++` for `results.at(1)-1`
+(the left neighbor), i.e. self=2, left=1, right=1 — identical to the toolkit.
+No divergence here; no further action required.
 
-**Prototype ref:** `ImprovePR3DCluster.cxx:993–1005` (coverage weights) and `:1039–1048` (tube).
-**Toolkit ref:** `improvecluster_1.cxx:604–616` (coverage weights) and `:670–677` (tube).
+**Prototype ref:** `ImprovePR3DCluster.cxx:1002–1021` (coverage weights) and `:1047–1071` (tube).
+**Toolkit ref:** `improvecluster_1.cxx:577–595` (coverage weights) and `:644–653` (tube).
 
 ---
 
@@ -279,24 +279,19 @@ pointer ordering → different representatives → potentially different physics
 ### Bug #7 — `ImproveCluster_2` seeds `get_activity_improved` from `orig_cluster`, not `temp_cluster`
 
 **File:** `improvecluster_2.cxx:180`
-**Severity:** Functional divergence from prototype (suspected — see §2.3 for context).
+**Severity:** Confirmed functional divergence from prototype (see §2.3 for context).
 
-In the prototype dual-cluster overload, the initial wire-harvest is from **cluster2**
-(the dead-channel-extended temp cluster), and dead/good fill proximity is gated against
-**cluster1**'s point cloud. In the toolkit, `get_activity_improved(*orig_cluster, ...)`
-does both harvest and proximity from `orig_cluster`. This means the initial wire
-inventory is smaller (it doesn't include the dead-channel extensions already added by
-`ImproveCluster_1`), which may reduce the coverage of the final tiled cluster.
+In the prototype dual-cluster overload (`ImprovePR3DCluster.cxx:1369`), the initial
+wire-harvest iterates `cluster2->get_mcells()` (the dead-channel-extended temp cluster),
+while proximity checks use `cluster1->get_point_cloud()`. In the toolkit,
+`get_activity_improved(*orig_cluster, ...)` does both harvest and proximity from
+`orig_cluster`. This means the initial wire inventory is smaller (it doesn't include the
+dead-channel extensions already added by `ImproveCluster_1`), which may reduce the
+coverage of the final tiled cluster.
 
-**Proposed fix (if prototype semantics are intended):** Change to:
-
-```cpp
-get_activity_improved(temp_cluster, map_slices_measures, apa, face);
-```
-
-This would require `get_activity_improved` to additionally accept a separate `proximity_cluster`
-argument for the kd2d distance gate, analogous to the prototype's dual-overload pattern.
-Confirm the intended behavior before changing.
+**Status:** Confirmed divergence. Fix requires splitting `get_activity_improved` into a
+harvest step (operating on `temp_cluster`) and a proximity step (operating on
+`orig_cluster`'s kd2d). Owner decision required before implementing.
 
 ---
 
@@ -575,28 +570,40 @@ config) should be added.
 
 ### P2 — Functional alignment / review decisions
 
-7. **Confirm intent of seeding `get_activity_improved` from `orig_cluster` vs
-   `temp_cluster` in `ImproveCluster_2`** (Bug #7, §2.3). If prototype semantics
-   are required, change to a dual-cluster variant.
-8. **Confirm coverage-weight change** (§2.5): `delta=0` weighted 2 in toolkit vs
-   `delta=-1` weighted 2 in prototype. Document as intentional or revert.
-9. **Replace commented-out `hack_activity_improved` line in `ImproveCluster_1::mutate`**
-   with an explanatory comment (§2.1).
-10. **Resolve wire-index vs channel-ID ambiguity** noted at `improvecluster_1.cxx:383`
+7. **Fix `get_activity_improved` seeding in `ImproveCluster_2`** (Bug #7, §2.3).
+   Confirmed divergence: toolkit seeds from `orig_cluster`, prototype seeds from
+   `cluster2` (temp_cluster). Fix requires splitting harvest from proximity in
+   `get_activity_improved`. Owner decision required.
+8. ~~**Confirm coverage-weight change** (§2.5)~~ — **Resolved**: weights match the
+   prototype exactly (self=2, left=1, right=1). The earlier draft table was wrong.
+   No code change needed.
+9. ~~**Replace commented-out `hack_activity_improved` line in `ImproveCluster_1::mutate`**~~
+   — **Done** (explanatory comment added).
+10. **Resolve wire-index vs channel-ID ambiguity** noted at `improvecluster_1.cxx`
     (§6.5). Required for correctness on wrapped-wire or non-trivial channel-map detectors.
 
 ### P3 — Efficiency
 
-11. **Factor out ~70 duplicated lines** in `CreateSteinerGraph::visit` into a helper (§4.2).
-12. **Add `Cluster::wpids_blob_set()`** to avoid the rebuild-set pattern (§4.3).
-13. **Consider removing or implementing `SteinerFunctions::improve_grapher*` stubs** (§6.7).
-14. **Address `tick_span` derivation from last blob** (Bug #3, §4). Derive from face metadata.
-15. **Refactor triplicated U/V/W blocks** in `get_activity_improved` into a plane loop (§4.6).
+11. ~~**Factor out ~70 duplicated lines** in `CreateSteinerGraph::visit` into a helper~~
+    — **Done** (`process_cluster_steiner` lambda, `CreateSteinerGraph.cxx`).
+12. ~~**Add `Cluster::wpids_blob_set()`**~~ — **Done** (`Facade_Cluster.h/cxx`; all
+    four call sites updated).
+13. ~~**Consider removing or implementing `SteinerFunctions::improve_grapher*` stubs**~~
+    — **Done**: stubs retained as documentation with explanatory comments replacing the
+    `raise<LogicError>` bodies (`SteinerFunctions.cxx/h`).
+14. ~~**Address `tick_span` derivation from last blob** (Bug #3)~~
+    — **Done**: now uses `m_grouping->get_nticks_per_slice().at(apa).at(face)`
+    (`improvecluster_1.cxx`).
+15. ~~**Refactor triplicated U/V/W blocks** in `get_activity_improved` into a plane loop~~
+    — **Done** (`improvecluster_1.cxx`: steps 2, 3, and 4 each collapsed into a
+    single `for (int pl = 0; pl < 3; ++pl)` loop).
 
 ### P4 — Testing
 
-16. **Add an integration config that wires `ImproveCluster_2` into `CreateSteinerGraph`**
-    (§6.8). Test on a multi-face detector (protoDUNE-HD or SBND).
+16. ~~**Add an integration config that wires `ImproveCluster_2` into `CreateSteinerGraph`**
+    (§6.8)~~ — **Done**: `clus/test/test-porting/pdhd/clus.jsonnet` now includes
+    `cm.steiner(retiler=improve_cluster_2)` with 4-APA × 2-face samplers and outputs
+    `steiner_pc` via `bee_points_sets`.
 17. **Bit-reproducibility check:** Run `ImproveCluster_2` twice on the same input;
     confirm blob counts and `steiner_graph` vertex/edge counts are identical after
     the determinism fixes above.

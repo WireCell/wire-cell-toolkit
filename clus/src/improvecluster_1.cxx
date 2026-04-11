@@ -57,8 +57,7 @@ namespace WireCell::Clus {
 
         // std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
 
-        auto wpids = orig_cluster->wpids_blob();
-        std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
+        const auto wpid_set = orig_cluster->wpids_blob_set();
 
         // // Needed in hack_activity() but call it here to avoid call overhead.
         // // find the highest and lowest points
@@ -287,7 +286,10 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     std::map<int, std::set<int>> v_time_chs; // V plane time-channel map  
     std::map<int, std::set<int>> w_time_chs; // W plane time-channel map
 
-    int tick_span = 1;
+    // Derive tick_span from face metadata rather than blob geometry so that it
+    // is stable even if no blobs exist yet for this face, and to avoid the
+    // "last-blob wins" bug that occurred before Bug #3 was fixed.
+    const int tick_span = m_grouping->get_nticks_per_slice().at(apa).at(face);
 
     // Step 1: Fill maps according to existing blobs in cluster (this face only).
     auto children = cluster.children();
@@ -303,12 +305,6 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
         // Get the time slice bounds for this blob
         int time_slice_min = blob->slice_index_min();
         int time_slice_max = blob->slice_index_max();
-        // Only record tick_span from the first encountered blob; all blobs on
-        // a given face should agree.  A later assertion/warning can catch
-        // discrepancies if they ever arise.
-        if (tick_span == 1 && time_slice_max > time_slice_min) {
-            tick_span = time_slice_max - time_slice_min;
-        }
         
         // Process each time slice in the blob
         for (int time_slice = time_slice_min; time_slice < time_slice_max; time_slice = time_slice + tick_span) {
@@ -347,161 +343,73 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
 
     // Distance cut for dead channel inclusion (20 cm as in original code)
     const double dis_cut = 20 * units::cm;
-         
-    // Step 2: Handle dead channels from CTPC (using grouping interface)
-    for (const auto& [start, end]: dead_uchs_range) {
-        for (int ch = start; ch < end; ++ch) {
-            for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, 0);  // this should be wire index ... , so a mismatch between MicroBooNE and other detectors, need to be fixed at some points ...
-                std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-                const auto& skd = cluster.kd2d(apa, face, 0);
-                auto ret_matches = skd.knn(1, query_point);
-                // std::cout << ret_matches[0].first << " " << sqrt(ret_matches[0].second) / units::cm << " " << dis_cut / units::cm << std::endl;
-                if (sqrt(ret_matches[0].second) < dis_cut) u_time_chs[time_slice].insert(ch);
+
+    // NOTE: ch values here are wire indices, not channel IDs.  On MicroBooNE
+    // they coincide; on detectors with non-trivial wire→channel mappings (e.g.
+    // wrapped wires) the dead/good-channel fill will be incorrect until
+    // get_overlap_dead_chs / get_overlap_good_ch_charge are updated to accept
+    // wire indices natively.  See §6.5 of the port review.
+
+    // Convenience aliases indexed by plane (0=U, 1=V, 2=W).
+    const std::vector<std::pair<int,int>>* dead_ch_ranges[3] = {
+        &dead_uchs_range, &dead_vchs_range, &dead_wchs_range
+    };
+    std::map<int, std::set<int>>* time_chs[3] = {
+        &u_time_chs, &v_time_chs, &w_time_chs
+    };
+    const std::map<std::pair<int,int>, std::pair<double,double>>* tcc_maps[3] = {
+        &map_u_tcc, &map_v_tcc, &map_w_tcc
+    };
+
+    // Step 2: Handle dead channels — one loop over planes replaces three identical blocks.
+    for (int pl = 0; pl < 3; ++pl) {
+        for (const auto& [start, end] : *dead_ch_ranges[pl]) {
+            for (int ch = start; ch < end; ++ch) {
+                for (int time_slice = min_time; time_slice < max_time; time_slice += tick_span) {
+                    auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, pl);
+                    std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
+                    auto ret_matches = cluster.kd2d(apa, face, pl).knn(1, query_point);
+                    if (sqrt(ret_matches[0].second) < dis_cut) (*time_chs[pl])[time_slice].insert(ch);
+                }
             }
         }
     }
-    for (const auto& [start, end]: dead_vchs_range) {
-        for (int ch = start; ch < end; ++ch) {
-            for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, 1);    // this should be wire index ...
-                std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-                const auto& skd = cluster.kd2d(apa, face, 1);
-                auto ret_matches = skd.knn(1, query_point);
-                if (sqrt(ret_matches[0].second) < dis_cut) v_time_chs[time_slice].insert(ch);
+
+    // Step 3: Handle good channels from CTPC — one loop over planes.
+    for (int pl = 0; pl < 3; ++pl) {
+        for (const auto& [time_ch, charge_info] : *tcc_maps[pl]) {
+            int time_slice = time_ch.first;
+            int ch = time_ch.second;
+            auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, pl);
+            std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
+            auto ret_matches = cluster.kd2d(apa, face, pl).knn(1, query_point);
+            if (sqrt(ret_matches[0].second) > dis_cut) continue;
+            (*time_chs[pl])[time_slice].insert(ch);
+        }
+    }
+
+    // Step 4: Convert to toolkit activity format (RayGrid measures).
+    // Layers 0 and 1 are the geometric (non-wire) ray layers in the RayGrid
+    // scheme; layers 2, 3, 4 carry U, V, W wire activity respectively.
+    const int nlayers = 2 + 3;
+    for (int pl = 0; pl < 3; ++pl) {
+        for (const auto& [time_slice, ch_set] : *time_chs[pl]) {
+            auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
+            auto& measures = map_slices_measures[slice_key];
+            if (measures.empty()) {
+                measures.resize(nlayers);
+                measures[0].push_back(1);
+                measures[1].push_back(1);
+                for (int i = 0; i < 3; ++i)
+                    measures[2+i].resize(m_plane_infos.at(apa).at(face)[i].total_wires, 0);
             }
-        }
-    }
-    for (const auto& [start, end]: dead_wchs_range) {
-        for (int ch = start; ch < end; ++ch) {
-            for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, 2);   // this should be wire index ...
-                std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-                const auto& skd = cluster.kd2d(apa, face, 2);
-                auto ret_matches = skd.knn(1, query_point);
-                if (sqrt(ret_matches[0].second) < dis_cut) w_time_chs[time_slice].insert(ch);
+            WRG::measure_t& m = measures[2 + pl];
+            for (int ch : ch_set) {
+                double charge = 1e-3; // sentinel: dead/forced channel, converted to (0, large_err) in make_iblobs_improved
+                auto it = tcc_maps[pl]->find(std::make_pair(time_slice, ch));
+                if (it != tcc_maps[pl]->end()) charge = it->second.first;
+                m[ch] = charge;
             }
-        }
-    }
-   
-   
-    
-    // Step 3: Deal with good channels from CTPC
-    std::map<std::pair<int, int>, double> time_ch_charge_map;
-
-    // Process U plane good channels
-    for (const auto& [time_ch, charge_info] : map_u_tcc) {
-        int time_slice = time_ch.first;
-        int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, 0);     // this should be wire index ...
-        std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-        const auto& skd = cluster.kd2d(apa, face, 0);
-        auto ret_matches = skd.knn(1, query_point);
-        double temp_min_dis = sqrt(ret_matches[0].second);
-        if (temp_min_dis > dis_cut) continue;
-        u_time_chs[time_slice].insert(ch);
-    }
-    // Process V plane good channels
-    for (const auto& [time_ch, charge_info] : map_v_tcc) {
-        int time_slice = time_ch.first;
-        int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, 1);   // this should be wire index ...
-        std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-        const auto& skd = cluster.kd2d(apa, face, 1);
-        auto ret_matches = skd.knn(1, query_point);
-        double temp_min_dis = sqrt(ret_matches[0].second); 
-        if (temp_min_dis > dis_cut) continue;
-        v_time_chs[time_slice].insert(ch);
-    }
-    // Process W plane good channels
-    for (const auto& [time_ch, charge_info] : map_w_tcc) {
-        int time_slice = time_ch.first;
-        int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, 2);    // this should be wire index ...
-        std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-        const auto& skd = cluster.kd2d(apa, face, 2);
-        auto ret_matches = skd.knn(1, query_point);
-        double temp_min_dis = sqrt(ret_matches[0].second);
-        if (temp_min_dis > dis_cut) continue;
-        w_time_chs[time_slice].insert(ch);
-    }
-
-    // Step 4: Convert to toolkit activity format (RayGrid measures)
-    const int nlayers = 2+3;
-    for (const auto& [time_slice, ch_set] : u_time_chs) {
-        auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
-
-        auto& measures = map_slices_measures[slice_key];
-         if (measures.size()==0){
-            measures.resize(nlayers);
-            // what to do the first two views???
-            measures[0].push_back(1);
-            measures[1].push_back(1);
-            measures[2].resize(m_plane_infos.at(apa).at(face)[0].total_wires, 0);
-            measures[3].resize(m_plane_infos.at(apa).at(face)[1].total_wires, 0);
-            measures[4].resize(m_plane_infos.at(apa).at(face)[2].total_wires, 0);
-            
-            // std::cout << "Test2: " << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
-        }
-
-        WRG::measure_t& m = measures[2+0]; // U plane is layer 2
-        for (int ch : ch_set) {
-            double charge = 1e-3; // Default charge value
-            auto it = map_u_tcc.find(std::make_pair(time_slice, ch));
-            if (it != map_u_tcc.end()) {
-                charge = it->second.first; // Use the charge from the map
-            }
-            m[ch] = charge;
-        }
-    }
-    for (const auto& [time_slice, ch_set] : v_time_chs) {
-        auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
-
-        auto& measures = map_slices_measures[slice_key];
-         if (measures.size()==0){
-            measures.resize(nlayers);
-            // what to do the first two views???
-            measures[0].push_back(1);
-            measures[1].push_back(1);
-            measures[2].resize(m_plane_infos.at(apa).at(face)[0].total_wires, 0);
-            measures[3].resize(m_plane_infos.at(apa).at(face)[1].total_wires, 0);
-            measures[4].resize(m_plane_infos.at(apa).at(face)[2].total_wires, 0);
-            
-            // std::cout << "Test3: " << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
-        }
-
-        WRG::measure_t& m = measures[2+1]; // V plane is layer 3
-        for (int ch : ch_set) {
-            double charge = 1e-3; // Default charge value
-            auto it = map_v_tcc.find(std::make_pair(time_slice, ch));
-            if (it != map_v_tcc.end()) {
-                charge = it->second.first; // Use the charge from the map
-            }
-            m[ch] = charge;
-        }
-    }
-    for (const auto& [time_slice, ch_set] : w_time_chs) {
-        auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
-        auto& measures = map_slices_measures[slice_key];
-         if (measures.size()==0){
-            measures.resize(nlayers);
-            // what to do the first two views???
-            measures[0].push_back(1);
-            measures[1].push_back(1);
-            measures[2].resize(m_plane_infos.at(apa).at(face)[0].total_wires, 0);
-            measures[3].resize(m_plane_infos.at(apa).at(face)[1].total_wires, 0);
-            measures[4].resize(m_plane_infos.at(apa).at(face)[2].total_wires, 0);
-            
-            // std::cout << "Test4: " << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
-        }
-        WRG::measure_t& m = measures[2+2]; // W plane is layer 4
-        for (int ch : ch_set) {
-            double charge = 1e-3; // Default charge value
-            auto it = map_w_tcc.find(std::make_pair(time_slice, ch));
-            if (it != map_w_tcc.end()) {
-                charge = it->second.first; // Use the charge from the map
-            }
-            m[ch] = charge;
         }
     }
 

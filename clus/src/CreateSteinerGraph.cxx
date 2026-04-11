@@ -91,185 +91,110 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: {} clusters with beam_flash flag. main={}", filtered_clusters.size(), main_cluster ? main_cluster->ident() : -1);
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: filter clusters took {} ms", MS(Clock::now() - t0).count());
 
-    if (main_cluster != nullptr){
-        // // test steiner ...
-        // {
-        //     Steiner::Grapher sg(*main_cluster, m_grapher_config, log);
-        //     auto& graph = sg.get_graph("basic_pid"); // ensure basic_pid graph exists
-        //     std::cout << "CreateSteinerGraph: " << boost::num_vertices(graph) << " vertices " << boost::num_edges(graph) << " edges." << std::endl;
-        //     std::vector<size_t> path_point_indices ;
-        //     sg.create_steiner_tree(main_cluster, path_point_indices, "basic_pid", "steiner_graph", false, "steiner_pc");
-        //     const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
-        //     const auto& steiner_graph = sg.get_graph("steiner_graph");
-        //     auto& flag_terminals = sg.get_flag_steiner_terminal();
-        //     size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
+    // Helper that runs the full retile→graph→Steiner pipeline for one cluster.
+    // `src` is the cluster to retile; `ref` is the reference cluster used for
+    // find_graph, create_steiner_tree, and the final graph transfer.
+    // For the main cluster src==ref; for associated clusters src==ref as well
+    // (retiled copy is a fresh child, but the graph is seeded from the same
+    // cluster and transferred back to it).
+    // `is_main` triggers the extra kd_steiner_knn probe done only for the main
+    // cluster.  Returns true if a steiner_graph was successfully produced.
+    auto process_cluster_steiner = [&](Cluster* src, bool is_main) -> bool {
+        const std::string tag = is_main
+            ? std::string("main ") + std::to_string(src->ident())
+            : std::string("assoc ") + std::to_string(src->get_cluster_id());
 
-        //     std::cout << "CreateSteinerGraph: " << "steiner_graph with " 
-        //               << boost::num_vertices(steiner_graph) << " vertices and "
-        //               << boost::num_edges(steiner_graph) << " edges." << " " << flag_terminals.size() << " " << num_true_terminals << std::endl;
-        // }
+        t0 = Clock::now();
+        auto new_node = m_grapher_config.retile->mutate(*src->node());
+        auto new_cluster_1 = new_node->value.facade<Cluster>();
+        auto& new_cluster = grouping.make_child();
+        new_cluster.take_children(*new_cluster_1);
+        new_cluster.from(*src);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] retile->mutate took {} ms", tag, MS(Clock::now() - t0).count());
 
+        t0 = Clock::now();
+        new_cluster.find_graph("ctpc_ref_pid", *src, m_dv, m_pcts);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] find_graph(ctpc_ref_pid) took {} ms", tag, MS(Clock::now() - t0).count());
 
-        if (m_grapher_config.retile ) {
-            // Call the mutate function with the appropriate configuration, create new cluster
-            t0 = Clock::now();
-            auto new_node = m_grapher_config.retile->mutate(*main_cluster->node());
-            auto new_cluster_1 = new_node->value.facade<Cluster>();
-            auto& new_cluster = grouping.make_child();
-            new_cluster.take_children(*new_cluster_1);  // Move all blobs from improved cluster
-            new_cluster.from(*main_cluster);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: retile->mutate took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
+        Steiner::Grapher sg(new_cluster, m_grapher_config, log);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] Grapher construction took {} ms", tag, MS(Clock::now() - t0).count());
 
-            // create the new graph
-            t0 = Clock::now();
-            new_cluster.find_graph("ctpc_ref_pid", *main_cluster, m_dv, m_pcts);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: find_graph(ctpc_ref_pid) took {} ms", MS(Clock::now() - t0).count());
+        auto& graph = sg.get_graph("ctpc_ref_pid");
+        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
 
+        t0 = Clock::now();
+        sg.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] establish_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
 
-            t0 = Clock::now();
-            Steiner::Grapher sg(new_cluster, m_grapher_config, log);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: Grapher construction took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
+        auto pair_points = new_cluster.get_two_boundary_wcps();
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] get_two_boundary_wcps took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: {} {} {} | {} {} {}", tag,
+            pair_points.first.x(), pair_points.first.y(), pair_points.first.z(),
+            pair_points.second.x(), pair_points.second.y(), pair_points.second.z());
 
-            auto& graph = sg.get_graph("ctpc_ref_pid");
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: ctpc_ref_pid with {} vertices and {} edges.", boost::num_vertices(graph), boost::num_edges(graph));
+        t0 = Clock::now();
+        auto first_index  = new_cluster.get_closest_point_index(pair_points.first);
+        auto second_index = new_cluster.get_closest_point_index(pair_points.second);
+        std::vector<size_t> path_point_indices = new_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] shortest_path took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: {} {} # of points along path: {}", tag, first_index, second_index, path_point_indices.size());
 
-            t0 = Clock::now();
-            sg.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: establish_same_blob_steiner_edges took {} ms", MS(Clock::now() - t0).count());
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: ctpc_ref_pid with {} vertices and {} edges.", boost::num_vertices(graph), boost::num_edges(graph));
+        t0 = Clock::now();
+        sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] remove_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
 
-            t0 = Clock::now();
-            auto pair_points = new_cluster.get_two_boundary_wcps();
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: get_two_boundary_wcps took {} ms", MS(Clock::now() - t0).count());
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: {} {} {} | {} {} {}", pair_points.first.x(), pair_points.first.y(), pair_points.first.z(), pair_points.second.x(), pair_points.second.y(), pair_points.second.z());
+        t0 = Clock::now();
+        sg.create_steiner_tree(src, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] create_steiner_tree took {} ms", tag, MS(Clock::now() - t0).count());
 
-            t0 = Clock::now();
-            auto first_index  =   new_cluster.get_closest_point_index(pair_points.first);
-            auto second_index =   new_cluster.get_closest_point_index(pair_points.second);
-            std::vector<size_t> path_point_indices = new_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: shortest_path took {} ms", MS(Clock::now() - t0).count());
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: {} {} # of points along path: {}", first_index, second_index, path_point_indices.size());
-            
-            t0 = Clock::now();
-            sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: remove_same_blob_steiner_edges took {} ms", MS(Clock::now() - t0).count());
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: ctpc_ref_pid with {} vertices and {} edges.", boost::num_vertices(graph), boost::num_edges(graph));
-
-            // path_point_indices belong to new_cluster, on which sg is based
-            // main_cluster is a reference to filter points ...
-            t0 = Clock::now();
-            sg.create_steiner_tree(main_cluster, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: create_steiner_tree took {} ms", MS(Clock::now() - t0).count());
-
-            auto* new_cluster_ptr = &new_cluster;
-            if (!new_cluster.has_graph("steiner_graph")) {
-                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: create_steiner_tree produced no steiner_graph for main cluster {}, skipping transfer", main_cluster->ident());
-                // Without steiner_pc/steiner_graph, find_proto_vertex will return false for this cluster.
-                // Fall through to process associated clusters rather than returning from visit().
-                grouping.destroy_child(new_cluster_ptr, true);
-            }
-            else {
-                const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
-                const auto& steiner_graph = sg.get_graph("steiner_graph");
-                auto& flag_terminals = sg.get_flag_steiner_terminal();
-                size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
-
-                SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: steiner_graph with {} vertices and {} edges. {} {} {}", boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph), steiner_point_cloud.size(), flag_terminals.size(), num_true_terminals);
-
-                // pass the new_cluster's steiner_graph and steiner_pc to the main cluster
-                t0 = Clock::now();
-                Steiner::Grapher main_sg(*main_cluster, m_grapher_config, log);
-                main_sg.transfer_pc(sg, "steiner_pc", "steiner_pc");
-                main_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
-                if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: transfer_pc/graph took {} ms", MS(Clock::now() - t0).count());
-
-                // test ...
-                (void)main_cluster->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
-                auto kd_results = main_cluster->kd_steiner_knn(1, pair_points.first);
-                auto kd_points = main_cluster->kd_steiner_points(kd_results);
-
-                // delete new cluster from grouping after usage ...
-                t0 = Clock::now();
-                grouping.destroy_child(new_cluster_ptr, true);
-                if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: destroy_child took {} ms", MS(Clock::now() - t0).count());
-            }
+        auto* new_cluster_ptr = &new_cluster;
+        if (!new_cluster.has_graph("steiner_graph")) {
+            SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: create_steiner_tree produced no steiner_graph for {}, skipping transfer", tag);
+            // Fall through: for the main cluster, still process associated clusters.
+            grouping.destroy_child(new_cluster_ptr, true);
+            return false;
         }
-    }
 
-    // Create Steiner graphs for associated (non-main) beam_flash clusters.
-    // In the prototype, Improve_PR3DCluster_2 (retiling) is called inside create_steiner_graph
-    // for every cluster, so we replicate the full main-cluster pipeline here.
+        const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+        const auto& steiner_graph       = sg.get_graph("steiner_graph");
+        auto& flag_terminals = sg.get_flag_steiner_terminal();
+        size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
+        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: steiner_graph with {} vertices and {} edges. {} {} {}", tag,
+            boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph),
+            steiner_point_cloud.size(), flag_terminals.size(), num_true_terminals);
+
+        t0 = Clock::now();
+        Steiner::Grapher ref_sg(*src, m_grapher_config, log);
+        ref_sg.transfer_pc(sg, "steiner_pc", "steiner_pc");
+        ref_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] transfer_pc/graph took {} ms", tag, MS(Clock::now() - t0).count());
+
+        if (is_main) {
+            // Extra probe done only for the main cluster.
+            (void)src->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+            auto kd_results = src->kd_steiner_knn(1, pair_points.first);
+            (void)src->kd_steiner_points(kd_results);
+        }
+
+        t0 = Clock::now();
+        grouping.destroy_child(new_cluster_ptr, true);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] destroy_child took {} ms", tag, MS(Clock::now() - t0).count());
+        return true;
+    };
+
     if (m_grapher_config.retile) {
+        if (main_cluster != nullptr) {
+            process_cluster_steiner(main_cluster, /*is_main=*/true);
+        }
+
+        // Associated (non-main) beam_flash clusters.
         for (auto* cluster : filtered_clusters) {
             if (cluster == main_cluster) continue;
-
-            t0 = Clock::now();
-            auto new_node = m_grapher_config.retile->mutate(*cluster->node());
-            auto new_cluster_1 = new_node->value.facade<Cluster>();
-            auto& new_cluster = grouping.make_child();
-            new_cluster.take_children(*new_cluster_1);
-            new_cluster.from(*cluster);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] retile->mutate took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            new_cluster.find_graph("ctpc_ref_pid", *cluster, m_dv, m_pcts);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] find_graph(ctpc_ref_pid) took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            Steiner::Grapher sg(new_cluster, m_grapher_config, log);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] Grapher construction took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            auto& graph = sg.get_graph("ctpc_ref_pid");
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [assoc {}]: ctpc_ref_pid with {} vertices and {} edges.", cluster->get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
-
-            t0 = Clock::now();
-            sg.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] establish_same_blob_steiner_edges took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            auto pair_points = new_cluster.get_two_boundary_wcps();
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] get_two_boundary_wcps took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            auto first_index  = new_cluster.get_closest_point_index(pair_points.first);
-            auto second_index = new_cluster.get_closest_point_index(pair_points.second);
-            std::vector<size_t> path_point_indices = new_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] shortest_path took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] remove_same_blob_steiner_edges took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            sg.create_steiner_tree(cluster, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] create_steiner_tree took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            if (!new_cluster.has_graph("steiner_graph")) {
-                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: create_steiner_tree produced no steiner_graph for assoc cluster {}, skipping transfer", cluster->get_cluster_id());
-                auto* new_cluster_ptr = &new_cluster;
-                grouping.destroy_child(new_cluster_ptr, true);
-                // Without steiner_pc/steiner_graph, find_proto_vertex will return false for this cluster.
-                continue;
-            }
-
-            const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
-            const auto& steiner_graph = sg.get_graph("steiner_graph");
-            auto& flag_terminals = sg.get_flag_steiner_terminal();
-            size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
-            SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [assoc {}]: steiner_graph with {} vertices and {} edges. {} {} {}",
-                                cluster->get_cluster_id(), boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph),
-                                steiner_point_cloud.size(), flag_terminals.size(), num_true_terminals);
-
-            t0 = Clock::now();
-            Steiner::Grapher cluster_sg(*cluster, m_grapher_config, log);
-            cluster_sg.transfer_pc(sg, "steiner_pc", "steiner_pc");
-            cluster_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] transfer_pc/graph took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
-
-            t0 = Clock::now();
-            auto* new_cluster_ptr = &new_cluster;
-            grouping.destroy_child(new_cluster_ptr, true);
-            if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [assoc {}] destroy_child took {} ms", cluster->get_cluster_id(), MS(Clock::now() - t0).count());
+            process_cluster_steiner(cluster, /*is_main=*/false);
         }
     }
 
