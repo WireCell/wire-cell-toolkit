@@ -570,23 +570,22 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
         global_steiner_point_cloud->add_points(Facade::make_points_cluster_steiner(cluster, wpid_params, true));
     }
     
-    // Clean up orphaned vertices
+    // Clean up orphaned vertices (use ordered_nodes for consistent ordering)
     std::vector<VertexPtr> tmp_vertices;
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
-        if (vtx && boost::out_degree(*vit, graph) == 0) {
+    for (auto v : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[v].vertex;
+        if (vtx && boost::out_degree(v, graph) == 0) {
             tmp_vertices.push_back(vtx);
         }
     }
-    
+
     for (auto vtx : tmp_vertices) {
         remove_vertex(graph, vtx);
     }
 }
 
 
-void PatternAlgorithms::deghosting(Graph& graph, ClusterVertexMap map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
+void PatternAlgorithms::deghosting(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, std::vector<Facade::Cluster*>& all_clusters, TrackFitting& track_fitter, IDetectorVolumes::pointer dv ){
     // Call deghost_clusters
     deghost_clusters(graph, all_clusters, track_fitter, dv);
     
