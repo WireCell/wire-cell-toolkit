@@ -146,8 +146,8 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
             auto test_wpid = dv->contained_by(test_p);
             if (test_wpid.face() == -1 || test_wpid.apa() == -1) continue;
             
-            for (auto it = boost::edges(graph).first; it != boost::edges(graph).second; ++it) {
-                SegmentPtr sg = graph[*it].segment;
+            for (auto e : ordered_edges(graph)) {
+                SegmentPtr sg = graph[e].segment;
                 if (!sg || sg->cluster() != &cluster) continue;
                 
                 auto [dist_3d, closest_pt] = segment_get_closest_point(sg, test_p, "fit");

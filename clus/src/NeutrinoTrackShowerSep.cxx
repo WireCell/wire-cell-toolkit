@@ -1347,8 +1347,10 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
                 if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
                     n_in++;
                     
-                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) || 
-                                   sg->flags_any(SegmentFlags::kShowerTopology);
+                    // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
+                    bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                    sg->flags_any(SegmentFlags::kShowerTopology) ||
+                                    (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11);
                     if (is_shower) {
                         n_in_shower++;
                     } else {
