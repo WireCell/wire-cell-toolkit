@@ -8,10 +8,10 @@
 
 #include <vector>
 
-class PMTNoiseROI;  // forward declaration
-
 namespace WireCell {
     namespace SigProc {
+
+        class PMTNoiseROI;  // forward declaration
 
         class OmnibusPMTNoiseFilter : public WireCell::IFrameFilter, public WireCell::IConfigurable {
            public:
