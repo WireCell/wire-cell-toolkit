@@ -1,0 +1,412 @@
+#+title: Examination: Cluster, Blob, and Tensor Data Model
+#+include: ../../../docs/include-topic.org
+
+* Purpose
+
+This document records code examination findings for the cluster graph,
+blob shadow, and tensor data model conversion code in the =aux= package.
+No code has been modified; findings are documented here for review
+before any changes are made.
+
+Examination date: 2026-04.
+
+* Files Examined
+
+| Source                        | Header                                   |
+|-------------------------------+------------------------------------------|
+| src/ClusterArrays.cxx         | inc/WireCellAux/ClusterArrays.h          |
+| src/ClusterHelpers.cxx        | inc/WireCellAux/ClusterHelpers.h         |
+| src/ClusterHelpersLoader.cxx  |                                          |
+| src/ClusterHelpersJsonify.cxx |                                          |
+| src/ClusterShadow.cxx         | inc/WireCellAux/ClusterShadow.h          |
+| src/BlobTools.cxx             | inc/WireCellAux/BlobTools.h              |
+| src/BlobShadow.cxx            | inc/WireCellAux/BlobShadow.h             |
+| src/TensorDMcommon.cxx        | inc/WireCellAux/TensorDM.h               |
+| src/TensorDMcluster.cxx       | inc/WireCellAux/TensorDMcluster.h        |
+| src/ClusterTensor.cxx         | inc/WireCellAux/ClusterTensor.h          |
+| src/TensorCluster.cxx         | inc/WireCellAux/TensorCluster.h          |
+
+* Algorithm Overview
+
+** Cluster Graph Model
+
+An =ICluster= is a boost directed graph with five node types:
+
+- *s* (slice): a time window with an activity map (channel to signal).
+- *b* (blob): a 3D space-time volume bounded by wire planes.
+- *w* (wire): a physical detector wire with geometry.
+- *c* (channel): a detector readout channel connected to wires.
+- *m* (measure): an aggregated signal measurement on a wire plane.
+
+Edges encode relationships: s-b (slice contains blob), b-w (blob spans
+wires), b-m (blob has measure), m-c (measure from channel), c-w
+(channel reads wire).
+
+The graph is stored as =boost::adjacency_list= with =cluster_node_t=
+vertex properties holding a =std::variant= of the five node types (plus
+=size_t= for invalidated nodes).
+
+** ClusterArrays: Graph to/from Arrays
+
+=ClusterArrays= serializes cluster graphs to flat arrays for HDF5/tensor
+storage:
+
+- *to_arrays()*: Four passes over vertices to categorize by type code
+  (a, w, b, s, m), then fill fixed-schema =double[N, ncols]= node
+  arrays and =int[N, 3]= edge arrays.  The column schema is
+  hard-coded per type (e.g., blobs have 21+ columns encoding time
+  bounds, wire ranges, corners, value, uncertainty).
+
+- *to_cluster()*: Inverse reconstruction.  Creates =IWire=, =IChannel=,
+  =ISlice=, =IBlob=, =IMeasure= objects from arrays, re-linking edges
+  by stored vertex descriptors.
+
+- *bodge_channel_slice()*: A preprocessing step that transforms
+  physical c-nodes into per-slice activity c-nodes.  Original c-nodes
+  are "invalidated" (variant set to =size_t(0)=) rather than removed,
+  to preserve vertex descriptor stability.
+
+** BlobShadow: Wire/Channel-level Overlap
+
+=BlobShadow= builds a shadow graph of blob-to-blob connections based on
+shared wires or channels:
+
+1. Convert the cluster graph to a directed version with type-based edge
+   ordering (=type_directed()=).
+2. For each slice, find blobs and their leaf nodes (wires or channels).
+3. Blobs sharing a leaf are connected with edges carrying =[beg, end)=
+   bounds in wire/channel index space and =WirePlaneId=.
+
+** ClusterShadow: Cluster-level Overlap
+
+=ClusterShadow= operates on the blob-shadow graph to produce a
+higher-level summary:
+
+1. Find connected components among blobs.
+2. For each component, accumulate value/uncertainty and build coverage
+   rectangles.
+3. Add edges between clusters sharing blob-shadow connections,
+   deduplicated per wire plane layer.
+
+** Tensor Data Model (TensorDM)
+
+=TensorDMcommon= provides =TensorIndex=, a helper that indexes a vector
+of =ITensor= by datapath and datatype for O(1) lookup.
+
+=TensorDMcluster= provides the conversions:
+- =as_tensors()=: calls =to_arrays()= and wraps each array as an
+  =ITensor=.
+- =as_cluster()=: unwraps tensors via =reinterpret_cast= and calls
+  =to_cluster()=.
+
+=ClusterTensor= and =TensorCluster= are the WCT components (registered
+via =WIRECELL_FACTORY=) that bridge between =ICluster= and
+=ITensorSet=.
+
+* Critical Findings
+
+** CRIT-CBT-01: =connected_leaves()= pushes wrong vertex type
+
+- *File*: =src/BlobShadow.cxx:62-69=
+- *Severity*: Critical
+- *Category*: Bug (wrong data)
+- *Description*:
+
+  When finding channel-type (='c'=) leaves, the function correctly
+  traverses blob -> wire -> channel, but pushes the wire vertex instead
+  of the channel vertex:
+
+  #+begin_src c++
+  // Lines 62-69 of src/BlobShadow.cxx
+  for(auto wedge : mir(boost::out_edges(wvtx, dgraph))) {
+      auto cvtx = boost::target(wedge, dgraph);
+      if (dgraph[cvtx].code() != 'c') {
+          continue;
+      }
+      leaves.push_back(wvtx);  // BUG: should be cvtx
+  }
+  #+end_src
+
+  The variable =cvtx= (channel vertex) is correctly found and
+  type-checked, but =wvtx= (wire vertex) is pushed instead.  This
+  means the shadow graph connects blobs by shared wires even when
+  channel-level connectivity was requested.
+
+- *Impact*: Channel-based blob shadow produces wire-based connections.
+  Blobs that share wires but not channels will be incorrectly
+  connected.
+- *Suggested Remediation*: Change line 68 to =leaves.push_back(cvtx)=.
+- *Testing*: Create a test with blobs sharing wires across different
+  channels and verify channel-mode shadow does not connect them.
+
+** CRIT-CBT-02: =ClusterArrays= activity vector sized by wrong dimension
+
+- *File*: =src/ClusterArrays.cxx:682=
+- *Severity*: Critical
+- *Category*: Bug (wrong size)
+- *Description*:
+
+  #+begin_src c++
+  // Lines 679-682 of src/ClusterArrays.cxx
+  const auto& ans = nas.at('a');
+  const size_t narows = ans.shape()[0];
+  // ...
+  slice_activities.resize(ans.size());
+  #+end_src
+
+  =ans= is a =boost::const_multi_array_ref<double,2>= with shape
+  =[narows, ncols]=.  The call =ans.size()= returns the total element
+  count (=narows * ncols=), not the row count.  The vector
+  =slice_activities= is indexed by s-node row index (=sind=) on line
+  694.  If the number of s-nodes exceeds =narows * ncols=, this causes
+  out-of-bounds access.  In practice the over-allocation is usually
+  harmless since =narows * ncols >> num_slices=, but it wastes memory
+  and the logic is incorrect.
+
+- *Impact*: Wastes memory; potential out-of-bounds if s-node count
+  exceeds total activity array elements (unlikely but possible for
+  graphs with many slices and few activities).
+- *Suggested Remediation*: Use the s-node array row count:
+  =slice_activities.resize(nas.at('s').shape()[0])=.
+
+** CRIT-CBT-03: Unsigned comparison =aind < 0= is always false
+
+- *File*: =src/ClusterArrays.cxx:686=
+- *Severity*: Critical (dead code masking potential errors)
+- *Category*: Bug (ineffective check)
+- *Description*:
+
+  #+begin_src c++
+  const size_t aind = edges[ind][tail_col];
+  const size_t sind = edges[ind][head_col];
+  if (aind < 0 or aind >= narows) {
+  #+end_src
+
+  =aind= is =size_t= (unsigned).  The check =aind < 0= can never be
+  true.  If the edge array contains negative values (e.g., from
+  corrupt data or uninitialized memory), the implicit cast to =size_t=
+  wraps to a very large positive number, which would be caught by
+  =aind >= narows= but not diagnosed as "negative index".
+
+- *Impact*: Negative-index corruption silently passes as
+  "index too large" rather than a distinct error.
+- *Suggested Remediation*: Either read =edges[ind][tail_col]= as
+  =int= first and check for negative, or remove the dead =< 0= check
+  and add a comment explaining that =size_t= wrapping handles it.
+
+* Moderate Findings
+
+** MOD-CBT-01: =bodge_channel_slice()= nulls node pointers
+
+- *File*: =src/ClusterArrays.cxx:67-148=
+- *Severity*: Moderate
+- *Category*: Design fragility
+- *Description*:
+
+  The "BIG FAT BODGE HACK" (self-described at line 67) invalidates
+  original c-nodes by setting their variant to =size_t(0)= (line 145):
+
+  #+begin_src c++
+  for (auto cvtx : old_cvtx) {
+      graph[cvtx].ptr = (size_t)0;
+  }
+  #+end_src
+
+  This leaves "zombie" vertices in the graph.  All downstream code
+  must check =is_old_chan()= (line 151) to avoid operating on these
+  invalidated nodes.  If any code path misses this check, it will
+  encounter a =size_t= where an =IChannel::pointer= is expected.
+
+  The function also modifies the graph in-place (albeit on a copy
+  passed by value on line 77), which makes reasoning about graph
+  invariants harder.
+
+- *Impact*: Maintenance hazard; any new code traversing the graph
+  must know about and handle zombie nodes.
+- *Suggested Remediation*: Consider removing invalidated vertices
+  after adding the new ones (accepting descriptor renumbering), or
+  using a separate "valid" flag rather than nulling the variant.
+
+** MOD-CBT-02: Magic number =ptr.index() == 4= for slice detection
+
+- *File*: =src/ClusterHelpers.cxx:110,124=
+- *Severity*: Moderate
+- *Category*: Maintainability
+- *Description*:
+
+  #+begin_src c++
+  // Line 110 of src/ClusterHelpers.cxx
+  if (vobj.ptr.index() != 4) {
+      continue;
+  }
+  #+end_src
+
+  The variant index 4 corresponds to =slice_t= in the
+  =cluster_node_t= variant ordering.  This is fragile: if the variant
+  type list is reordered, the magic number silently breaks.  Other
+  code in the same file uses =vobj.code() == 's'= (e.g., line 146)
+  which is robust.
+
+- *Impact*: Silent breakage if variant ordering changes.
+- *Suggested Remediation*: Replace =ptr.index() != 4= with
+  =code() != 's'= for consistency with the rest of the codebase.
+
+** MOD-CBT-03: =TensorDMcluster= pointer casts lack type validation
+
+- *File*: =src/TensorDMcluster.cxx:93-105=
+- *Severity*: Moderate
+- *Category*: Robustness
+- *Description*:
+
+  #+begin_src c++
+  // Lines 93-94 of src/TensorDMcluster.cxx
+  const double* data = reinterpret_cast<const double*>(ten->data());
+  nas.emplace(nc, boost::const_multi_array_ref<double,2>(data, ten->shape()));
+  #+end_src
+
+  The code =reinterpret_cast=s the tensor's raw data to =double*=
+  (for node arrays) and =int*= (for edge arrays at line 104) without
+  checking =ten->element_type()=.  If a tensor has the wrong element
+  type (e.g., float32 instead of float64), the reinterpret produces
+  garbage data silently.
+
+  The =// fixme: datatype= comments at lines 91 and 102 acknowledge
+  this gap.
+
+- *Impact*: Silent data corruption if tensor element types don't match
+  expectations.
+- *Suggested Remediation*: Validate =ten->element_type()= before
+  casting, or use a typed accessor.
+
+** MOD-CBT-04: =TensorCluster= compiles regex on every call
+
+- *File*: =src/TensorCluster.cxx:52=
+- *Severity*: Moderate
+- *Category*: Performance
+- *Description*:
+
+  #+begin_src c++
+  // Line 52 of src/TensorCluster.cxx
+  std::regex dpre(m_dpre);
+  #+end_src
+
+  =std::regex= construction is expensive (involves compilation of the
+  pattern).  This happens on every invocation of =operator()=, not
+  just during =configure()=.  The pattern string =m_dpre= does not
+  change between calls.
+
+- *Impact*: Unnecessary regex compilation overhead per tensor set.
+- *Suggested Remediation*: Compile once in =configure()= and store
+  as a member variable.
+
+** MOD-CBT-05: =ClusterShadow= coverage vector may have gaps
+
+- *File*: =src/ClusterShadow.cxx:53-55=
+- *Severity*: Moderate
+- *Category*: Robustness
+- *Description*:
+
+  The coverage vector in shadow nodes is resized on-demand when a new
+  view index is encountered.  If a blob has views 0 and 2 but not 1,
+  the vector grows to size 3 but view 1 is left as a default-
+  constructed (empty) =Rectangle=.  Downstream code iterating all
+  views must handle these gaps.
+
+- *Impact*: Potential misinterpretation of empty coverage entries.
+- *Suggested Remediation*: Initialize all views up to max, or use a
+  map indexed by view.
+
+* Minor Findings
+
+** MIN-CBT-01: =BlobShadow= hash function uses simple XOR
+
+- *File*: =src/BlobShadow.cxx:73-79=
+- *Severity*: Minor
+- *Category*: Performance
+- *Description*:
+
+  #+begin_src c++
+  struct pair_hash {
+      template <class T1, class T2>
+      std::size_t operator()(std::pair<T1, T2> const& pair) const {
+          std::size_t h1 = std::hash<T1>()(pair.first);
+          std::size_t h2 = std::hash<T2>()(pair.second);
+          return h1 ^ h2;
+      }
+  };
+  #+end_src
+
+  =h1 ^ h2= is symmetric and has high collision rate for similar
+  values.  Standard improvement: =h1 ^ (h2 * 0x9e3779b97f4a7c15 + (h1 << 6) + (h1 >> 2))=.
+
+- *Impact*: Slightly degraded hash map performance under collisions.
+- *Suggested Remediation*: Use a better hash combiner.
+
+** MIN-CBT-02: =ClusterHelpersJsonify= hard-codes 3-plane detector assumption
+
+- *File*: =src/ClusterHelpersJsonify.cxx= (blob_jsoner accessing =iplanes[2]=)
+- *Severity*: Minor
+- *Category*: Portability
+- *Description*:
+
+  The blob JSON serializer accesses =iplanes[2]= assuming exactly
+  three wire planes.  For detectors with a different number of planes,
+  this would be out of bounds.
+
+- *Impact*: Crash for non-3-plane detectors.
+- *Suggested Remediation*: Iterate over actual plane count.
+
+** MIN-CBT-03: =TensorIndex= silently keeps only first tensor per datatype
+
+- *File*: =src/TensorDMcommon.cxx:32-34=
+- *Severity*: Minor
+- *Category*: Surprising behavior
+- *Description*:
+
+  When multiple tensors have the same datatype, only the first one
+  encountered is stored in =m_type2ind=.  Subsequent tensors of the
+  same type are accessible by datapath but not by
+  =at_of("typename")=.  No warning is issued.
+
+- *Impact*: Silent data loss if callers rely on type-based lookup.
+- *Suggested Remediation*: Log a warning when duplicate datatypes are
+  encountered, or document the first-wins behavior.
+
+** MIN-CBT-04: =BlobTools= does not cross-validate corners vs strips
+
+- *File*: =src/BlobTools.cxx:20-31=
+- *Severity*: Minor
+- *Category*: Robustness
+- *Description*:
+
+  =BlobCategory= checks for null, no-strips, no-width, no-corners,
+  and no-volume independently.  It does not verify internal consistency
+  (e.g., that corner count matches expected value for the number of
+  strips).  A blob with 12 corners but only 2 strips would pass as
+  "okay".
+
+- *Impact*: Malformed blobs not caught during validation.
+- *Suggested Remediation*: Add cross-validation checks.
+
+* Efficiency Observations
+
+** EFF-CBT-01: =to_arrays()= makes 4 linear passes over all vertices
+
+=src/ClusterArrays.cxx=: The serialization function iterates over all
+graph vertices four times: once per type code to count, then again to
+fill arrays.  A single pass with per-type accumulators would halve the
+traversal cost.
+
+** EFF-CBT-02: =bodge_channel_slice()= modifies a full graph copy
+
+=src/ClusterArrays.cxx:77=: The function takes the graph by value
+(creating a full copy) then mutates it.  For large cluster graphs with
+millions of nodes, this copy is expensive.  Consider taking by
+reference and documenting the mutation, or using a view.
+
+** EFF-CBT-03: =ClusterHelpers= vertex lookups use linear scan
+
+=src/ClusterHelpers.cxx=: Functions like =find_slices()= and
+=blobs_by_slice()= iterate all vertices to filter by type.  For graphs
+with many nodes, building a type-indexed structure once would be more
+efficient than repeated linear scans.
