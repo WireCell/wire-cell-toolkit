@@ -1911,7 +1911,7 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
 void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
     s_log->debug("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
 
-    std::set<VertexPtr> fitted_vertices;
+    IndexedVertexSet fitted_vertices;  // order by stable graph index, not pointer address
     std::set<SegmentPtr> existing_segments;
     
     // Check if all segments are showers, no need to fit vertex with only two legs
@@ -3474,15 +3474,10 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
 
             // Short segment with only 1 daughter and high dQ/dx -> likely proton
             if (pair_results.first == 1 && length < 1.5 * units::cm && median_dqdx > 1.6) {
-                if (!sg->particle_info()) {
-                    sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
-                }
-                sg->particle_info()->set_pdg(2212);  // proton
-                sg->particle_info()->set_mass(particle_data->get_particle_mass(2212));
-
-                // Calculate 4-momentum
                 auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
-                auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
+                auto pinfo = std::make_shared<Aux::ParticleInfo>(
+                    2212, particle_data->get_particle_mass(2212),
+                    particle_data->pdg_to_name(2212), four_momentum);
                 sg->particle_info(pinfo);
             }
         }

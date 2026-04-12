@@ -129,17 +129,22 @@ void MyFCN::AddSegment(SegmentPtr sg)
         Eigen::Vector3d eigen_values = eigen_solver.eigenvalues();
         Eigen::Matrix3d eigen_vectors = eigen_solver.eigenvectors();
         
-        PCA_values[0] = eigen_values(0) + std::pow(0.15 * units::cm, 2);
+        // Eigen returns eigenvalues in ascending order; reverse to descending
+        // (largest first) to match prototype convention (ROOT's TMatrixDEigen).
+        // FitVertex zeros out row 0 (track direction = largest eigenvalue) and
+        // weights rows 1,2 by sqrt(λ0/λk), so index 0 must be the largest.
+        PCA_values[0] = eigen_values(2) + std::pow(0.15 * units::cm, 2);
         PCA_values[1] = eigen_values(1) + std::pow(0.15 * units::cm, 2);
-        PCA_values[2] = eigen_values(2) + std::pow(0.15 * units::cm, 2);
-        
+        PCA_values[2] = eigen_values(0) + std::pow(0.15 * units::cm, 2);
+
         for (int i = 0; i != 3; i++) {
-            double norm = std::sqrt(eigen_vectors(0, i) * eigen_vectors(0, i) + 
-                                   eigen_vectors(1, i) * eigen_vectors(1, i) + 
-                                   eigen_vectors(2, i) * eigen_vectors(2, i));
-            PCA_axis[i] = Facade::geo_point_t(eigen_vectors(0, i) / norm, 
-                                     eigen_vectors(1, i) / norm, 
-                                     eigen_vectors(2, i) / norm);
+            int col = 2 - i;  // reverse column order to match descending eigenvalues
+            double norm = std::sqrt(eigen_vectors(0, col) * eigen_vectors(0, col) +
+                                   eigen_vectors(1, col) * eigen_vectors(1, col) +
+                                   eigen_vectors(2, col) * eigen_vectors(2, col));
+            PCA_axis[i] = Facade::geo_point_t(eigen_vectors(0, col) / norm,
+                                     eigen_vectors(1, col) / norm,
+                                     eigen_vectors(2, col) / norm);
         }
         
         vec_PCA_dirs.push_back(std::make_tuple(PCA_axis[0], PCA_axis[1], PCA_axis[2]));
