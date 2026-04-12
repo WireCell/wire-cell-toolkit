@@ -238,3 +238,44 @@ No changes were made to any helper function in the initial review.
 **2026-04-12:** Two additional helper bugs found and fixed:
 3. `bad_reconstruction_2_sp` br3_3: Moved `angle > 105` check and TaggerInfo vector pushes outside the `dir1.magnitude() > 10*units::cm` guard to match prototype scope.
 4. `high_energy_overlapping_sp` hol_1: Removed incorrect `flag_all_showers = false` when `dir2.magnitude() == 0` (prototype does not set this flag in this case).
+
+---
+
+## Prototype Bugs Fixed by Toolkit
+
+1. **PROTO-BUG-1 (Low) — `num_muons`/`num_pions` parenthesis bug**: Prototype lines 127-128 have `abs(sg->get_particle_type()==13)` which evaluates the comparison first (bool), then abs. Anti-particles (pdg=-13, -211) count in `num_mip_tracks` but not in `num_muons`/`num_pions`. Toolkit correctly uses `std::abs(pdg) == 13` / `== 211`.
+
+---
+
+## Efficiency / Structure Improvements
+
+1. **SpContext bundle**: Shared state packaged into a file-local struct, replacing scattered member-variable access.
+2. **Static helpers**: All 9 helpers are file-local `static` functions.
+3. **flag_fill elimination**: Throw-away `TaggerInfo tmp_ti{}` replaces the prototype's `flag_fill=false` parameter threading.
+4. **pi0 acc_length precomputation**: O(E) edge scan + O(1) lookup replaces prototype's O(V*S) per-vertex recomputation.
+5. **Dead code removal**: `E_range`, unused `n_segs`, `flag_overlap_4/5`, `max_dQ_dx` in br1_2 — all removed.
+6. **Debug output removal**: All `std::cout`/`flag_print` output removed.
+7. **Overall**: 4275 lines → 2511 lines (41% reduction).
+
+---
+
+## Determinism
+
+| Container | Prototype | Toolkit | Issue? |
+|-----------|-----------|---------|--------|
+| Shower loop at main vertex | `map_vertex_to_shower[v]` (pointer set) | `VertexShowerSetMap` = `IndexedShowerSet` | **Fixed** — index-ordered |
+| Segment/vertex sets in helpers | `map_seg_vtxs`/`map_vtx_segs` (pointer-keyed) | `IndexedSegmentSet`, `IndexedVertexSet` | **Fixed** — index-ordered |
+| `cluster_acc_length` (pi0) | `map_segment_vertices` (pointer-keyed) | `std::map<Cluster*, double>` | **OK** — lookup only, never iterated |
+| pio_2 vector population | `map_vertex_segments` (pointer-ordered) | `graph_nodes()` (pointer-ordered) | **Inherited** — non-deterministic vector order in both; BDT treats as unordered |
+
+---
+
+## Multi-APA / Multi-Face
+
+The single-photon tagger operates on graph topology and segment-level quantities. Drift direction is hardcoded as `Vector(1,0,0)` (same as prototype), but all drift-angle computations use `fabs(angle - 90°)` (symmetric w.r.t. drift sign). APA/face correctly derived from main vertex position via `dv->contained_by()`. No wire-plane geometry references. **No multi-APA issues found.**
+
+---
+
+## Angle Safety
+
+All angle computations use `D3Vector::angle()` which internally clamps the cosine to [-1, 1] before `std::acos`. No NaN risk.
