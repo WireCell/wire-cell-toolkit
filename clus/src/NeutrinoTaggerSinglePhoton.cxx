@@ -726,18 +726,20 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
         Vector dir1 = (d1 < d2) ? (back1 - front1) : (front1 - back1);
         double len1 = segment_track_length(sg1);
         bool flag_bad3 = false;
+        double angle = 0;
         if (dir1.magnitude() > 10*units::cm) {
-            double angle = dir1.angle(dir_stem) / M_PI * 180.0;
+            angle = dir1.angle(dir_stem) / M_PI * 180.0;
             if (angle > 90)  acc_length += len1;
             if (angle > 150 && Eshower < 600*units::MeV) flag_bad3 = true;
-            if (angle > 105 && len1 > 15*units::cm && Eshower < 600*units::MeV) flag_bad3 = true;
-
-            ti.shw_sp_br3_3_v_energy.push_back(Eshower / units::MeV);
-            ti.shw_sp_br3_3_v_angle.push_back(angle);
-            ti.shw_sp_br3_3_v_dir_length.push_back(dir1.magnitude() / units::cm);
-            ti.shw_sp_br3_3_v_length.push_back(len1 / units::cm);
-            ti.shw_sp_br3_3_v_flag.push_back(!flag_bad3);
         }
+        if (angle > 105 && len1 > 15*units::cm && Eshower < 600*units::MeV) flag_bad3 = true;
+
+        ti.shw_sp_br3_3_v_energy.push_back(Eshower / units::MeV);
+        ti.shw_sp_br3_3_v_angle.push_back(angle);
+        ti.shw_sp_br3_3_v_dir_length.push_back(dir1.magnitude() / units::cm);
+        ti.shw_sp_br3_3_v_length.push_back(len1 / units::cm);
+        ti.shw_sp_br3_3_v_flag.push_back(!flag_bad3);
+
         total_main_len2 += len1;
         if (flag_bad3) flag_bad3_save = true;
     }
@@ -1623,7 +1625,7 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
             if (is_pdg11 || is_weak_muon) {
                 Point dp = vtx_point;
                 Vector dir2 = segment_cal_dir_3vector(sg1, dp, 5*units::cm);
-                if (dir2.magnitude() == 0) { flag_all_showers = false; continue; }
+                if (dir2.magnitude() == 0) { continue; }
                 double angle = dir1.angle(dir2) / M_PI * 180.0;
                 if (angle < min_angle) {
                     min_angle = angle;

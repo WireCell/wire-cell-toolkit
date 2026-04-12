@@ -620,9 +620,9 @@ bool PatternAlgorithms::ssm_tagger(
             int nfits = (int)fits.size();
             std::vector<double> vec_d_dqdx;
             if (nfits > 1) {
-                double last = fits[0].dQ / (fits[0].dx/units::cm);
+                double last = fits[0].dQ / (fits[0].dx/units::cm) / (43e3/units::cm);
                 for (int i = 1; i < nfits; ++i) {
-                    double cur = fits[i].dQ / (fits[i].dx/units::cm);
+                    double cur = fits[i].dQ / (fits[i].dx/units::cm) / (43e3/units::cm);
                     vec_d_dqdx.push_back(cur - last);
                     last = cur;
                 }
@@ -915,10 +915,10 @@ bool PatternAlgorithms::ssm_tagger(
 
     std::vector<double> vec_dqdx, vec_d_dqdx, vec_abs_d_dqdx;
     if (nfits_ssm > 0) {
-        double last = fits_ssm[0].dQ / (fits_ssm[0].dx/units::cm);
+        double last = fits_ssm[0].dQ / (fits_ssm[0].dx/units::cm) / (43e3/units::cm);
         vec_dqdx.push_back(last);
         for (int i = 1; i < nfits_ssm; ++i) {
-            double cur = fits_ssm[i].dQ / (fits_ssm[i].dx/units::cm);
+            double cur = fits_ssm[i].dQ / (fits_ssm[i].dx/units::cm) / (43e3/units::cm);
             vec_dqdx.push_back(cur);
             vec_d_dqdx.push_back(cur - last);
             vec_abs_d_dqdx.push_back(std::abs(cur - last));
@@ -1018,7 +1018,7 @@ bool PatternAlgorithms::ssm_tagger(
         score_e_fwd_bp  = bp_sc.at(3);
     }
 
-    // catch degenerate break_point
+    // catch degenerate break_point (scores + reduced length)
     if ((break_point == nd && dir == 1 && vtx_activity) ||
         (break_point == 0  && dir == -1 && vtx_activity)) {
         reduced_muon_length = length;
@@ -1034,6 +1034,12 @@ bool PatternAlgorithms::ssm_tagger(
         medium_dq_dx_bp = segment_median_dQ_dx(ssm_sg, break_point, nfits_ssm) / (43e3/units::cm);
     else if (vtx_activity && break_point >= 0)
         medium_dq_dx_bp = segment_median_dQ_dx(ssm_sg, 0, break_point) / (43e3/units::cm);
+
+    // degenerate break_point: reset medium_dq_dx_bp to full-segment median
+    if ((break_point == nd && dir == 1 && vtx_activity) ||
+        (break_point == 0  && dir == -1 && vtx_activity)) {
+        medium_dq_dx_bp = medium_dq_dx;
+    }
 
     // Kinetic energy from range (prototype line 762: g_range->Eval(length) * MeV)
     double kine_energy         = cal_kine_range(length, 13, particle_data);
@@ -1126,8 +1132,8 @@ bool PatternAlgorithms::ssm_tagger(
     double track_angle_z, track_angle_target, track_angle_absorber, track_angle_vertical;
 
     Vector nu_all = mom + mom_prim_track1 + mom_prim_track2 + mom_prim_shw1 + mom_prim_shw2
-                  + mom_daught_track1 + mom_daught_track2 + mom_daught_shw1 + mom_daught_shw2
-                  + mom_pi0;  // off-vertex mom added later
+                  + mom_daught_track1 + mom_daught_track2 + mom_daught_shw1 + mom_daught_shw2;
+                  // off-vertex mom added later (prototype does not include mom_pi0)
     Vector con_nu = mom + mom_prim_track1 + mom_prim_track2 + mom_prim_shw1 + mom_prim_shw2
                   + mom_daught_track1 + mom_daught_track2 + mom_daught_shw1 + mom_daught_shw2;
     Vector prim_nu = mom + mom_prim_track1 + mom_prim_track2 + mom_prim_shw1 + mom_prim_shw2;

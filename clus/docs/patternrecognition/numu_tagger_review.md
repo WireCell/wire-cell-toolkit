@@ -256,9 +256,9 @@ This is a proper generalization of the prototype's single-APA logic.
 
 ## 7. Recommendations
 
-| Priority | Item | Action |
-|---|---|---|
-| **P1** | BUG-1: unclamped `acos()` in `cluster_fc_check()` | Add `std::clamp(-1.0, 1.0)` to 6 `acos()` calls at `Clustering_Util.cxx:143-158`; add zero-magnitude guard for `dir_1` |
-| **P1** | BUG-2: unclamped `acos()` for `main_angle` | Add `std::clamp` at `Clustering_Util.cxx:171` |
-| **P2** | EFF-1: TMVA::Reader recreation | Cache 5 Reader objects as class members in `UbooneNumuBDTScorer`; call `BookMVA` once |
-| **P3** | Unused variable suppressions | Remove `max_angle`, `max_ratio`, `max_ratio1_length` computations from `find_cont_muon_segment()` (lines 925-926, 993-994, 1000-1001) or document their retention |
+| Priority | Item | Action | Status |
+|---|---|---|---|
+| **P1** | BUG-1: unclamped `acos()` in `cluster_fc_check()` | Add `std::clamp(-1.0, 1.0)` to 6 `acos()` calls at `Clustering_Util.cxx:143-158`; add zero-magnitude guard for `dir_1` | **Fixed** (commit aeb7980e) |
+| **P1** | BUG-2: unclamped `acos()` for `main_angle` | Add `std::clamp` at `Clustering_Util.cxx:171` | **Fixed** (commit aeb7980e) |
+| **P2** | EFF-1: TMVA::Reader recreation | Cache 5 Reader objects as class members in `UbooneNumuBDTScorer`; call `BookMVA` once | Open |
+| **P3** | Unused variable suppressions | Remove `max_angle`, `max_ratio`, `max_ratio1_length` computations from `find_cont_muon_segment()` (lines 925-926, 993-994, 1000-1001) or document their retention | Open |

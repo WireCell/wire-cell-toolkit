@@ -82,7 +82,7 @@ The entry point follows the same two-pass structure as the prototype:
   ```
   The toolkit (line 645–650) explicitly parenthesizes this as `(>0.95 || (<5 && trajectory))` — correct and unambiguous. ✅
 - **br3_2** (segment composition + fiducial): n\_ele/n\_other counting, the two bad2 conditions, and `other_fid` via `FiducialUtilsPtr` all match. ✅
-- **br3_3 / br3_4** (backward segments): The loop filters to main cluster segments; `dir1` built as back-minus-front or front-minus-back depending on which endpoint is closer to `vertex_point`; `acc_length`/`total_main_len2` accumulation matches prototype's `acc_length`/`total_length`.  Note: prototype resets `total_length = 0` before this loop (line 3569) — toolkit initialises `total_main_len2 = 0` at the same point. ✅
+- **br3_3 / br3_4** (backward segments): 🐛 **Bug fixed 2026-04-12.** The `angle > 105` check and all TaggerInfo vector pushes (`shw_sp_br3_3_v_*`) were incorrectly placed inside the `if (dir1.magnitude() > 10*units::cm)` guard. In the prototype (line 3590), `angle > 105 && len > 15*cm` is NOT guarded by `dir1.Mag() > 10*cm` — only the `angle > 90` accumulation and `angle > 150` check are. Also, the TaggerInfo vectors are pushed for EVERY segment (prototype lines 3592-3597), not only those with `dir1.Mag() > 10*cm`. Fix: moved `angle > 105` check and vector pushes outside the guard, computing `angle` unconditionally (defaults to 0 when `dir1.magnitude() <= 10*cm`). The rest of the loop (main cluster filter, `acc_length`/`total_main_len2` accumulation) matches.
 - **br3_5** (average non-stem point): `side_total_length` replaces prototype's `total_length` (reset at line 3623); `dir1 = ave_p - other_point`; the `flag_bad5 = false` override for multi-cluster showers uses `shower->get_total_length(sg->cluster())`. ✅
 - **br3_6** (segments at far-end vertex): Prototype iterates `map_vertex_segments[other_vertex]` (graph-wide); toolkit iterates `boost::out_edges(other_vertex, graph)` — correct translation.  `n_other_vtx_segs = boost::out_degree(...)` matches `map_vertex_segments[other_vertex].size()`. ✅
 - **br3_7** (`shower_main_len = vertex->cluster() ? shower->get_total_length(vertex->cluster()) : 0`; prototype uses `vertex->get_cluster_id()`): equivalent. ✅
@@ -114,9 +114,9 @@ This is the largest helper (~450 lines).  All of the following match the prototy
 - Median/mean dQ/dx → dedx conversion (Bethe-Bloch, first 7 values, same formula). ✅
 - All 20 `shw_sp_vec_dQ_dx_*` fills. ✅
 
-### ✅ `high_energy_overlapping_sp` (hol_1, hol_2)
+### ✅ `high_energy_overlapping_sp` (hol_1, hol_2) | **Minor fix 2026-04-12**
 
-- **hol_1**: `n_valid_tracks`, `min_angle`, `flag_all_showers`, `num_showers` computation; the three `flag_overlap1` conditions; dQ/dx boost conditions. ✅
+- **hol_1**: `n_valid_tracks`, `min_angle`, `flag_all_showers`, `num_showers` computation; the three `flag_overlap1` conditions; dQ/dx boost conditions. 🐛 **Minor bug fixed 2026-04-12:** When `dir2.magnitude() == 0` for an electron/weak-muon segment, the toolkit incorrectly set `flag_all_showers = false` before `continue`. The prototype (line 2641) simply calls `continue` without modifying `flag_all_showers`. Fix: removed the `flag_all_showers = false` assignment.
 - **hol_2**: `min_ang2` / `min_sg` scan; `ncount` loop (consecutive fit points within 0.6 cm); `medium_dQ_dx` from `min_sg` using near-endpoint index — prototype checks `wcpt` front/back equality; toolkit uses geometric distance. Both yield the same near endpoint under the accepted convention. ✅
 
 ### ✅ `low_energy_overlapping_sp` (lol_1, lol_2, lol_3)
@@ -215,10 +215,10 @@ bool badreco2 = sg_at_main
 |---|---|---|
 | `bad_reconstruction_sp` (br1) | ✅ Correct | All three sub-checks match |
 | `bad_reconstruction_1_sp` (br2) | ✅ Correct | PCA logic, angle cuts match |
-| `bad_reconstruction_2_sp` (br3) | ✅ Correct | All 8 sub-checks; parenthesization fix for br3_1 condition |
+| `bad_reconstruction_2_sp` (br3) | 🐛 **br3_3 scoping bug fixed** | br3_3 `angle>105` and vector fills were inside `dir1.mag>10cm` guard |
 | `bad_reconstruction_3_sp` (br4) | ✅ Correct | br4_1 + br4_2 match |
 | `mip_identification_sp` | ✅ Correct | All scan loops, classification, cuts match |
-| `high_energy_overlapping_sp` (hol) | ✅ Correct | hol_1 + hol_2 match |
+| `high_energy_overlapping_sp` (hol) | 🐛 **Minor fix** | hol_1: removed incorrect `flag_all_showers=false` on zero-mag dir |
 | `low_energy_overlapping_sp` (lol) | ✅ Correct | lol_1/2/3 match |
 | `pi0_identification_sp` (pio) | ✅ Correct | pio_1 + pio_2 match |
 | `low_energy_michel_sp` | ✅ Correct | Matches; dead `E_range` code omitted cleanly |
@@ -233,4 +233,8 @@ Both bugs are in `clus/src/NeutrinoTaggerSinglePhoton.cxx`, first-pass shower cl
 1. Replaced `TaggerInfo& ti` with a local `TaggerInfo tmp_ti{}` as the destination for all four `bad_reconstruction_*_sp` calls in the first-pass loop.
 2. Added a `first_pass_valid_tracks` computation (14 lines) matching prototype lines 183–190, and passed it instead of the hardcoded `0` to `bad_reconstruction_1_sp`.
 
-No changes were made to any helper function.  All helper functions are correct as written.
+No changes were made to any helper function in the initial review.
+
+**2026-04-12:** Two additional helper bugs found and fixed:
+3. `bad_reconstruction_2_sp` br3_3: Moved `angle > 105` check and TaggerInfo vector pushes outside the `dir1.magnitude() > 10*units::cm` guard to match prototype scope.
+4. `high_energy_overlapping_sp` hol_1: Removed incorrect `flag_all_showers = false` when `dir2.magnitude() == 0` (prototype does not set this flag in this case).

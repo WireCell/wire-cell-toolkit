@@ -25,7 +25,13 @@ Supporting helpers reviewed: `get_scores` (L42), `get_scores_bp` (L70), `get_con
 
 ---
 
-## No bugs in the toolkit. Three prototype bugs correctly fixed.
+## Three prototype bugs correctly fixed. Three additional toolkit bugs found and fixed (2026-04-12).
+
+| Bug | Severity | Location | Fix |
+|---|---|---|---|
+| Missing `/(43e3/units::cm)` dQ/dx normalization | **Critical** | Phase A (L623) + Phase B (L918) | Added normalization factor to all dQ/dx computations |
+| `nu_all` includes `mom_pi0` — prototype does not | Medium | Phase D (L1128-1130) | Removed `+ mom_pi0` from `nu_all` sum |
+| Missing `medium_dq_dx_bp = medium_dq_dx` reset in degenerate break_point | Medium | Phase B (L1022-1028) | Added reset after `medium_dq_dx_bp` declaration |
 
 ---
 
@@ -43,11 +49,13 @@ The function is large (~1500 lines in toolkit, ~3600 in prototype). Both share t
 
 ## Findings
 
-### ✅ Phase A — SSM candidate scan
+### 🐛 Phase A — SSM candidate scan | **dQ/dx normalization fixed 2026-04-12**
 
 Pre-cuts (PDG, length, dQ/dx), d(dQ/dx) vector construction, vertex-activity scan of first/last 5 points, and the multi-stage ambiguity resolution (prototype lines 476–518) all match exactly.
 
 Prototype uses `map_vertex_segments[main_vertex]` (ordered set); toolkit uses `boost::out_edges(main_vertex, graph)`. Order is nondeterministic in both (set order depends on pointer address). The `all_ssm_sg` map uses `SegmentIndexCmp` (by graph index) in the toolkit to give deterministic iteration — a correctness improvement over the prototype. ✅
+
+**Bug (fixed):** The d(dQ/dx) vector construction at line 623 was missing the `/(43e3/units::cm)` normalization factor. The prototype (line 438) normalizes raw dQ/dx by this factor before computing differences. Without it, the vertex-activity threshold of 0.7 was comparing against values ~43000× too large, causing vertex activity to fire on nearly every segment. Fix: added `/ (43e3/units::cm)` to both Phase A (L623) and Phase B (L918) dQ/dx computations.
 
 ---
 
@@ -209,9 +217,9 @@ All `ssm_*` fields set to −999, `Nsm`/`Nsm_wivtx` always written before exit. 
 | Phase B — `max_d_dq_dx_fwd/bck_3/5` swap when dir==-1 | 🐛 Prototype typo (bck_5 vs bck_3) | Toolkit correct |
 | Phase B — PID scores and dir-based swap | ✅ Match | — |
 | Phase B — `score_*_bp` with break_point | ✅ Match | — |
-| Phase B — degenerate break_point catch | ✅ Match | — |
+| Phase B — degenerate break_point catch | 🐛 Missing `medium_dq_dx_bp` reset | **Fixed 2026-04-12** |
 | Phase B — `dQ_dx_cut` formula | 🐛 Prototype has extra `/units::cm` | Toolkit correct |
-| Phase B — `medium_dq_dx_bp` | ✅ Match | — |
+| Phase B — `medium_dq_dx_bp` | ✅ Match (after degenerate fix) | — |
 | Phase B — kinetic energy from range (muon, PDG=13) | ✅ Match | — |
 | Phase C — prim/daughter count accumulators | ✅ Match | — |
 | Phase C — top-2 primary tracks and showers selection | ✅ Match | — |
@@ -220,6 +228,7 @@ All `ssm_*` fields set to −999, `Nsm`/`Nsm_wivtx` always written before exit. 
 | Phase C — `kine_energy_best_*` shower lookup | ✅ Match | — |
 | Phase D — backwards_muon swap (all variable pairs incl. segment ptrs) | ✅ Match | — |
 | Phase D — `x/y/z_dir_daught_track1` direction source | 🐛 Prototype uses `dir_prim_track1` | Toolkit correct |
+| Phase D — `nu_all` sum components | 🐛 Included `mom_pi0` (prototype does not) | **Fixed 2026-04-12** |
 | Phase D — momentum vector computation | ✅ Match | — |
 | Phase D — `ssm_main_vtx`/`ssm_second_vtx` assignment when backwards | ✅ Match | — |
 | Phase D — off-vertex loop: distance filter, classification, single best | ✅ Match | — |
@@ -230,6 +239,56 @@ All `ssm_*` fields set to −999, `Nsm`/`Nsm_wivtx` always written before exit. 
 
 ---
 
+## Efficiency / Structure Improvements
+
+1. **EFF-1 — Particle loop deduplication**: The prototype's two nearly-identical ~430-line loops for primary and daughter particle enumeration (lines 794-1224) are replaced by a single reusable function `fill_particle_block_at_vtx()` (lines 443-550), eliminating ~310 lines of duplicated code.
+
+2. **EFF-2 — Backwards_muon swap simplification**: The ~115-line field-by-field swap block (prototype lines 1340-1464) is replaced by `std::swap(pb_prim, pb_daught)` (toolkit line 1066), enabled by the `ParticleBlock` struct.
+
+3. **EFF-3 — Exit path consolidation**: The prototype's `exit_ssm_tagger()` (separate 325-line function) is merged as an inline lambda with helper lambdas `set_track_block`/`set_shw_block`.
+
+4. **EFF-4 — Logging removal**: `print_ssm_tagger()` (390 lines of `std::cout`) and debug prints throughout are removed.
+
+5. **Overall**: 3598 lines → 1517 lines (58% reduction) with identical functionality.
+
+---
+
+## Determinism
+
+| Container | Prototype | Toolkit | Issue? |
+|---|---|---|---|
+| `all_ssm_sg` | `std::map<ProtoSegment*, ...>` | `std::map<SegmentPtr, ..., SegmentIndexCmp>` | **Fixed** — pointer order → index order |
+| Vertex→segment iteration | `map_vertex_segments[vtx]` (pointer set) | `boost::out_edges(vtx, graph)` | **Fixed** — deterministic edge order |
+| Shower iteration | `showers` (pointer set) | `IndexedShowerSet` | **Fixed** — index-ordered |
+| BFS `used_segments/used_vertices` | `std::set<ProtoSegment*>` / `std::set<ProtoVertex*>` | `std::set<SegmentPtr>` / `std::set<VertexPtr>` | OK — only used for membership tests |
+
+All non-determinism sources from the prototype are resolved.
+
+---
+
+## Multi-APA / Multi-Face
+
+The SSM tagger operates on graph topology only (vertices, segments, edges, dQ/dx data). It does not reference wire-plane geometry, drift direction, APA indices, or face indices. The off-vertex loop (`boost::edges(graph)`, line 1164) iterates all edges regardless of APA. The 80 cm distance cut (line 1195) is metric and APA-agnostic.
+
+**No multi-APA issues found.**
+
+---
+
+## Minor Logic Divergence (Low Impact)
+
+**DIVERGE-1 — `fill_ssmsp_all` shower fallback mother ID**
+
+In `fill_ssmsp_all()`, when processing a shower with `conn_type == 2 || conn_type == 3` and the start vertex has no recognizable parent segment:
+
+- **Prototype** (line 1838-1840): Falls back to SSM segment's id as mother
+- **Toolkit** (line 378-379): Falls back to `mother = 0`
+
+Only affects ssmsp tree parentage in a rare edge case. The ssmsp data is used for event display, not BDT scoring. Minimal impact.
+
+---
+
 ## Changes Made
 
-None. All three divergences from the prototype are prototype bugs that the toolkit already has correct. No toolkit code was modified.
+**2026-04-09**: Initial review — three prototype bugs identified as already fixed in toolkit. No toolkit code changes.
+
+**2026-04-12**: Three additional toolkit bugs found and fixed in `NeutrinoTaggerSSM.cxx` (see table at top of document). Efficiency, determinism, multi-APA, and DIVERGE-1 sections added.

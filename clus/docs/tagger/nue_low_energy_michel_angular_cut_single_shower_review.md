@@ -27,7 +27,13 @@
 
 ---
 
-## No bugs found. No changes made.
+## Bugs Found and Fixed
+
+| Bug | Location | Fix |
+|---|---|---|
+| `angular_cut` fiducial check missing tolerance vector | `NeutrinoTaggerNuE.cxx:322` | Added `{-1.5*units::cm, ...}` tolerance arg to `inside_fiducial_volume` |
+
+> **Update 2026-04-12:** The prior review (2026-04-08) noted that `inside_fiducial_volume` ignored the tolerance parameter, making the no-arg call equivalent. That was true at the time. However, the tolerance support in `FiducialUtils::inside_fiducial_volume` was implemented on 2026-04-11 (see `cosmic_tagger_bad_reconstruction_review.md`). Now that tolerance is functional, the omission is a real bug — the prototype passes `{-1.5cm, ...}` to shrink the FV by 1.5 cm, and the toolkit must do the same.
 
 ---
 
@@ -193,7 +199,7 @@ Note: unlike `single_shower` which has a conditional (start segment length > 12 
 This differs from `single_shower` (which skips `sg`). Both toolkit implementations
 correctly match their respective prototypes.
 
-#### ✅ Fiducial check — `stm_tol_vec` has no effect
+#### 🐛 Fiducial check — missing tolerance vector | **Fixed 2026-04-12**
 
 Prototype:
 ```cpp
@@ -201,16 +207,21 @@ std::vector<double> stm_tol_vec = {-1.5*cm, -1.5*cm, -1.5*cm, -1.5*cm, -1.5*cm};
 fid->inside_fiducial_volume(vtx1->get_fit_pt(), offset_x, &stm_tol_vec)
 ```
 
-Toolkit:
+Toolkit (before fix):
 ```cpp
 fiducial_utils->inside_fiducial_volume(vtx_fit_pt(vtx1))  // no tolerance
 ```
 
-The toolkit's `FiducialUtils::inside_fiducial_volume` implementation ignores the
-`tolerance_vec` parameter entirely (`FiducialUtils.cxx:75`: *"currently tolerance
-vector is not used"*) and delegates straight to `m_sd.fiducial->contained(p)`.
-The toolkit's no-tolerance call is therefore numerically identical to the prototype's
-`stm_tol_vec` call. ✅
+Toolkit (after fix):
+```cpp
+fiducial_utils->inside_fiducial_volume(vtx_fit_pt(vtx1),
+    {-1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm})
+```
+
+The tolerance support in `FiducialUtils::inside_fiducial_volume` was implemented on
+2026-04-11. Without the tolerance vector, the toolkit's `flag_main_outside` check was
+less strict than the prototype — vertices within 1.5 cm of FV boundaries would not
+be flagged as outside. **Fixed.**
 
 #### ✅ Fiducial check vertex iteration — equivalent
 
@@ -340,7 +351,7 @@ count (no exclusion here). ✅
 | `angular_cut` — 5 cut conditions, re-parenthesized | ✅ Identical logic | — |
 | `angular_cut` — `dir_shower` = shower direction at 30 cm (no segment condition) | ✅ Matches prototype | — |
 | `angular_cut` — no start-segment exclusion in vertex loop | ✅ Matches prototype | — |
-| `angular_cut` — `stm_tol_vec` ignored by `inside_fiducial_volume` impl | ✅ No-tolerance call equivalent | — |
+| `angular_cut` — fiducial tolerance vector missing (now impl'd) | 🐛 Missing tol vec | **Fixed 2026-04-12** |
 | `angular_cut` — all 11 fills | ✅ Match | — |
 | `single_shower` — `Eshower` selection | ✅ Identical | — |
 | `single_shower` — `max_dQ_dx` stem scan (first 3, max) | ✅ Identical | — |
@@ -354,4 +365,6 @@ count (no exclusion here). ✅
 
 ## Changes Made
 
-None. No bugs or logic divergences found.
+**File:** `clus/src/NeutrinoTaggerNuE.cxx`
+
+1. Added `-1.5 cm` tolerance vector to `inside_fiducial_volume` call in `angular_cut` (line 322), matching prototype's `stm_tol_vec`. This became a real bug after `FiducialUtils::inside_fiducial_volume` tolerance support was implemented on 2026-04-11.

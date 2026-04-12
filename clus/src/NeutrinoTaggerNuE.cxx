@@ -319,7 +319,8 @@ static bool angular_cut(NuEContext& ctx, ShowerPtr shower,
         for (VertexPtr vtx1 : fv_vtxs) {
             if (vtx1 == start_vtx) continue;
             if (!vtx1->cluster() || vtx1->cluster() != start_cl) continue;
-            if (!fiducial_utils->inside_fiducial_volume(vtx_fit_pt(vtx1)))
+            if (!fiducial_utils->inside_fiducial_volume(vtx_fit_pt(vtx1),
+                    {-1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm, -1.5*units::cm}))
                 flag_main_outside = true;
         }
     }
