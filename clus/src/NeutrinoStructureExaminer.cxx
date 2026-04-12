@@ -3059,13 +3059,11 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                     const auto& sg1_wcpts = sg1->wcpts();
                     if (sg1_wcpts.empty()) continue;
 
-                    // Determine which end of sg connects to vtx1
-                    // Use vtx1->wcpt().point (steiner node), not vtx1_point (fit), to match sg wcpts
-                    const auto& sg_wcpts = sg->wcpts();
-                    if (sg_wcpts.empty()) continue;
-
+                    // Determine which end of sg1 connects to vtx1.
+                    // Must check sg1's orientation (not sg's): sg and sg1 are independent segments;
+                    // vtx1's position at front vs back of sg has no bearing on sg1's orientation.
                     WireCell::Point vtx1_wcpt_point = vtx1->wcpt().point;
-                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, vtx1_wcpt_point}) < 0.01*units::cm);
+                    bool flag_start = (ray_length(Ray{sg1_wcpts.front().point, vtx1_wcpt_point}) < 0.01*units::cm);
 
                     // Find point at ~3cm from vtx1
                     WireCell::Point min_point = sg1_wcpts.front().point;
@@ -3248,12 +3246,11 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                     const auto& sg1_wcpts = sg1->wcpts();
                     if (sg1_wcpts.empty()) continue;
 
-                    // Determine which end of sg connects to main_vertex
-                    const auto& sg_wcpts = sg->wcpts();
-                    if (sg_wcpts.empty()) continue;
-
+                    // Determine which end of sg1 connects to main_vertex.
+                    // Must check sg1's orientation (not sg's): sg and sg1 are independent segments;
+                    // main_vertex's position at front vs back of sg has no bearing on sg1's orientation.
                     WireCell::Point main_wcpt_point = main_vertex->wcpt().point;
-                    bool flag_start = (ray_length(Ray{sg_wcpts.front().point, main_wcpt_point}) < 0.01*units::cm);
+                    bool flag_start = (ray_length(Ray{sg1_wcpts.front().point, main_wcpt_point}) < 0.01*units::cm);
 
                     // Find point at ~3cm from main_vertex
                     WireCell::Point min_point = sg1_wcpts.front().point;
