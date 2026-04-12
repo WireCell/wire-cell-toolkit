@@ -2681,11 +2681,11 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
     if (vertices.size() == 1) return;
 
     double max_length = 0;
-    std::set<VertexPtr> tmp_vertices;
-    
+    IndexedVertexSet tmp_vertices;  // order by stable graph index, not pointer address
+
     for (auto vtx : vertices) {
         if (!vtx || !vtx->descriptor_valid()) continue;
-        
+
         // Count segments connected to this vertex
         int num_segs = 0;
         auto vd = vtx->get_descriptor();
