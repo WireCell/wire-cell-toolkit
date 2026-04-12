@@ -93,13 +93,13 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
     // special case of one blob
     if (params.config == SolveParams::simple && blob_descs.size() == 1) {
         auto nbdesc = blob_descs_out.collection[0];
-        value_t val;
+        value_t val{0, 0};
         for (size_t mind=0; mind < nmeas; ++mind) {
             auto nmdesc = meas_descs_out.collection[mind];
             boost::add_edge(nbdesc, nmdesc, csg_out);
             val += csg_out[nmdesc].value;
         }
-        csg_out[nbdesc].value = val / nmeas;
+        csg_out[nbdesc].value = val / nmeas * params.scale;
         return csg_out;
     }
         
@@ -156,17 +156,23 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
 
     if (params.whiten) {
 
-        // std::cerr << "A:\n" << A << "\nmcov:\n" << mcov << "\nmcovinv:\n" << mcov.inverse() << std::endl;
-        Eigen::LLT<double_matrix_t> llt(mcov.inverse());
-        double_matrix_t U = llt.matrixL().transpose();
-        // std::cerr << "U:\n" << U << std::endl;
- 
+        // Cholesky decomposition of mcov directly (avoids computing explicit inverse).
+        // If mcov = L*L^T, then mcov^{-1} = L^{-T}*L^{-1}, and the whitening
+        // transform U = L^{-1} satisfies U^T*U = mcov^{-1}.
+        Eigen::LLT<double_matrix_t> llt(mcov);
+        if (llt.info() != Eigen::Success) {
+            SPDLOG_WARN("Cholesky decomposition of measurement covariance failed, skipping whitening");
+            return csg_out;
+        }
+        // U*x = L^{-1}*x is computed via triangular solve of L*y = x
+        auto L = llt.matrixL();
+
         // The measure vector in a "whitened" basis
-        m_vec = U*measure;
+        m_vec = L.solve(measure);
 
         // The blob-measure association in "whitened" basis (becomes
-        // the "reasponse" matrix in ress solving).
-        R_mat = params.scale*U*A;
+        // the "response" matrix in ress solving).
+        R_mat = params.scale * L.solve(A);
     }
     if (verbose) {
         SPDLOG_INFO("CS params scale {} whiten {}", params.scale, params.whiten);

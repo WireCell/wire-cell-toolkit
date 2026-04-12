@@ -44,13 +44,14 @@ WireCell::Configuration Img::ChargeSolving::default_configuration() const
     }
     cfg["solve_config"] = m_solve_config;
     cfg["whiten"] = m_whiten;
+    cfg["good_blob_charge_th"] = m_good_blob_charge_th;
 
     return cfg;
 }
 
 
 
-void blob_weight_uniform(const cluster_graph_t& /*cgraph*/, graph_t& csg)
+void blob_weight_uniform(const cluster_graph_t& /*cgraph*/, graph_t& csg, double /*charge_th*/)
 {
     for (auto desc : vertex_range(csg)) {
         auto& vtx = csg[desc];
@@ -61,7 +62,7 @@ void blob_weight_uniform(const cluster_graph_t& /*cgraph*/, graph_t& csg)
     }
 }
 
-void blob_weight_simple(const cluster_graph_t& cgraph, graph_t& csg)
+void blob_weight_simple(const cluster_graph_t& cgraph, graph_t& csg, double /*charge_th*/)
 {
     for (auto desc : vertex_range(csg)) {
         auto& vtx = csg[desc];
@@ -87,21 +88,19 @@ void blob_weight_simple(const cluster_graph_t& cgraph, graph_t& csg)
 // fixme: implement distance.
 
 
-void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
+void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg, double charge_th)
 {
-    // int nblobs = 0;
     for (auto desc : vertex_range(csg)) {
         auto& vtx = csg[desc];
         if (vtx.kind != node_t::blob) {
             continue;
         }
-        // ++nblobs;
         // check if blob is connected to other blobs in other slices
         // connection | weight
         // non | 9
         // one | 3
         // both| 1
-        auto cent_time = (int)csg[boost::graph_bundle].islice->start();
+        auto cent_time = csg[boost::graph_bundle].islice->start();
         bool prev_con = false;
         bool next_con = false;
         for (auto edge : mir(boost::out_edges(vtx.orig_desc, cgraph)))
@@ -110,9 +109,8 @@ void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
             const auto& nnode = cgraph[ndesc];
             if (nnode.code() == 'b') {
                 const auto iblob = get<blob_t>(nnode.ptr);
-                auto time = (int)iblob->slice()->start();
-                /// TODO: make this 300 configurable
-                if (iblob->value() < 300) continue;
+                auto time = iblob->slice()->start();
+                if (iblob->value() < charge_th) continue;
                 if (time > cent_time) {
                     next_con = true;
                 }
@@ -129,16 +127,11 @@ void blob_weight_uboone(const cluster_graph_t& cgraph, graph_t& csg)
             weight /= 3.;
         }
         vtx.value.uncertainty((float) weight);
-        // TODO remove this
-        // std::cout << String::format("cent_time: %f next_con: %d, prev_con: %d, weight: %d", cent_time, next_con, prev_con, weight) << std::endl;
     }
-    // (void)nblobs; // unused, but useful for debugging
-    // TODO remove this
-    // std::cout << String::format("nblobs: %d", nblobs) << std::endl;
 }
 
 // Weighting function lookup
-using blob_weighting_f = std::function<void(const cluster_graph_t& cgraph, graph_t& csg)>;
+using blob_weighting_f = std::function<void(const cluster_graph_t& cgraph, graph_t& csg, double charge_th)>;
 using blob_weighting_lut = std::unordered_map<std::string, blob_weighting_f>;
 static const blob_weighting_lut gStrategies{
     {"uniform", blob_weight_uniform},
@@ -186,6 +179,7 @@ void Img::ChargeSolving::configure(const WireCell::Configuration& cfg)
     }
     log->debug("SolveParams::Config: {}", m_solve_config);
     m_whiten = get<bool>(cfg, "whiten", m_whiten);
+    m_good_blob_charge_th = get<double>(cfg, "good_blob_charge_th", m_good_blob_charge_th);
 }
 
 
@@ -265,7 +259,9 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
     // b-m subgraphs with all the info needed for solving each round.
     graph_vector_t sgs;
     const auto in_graph = in->graph();
-    dump_cg(in_graph, log);
+    if (log->level() <= spdlog::level::debug) {
+        dump_cg(in_graph, log);
+    }
     unpack(in_graph, std::back_inserter(sgs), m_meas_thresh);
 
     // for (const auto& sg : sgs) {
@@ -299,13 +295,15 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
         std::transform(sgs.begin(), sgs.end(), sgs.begin(),
                        [&](graph_t& sg) {
                            //dump_sg(sg, log);
-                           blob_weighter(in_graph, sg);
+                           blob_weighter(in_graph, sg, m_good_blob_charge_th);
                            auto tmp_csg = solve(sg, sparams);
                            return prune(tmp_csg, blob_threshold[ind]);
                        });
     }
-    for (const auto& sg : sgs) {
-        dump_sg(sg, log);
+    if (log->level() <= spdlog::level::trace) {
+        for (const auto& sg : sgs) {
+            dump_sg(sg, log);
+        }
     }
     log->debug("count={} cluster={} solved nsubclusters={} over nstrategies={}",
                m_count,

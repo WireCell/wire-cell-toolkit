@@ -63,7 +63,7 @@ namespace {
         if (tag)
             pack |= (1 << p);
         else
-            pack &= (0 << p);
+            pack &= ~(1 << p);
     }
 
     template <class Map, class Key, class Pos>
@@ -254,14 +254,19 @@ namespace {
     // }
 
 
-    // Helper function to calculate overlap ratio between two sets of wires
+    // Helper function to calculate overlap ratio between two sets of wires.
+    // Uses counting iterator to avoid allocating a temporary vector.
     double calculate_wire_overlap(const std::set<int>& wires1, const std::set<int>& wires2) {
-        std::vector<int> common_wires;
-        std::set_intersection(wires1.begin(), wires1.end(), 
-                             wires2.begin(), wires2.end(),
-                             std::back_inserter(common_wires));
-        
-        return common_wires.size() * 1.0 / wires1.size();
+        if (wires1.empty()) return 0.0;
+        size_t common_count = 0;
+        auto it1 = wires1.begin();
+        auto it2 = wires2.begin();
+        while (it1 != wires1.end() && it2 != wires2.end()) {
+            if (*it1 < *it2) { ++it1; }
+            else if (*it2 < *it1) { ++it2; }
+            else { ++common_count; ++it1; ++it2; }
+        }
+        return common_count * 1.0 / wires1.size();
     }
 
 }  // namespace

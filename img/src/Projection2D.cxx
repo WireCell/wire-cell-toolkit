@@ -6,6 +6,7 @@
 #include "WireCellUtil/String.h"
 
 #include <fstream>
+#include <limits>
 #include <unordered_set>
 #include <utility>
 #include <algorithm>
@@ -129,7 +130,9 @@ struct pair_hash {
     {
         std::size_t h1 = std::hash<T1>()(pair.first);
         std::size_t h2 = std::hash<T2>()(pair.second);
-        return h1 ^ h2;
+        // boost::hash_combine style mixing to avoid h1^h2 symmetry collisions
+        h1 ^= h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2);
+        return h1;
     }
 };
 
@@ -225,7 +228,7 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
 
             double sum_charge = 0;
             int sum_n = 0;
-            double min_charge = 1e12;
+            double min_charge = std::numeric_limits<double>::max();
             for (auto it = layer_charge.begin(); it != layer_charge.end(); it++) {
                 if (it->second != 0) {
                     sum_charge += it->second;
@@ -233,8 +236,8 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
                     if (it->second < min_charge) min_charge = it->second;
                 }
             }
-            // protection ...
-            if (min_charge == 1e12) min_charge = 0;
+            // protection: no layer had non-zero charge
+            if (sum_n == 0) min_charge = 0;
             if (sum_n > 0) estimated_total_charge = sum_charge / sum_n;
             estimated_minimum_charge += min_charge;  // min_iter->second;
 
@@ -417,8 +420,6 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
         }
     }
 
-    return OTHER;
-
     // ref * tar
     // sparse_mat_t ref_t_tar = ref.m_proj.cwiseProduct(tar.m_proj);
 
@@ -466,17 +467,32 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
     sparse_mat_t inter_mask = ref_mask.cwiseProduct(tar_mask);
     sparse_mat_t inter_proj = ref.m_proj.cwiseProduct(inter_mask);
 
-    int num_ref = loop_count(ref.m_proj, [](scaler_t x) { return x > 0; });
-    int num_tar = loop_count(tar.m_proj, [](scaler_t x) { return x > 0; });
-    int num_dead_ref = loop_count(ref.m_proj, [&](scaler_t x) {
-        return x < (-1) * uncer_cut;
-    });  // -1e12 for dead pixels, TODO: make sure this is robust
-    int num_dead_tar = loop_count(tar.m_proj, [&](scaler_t x) { return x < (-1) * uncer_cut; });
-    int num_inter = loop_count(inter_proj, [](scaler_t x) { return x > 0; });
-
-    scaler_t charge_ref = loop_sum(ref.m_proj, [](scaler_t x) { return (x > 0) * x; });
-    scaler_t charge_tar = loop_sum(tar.m_proj, [](scaler_t x) { return (x > 0) * x; });
-    scaler_t charge_inter = loop_sum(inter_proj, [](scaler_t x) { return (x > 0) * x; });
+    // Single-pass stats for ref: count live, count dead, sum charge
+    int num_ref = 0, num_dead_ref = 0;
+    scaler_t charge_ref = 0;
+    for (int k = 0; k < ref.m_proj.outerSize(); ++k) {
+        for (sparse_mat_t::InnerIterator it(ref.m_proj, k); it; ++it) {
+            if (it.value() > 0) { ++num_ref; charge_ref += it.value(); }
+            else if (it.value() < (-1) * uncer_cut) { ++num_dead_ref; }
+        }
+    }
+    // Single-pass stats for tar: count live, count dead, sum charge
+    int num_tar = 0, num_dead_tar = 0;
+    scaler_t charge_tar = 0;
+    for (int k = 0; k < tar.m_proj.outerSize(); ++k) {
+        for (sparse_mat_t::InnerIterator it(tar.m_proj, k); it; ++it) {
+            if (it.value() > 0) { ++num_tar; charge_tar += it.value(); }
+            else if (it.value() < (-1) * uncer_cut) { ++num_dead_tar; }
+        }
+    }
+    // Single-pass stats for inter_proj: count and charge
+    int num_inter = 0;
+    scaler_t charge_inter = 0;
+    for (int k = 0; k < inter_proj.outerSize(); ++k) {
+        for (sparse_mat_t::InnerIterator it(inter_proj, k); it; ++it) {
+            if (it.value() > 0) { ++num_inter; charge_inter += it.value(); }
+        }
+    }
 
     if (num_ref != 0 && num_tar != 0 && num_inter == 0) return OTHER;
 
@@ -513,6 +529,8 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
 
         float common_counts = num_inter;
         float common_charge = charge_inter;
+
+        if (small_charge == 0 || small_counts == 0) return OTHER;
 
         if ((1 - common_charge / small_charge) <
                 std::min(cut_values[0] * (small_counts + dead_counts) / small_counts, cut_values[1]) &&
