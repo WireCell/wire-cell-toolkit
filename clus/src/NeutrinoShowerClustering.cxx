@@ -277,7 +277,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
             if (map_segment_in_shower.find(sg) != map_segment_in_shower.end()) continue;
 
             // Calculate total number of daughter segments for this segment
-            auto pair_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
+            auto pair_result = calculate_num_daughter_showers(graph, main_vertex, sg);
 
             // Get segment properties
             double medium_dQ_dx = segment_median_dQ_dx(sg);
@@ -1459,7 +1459,11 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             for (auto shower_to_remove : showers_to_be_removed) {
                 showers.erase(shower_to_remove);
             }
-            
+
+            // Post-merge majority-vote and kinematics (prototype lines 1555-1556)
+            shower->update_particle_type(particle_data, recomb_model);
+            shower->calculate_kinematics(particle_data, recomb_model);
+
             showers.insert(shower);
         }
     }
@@ -2847,8 +2851,17 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
             auto [start_vtx, conn_type] = shower->get_start_vertex_and_type();
             if (conn_type != 3) continue;
             
-            if (!shower->start_segment()->flags_any(SegmentFlags::kShowerTrajectory) &&
-                !shower->start_segment()->flags_any(SegmentFlags::kShowerTopology)) continue;
+            {
+                bool is_shower_seg = shower->start_segment()->flags_any(SegmentFlags::kShowerTrajectory) ||
+                                     shower->start_segment()->flags_any(SegmentFlags::kShowerTopology);
+                if (!is_shower_seg) {
+                    // Also accept segments identified as electron by PID (prototype's get_flag_shower_dQdx)
+                    int seg_pdg = 0;
+                    if (shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info())
+                        seg_pdg = shower->start_segment()->particle_info()->pdg();
+                    if (std::abs(seg_pdg) != 11) continue;
+                }
+            }
             
             auto [closest_dis, test_p] = shower_get_closest_point(*shower, main_vtx_pt);
             WireCell::Vector dir = shower_cal_dir_3vector(*shower, test_p, 15 * units::cm);
@@ -2966,7 +2979,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
                     map_shower_pair_mass_point[std::make_pair(shower_1, shower_2)] = std::make_pair(mass_pio, center);
                     
                 } else {
-                    continue; // both showers short: skip pair but keep checking remaining pairs
+                    break; // both showers short: exit inner loop (prototype line 614)
                 }
             }
         }
