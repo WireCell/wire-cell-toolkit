@@ -706,31 +706,41 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         return flag;
     }
     
-    // Step 1: Find points at ~3cm distance from vertex on other connected segments
-    std::map<SegmentPtr, Facade::geo_point_t> map_segment_point;
-    
+    // Step 1: Find points at ~3cm distance from vertex on other connected segments.
+    // Use a vector sorted by edge insertion index for deterministic iteration order
+    // (avoids pointer-dependent ordering of std::map<SegmentPtr,...>).
+    std::vector<std::pair<SegmentPtr, Facade::geo_point_t>> seg_ref_points;
+
     if (!vertex->descriptor_valid()) return flag;
     auto vd = vertex->get_descriptor();
-    auto edge_range = boost::out_edges(vd, graph);
-    
-    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
-        if (!sg || sg == seg) continue;
-        
-        const auto& fits = sg->fits();
-        if (fits.empty()) continue;
-        
-        Facade::geo_point_t min_point = fits.front().point;
-        double min_dis = 1e9;
-        
-        for (size_t i = 0; i < fits.size(); i++) {
-            double dis = std::fabs(ray_length(Ray{fits[i].point, vertex->fit().point}) - 3.0 * units::cm);
-            if (dis < min_dis) {
-                min_dis = dis;
-                min_point = fits[i].point;
+
+    {
+        // Collect (edge_index, segment, ref_point) triples, then sort by edge_index
+        std::vector<std::tuple<int, SegmentPtr, Facade::geo_point_t>> tmp;
+        auto edge_range = boost::out_edges(vd, graph);
+        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
+            SegmentPtr sg = graph[*eit].segment;
+            if (!sg || sg == seg) continue;
+
+            const auto& fits = sg->fits();
+            if (fits.empty()) continue;
+
+            Facade::geo_point_t min_point = fits.front().point;
+            double min_dis = 1e9;
+            for (size_t i = 0; i < fits.size(); i++) {
+                double dis = std::fabs(ray_length(Ray{fits[i].point, vertex->fit().point}) - 3.0 * units::cm);
+                if (dis < min_dis) {
+                    min_dis = dis;
+                    min_point = fits[i].point;
+                }
             }
+            tmp.emplace_back(graph[*eit].index, sg, min_point);
         }
-        map_segment_point[sg] = min_point;
+        std::sort(tmp.begin(), tmp.end(),
+                  [](const auto& a, const auto& b) { return std::get<0>(a) < std::get<0>(b); });
+        for (auto& [idx, sg, pt] : tmp) {
+            seg_ref_points.emplace_back(sg, pt);
+        }
     }
     
     // Step 2: Determine which end of seg connects to vertex
@@ -776,8 +786,8 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         int n_bad = 0;
         Facade::geo_point_t end_p = pts_to_be_tested[i];
         
-        for (auto it = map_segment_point.begin(); it != map_segment_point.end(); it++) {
-            Facade::geo_point_t start_p = it->second;
+        for (const auto& [ref_sg, ref_pt] : seg_ref_points) {
+            Facade::geo_point_t start_p = ref_pt;
             double distance = ray_length(Ray{start_p, end_p});
             int ncount = std::round(distance / step_size);
             
@@ -882,14 +892,12 @@ bool PatternAlgorithms::crawl_segment(Graph& graph, Facade::Cluster& cluster, Se
         seg = new_seg;
         
         // Update other connected segments
-        for (auto it = map_segment_point.begin(); it != map_segment_point.end(); it++) {
-            SegmentPtr other_sg = it->first;
+        for (const auto& [other_sg, min_p] : seg_ref_points) {
             const auto& other_wcpts = other_sg->wcpts();
             if (other_wcpts.empty()) continue;
-            
-            bool flag_front = (ray_length(Ray{other_wcpts.front().point, vertex->wcpt().point}) < 
+
+            bool flag_front = (ray_length(Ray{other_wcpts.front().point, vertex->wcpt().point}) <
                               ray_length(Ray{other_wcpts.back().point, vertex->wcpt().point}));
-            Facade::geo_point_t min_p = it->second;
             
             // Find closest point in other segment to min_p
             size_t min_idx = 0;

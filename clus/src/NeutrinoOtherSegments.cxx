@@ -903,9 +903,8 @@ PatternAlgorithms::check_end_point(Graph& graph,
         Facade::geo_point_t min_point(0, 0, 0);
         double min_dis = 1e9;
 
-        auto [ebegin, eend] = boost::edges(graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr candidate_seg = graph[*eit].segment;
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr candidate_seg = graph[ed].segment;
             if (!candidate_seg || candidate_seg->cluster() != &cluster) {
                 continue;
             }
