@@ -3,6 +3,7 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/FiducialUtils.h"
 
+#include <algorithm>
 #include <cmath>
 
 using namespace WireCell;
@@ -139,24 +140,29 @@ FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
                 auto it_W = wpid_W_dir.find(wpid_p1);
                 if (it_W != wpid_W_dir.end()) W_dir = it_W->second.first;
 
+                // Skip wire-angle checks if dir_1 has zero magnitude
+                // (direction purely along drift axis — projections undefined)
+                double dir_1_mag = dir_1.magnitude();
+                if (dir_1_mag == 0) continue;
+
                 // Projected angles w.r.t. each wire-plane direction
-                double angle1 = acos(dir_1.dot(U_dir) / (dir_1.magnitude() * U_dir.magnitude()));
+                double angle1 = acos(std::clamp(dir_1.dot(U_dir) / (dir_1_mag * U_dir.magnitude()), -1.0, 1.0));
                 geo_point_t tempV1(fabs(dir.x()),
                                    sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle1), 0);
-                double angle1_1 = acos(tempV1.dot(drift_dir) /
-                                       (tempV1.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
+                double angle1_1 = acos(std::clamp(tempV1.dot(drift_dir) /
+                                       (tempV1.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / 3.1415926 * 180.;
 
-                double angle2 = acos(dir_1.dot(V_dir) / (dir_1.magnitude() * V_dir.magnitude()));
+                double angle2 = acos(std::clamp(dir_1.dot(V_dir) / (dir_1_mag * V_dir.magnitude()), -1.0, 1.0));
                 geo_point_t tempV2(fabs(dir.x()),
                                    sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle2), 0);
-                double angle2_1 = acos(tempV2.dot(drift_dir) /
-                                       (tempV2.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
+                double angle2_1 = acos(std::clamp(tempV2.dot(drift_dir) /
+                                       (tempV2.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / 3.1415926 * 180.;
 
-                double angle3 = acos(dir_1.dot(W_dir) / (dir_1.magnitude() * W_dir.magnitude()));
+                double angle3 = acos(std::clamp(dir_1.dot(W_dir) / (dir_1_mag * W_dir.magnitude()), -1.0, 1.0));
                 geo_point_t tempV3(fabs(dir.x()),
                                    sqrt(dir.y()*dir.y() + dir.z()*dir.z()) * sin(angle3), 0);
-                double angle3_1 = acos(tempV3.dot(drift_dir) /
-                                       (tempV3.magnitude() * drift_dir.magnitude())) / 3.1415926 * 180.;
+                double angle3_1 = acos(std::clamp(tempV3.dot(drift_dir) /
+                                       (tempV3.magnitude() * drift_dir.magnitude()), -1.0, 1.0)) / 3.1415926 * 180.;
 
                 // Near-collinear with a wire plane → check signal-processing gaps
                 if (angle1_1 < 10 || angle2_1 < 10 || angle3_1 < 5) {
@@ -168,8 +174,8 @@ FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
 
                 // Direction largely transverse to the cluster axis → check dead volume
                 if (!flag_save) {
-                    double main_angle = acos(dir_vec.dot(main_dir) /
-                                            (dir_vec.magnitude() * main_dir.magnitude()));
+                    double main_angle = acos(std::clamp(dir_vec.dot(main_dir) /
+                                            (dir_vec.magnitude() * main_dir.magnitude()), -1.0, 1.0));
                     double angle_deg = fabs((3.1415926/2. - main_angle) / 3.1415926 * 180.);
                     if (angle_deg > 60) {
                         if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)) {
