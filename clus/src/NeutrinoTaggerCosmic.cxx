@@ -533,10 +533,8 @@ bool PatternAlgorithms::cosmic_tagger(
         // Use tighter tolerance (STM-like -1.5cm) for the vertex outside-FV check.
         // The prototype calls fid->inside_fiducial_volume(test_p, offset_x, &stm_tol_vec)
         // with all tolerances set to -1.5 cm, meaning the fiducial volume is shrunk by 1.5cm.
-        // The toolkit FiducialUtils::inside_fiducial_volume already accounts for offset;
-        // the stm_tol_vec shrinkage is not yet parameterizable, so we use the default here.
-        // TODO: if stm tolerance is needed, extend FiducialUtils API.
-        if (fiducial_utils && !fiducial_utils->inside_fiducial_volume(test_p))
+        const std::vector<double> stm_tol_vec(6, -1.5 * units::cm);
+        if (fiducial_utils && !fiducial_utils->inside_fiducial_volume(test_p, stm_tol_vec))
             flag_cosmic_1 = true;
     }
 
@@ -869,7 +867,7 @@ bool PatternAlgorithms::cosmic_tagger(
             Vector dir3 = segment_cal_dir_3vector(muon_2nd, mv_pt, 15 * units::cm);
 
             double Emi = michel_energy;
-            if (Emi < 25 * units::cm && dir1.angle(dir2) / M_PI * 180.0 > 170)
+            if (Emi < 25 * units::MeV && dir1.angle(dir2) / M_PI * 180.0 > 170)
                 valid_tracks--;
             else if (length2nd < 5 * units::cm && dir1.angle(dir3) / M_PI * 180.0 > 170)
                 valid_tracks--;
@@ -1262,11 +1260,31 @@ bool PatternAlgorithms::cosmic_tagger(
 
     // -----------------------------------------------------------------------
     // Section: front-end vertex check (flag 10).
-    // Flag tracks that are near z=0 (front face), not in FV, and pointing
-    // along the beam direction.
+    // Flag tracks that are near a z-boundary (front face), not in FV, and
+    // pointing along the beam direction.
     // Prototype: NeutrinoID_cosmic_tagger.h lines 799-835.
+    //
+    // Multi-APA: instead of hard-coding z<15cm, compute the minimum z of
+    // all sensitive volumes and check proximity to that boundary.
     // -----------------------------------------------------------------------
     {
+        // Determine the minimum z of all sensitive volumes in the detector.
+        double z_front = 0;  // fallback for single-APA (prototype behaviour)
+        if (dv) {
+            bool first = true;
+            for (const auto& [ident, face] : dv->wpident_faces()) {
+                WirePlaneId wpid(ident);
+                auto bb = dv->inner_bounds(wpid);
+                if (!bb.empty()) {
+                    double zmin = bb.bounds().first.z();
+                    if (first || zmin < z_front) {
+                        z_front = zmin;
+                        first = false;
+                    }
+                }
+            }
+        }
+
         for (auto [vit, vit_end] = boost::vertices(graph); vit != vit_end; ++vit) {
             VertexPtr vtx = graph[*vit].vertex;
             if (!vtx) continue;
@@ -1274,7 +1292,7 @@ bool PatternAlgorithms::cosmic_tagger(
             if (vtx->cluster()->get_cluster_id() != main_cluster->get_cluster_id()) continue;
 
             Point vpt = vtx_fit_pt(vtx);
-            if (!inside_fv(vpt) && vpt.z() < 15 * units::cm) {
+            if (!inside_fv(vpt) && vpt.z() < z_front + 15 * units::cm) {
                 segs_at_vtx(vtx, [&](SegmentPtr sg) {
                     flag_cosmic_10 = false;
                     Vector dir     = segment_cal_dir_3vector(sg, vpt, 15 * units::cm);

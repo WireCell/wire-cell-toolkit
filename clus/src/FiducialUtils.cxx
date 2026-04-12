@@ -69,11 +69,47 @@ namespace WireCell::Clus {
     }
 
 
-    bool FiducialUtils::inside_fiducial_volume(const Point& p, 
+    bool FiducialUtils::inside_fiducial_volume(const Point& p,
                                                const std::vector<double>& tolerance_vec) const
     {
-        // currently tolerance vector is not used ...
-        return m_sd.fiducial->contained(p); 
+        if (tolerance_vec.empty()) {
+            return m_sd.fiducial->contained(p);
+        }
+
+        // Apply tolerance by checking offset points.  A negative tolerance
+        // (e.g. -1.5cm) shrinks the fiducial volume, meaning the point must
+        // be at least |tol| inside each boundary.  We verify this by
+        // checking that the point shifted outward by |tol| along each axis
+        // direction is still contained.
+        //
+        // tolerance_vec mapping (mirrors prototype stm_tol_vec):
+        //   size >= 1 → uniform tolerance from first element
+        //   size >= 3 → per-axis: [x, y, z]
+        //   size >= 6 → per-face: [x_lo, x_hi, y_lo, y_hi, z_lo, z_hi]
+        double tol_xlo, tol_xhi, tol_ylo, tol_yhi, tol_zlo, tol_zhi;
+        if (tolerance_vec.size() >= 6) {
+            tol_xlo = tolerance_vec[0]; tol_xhi = tolerance_vec[1];
+            tol_ylo = tolerance_vec[2]; tol_yhi = tolerance_vec[3];
+            tol_zlo = tolerance_vec[4]; tol_zhi = tolerance_vec[5];
+        } else if (tolerance_vec.size() >= 3) {
+            tol_xlo = tol_xhi = tolerance_vec[0];
+            tol_ylo = tol_yhi = tolerance_vec[1];
+            tol_zlo = tol_zhi = tolerance_vec[2];
+        } else {
+            tol_xlo = tol_xhi = tolerance_vec[0];
+            tol_ylo = tol_yhi = tolerance_vec[0];
+            tol_zlo = tol_zhi = tolerance_vec[0];
+        }
+
+        // For a negative tolerance t, |t| is the required margin.
+        // Check that the point shifted outward by |t| is still contained.
+        if (!m_sd.fiducial->contained(Point(p.x() - tol_xlo, p.y(), p.z()))) return false;
+        if (!m_sd.fiducial->contained(Point(p.x() + tol_xhi, p.y(), p.z()))) return false;
+        if (!m_sd.fiducial->contained(Point(p.x(), p.y() - tol_ylo, p.z()))) return false;
+        if (!m_sd.fiducial->contained(Point(p.x(), p.y() + tol_yhi, p.z()))) return false;
+        if (!m_sd.fiducial->contained(Point(p.x(), p.y(), p.z() - tol_zlo))) return false;
+        if (!m_sd.fiducial->contained(Point(p.x(), p.y(), p.z() + tol_zhi))) return false;
+        return true;
     }
 
 
