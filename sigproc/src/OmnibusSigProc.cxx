@@ -317,7 +317,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["r_low_peak_sep_threshold_pre"] = m_r_low_peak_sep_threshold_pre;
     cfg["r_max_npeaks"] = m_r_max_npeaks;
     cfg["r_sigma"] = m_r_sigma;
-    cfg["r_th_precent"] = m_r_th_percent;
+    cfg["r_th_percent"] = m_r_th_percent;
 
     cfg["ROI_tight_lf_filter"] = m_ROI_tight_lf_filter;
     cfg["ROI_tighter_lf_filter"] = m_ROI_tighter_lf_filter;
@@ -354,7 +354,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     
     cfg["rebase_nbins"] = m_rebase_nbins;    
 
-    cfg["isWarped"] = m_isWrapped;  // default false
+    cfg["isWrapped"] = m_isWrapped;  // default false
 
     cfg["sparse"] = false;
 

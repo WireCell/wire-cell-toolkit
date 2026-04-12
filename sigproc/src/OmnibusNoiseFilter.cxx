@@ -13,6 +13,7 @@
 #include "WireCellAux/FrameTools.h"
 
 #include <unordered_map>
+#include <unordered_set>
 
 WIRECELL_FACTORY(OmnibusNoiseFilter,
                  WireCell::SigProc::OmnibusNoiseFilter,
@@ -172,6 +173,9 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
 
     int nchanged_samples = 0;
 
+    // Build a set for O(1) bad-channel lookup instead of O(N) linear search
+    std::unordered_set<int> bad_channel_set(bad_channels.begin(), bad_channels.end());
+
     // Collect our working area indexed by channel.
     std::unordered_map<int, Aux::SimpleTrace*> bychan;
     for (auto trace : traces) {
@@ -182,7 +186,7 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         bychan[ch] = signal;
 
         // if good
-        if (find(bad_channels.begin(), bad_channels.end(), ch) == bad_channels.end()) {
+        if (bad_channel_set.find(ch) == bad_channel_set.end()) {
             auto const& charge = trace->charge();
             const size_t ncharges = charge.size();
 
@@ -195,7 +199,7 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         }
 
         // int filt_count = 0;
-        for (auto filter : m_perchan) {
+        for (const auto& filter : m_perchan) {
             auto masks = filter->apply(ch, signal->charge());
 
             // fixme: probably should assure these masks do not lead to out-of-bounds...
@@ -214,7 +218,7 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
     // int group_counter = 0;
     int nunknownchans = 0;
     for (const auto& mgcf : m_multigroup_chanfilters) {
-        for (auto group : mgcf.channelgroups) {
+        for (const auto& group : mgcf.channelgroups) {
 
             int flag = 1;
 
@@ -231,13 +235,12 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
             }
             if (flag == 0) continue;
 
-            for (auto filter : mgcf.filters) {
+            for (const auto& filter : mgcf.filters) {
                 auto masks = filter->apply(chgrp);
                 Waveform::merge(cmm, masks, m_maskmap);
             }
 
-            for (auto cs : chgrp) {
-                // cs.second; // copy
+            for (auto& cs : chgrp) {
                 bychan[cs.first]->charge().assign(cs.second.begin(), cs.second.end());
             }
 
@@ -253,7 +256,7 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
     for (auto& it : bychan) {
         const int ch = it.first;
         IChannelFilter::signal_t& signal = it.second->charge();
-        for (auto filter : m_perchan_status) {
+        for (const auto& filter : m_perchan_status) {
             auto masks = filter->apply(ch, signal);
 
             Waveform::merge(cmm, masks, m_maskmap);
