@@ -119,7 +119,7 @@ std::vector<WireCell::Binning> collate_byplane(const ITrace::vector& traces, con
                                                ITrace::vector byplane[])
 {
     std::vector<int> uvwt[4];
-    for (auto trace : traces) {
+    for (const auto& trace : traces) {
         const int chid = trace->channel();
         auto wpid = anode->resolve(chid);
         const int iplane = wpid.index();
@@ -421,7 +421,7 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
                 const int ch0 = *mme.first;
                 const int chf = *mme.second;
                 const std::string hname = Form("h%c_%s", 'u' + iplane, tag.c_str());
-                TH1F* hist = new TH1F(hname.c_str(), hname.c_str(), chf - ch0 + 1, ch0, chf);
+                TH1F* hist = new TH1F(hname.c_str(), hname.c_str(), chf - ch0 + 1, ch0, chf + 1);
                 for (size_t ind = 0; ind < chans.size(); ++ind) {
                     const int x = chans[ind] + 0.5;
                     const double val = vals[ind];

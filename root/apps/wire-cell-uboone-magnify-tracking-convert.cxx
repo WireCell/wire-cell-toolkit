@@ -535,7 +535,11 @@ int main(int argc, char* argv[])
 	  total_dtheta->at(k) += dtheta->at(k).back();
 	}
       }else{
-	dtheta->at(k).push_back(0);
+	std::vector<double> temp_dtheta;
+	temp_dtheta.push_back(0);
+	dtheta->push_back(temp_dtheta);
+	max_dtheta->push_back(0);
+	total_dtheta->push_back(0);
       }
     }
   }

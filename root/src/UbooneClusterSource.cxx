@@ -76,7 +76,7 @@ void Root::UbooneClusterSource::configure(const WireCell::Configuration& cfg)
     // A "live" kind is always implied in UboontTFiles so if user gives "dead",
     // this still does the right thing.
     std::vector<std::string> kinds = {get<std::string>(cfg, "kind", "live")};
-    if (!m_light_name.empty() || !m_flash_name.empty() || m_flashlight_name.empty()) {
+    if (!m_light_name.empty() || !m_flash_name.empty() || !m_flashlight_name.empty()) {
         kinds.push_back("light");
     }
     m_files = std::make_unique<UbooneTFiles>(input_paths, kinds, log);
@@ -348,24 +348,19 @@ void Root::UbooneClusterSource::extract_live(
     // STEP 2: Modify activity map based on bad channels (bad_ch)
     // =================================================================
     
-    // Fill in known dead channels in all time slices
+    // Fill in known dead channels in overlapping time slices
     for (const auto& [ch, brl] : m_files->trees->bad.masks()) {
         auto ichan = get_channel(ch);
         if (!ichan) continue;
-        
 
-        // Check each time slice to see if it overlaps with any of the bin ranges
-        for (int tsid = 0; tsid < n_slices_span; ++tsid) {
-            auto& activity = slice_activities[tsid];
-            
-            // If slice overlaps with any of the bin ranges.
-            for (const auto& tt : brl) {
-                if (tt.second < tsid*nrebin || tt.first > (tsid+1)*nrebin) continue;
-
-                // if (ch == 955)         std::cout << "Test: " << tsid << " " << ch << " " << n_slices_span << " " << brl.front().first << " " << brl.front().second << std::endl;
-
-                activity[ichan] = m_bodge;
-                break; // No need to check other ranges for this slice
+        // Compute which time slices overlap with each bad channel range directly
+        for (const auto& tt : brl) {
+            int tsid_start = tt.first / nrebin;
+            int tsid_end = (tt.second + nrebin - 1) / nrebin;
+            if (tsid_start < 0) tsid_start = 0;
+            if (tsid_end > n_slices_span) tsid_end = n_slices_span;
+            for (int tsid = tsid_start; tsid < tsid_end; ++tsid) {
+                slice_activities[tsid][ichan] = m_bodge;
             }
         }
     }
@@ -539,6 +534,11 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
         extract_dead(m_cache, islices, iblobs);
     }
 
+    if (islices.empty() || iblobs.empty()) {
+        log->warn("no slices or blobs extracted at call {}, skipping", m_calls);
+        m_cache.clear();
+        return false;
+    }
     const int ident = islices[0]->frame()->ident();
     IAnodeFace::pointer iface = iblobs[0]->face();
     log->debug("is_live:{}, extracted {} slices, {} blobs from {} blob sets from frame ident {} face ident {} at call {}",
@@ -606,34 +606,28 @@ bool Root::UbooneClusterSource::flush(output_queue& outq)
     if (trees.is_live()) {
         const auto& individual_cluster_ids = trees.live.individual_cluster_ids();
         
-        // Create isolated arrays for each cluster
-        for (const auto& [cid, cnode] : cnodes) {
-            auto& lpc = cnode->value.local_pcs();
+        // Build per-cluster isolated arrays in a single pass over blobs
+        std::unordered_map<int, std::vector<int>> cluster_cc2_map;
+        for (size_t bind = 0; bind < niblobs; ++bind) {
+            const int index = iblobs[bind]->ident();
+            const int blob_cluster_id = blob_cluster_ids[index];
+            const int individual_cluster_id = individual_cluster_ids[index];
+
+            if (individual_cluster_id == blob_cluster_id) {
+                cluster_cc2_map[blob_cluster_id].push_back(-1);  // Main cluster
+            } else {
+                cluster_cc2_map[blob_cluster_id].push_back(individual_cluster_id);  // Sub-cluster
+            }
+        }
+
+        // Assign isolated arrays to cluster nodes
+        for (auto& [cid, cc2] : cluster_cc2_map) {
+            auto cit = cnodes.find(cid);
+            if (cit == cnodes.end()) continue;
+            auto& lpc = cit->second->value.local_pcs();
             auto& pc = lpc["perblob"];
-            
-            std::vector<int> cluster_cc2;
-            
-            // Find blobs belonging to this cluster and assign group IDs
-            for (size_t bind = 0; bind < niblobs; ++bind) {
-                const int index = iblobs[bind]->ident();
-                const int blob_cluster_id = blob_cluster_ids[index];
-                
-                if (blob_cluster_id == cid) {
-                    const int individual_cluster_id = individual_cluster_ids[index];
-                    
-                    if (individual_cluster_id == cid) {
-                        cluster_cc2.push_back(-1);  // Main cluster
-                    } else {
-                        cluster_cc2.push_back(individual_cluster_id);  // Sub-cluster
-                    }
-                }
-            }
-            
-            // Add the isolated array to the cluster's PCTree
-            if (!cluster_cc2.empty()) {
-                PointCloud::Array::shape_t shape = {cluster_cc2.size()};
-                pc.add("isolated", PointCloud::Array(cluster_cc2, shape, false));
-            }
+            PointCloud::Array::shape_t shape = {cc2.size()};
+            pc.add("isolated", PointCloud::Array(cc2, shape, false));
         }
     }
 

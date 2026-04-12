@@ -311,35 +311,49 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     // Set default values
     point_tree.reco_chi2 = 1;
 
-    // Collect all clusters from the graph
-    std::set<Facade::Cluster*> all_clusters;
-    
-    // Iterate through all edges (segments) in the graph
+    // Build per-cluster edge/vertex maps in a single pass (O(E+V) instead of O(C*(E+V)))
+    using edge_desc = typename boost::graph_traits<PR::Graph>::edge_descriptor;
+    using vertex_desc = typename boost::graph_traits<PR::Graph>::vertex_descriptor;
+    std::map<Facade::Cluster*, std::vector<edge_desc>> cluster_edges;
+    std::map<Facade::Cluster*, std::vector<vertex_desc>> cluster_vertices;
+
     auto edge_range = boost::edges(*graph);
     for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
         auto seg = (*graph)[*eit].segment;
         if (seg && seg->cluster()) {
-            all_clusters.insert(seg->cluster());
+            cluster_edges[seg->cluster()].push_back(*eit);
         }
     }
 
-    // Iterate through all vertices in the graph
     auto vertex_range = boost::vertices(*graph);
     for (auto vit = vertex_range.first; vit != vertex_range.second; ++vit) {
         auto vtx = (*graph)[*vit].vertex;
         if (vtx && vtx->cluster()) {
-            all_clusters.insert(vtx->cluster());
+            cluster_vertices[vtx->cluster()].push_back(*vit);
         }
     }
 
     // Find the main cluster ID
     int mother_cluster_id = -1;
-    for (auto* cluster : all_clusters) {
+    for (const auto& [cluster, _] : cluster_edges) {
         if (cluster && cluster->get_flag(Facade::Flags::main_cluster)) {
             mother_cluster_id = cluster->get_cluster_id();
             break;
         }
     }
+    if (mother_cluster_id < 0) {
+        for (const auto& [cluster, _] : cluster_vertices) {
+            if (cluster && cluster->get_flag(Facade::Flags::main_cluster)) {
+                mother_cluster_id = cluster->get_cluster_id();
+                break;
+            }
+        }
+    }
+
+    // Collect unique clusters
+    std::set<Facade::Cluster*> all_clusters;
+    for (const auto& [c, _] : cluster_edges) all_clusters.insert(c);
+    for (const auto& [c, _] : cluster_vertices) all_clusters.insert(c);
 
     // Process each cluster
     for (auto* cluster : all_clusters) {
@@ -349,9 +363,9 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
 
         // Process vertices in this cluster
         if (!flag_skip_vertex) {
-            for (auto vit = vertex_range.first; vit != vertex_range.second; ++vit) {
-                auto vtx = (*graph)[*vit].vertex;
-                if (!vtx || vtx->cluster() != cluster) continue;
+            for (auto vd : cluster_vertices[cluster]) {
+                auto vtx = (*graph)[vd].vertex;
+                if (!vtx) continue;
 
                 // Fill vertex information
                 point_tree.reco_cluster_id = cluster->get_cluster_id();
@@ -385,9 +399,9 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
         }
 
         // Process segments in this cluster
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            auto seg = (*graph)[*eit].segment;
-            if (!seg || seg->cluster() != cluster) continue;
+        for (auto ed : cluster_edges[cluster]) {
+            auto seg = (*graph)[ed].segment;
+            if (!seg) continue;
 
             const auto& fits = seg->fits();
             const auto& wcpts = seg->wcpts();

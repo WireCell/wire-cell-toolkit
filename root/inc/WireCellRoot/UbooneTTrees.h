@@ -132,8 +132,10 @@ namespace WireCell::Root {
             std::vector<std::vector<int>> *wire_index_v_vec{nullptr};
             std::vector<std::vector<int>> *wire_index_w_vec{nullptr};
 
-            // Lord, forgive us our sins.
-            std::vector<std::vector<int>*> flag_uvw;
+            // Return current flag pointers (must be called after GetEntry)
+            std::vector<std::vector<int>*> get_flag_uvw() const {
+                return {flag_u_vec, flag_v_vec, flag_w_vec};
+            }
 
             virtual const std::vector<int>& cluster_ids() const
             {
@@ -142,10 +144,10 @@ namespace WireCell::Root {
 
 
             void set_addresses(TTree& tree, int kind = 0) {
-                
-                tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
+
+                tree.SetBranchAddress("cluster_id", &cluster_id_vec);
                 // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
-                // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
+                // the cluster_id is the individual cluster id, some of them are associated with the main cluster,
                 // not directly used in T_match tree
                 tree.SetBranchAddress("flag_u", &flag_u_vec);
                 tree.SetBranchAddress("flag_v", &flag_v_vec);
@@ -153,9 +155,6 @@ namespace WireCell::Root {
                 tree.SetBranchAddress("wire_index_u", &wire_index_u_vec);
                 tree.SetBranchAddress("wire_index_v", &wire_index_v_vec);
                 tree.SetBranchAddress("wire_index_w", &wire_index_w_vec);
-
-                // derived
-                flag_uvw = {flag_u_vec, flag_v_vec, flag_w_vec};
             }
         };
 
@@ -184,18 +183,18 @@ namespace WireCell::Root {
 
 
             void set_addresses(TTree& tree) {
-                // tree.SetBranchAddress("cluster_id", &cluster_id_vec); 
+                // tree.SetBranchAddress("cluster_id", &cluster_id_vec);
                 // in the uboone files, parent_cluster_id, is the main_cluster, which is used in T_match tree
-                // the cluster_id is the individual cluster id, some of them are associated with the main cluster, 
+                // the cluster_id is the individual cluster id, some of them are associated with the main cluster,
                 // not directly used in T_match tree
                 Blob::set_addresses(tree);
 
                 if (tree.GetBranch("parent_cluster_id")) {
                     tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec);
                 } else {
-                    // Fallback: if no parent_cluster_id branch, copy cluster_id to parent_cluster_id
-                    // This maintains backward compatibility
-                    parent_cluster_id_vec = cluster_id_vec;
+                    // Fallback: if no parent_cluster_id branch, use cluster_id as parent.
+                    // Point ROOT at parent_cluster_id_vec but read from the "cluster_id" branch.
+                    tree.SetBranchAddress("cluster_id", &parent_cluster_id_vec);
                 }
 
                 tree.SetBranchAddress("q", &q_vec);
@@ -404,6 +403,14 @@ namespace WireCell::Root {
                 // std::cout << "Test2: " << lid.size() << " " << lt.size() << " " << lq.size() << " " << ldq.size() << std::endl;   
                 ++find;
             }
+
+            // Trim flash vectors to actual count (they were pre-sized to total nflashes)
+            ftime.resize(find);
+            ftmin.resize(find);
+            ftmax.resize(find);
+            fval.resize(find);
+            fident.resize(find);
+            ftype.resize(find);
 
             PointCloud::Dataset light_ds;
             light_ds.add("ident", PointCloud::Array(lid));

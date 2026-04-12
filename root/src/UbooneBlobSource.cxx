@@ -165,7 +165,7 @@ bool Root::UbooneBlobSource::in_views(int bind)
 {
     // Inclusion test depends if we are loading live or dead blobs.
     const int want = m_kind == "live" ? 1 : 0;
-    const auto& flag_uvw = m_files->trees->blob(m_kind).flag_uvw;
+    const auto flag_uvw = m_files->trees->blob(m_kind).get_flag_uvw();
 
     int cone = 0;
     for (int pln=0; pln<3; ++pln) {
@@ -443,9 +443,7 @@ void Root::UbooneBlobSource::fill_queue()
     else {
         load_dead();
     }
-    if (m_frame_eos) {
-        m_queue.push_back(nullptr);
-    }
+    // Note: load_live()/load_dead() already push nullptr for EOS when m_frame_eos is true
 }
 
 bool Root::UbooneBlobSource::operator()(IBlobSet::pointer& blobset)

@@ -18,6 +18,10 @@
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellUtil/Logging.h"
 
+#include "TMVA/Reader.h"
+#include <memory>
+#include <vector>
+
 namespace WireCell {
     namespace Root {
 
@@ -59,6 +63,53 @@ namespace WireCell {
             /// TMVA model. Writes all *_score fields and numu_score into ti.
             void cal_numu_bdts_xgboost(Clus::PR::TaggerInfo& ti,
                                        const Clus::PR::KineInfo& ki) const;
+
+            /// Initialize all TMVA readers — called once from configure().
+            void init_readers();
+
+            // --- Persistent TMVA readers (created once in configure) ---
+            // Mutable because visit() and sub-BDT methods are const.
+            mutable std::unique_ptr<TMVA::Reader> m_reader_cosmict10;
+            mutable std::unique_ptr<TMVA::Reader> m_reader_numu1;
+            mutable std::unique_ptr<TMVA::Reader> m_reader_numu2;
+            mutable std::unique_ptr<TMVA::Reader> m_reader_numu3;
+            mutable std::unique_ptr<TMVA::Reader> m_reader_xgboost;
+
+            // --- Float variable buffers bound to each reader via AddVariable ---
+            // cosmict_10: 5 vars
+            mutable float m_cosmict10_vtx_z{0};
+            mutable float m_cosmict10_flag_shower{0};
+            mutable float m_cosmict10_flag_dir_weak{0};
+            mutable float m_cosmict10_angle_beam{0};
+            mutable float m_cosmict10_length{0};
+
+            // numu_1: 7 vars
+            mutable float m_numu1_particle_type{0};
+            mutable float m_numu1_length{0};
+            mutable float m_numu1_medium_dQ_dx{0};
+            mutable float m_numu1_dQ_dx_cut{0};
+            mutable float m_numu1_direct_length{0};
+            mutable float m_numu1_n_daughter_tracks{0};
+            mutable float m_numu1_n_daughter_all{0};
+
+            // numu_2: 4 vars
+            mutable float m_numu2_length{0};
+            mutable float m_numu2_total_length{0};
+            mutable float m_numu2_n_daughter_tracks{0};
+            mutable float m_numu2_n_daughter_all{0};
+
+            // numu_3: 7 vars
+            mutable float m_numu3_particle_type{0};
+            mutable float m_numu3_max_length{0};
+            mutable float m_numu3_acc_track_length{0};
+            mutable float m_numu3_max_length_all{0};
+            mutable float m_numu3_max_muon_length{0};
+            mutable float m_numu3_n_daughter_tracks{0};
+            mutable float m_numu3_n_daughter_all{0};
+
+            // xgboost final: ~72 vars (all scalar inputs)
+            // Indexed by the order they are added in init_readers().
+            mutable std::vector<float> m_xgb_vars;
         };
 
     }  // namespace Root
