@@ -492,8 +492,6 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     
     if (!cluster.has_pc("steiner_pc")) return {p, 0};
 
-    if (!cluster.has_pc("steiner_pc")) return {p, 0};
-
     // Get steiner point cloud data
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;

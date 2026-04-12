@@ -1835,13 +1835,16 @@ namespace WireCell::Clus::PR {
             return it->second;
         };
 
-        // Fast 2D closest distance: linear scan over precomputed fit-point projections.
-        // Returns {1e9, 1e9, 1e9} for planes with no matching (apa, face) data (e.g. cross-APA).
-        auto get_2d_dist_fast = [&](SegmentPtr seg,
-                                    double qx, const std::array<double, 3>& qy,
-                                    int apa, int face) -> std::tuple<double, double, double> {
+        // Fast 2D closest squared-distance: linear scan over precomputed fit-point projections.
+        // Returns squared distances {d_u^2, d_v^2, d_w^2}.
+        // Sentinel 1e18 for planes with no matching (apa, face) data (e.g. cross-APA).
+        // Returns squared distances (not sqrt) so that the equality comparison with the
+        // global KD-tree result (also squared) is exact — no sqrt round-trip ULP mismatch.
+        auto get_2d_dist2_fast = [&](SegmentPtr seg,
+                                     double qx, const std::array<double, 3>& qy,
+                                     int apa, int face) -> std::tuple<double, double, double> {
             auto it = seg_pts2d.find(seg);
-            if (it == seg_pts2d.end()) return {1e9, 1e9, 1e9};
+            if (it == seg_pts2d.end()) return {1e18, 1e18, 1e18};
             double min_d2[3] = {1e18, 1e18, 1e18};
             for (int pind = 0; pind < 3; ++pind) {
                 auto it2 = it->second.find({pind, apa, face});
@@ -1852,7 +1855,7 @@ namespace WireCell::Clus::PR {
                     if (d2 < min_d2[pind]) min_d2[pind] = d2;
                 }
             }
-            return {std::sqrt(min_d2[0]), std::sqrt(min_d2[1]), std::sqrt(min_d2[2])};
+            return {min_d2[0], min_d2[1], min_d2[2]};  // squared distances
         };
 
         // Fast 3D closest distance: linear scan over precomputed fit-point coordinates.
@@ -1930,6 +1933,9 @@ namespace WireCell::Clus::PR {
                 // Use the flat vector directly for O(1) access by vertex index
                 const auto& nearest_terminal = vor.terminal;
 
+                // Squared 2D threshold — constant across all points in this cluster; hoisted out of loop.
+                const double sq_2d_thr = (scaling_2d * search_range) * (scaling_2d * search_range);
+
                 // now examine to remove ghost points ....
                 for (int i = 0; i < num_graph_vertices; i++){
                     const int nt_i = static_cast<int>(nearest_terminal[i]);
@@ -1950,15 +1956,21 @@ namespace WireCell::Clus::PR {
                         std::cos(ang[2]) * gp.z() - std::sin(ang[2]) * gp.y()
                     };
 
-                    // 3D and 2D closest distances to main segment (linear scan)
+                    // 3D closest distance to main segment (linear scan, used only for < search_range check)
                     std::pair<double, WireCell::Point> closest_dis_point = {get_3d_dist_fast(main_sg, gp), WireCell::Point(0,0,0)};
-                    std::tuple<double, double, double> closest_2d_dis = get_2d_dist_fast(main_sg, qx, qy, apa, face);
+
+                    // All 2D comparisons use squared distances to avoid sqrt round-trip ULP mismatch
+                    // between the KD-tree global query and the linear-scan per-segment result.
+                    // "closest_2d_dis2" = min squared 2D distance from this point to main_sg's fit projections.
+                    // "min_2d_dis2"     = min squared 2D distance from this point to ANY segment's projections.
+                    // Both are computed without sqrt, so equality is exact when the same underlying point wins.
+                    std::tuple<double, double, double> closest_2d_dis2 = get_2d_dist2_fast(main_sg, qx, qy, apa, face);
 
                     // F17: Replace O(S) inner loop with O(log N) global KD-tree queries.
-                    // The global trees include main_sg's own points, so global_min <= closest_2d_dis
-                    // for each plane.  Equality means main_sg achieves the global minimum — exactly
-                    // the condition the downstream flag_change comparisons check.
-                    std::tuple<double, double, double> min_2d_dis = closest_2d_dis;
+                    // The global trees include main_sg's own points, so global_min2 <= closest_2d_dis2
+                    // per plane.  Equality (exact, since both use the same squared-distance formula)
+                    // means main_sg achieves the global minimum on that plane.
+                    std::tuple<double, double, double> min_2d_dis2 = closest_2d_dis2;
                     {
                         const std::array<double, 2> query_u = {qx, qy[0]};
                         const std::array<double, 2> query_v = {qx, qy[1]};
@@ -1968,10 +1980,10 @@ namespace WireCell::Clus::PR {
                             if (kit == global_kd2d.end()) return;
                             auto res = kit->second.knn(1, q);
                             if (!res.empty()) {
-                                double d = std::sqrt(res[0].second);
-                                if (pind == 0) std::get<0>(min_2d_dis) = d;
-                                else if (pind == 1) std::get<1>(min_2d_dis) = d;
-                                else               std::get<2>(min_2d_dis) = d;
+                                double d2 = res[0].second;  // already squared — no sqrt
+                                if (pind == 0) std::get<0>(min_2d_dis2) = d2;
+                                else if (pind == 1) std::get<1>(min_2d_dis2) = d2;
+                                else               std::get<2>(min_2d_dis2) = d2;
                             }
                         };
                         q2(0, query_u);
@@ -1979,43 +1991,43 @@ namespace WireCell::Clus::PR {
                         q2(2, query_w);
                     }
 
-                    // check against main_sg;
+                    // check against main_sg — all comparisons in squared-distance space
                     bool flag_change = true;
-                
-                    if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis)) // all closest
+
+                    if (std::get<0>(min_2d_dis2) == std::get<0>(closest_2d_dis2) && std::get<1>(min_2d_dis2) == std::get<1>(closest_2d_dis2) && std::get<2>(min_2d_dis2) == std::get<2>(closest_2d_dis2)) // all closest
                     flag_change = false;
-                    else if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) ) //&& (std::get<2>(closest_2d_dis) < scaling_2d * search_range || closest_dis_point.first < search_range)) // 2 closest
+                    else if (std::get<0>(min_2d_dis2) == std::get<0>(closest_2d_dis2) && std::get<1>(min_2d_dis2) == std::get<1>(closest_2d_dis2) ) // 2 closest
                     flag_change = false;
-                    else if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis) ) //&& (std::get<1>(closest_2d_dis) < scaling_2d * search_range || closest_dis_point.first < search_range))
+                    else if (std::get<0>(min_2d_dis2) == std::get<0>(closest_2d_dis2) && std::get<2>(min_2d_dis2) == std::get<2>(closest_2d_dis2) )
                     flag_change = false;
-                    else if (std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis) ) //&& (std::get<0>(closest_2d_dis) < scaling_2d * search_range || closest_dis_point.first < search_range))
+                    else if (std::get<1>(min_2d_dis2) == std::get<1>(closest_2d_dis2) && std::get<2>(min_2d_dis2) == std::get<2>(closest_2d_dis2) )
                     flag_change = false;
-                    else if (std::get<0>(min_2d_dis) == std::get<0>(closest_2d_dis) && (closest_dis_point.first < search_range || (std::get<1>(closest_2d_dis) < scaling_2d * search_range &&  std::get<2>(closest_2d_dis) < scaling_2d * search_range)) )
+                    else if (std::get<0>(min_2d_dis2) == std::get<0>(closest_2d_dis2) && (closest_dis_point.first < search_range || (std::get<1>(closest_2d_dis2) < sq_2d_thr && std::get<2>(closest_2d_dis2) < sq_2d_thr)) )
                     flag_change = false;
-                    else if (std::get<1>(min_2d_dis) == std::get<1>(closest_2d_dis) && (closest_dis_point.first < search_range || (std::get<0>(closest_2d_dis) < scaling_2d * search_range &&  std::get<2>(closest_2d_dis) < scaling_2d * search_range) ))
+                    else if (std::get<1>(min_2d_dis2) == std::get<1>(closest_2d_dis2) && (closest_dis_point.first < search_range || (std::get<0>(closest_2d_dis2) < sq_2d_thr && std::get<2>(closest_2d_dis2) < sq_2d_thr) ))
                     flag_change = false;
-                    else if (std::get<2>(min_2d_dis) == std::get<2>(closest_2d_dis) && (closest_dis_point.first < search_range || (std::get<1>(closest_2d_dis) < scaling_2d * search_range &&  std::get<0>(closest_2d_dis) < scaling_2d * search_range) ))
+                    else if (std::get<2>(min_2d_dis2) == std::get<2>(closest_2d_dis2) && (closest_dis_point.first < search_range || (std::get<1>(closest_2d_dis2) < sq_2d_thr && std::get<0>(closest_2d_dis2) < sq_2d_thr) ))
                     flag_change = false;
 
                     // deal with dead channels ...
                     if (!flag_change){
                         auto grouping = clus->grouping();
                         int ch_range = 0; // Default channel range for dead channel checking
-                        
+
                         // Check U plane (pind=0) for dead channels
-                        if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 0) && std::get<0>(closest_2d_dis) > scaling_2d * search_range){
-                            if (std::get<1>(closest_2d_dis) < scaling_2d * search_range ||  std::get<2>(closest_2d_dis) < scaling_2d * search_range)
+                        if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 0) && std::get<0>(closest_2d_dis2) > sq_2d_thr){
+                            if (std::get<1>(closest_2d_dis2) < sq_2d_thr || std::get<2>(closest_2d_dis2) < sq_2d_thr)
                                 flag_change = true;
                         // Check V plane (pind=1) for dead channels
-                        }else if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 1) && std::get<1>(closest_2d_dis) > scaling_2d * search_range){
-                            if (std::get<0>(closest_2d_dis) < scaling_2d * search_range ||  std::get<2>(closest_2d_dis) < scaling_2d * search_range)
+                        }else if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 1) && std::get<1>(closest_2d_dis2) > sq_2d_thr){
+                            if (std::get<0>(closest_2d_dis2) < sq_2d_thr || std::get<2>(closest_2d_dis2) < sq_2d_thr)
                                 flag_change = true;
                         // Check W plane (pind=2) for dead channels
-                        }else if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 2) && std::get<2>(closest_2d_dis) > scaling_2d * search_range){
-                            if (std::get<1>(closest_2d_dis) < scaling_2d * search_range ||  std::get<0>(closest_2d_dis) < scaling_2d * search_range)
+                        }else if (grouping->get_closest_dead_chs(gp, ch_range, apa, face, 2) && std::get<2>(closest_2d_dis2) > sq_2d_thr){
+                            if (std::get<1>(closest_2d_dis2) < sq_2d_thr || std::get<0>(closest_2d_dis2) < sq_2d_thr)
                                 flag_change = true;
                         }
-                   } 
+                   }
                 
                     // change the point's clustering ...
                     if (!flag_change){
