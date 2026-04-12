@@ -30,9 +30,9 @@ The toolkit equivalents are in:
 | B.2 | `id_pi0_without_vertex`: `continue` should be `break` when both showers are short | **Fix** | `NeutrinoShowerClustering.cxx:2969` |
 | B.3 | `id_pi0_without_vertex`: missing `pdg==11` in `get_flag_shower` equivalent | **Fix** | `NeutrinoShowerClustering.cxx:2850-2851` |
 | B.4 | `shower_clustering_in_other_clusters` sub-pass 1: missing second `update_particle_type()` and `calculate_kinematics()` after shower merge | **Fix** | `NeutrinoShowerClustering.cxx:1461-1463` |
-| B.5 | `id_pi0_with_vertex`: direction calculation uses candidate pi0 vertex instead of shower's own start vertex | Documented only | `NeutrinoShowerClustering.cxx:2588-2592` |
+| B.5 | `id_pi0_with_vertex`: direction calculation uses candidate pi0 vertex instead of shower's own start vertex | **Fix** | `NeutrinoShowerClustering.cxx:2592-2597` |
 | B.6 | `shower_clustering_in_other_clusters` sub-pass 1: extra electron-forcing block not in prototype | Documented only | `NeutrinoShowerClustering.cxx:1421-1435` |
-| L.1 | `shower_clustering_with_nv_in_main_cluster`: hardcoded electron mass `0.511*MeV` | Documented only | `NeutrinoShowerClustering.cxx:203` |
+| L.1 | `shower_clustering_with_nv_in_main_cluster`: hardcoded electron mass `0.511*MeV` | **Fix** | `NeutrinoShowerClustering.cxx:204` |
 
 ---
 
@@ -394,12 +394,13 @@ loop and before `showers.insert(shower)`.
 
 ### B.5 — Direction calculation in `id_pi0_with_vertex`
 
-**File**: `NeutrinoShowerClustering.cxx:2588-2592`
+**File**: `NeutrinoShowerClustering.cxx:2592-2597`
+**Severity**: Low-Medium — affects theta/phi/angle BDT features for pi0.
 
-When `dis < 3cm`, prototype uses shower's own start vertex for direction;
-toolkit uses the candidate pi0 decay vertex.  Both are within 3cm of the
-shower's start point.  Practical impact is minimal but theta/phi/angle BDT
-features may differ slightly.
+When `dis < 3cm`, the prototype computes the shower direction from the
+shower's own start vertex.  The toolkit was using the candidate pi0 decay
+vertex instead.  **Fixed**: now uses each shower's own start vertex point
+(`sv1_pt`, `sv2_pt`) to match the prototype.
 
 ### B.6 — Extra electron-forcing in `shower_clustering_in_other_clusters` sub-pass 1
 
@@ -469,9 +470,8 @@ No multi-APA/face issues were found in any of the reviewed functions.
 
 ## Summary of Changes
 
-- **4 bugs fixed** (B.1–B.4) in `NeutrinoShowerClustering.cxx`
-- **2 documented differences** (B.5, B.6) preserved intentionally
-- **1 style note** (L.1) documented
+- **6 bugs fixed** (B.1–B.5, L.1) in `NeutrinoShowerClustering.cxx`
+- **1 documented difference** (B.6) preserved intentionally
 - **3 prototype bugs** already fixed in the toolkit port
 - **9 determinism improvements** over prototype
 - **Multi-APA/face** handling verified correct across all functions

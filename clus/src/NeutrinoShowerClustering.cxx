@@ -201,7 +201,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 if (sg1 == max_sg) sg1->set_flags(SegmentFlags::kAvoidMuonCheck);
                 if (sg1->has_particle_info() && sg1->particle_info()) {
                     sg1->particle_info()->set_pdg(11);
-                    sg1->particle_info()->set_mass(0.511 * units::MeV);
+                    sg1->particle_info()->set_mass(particle_data->get_particle_mass(11));
                 }
                 tmp_segments.insert(sg1);
                 auto [vtx1, vtx2] = find_vertices(graph, sg1);
@@ -2589,11 +2589,15 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
                 double dis_1 = (vtx_pt - sp1).magnitude();
                 double dis_2 = (vtx_pt - sp2).magnitude();
 
+                // Prototype uses each shower's own start vertex for direction
+                // when close (not the candidate pi0 vertex).
+                WireCell::Point sv1_pt = sv1->fit().valid() ? sv1->fit().point : sv1->wcpt().point;
+                WireCell::Point sv2_pt = sv2->fit().valid() ? sv2->fit().point : sv2->wcpt().point;
                 WireCell::Vector dir1 = (dis_1 < 3 * units::cm)
-                    ? shower_cal_dir_3vector(*sh1, vtx_pt, 15 * units::cm)
+                    ? shower_cal_dir_3vector(*sh1, sv1_pt, 15 * units::cm)
                     : WireCell::Vector(sp1.x()-vtx_pt.x(), sp1.y()-vtx_pt.y(), sp1.z()-vtx_pt.z());
                 WireCell::Vector dir2 = (dis_2 < 3 * units::cm)
-                    ? shower_cal_dir_3vector(*sh2, vtx_pt, 15 * units::cm)
+                    ? shower_cal_dir_3vector(*sh2, sv2_pt, 15 * units::cm)
                     : WireCell::Vector(sp2.x()-vtx_pt.x(), sp2.y()-vtx_pt.y(), sp2.z()-vtx_pt.z());
 
                 pio_kine.flag     = 1;
