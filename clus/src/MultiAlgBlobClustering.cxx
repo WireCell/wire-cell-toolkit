@@ -1114,24 +1114,30 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return node;
     };
 
-    // Helper: insert one gamma pseudo-node + shower-leaf into a parent children array.
-    auto append_gamma_shower = [&](Configuration& parent_children, PR::ShowerPtr sh, PR::VertexPtr conn_vtx) {
+    // Helper: insert one pseudo-particle node + shower-leaf into a parent children array.
+    // Mirrors prototype fill_psuedo_reco_tree: pseudo PDG is gamma (22) for EM showers,
+    // neutron (2112) for all others (e.g. isolated proton activities that were not
+    // absorbed into an EMShower — the neutral carrier is assumed to be an unseen neutron).
+    auto append_pseudo_shower = [&](Configuration& parent_children, PR::ShowerPtr sh, PR::VertexPtr conn_vtx) {
+        const int pdg = (std::abs(sh->get_particle_type()) == 11 ||
+                         std::abs(sh->get_particle_type()) == 22) ? 22 : 2112;
+        const std::string pname = pf_pdg_to_name(pdg);
         PR::VertexPtr cv = conn_vtx;
         WireCell::Point gstart = cv ? get_vtx_pt(cv) : sh->get_start_point();
         WireCell::Point gend   = sh->get_start_point();
-        const std::string gamma_ke = format_mev(sh->get_kine_best());
-        const int gamma_id = next_id++;
-        auto gamma = make_node(gamma_id, "gamma  " + gamma_ke + " MeV", gstart, gend);
+        const std::string pseudo_ke = format_mev(sh->get_kine_best());
+        const int pseudo_id = next_id++;
+        auto pseudo = make_node(pseudo_id, pname + "  " + pseudo_ke + " MeV", gstart, gend);
         if (flag_print) {
-            std::cout << "[fill_bee_pf_tree] ADD pseudo-gamma"
-                      << "  id=" << gamma_id
-                      << "  ke=" << gamma_ke << " MeV"
+            std::cout << "[fill_bee_pf_tree] ADD pseudo-" << pname
+                      << "  id=" << pseudo_id
+                      << "  ke=" << pseudo_ke << " MeV"
                       << "  child_pdg=" << sh->get_particle_type()
                       << "\n";
         }
-        gamma["children"].append(make_shower_leaf(sh));
-        if (gamma["children"].empty()) gamma["icon"] = "jstree-file";
-        parent_children.append(gamma);
+        pseudo["children"].append(make_shower_leaf(sh));
+        if (pseudo["children"].empty()) pseudo["icon"] = "jstree-file";
+        parent_children.append(pseudo);
     };
 
     // Append all showers (direct + indirect via pseudo-gamma) into a children array,
@@ -1150,7 +1156,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         for (auto& [sh, conn_vtx] : indirect) {
             if (pi0_showers.count(sh)) continue;
             PR::VertexPtr cv = conn_vtx ? conn_vtx : fallback_conn_vtx;
-            append_gamma_shower(children, sh, cv);
+            append_pseudo_shower(children, sh, cv);
         }
 
         // --- Pi0 showers: group by pi0_id, emit one pi0 node per group ---
@@ -1177,7 +1183,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             }
             for (auto& [sh, cv] : group) {
                 PR::VertexPtr gcv = cv ? cv : fallback_conn_vtx;
-                append_gamma_shower(pi0_node["children"], sh, gcv);
+                append_pseudo_shower(pi0_node["children"], sh, gcv);
             }
             if (pi0_node["children"].empty()) pi0_node["icon"] = "jstree-file";
             children.append(pi0_node);
