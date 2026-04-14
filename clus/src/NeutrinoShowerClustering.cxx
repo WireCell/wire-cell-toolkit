@@ -147,6 +147,9 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
         //    (long-muon start segments retain PDG=13 and are handled by the post-pass below)
         shower->update_particle_type(particle_data, recomb_model);
+        // PDG=0 guard: defensive fixup for shower-flagged start segments that
+        // arrived without any ParticleInfo set.  Independent of
+        // update_particle_type and still needed.
         auto start_seg = shower->start_segment();
         if (start_seg && start_seg->has_particle_info() && start_seg->particle_info() &&
             start_seg->particle_info()->pdg() == 0) {
@@ -1709,6 +1712,13 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                             if (angle > 30) continue;
                         }
                     } else {
+                        // Skip a conn_type=1 shower whose start_vertex is already inside shower1.
+                        // Such a shower is a downstream decay product (e.g. a Michel electron that
+                        // starts at the far-end junction of sg) — its presence cannot be used as
+                        // evidence that sg itself is an EM shower.  High-energy (>80 MeV) downstream
+                        // showers are handled by the if-branch above and are unaffected.
+                        if (conn_type == 1 && shower1_vertices.count(start_vtx)) continue;
+
                         WireCell::Vector dir3 = shower_cal_dir_3vector(*shower, shower->get_start_point(), 15 * units::cm);
 
                         // Find closest vertex in shower1 to shower start point
@@ -1877,23 +1887,39 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 !flag_skip_segment) {
                 
                 // Set particle type to electron
-                if (shower1->start_segment() && shower1->start_segment()->has_particle_info() && 
+                if (shower1->start_segment() && shower1->start_segment()->has_particle_info() &&
                     shower1->start_segment()->particle_info()) {
                     shower1->start_segment()->particle_info()->set_pdg(11);
+                    shower1->start_segment()->particle_info()->set_mass(
+                        particle_data->get_particle_mass(11));
                 }
                 shower1->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
                 shower1->update_particle_type(particle_data, recomb_model);
-                
+
                 // Merge associated showers
                 for (auto shower : associated_showers) {
                     del_showers.insert(shower);
                     shower1->add_shower(*shower);
                 }
-                
+
                 shower1->calculate_kinematics(particle_data, recomb_model);
                 double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
                 shower1->set_kine_charge(kine_charge);
                 shower1->set_flag_kinematics(true);
+
+                // Dedup: remove any pre-existing shower at (main_vertex, conn_type=1) whose
+                // start_segment is the same as this new shower1's start_segment.  Such a shower
+                // is a stale single-segment wrapper left from shower_clustering_with_nv_in_main_cluster;
+                // shower1 supersedes it.  Without this both objects survive in the showers set and
+                // fill_bee_pf_tree emits duplicate nodes with identical cluster*1000+seg_id display ids.
+                for (auto sh_old : showers) {
+                    if (sh_old == shower1) continue;
+                    if (sh_old->start_segment() != sg) continue;
+                    auto [svtx_old, ctype_old] = sh_old->get_start_vertex_and_type();
+                    if (svtx_old == main_vertex && ctype_old == 1) {
+                        del_showers.insert(sh_old);
+                    }
+                }
 
                 showers.insert(shower1);
                 SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_in_other_clusters: Create a new low-energy shower: {} MeV", kine_charge / units::MeV);
