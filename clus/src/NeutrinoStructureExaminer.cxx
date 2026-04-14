@@ -193,7 +193,7 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
             // Check if this vertex has exactly 2 connected segments
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
-            
+
             // Get the two segments connected to this vertex
             auto edge_range = boost::out_edges(vd, graph);
             auto eit = edge_range.first;
@@ -257,6 +257,7 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
                     break;
                 }
             }
+
 
             // If the straight line is better, merge the two segments
             if (flag_replace) {

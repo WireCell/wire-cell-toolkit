@@ -96,7 +96,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dl_vtx_cut=20.0, dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="") :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="") :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -106,7 +106,6 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 recombination_model: recombination_model,
                 perf: perf,
                 dl_weights: dl_weights,     // path to SCN vertex .pth file (empty = DL disabled)
-                dl_vtx_cut: dl_vtx_cut,     // max distance mm to accept DL vertex (default 20mm = 2cm)
                 dQdx_scale: dQdx_scale,     // scale factor for dQ passed to SCN network
                 dQdx_offset: dQdx_offset,   // offset for dQ passed to SCN network
                 clus_geom_helper: clus_geom_helper, // type/name of SimpleClusGeomHelper; empty = no SCE

@@ -3255,14 +3255,6 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 
         if (!min_vertex) return false;
 
-        {
-            auto tmp_pt = min_vertex->fit().valid() ? min_vertex->fit().point : min_vertex->wcpt().point;
-            SPDLOG_LOGGER_DEBUG(s_log,
-                "determine_overall_main_vertex_DL: nearest vertex: ({:.2f}, {:.2f}, {:.2f}) cm, dis={:.2f} cm",
-                tmp_pt.x() / units::cm, tmp_pt.y() / units::cm, tmp_pt.z() / units::cm,
-                min_dis / units::cm);
-        }
-
         // Direction sanity check: reject if ALL connected long tracks point away from vertex
         bool flag_pass = true;
         {

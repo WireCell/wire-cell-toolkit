@@ -59,7 +59,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["trackfitting_config_file"] = "";
     cfg["perf"] = m_perf;
     cfg["dl_weights"] = "";      // empty = DL vertex disabled
-    cfg["dl_vtx_cut"] = 20.0;   // mm (= 2 cm)
+    cfg["dl_vtx_cut"] = 25.0;   // mm (= 2.5 cm)
     cfg["dQdx_scale"]  = 0.1;   // dQ scale factor for SCN network input
     cfg["dQdx_offset"] = -1000.0; // dQ offset for SCN network input
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction

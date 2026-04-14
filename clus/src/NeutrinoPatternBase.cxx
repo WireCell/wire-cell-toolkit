@@ -487,9 +487,9 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
 }
 
 
-std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(const Facade::Cluster& cluster, Facade::geo_point_t& p, Facade::geo_vector_t& dir, Facade::geo_vector_t& dir_other, bool flag_continue){
+std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(const Facade::Cluster& cluster, Facade::geo_point_t& p, Facade::geo_vector_t& dir, Facade::geo_vector_t& dir_other, bool flag_continue, std::vector<Facade::geo_point_t>* walk_history){
     const double step_dis = 1.0 * units::cm;
-    
+
     if (!cluster.has_pc("steiner_pc")) return {p, 0};
 
     // Get steiner point cloud data
@@ -508,9 +508,10 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     size_t curr_index = curr_knn_results[0].first;
     Facade::geo_point_t curr_wcp(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
     Facade::geo_point_t next_wcp = curr_wcp;
-    
+
     // (saved_start_wcp and saved_dir removed: set but never used)
-    
+    if (walk_history) walk_history->push_back(curr_wcp);
+
     // Forward search
     while(flag_continue){
         flag_continue = false;
@@ -540,8 +541,9 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
                         flag_continue = true;
                         curr_wcp = next_wcp;
                         curr_index = next_index;
-                        dir = dir2.norm() + dir * 5.0;  // both terms are now dimensionless
+                        dir = dir2.norm() + dir * 5;
                         dir = dir / dir.magnitude();
+                        if (walk_history) walk_history->push_back(curr_wcp);
                         break;
                     }
                 }
@@ -567,8 +569,9 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
                         flag_continue = true;
                         curr_wcp = next_wcp;
                         curr_index = updated_knn[0].first;
-                        dir = dir1.norm() + dir * 5.0;  // both terms are now dimensionless
+                        dir = dir1.norm() + dir * 5;  // both terms are now dimensionless
                         dir = dir / dir.magnitude();
+                        if (walk_history) walk_history->push_back(curr_wcp);
                         break;
                     }
                     // Secondary steiner KNN failed — do not advance, continue loop
@@ -845,6 +848,11 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     BS_MS t_segment_search_kink{0}, t_proto_extend_point{0}, t_proto_break_tracks{0};
     BS_MS t_replace_segment_and_vertex{0}, t_break_segment_into_two{0}, t_do_multi_tracking{0};
     
+    // Walk-halfway guard state: track dir1 from the previous break iteration.
+    // Persists across outer-while pops so that break #2 can compare against break #1's dir1, etc.
+    Facade::geo_vector_t dir1_prev(0, 0, 0);
+    bool has_dir1_prev = false;
+
     while(!remaining_segments.empty() && count < 2) {
         SegmentPtr curr_sg = remaining_segments.back();
         auto cluster = curr_sg->cluster();
@@ -894,7 +902,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
             t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
             auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
-            
+
             if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments 0: cluster={} test_start_p=({:.2f},{:.2f},{:.2f}) kink=({:.2f},{:.2f},{:.2f}) dir1=({:.2f},{:.2f},{:.2f}) dir2=({:.2f},{:.2f},{:.2f}) flag_continue={}",
                 cluster->get_cluster_id(),
                 test_start_p.x(), test_start_p.y(), test_start_p.z(),
@@ -909,12 +917,37 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 Facade::geo_vector_t dir1_geo(dir1.x(), dir1.y(), dir1.z());
                 Facade::geo_vector_t dir2_geo(dir2.x(), dir2.y(), dir2.z());
                 Facade::geo_point_t kink_geo(kink_point.x(), kink_point.y(), kink_point.z());
-                
-                t_op = BS_Clock::now();
-                auto [break_pt, break_idx] = proto_extend_point(*cluster, kink_geo, dir1_geo, dir2_geo, flag_continue);
-                t_proto_extend_point += BS_MS(BS_Clock::now() - t_op);
-                break_wcp = break_pt;
 
+                t_op = BS_Clock::now();
+                std::vector<Facade::geo_point_t> walk_hist;
+                auto [break_pt, break_idx] = proto_extend_point(*cluster, kink_geo, dir1_geo, dir2_geo, flag_continue, &walk_hist);
+                t_proto_extend_point += BS_MS(BS_Clock::now() - t_op);
+
+                // Walk-halfway guard: if this walk's dir1 is anti-parallel to the previous
+                // iteration's dir1, the walker followed a near-endpoint wiggle rather than the
+                // segment's macro continuation. Replace break_pt with the walk-history midpoint
+                // — an actual accepted steiner/wcp vertex — to shorten the overshoot.
+                if (has_dir1_prev && walk_hist.size() >= 3) {
+                    double dot_rev = dir1_geo.dot(dir1_prev);
+                    if (dot_rev < -0.5) {
+                        Facade::geo_point_t half_pt = walk_hist[walk_hist.size() / 2];
+                        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log,
+                            "break_segments walk_halfway: cluster={} dot(dir1,dir1_prev)={:.3f} "
+                            "walk_size={} replacing break_pt ({:.2f},{:.2f},{:.2f}) with halfway ({:.2f},{:.2f},{:.2f})",
+                            cluster->get_cluster_id(), dot_rev, walk_hist.size(),
+                            break_pt.x(), break_pt.y(), break_pt.z(),
+                            half_pt.x(), half_pt.y(), half_pt.z());
+                        break_pt = half_pt;
+                        auto half_knn = cluster->kd_steiner_knn(1, half_pt, "steiner_pc");
+                        if (!half_knn.empty()) break_idx = half_knn[0].first;
+                        else break_idx = INVALID_STEINER_INDEX;
+                    }
+                }
+                // Save this iteration's dir1 for the next iteration's check.
+                dir1_prev = dir1_geo;
+                has_dir1_prev = true;
+
+                break_wcp = break_pt;
 
                 if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments 1: cluster={} kink=({:.2f},{:.2f},{:.2f}) break_pt=({:.2f},{:.2f},{:.2f}) break_idx={} flag_continue={}",
                     cluster->get_cluster_id(),
@@ -1033,6 +1066,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     }
                 }
             }
+
         }
     }
 
@@ -1481,6 +1515,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         return false;
     }
 
+ 
   
 
     // Break tracks and examine structure
@@ -1545,7 +1580,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
-   
+
 
     // Find other segments
     for (int i = 0; i < nrounds_find_other_tracks; i++) {
