@@ -504,7 +504,7 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     if (curr_knn_results.empty()) {
         return std::make_pair(p, INVALID_STEINER_INDEX); // No steiner point found
     }
-    
+
     size_t curr_index = curr_knn_results[0].first;
     Facade::geo_point_t curr_wcp(steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index]);
     Facade::geo_point_t next_wcp = curr_wcp;
@@ -515,25 +515,25 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     // Forward search
     while(flag_continue){
         flag_continue = false;
-        
+
         for (int i = 0; i != 3; i++){
             Facade::geo_point_t test_p(
                 curr_wcp.x() + dir.x() * step_dis * (i + 1),
                 curr_wcp.y() + dir.y() * step_dis * (i + 1),
                 curr_wcp.z() + dir.z() * step_dis * (i + 1)
             );
-            
+
             // Try steiner point cloud first
             auto next_knn_steiner = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
             if (!next_knn_steiner.empty()) {
                 size_t next_index = next_knn_steiner[0].first;
                 next_wcp = Facade::geo_point_t(steiner_x[next_index], steiner_y[next_index], steiner_z[next_index]);
                 Facade::geo_vector_t dir2(
-                    next_wcp.x() - curr_wcp.x(), 
-                    next_wcp.y() - curr_wcp.y(), 
+                    next_wcp.x() - curr_wcp.x(),
+                    next_wcp.y() - curr_wcp.y(),
                     next_wcp.z() - curr_wcp.z()
                 );
-                
+
                 double mag2 = dir2.magnitude();
                 if (mag2 != 0) {
                     double angle = std::acos(dir2.dot(dir) / mag2) / 3.1415926 * 180.0;
@@ -548,18 +548,18 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
                     }
                 }
             }
-            
+
             // Try regular point cloud
             auto closest_result = cluster.get_closest_wcpoint(test_p);
             // size_t regular_index = closest_result.first;
             next_wcp = closest_result.second;
-            
+
             Facade::geo_vector_t dir1(
-                next_wcp.x() - curr_wcp.x(), 
-                next_wcp.y() - curr_wcp.y(), 
+                next_wcp.x() - curr_wcp.x(),
+                next_wcp.y() - curr_wcp.y(),
                 next_wcp.z() - curr_wcp.z()
             );
-            
+
             double mag1 = dir1.magnitude();
             if (mag1 != 0) {
                 double angle = std::acos(dir1.dot(dir) / mag1) / 3.1415926 * 180.0;
@@ -1019,19 +1019,55 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 // Check geometry constraints
                 Facade::geo_vector_t tv1 = end_v->wcpt().point - start_v->wcpt().point;
                 Facade::geo_vector_t tv2 = end_v->wcpt().point - break_wcp;
-                
+
                 double min_dis = 1e9;
                 for (const auto& wcp : wcps_list1) {
                     double dis = ray_length(Ray{wcp, end_v->wcpt().point});
                     if (dis < min_dis) min_dis = dis;
                 }
-                
+
                 double angle = std::acos(tv1.dot(tv2) / (tv1.magnitude() * tv2.magnitude())) / 3.1415926 * 180.0;
-                
+
+                // Kink angle at break_wcp as seen in the steiner graph:
+                // angle between the approach direction (second-to-last → last of list1)
+                // and the departure direction (first → second of list2).
+                // This is a physically meaningful angle that segment_search_kink already
+                // required to be large (≥22-45°), so it is not zero for any valid kink.
+                // A 15° floor guards against degenerate configurations where the steiner
+                // path happens to land at a collinear point.
+                double kink_angle_at_break = 0.0;
+                if (wcps_list1.size() >= 2 && wcps_list2.size() >= 2) {
+                    auto it1b = wcps_list1.end(); --it1b;   // last
+                    auto it1a = it1b; --it1a;               // second to last
+                    auto it2a = wcps_list2.begin();          // first
+                    auto it2b = it2a; ++it2b;               // second
+                    Facade::geo_vector_t approach = *it1b - *it1a;
+                    Facade::geo_vector_t depart   = *it2b - *it2a;
+                    double mag_ap = approach.magnitude(), mag_dep = depart.magnitude();
+                    if (mag_ap > 0 && mag_dep > 0) {
+                        double cos_kink = approach.dot(depart) / (mag_ap * mag_dep);
+                        cos_kink = std::max(-1.0, std::min(1.0, cos_kink));
+                        kink_angle_at_break = std::acos(cos_kink) / 3.1415926 * 180.0;
+                    }
+                }
+
+                auto end_vd = end_v->get_descriptor();
+                bool end_is_terminus = (boost::degree(end_vd, graph) == 1);
+
+                // A degree-1 end vertex with a short tail and a real kink angle at the
+                // break point is a track-endpoint fold-back artifact.  Absorb it via
+                // replace_segment_and_vertex (trim the segment to break_wcp, remove the
+                // stub) rather than materialising a tiny separate segment.
+                // - min_dis < 2 cm:  the tail is too short to represent real physics
+                // - kink_angle_at_break > 15°: the break falls at a genuine direction
+                //   change in the steiner graph, not a collinear snap artefact
+                // The original 1.5 cm+120° condition (for degree-!=1 junctions) is kept.
+                bool use_replace = (end_is_terminus && min_dis / units::cm < 2.0 && kink_angle_at_break > 30.0) ||
+                                   (!end_is_terminus && min_dis / units::cm < 1.5 && angle > 120);
+
                 // Check if we should replace end vertex instead of breaking
-                if (min_dis / units::cm < 1.5 && angle > 120) {
-                    auto vd = end_v->get_descriptor();
-                    if (boost::degree(vd, graph) == 1) {
+                if (use_replace) {
+                    if (end_is_terminus) {
                         // Replace segment and end vertex
                         SegmentPtr new_seg = curr_sg;
                         VertexPtr new_vtx = end_v;
@@ -1047,6 +1083,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                             t_do_multi_tracking += BS_MS(BS_Clock::now() - t_op_mt);
                         }
                     }
+                    // degree!=1 + (min_dis<1.5 && angle>120): original "do nothing" preserved
                 } else {
                     // Break segment into two
                     SegmentPtr out_seg2 = nullptr;
@@ -1515,6 +1552,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         return false;
     }
 
+    
  
   
 

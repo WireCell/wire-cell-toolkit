@@ -281,27 +281,27 @@ namespace WireCell::Clus::PR {
         int save_i = -1;
         bool flag_switch = false;
         bool flag_search = false;
-        
+
         for (size_t i = 0; i < fits.size(); i++) {
             // Check if close to test point
             double dist_to_test = (test_p - fits[i].point).magnitude();
             if (dist_to_test < 0.1 * units::cm) flag_check = true;
-            
+
             // Check distance constraints
             double dist_to_front = (fits[i].point - fits.front().point).magnitude();
             double dist_to_back = (fits[i].point - fits.back().point).magnitude();
             double dist_to_start = (fits[i].point - start_p).magnitude();
-            
-            if (dist_to_front < 1*units::cm || 
-                dist_to_back < 1*units::cm || 
+
+            if (dist_to_front < 1*units::cm ||
+                dist_to_back < 1*units::cm ||
                 dist_to_start < 1*units::cm) continue;
-            
+
             if (flag_check) {
                 // Calculate average and max dQ/dx in local region
-                double ave_dQ_dx = 0; 
+                double ave_dQ_dx = 0;
                 int ave_count = 0;
                 double max_dQ_dx = fits[i].dQ / (fits[i].dx + 1e-9);
-                
+
                 for (int j = -2; j <= 2; j++) {
                     int idx = i + j;
                     if (idx >= 0 && idx < static_cast<int>(fits.size())) {
@@ -312,13 +312,13 @@ namespace WireCell::Clus::PR {
                     }
                 }
                 if (ave_count != 0) ave_dQ_dx /= ave_count;
-                
+
                 // Calculate angle sums
                 double sum_angles = 0;
                 double nsum = 0;
                 double sum_angles1 = 0;
                 double nsum1 = 0;
-                
+
                 for (int j = -2; j <= 2; j++) {
                     int idx = i + j;
                     if (idx >= 0 && idx < static_cast<int>(fits.size())) {
@@ -334,7 +334,7 @@ namespace WireCell::Clus::PR {
                 }
                 if (nsum != 0) sum_angles = sqrt(sum_angles / nsum);
                 if (nsum1 != 0) sum_angles1 = sqrt(sum_angles1 / nsum1);
-                
+
                 // Apply kink detection criteria
                 if (para_angles[i] > 10 && refl_angles[i] > 30 && sum_angles > 15) {
                     save_i = i;
@@ -345,7 +345,7 @@ namespace WireCell::Clus::PR {
                 } else if (para_angles[i] > 15 && refl_angles[i] > 27 && sum_angles > 12.5) {
                     save_i = i;
                     break;
-                } else if (para_angles[i] > 15 && refl_angles[i] > 22 && sum_angles > 19 && 
+                } else if (para_angles[i] > 15 && refl_angles[i] > 22 && sum_angles > 19 &&
                           max_dQ_dx > dQ_dx_threshold*1.5 && ave_dQ_dx > dQ_dx_threshold) {
                     save_i = i;
                     flag_search = true;
@@ -386,11 +386,25 @@ namespace WireCell::Clus::PR {
             double length1_1 = (last_p1 - fits[save_i].point).magnitude();
             double length2_1 = (last_p2 - fits[save_i].point).magnitude();
             
-            // Check for direction switch
-            if (std::abs(length2 - length2_1) < 0.03 * length2_1 && length1 * length2_1 > 1.06 * length2 * length1_1) {
+            // Check for direction switch.
+            // Guard: require the full 9-point window AND an absolute chord > 3 cm on the
+            // "straight" side before trusting the straightness ratio.  When the kink sits
+            // near a segment endpoint only 3-4 post-kink (or pre-kink) points exist, making
+            // the path-length ≈ chord trivially regardless of true geometry.  Allowing
+            // flag_switch to fire on such a degenerate window dispatches proto_extend_point
+            // in the wrong direction and produces spurious near-endpoint tail segments.
+            const double min_straight_chord  = 3.0 * units::cm;
+            const int    min_straight_points = 9;
+            if (num_p1 >= min_straight_points &&
+                length2_1 > min_straight_chord &&
+                std::abs(length2 - length2_1) < 0.03 * length2_1 &&
+                length1 * length2_1 > 1.06 * length2 * length1_1) {
                 flag_switch = true;
                 flag_search = true;
-            } else if (std::abs(length1 - length1_1) < 0.03 * length1_1 && length2 * length1_1 > 1.06 * length1 * length2_1) {
+            } else if (num_p >= min_straight_points &&
+                       length1_1 > min_straight_chord &&
+                       std::abs(length1 - length1_1) < 0.03 * length1_1 &&
+                       length2 * length1_1 > 1.06 * length1 * length2_1) {
                 flag_search = true;
             }
             
@@ -410,13 +424,15 @@ namespace WireCell::Clus::PR {
                 }
             }
             
+            double local_dQdx = sum_dQ / (sum_dx + 1e-9);
+
             if (flag_search) {
                 if (flag_switch) {
                     return std::make_tuple(p, dir1, dir, true);
                 } else {
                     return std::make_tuple(p, dir, dir1, true);
                 }
-            } else if (sum_dQ / (sum_dx + 1e-9) > 25000/units::cm) { //not too low ...
+            } else if (local_dQdx > 25000/units::cm) { //not too low ...
                 if (flag_switch) {
                     return std::make_tuple(p, dir1, dir, false);
                 } else {
