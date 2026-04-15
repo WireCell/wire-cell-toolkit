@@ -52,7 +52,7 @@ def voxelize(x, y, resolution=0.5):
     return unique_coords, ft_out
 
 
-def SCN_Vertex(weights, x, y, z, q, dtype='float32', resolution=0.5, verbose=False):
+def SCN_Vertex(weights, x, y, z, q, dtype='float32', top_k=1, resolution=0.5, verbose=False):
     x = np.frombuffer(x, dtype=dtype)
     y = np.frombuffer(y, dtype=dtype)
     z = np.frombuffer(z, dtype=dtype)
@@ -81,14 +81,28 @@ def SCN_Vertex(weights, x, y, z, q, dtype='float32', resolution=0.5, verbose=Fal
     pred_np = prediction.cpu().numpy()
     pred_np = pred_np[:, 1] - pred_np[:, 0]
 
-    pred_coord = coords_np[np.argmax(pred_np)]
-    if verbose:
-        print('raw: pred_coord: ', pred_coord)
-
-    pred_coord = pred_coord.astype(dtype)
-    pred_coord *= resolution
-    pred_coord += coords_offset + 0.5 * resolution
-    if verbose:
-        print('final: pred_coord', pred_coord)
-
-    return pred_coord.tobytes()
+    if top_k == 1:
+        # Legacy path: return exactly 3 floats (argmax voxel x,y,z in cm)
+        pred_coord = coords_np[np.argmax(pred_np)]
+        if verbose:
+            print('raw: pred_coord: ', pred_coord)
+        pred_coord = pred_coord.astype(dtype)
+        pred_coord *= resolution
+        pred_coord += coords_offset + 0.5 * resolution
+        if verbose:
+            print('final: pred_coord', pred_coord)
+        return pred_coord.tobytes()
+    else:
+        # Top-K path: return 4*K floats [x1,y1,z1,s1, x2,y2,z2,s2, ...] in cm
+        k = min(top_k, len(pred_np))
+        top_k_idx = np.argpartition(pred_np, -k)[-k:]
+        top_k_idx = top_k_idx[np.argsort(pred_np[top_k_idx])[::-1]]  # sort descending by score
+        coords_k = coords_np[top_k_idx].astype(dtype)  # shape (K, 3)
+        coords_k = coords_k * np.float32(resolution) + (coords_offset + 0.5 * resolution).astype(dtype)
+        scores_k = pred_np[top_k_idx].astype(dtype)    # shape (K,)
+        out = np.empty((k, 4), dtype=dtype)
+        out[:, :3] = coords_k
+        out[:, 3] = scores_k
+        if verbose:
+            print('top-k: coords+scores: ', out)
+        return out.ravel().tobytes()

@@ -3177,7 +3177,11 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     const std::string& dl_weights,
     double dl_vtx_cut,
     double dQdx_scale,
-    double dQdx_offset)
+    double dQdx_offset,
+    bool flag_rerank,
+    int dl_vtx_top_k,
+    double dl_vtx_min_accept_score,
+    double dl_vtx_score_scale)
 {
     bool flag_change = false;
 
@@ -3224,65 +3228,296 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     if (vec_xyzq[0].empty()) return false;
 
     try {
-        auto dnn_vtx = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false);
+        // Request top_k voxels from Python: legacy mode (flag_rerank==false) uses top_k=1
+        // which returns the same 3-float argmax payload as before (byte-for-byte identical).
+        // Rerank mode requests dl_vtx_top_k voxels and receives 4*K floats [x,y,z,score per voxel].
+        int top_k_arg = flag_rerank ? std::max(1, dl_vtx_top_k) : 1;
+        auto dnn_vtx = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false, top_k_arg);
         MS t_scn_inference(Clock::now() - t0); t0 = Clock::now();
 
-        if (dnn_vtx.size() != 3) {
-            SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DNN output size {}", dnn_vtx.size());
-            return false;
-        }
-
-        double x_reg = dnn_vtx[0] * units::cm;
-        double y_reg = dnn_vtx[1] * units::cm;
-        double z_reg = dnn_vtx[2] * units::cm;
-        SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DNN prediction: ({:.2f}, {:.2f}, {:.2f}) cm",
-                            dnn_vtx[0], dnn_vtx[1], dnn_vtx[2]);
-
-        // Find nearest candidate vertex to DL prediction
+        // -----------------------------------------------------------------------
+        // Shared output variables: determined by either the legacy or rerank path
+        // -----------------------------------------------------------------------
         double min_dis = 1e9;
         VertexPtr min_vertex = nullptr;
-        for (auto vtx : cand_vertices) {
-            auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
-            double dis = std::sqrt(std::pow(pt.x() - x_reg, 2) +
-                                   std::pow(pt.y() - y_reg, 2) +
-                                   std::pow(pt.z() - z_reg, 2));
-            if (dis < min_dis) {
-                min_dis = dis;
-                min_vertex = vtx;
+        bool flag_pass = false;
+
+        if (!flag_rerank) {
+            // ===================================================================
+            // LEGACY PATH: top-1 argmax + nearest-neighbor snap + hard gates
+            // (identical to the original implementation; behaviour is unchanged)
+            // ===================================================================
+            if (dnn_vtx.size() != 3) {
+                SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DNN output size {}", dnn_vtx.size());
+                return false;
             }
-        }
-        MS t_find_nearest(Clock::now() - t0); t0 = Clock::now();
 
-        if (!min_vertex) return false;
+            double x_reg = dnn_vtx[0] * units::cm;
+            double y_reg = dnn_vtx[1] * units::cm;
+            double z_reg = dnn_vtx[2] * units::cm;
+            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DNN prediction: ({:.2f}, {:.2f}, {:.2f}) cm",
+                                dnn_vtx[0], dnn_vtx[1], dnn_vtx[2]);
 
-        // Direction sanity check: reject if ALL connected long tracks point away from vertex
-        bool flag_pass = true;
-        {
-            int num_bad = 0;
-            int num_tracks = 0;
-            if (min_vertex->descriptor_valid()) {
-                auto vd = min_vertex->get_descriptor();
-                auto edge_range = boost::out_edges(vd, graph);
-                for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                    SegmentPtr sg = graph[*e_it].segment;
-                    if (!sg) continue;
-                    double length = segment_track_length(sg);
-                    double medium_dqdx = segment_median_dQ_dx(sg);
-                    double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * 43e3 / units::cm;
-                    auto [v1, v2] = find_vertices(graph, sg);
-                    bool flag_start = (v1 == min_vertex);
-                    if (length > 15 * units::cm && !sg->dir_weak() && !flag_start && medium_dqdx > dQ_dx_cut) {
-                        num_bad++;
-                    }
-                    num_tracks++;
+            // Find nearest candidate vertex to DL prediction
+            for (auto vtx : cand_vertices) {
+                auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                double dis = std::sqrt(std::pow(pt.x() - x_reg, 2) +
+                                       std::pow(pt.y() - y_reg, 2) +
+                                       std::pow(pt.z() - z_reg, 2));
+                if (dis < min_dis) {
+                    min_dis = dis;
+                    min_vertex = vtx;
                 }
             }
-            if (num_bad > 0 && num_bad == num_tracks) flag_pass = false;
+
+            if (!min_vertex) return false;
+
+            // Direction sanity check: reject if ALL connected long tracks point away from vertex
+            flag_pass = true;
+            {
+                int num_bad = 0;
+                int num_tracks = 0;
+                if (min_vertex->descriptor_valid()) {
+                    auto vd = min_vertex->get_descriptor();
+                    auto edge_range = boost::out_edges(vd, graph);
+                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
+                        SegmentPtr sg = graph[*e_it].segment;
+                        if (!sg) continue;
+                        double length = segment_track_length(sg);
+                        double medium_dqdx = segment_median_dQ_dx(sg);
+                        double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * 43e3 / units::cm;
+                        auto [v1, v2] = find_vertices(graph, sg);
+                        bool flag_start = (v1 == min_vertex);
+                        if (length > 15 * units::cm && !sg->dir_weak() && !flag_start && medium_dqdx > dQ_dx_cut) {
+                            num_bad++;
+                        }
+                        num_tracks++;
+                    }
+                }
+                if (num_bad > 0 && num_bad == num_tracks) flag_pass = false;
+            }
+
+            // Distance cut
+            if (min_dis > dl_vtx_cut) flag_pass = false;
+
+        } else {
+            // ===================================================================
+            // RERANK PATH: top-K voxels, snap each to nearest ProtoVertex,
+            // score by composite heuristic, pick argmax.
+            // ===================================================================
+            if (dnn_vtx.size() < 4 || dnn_vtx.size() % 4 != 0) {
+                SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected top-K payload size {}", dnn_vtx.size());
+                return false;
+            }
+            int K = static_cast<int>(dnn_vtx.size() / 4);
+            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: rerank mode, K={}", K);
+
+            // --- Parse K (pred_pt, dl_score) from the payload ---
+            // dl_score = sigmoid(vertex_class) - sigmoid(bg_class), range [-1, +1].
+            // Values near +1: strong vertex signal. Near 0: model is uncertain (both
+            // sigmoid outputs ~0.5). Near -1: strong background.  When all top-K scores
+            // are small (e.g. <0.01), the DL term barely differentiates candidates and
+            // the geometric terms below dominate the final ranking — which is intentional.
+            struct DLVoxel { WireCell::Point pred_pt; double dl_score; };
+            std::vector<DLVoxel> dl_voxels;
+            dl_voxels.reserve(K);
+            double dl_score_max = -1e9, dl_score_min = 1e9;
+            for (int i = 0; i < K; ++i) {
+                WireCell::Point p(dnn_vtx[4*i+0] * units::cm,
+                                  dnn_vtx[4*i+1] * units::cm,
+                                  dnn_vtx[4*i+2] * units::cm);
+                double s = static_cast<double>(dnn_vtx[4*i+3]);
+                dl_voxels.push_back({p, s});
+                if (s > dl_score_max) dl_score_max = s;
+                if (s < dl_score_min) dl_score_min = s;
+            }
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "  DL top-{} scores in [{:.4f}, {:.4f}] (scale: [-1,+1]; near 0 = model uncertain)",
+                K, dl_score_min, dl_score_max);
+            {
+                double dl_mean = 0;
+                for (const auto& v : dl_voxels) dl_mean += v.dl_score;
+                dl_mean /= static_cast<double>(dl_voxels.size());
+                double dl_var = 0;
+                for (const auto& v : dl_voxels) dl_var += (v.dl_score - dl_mean) * (v.dl_score - dl_mean);
+                double dl_std = std::sqrt(dl_var / std::max<size_t>(1, dl_voxels.size() - 1));
+                const char* regime = (dl_score_max > 0.1) ? "confident" : (dl_score_max < 0.02 ? "uncertain" : "intermediate");
+                SPDLOG_LOGGER_DEBUG(s_log, "  DL score stats: mean={:.4f} std={:.4f} regime={}", dl_mean, dl_std, regime);
+            }
+
+            // --- Snap each DL voxel to nearest ProtoVertex; deduplicate ---
+            // For duplicate snaps (same vtx), keep the entry with the higher dl_score.
+            struct SnappedCand { VertexPtr vtx; double snap_dis; double dl_score; int voxel_rank; };
+            std::map<VertexPtr, SnappedCand> snap_map;
+            for (int vi = 0; vi < static_cast<int>(dl_voxels.size()); ++vi) {
+                const auto& vox = dl_voxels[vi];
+                double best_dis = 1e9;
+                VertexPtr best_vtx = nullptr;
+                for (auto vtx : cand_vertices) {
+                    auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                    double d = std::sqrt(std::pow(pt.x() - vox.pred_pt.x(), 2) +
+                                        std::pow(pt.y() - vox.pred_pt.y(), 2) +
+                                        std::pow(pt.z() - vox.pred_pt.z(), 2));
+                    if (d < best_dis) { best_dis = d; best_vtx = vtx; }
+                }
+                if (!best_vtx) continue;
+                auto it = snap_map.find(best_vtx);
+                if (it == snap_map.end() || vox.dl_score > it->second.dl_score)
+                    snap_map[best_vtx] = {best_vtx, best_dis, vox.dl_score, vi};
+            }
+            if (snap_map.empty()) return false;
+
+            std::vector<SnappedCand> snapped;
+            snapped.reserve(snap_map.size());
+            for (auto& [vtx, sc] : snap_map) snapped.push_back(sc);
+
+            // --- Precompute cluster total track lengths (avoid O(N_edges) per candidate) ---
+            std::map<Facade::Cluster*, double> cluster_total_len;
+            {
+                auto [ebegin, eend] = boost::edges(graph);
+                for (auto eit = ebegin; eit != eend; ++eit) {
+                    SegmentPtr seg = graph[*eit].segment;
+                    if (seg && seg->cluster())
+                        cluster_total_len[seg->cluster()] += segment_track_length(seg);
+                }
+            }
+
+            // --- Print per-voxel snap summary (voxel → snapped cluster) ---
+            // This bridges the DL score list to the geometric scoring below.
+            // Geometric terms each contribute ~0.125-0.5; DL term contributes dl_score
+            // (range [-1,+1]). When dl_score << 1, geometry dominates — this is expected.
+            for (const auto& sc : snapped) {
+                double L = 0.0;
+                if (sc.vtx->cluster()) {
+                    auto it = cluster_total_len.find(sc.vtx->cluster());
+                    if (it != cluster_total_len.end()) L = it->second;
+                }
+                auto pt = sc.vtx->fit().valid() ? sc.vtx->fit().point : sc.vtx->wcpt().point;
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "  DL voxel {} (dl_score={:.4f}) → cluster={} pos=({:.1f},{:.1f},{:.1f})cm "
+                    "L={:.1f}cm snap={:.2f}cm{}",
+                    sc.voxel_rank, sc.dl_score,
+                    sc.vtx->cluster() ? sc.vtx->cluster()->get_cluster_id() : -1,
+                    pt.x()/units::cm, pt.y()/units::cm, pt.z()/units::cm,
+                    L/units::cm, sc.snap_dis/units::cm,
+                    (sc.vtx->cluster() == main_cluster) ? " [main_cluster]" : "");
+            }
+
+            // --- Find min z over snapped candidates for forward-z penalty ---
+            double min_z_set = 1e9;
+            for (const auto& sc : snapped) {
+                auto pt = sc.vtx->fit().valid() ? sc.vtx->fit().point : sc.vtx->wcpt().point;
+                if (pt.z() < min_z_set) min_z_set = pt.z();
+            }
+
+            // --- Score each candidate ---
+            // Empirical weights tuned on 36 annotated events (2026-04-15).
+            // Previously scored: segs, ltrk, mult, flg_in, conf, ptbk — removed after empirical
+            // analysis showed them disabled or actively harmful. The three active geometric signals
+            // (main, clen, isol) dominate when DL is uncertain (scores ~0.005); DL dominates
+            // when confident (scores >0.1). fwd_z kept as a vestigial tiebreaker, capped at 0.25.
+            constexpr double W_MAIN    = 2.0;   // host cluster == main_cluster
+            constexpr double W_CLEN    = 2.0;   // saturating bonus for long host clusters
+            constexpr double W_CLEN_L  = 60.0;  // saturation length in cm
+            constexpr double W_ISOL    = 2.0;   // short isolated non-main cluster penalty
+            constexpr double W_ISOL_L  = 6.0;   // isolation length cutoff in cm
+            constexpr double W_FV      = 0.5;   // inside fiducial volume
+            constexpr double W_SNAP_L  = 5.0;   // soft snap penalty denominator in cm
+            constexpr double W_SNAP_MAX = 2.0;  // soft snap penalty saturation
+            constexpr double W_FWD_Z   = 0.25;  // vestigial upstream-z tiebreaker (max |penalty|)
+            constexpr double W_FWD_L   = 400.0; // fwd_z normalization in cm
+
+            double best_score = -1e9;
+            VertexPtr best_vtx_rerank = nullptr;
+            double best_snap_dis = 1e9;
+
+            for (const auto& sc : snapped) {
+                VertexPtr vtx = sc.vtx;
+                auto vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+
+                // (1) DL confidence — sigmoid-diff in [-1,+1], scaled by dl_vtx_score_scale.
+                double s_dl = sc.dl_score * dl_vtx_score_scale;
+
+                // (2) Soft snap penalty: 0 at perfect snap, saturates at -W_SNAP_MAX.
+                //     Replaces the old hard "min_dis > 2*dl_vtx_cut" gate, which caused false
+                //     rejections on long main-cluster candidates with snap distances of 5-8 cm.
+                double s_snap = -std::min(W_SNAP_MAX, sc.snap_dis / (W_SNAP_L * units::cm));
+
+                // (3) Vestigial forward-z tiebreaker: max |penalty| = W_FWD_Z = 0.25.
+                //     Capped so it never swamps main/clen bonuses. Breaks upstream/downstream
+                //     ties when two candidates land on the same long main cluster.
+                double s_fwd_z = -W_FWD_Z * std::clamp(
+                    (vtx_pt.z() - min_z_set) / (W_FWD_L * units::cm), 0.0, 1.0);
+
+                // (4) Host cluster total track length: continuous, saturates at W_CLEN_L cm.
+                double L_host = 0.0;
+                if (vtx->cluster()) {
+                    auto it = cluster_total_len.find(vtx->cluster());
+                    if (it != cluster_total_len.end()) L_host = it->second;
+                }
+                double s_clen = W_CLEN * std::min(1.0, L_host / (W_CLEN_L * units::cm));
+
+                // (5) Isolated-short cluster penalty.
+                double s_isol = 0.0;
+                if (L_host < W_ISOL_L * units::cm && vtx->cluster() != main_cluster)
+                    s_isol = -W_ISOL;
+
+                // (6) Main cluster bonus.
+                double s_main = (vtx->cluster() == main_cluster) ? W_MAIN : 0.0;
+
+                // (7) Fiducial volume bonus.
+                double s_fv = 0.0;
+                if (vtx->cluster()) {
+                    auto grouping = vtx->cluster()->grouping();
+                    auto fv = grouping ? grouping->get_fiducialutils() : nullptr;
+                    if (fv && fv->inside_fiducial_volume(vtx_pt)) s_fv = W_FV;
+                }
+
+                double score = s_dl + s_snap + s_fwd_z + s_clen + s_isol + s_main + s_fv;
+
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "DL rerank cand [voxel {}] cluster={} pos=({:.1f},{:.1f},{:.1f})cm "
+                    "L={:.1f}cm snap={:.2f}cm | "
+                    "dl={:+.4f} snap={:+.3f} fwd_z={:+.3f} clen={:+.3f} "
+                    "isol={:+.3f} main={:+.3f} fv={:+.3f} | TOTAL={:+.3f}",
+                    sc.voxel_rank,
+                    vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1,
+                    vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm,
+                    L_host/units::cm, sc.snap_dis/units::cm,
+                    s_dl, s_snap, s_fwd_z, s_clen, s_isol, s_main, s_fv, score);
+
+                if (score > best_score) {
+                    best_score      = score;
+                    best_vtx_rerank = vtx;
+                    best_snap_dis   = sc.snap_dis;
+                }
+            }
+
+            min_vertex = best_vtx_rerank;
+            min_dis    = best_snap_dis;
+
+            // Accept if the winner clears the composite-score threshold.
+            // The soft s_snap penalty already limits distant-snap acceptance;
+            // no hard snap gate is needed (and it was causing false rejections
+            // on long main-cluster candidates at 5-8 cm snap distance).
+            flag_pass = (min_vertex != nullptr)
+                     && (best_score >= dl_vtx_min_accept_score);
+
+            if (flag_pass) {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_overall_main_vertex_DL: rerank selected cluster={} "
+                    "snap_dis={:.2f}cm composite_score={:.4f}",
+                    min_vertex->cluster() ? min_vertex->cluster()->get_cluster_id() : -1,
+                    min_dis / units::cm, best_score);
+            } else {
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "determine_overall_main_vertex_DL: rerank rejected "
+                    "(best_score={:.4f} < threshold={:.4f}), staying with traditional vertex",
+                    best_score, dl_vtx_min_accept_score);
+            }
         }
 
-        // Distance cut (default 2 cm in WireCell mm units)
-        if (min_dis > dl_vtx_cut) flag_pass = false;
-        MS t_sanity_check(Clock::now() - t0); t0 = Clock::now();
+        MS t_selection(Clock::now() - t0); t0 = Clock::now();
 
         MS t_examine_direction(MS::zero());
         MS t_proton_tagging(MS::zero());
@@ -3353,11 +3588,11 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             MS t_total_ms(Clock::now() - t_total);
             SPDLOG_LOGGER_DEBUG(s_log,
                 "determine_overall_main_vertex_DL timing: "
-                "collect_pc={:.3f}ms scn_inference={:.3f}ms find_nearest={:.3f}ms "
-                "sanity_check={:.3f}ms examine_direction={:.3f}ms "
+                "collect_pc={:.3f}ms scn_inference={:.3f}ms selection={:.3f}ms "
+                "examine_direction={:.3f}ms "
                 "proton_tagging={:.3f}ms cleanup_long_muon={:.3f}ms TOTAL={:.3f}ms",
-                t_collect_pc.count(), t_scn_inference.count(), t_find_nearest.count(),
-                t_sanity_check.count(), t_examine_direction.count(),
+                t_collect_pc.count(), t_scn_inference.count(), t_selection.count(),
+                t_examine_direction.count(),
                 t_proton_tagging.count(), t_cleanup_long_muon.count(), t_total_ms.count());
         }
     }

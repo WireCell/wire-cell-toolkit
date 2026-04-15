@@ -20,7 +20,7 @@ static void print_vec(const std::vector<VType> &data)
 
 namespace WCPPyUtil {
     std::vector<FLOAT> SCN_Vertex(const std::string &module, const std::string &function, const std::string &weights,
-                                  const std::vector< std::vector<FLOAT> > &input, const std::string &dtype, const bool verbose)
+                                  const std::vector< std::vector<FLOAT> > &input, const std::string &dtype, const bool verbose, const int top_k)
     {
         if (input.size() != 4) {
             throw std::runtime_error("input.size() != 4");
@@ -96,7 +96,9 @@ namespace WCPPyUtil {
             throw std::runtime_error("SCN_Vertex: failed to create byte buffers");
         }
 
-        pValue = PyObject_CallFunctionObjArgs(pFunc, pWeights, pX, pY, pZ, pQ, pDtype, NULL);
+        auto pTopK = PyLong_FromLong(top_k);
+        pValue = PyObject_CallFunctionObjArgs(pFunc, pWeights, pX, pY, pZ, pQ, pDtype, pTopK, NULL);
+        Py_DECREF(pTopK);
         if (verbose) {
             DebugInf("PyObject_CallFunctionObjArgs: OK");
         }

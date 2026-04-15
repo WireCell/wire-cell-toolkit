@@ -10,6 +10,6 @@ namespace WCPPyUtil {
 
     std::vector<FLOAT> SCN_Vertex(const std::string &module, const std::string &function, const std::string &weights,
                                   const std::vector<std::vector<FLOAT> > &input, const std::string &dtype = "float32",
-                                  const bool verbose = false);
+                                  const bool verbose = false, const int top_k = 1);
 }
 #endif

@@ -32,9 +32,13 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
             SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: dl_weights path not found: {}", dl_weights_raw);
         }
     }
-    m_dl_vtx_cut = get(config, "dl_vtx_cut", m_dl_vtx_cut);
-    m_dQdx_scale  = get(config, "dQdx_scale",  m_dQdx_scale);
-    m_dQdx_offset = get(config, "dQdx_offset", m_dQdx_offset);
+    m_dl_vtx_cut              = get(config, "dl_vtx_cut",              m_dl_vtx_cut);
+    m_dQdx_scale              = get(config, "dQdx_scale",              m_dQdx_scale);
+    m_dQdx_offset             = get(config, "dQdx_offset",             m_dQdx_offset);
+    m_dl_vtx_rerank           = get(config, "dl_vtx_rerank",           m_dl_vtx_rerank);
+    m_dl_vtx_top_k            = get(config, "dl_vtx_top_k",            m_dl_vtx_top_k);
+    m_dl_vtx_min_accept_score = get(config, "dl_vtx_min_accept_score", m_dl_vtx_min_accept_score);
+    m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -58,10 +62,14 @@ Configuration TaggerCheckNeutrino::default_configuration() const
 
     cfg["trackfitting_config_file"] = "";
     cfg["perf"] = m_perf;
-    cfg["dl_weights"] = "";      // empty = DL vertex disabled
-    cfg["dl_vtx_cut"] = 25.0;   // mm (= 2.5 cm)
-    cfg["dQdx_scale"]  = 0.1;   // dQ scale factor for SCN network input
+    cfg["dl_weights"] = "";       // empty = DL vertex disabled
+    cfg["dl_vtx_cut"] = 25.0;    // mm (= 2.5 cm)
+    cfg["dQdx_scale"]  = 0.1;    // dQ scale factor for SCN network input
     cfg["dQdx_offset"] = -1000.0; // dQ offset for SCN network input
+    cfg["dl_vtx_rerank"]           = true;    // true → use top-K + soft re-rank; false → legacy single argmax
+    cfg["dl_vtx_top_k"]            = 5;       // number of top DL voxels to re-rank (only when dl_vtx_rerank==true)
+    cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
+    cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
 
     return cfg;
@@ -244,7 +252,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
             vertices_in_long_muon, segments_in_long_muon,
             *m_track_fitter, m_dv, particle_data(), m_recomb_model,
-            m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset);
+            m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
+            m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
+            m_dl_vtx_score_scale);
     }
     if (!flag_dl_changed) {
         final_main_vertex = pattern_algos.determine_overall_main_vertex(
