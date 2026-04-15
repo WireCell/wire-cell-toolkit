@@ -395,6 +395,7 @@ namespace WireCell::Clus::PR {
             // in the wrong direction and produces spurious near-endpoint tail segments.
             const double min_straight_chord  = 3.0 * units::cm;
             const int    min_straight_points = 9;
+
             if (num_p1 >= min_straight_points &&
                 length2_1 > min_straight_chord &&
                 std::abs(length2 - length2_1) < 0.03 * length2_1 &&
@@ -407,7 +408,7 @@ namespace WireCell::Clus::PR {
                        length2 * length1_1 > 1.06 * length1 * length2_1) {
                 flag_search = true;
             }
-            
+
             prev_p = prev_p * (1.0/num_p);
             next_p = next_p * (1.0/num_p1);
             

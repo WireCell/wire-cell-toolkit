@@ -1059,10 +1059,18 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                 // replace_segment_and_vertex (trim the segment to break_wcp, remove the
                 // stub) rather than materialising a tiny separate segment.
                 // - min_dis < 2 cm:  the tail is too short to represent real physics
-                // - kink_angle_at_break > 15°: the break falls at a genuine direction
+                // - kink_angle_at_break > 30°: the break falls at a genuine direction
                 //   change in the steiner graph, not a collinear snap artefact
+                // - angle < 45°: the stub (tv2=end-break) must be roughly aligned with
+                //   the whole segment direction (tv1=end-start).  A fold-back artifact
+                //   at the track endpoint has tv1≈tv2 (small angle, ~28° in the test
+                //   event), whereas a real Michel electron or physical secondary
+                //   diverges from the parent track axis (~79° for a 12.94 MeV Michel).
+                //   This clause prevents the absorption of real short-track secondaries.
                 // The original 1.5 cm+120° condition (for degree-!=1 junctions) is kept.
-                bool use_replace = (end_is_terminus && min_dis / units::cm < 2.0 && kink_angle_at_break > 30.0) ||
+                bool use_replace = (end_is_terminus && min_dis / units::cm < 2.0
+                                                    && kink_angle_at_break > 30.0
+                                                    && angle < 45.0) ||
                                    (!end_is_terminus && min_dis / units::cm < 1.5 && angle > 120);
 
                 // Check if we should replace end vertex instead of breaking
