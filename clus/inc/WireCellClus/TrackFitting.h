@@ -369,6 +369,12 @@ namespace WireCell::Clus {
             double rel_uncer_ind, double rel_uncer_col,
             double add_uncer_ind, double add_uncer_col);
 
+        /// Merge every per-cluster snapshot captured inside fill_fitted_charge_2d
+        /// into m_fitted_charge_2d so the flat map covers every cluster fit this
+        /// event.  Call once per event after all do_multi_tracking() calls are done
+        /// (e.g. at the end of TaggerCheckNeutrino::visit, before set_track_fitting).
+        void assemble_fitted_charge_2d();
+
         // point associations
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
 
@@ -647,6 +653,15 @@ namespace WireCell::Clus {
 
         // Fitted 2D charge organized by (apa, face, plane) -> (wire, time)
         std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> m_fitted_charge_2d;
+
+        /// Per-cluster snapshots of m_fitted_charge_2d captured at the end of
+        /// every fill_fitted_charge_2d() call when m_cluster_filter is set.
+        /// Overwriting the same key on each refill gives "latest fit wins per
+        /// cluster", correctly handling re-fits during pattern recognition.
+        /// Merged into m_fitted_charge_2d by assemble_fitted_charge_2d().
+        std::map<Facade::Cluster*,
+                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>>
+            m_cluster_fitted_charge_2d;
 
         // global geometry
 

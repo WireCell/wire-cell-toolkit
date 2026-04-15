@@ -17,6 +17,9 @@
 WIRECELL_FACTORY(UbooneMagnifyTrackingVisitor, WireCell::Root::UbooneMagnifyTrackingVisitor,
                  WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
+// uBooNE absolute channel ID offsets per plane: U=[0,2400), V=[2400,4800), W=[4800,8256)
+static constexpr int kPlaneChOffset[3] = {0, 2400, 4800};
+
 using namespace WireCell;
 using namespace WireCell::Clus;
 
@@ -134,7 +137,7 @@ void Root::UbooneMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Cl
                 auto dead_chs = grouping.get_all_dead_chs(apa, face, pind);
                 plane = pind;
                 for (const auto& [ch, time_range] : dead_chs) {
-                    chid = ch;
+                    chid = ch + kPlaneChOffset[pind];
                     start_time = time_range.first;
                     end_time = time_range.second;
                     tree->Fill();
@@ -200,8 +203,7 @@ void Root::UbooneMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus:
         int apa = std::get<0>(afp);
         int face = std::get<1>(afp);
         int plane_idx = std::get<2>(afp);
-        // uBooNE channel convention: U=wire, V=2400+wire, W=4800+wire
-        int ch_offset = (plane_idx == 1) ? 2400 : (plane_idx == 2) ? 4800 : 0;
+        int ch_offset = kPlaneChOffset[plane_idx];
 
         int nticks_per_slice = nticks_map.at(apa).at(face);
 
@@ -385,10 +387,10 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
                 point_tree.reco_dQ = vtx->fit().dQ * dQdx_scale + dQdx_offset;
                 point_tree.reco_dx = vtx->fit().dx / units::cm;
                 
-                // Projection coordinates
-                point_tree.reco_pu = vtx->fit().pu;
-                point_tree.reco_pv = vtx->fit().pv;
-                point_tree.reco_pw = vtx->fit().pw;
+                // Projection coordinates (absolute channel IDs)
+                point_tree.reco_pu = vtx->fit().pu + kPlaneChOffset[0];
+                point_tree.reco_pv = vtx->fit().pv + kPlaneChOffset[1];
+                point_tree.reco_pw = vtx->fit().pw + kPlaneChOffset[2];
                 point_tree.reco_pt = vtx->fit().pt / nticks_per_slice;
                 
                 point_tree.reco_reduced_chi2 = vtx->fit().reduced_chi2;
@@ -473,9 +475,9 @@ void Root::UbooneMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
                 point_tree.reco_z = fit.point.z() / units::cm;
                 point_tree.reco_dQ = fit.dQ * dQdx_scale + dQdx_offset;
                 point_tree.reco_dx = fit.dx / units::cm;
-                point_tree.reco_pu = fit.pu;
-                point_tree.reco_pv = fit.pv;
-                point_tree.reco_pw = fit.pw;
+                point_tree.reco_pu = fit.pu + kPlaneChOffset[0];
+                point_tree.reco_pv = fit.pv + kPlaneChOffset[1];
+                point_tree.reco_pw = fit.pw + kPlaneChOffset[2];
                 point_tree.reco_pt = fit.pt / nticks_per_slice;
                 point_tree.reco_reduced_chi2 = fit.reduced_chi2;
                 point_tree.reco_rr = rr_vec[i] / units::cm;

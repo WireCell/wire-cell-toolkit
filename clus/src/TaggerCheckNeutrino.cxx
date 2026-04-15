@@ -414,6 +414,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     m_track_fitter->set_kine_info(kine_info);
     m_track_fitter->set_tagger_info(tagger_info);
 
+    // Merge every per-cluster fill_fitted_charge_2d snapshot into the flat
+    // map that UbooneMagnifyTrackingVisitor::write_proj_data reads, so that
+    // T_proj_data contains cells for all beam-flash clusters, not just the
+    // last cluster fit by pattern recognition.
+    m_track_fitter->assemble_fitted_charge_2d();
+
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);
 }

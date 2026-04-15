@@ -231,6 +231,8 @@ void TrackFitting::clear_graph(){
     m_all_edges.clear();
     m_ordered_nodes_vec.clear();
     m_cluster_charge_data.clear();
+    m_cluster_fitted_charge_2d.clear();
+    m_fitted_charge_2d.clear();
 }
 
 
@@ -241,6 +243,8 @@ void TrackFitting::clear_segments(){
     m_charge_data_dirty = true;
     m_blobs.clear();
     m_cluster_charge_data.clear();
+    m_cluster_fitted_charge_2d.clear();
+    m_fitted_charge_2d.clear();
 }
 
 void TrackFitting::sync_from_graph(){
@@ -1094,6 +1098,30 @@ void TrackFitting::fill_fitted_charge_2d(
     process_plane(map_U, pred_u, 0, rel_uncer_ind, add_uncer_ind);
     process_plane(map_V, pred_v, 1, rel_uncer_ind, add_uncer_ind);
     process_plane(map_W, pred_w, 2, rel_uncer_col, add_uncer_col);
+
+    // Persist this cluster's cells so they survive when the next
+    // do_multi_tracking(..., &other_cluster) clears m_fitted_charge_2d.
+    if (m_cluster_filter) {
+        m_cluster_fitted_charge_2d[m_cluster_filter] = m_fitted_charge_2d;
+    }
+}
+
+void TrackFitting::assemble_fitted_charge_2d()
+{
+    m_fitted_charge_2d.clear();
+    for (const auto& [cl, afp_map] : m_cluster_fitted_charge_2d) {
+        (void)cl;
+        for (const auto& [afp, wt_map] : afp_map) {
+            auto& dst = m_fitted_charge_2d[afp];
+            for (const auto& [wt, fc] : wt_map) {
+                // Last-writer-wins on cross-cluster overlap.  charge/charge_err
+                // depend only on the readout (not the cluster), so the overwrite
+                // is benign.  pred_charge may differ between overlapping clusters
+                // but write_proj_data emits one row per cluster tag regardless.
+                dst[wt] = fc;
+            }
+        }
+    }
 }
 
 // ============================================================================
