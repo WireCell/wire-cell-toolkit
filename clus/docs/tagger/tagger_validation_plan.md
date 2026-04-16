@@ -379,28 +379,37 @@ Once a known-good output is established, add a digest comparison:
 - Save as a historical baseline file (following the existing `saveout -c history` pattern)
 - Future runs diff against the baseline; any change triggers investigation
 
-### 5.4 Comparison Script
+### 5.4 Comparison App
 
-File: `clus/test/compare_tagger_outputs.py` (or `root/scripts/`)
+**Status: DONE** — `root/apps/wire-cell-uboone-tagger-compare.cxx`
 
-A Python script using `uproot` (preferred for HEP CI environments) or `ROOT` that:
+A C++ binary built by `root/wscript_build`'s `smplpkg` (auto-discovers all `.cxx` under `apps/`).  It reads `T_tagger` and `T_kine` from both files, compares all scalar (`Float_t`/`Int_t`) and vector (`vector<float>`/`vector<int>`) branches event-by-event (positional matching), groups results by tagger function, and writes per-category histograms + a `T_summary` tree to `report.root`.
 
 ```
-Usage: python compare_tagger_outputs.py toolkit_out.root prototype_out.root [--report report.html]
+Usage: wire-cell-uboone-tagger-compare -p<proto.root> -t<toolkit.root>
+           [-o<report.root>] [-v]
 
 Steps:
-1. Open both files, find matching events by (runNo, subRunNo, eventNo)
-2. Phase 1: Sanity checks on toolkit file
-3. Phase 2: For each scalar variable:
-   a. Overlay histograms (matplotlib or ROOT)
-   b. KS test (scipy.stats.ks_2samp)
-   c. Correlation coefficient (scipy.stats.pearsonr)
-4. Phase 2b: BDT score efficiency comparison at working points
-5. Output: summary table (pass/fail per variable) + PDF/HTML with plots
-6. Exit code 0 if all acceptance criteria pass, non-zero otherwise
+1. Open both files; verify T_tagger and T_kine exist in each.
+2. Walk all branches via GetListOfBranches(); detect type (Float_t scalar,
+   Int_t scalar, vector<float>, vector<int>); classify into 18 categories
+   by name prefix (cosmic, gap, mip, ssm, shw_sp, stem, pio_family,
+   lem, br, tro, hol_lol, vis, numu, nue, match, kine, nu_vertex,
+   _uncategorized).
+3. Event loop: for each matched event, call TBranch::GetEntry() per branch,
+   compare values.  Mismatch criterion: |Δ|/max(|a|,|b|,1e-6) > 1e-3 for
+   floats; exact equality for ints.  Sentinel -999 counted separately.
+4. Write per-category TDirectory to report.root, each containing:
+   - h_<branch>_ndiff histograms (normalized diff)
+   - T_summary tree (branch_name, n_compared, n_diff, n_sentinel,
+     max_abs_diff, mean_abs_diff, frac_diff)
+5. Print compact per-category table to stdout.
+6. Exit 0 if no branch differs; exit 1 otherwise (CI-gateable).
 ```
 
-Key Python dependencies: `uproot`, `numpy`, `scipy`, `matplotlib` (all standard in LArSoft / HEP Python environments).
+Branches missing from one side are reported as `[MISSING in toolkit]` or
+`[ONLY in toolkit]` without aborting.  The `_uncategorized` directory captures
+any branch not matched by the prefix table (safety net for prototype additions).
 
 ---
 
@@ -459,21 +468,22 @@ The toolkit's primary output uses tensor serialization (`.tar.gz` via `MultiAlgB
 
 ## 7. Implementation Sequence
 
-| Step | Task | Notes |
-|---|---|---|
-| 1 | Verify prototype tree names and branch names | Open prototype ROOT file, run `T_eval->Print()` etc. |
-| 2 | Implement `UbooneTaggerOutputVisitor` | Follow `UbooneMagnifyTrackingVisitor` pattern |
-| 3 | Add Jsonnet `tagger_output()` to `cfg/pgrapher/common/clus.jsonnet` | Default OFF per project convention |
-| 4 | Write validation-specific Jsonnet config | Enables `tagger_output` visitor |
-| 5 | Run on single test event | Confirm ROOT file produced with expected trees |
-| 6 | Run Phase 1 sanity checks | Use comparison script or manual ROOT inspection |
-| 7 | Prepare multi-event sample (100+ events) | Same input files as BATS tests |
-| 8 | Run Phase 2 distributional comparison | Use `compare_tagger_outputs.py` |
-| 9 | Investigate any Class C outliers | Use PatternDebugIO for PR graph inspection |
-| 10 | Add doctest for TaggerInfo/KineInfo defaults | `clus/test/doctest_tagger_info.cxx` |
-| 11 | Add round-trip serialization test | `root/test/doctest_tagger_output.cxx` |
-| 12 | Add BATS end-to-end and regression tests | Extend `test-porting.bats` |
-| 13 | Document results | Add `tagger_validation_results.md` under this directory |
+| Step | Task | Status | Notes |
+|---|---|---|---|
+| 1 | Verify prototype tree names and branch names | DONE | Trees are `T_tagger` (1216+ branches) and `T_kine` (21 branches) |
+| 2 | Implement `UbooneTaggerOutputVisitor` | DONE | `root/src/UbooneTaggerOutputVisitor.cxx`, UPDATE mode, T_tagger + T_kine |
+| 3 | Add Jsonnet `tagger_output()` to `cfg/pgrapher/common/clus.jsonnet` | DONE | `tagger_output()` factory after `nue_bdt_scorer()`; existing configs unaffected |
+| 4 | Wire `tagger_output_visitor` into pipeline config | DONE | `qlport/uboone-mabc.jsonnet`: appended after `tracking_visitor` |
+| 5 | Build comparison app | DONE | `root/apps/wire-cell-uboone-tagger-compare.cxx`; binary at `build/root/wire-cell-uboone-tagger-compare` |
+| 6 | Run on single test event | TODO | Confirm T_tagger and T_kine appear in output ROOT file |
+| 7 | Run Phase 1 sanity checks | TODO | Use `wire-cell-uboone-tagger-compare` or manual ROOT inspection |
+| 8 | Prepare multi-event sample (100+ events) | TODO | Same input files as BATS tests |
+| 9 | Run Phase 2 distributional comparison | TODO | `wire-cell-uboone-tagger-compare -p proto.root -t toolkit.root -o report.root` |
+| 10 | Investigate any Class C outliers | TODO | Use PatternDebugIO for PR graph inspection |
+| 11 | Add doctest for TaggerInfo/KineInfo defaults | TODO | `clus/test/doctest_tagger_info.cxx` |
+| 12 | Add round-trip serialization test | TODO | `root/test/doctest_tagger_output.cxx` |
+| 13 | Add BATS end-to-end and regression tests | TODO | Extend `test-porting.bats` |
+| 14 | Document results | TODO | Add `tagger_validation_results.md` under this directory |
 
 ---
 
@@ -493,6 +503,9 @@ The toolkit's primary output uses tensor serialization (`.tar.gz` via `MultiAlgB
 | `root/src/UbooneNumuBDTScorer.cxx` | Numu BDT scorer (writes numu_score) |
 | `root/src/UbooneNueBDTScorer.cxx` | Nue BDT scorer (writes nue_score, 30 sub-scores) |
 | `root/src/UbooneMagnifyTrackingVisitor.cxx` | Reference visitor: ROOT file output pattern |
+| `root/src/UbooneTaggerOutputVisitor.cxx` | New visitor: writes T_tagger + T_kine in UPDATE mode |
+| `root/inc/WireCellRoot/UbooneTaggerOutputVisitor.h` | Header for new output visitor |
+| `root/apps/wire-cell-uboone-tagger-compare.cxx` | Comparison binary: prototype vs toolkit T_tagger/T_kine |
 | `cfg/pgrapher/common/clus.jsonnet` | Pipeline configuration for all visitors |
 | `clus/test/test-porting.bats` | Existing BATS integration tests |
 | `clus/inc/WireCellClus/PatternDebugIO.h` | JSON serialization for PR state debugging |
