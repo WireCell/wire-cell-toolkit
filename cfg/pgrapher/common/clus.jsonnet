@@ -216,6 +216,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             }
         },
 
+        // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
+        // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
+        // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
+        tagger_output(name="", output_filename="tracking_proj.root") :: {
+            type: "UbooneTaggerOutputVisitor",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                output_filename: output_filename,
+            }
+        },
+
         pointed(name="", groupings=["live"]) :: {
             type: "ClusteringPointed",
             name: prefix+name,
