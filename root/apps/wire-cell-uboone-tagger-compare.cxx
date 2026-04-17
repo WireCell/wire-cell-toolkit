@@ -677,8 +677,23 @@ int main(int argc, char* argv[])
         for (const auto& bs : all_stats) {
             if (bs.n_diff == 0 || bs.type == SKIP) continue;
 
-            auto it = branch_defaults.find(bs.name);
-            std::string defstr = (it != branch_defaults.end()) ? it->second : "";
+            // Branch name → struct field name aliases (output visitor uses different names).
+            static const std::map<std::string,std::string> kAliases = {
+                {"nu_x", "kine_nu_x_corr"},
+                {"nu_y", "kine_nu_y_corr"},
+                {"nu_z", "kine_nu_z_corr"},
+            };
+            auto lookup = [&](const std::string& name) -> std::string {
+                auto it = branch_defaults.find(name);
+                if (it != branch_defaults.end()) return it->second;
+                auto al = kAliases.find(name);
+                if (al != kAliases.end()) {
+                    auto it2 = branch_defaults.find(al->second);
+                    if (it2 != branch_defaults.end()) return it2->second;
+                }
+                return "";
+            };
+            std::string defstr = lookup(bs.name);
 
             switch (bs.type) {
             case SCALAR_F:
