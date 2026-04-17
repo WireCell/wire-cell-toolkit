@@ -293,91 +293,96 @@ Only Class C events require code-level debugging.
 
 ### 5.1 Doctest Tests (Build-time, `clus/test/`)
 
-#### 5.1.1 TaggerInfo Default Initialization Test
+#### 5.1.1 TaggerInfo/KineInfo Default Initialization Test
 File: `clus/test/doctest_tagger_info.cxx`
 
+Verify that value-initializing `TaggerInfo{}` and `KineInfo{}` yields the exact defaults documented in `NeutrinoTaggerInfo.h`. This catches any accidental change to the default-member-initializers in that header.
+
+Key checks:
+- Top-level flags that default to 1: `cosmic_flag`, `gap_flag`, `mip_quality_flag`, `mip_flag`
+- MIP counters that default to 19: `mip_n_first_non_mip`, `mip_n_first_non_mip_1`, `mip_n_first_non_mip_2`, `mip_n_below_threshold`
+- MIP values that default to 1: `mip_vec_dQ_dx_0`, `mip_vec_dQ_dx_1`, `mip_max_dQ_dx_sample`, `mip_n_lowest`, `mip_n_highest`, `mip_lowest_dQ_dx`, `mip_highest_dQ_dx`, `mip_medium_dQ_dx`, `mip_stem_length`, `mip_length_main`, `mip_length_total`
+- SSM sentinel (-999): `ssm_Nsm`, `ssm_kine_energy`, representative SSM dQ/dx fields
+- All KineInfo scalar defaults to zero, vectors empty
+
+No fixture needed — pure struct instantiation.
+
+### 5.2 Full-Chain Tagger Replay Test
+
+#### Overview
+
+The existing `PatternDebugIO` framework captures the pre-pattern-recognition state (point clouds, steiner graph, TrackFitting parameters) for a single cluster as JSON. We extend this to also dump `other_clusters` (beam-flash clusters aside from the main), which are needed by the full `TaggerCheckNeutrino::visit()` chain including cosmic/numu/nue/SSM/singlephoton taggers.
+
+Charge data (`TrackFitting::preload_clusters`) is **not** separately serialized — it is re-derived from the blob 3D point clouds and detector geometry, both of which are already captured. The doctest calls `preload_clusters` on the reconstructed clusters exactly as the main pipeline does.
+
+#### PatternDebugIO extension
+
+Add to `clus/inc/WireCellClus/PatternDebugIO.h`:
+
 ```cpp
-TEST_CASE("TaggerInfo default initialization") {
-    WireCell::Clus::PR::TaggerInfo ti{};
-    // Check non-zero sentinels are correct
-    CHECK(ti.cosmic_flag == Approx(1.0f));
-    CHECK(ti.gap_flag == Approx(1.0f));
-    CHECK(ti.mip_quality_flag == Approx(1.0f));
-    CHECK(ti.mip_flag == Approx(1.0f));
-    // ... all non-zero defaults from init_tagger_info_review.md
-    // Check zero-init fields
-    CHECK(ti.cosmic_filled == Approx(0.0f));
-    CHECK(ti.numu_cc_flag == Approx(0.0f));
-    // Check SSM sentinels
-    CHECK(ti.ssm_kine_energy == Approx(-999.0f));
-    // ... etc.
-}
+/// Extended test data including other beam-flash clusters for full-chain replay.
+struct TaggerTestData : LoadedTestData {
+    // Non-owning pointers into grouping_node; valid while grouping_node is alive.
+    std::vector<Facade::Cluster*> other_clusters;
+};
+
+/// Dump main_cluster + other_clusters at the TaggerCheckNeutrino entry point
+/// (after preload_clusters, before find_proto_vertex).
+void dump_tagger_inputs(
+    const std::string& output_path,
+    const Facade::Cluster& main_cluster,
+    const std::vector<Facade::Cluster*>& other_clusters,
+    bool flag_back_search,
+    const TrackFitting& track_fitter);
+
+/// Reconstruct clusters from a tagger input dump.
+TaggerTestData load_tagger_inputs(const std::string& input_path);
 ```
 
-This catches any accidental changes to default values in `NeutrinoTaggerInfo.h`.
+JSON format: same as `init_first_segment_input.json` with `"cluster"` = main cluster, plus `"other_clusters"` array of additional cluster objects using the existing `dump_cluster_data` format.
 
-#### 5.1.2 KineInfo Default Initialization Test
-File: same `doctest_tagger_info.cxx`
+#### Dump hook
+
+In `TaggerCheckNeutrino::visit()`, immediately after `m_track_fitter->preload_clusters(...)` (line ~143), add an env-var gate:
 
 ```cpp
-TEST_CASE("KineInfo default initialization") {
-    WireCell::Clus::PR::KineInfo ki{};
-    CHECK(ki.kine_reco_Enu == Approx(0.0f));
-    CHECK(ki.kine_pio_flag == 0);
-    CHECK(ki.kine_energy_particle.empty());
-    // ...
+if (const char* p = std::getenv("WCT_DUMP_TAGGER_INPUTS")) {
+    DebugIO::dump_tagger_inputs(p, *main_cluster, other_clusters,
+                                /*flag_back_search=*/true, *m_track_fitter);
 }
 ```
 
-### 5.2 Round-Trip Serialization Test (ROOT)
-
-File: `root/test/doctest_tagger_output.cxx` (or a BATS test if ROOT is not available at doctest time)
-
+Generate fixture with:
 ```
-1. Construct TaggerInfo with known non-default values for all fields
-2. Write to a TTree via UbooneTaggerOutputVisitor::write_T_BDTvars()
-3. Read back from the TTree
-4. Check every field matches the original value within float precision
+WCT_DUMP_TAGGER_INPUTS=./tmp/tagger_check_neutrino_input.json \
+  wire-cell -A infiles=... uboone-mabc.jsonnet
 ```
 
-This tests the branch registration code is complete and correct — any field added to `TaggerInfo` but not registered as a branch will be caught when the round-trip produces the wrong value.
+#### Replay doctest
 
-### 5.3 BATS Integration Tests
+File: `clus/test/doctest_tagger_check_neutrino.cxx`
 
-#### 5.3.1 End-to-End Tagger Output Test
-Extend `clus/test/test-porting.bats` with a new test function:
+Follows `doctest_init_first_segment.cxx` "end-to-end" template:
+1. Load plugins (`WireCellClus`, `WireCellAux`, `WireCellGen`, `WireCellSigProc`).
+2. Read `uboone-mabc_config.json` and configure `DetectorVolumes`, `PCTransformSet`, `AnodePlane`, `ParticleDataSet`, `BoxRecombination`.
+3. Load `tagger_check_neutrino_input.json` via `load_tagger_inputs()`.
+4. Create `TrackFitting`, call `preload_clusters(main + others)`.
+5. Construct `TaggerCheckNeutrino` (or its inner `NeutrinoPatternBase::PatternAlgorithms` directly) and run the full chain through `fill_kine_tree`.
+6. Assertions on the result:
+   - `tagger_info.cosmic_filled == 1.0f` (cosmic tagger ran)
+   - `std::isfinite(tagger_info.numu_cc_flag)` and `std::isfinite(tagger_info.nue_score)`
+   - `|kine_info.kine_nu_x_corr|` inside detector X range [0, 260] cm
+   - No NaN or Inf on a representative set of ~20 scalar fields
 
-```bash
-@test "tagger output file is produced" {
-    do_prep "tagger_output"
-    # Download test input file (same as qlport/steiner tests)
-    local url="$raw_url/qlport/rootfiles/nuselEval_5384_130_6501.root"
-    local dat="$(download_file "$url")"
-    local cfg="$(relative_path test-porting/tagger_output/main.jsonnet)"
-    
-    # Run pipeline with tagger output enabled
-    run_idempotently -s "$cfg" -s "$dat" -t "tagger_output.root" -t "$log" -- \
-        bash -c "wire-cell -A infiles=$dat $cfg > $log 2>&1"
-    
-    # Verify output file exists and has expected content
-    test -f tagger_output.root
-    
-    # Verify trees exist and have entries
-    root -l -b -q "check_tagger_output.C(\"tagger_output.root\")"
-}
-```
+Fixture stored in `clus/test/data/tagger_check_neutrino_input.json` (checked in if < 2 MB; otherwise downloaded via BATS `download_file` pattern).
 
-The helper macro `check_tagger_output.C` checks:
-- `T_eval`, `T_BDTvars`, `T_KINEvars` trees all exist
-- Each tree has >= 1 entry
-- `numu_score` and `nue_score` are finite (not 0 or NaN -- confirms BDT scorers ran)
-- `match_isFC` is 0 or 1
+### 5.3 BATS Integration Tests (future)
 
-#### 5.3.2 Regression Test (Stability)
-Once a known-good output is established, add a digest comparison:
-- Extract `numu_score`, `nue_score`, `kine_reco_Enu` for the test event
-- Save as a historical baseline file (following the existing `saveout -c history` pattern)
-- Future runs diff against the baseline; any change triggers investigation
+Extend `clus/test/test-porting.bats` once a known-good single-event output is established:
+- Verify `T_tagger` and `T_kine` exist with >= 1 entry.
+- Extract `numu_score`, `nue_score`, `kine_reco_Enu` and diff against a checked-in baseline (using existing `saveout -c history` pattern).
+
+**Status: deferred** — depends on selecting a stable reference event.
 
 ### 5.4 Comparison App
 
@@ -475,10 +480,10 @@ The toolkit's primary output uses tensor serialization (`.tar.gz` via `MultiAlgB
 | 3 | Add Jsonnet `tagger_output()` to `cfg/pgrapher/common/clus.jsonnet` | DONE | `tagger_output()` factory after `nue_bdt_scorer()`; existing configs unaffected |
 | 4 | Wire `tagger_output_visitor` into pipeline config | DONE | `qlport/uboone-mabc.jsonnet`: appended after `tracking_visitor` |
 | 5 | Build comparison app | DONE | `root/apps/wire-cell-uboone-tagger-compare.cxx`; binary at `build/root/wire-cell-uboone-tagger-compare` |
-| 6 | Run on single test event | TODO | Confirm T_tagger and T_kine appear in output ROOT file |
-| 7 | Run Phase 1 sanity checks | TODO | Use `wire-cell-uboone-tagger-compare` or manual ROOT inspection |
-| 8 | Prepare multi-event sample (100+ events) | TODO | Same input files as BATS tests |
-| 9 | Run Phase 2 distributional comparison | TODO | `wire-cell-uboone-tagger-compare -p proto.root -t toolkit.root -o report.root` |
+| 6 | Run on single test event | DONE | T_tagger and T_kine confirmed in toolkit output ROOT file |
+| 7 | Run Phase 1 sanity checks | DONE | Checked via `wire-cell-uboone-tagger-compare` on single event |
+| 8 | Prepare multi-event sample (100+ events) | DONE | 35 matched events (run 5384) processed; `qlport/check_tagger_5384.pl` automates batch runs |
+| 9 | Run Phase 2 distributional comparison | DONE | Fingerprint clustering + sentinel annotation added to compare app; 35-event report generated |
 | 10 | Investigate any Class C outliers | TODO | Use PatternDebugIO for PR graph inspection |
 | 11 | Add doctest for TaggerInfo/KineInfo defaults | TODO | `clus/test/doctest_tagger_info.cxx` |
 | 12 | Add round-trip serialization test | TODO | `root/test/doctest_tagger_output.cxx` |

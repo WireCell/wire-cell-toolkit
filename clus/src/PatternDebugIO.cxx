@@ -209,6 +209,7 @@ static Json::Value dump_cluster_data(const Facade::Cluster& cluster)
     // Flags
     Json::Value jflags(Json::objectValue);
     jflags["main_cluster"] = cluster.get_flag(Facade::Flags::main_cluster);
+    jflags["beam_flash"]   = cluster.get_flag(Facade::Flags::beam_flash);
     jcluster["flags"] = jflags;
 
     // Scope transform name (e.g. "Unity", "T0Correction")
@@ -526,6 +527,9 @@ static PointCloud::Tree::Points::node_t* make_cluster_node(
         if (jflags.isMember("main_cluster") && jflags["main_cluster"].asInt()) {
             cluster->set_flag(Facade::Flags::main_cluster, 1);
         }
+        if (jflags.isMember("beam_flash") && jflags["beam_flash"].asInt()) {
+            cluster->set_flag(Facade::Flags::beam_flash, 1);
+        }
     }
 
     // Directly set the default scope with the dumped coordinate names.
@@ -579,5 +583,87 @@ PR::DebugIO::load_init_first_segment_inputs(const std::string& input_path)
     }
 
     logger().info("Loaded init_first_segment inputs from {}", input_path);
+    return data;
+}
+
+
+// -----------------------------------------------------------------------
+// Full-chain tagger input dump / load
+// -----------------------------------------------------------------------
+
+void PR::DebugIO::dump_tagger_inputs(
+    const std::string& output_path,
+    const Facade::Cluster& main_cluster,
+    const std::vector<Facade::Cluster*>& other_clusters,
+    bool flag_back_search,
+    const TrackFitting& track_fitter)
+{
+    Json::Value root(Json::objectValue);
+
+    root["cluster"] = dump_cluster_data(main_cluster);
+    root["flag_back_search"] = flag_back_search;
+    root["trackfitting_params"] = params_to_json(track_fitter.get_parameters());
+
+    // Precompute boundary steiner indices for the main cluster
+    try {
+        auto boundary = main_cluster.get_two_boundary_steiner_graph_idx(
+            "steiner_graph", "steiner_pc");
+        root["boundary_steiner_indices"] = Json::Value(Json::arrayValue);
+        root["boundary_steiner_indices"].append(static_cast<Json::UInt>(boundary.first));
+        root["boundary_steiner_indices"].append(static_cast<Json::UInt>(boundary.second));
+    } catch (const std::exception& e) {
+        logger().warn("Could not dump boundary steiner indices: {}", e.what());
+    }
+
+    // Beam-flash other clusters
+    Json::Value jothers(Json::arrayValue);
+    for (const auto* c : other_clusters) {
+        jothers.append(dump_cluster_data(*c));
+    }
+    root["other_clusters"] = jothers;
+
+    Persist::dump(output_path, root, true);
+    logger().info("Dumped tagger inputs ({} other clusters) to {}",
+                  other_clusters.size(), output_path);
+}
+
+
+PR::DebugIO::TaggerTestData
+PR::DebugIO::load_tagger_inputs(const std::string& input_path)
+{
+    auto root = Persist::load(input_path);
+
+    TaggerTestData data;
+    data.flag_back_search = root.get("flag_back_search", true).asBool();
+
+    if (root.isMember("trackfitting_params")) {
+        data.trackfitting_params = params_from_json(root["trackfitting_params"]);
+    }
+
+    if (root.isMember("boundary_steiner_indices")) {
+        const auto& jbi = root["boundary_steiner_indices"];
+        data.boundary_steiner_indices = {jbi[0].asUInt(), jbi[1].asUInt()};
+    }
+
+    // Create grouping node
+    data.grouping_node = std::make_unique<PointCloud::Tree::Points::node_t>();
+    auto* grouping = data.grouping_node->value.facade<Facade::Grouping>();
+    (void)grouping;
+
+    // Main cluster
+    auto* main_node = make_cluster_node(*data.grouping_node, root["cluster"]);
+    data.cluster      = main_node->value.facade<Facade::Cluster>();
+    data.main_cluster = data.cluster;
+
+    // Other beam-flash clusters
+    if (root.isMember("other_clusters")) {
+        for (const auto& jc : root["other_clusters"]) {
+            auto* cn = make_cluster_node(*data.grouping_node, jc);
+            data.other_clusters.push_back(cn->value.facade<Facade::Cluster>());
+        }
+    }
+
+    logger().info("Loaded tagger inputs ({} other clusters) from {}",
+                  data.other_clusters.size(), input_path);
     return data;
 }

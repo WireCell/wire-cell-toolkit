@@ -37,6 +37,32 @@ namespace WireCell::Clus::PR::DebugIO {
     /// suitable for calling init_first_segment().
     LoadedTestData load_init_first_segment_inputs(const std::string& input_path);
 
+    // ------------------------------------------------------------------
+    // Extended dump/load for full TaggerCheckNeutrino::visit() replay.
+    // ------------------------------------------------------------------
+
+    /// Extended test data that also carries beam-flash (other) clusters.
+    struct TaggerTestData : LoadedTestData {
+        /// Non-owning pointers into grouping_node (valid while it is alive).
+        std::vector<Facade::Cluster*> other_clusters;
+    };
+
+    /// Dump main_cluster + beam-flash other_clusters right after
+    /// TrackFitting::preload_clusters(), before find_proto_vertex().
+    /// Use WCT_DUMP_TAGGER_INPUTS=/path/to.json to trigger this from
+    /// TaggerCheckNeutrino::visit().
+    void dump_tagger_inputs(
+        const std::string& output_path,
+        const Facade::Cluster& main_cluster,
+        const std::vector<Facade::Cluster*>& other_clusters,
+        bool flag_back_search,
+        const TrackFitting& track_fitter);
+
+    /// Reconstruct clusters from a tagger input dump.
+    /// Caller must set anodes/DV on the returned grouping_node and call
+    /// TrackFitting::preload_clusters() before running pattern recognition.
+    TaggerTestData load_tagger_inputs(const std::string& input_path);
+
 }
 
 #endif

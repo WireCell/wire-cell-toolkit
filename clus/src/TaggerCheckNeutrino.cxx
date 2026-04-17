@@ -145,6 +145,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: preload_clusters took {} ms", MS(Clock::now() - t0).count());
     t0 = Clock::now();
 
+    // Debug dump for unit-test fixture generation (only when env var is set).
+    // Generate with:
+    //   WCT_DUMP_TAGGER_INPUTS=./tmp/tagger_check_neutrino_input.json wire-cell ...
+    // Then replay with doctest_tagger_check_neutrino end-to-end test.
+    if (main_cluster) {
+        if (const char* dump_path = std::getenv("WCT_DUMP_TAGGER_INPUTS")) {
+            DebugIO::dump_tagger_inputs(
+                dump_path, *main_cluster, other_clusters,
+                /*flag_back_search=*/true, *m_track_fitter);
+        }
+    }
+
     // Create PRGraph and first segment
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
     m_track_fitter->add_graph(pr_graph);
