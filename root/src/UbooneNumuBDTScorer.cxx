@@ -111,7 +111,7 @@ void UbooneNumuBDTScorer::init_readers()
         m_reader_numu3 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_reader_numu3->AddVariable("numu_cc_3_particle_type",   &m_numu3_particle_type);
         m_reader_numu3->AddVariable("numu_cc_3_max_length",      &m_numu3_max_length);
-        m_reader_numu3->AddVariable("numu_cc_3_track_length",   &m_numu3_track_length);
+        m_reader_numu3->AddVariable("numu_cc_3_acc_track_length",&m_numu3_track_length);
         m_reader_numu3->AddVariable("numu_cc_3_max_length_all",  &m_numu3_max_length_all);
         m_reader_numu3->AddVariable("numu_cc_3_max_muon_length", &m_numu3_max_muon_length);
         m_reader_numu3->AddVariable("numu_cc_3_n_daughter_tracks",&m_numu3_n_daughter_tracks);
