@@ -335,29 +335,6 @@ namespace {
         return false;
     }
 
-    int loop_count(const sparse_mat_t& sm, std::function<bool(scaler_t)> f)
-    {
-        int ret = 0;
-        for (int k = 0; k < sm.outerSize(); ++k) {
-            for (sparse_mat_t::InnerIterator it(sm, k); it; ++it) {
-                if (f(it.value())) {
-                    ret += 1;
-                }
-            }
-        }
-        return ret;
-    }
-
-    scaler_t loop_sum(const sparse_mat_t& sm, std::function<scaler_t(scaler_t)> f)
-    {
-        scaler_t ret = 0;
-        for (int k = 0; k < sm.outerSize(); ++k) {
-            for (sparse_mat_t::InnerIterator it(sm, k); it; ++it) {
-                ret += f(it.value());
-            }
-        }
-        return ret;
-    }
 }  // namespace
 
 // 1: tar is part of ref: REF_COVERS_TAR
