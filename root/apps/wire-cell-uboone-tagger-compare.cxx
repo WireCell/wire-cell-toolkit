@@ -1,14 +1,15 @@
 // Comparison app: prototype T_tagger/T_kine vs toolkit T_tagger/T_kine.
 // Opens both ROOT files, walks all scalar and vector branches, groups diffs
-// by originating tagger function, and writes per-category histograms + a
-// T_summary tree to report.root.  Exit code 0 means all categories agree.
+// by originating tagger function, and prints results to stdout.
+// Exit code 0 means all categories agree.
 //
 // Usage:
-//   wire-cell-uboone-tagger-compare -p<proto.root> -t<toolkit.root>
-//       [-o<report.root>] [-v]
+//   wire-cell-uboone-tagger-compare -p <proto.root> -t <toolkit.root> [-v]
+//                                   [-n <NeutrinoTaggerInfo.h>]
 //
 // Matching is positional (entry 0 vs 0, etc.).
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -16,14 +17,13 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
 
 #include "TBranch.h"
-#include "TDirectory.h"
 #include "TFile.h"
-#include "TH1F.h"
 #include "TLeaf.h"
 #include "TObjArray.h"
 #include "TString.h"
@@ -139,12 +139,9 @@ struct BranchStat {
     int    first_diff_proto_i{0}, first_diff_tool_i{0};
     std::vector<float> first_diff_proto_vf, first_diff_tool_vf;
     std::vector<int>   first_diff_proto_vi, first_diff_tool_vi;
-
-    // histogram of normalized diff (toolkit − proto) / scale
-    TH1F* h_norm_diff = nullptr;
 };
 
-static void setup_branch_stat(BranchStat& bs, TDirectory* dir)
+static void setup_branch_stat(BranchStat& bs)
 {
     BrType pt = detect_type(bs.proto_br);
     BrType tt = detect_type(bs.tool_br);
@@ -175,15 +172,6 @@ static void setup_branch_stat(BranchStat& bs, TDirectory* dir)
     case VEC_F:    bs.tool_br->SetAddress(&bs.tool_vf); break;
     case VEC_I:    bs.tool_br->SetAddress(&bs.tool_vi); break;
     default: return;
-    }
-
-    if (dir) {
-        dir->cd();
-        std::string hname = "h_" + bs.name + "_ndiff";
-        bs.h_norm_diff = new TH1F(
-            hname.c_str(),
-            (bs.name + ";(toolkit-proto)/scale;entries").c_str(),
-            100, -2.0, 2.0);
     }
 }
 
@@ -220,7 +208,6 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
             bs.max_abs_diff  = std::max(bs.max_abs_diff, std::abs(diff));
             bs.sum_abs_diff += std::abs(diff);
         }
-        if (bs.h_norm_diff) bs.h_norm_diff->Fill(nd);
         break;
     }
     case SCALAR_D: {
@@ -246,7 +233,6 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
             bs.max_abs_diff  = std::max(bs.max_abs_diff, std::abs(diff));
             bs.sum_abs_diff += std::abs(diff);
         }
-        if (bs.h_norm_diff) bs.h_norm_diff->Fill(nd);
         break;
     }
     case SCALAR_I: {
@@ -286,7 +272,6 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
                 event_differs = true;
                 bs.max_abs_diff  = std::max(bs.max_abs_diff, std::abs(diff));
                 bs.sum_abs_diff += std::abs(diff);
-                if (bs.h_norm_diff) bs.h_norm_diff->Fill(nd);
             }
         }
         if (event_differs) {
@@ -333,8 +318,6 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
 // ============================================================
 static void build_stats(TTree* ptree, TTree* ttree, bool is_kine,
                         const std::vector<Category>& cats,
-                        std::map<std::string, TDirectory*>& cat_dirs,
-                        TFile* out_file,
                         std::list<BranchStat>& stat_list)
 {
     TObjArray* proto_branches = ptree->GetListOfBranches();
@@ -347,20 +330,14 @@ static void build_stats(TTree* ptree, TTree* ttree, bool is_kine,
             continue;
         }
 
-        std::string cat = classify_branch(bname, cats);
-        if (cat_dirs.find(cat) == cat_dirs.end()) {
-            TDirectory* d = out_file->mkdir(cat.c_str());
-            cat_dirs[cat] = d;
-        }
-
         stat_list.push_back(BranchStat{});   // stable address in list
         BranchStat& bs  = stat_list.back();
         bs.name         = bname;
-        bs.category     = cat;
+        bs.category     = classify_branch(bname, cats);
         bs.in_kine      = is_kine;
         bs.proto_br     = pb;
         bs.tool_br      = tb;
-        setup_branch_stat(bs, cat_dirs[cat]);
+        setup_branch_stat(bs);
 
         if (bs.type == SKIP)
             std::cout << "[SKIP unsupported type] " << bname << "\n";
@@ -374,42 +351,6 @@ static void build_stats(TTree* ptree, TTree* ttree, bool is_kine,
         if (!ptree->GetBranch(bname.c_str()))
             std::cout << "[ONLY in toolkit] " << bname << "\n";
     }
-}
-
-// ============================================================
-//  Write T_summary tree into category directory
-// ============================================================
-static void write_category_summary(const std::string& cat,
-                                   const std::list<BranchStat>& stats,
-                                   TDirectory* dir)
-{
-    if (!dir) return;
-    dir->cd();
-    TTree* ts = new TTree("T_summary", "per-branch comparison summary");
-    char branch_name[256];
-    long long n_compared, n_diff, n_sentinel;
-    double max_abs_diff, mean_abs_diff, frac_diff;
-    ts->Branch("branch_name",  branch_name,     "branch_name/C");
-    ts->Branch("n_compared",   &n_compared,     "n_compared/L");
-    ts->Branch("n_diff",       &n_diff,         "n_diff/L");
-    ts->Branch("n_sentinel",   &n_sentinel,     "n_sentinel/L");
-    ts->Branch("max_abs_diff", &max_abs_diff,   "max_abs_diff/D");
-    ts->Branch("mean_abs_diff",&mean_abs_diff,  "mean_abs_diff/D");
-    ts->Branch("frac_diff",    &frac_diff,      "frac_diff/D");
-
-    for (const auto& bs : stats) {
-        if (bs.category != cat || bs.type == SKIP) continue;
-        std::strncpy(branch_name, bs.name.c_str(), 255);
-        branch_name[255] = '\0';
-        n_compared  = bs.n_compared;
-        n_diff      = bs.n_diff;
-        n_sentinel  = bs.n_sentinel;
-        max_abs_diff  = bs.max_abs_diff;
-        mean_abs_diff = (bs.n_diff > 0) ? bs.sum_abs_diff / bs.n_diff : 0.0;
-        frac_diff     = (bs.n_compared > 0) ? (double)bs.n_diff / bs.n_compared : 0.0;
-        ts->Fill();
-    }
-    ts->Write();
 }
 
 // ============================================================
@@ -501,30 +442,66 @@ parse_tagger_defaults(const std::string& path)
 }
 
 // ============================================================
+//  Sentinel / uninitialized value detection
+//
+//  Returns a short annotation when one side of a diff looks like a known
+//  sentinel and the other does not.  Only scalar types are checked; vector
+//  diffs are already obvious from the size and content display.
+//
+//  Known sentinels:
+//    |v| >= 1e7  — "no segment found" style (e.g. min_dis = 1e9 / units::cm = 1e8)
+//    v == -1     — uninitialized counter idiom (int branches)
+// ============================================================
+static std::string sentinel_note(const BranchStat& bs)
+{
+    auto check_f = [](double a, double b) -> std::string {
+        bool a_big = std::abs(a) >= 1e7;
+        bool b_big = std::abs(b) >= 1e7;
+        if (a_big && !b_big) return "[SENT proto]";
+        if (!a_big && b_big) return "[SENT tool]";
+        return "";
+    };
+    auto check_i = [](int a, int b) -> std::string {
+        if (a == -1 && b != -1) return "[UNINIT proto]";
+        if (b == -1 && a != -1) return "[UNINIT tool]";
+        return "";
+    };
+    switch (bs.type) {
+    case SCALAR_F: return check_f(bs.first_diff_proto_f, bs.first_diff_tool_f);
+    case SCALAR_D: return check_f(bs.first_diff_proto_d, bs.first_diff_tool_d);
+    case SCALAR_I: return check_i(bs.first_diff_proto_i, bs.first_diff_tool_i);
+    default:       return "";
+    }
+}
+
+// ============================================================
 //  main
 // ============================================================
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
         std::cerr << "Usage: wire-cell-uboone-tagger-compare"
-                     " -p<proto.root> -t<toolkit.root>"
-                     " [-o<report.root>] [-v] [-n<NeutrinoTaggerInfo.h>]\n";
+                     " -p <proto.root> -t <toolkit.root>"
+                     " [-v] [-n <NeutrinoTaggerInfo.h>]\n";
         return 1;
     }
 
     TString proto_filename;
     TString toolkit_filename;
-    TString out_filename = "tagger_compare_report.root";
     std::string info_header_path;
     bool verbose = false;
 
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] != '-' || argv[i][1] == '\0') continue;
-        switch (argv[i][1]) {
-        case 'p': proto_filename     = &argv[i][2]; break;
-        case 't': toolkit_filename   = &argv[i][2]; break;
-        case 'o': out_filename       = &argv[i][2]; break;
-        case 'n': info_header_path   = &argv[i][2]; break;
+        char flag = argv[i][1];
+        // Support both -p<file> and -p <file> forms
+        const char* val = (argv[i][2] != '\0') ? argv[i] + 2
+                          : (i + 1 < argc)     ? argv[++i]
+                                               : nullptr;
+        switch (flag) {
+        case 'p': if (val) proto_filename   = val; break;
+        case 't': if (val) toolkit_filename = val; break;
+        case 'n': if (val) info_header_path = val; break;
         case 'v': verbose = true; break;
         }
     }
@@ -537,7 +514,7 @@ int main(int argc, char* argv[])
         branch_defaults = parse_tagger_defaults(info_header_path);
 
     if (proto_filename.IsNull() || toolkit_filename.IsNull()) {
-        std::cerr << "Need -p<proto.root> and -t<toolkit.root>\n";
+        std::cerr << "Need -p <proto.root> and -t <toolkit.root>\n";
         return 1;
     }
 
@@ -574,16 +551,9 @@ int main(int argc, char* argv[])
 
     auto cats = make_categories();
 
-    TFile* out_file = TFile::Open(out_filename, "RECREATE");
-    if (!out_file || out_file->IsZombie()) {
-        std::cerr << "Cannot create report file: " << out_filename << "\n"; return 1;
-    }
-
-    std::map<std::string, TDirectory*> cat_dirs;
     std::list<BranchStat> all_stats;
-
-    build_stats(proto_tagger, tool_tagger, false, cats, cat_dirs, out_file, all_stats);
-    build_stats(proto_kine,   tool_kine,   true,  cats, cat_dirs, out_file, all_stats);
+    build_stats(proto_tagger, tool_tagger, false, cats, all_stats);
+    build_stats(proto_kine,   tool_kine,   true,  cats, all_stats);
 
     // Event loop — T_tagger
     for (long ev = 0; ev < N_tagger; ++ev) {
@@ -598,25 +568,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    // Write histograms and summary trees
-    for (const auto& kv : cat_dirs) {
-        const std::string& cat = kv.first;
-        TDirectory* dir = kv.second;
-        dir->cd();
-        // Write all histograms already owned by the directory
-        for (auto& bs : all_stats) {
-            if (bs.category == cat && bs.h_norm_diff) {
-                bs.h_norm_diff->Write();
-            }
-        }
-        write_category_summary(cat, all_stats, dir);
-    }
-
-    out_file->Write();
-    out_file->Close();
-
     // ---- Terminal summary table ----
-    // Collect per-category aggregate stats
     struct CatSummary {
         long   n_branches      = 0;
         long   n_diff_branches = 0;
@@ -670,13 +622,75 @@ int main(int argc, char* argv[])
                   << std::setw(12) << cs.max_abs_diff
                   << "\n";
     }
-    std::cout << "\nReport written to: " << out_filename << "\n";
 
     if (verbose) {
-        // Column widths
+        // ---- Fingerprint cluster report ----------------------------------------
+        // Many branches report the same (proto, toolkit) diff value because they
+        // all read from the same upstream quantity (main shower energy, main shower
+        // length, main vertex, …).  Group scalar diffs by their value fingerprint
+        // and surface any cluster of ≥ 3 branches — these point to ONE root cause.
+        //
+        // Known sentinel patterns flagged by sentinel_note():
+        //   |v| >= 1e7  →  "no-segment-found" style (e.g. min_dis = 1e9/units::cm)
+        //   int == -1   →  uninitialized counter idiom
+        {
+            // fingerprint key = "proto_val|tool_val" in scientific(5) notation
+            std::map<std::string, std::vector<std::string>> fp_map;
+            for (const auto& bs : all_stats) {
+                if (bs.n_diff == 0 || bs.type == SKIP) continue;
+                std::ostringstream key;
+                key << std::scientific << std::setprecision(5);
+                switch (bs.type) {
+                case SCALAR_F:
+                    key << (double)bs.first_diff_proto_f << "|" << (double)bs.first_diff_tool_f;
+                    break;
+                case SCALAR_D:
+                    key << bs.first_diff_proto_d << "|" << bs.first_diff_tool_d;
+                    break;
+                case SCALAR_I:
+                    key.str(""); key << bs.first_diff_proto_i << "|" << bs.first_diff_tool_i;
+                    break;
+                default: continue;
+                }
+                fp_map[key.str()].push_back(bs.name);
+            }
+
+            // collect clusters of >= 3, sort largest first
+            std::vector<std::pair<int, std::string>> clusters;
+            for (const auto& kv : fp_map)
+                if ((int)kv.second.size() >= 3)
+                    clusters.push_back({(int)kv.second.size(), kv.first});
+            std::sort(clusters.begin(), clusters.end(),
+                      [](const auto& a, const auto& b){ return a.first > b.first; });
+
+            if (!clusters.empty()) {
+                std::cout << "\nFingerprint clusters"
+                             " (≥3 scalar branches with identical first-diff values"
+                             " → shared upstream input):\n"
+                          << std::string(95, '-') << "\n";
+                constexpr int MAX_SHOW = 6;
+                for (const auto& kv : clusters) {
+                    int sz = kv.first;
+                    const std::string& key = kv.second;
+                    size_t pipe = key.find('|');
+                    std::cout << "  proto=" << std::setw(14) << key.substr(0, pipe)
+                              << "  tool="  << std::setw(14) << key.substr(pipe + 1)
+                              << "  (" << sz << " branches)  ";
+                    const auto& names = fp_map[key];
+                    for (int k = 0; k < std::min(sz, MAX_SHOW); ++k)
+                        std::cout << (k ? ", " : "") << names[k];
+                    if (sz > MAX_SHOW)
+                        std::cout << ", …+" << (sz - MAX_SHOW) << " more";
+                    std::cout << "\n";
+                }
+            }
+        }
+
+        // ---- Per-branch verbose table ------------------------------------------
         constexpr int W_NAME   = 46;
         constexpr int W_NDIFF  =  7;  // digits for n_diff and n_compared
         constexpr int W_VAL    = 14;  // width for each numeric value
+        constexpr int W_NOTE   = 14;  // width for sentinel/uninit annotation
 
         auto fmt_val = [&](std::ostream& os, double v) -> std::ostream& {
             os << std::setw(W_VAL) << std::right << std::scientific
@@ -696,31 +710,34 @@ int main(int argc, char* argv[])
                   << "  " << std::right << std::setw(W_VAL) << "proto"
                   << "  " << std::right << std::setw(W_VAL) << "toolkit"
                   << "  " << std::right << std::setw(W_VAL) << "default"
+                  << "  " << std::left  << std::setw(W_NOTE) << "note"
                   << "\n"
-                  << std::string(W_NAME + 2 + 2*W_NDIFF + 1 + 4*(W_VAL+2), '-') << "\n";
+                  << std::string(W_NAME + 2 + 2*W_NDIFF + 1 + 4*(W_VAL+2) + 2 + W_NOTE, '-') << "\n";
 
         std::cout << std::defaultfloat;
+
+        // Branch name → struct field name aliases (output visitor uses different names).
+        static const std::map<std::string,std::string> kAliases = {
+            {"nu_x", "kine_nu_x_corr"},
+            {"nu_y", "kine_nu_y_corr"},
+            {"nu_z", "kine_nu_z_corr"},
+        };
+        auto lookup = [&](const std::string& name) -> std::string {
+            auto it = branch_defaults.find(name);
+            if (it != branch_defaults.end()) return it->second;
+            auto al = kAliases.find(name);
+            if (al != kAliases.end()) {
+                auto it2 = branch_defaults.find(al->second);
+                if (it2 != branch_defaults.end()) return it2->second;
+            }
+            return "";
+        };
 
         for (const auto& bs : all_stats) {
             if (bs.n_diff == 0 || bs.type == SKIP) continue;
 
-            // Branch name → struct field name aliases (output visitor uses different names).
-            static const std::map<std::string,std::string> kAliases = {
-                {"nu_x", "kine_nu_x_corr"},
-                {"nu_y", "kine_nu_y_corr"},
-                {"nu_z", "kine_nu_z_corr"},
-            };
-            auto lookup = [&](const std::string& name) -> std::string {
-                auto it = branch_defaults.find(name);
-                if (it != branch_defaults.end()) return it->second;
-                auto al = kAliases.find(name);
-                if (al != kAliases.end()) {
-                    auto it2 = branch_defaults.find(al->second);
-                    if (it2 != branch_defaults.end()) return it2->second;
-                }
-                return "";
-            };
-            std::string defstr = lookup(bs.name);
+            std::string defstr  = lookup(bs.name);
+            std::string note    = sentinel_note(bs);
 
             switch (bs.type) {
             case SCALAR_F:
@@ -742,7 +759,8 @@ int main(int argc, char* argv[])
                     fmt_ival(std::cout, bs.first_diff_tool_i)  << "  ";
                 }
                 std::cout << std::right << std::setw(W_VAL)
-                          << (defstr.empty() ? "-" : defstr) << "\n";
+                          << (defstr.empty() ? "-" : defstr)
+                          << "  " << std::left << note << "\n";
                 break;
             }
             case VEC_F:
