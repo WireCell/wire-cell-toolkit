@@ -17,6 +17,7 @@
 #include <list>
 #include <map>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 #include "TBranch.h"
@@ -412,6 +413,29 @@ static void write_category_summary(const std::string& cat,
 }
 
 // ============================================================
+//  Auto-locate NeutrinoTaggerInfo.h
+//
+//  The installed header lives at <prefix>/include/WireCellClus/NeutrinoTaggerInfo.h
+//  which is one level up from <prefix>/bin/ where this binary lives.
+// ============================================================
+static std::string find_tagger_info_header()
+{
+    char buf[4096] = {0};
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n <= 0) return "";
+    std::string exe(buf, n);
+    size_t slash = exe.rfind('/');
+    if (slash == std::string::npos) return "";
+    // <prefix>/bin → <prefix>/include/WireCellClus/NeutrinoTaggerInfo.h
+    std::string candidate = exe.substr(0, slash) +
+                            "/../include/WireCellClus/NeutrinoTaggerInfo.h";
+    char resolved[4096];
+    if (realpath(candidate.c_str(), resolved) && std::ifstream(resolved).good())
+        return std::string(resolved);
+    return "";
+}
+
+// ============================================================
 //  NeutrinoTaggerInfo.h default-value parser
 //
 //  Reads the header and builds a map: branch_name → default_value_string.
@@ -504,6 +528,9 @@ int main(int argc, char* argv[])
         case 'v': verbose = true; break;
         }
     }
+
+    if (info_header_path.empty())
+        info_header_path = find_tagger_info_header();
 
     std::map<std::string, std::string> branch_defaults;
     if (!info_header_path.empty())
