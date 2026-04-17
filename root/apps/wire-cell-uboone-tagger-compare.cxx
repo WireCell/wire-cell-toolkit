@@ -129,6 +129,12 @@ struct BranchStat {
     double max_abs_diff = 0;
     double sum_abs_diff = 0;
 
+    // values at first differing event (printed in verbose mode)
+    float first_diff_proto_f{0}, first_diff_tool_f{0};
+    int   first_diff_proto_i{0}, first_diff_tool_i{0};
+    std::vector<float> first_diff_proto_vf, first_diff_tool_vf;
+    std::vector<int>   first_diff_proto_vi, first_diff_tool_vi;
+
     // histogram of normalized diff (toolkit − proto) / scale
     TH1F* h_norm_diff = nullptr;
 };
@@ -198,6 +204,10 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
                                  std::abs((double)bs.tool_f), EPS});
         double nd = diff / scale;
         if (std::abs(nd) > 1e-3) {
+            if (bs.n_diff == 0) {
+                bs.first_diff_proto_f = bs.proto_f;
+                bs.first_diff_tool_f  = bs.tool_f;
+            }
             bs.n_diff++;
             bs.max_abs_diff  = std::max(bs.max_abs_diff, std::abs(diff));
             bs.sum_abs_diff += std::abs(diff);
@@ -208,6 +218,10 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
     case SCALAR_I: {
         bs.n_compared++;
         if (bs.proto_i != bs.tool_i) {
+            if (bs.n_diff == 0) {
+                bs.first_diff_proto_i = bs.proto_i;
+                bs.first_diff_tool_i  = bs.tool_i;
+            }
             bs.n_diff++;
             bs.max_abs_diff  = std::max(bs.max_abs_diff,
                                         std::abs((double)(bs.tool_i - bs.proto_i)));
@@ -219,6 +233,10 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
         if (!bs.proto_vf || !bs.tool_vf) return;
         bs.n_compared++;
         if (bs.proto_vf->size() != bs.tool_vf->size()) {
+            if (bs.n_diff == 0) {
+                bs.first_diff_proto_vf = *bs.proto_vf;
+                bs.first_diff_tool_vf  = *bs.tool_vf;
+            }
             bs.n_diff++;
             return;
         }
@@ -237,18 +255,32 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
                 if (bs.h_norm_diff) bs.h_norm_diff->Fill(nd);
             }
         }
-        if (event_differs) bs.n_diff++;
+        if (event_differs) {
+            if (bs.n_diff == 0) {
+                bs.first_diff_proto_vf = *bs.proto_vf;
+                bs.first_diff_tool_vf  = *bs.tool_vf;
+            }
+            bs.n_diff++;
+        }
         break;
     }
     case VEC_I: {
         if (!bs.proto_vi || !bs.tool_vi) return;
         bs.n_compared++;
         if (bs.proto_vi->size() != bs.tool_vi->size()) {
+            if (bs.n_diff == 0) {
+                bs.first_diff_proto_vi = *bs.proto_vi;
+                bs.first_diff_tool_vi  = *bs.tool_vi;
+            }
             bs.n_diff++;
             return;
         }
         for (size_t k = 0; k < bs.proto_vi->size(); ++k) {
             if ((*bs.proto_vi)[k] != (*bs.tool_vi)[k]) {
+                if (bs.n_diff == 0) {
+                    bs.first_diff_proto_vi = *bs.proto_vi;
+                    bs.first_diff_tool_vi  = *bs.tool_vi;
+                }
                 bs.n_diff++;
                 bs.max_abs_diff = std::max(bs.max_abs_diff,
                     std::abs((double)((*bs.tool_vi)[k] - (*bs.proto_vi)[k])));
@@ -516,8 +548,39 @@ int main(int argc, char* argv[])
             std::cout << "  " << std::left << std::setw(48) << bs.name
                       << "  n_diff=" << bs.n_diff
                       << "/" << bs.n_compared
-                      << "  max|diff|=" << bs.max_abs_diff
-                      << "\n";
+                      << "  max|diff|=" << bs.max_abs_diff;
+            switch (bs.type) {
+            case SCALAR_F:
+                std::cout << "  proto=" << bs.first_diff_proto_f
+                          << "  toolkit=" << bs.first_diff_tool_f;
+                break;
+            case SCALAR_I:
+                std::cout << "  proto=" << bs.first_diff_proto_i
+                          << "  toolkit=" << bs.first_diff_tool_i;
+                break;
+            case VEC_F: {
+                std::cout << "\n    proto  =[";
+                for (size_t k = 0; k < bs.first_diff_proto_vf.size(); ++k)
+                    std::cout << (k ? "," : "") << bs.first_diff_proto_vf[k];
+                std::cout << "]\n    toolkit=[";
+                for (size_t k = 0; k < bs.first_diff_tool_vf.size(); ++k)
+                    std::cout << (k ? "," : "") << bs.first_diff_tool_vf[k];
+                std::cout << "]";
+                break;
+            }
+            case VEC_I: {
+                std::cout << "\n    proto  =[";
+                for (size_t k = 0; k < bs.first_diff_proto_vi.size(); ++k)
+                    std::cout << (k ? "," : "") << bs.first_diff_proto_vi[k];
+                std::cout << "]\n    toolkit=[";
+                for (size_t k = 0; k < bs.first_diff_tool_vi.size(); ++k)
+                    std::cout << (k ? "," : "") << bs.first_diff_tool_vi[k];
+                std::cout << "]";
+                break;
+            }
+            default: break;
+            }
+            std::cout << "\n";
         }
     }
 
