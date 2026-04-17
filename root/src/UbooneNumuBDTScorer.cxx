@@ -74,7 +74,7 @@ void UbooneNumuBDTScorer::init_readers()
 {
     // --- cosmict_10 reader (5 variables) ---
     if (!m_cosmict10_xml.empty()) {
-        m_reader_cosmict10 = std::make_unique<TMVA::Reader>();
+        m_reader_cosmict10 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_reader_cosmict10->AddVariable("cosmict_10_vtx_z",        &m_cosmict10_vtx_z);
         m_reader_cosmict10->AddVariable("cosmict_10_flag_shower",  &m_cosmict10_flag_shower);
         m_reader_cosmict10->AddVariable("cosmict_10_flag_dir_weak",&m_cosmict10_flag_dir_weak);
@@ -85,7 +85,7 @@ void UbooneNumuBDTScorer::init_readers()
 
     // --- numu_1 reader (7 variables) ---
     if (!m_numu1_xml.empty()) {
-        m_reader_numu1 = std::make_unique<TMVA::Reader>();
+        m_reader_numu1 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_reader_numu1->AddVariable("numu_cc_1_particle_type",    &m_numu1_particle_type);
         m_reader_numu1->AddVariable("numu_cc_1_length",           &m_numu1_length);
         m_reader_numu1->AddVariable("numu_cc_1_medium_dQ_dx",     &m_numu1_medium_dQ_dx);
@@ -98,7 +98,7 @@ void UbooneNumuBDTScorer::init_readers()
 
     // --- numu_2 reader (4 variables) ---
     if (!m_numu2_xml.empty()) {
-        m_reader_numu2 = std::make_unique<TMVA::Reader>();
+        m_reader_numu2 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_reader_numu2->AddVariable("numu_cc_2_length",           &m_numu2_length);
         m_reader_numu2->AddVariable("numu_cc_2_total_length",     &m_numu2_total_length);
         m_reader_numu2->AddVariable("numu_cc_2_n_daughter_tracks",&m_numu2_n_daughter_tracks);
@@ -108,7 +108,7 @@ void UbooneNumuBDTScorer::init_readers()
 
     // --- numu_3 reader (7 variables) ---
     if (!m_numu3_xml.empty()) {
-        m_reader_numu3 = std::make_unique<TMVA::Reader>();
+        m_reader_numu3 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_reader_numu3->AddVariable("numu_cc_3_particle_type",   &m_numu3_particle_type);
         m_reader_numu3->AddVariable("numu_cc_3_max_length",      &m_numu3_max_length);
         m_reader_numu3->AddVariable("numu_cc_3_acc_track_length",&m_numu3_acc_track_length);
@@ -138,7 +138,7 @@ void UbooneNumuBDTScorer::init_readers()
         // Total = 74
         m_xgb_vars.resize(74, 0.0f);
 
-        m_reader_xgboost = std::make_unique<TMVA::Reader>();
+        m_reader_xgboost = std::make_unique<TMVA::Reader>("!V:Silent");
         int idx = 0;
 
         // --- numu flag-3 features ---

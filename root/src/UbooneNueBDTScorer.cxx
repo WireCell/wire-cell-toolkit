@@ -159,7 +159,7 @@ void UbooneNueBDTScorer::init_readers()
     // ---- Vector sub-BDT readers ----
 
     if (!m_br3_3_xml.empty()) {
-        m_rdr_br3_3 = std::make_unique<TMVA::Reader>();
+        m_rdr_br3_3 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_br3_3->AddVariable("br3_3_v_energy",     &m_br3_3_v_energy);
         m_rdr_br3_3->AddVariable("br3_3_v_angle",      &m_br3_3_v_angle);
         m_rdr_br3_3->AddVariable("br3_3_v_dir_length", &m_br3_3_v_dir_length);
@@ -168,7 +168,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_br3_5_xml.empty()) {
-        m_rdr_br3_5 = std::make_unique<TMVA::Reader>();
+        m_rdr_br3_5 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_br3_5->AddVariable("br3_5_v_dir_length",            &m_br3_5_v_dir_length);
         m_rdr_br3_5->AddVariable("br3_5_v_total_length",          &m_br3_5_v_total_length);
         m_rdr_br3_5->AddVariable("br3_5_v_flag_avoid_muon_check", &m_br3_5_v_flag_avoid_muon_check);
@@ -183,7 +183,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_br3_6_xml.empty()) {
-        m_rdr_br3_6 = std::make_unique<TMVA::Reader>();
+        m_rdr_br3_6 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_br3_6->AddVariable("br3_6_v_angle",                  &m_br3_6_v_angle);
         m_rdr_br3_6->AddVariable("br3_6_v_angle1",                 &m_br3_6_v_angle1);
         m_rdr_br3_6->AddVariable("br3_6_v_flag_shower_trajectory", &m_br3_6_v_flag_shower_trajectory);
@@ -195,7 +195,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_pio_2_xml.empty()) {
-        m_rdr_pio_2 = std::make_unique<TMVA::Reader>();
+        m_rdr_pio_2 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_pio_2->AddVariable("pio_2_v_dis2",       &m_pio_2_v_dis2);
         m_rdr_pio_2->AddVariable("pio_2_v_angle2",     &m_pio_2_v_angle2);
         m_rdr_pio_2->AddVariable("pio_2_v_acc_length", &m_pio_2_v_acc_length);
@@ -204,7 +204,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_stw_2_xml.empty()) {
-        m_rdr_stw_2 = std::make_unique<TMVA::Reader>();
+        m_rdr_stw_2 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_stw_2->AddVariable("stw_2_v_medium_dQ_dx", &m_stw_2_v_medium_dQ_dx);
         m_rdr_stw_2->AddVariable("stw_2_v_energy",        &m_stw_2_v_energy);
         m_rdr_stw_2->AddVariable("stw_2_v_angle",         &m_stw_2_v_angle);
@@ -214,7 +214,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_stw_3_xml.empty()) {
-        m_rdr_stw_3 = std::make_unique<TMVA::Reader>();
+        m_rdr_stw_3 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_stw_3->AddVariable("stw_3_v_angle",          &m_stw_3_v_angle);
         m_rdr_stw_3->AddVariable("stw_3_v_dir_length",     &m_stw_3_v_dir_length);
         m_rdr_stw_3->AddVariable("stw_3_v_energy",         &m_stw_3_v_energy);
@@ -223,7 +223,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_stw_4_xml.empty()) {
-        m_rdr_stw_4 = std::make_unique<TMVA::Reader>();
+        m_rdr_stw_4 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_stw_4->AddVariable("stw_4_v_angle",  &m_stw_4_v_angle);
         m_rdr_stw_4->AddVariable("stw_4_v_dis",    &m_stw_4_v_dis);
         m_rdr_stw_4->AddVariable("stw_4_v_energy", &m_stw_4_v_energy);
@@ -231,7 +231,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_sig_1_xml.empty()) {
-        m_rdr_sig_1 = std::make_unique<TMVA::Reader>();
+        m_rdr_sig_1 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_sig_1->AddVariable("sig_1_v_angle",               &m_sig_1_v_angle);
         m_rdr_sig_1->AddVariable("sig_1_v_flag_single_shower",  &m_sig_1_v_flag_single_shower);
         m_rdr_sig_1->AddVariable("sig_1_v_energy",              &m_sig_1_v_energy);
@@ -240,7 +240,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_sig_2_xml.empty()) {
-        m_rdr_sig_2 = std::make_unique<TMVA::Reader>();
+        m_rdr_sig_2 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_sig_2->AddVariable("sig_2_v_energy",              &m_sig_2_v_energy);
         m_rdr_sig_2->AddVariable("sig_2_v_shower_angle",        &m_sig_2_v_shower_angle);
         m_rdr_sig_2->AddVariable("sig_2_v_flag_single_shower",  &m_sig_2_v_flag_single_shower);
@@ -250,7 +250,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_lol_1_xml.empty()) {
-        m_rdr_lol_1 = std::make_unique<TMVA::Reader>();
+        m_rdr_lol_1 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_lol_1->AddVariable("lol_1_v_energy",      &m_lol_1_v_energy);
         m_rdr_lol_1->AddVariable("lol_1_v_vtx_n_segs",  &m_lol_1_v_vtx_n_segs);
         m_rdr_lol_1->AddVariable("lol_1_v_nseg",        &m_lol_1_v_nseg);
@@ -259,7 +259,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_lol_2_xml.empty()) {
-        m_rdr_lol_2 = std::make_unique<TMVA::Reader>();
+        m_rdr_lol_2 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_lol_2->AddVariable("lol_2_v_length",             &m_lol_2_v_length);
         m_rdr_lol_2->AddVariable("lol_2_v_angle",              &m_lol_2_v_angle);
         m_rdr_lol_2->AddVariable("lol_2_v_type",               &m_lol_2_v_type);
@@ -271,7 +271,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_tro_1_xml.empty()) {
-        m_rdr_tro_1 = std::make_unique<TMVA::Reader>();
+        m_rdr_tro_1 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_tro_1->AddVariable("tro_1_v_particle_type",       &m_tro_1_v_particle_type);
         m_rdr_tro_1->AddVariable("tro_1_v_flag_dir_weak",       &m_tro_1_v_flag_dir_weak);
         m_rdr_tro_1->AddVariable("tro_1_v_min_dis",             &m_tro_1_v_min_dis);
@@ -286,7 +286,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_tro_2_xml.empty()) {
-        m_rdr_tro_2 = std::make_unique<TMVA::Reader>();
+        m_rdr_tro_2 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_tro_2->AddVariable("tro_2_v_energy",      &m_tro_2_v_energy);
         m_rdr_tro_2->AddVariable("tro_2_v_stem_length", &m_tro_2_v_stem_length);
         m_rdr_tro_2->AddVariable("tro_2_v_iso_angle",   &m_tro_2_v_iso_angle);
@@ -296,7 +296,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_tro_4_xml.empty()) {
-        m_rdr_tro_4 = std::make_unique<TMVA::Reader>();
+        m_rdr_tro_4 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_tro_4->AddVariable("tro_4_v_dir2_mag",              &m_tro_4_v_dir2_mag);
         m_rdr_tro_4->AddVariable("tro_4_v_angle",                 &m_tro_4_v_angle);
         m_rdr_tro_4->AddVariable("tro_4_v_angle1",                &m_tro_4_v_angle1);
@@ -312,7 +312,7 @@ void UbooneNueBDTScorer::init_readers()
     }
 
     if (!m_tro_5_xml.empty()) {
-        m_rdr_tro_5 = std::make_unique<TMVA::Reader>();
+        m_rdr_tro_5 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_tro_5->AddVariable("tro_5_v_max_angle",   &m_tro_5_v_max_angle);
         m_rdr_tro_5->AddVariable("tro_5_v_min_angle",   &m_tro_5_v_min_angle);
         m_rdr_tro_5->AddVariable("tro_5_v_max_length",  &m_tro_5_v_max_length);
@@ -327,7 +327,7 @@ void UbooneNueBDTScorer::init_readers()
     // ---- Final XGBoost reader ----
 
     if (!m_nue_xgboost_xml.empty()) {
-        m_rdr_xgboost = std::make_unique<TMVA::Reader>();
+        m_rdr_xgboost = std::make_unique<TMVA::Reader>("!V:Silent");
         m_rdr_xgboost->AddVariable("match_isFC",                   &m_xgb_match_isFC);
         m_rdr_xgboost->AddVariable("kine_reco_Enu",                &m_xgb_kine_reco_Enu);
         m_rdr_xgboost->AddVariable("cme_mu_energy",                &m_xgb_cme_mu_energy);
