@@ -116,9 +116,9 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
                 if (curr_sg->has_particle_info() && curr_sg->particle_info() &&
                     std::abs(curr_sg->particle_info()->pdg()) == 13) {
                     shower->set_particle_type(curr_sg->particle_info()->pdg());
-                    SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster long muon {} : {}", new_showers.size(), curr_sg->particle_info()->pdg());
+                    SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster long muon {} : {}", new_showers.size(), curr_sg->particle_info()->pdg());
                 } else {
-                    SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster shower {}", new_showers.size());
+                    SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_in_main_cluster: Main-cluster shower {}", new_showers.size());
                 }
                 new_showers.push_back(shower);
                 // BFS does not descend into shower sub-tree
@@ -199,7 +199,7 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
 
         if (n_others >= 2 * n_muons && length_others > 0.33 * length_muons &&
             n_muons > 0 && max_muon_length < 60 * units::cm) {
-            SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_in_main_cluster: Long muon converted to EM shower");
+            SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_in_main_cluster: Long muon converted to EM shower");
             for (auto sg1 : shower_segs) {
                 if (sg1 == max_sg) sg1->set_flags(SegmentFlags::kAvoidMuonCheck);
                 if (sg1->has_particle_info() && sg1->particle_info()) {
@@ -418,7 +418,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
         for (auto& [shower, max_sg] : map_shower_max_sg) {
             if (shower == max_shower) {
                 // Convert to EM shower (particle type 11 = electron)
-                SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_connecting_to_main_vertex: Convert EM shower {}", shower->start_segment()->id());
+                SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_connecting_to_main_vertex: Convert EM shower {}", shower->start_segment()->id());
                 if (shower->start_segment() && shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info()) {
                     shower->start_segment()->particle_info()->set_pdg(11);
                 }
@@ -1108,7 +1108,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         shower->update_particle_type(particle_data, recomb_model);
 
         bool tmp_flag = (shower->start_vertex() == main_vertex);
-        SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
+        SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
             shower->start_segment()->cluster()->get_cluster_id() * 1000 + shower->start_segment()->id(),
             (shower->start_segment()->has_particle_info() && shower->start_segment()->particle_info() ? shower->start_segment()->particle_info()->pdg() : 0),
             shower->get_num_segments(), tmp_flag, pi.min_dis / units::cm);
@@ -1179,7 +1179,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
     }
     
-    SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv_from_vertices: With separated-cluster shower: {}", showers.size());
+    SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_from_vertices: With separated-cluster shower: {}", showers.size());
 }
 
 void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexPtr main_vertex, ShowerVertexMap& map_vertex_in_shower, ShowerSegmentMap& map_segment_in_shower, VertexShowerSetMap& map_vertex_to_shower, ClusterPtrSet& used_shower_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, Graph& graph, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
@@ -1922,7 +1922,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 }
 
                 showers.insert(shower1);
-                SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_in_other_clusters: Create a new low-energy shower: {} MeV", kine_charge / units::MeV);
+                SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_in_other_clusters: Create a new low-energy shower: {} MeV", kine_charge / units::MeV);
                 flag_added = true;
             }
         }
@@ -2300,7 +2300,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
     std::set<ShowerPtr>    updated_showers_set;
 
     for (auto& [sg, shower] : map_merge_seg_shower) {
-        SPDLOG_LOGGER_DEBUG(s_log, "examine_showers: EM shower modification: {} -> {}", shower->start_segment()->id(), sg->id());
+        SPDLOG_LOGGER_TRACE(s_log, "examine_showers: EM shower modification: {} -> {}", shower->start_segment()->id(), sg->id());
         if (!updated_showers_set.count(shower)) {
             updated_showers_vec.push_back(shower);
             updated_showers_set.insert(shower);
@@ -2698,7 +2698,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
             svc[shower_2] = {vtx, 2};
         }
 
-        SPDLOG_LOGGER_DEBUG(s_log, "examine_showers: Pi0 found with mass: {} MeV with {} MeV + {} MeV",
+        SPDLOG_LOGGER_TRACE(s_log, "examine_showers: Pi0 found with mass: {} MeV with {} MeV + {} MeV",
             mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
 
         // Remove all pairs that involve either used shower.
@@ -3119,7 +3119,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower,
                               map_vertex_to_shower, used_shower_clusters);
             
-            SPDLOG_LOGGER_DEBUG(s_log, "examine_showers: Pi0 (displaced vertex) found with mass: {} MeV with {} MeV + {} MeV",
+            SPDLOG_LOGGER_TRACE(s_log, "examine_showers: Pi0 (displaced vertex) found with mass: {} MeV with {} MeV + {} MeV",
                 mass_save / units::MeV, shower_1->get_kine_charge() / units::MeV, shower_2->get_kine_charge() / units::MeV);
         }
     }
@@ -3134,7 +3134,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
             SegmentPtr seg = graph[e].segment;
             if (!seg || seg->cluster() != main_cluster) continue;
             if (seg->fits().size() >= 2) {  // only segments with real fit data
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "shower_clustering_with_nv entry: seg id={} nfits={} nwcpts={} dirsign={} dir_weak={}"
                     " shower_topo={} shower_traj={} pdg={}",
                     seg->id(), seg->fits().size(), seg->wcpts().size(),
@@ -3209,7 +3209,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // has populated the underlying charge data, but before any kinematics calculations.
     // All cal_kine_charge call sites below reuse m_charge_* to avoid repeated O(N_hits) collection.
     collect_charge_maps(track_fitter);
-    SPDLOG_LOGGER_DEBUG(s_log,
+    SPDLOG_LOGGER_TRACE(s_log,
         "shower_clustering_with_nv: collected charge maps U={} V={} W={} hits, {} shower(s) before calc_kine_1",
         m_charge_2d_u.size(), m_charge_2d_v.size(), m_charge_2d_w.size(), showers.size());
 
@@ -3236,7 +3236,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // check_used_shower_cluster_933("shower_clustering_in_other_clusters");
     
     // Calculate shower kinematics again
-    SPDLOG_LOGGER_DEBUG(s_log,
+    SPDLOG_LOGGER_TRACE(s_log,
         "shower_clustering_with_nv: {} shower(s) before calc_kine_2", showers.size());
     calculate_shower_kinematics(showers, vertices_in_long_muon, segments_in_long_muon,
                                 graph, track_fitter, dv, particle_data, recomb_model);
@@ -3269,7 +3269,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
     // check_used_shower_cluster_933("id_pi0_without_vertex");
 
     if (m_perf) {
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "shower_clustering_with_nv timing: "
             "in_main_cluster={:.3f}ms connecting_to_main_vertex={:.3f}ms "
             "from_main_cluster={:.3f}ms from_vertices={:.3f}ms "
@@ -3283,14 +3283,14 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
             t_in_other_clusters.count(), t_calc_kine_2.count(),
             t_examine_showers.count(), t_id_pi0_with_vertex.count(),
             t_id_pi0_without_vertex.count());
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "shower_clustering_with_nv timing: TOTAL={:.3f}ms",
             MS(Clock::now() - t_total).count());
     }
 
     // Debug summary: showers and pi0s
     {
-        SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv: {} shower(s)", showers.size());
+        SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv: {} shower(s)", showers.size());
         int idx = 0;
         for (auto& shower : showers) {
             if (!shower) continue;
@@ -3312,7 +3312,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
             int start_seg_dirsign = start_seg ? start_seg->dirsign() : -99;
             WireCell::Point vtx_pt(0, 0, 0);
             if (start_vtx) vtx_pt = start_vtx->fit().valid() ? start_vtx->fit().point : start_vtx->wcpt().point;
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "shower_clustering_with_nv:   shower[{}] pdg={} flag_shower={} conn={}"
                 " nseg={} ncls={} kine_charge={:.1f}MeV kine_best={:.1f}MeV"
                 " start=({:.1f},{:.1f},{:.1f})cm vtx=({:.1f},{:.1f},{:.1f})cm"
@@ -3326,12 +3326,12 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                 dir.x(), dir.y(), dir.z(), start_seg_dirsign);
         }
 
-        SPDLOG_LOGGER_DEBUG(s_log, "shower_clustering_with_nv: {} pi0(s)", map_pio_id_showers.size());
+        SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv: {} pi0(s)", map_pio_id_showers.size());
         for (auto& [pio_id, pi0_shower_vec] : map_pio_id_showers) {
             auto mass_it = map_pio_id_mass.find(pio_id);
             double mass = mass_it != map_pio_id_mass.end() ? mass_it->second.first : 0.0;
             int    flag = mass_it != map_pio_id_mass.end() ? mass_it->second.second : 0;
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "shower_clustering_with_nv:   pi0[id={}] flag={} mass={:.1f}MeV",
                 pio_id, flag, mass / units::MeV);
             for (size_t i = 0; i < pi0_shower_vec.size(); ++i) {
@@ -3339,7 +3339,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                 if (!s) continue;
                 WireCell::Point  sp  = s->get_start_point();
                 WireCell::Vector dir = s->get_init_dir();
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "shower_clustering_with_nv:     pi0[id={}] shower[{}] pdg={}"
                     " nseg={} kine_charge={:.1f}MeV"
                     " start=({:.1f},{:.1f},{:.1f})cm dir=({:.3f},{:.3f},{:.3f})",

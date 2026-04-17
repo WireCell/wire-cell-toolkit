@@ -65,10 +65,10 @@ public:
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
     
         if (!m_trackfitting_config_file.empty()) {
-            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: Loading TrackFitting config from: {}", m_trackfitting_config_file);
+            SPDLOG_LOGGER_TRACE(s_log, "configure: TaggerCheckSTM: Loading TrackFitting config from: {}", m_trackfitting_config_file);
             load_trackfitting_config(m_trackfitting_config_file);
         } else {
-            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: No TrackFitting config file specified, using defaults");
+            SPDLOG_LOGGER_TRACE(s_log, "configure: TaggerCheckSTM: No TrackFitting config file specified, using defaults");
         }
 
     }
@@ -115,7 +115,7 @@ public:
             }
         }
 
-        SPDLOG_LOGGER_DEBUG(s_log, "visit: TaggerCheckSTM: Found {} main cluster; {} associated clusters.",
+        SPDLOG_LOGGER_TRACE(s_log, "visit: TaggerCheckSTM: Found {} main cluster; {} associated clusters.",
             (main_cluster ? 1 : 0), associated_clusters.size());
 
         if (!main_cluster) return;
@@ -127,7 +127,7 @@ public:
             main_cluster->set_flag(Flags::STM);
         }
 
-        SPDLOG_LOGGER_DEBUG(s_log, "visit: TaggerCheckSTM: cluster {} → STM={} TGM={}",
+        SPDLOG_LOGGER_TRACE(s_log, "visit: TaggerCheckSTM: cluster {} → STM={} TGM={}",
             main_cluster->ident(),
             main_cluster->get_flag(Flags::STM),
             main_cluster->get_flag(Flags::TGM));
@@ -154,7 +154,7 @@ public:
             geo_point_t first_wcp = boundary_point_first;
             geo_point_t last_wcp = boundary_point_second;
 
-            SPDLOG_LOGGER_DEBUG(s_log, "visit: End Points: {} {}", first_wcp, last_wcp);
+            SPDLOG_LOGGER_TRACE(s_log, "visit: End Points: {} {}", first_wcp, last_wcp);
             // last_wcp = geo_point_t(215.532, -95.1674, 211.193);
 
             auto path_points = do_rough_path(*main_cluster, first_wcp, last_wcp);
@@ -222,7 +222,7 @@ public:
                 new_wcpts.push_back({WireCell::Point(212.053*units::cm, -101.827*units::cm, 212.95*units::cm)});
                 new_wcpts.push_back({WireCell::Point(212.053*units::cm, -103.213*units::cm, 212.95*units::cm)});
                 segment->wcpts(new_wcpts);
-                SPDLOG_LOGGER_DEBUG(s_log, "visit: Hacked segment wcpts with {} points", new_wcpts.size());
+                SPDLOG_LOGGER_TRACE(s_log, "visit: Hacked segment wcpts with {} points", new_wcpts.size());
             }
 
 
@@ -370,13 +370,13 @@ public:
             auto break_results = break_segment(*pr_graph, segment, break_p, particle_data(), m_recomb_model, m_dv);
             bool break_success = std::get<0>(break_results);
             if (break_success){
-                SPDLOG_LOGGER_DEBUG(s_log, "visit: Break segment successful.");
+                SPDLOG_LOGGER_TRACE(s_log, "visit: Break segment successful.");
                 auto seg1 = std::get<1>(break_results).first;
                 auto seg2 = std::get<1>(break_results).second;
                 auto vtx_break = std::get<2>(break_results);
-                SPDLOG_LOGGER_DEBUG(s_log, "visit:  Segment 1 fits size: {}", seg1->fits().size());
-                SPDLOG_LOGGER_DEBUG(s_log, "visit:  Segment 2 fits size: {}", seg2->fits().size());
-                SPDLOG_LOGGER_DEBUG(s_log, "visit:  Break vertex position: {} {}", vtx_break->fit().point, vtx_break->wcpt().point);
+                SPDLOG_LOGGER_TRACE(s_log, "visit:  Segment 1 fits size: {}", seg1->fits().size());
+                SPDLOG_LOGGER_TRACE(s_log, "visit:  Segment 2 fits size: {}", seg2->fits().size());
+                SPDLOG_LOGGER_TRACE(s_log, "visit:  Break vertex position: {} {}", vtx_break->fit().point, vtx_break->wcpt().point);
 
             //     std::set<std::shared_ptr<PR::Segment>> segs;
             //     segs.insert(seg1);
@@ -532,14 +532,14 @@ private:
                 try {
                     double value = root[param_name].asDouble();
                     m_track_fitter.set_parameter(param_name, value);
-                    SPDLOG_LOGGER_DEBUG(s_log, "load_trackfitting_config: TaggerCheckSTM: Set {} = {}", param_name, value);
+                    SPDLOG_LOGGER_TRACE(s_log, "load_trackfitting_config: TaggerCheckSTM: Set {} = {}", param_name, value);
                 } catch (const std::exception& e) {
                     std::cerr << "TaggerCheckSTM: Failed to set parameter " << param_name 
                             << ": " << e.what() << std::endl;
                 }
             }
             
-            SPDLOG_LOGGER_DEBUG(s_log, "load_trackfitting_config: TaggerCheckSTM: Successfully loaded TrackFitting configuration");
+            SPDLOG_LOGGER_TRACE(s_log, "load_trackfitting_config: TaggerCheckSTM: Successfully loaded TrackFitting configuration");
             
         } catch (const std::exception& e) {
             std::cerr << "TaggerCheckSTM: Exception loading config: " << e.what() << std::endl;
@@ -692,7 +692,7 @@ private:
 
             // First breakpoint condition: Low charge with significant angles
             if (min_dQ_dx < 1000 && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
-                SPDLOG_LOGGER_DEBUG(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
+                SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
                 flag_crawl = true;
                 save_i = i;
                 break;
@@ -716,7 +716,7 @@ private:
                 // Skip if the angle is too small (nearly straight line)
                 if (angle3 < 20) continue;
                 
-                SPDLOG_LOGGER_DEBUG(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), angle3, min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
+                SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), angle3, min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
                 flag_crawl = true;
                 save_i = i;
                 break;
@@ -840,7 +840,7 @@ private:
                                 std::pow(steiner_y[curr_index] - steiner_y[last_index], 2) + 
                                 std::pow(steiner_z[curr_index] - steiner_z[last_index], 2));
 
-            SPDLOG_LOGGER_DEBUG(s_log, "adjust_rough_path: First, Center: {} {} {} {} {} {} {}", steiner_x[first_index], steiner_y[first_index], steiner_z[first_index], steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index], dis/units::cm);
+            SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: First, Center: {} {} {} {} {} {} {}", steiner_x[first_index], steiner_y[first_index], steiner_z[first_index], steiner_x[curr_index], steiner_y[curr_index], steiner_z[curr_index], dis/units::cm);
             
             if (dis > 1.0 * units::cm) {
                 // Find path from first to current point
@@ -903,7 +903,7 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
+            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: TaggerCheckSTM: No FiducialUtils available in find_first_kink");
             return static_cast<int>(segment->fits().size()); // no-kink sentinel
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
@@ -1118,7 +1118,7 @@ private:
                         v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
                         
                         if (i + 2 < dq_size) {
-                            SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3, pu.at(i), pv.at(i), pw.at(i));
+                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3, pu.at(i), pv.at(i), pw.at(i));
                             return max_numbers.at(i);
                         }
                     }
@@ -1217,7 +1217,7 @@ private:
                     
                     if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
                         if (i+2<dq_size){
-                            SPDLOG_LOGGER_DEBUG(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3);
+                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3);
                             return max_numbers.at(i);
                         }
                     }
@@ -1234,7 +1234,7 @@ private:
         // Get FiducialUtils from the grouping
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: TaggerCheckSTM: No FiducialUtils available");
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: TaggerCheckSTM: No FiducialUtils available");
             return false; // cannot determine → assume no proton, allow STM
         }
         const auto transform = m_pcts->pc_transform(cluster.get_scope_transform(cluster.get_default_scope()));
@@ -1337,7 +1337,7 @@ private:
                 if ((p2.angle(p1)/3.1415926*180. < 20 || 
                     (p3.angle(p1)/3.1415926*180. < 15 && p3.magnitude() > 4*units::cm && p2.angle(p1)/3.1415926*180. < 35)) &&
                     seg_dQ_dx > 0.8) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: Delta Ray Dir: {} {} {} {} {}", p2.angle(p1)/3.1415926*180., p3.angle(p1)/3.1415926*180., p3.magnitude()/units::cm, dis/units::cm, seg_length/units::cm);
+                    SPDLOG_LOGGER_TRACE(s_log, "detect_proton: Delta Ray Dir: {} {} {} {} {}", p2.angle(p1)/3.1415926*180., p3.angle(p1)/3.1415926*180., p3.magnitude()/units::cm, dis/units::cm, seg_length/units::cm);
                     return true;
                 }
             }
@@ -1464,7 +1464,7 @@ private:
             double ratio3 = std::accumulate(vec_yp.begin(), vec_yp.end(), 0.0) / 
                         (std::accumulate(muon_ref_p.begin(), muon_ref_p.end(), 0.0) + 1e-9);
 
-            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/50e3, dQ_dx.size() - max_bin);
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/50e3, dQ_dx.size() - max_bin);
 
             if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/50e3 > 2.3 &&
                 (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {
@@ -1478,7 +1478,7 @@ private:
 
             // Check for proton with very high dQ_dx
             double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / 50000.;
-            SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/50e3, ks3, ratio3);
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/50e3, ks3, ratio3);
                     
             if (track_medium_dQ_dx < 1.0 && dQ_dx.at(max_bin)/50e3 > 3.5){
                 if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) return true;
@@ -1646,7 +1646,7 @@ private:
         double ratio2 = std::accumulate(ref_flat.begin(), ref_flat.end(), 0.0) / 
                         (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
 
-        SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/50000.);
+        SPDLOG_LOGGER_TRACE(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/50000.);
 
         if (ks1 - ks2 >= 0.0) return false;
         if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 && 
@@ -1694,7 +1694,7 @@ private:
         auto& cluster = *segment->cluster();
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
-            SPDLOG_LOGGER_DEBUG(s_log, "eval_stm: TaggerCheckSTM: No FiducialUtils available");
+            SPDLOG_LOGGER_TRACE(s_log, "eval_stm: TaggerCheckSTM: No FiducialUtils available");
             return false;
         }
         auto arrs = build_eval_arrays(segment);
@@ -2067,7 +2067,7 @@ private:
         // Apply the final condition from prototype
         if (number_clusters > 0 &&
             (number_clusters/3. + total_length/(35*units::cm)/number_clusters) >= 1) {
-            SPDLOG_LOGGER_DEBUG(s_log, "check_other_clusters: Other clusters: {} {}", number_clusters, (number_clusters/3. + total_length/(35*units::cm)/number_clusters));
+            SPDLOG_LOGGER_TRACE(s_log, "check_other_clusters: Other clusters: {} {}", number_clusters, (number_clusters/3. + total_length/(35*units::cm)/number_clusters));
             return true;
         }
 
@@ -2151,7 +2151,7 @@ private:
      * @return true if cluster should be flagged as STM
      */
     bool check_stm_conditions(Cluster& cluster, std::vector<Cluster*> associated_clusters) const {
-        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TaggerCheckSTM: Checking cluster with {} wire plane IDs.",
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TaggerCheckSTM: Checking cluster with {} wire plane IDs.",
             cluster.grouping()->wpids().size());
 
         // Early exit if no steiner graph points
@@ -2164,7 +2164,7 @@ private:
         auto fc_result = Facade::cluster_fc_check(cluster, m_dv);
 
         if (fc_result.is_fc) {
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: STMTagger: Mid Point: A");
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STMTagger: Mid Point: A");
             return false;
         }
 
@@ -2207,7 +2207,7 @@ private:
             return std::abs(pt.x() - anode_x);
         };
 
-        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: end_point: {} {}", temp_set.size(), candidate_exit_wcps.size());
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: end_point: {} {}", temp_set.size(), candidate_exit_wcps.size());
 
         // Determine first and last points for further analysis
         geo_point_t first_wcp, last_wcp;
@@ -2234,7 +2234,7 @@ private:
                 double angle_between = acos(dir1.dot(dir2) / (dis1 * dis2));
                 
                 if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point: B");
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: B");
                     return false;
                 } else {
                     if (dis1 < dis2) {
@@ -2244,14 +2244,14 @@ private:
                     }
                 }
             } else {
-                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point: C");
+                SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: C");
                 return false;
             }
         }
 
         bool flag_other_clusters = check_other_clusters(cluster, associated_clusters);
 
-        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: STM analysis: flag_double_end={}, flag_other_clusters={}", flag_double_end, flag_other_clusters);
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STM analysis: flag_double_end={}, flag_other_clusters={}", flag_double_end, flag_other_clusters);
 
         // Unified forward/backward pass.
         // Returns nullopt (continue), false (not STM), or true (STM/TGM, flag already set).
@@ -2263,9 +2263,9 @@ private:
         auto run_pass = [&](const geo_point_t& start_wcp, const geo_point_t& end_wcp,
                             bool is_forward) -> std::optional<bool> {
             if (is_forward && flag_double_end)
-                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Forward check!");
+                SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Forward check!");
             if (!is_forward)
-                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Backward check!");
+                SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Backward check!");
 
             // do_rough_path takes non-const refs; use local copies.
             geo_point_t start_copy = start_wcp;
@@ -2279,7 +2279,7 @@ private:
                 if (is_forward && segment->fits().size() <= 3) return false;
             }
 
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Finish first round of fitting");
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Finish first round of fitting");
 
             geo_point_t mid_point(0, 0, 0);
             auto adjusted_path_points = adjust_rough_path(cluster, mid_point);
@@ -2289,7 +2289,7 @@ private:
             m_track_fitter.add_segment(adjusted_segment);
             m_track_fitter.do_single_tracking(adjusted_segment);
 
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Finish second round of fitting");
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Finish second round of fitting");
 
             std::vector<double> dQ, dx;
             std::vector<WireCell::Point> pts;
@@ -2316,7 +2316,7 @@ private:
             for (size_t i = 0; i < first_loop_end; i++) { exit_L += dx[i]; exit_Q += dQ[i]; }
             for (size_t i = second_loop_start; i < dx_size; i++) { left_L += dx[i]; left_Q += dQ[i]; }
 
-            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Left: {} {} {} {}",
+            SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Left: {} {} {} {}",
                 exit_L/units::cm, left_L/units::cm,
                 (left_Q/(left_L/units::cm+1e-9))/50e3,
                 (exit_Q/(exit_L/units::cm+1e-9))/50e3);
@@ -2343,7 +2343,7 @@ private:
                     }
                 }
                 if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                     cluster.set_flag(Flags::TGM);
                     return true;
                 }
@@ -2356,7 +2356,7 @@ private:
                 dir_vec *= -1;
                 if (!fiducial_utils->check_dead_volume(cluster, p1, dir_vec, 1*units::cm)) {
                     if (exit_L < 3*units::cm || left_L < 3*units::cm) {
-                        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
+                        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                         cluster.set_flag(Flags::TGM);
                         return true;
                     }
@@ -2366,12 +2366,12 @@ private:
             // STM evaluation
             if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)) {
                 if (!is_forward) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}",
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}",
                         mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
                     return false;
                 }
                 if (!flag_double_end) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}",
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}",
                         mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
                     return false;
                 }
@@ -2448,7 +2448,7 @@ private:
                 std::vector<std::shared_ptr<PR::Segment>> fitted_segments{adjusted_segment};
                 search_other_tracks(cluster, fitted_segments);
                 if (check_other_tracks(cluster, fitted_segments)) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point Tracks");
+                    SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point Tracks");
                     return false;
                 }
                 if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
@@ -2464,7 +2464,7 @@ private:
             if (auto bwd = run_pass(last_wcp, first_wcp, false); bwd.has_value()) return *bwd;
         }
 
-        SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: Mid Point ");
+        SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point ");
 
 
 

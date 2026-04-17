@@ -53,7 +53,7 @@ public:
         // Get the specified grouping (default: "live")
         auto groupings = ensemble.with_name(m_grouping_name);
         if (groupings.empty()) {
-            log->debug("No '{}' grouping found", m_grouping_name);
+            log->trace("No '{}' grouping found", m_grouping_name);
             return;
         }
 
@@ -68,7 +68,7 @@ public:
             }
         }
 
-        log->debug("Found {} beam-flash flagged clusters", filtered_clusters.size());
+        log->trace("Found {} beam-flash flagged clusters", filtered_clusters.size());
 
         // Process each filtered cluster
         for (auto* cluster : filtered_clusters) {
@@ -81,7 +81,7 @@ public:
                 ++nassoc;
             }
         }
-        log->debug("Associated clusters: {}", nassoc);
+        log->trace("Associated clusters: {}", nassoc);
     }
 
 private:
@@ -104,10 +104,10 @@ private:
 
             // Determine which component is the "main" cluster
             auto old_cc_array = cluster->get_pcarray(m_array_name, m_pcarray_name);
-            log->debug("old_cc_array: {} clusters", std::set<int>(old_cc_array.begin(), old_cc_array.end()).size());
+            log->trace("old_cc_array: {} clusters", std::set<int>(old_cc_array.begin(), old_cc_array.end()).size());
 
             auto b2groupid = cluster->connected_blobs(dv, pcts, m_graph_name);
-            log->debug("examine in recovering: b2groupid has {} components",
+            log->trace("examine in recovering: b2groupid has {} components",
                        std::set<int>(b2groupid.begin(), b2groupid.end()).size());
             bool flag_largest = false;
             if (old_cc_array.size() == b2groupid.size()) {

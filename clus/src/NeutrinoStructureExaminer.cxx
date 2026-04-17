@@ -412,7 +412,7 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
                 
                 // Check if segments are nearly collinear (small 3cm angle)
                 if (angle_3cm < 27) {
-                    SPDLOG_LOGGER_DEBUG(s_log, "examine_structure: Cluster: {} Merge two segments into one according to angle {}° (10cm) and {}° (3cm)", cluster.ident(), angle_10cm, angle_3cm);
+                    SPDLOG_LOGGER_TRACE(s_log, "examine_structure: Cluster: {} Merge two segments into one according to angle {}° (10cm) and {}° (3cm)", cluster.ident(), angle_10cm, angle_3cm);
                     
                     // Merge the two segments by combining their WCPoint lists.
                     // Use graph topology to determine orientation — i.e. which wcpt
@@ -680,7 +680,7 @@ bool PatternAlgorithms::examine_structure_4(VertexPtr vertex, bool flag_final_ve
             wcp_list.push_back(end_wcp);
         }
         
-        SPDLOG_LOGGER_DEBUG(s_log, "examine_structure: Cluster: {} Add a track to the main vertex, {} points", cluster.ident(), wcp_list.size());
+        SPDLOG_LOGGER_TRACE(s_log, "examine_structure: Cluster: {} Add a track to the main vertex, {} points", cluster.ident(), wcp_list.size());
         
         // Create new segment
         auto sg1 = make_segment();
@@ -2681,7 +2681,7 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             if ((dist_front_front < 0.1*units::cm && dist_back_back < 0.1*units::cm) ||
                 (dist_front_back < 0.1*units::cm && dist_back_front < 0.1*units::cm)) {
                 // Segments are identical, delete one
-                s_log->debug("examine_structure_final_1: cluster {} removing duplicate segment at vtx ({:.2f},{:.2f},{:.2f})",
+                s_log->trace("examine_structure_final_1: cluster {} removing duplicate segment at vtx ({:.2f},{:.2f},{:.2f})",
                     cluster.ident(), vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
                 remove_segment(graph, sg2);
                 flag_update = true;
@@ -2740,7 +2740,7 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             if (flag_replace) {
                 // Use helper function to merge the two segments
                 if (merge_two_segments_into_one(graph, sg1, vtx, sg2, dv)) {
-                    s_log->debug("examine_structure_final_1: cluster {} merged two segments through vtx ({:.2f},{:.2f},{:.2f})",
+                    s_log->trace("examine_structure_final_1: cluster {} merged two segments through vtx ({:.2f},{:.2f},{:.2f})",
                         cluster.ident(), vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
                     flag_update = true;
                     flag_continue = true;
@@ -2893,7 +2893,7 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             // Delete sg1 and vtx
             remove_segment(graph, sg1);
             remove_vertex(graph, vtx);
-            s_log->debug("examine_structure_final_1p: cluster {} merged short sg1 ({:.2f} cm) into sg2 at main_vtx ({:.2f},{:.2f},{:.2f})",
+            s_log->trace("examine_structure_final_1p: cluster {} merged short sg1 ({:.2f} cm) into sg2 at main_vtx ({:.2f},{:.2f},{:.2f})",
                 cluster.ident(), length1/units::cm,
                 main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm);
             flag_update = true;
@@ -2991,7 +2991,7 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             // Delete sg2 and vtx
             remove_segment(graph, sg2);
             remove_vertex(graph, vtx);
-            s_log->debug("examine_structure_final_1p: cluster {} merged short sg2 ({:.2f} cm) into sg1 at main_vtx ({:.2f},{:.2f},{:.2f})",
+            s_log->trace("examine_structure_final_1p: cluster {} merged short sg2 ({:.2f} cm) into sg1 at main_vtx ({:.2f},{:.2f},{:.2f})",
                 cluster.ident(), length2/units::cm,
                 main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm);
             flag_update = true;
@@ -3168,7 +3168,7 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
                 
                 // Perform the merge
                 if (flag_update) {
-                    s_log->debug("examine_structure_final_2: cluster {} merging vtx ({:.2f},{:.2f},{:.2f}) into main_vtx ({:.2f},{:.2f},{:.2f}) dis={:.2f} cm",
+                    s_log->trace("examine_structure_final_2: cluster {} merging vtx ({:.2f},{:.2f},{:.2f}) into main_vtx ({:.2f},{:.2f},{:.2f}) dis={:.2f} cm",
                         cluster.ident(),
                         vtx1_point.x()/units::cm, vtx1_point.y()/units::cm, vtx1_point.z()/units::cm,
                         main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm,
@@ -3322,7 +3322,7 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                 
                 // Perform the merge
                 if (flag_update) {
-                    s_log->debug("examine_structure_final_3: cluster {} merging main_vtx ({:.2f},{:.2f},{:.2f}) into vtx ({:.2f},{:.2f},{:.2f}) dis={:.2f} cm",
+                    s_log->trace("examine_structure_final_3: cluster {} merging main_vtx ({:.2f},{:.2f},{:.2f}) into vtx ({:.2f},{:.2f},{:.2f}) dis={:.2f} cm",
                         cluster.ident(),
                         main_vtx_point.x()/units::cm, main_vtx_point.y()/units::cm, main_vtx_point.z()/units::cm,
                         vtx1_point.x()/units::cm, vtx1_point.y()/units::cm, vtx1_point.z()/units::cm,

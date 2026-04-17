@@ -41,12 +41,12 @@ void Graphs::connect_graph(const Cluster& cluster, Weighted::Graph& graph)
     /// DEBUGONLY:
     if (0) {
         for (size_t i = 0; i != num; i++) {
-            { std::ostringstream oss; oss << *pt_clouds.at(i); SPDLOG_LOGGER_DEBUG(s_log, "connect_graph: {}", oss.str()); }
+            { std::ostringstream oss; oss << *pt_clouds.at(i); SPDLOG_LOGGER_TRACE(s_log, "connect_graph: {}", oss.str()); }
             std::string idx_str;
             for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
                 idx_str += std::to_string(pt_clouds_global_indices.at(i).at(j)) + " ";
             }
-            SPDLOG_LOGGER_DEBUG(s_log, "connect_graph: global indices: {}", idx_str);
+            SPDLOG_LOGGER_TRACE(s_log, "connect_graph: global indices: {}", idx_str);
         }
     }
 

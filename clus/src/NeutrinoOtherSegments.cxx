@@ -105,7 +105,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             }
         
 
-        // SPDLOG_LOGGER_DEBUG(
+        // SPDLOG_LOGGER_TRACE(
         //     s_log,
         //     "find_other_segments:{}: index {}; point {}: flag_tagged={}, min_3d_dis={:.2f} cm, min_dis_u={:.2f} cm, min_dis_v={:.2f} cm, min_dis_w={:.2f} cm, search_range={:.2f} cm, scaling_2d={:.2f}, dead_chs_u={}, dead_chs_v={}, dead_chs_w={}",
         //     __func__, i, p, (bool)flag_tagged[i],
@@ -134,7 +134,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
     
     if (terminals.empty()) return;
 
-    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: existing_segments={}, N={}, num_tagged={}, terminals={}", existing_segments.size(), N, std::count(flag_tagged.begin(), flag_tagged.end(), true), terminals.size());
+    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: existing_segments={}, N={}, num_tagged={}, terminals={}", existing_segments.size(), N, std::count(flag_tagged.begin(), flag_tagged.end(), true), terminals.size());
 
 
     // Step 3: Compute Voronoi diagram
@@ -236,9 +236,9 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         sep_clusters[component[i]].push_back(terminals[i]);
     }
 
-    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: num_components={}",  num_components);
+    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: num_components={}",  num_components);
 
-    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Start tracks --- # of Vertices: {}; # of Edges: {}", boost::num_vertices(graph), boost::num_edges(graph));
+    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Start tracks --- # of Vertices: {}; # of Edges: {}", boost::num_vertices(graph), boost::num_edges(graph));
 
     
     // Step 8: Analyze each cluster and filter
@@ -562,7 +562,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         // std::cout << "Cluster " << cluster.get_cluster_id() << " New segment: length = " << length / units::cm << " cm, direct_length = " << direct_length / units::cm 
                             //   << " cm, medium_dQ_dx = " << medium_dQ_dx / (units::MeV / units::cm) << " MeV/cm" << " " << v1_fit_pt << " " << v2_fit_pt << std::endl;
                     }
-                    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Other tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+                    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Other tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
                 } else {
                     // Endpoints at same position – discard fresh vertices
@@ -575,7 +575,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                 // so do NOT call add_segment here.
                 bool flag_parallel = false;
 
-                SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Middle tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+                SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Middle tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
                 Facade::geo_vector_t dir(v1_fit_pt.x() - v2_fit_pt.x(),
                                         v1_fit_pt.y() - v2_fit_pt.y(),
@@ -661,7 +661,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
 
                 if (!flag_parallel) {
                     // Truly isolated residual – remove vertices from graph; segment was never added
-                    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Isolated residual segment   # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+                    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Isolated residual segment   # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
                     remove_vertex(graph, v1);
                     remove_vertex(graph, v2);
@@ -681,7 +681,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                         } else {
                             new_segments_1.push_back(new_seg);
                         }
-                        // SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Other tracks -- isochronous connection, length={} cm", cluster.get_cluster_id(), length / units::cm);
+                        // SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Other tracks -- isochronous connection, length={} cm", cluster.get_cluster_id(), length / units::cm);
                     }
                 }
             }
@@ -764,7 +764,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         break_segments(graph, track_fitter, dv, new_segments_1, 2.0 * units::cm);
         break_segments(graph, track_fitter, dv, new_segments);
     }
-    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} End tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} End tracks --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
 }
 
@@ -841,7 +841,7 @@ PatternAlgorithms::check_end_point(Graph& graph,
                                    double sg_cut1,
                                    double sg_cut2)
 {
-    if (tracking_path.size() < 2) SPDLOG_LOGGER_DEBUG(s_log, "check_end_point: {}: vector size wrong!", __func__);
+    if (tracking_path.size() < 2) SPDLOG_LOGGER_TRACE(s_log, "check_end_point: {}: vector size wrong!", __func__);
 
     const int ncount = 5;
     Facade::geo_point_t test_p = flag_front ? tracking_path.front() : tracking_path.back();
@@ -1001,7 +1001,7 @@ VertexPtr PatternAlgorithms::find_vertex_other_segment(Graph& graph, Facade::Clu
         }
 
         if (!start_v || !end_v) {
-            SPDLOG_LOGGER_DEBUG(s_log, "find_vertex_other_segment: {}: Error in finding vertices for a segment", __func__);
+            SPDLOG_LOGGER_TRACE(s_log, "find_vertex_other_segment: {}: Error in finding vertices for a segment", __func__);
             return v1;
         }
 
@@ -1170,7 +1170,7 @@ bool PatternAlgorithms::modify_vertex_isochronous(Graph& graph, Facade::Cluster&
     remove_vertex(graph, v1);
     add_segment(graph, sg, vtx, v2);
     flag = true;
-    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Shift a isochronous vertex --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Shift a isochronous vertex --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
     return flag;
 }
@@ -1303,8 +1303,8 @@ bool PatternAlgorithms::modify_segment_isochronous(Graph& graph, Facade::Cluster
 
     remove_segment(graph, sg1);
 
-    // SPDLOG_LOGGER_DEBUG(s_log, "modify_segment_isochronous: {}: Modify segment for adding a segment in isochronous case", __func__);
-    SPDLOG_LOGGER_DEBUG(s_log, "find_other_segments: Cluster {} Modify segment for adding a segment in isochronous case --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
+    // SPDLOG_LOGGER_TRACE(s_log, "modify_segment_isochronous: {}: Modify segment for adding a segment in isochronous case", __func__);
+    SPDLOG_LOGGER_TRACE(s_log, "find_other_segments: Cluster {} Modify segment for adding a segment in isochronous case --- # of Vertices: {}; # of Edges: {}", cluster.get_cluster_id(), boost::num_vertices(graph), boost::num_edges(graph));
 
     return flag;
 }

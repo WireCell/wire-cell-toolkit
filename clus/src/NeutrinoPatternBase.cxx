@@ -360,7 +360,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
                 std::swap(first_pt, second_pt);
             }
         }
-        SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: main cluster, flag_back_search={} -> start({:.2f},{:.2f},{:.2f})",
+        SPDLOG_LOGGER_TRACE(s_log, "init_first_segment: main cluster, flag_back_search={} -> start({:.2f},{:.2f},{:.2f})",
                             flag_back_search, first_pt.x(), first_pt.y(), first_pt.z());
     } else if (main_cluster) {
         // Non-main cluster: start from the point closest to main cluster
@@ -376,7 +376,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
             if (dis2 < dis1) {
                 std::swap(first_pt, second_pt);
             }
-            SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: non-main cluster, dis_A={:.2f} dis_B={:.2f} -> start({:.2f},{:.2f},{:.2f})",
+            SPDLOG_LOGGER_TRACE(s_log, "init_first_segment: non-main cluster, dis_A={:.2f} dis_B={:.2f} -> start({:.2f},{:.2f},{:.2f})",
                                 dis1, dis2, first_pt.x(), first_pt.y(), first_pt.z());
         }
     } else {
@@ -389,7 +389,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         }
     }
     
-    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: raw boundary pts  A({:.2f},{:.2f},{:.2f})  B({:.2f},{:.2f},{:.2f})  flag_back_search={}",
+    SPDLOG_LOGGER_TRACE(s_log, "init_first_segment: raw boundary pts  A({:.2f},{:.2f},{:.2f})  B({:.2f},{:.2f},{:.2f})  flag_back_search={}",
                         first_pt.x(), first_pt.y(), first_pt.z(),
                         second_pt.x(), second_pt.y(), second_pt.z(),
                         flag_back_search);
@@ -403,7 +403,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     v2->cluster(&cluster);
 
     auto seg = create_segment_from_vertices(graph, cluster, v1, v2, dv);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: do shortest path took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "init_first_segment timing: do shortest path took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
 
     if (!seg) {
@@ -411,19 +411,19 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         remove_vertex(graph, v2);
         return nullptr;
     }
-    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: Dijkstra path  npts={}", seg->wcpts().size());
+    SPDLOG_LOGGER_TRACE(s_log, "init_first_segment: Dijkstra path  npts={}", seg->wcpts().size());
     // for (size_t i = 0; i < seg->wcpts().size(); ++i) {
-    //     SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
+    //     SPDLOG_LOGGER_TRACE(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
     //                         seg->wcpts()[i].point.x(), seg->wcpts()[i].point.y(), seg->wcpts()[i].point.z());
     // }
 
 
     // perform fitting ...
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: create segment and prepare data took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "init_first_segment timing: create segment and prepare data took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
     track_fitter.add_segment(seg);
     track_fitter.do_single_tracking(seg, true, true, false, false, &cluster);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: do single_track fitting took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "init_first_segment timing: do single_track fitting took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     t0 = IFS_Clock::now();
 
     const auto& fine_path = track_fitter.get_fine_tracking_path();
@@ -434,9 +434,9 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     const auto& pw_vec = track_fitter.get_pw();
     const auto& pt_vec = track_fitter.get_pt();
     const auto& chi2_vec = track_fitter.get_reduced_chi2();
-    SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment: fitted path     npts={}", fine_path.size());
+    SPDLOG_LOGGER_TRACE(s_log, "init_first_segment: fitted path     npts={}", fine_path.size());
     // for (size_t i = 0; i < fine_path.size(); ++i) {
-    //     SPDLOG_LOGGER_DEBUG(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
+    //     SPDLOG_LOGGER_TRACE(s_log, "  [{}] ({:.2f},{:.2f},{:.2f})", i, 
     //                         fine_path[i].first.x(), fine_path[i].first.y(), fine_path[i].first.z());
     // }
 
@@ -481,7 +481,7 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         remove_vertex(graph, v2);
         return nullptr;
     }
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "init_first_segment timing: after fit assignment took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "init_first_segment timing: after fit assignment took {} ms", IFS_MS(IFS_Clock::now() - t0).count());
     
     return seg;
 }
@@ -903,7 +903,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
             auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
 
-            if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments 0: cluster={} test_start_p=({:.2f},{:.2f},{:.2f}) kink=({:.2f},{:.2f},{:.2f}) dir1=({:.2f},{:.2f},{:.2f}) dir2=({:.2f},{:.2f},{:.2f}) flag_continue={}",
+            if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "break_segments 0: cluster={} test_start_p=({:.2f},{:.2f},{:.2f}) kink=({:.2f},{:.2f},{:.2f}) dir1=({:.2f},{:.2f},{:.2f}) dir2=({:.2f},{:.2f},{:.2f}) flag_continue={}",
                 cluster->get_cluster_id(),
                 test_start_p.x(), test_start_p.y(), test_start_p.z(),
                 kink_point.x(), kink_point.y(), kink_point.z(),
@@ -931,7 +931,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     double dot_rev = dir1_geo.dot(dir1_prev);
                     if (dot_rev < -0.5) {
                         Facade::geo_point_t half_pt = walk_hist[walk_hist.size() / 2];
-                        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log,
+                        if (m_perf) SPDLOG_LOGGER_TRACE(s_log,
                             "break_segments walk_halfway: cluster={} dot(dir1,dir1_prev)={:.3f} "
                             "walk_size={} replacing break_pt ({:.2f},{:.2f},{:.2f}) with halfway ({:.2f},{:.2f},{:.2f})",
                             cluster->get_cluster_id(), dot_rev, walk_hist.size(),
@@ -949,7 +949,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
 
                 break_wcp = break_pt;
 
-                if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments 1: cluster={} kink=({:.2f},{:.2f},{:.2f}) break_pt=({:.2f},{:.2f},{:.2f}) break_idx={} flag_continue={}",
+                if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "break_segments 1: cluster={} kink=({:.2f},{:.2f},{:.2f}) break_pt=({:.2f},{:.2f},{:.2f}) break_idx={} flag_continue={}",
                     cluster->get_cluster_id(),
                     kink_geo.x(), kink_geo.y(), kink_geo.z(),
                     break_pt.x(), break_pt.y(), break_pt.z(),
@@ -1009,7 +1009,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             t_proto_break_tracks += BS_MS(BS_Clock::now() - t_op_pbt); }
             
             if (flag_break) {
-                if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments: cluster={} flag_break={} list1_front=({:.2f},{:.2f},{:.2f}) list1_back=({:.2f},{:.2f},{:.2f}) list2_front=({:.2f},{:.2f},{:.2f}) list2_back=({:.2f},{:.2f},{:.2f})",
+                if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "break_segments: cluster={} flag_break={} list1_front=({:.2f},{:.2f},{:.2f}) list1_back=({:.2f},{:.2f},{:.2f}) list2_front=({:.2f},{:.2f},{:.2f}) list2_back=({:.2f},{:.2f},{:.2f})",
                     cluster->get_cluster_id(), flag_break,
                     wcps_list1.front().x(), wcps_list1.front().y(), wcps_list1.front().z(),
                     wcps_list1.back().x(), wcps_list1.back().y(), wcps_list1.back().z(),
@@ -1131,12 +1131,12 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
 
    
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments timing: segment_search_kink={:.3f}ms proto_extend_point={:.3f}ms proto_break_tracks={:.3f}ms replace_segment_and_vertex={:.3f}ms break_segment_into_two={:.3f}ms do_multi_tracking={:.3f}ms",
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "break_segments timing: segment_search_kink={:.3f}ms proto_extend_point={:.3f}ms proto_break_tracks={:.3f}ms replace_segment_and_vertex={:.3f}ms break_segment_into_two={:.3f}ms do_multi_tracking={:.3f}ms",
         t_segment_search_kink.count(), t_proto_extend_point.count(), t_proto_break_tracks.count(),
         t_replace_segment_and_vertex.count(), t_break_segment_into_two.count(), t_do_multi_tracking.count());
 
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "break_segments: cluster={} break tracks -- # of Vertices: {}; # of Segments: {}",
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "break_segments: cluster={} break tracks -- # of Vertices: {}; # of Segments: {}",
         11, boost::num_vertices(graph), boost::num_edges(graph));
 
         
@@ -1541,7 +1541,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 
     // Initialize first segment
     SegmentPtr sg1 = init_first_segment(graph, cluster, &cluster, track_fitter, dv, flag_back_search);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: init_first_segment took {} ms", MS(Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: init_first_segment took {} ms", MS(Clock::now() - t0).count());
 
     if (!sg1) return false;
     // std::cout << "Fits: " << sg1->fits().size() << std::endl;
@@ -1570,7 +1570,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         std::vector<SegmentPtr> remaining_segments;
         remaining_segments.push_back(sg1);
         break_segments(graph, track_fitter, dv, remaining_segments);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: break_segments took {} ms", MS(Clock::now() - t0).count());
 
         //  // Debug: print all segments and vertices
         // {
@@ -1620,11 +1620,11 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
 
         t0 = Clock::now();
         examine_structure(graph, cluster, track_fitter, dv);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_structure took {} ms", MS(Clock::now() - t0).count());
     } else {
         t0 = Clock::now();
         track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: do_multi_tracking (no break) took {} ms", MS(Clock::now() - t0).count());
     }
 
 
@@ -1632,7 +1632,7 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     for (int i = 0; i < nrounds_find_other_tracks; i++) {
         t0 = Clock::now();
         find_other_segments(graph, cluster, track_fitter, dv, flag_break_track);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: find_other_segments round {} took {} ms", i, MS(Clock::now() - t0).count());
     }
 
   
@@ -1643,30 +1643,30 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         if (examine_structure_3(graph, cluster, track_fitter, dv)) {
             track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
         }
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_structure_3 took {} ms", MS(Clock::now() - t0).count());
     }
 
     // Examine the vertices
     t0 = Clock::now();
     examine_vertices(graph, cluster, track_fitter, dv);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices took {} ms", MS(Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_vertices took {} ms", MS(Clock::now() - t0).count());
 
     // Examine partial identical segments
     t0 = Clock::now();
     examine_partial_identical_segments(graph, cluster, track_fitter, dv);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_partial_identical_segments took {} ms", MS(Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_partial_identical_segments took {} ms", MS(Clock::now() - t0).count());
 
     // Examine the two initial points for main cluster
     if (is_main_cluster && main_cluster_initial_pair_vertices.first) {
         t0 = Clock::now();
         examine_vertices_3(graph, cluster, main_cluster_initial_pair_vertices, track_fitter, dv);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: examine_vertices_3 took {} ms", MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: examine_vertices_3 took {} ms", MS(Clock::now() - t0).count());
     }
 
     // Final multi-tracking
     t0 = Clock::now();
     track_fitter.do_multi_tracking(true, true, false, false, false, &cluster);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: final do_multi_tracking took {} ms", MS(Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: final do_multi_tracking took {} ms", MS(Clock::now() - t0).count());
 
     // Verify that at least one segment for this cluster survived all the merging/cleanup.
     // If all segments were removed (e.g. Type II merge on the only segment), return false
@@ -1679,12 +1679,12 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
         }
     }
     if (!has_segment) {
-        SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex: no segments remain for cluster after processing, returning false");
-        if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
+        SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex: no segments remain for cluster after processing, returning false");
+        if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
         return false;
     }
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
 
     return true;
 }

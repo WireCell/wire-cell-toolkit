@@ -109,7 +109,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
+    SPDLOG_LOGGER_TRACE(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
 
 
     // // Debug dump (only when env var is set)
@@ -120,7 +120,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     //     }
     // }
 
-    SPDLOG_LOGGER_DEBUG(log, "Number of Main Clusters: {}", n_main_clusters);
+    SPDLOG_LOGGER_TRACE(log, "Number of Main Clusters: {}", n_main_clusters);
 
     IndexedVertexSet vertices_in_long_muon;
     IndexedSegmentSet segments_in_long_muon;
@@ -300,7 +300,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                         vertices_in_long_muon, segments_in_long_muon,
                                         particle_data(), m_recomb_model, true);
 
-        SPDLOG_LOGGER_DEBUG(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
+        SPDLOG_LOGGER_TRACE(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
         
         std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
 
@@ -450,14 +450,14 @@ void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_fil
             try {
                 double value = root[param_name].asDouble();
                 m_track_fitter->set_parameter(param_name, value);
-                // SPDLOG_LOGGER_DEBUG(log, "Set {} = {}", param_name, value);
+                // SPDLOG_LOGGER_TRACE(log, "Set {} = {}", param_name, value);
             } catch (const std::exception& e) {
                 std::cerr << "TaggerCheckNeutrino: Failed to set parameter " << param_name 
                         << ": " << e.what() << std::endl;
             }
         }
         
-        SPDLOG_LOGGER_DEBUG(log, "Successfully loaded TrackFitting configuration");
+        SPDLOG_LOGGER_TRACE(log, "Successfully loaded TrackFitting configuration");
         
     } catch (const std::exception& e) {
         std::cerr << "TaggerCheckNeutrino: Exception loading config: " << e.what() << std::endl;

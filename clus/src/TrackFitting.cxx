@@ -270,7 +270,7 @@ void TrackFitting::sync_from_graph(){
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(s_log, "sync_from_graph: segments={} clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
+    SPDLOG_LOGGER_TRACE(s_log, "sync_from_graph: segments={} clusters={} blobs={}", segments_set.size(), m_clusters.size(), m_blobs.size());
 }
 
 void TrackFitting::inherit_from(const TrackFitting& src, Facade::Cluster* cluster)
@@ -395,7 +395,7 @@ void TrackFitting::add_segment(std::shared_ptr<PR::Segment> segment){
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(s_log, "Added segment with {} points. clusters={} blobs={}", segment->wcpts().size(), m_clusters.size(), m_blobs.size());
+    SPDLOG_LOGGER_TRACE(s_log, "Added segment with {} points. clusters={} blobs={}", segment->wcpts().size(), m_clusters.size(), m_blobs.size());
 }
 
 void TrackFitting::BuildGeometry(){
@@ -1036,7 +1036,7 @@ void TrackFitting::fill_global_rb_map() {
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(s_log, "Global RB Map filled with {} coordinate entries.", global_rb_map.size());
+    SPDLOG_LOGGER_TRACE(s_log, "Global RB Map filled with {} coordinate entries.", global_rb_map.size());
 
 }
 
@@ -5734,7 +5734,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             case 2: map_W_charge_2D[coord_readout] = charge_coord_pair; break;
         }
     }
-    SPDLOG_LOGGER_DEBUG(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
+    SPDLOG_LOGGER_TRACE(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
     
     // Count total 3D positions from all segments and vertices
     int n_3D_pos = 0;
@@ -6022,7 +6022,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
                 // S5.2(c): point lies exactly on an APA boundary or outside the detector.
                 // The Eigen row for this point is left unconstrained (regulariser only).
-                SPDLOG_LOGGER_DEBUG(s_log, "dQ_dx_multi_fit: trajectory point at ({:.2f},{:.2f},{:.2f}) has face=-1; regulariser-only constraint for this row", curr_pos.x(), curr_pos.y(), curr_pos.z());
+                SPDLOG_LOGGER_TRACE(s_log, "dQ_dx_multi_fit: trajectory point at ({:.2f},{:.2f},{:.2f}) has face=-1; regulariser-only constraint for this row", curr_pos.x(), curr_pos.y(), curr_pos.z());
                 continue;
             }
             int apa = test_wpid.apa();
@@ -6378,7 +6378,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
             // S5.2(c): point lies exactly on an APA boundary or outside the detector.
             // The Eigen row for this point is left unconstrained (regulariser only).
-            SPDLOG_LOGGER_DEBUG(s_log, "dQ_dx_fit: trajectory point at ({:.2f},{:.2f},{:.2f}) has face=-1; regulariser-only constraint for this row", curr_pos.x(), curr_pos.y(), curr_pos.z());
+            SPDLOG_LOGGER_TRACE(s_log, "dQ_dx_fit: trajectory point at ({:.2f},{:.2f},{:.2f}) has face=-1; regulariser-only constraint for this row", curr_pos.x(), curr_pos.y(), curr_pos.z());
             continue;
         }
         int apa = test_wpid.apa();
@@ -6880,7 +6880,7 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     }
 
 
-    SPDLOG_LOGGER_DEBUG(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
+    SPDLOG_LOGGER_TRACE(s_log, "dQ/dx: U={} V={} W={}", map_U_charge_2D.size(), map_V_charge_2D.size(), map_W_charge_2D.size());
     // for (const auto& [coord_key, result] : map_U_charge_2D) {
     //     std::cout << "CoordReadout: APA=" << coord_key.apa
     //               << ", Time=" << coord_key.time

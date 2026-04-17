@@ -293,7 +293,7 @@ void PatternAlgorithms::deghost_clusters(Graph& graph, std::vector<Facade::Clust
                     }
                 }
             } else {
-                s_log->debug("deghost_clusters: cluster {} ghosted len={:.2f}cm pts={} "
+                s_log->trace("deghost_clusters: cluster {} ghosted len={:.2f}cm pts={} "
                     "unique=({:.0f}%,{:.0f}%,{:.0f}%) dead=({:.0f}%,{:.0f}%,{:.0f}%)",
                     cluster->ident(),
                     map_cluster_total_length[cluster] / units::cm,
@@ -551,7 +551,7 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
                     // Remove segment
                     auto p1 = v1 ? v1->wcpt().point : Facade::geo_point_t{};
                     auto p2 = v2 ? v2->wcpt().point : Facade::geo_point_t{};
-                    s_log->debug("deghost_segments: cluster {} removing segment len={:.2f}cm "
+                    s_log->trace("deghost_segments: cluster {} removing segment len={:.2f}cm "
                         "dQ/dx={:.1f} unique=({},{},{}) "
                         "vtx1({:.2f},{:.2f},{:.2f}) vtx2({:.2f},{:.2f},{:.2f})",
                         cluster->ident(),

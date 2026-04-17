@@ -20,7 +20,7 @@ using namespace WireCell::Clus;
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::vector<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range){
-    s_log->debug("search_for_vertex_activities: cluster {} vertex ({:.2f}, {:.2f}, {:.2f}) search_range={:.2f} cm nsegs={}",
+    s_log->trace("search_for_vertex_activities: cluster {} vertex ({:.2f}, {:.2f}, {:.2f}) search_range={:.2f} cm nsegs={}",
         cluster.ident(),
         vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm,
         search_range/units::cm, segments_set.size());
@@ -213,7 +213,7 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
         }
         
         if (wcp_list.size() > 1) {
-            s_log->debug("search_for_vertex_activities: cluster {} vertex activity found at ({:.2f}, {:.2f}, {:.2f}), max_dis={:.4f}",
+            s_log->trace("search_for_vertex_activities: cluster {} vertex activity found at ({:.2f}, {:.2f}, {:.2f}), max_dis={:.4f}",
                 cluster.ident(), max_point.x()/units::cm, max_point.y()/units::cm, max_point.z()/units::cm, max_dis);
 
             // Convert to vector for segment creation
@@ -240,10 +240,10 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
 
     // Get all segments connected to this vertex
     if (!vertex || !vertex->descriptor_valid()) {
-        s_log->debug("examine_main_vertex_candidate: invalid vertex, returning early");
+        s_log->trace("examine_main_vertex_candidate: invalid vertex, returning early");
         return std::make_tuple(flag_in, ntracks, nshowers);
     }
-    s_log->debug("examine_main_vertex_candidate: vertex ({:.2f}, {:.2f}, {:.2f})",
+    s_log->trace("examine_main_vertex_candidate: vertex ({:.2f}, {:.2f}, {:.2f})",
         vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm);
     
     auto vd = vertex->get_descriptor();
@@ -315,7 +315,7 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
 }
 
 VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
-    s_log->debug("compare_main_vertices_all_showers: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
+    s_log->trace("compare_main_vertices_all_showers: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
     if (vertex_candidates.empty()) return nullptr;
 
     VertexPtr temp_main_vertex = vertex_candidates.front();
@@ -493,7 +493,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     }
     
     // Local graph and temporary elements automatically cleaned up when going out of scope
-    s_log->debug("compare_main_vertices_all_showers: selected vertex ({:.2f}, {:.2f}, {:.2f}) sg_length={:.2f}cm sg_dir={}",
+    s_log->trace("compare_main_vertices_all_showers: selected vertex ({:.2f}, {:.2f}, {:.2f}) sg_length={:.2f}cm sg_dir={}",
         temp_main_vertex->wcpt().point.x()/units::cm, temp_main_vertex->wcpt().point.y()/units::cm,
         temp_main_vertex->wcpt().point.z()/units::cm, tmp_sg_length/units::cm, tmp_sg_dir);
 
@@ -717,7 +717,7 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
 }
 
 VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster& cluster, std::vector<VertexPtr>& vertex_candidates){
-    s_log->debug("compare_main_vertices: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
+    s_log->trace("compare_main_vertices: cluster {} ncandidates={}", cluster.ident(), vertex_candidates.size());
     if (vertex_candidates.empty()) return nullptr;
 
     std::map<VertexPtr, double> map_vertex_num;
@@ -907,11 +907,11 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     }
 
     if (max_vertex) {
-        s_log->debug("compare_main_vertices: selected vertex ({:.2f}, {:.2f}, {:.2f}) score={:.3f}",
+        s_log->trace("compare_main_vertices: selected vertex ({:.2f}, {:.2f}, {:.2f}) score={:.3f}",
             max_vertex->wcpt().point.x()/units::cm, max_vertex->wcpt().point.y()/units::cm,
             max_vertex->wcpt().point.z()/units::cm, max_val);
     } else {
-        s_log->debug("compare_main_vertices: no vertex selected");
+        s_log->trace("compare_main_vertices: no vertex selected");
     }
     return max_vertex;
 }
@@ -1019,7 +1019,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     if (!vertex || !vertex->cluster()) return false;
 
     Facade::Cluster& cluster = *vertex->cluster();
-    s_log->debug("examine_direction: cluster {} vtx ({:.2f},{:.2f},{:.2f}) is_main_vtx={} flag_final={}",
+    s_log->trace("examine_direction: cluster {} vtx ({:.2f},{:.2f},{:.2f}) is_main_vtx={} flag_final={}",
         cluster.ident(),
         vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm,
         (vertex == main_vertex), flag_final);
@@ -1085,7 +1085,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         }
     }
     
-    s_log->debug("examine_direction: cluster {} topology: num_total_segs={} max_vtx_len={:.2f}cm min_vtx_len={:.2f}cm flag_only_showers={}",
+    s_log->trace("examine_direction: cluster {} topology: num_total_segs={} max_vtx_len={:.2f}cm min_vtx_len={:.2f}cm flag_only_showers={}",
         cluster.ident(), num_total_segments,
         max_vtx_length/units::cm, min_vtx_length/units::cm, flag_only_showers);
 
@@ -1158,14 +1158,14 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             current_sg->flags_any(SegmentFlags::kShowerTopology) ||
                             (current_sg->has_particle_info() && std::abs(current_sg->particle_info()->pdg()) == 11);
 
-            s_log->debug("examine_direction: cluster {} processing seg: length={:.2f}cm is_shower={} flag_shower_in={} cur_dirsign={} dir_weak={}",
+            s_log->trace("examine_direction: cluster {} processing seg: length={:.2f}cm is_shower={} flag_shower_in={} cur_dirsign={} dir_weak={}",
                 cluster.ident(), length/units::cm, is_shower, flag_shower_in,
                 current_sg->dirsign(), current_sg->dir_weak());
 
             // Determine segment direction
             if (current_sg->dirsign() == 0 || current_sg->dir_weak() || is_shower || flag_final) {
                 const auto& wcps = current_sg->wcpts();
-                s_log->debug("examine_direction: processing seg nfits={} nwcpts={} dirsign_before={}"
+                s_log->trace("examine_direction: processing seg nfits={} nwcpts={} dirsign_before={}"
                     " is_shower={} shower_topo={} shower_traj={}",
                     current_sg->fits().size(), wcps.size(), current_sg->dirsign(),
                     is_shower ? 1 : 0,
@@ -1181,7 +1181,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     } else {
                         current_sg->dirsign(-1);
                     }
-                    s_log->debug("examine_direction:   → dirsign set to {}", current_sg->dirsign());
+                    s_log->trace("examine_direction:   → dirsign set to {}", current_sg->dirsign());
                     
                     // Determine particle type
                     if (flag_shower_in && current_sg->dirsign() == 0 && !is_shower) {
@@ -1293,7 +1293,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 current_sg->particle_info(pinfo);
                             } else {
                                 double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
-                                s_log->debug("examine_direction: cluster {} segment_graph_index={} dqdx_ratio={:.3f} length={:.2f}cm nfits={}",
+                                s_log->trace("examine_direction: cluster {} segment_graph_index={} dqdx_ratio={:.3f} length={:.2f}cm nfits={}",
                                     cluster.ident(), current_sg->get_graph_index(), dqdx_ratio, length/units::cm, current_sg->fits().size());
                                 // std::cout << "examine_direction: A segment graph index " << current_sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " length=" << length/units::cm << "cm nfits=" << current_sg->fits().size() << std::endl;
                                 if (dqdx_ratio > 1.4) {
@@ -1310,7 +1310,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     }
                     
                     current_sg->dir_weak(true);
-                    s_log->debug("examine_direction: cluster {} seg assigned: dirsign={} pdg={} length={:.2f}cm",
+                    s_log->trace("examine_direction: cluster {} seg assigned: dirsign={} pdg={} length={:.2f}cm",
                         cluster.ident(), current_sg->dirsign(),
                         current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0,
                         length/units::cm);
@@ -1406,7 +1406,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             }
             
             if (total_length > 45*units::cm && max_length > 35*units::cm && acc_segments.size() > 1) {
-                s_log->debug("examine_direction: cluster {} found long muon chain: total_length={:.2f}cm max_length={:.2f}cm nsegs={}",
+                s_log->trace("examine_direction: cluster {} found long muon chain: total_length={:.2f}cm max_length={:.2f}cm nsegs={}",
                     cluster.ident(), total_length/units::cm, max_length/units::cm, acc_segments.size());
                 for (auto acc_seg : acc_segments) {
                     auto four_momentum = segment_cal_4mom(acc_seg, 13, particle_data, recomb_model);
@@ -1493,7 +1493,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             }
         }
         
-        s_log->debug("examine_direction: cluster {} muon/pion selection: muon_length={:.2f}cm n_muon_candidates={} has_muon={}",
+        s_log->trace("examine_direction: cluster {} muon/pion selection: muon_length={:.2f}cm n_muon_candidates={} has_muon={}",
             cluster.ident(), muon_length/units::cm, (int)pion_sgs.size(), (muon_sg != nullptr));
 
         // Convert non-muon candidates to pions
@@ -1909,7 +1909,7 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
 
 
 void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, bool flag_search_vertex_activity, bool flag_final_vertex){
-    s_log->debug("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
+    s_log->trace("improve_vertex: cluster {} flag_search_vertex_activity={} flag_final_vertex={}", cluster.ident(), flag_search_vertex_activity, flag_final_vertex);
 
     IndexedVertexSet fitted_vertices;  // order by stable graph index, not pointer address
     std::set<SegmentPtr> existing_segments;
@@ -1974,7 +1974,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         
         auto wcp_save = vtx->wcpt();
 
-        s_log->debug("improve_vertex: cluster {} fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",
+        s_log->trace("improve_vertex: cluster {} fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",
             cluster.ident(),
             vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm,
             vertex_segments.size());
@@ -1986,19 +1986,19 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             double tmp_dis = std::sqrt(std::pow(wcp_save.point.x() - vtx->wcpt().point.x(), 2) +
                                       std::pow(wcp_save.point.y() - vtx->wcpt().point.y(), 2) +
                                       std::pow(wcp_save.point.z() - vtx->wcpt().point.z(), 2));
-            s_log->debug("improve_vertex: cluster {} fit_vertex done, vertex moved {:.3f} cm -> ({:.2f}, {:.2f}, {:.2f})",
+            s_log->trace("improve_vertex: cluster {} fit_vertex done, vertex moved {:.3f} cm -> ({:.2f}, {:.2f}, {:.2f})",
                 cluster.ident(), tmp_dis/units::cm,
                 vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
 
             if (tmp_dis > 0.5*units::cm) { // if the vertex moved far, refit
                 track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
                 fit_vertex(cluster, vtx, main_vertex, vertex_segments, track_fitter, dv);
-                s_log->debug("improve_vertex: cluster {} second fit_vertex done -> ({:.2f}, {:.2f}, {:.2f})",
+                s_log->trace("improve_vertex: cluster {} second fit_vertex done -> ({:.2f}, {:.2f}, {:.2f})",
                     cluster.ident(),
                     vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
             }
         } else {
-            s_log->debug("improve_vertex: cluster {} fit_vertex made no update", cluster.ident());
+            s_log->trace("improve_vertex: cluster {} fit_vertex made no update", cluster.ident());
         }
 
         (void)nshowers;
@@ -2141,7 +2141,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     }
                 }
 
-                s_log->debug("improve_vertex: cluster {} refit pass, fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",
+                s_log->trace("improve_vertex: cluster {} refit pass, fitting vertex ({:.2f}, {:.2f}, {:.2f}) nsegs={}",
                     cluster.ident(),
                     vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm,
                     vertex_segments.size());
@@ -2149,7 +2149,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 if (flag_update) fitted_vertices.insert(vtx);
                 if (flag_update) {
                     flag_update_fit = true;
-                    s_log->debug("improve_vertex: cluster {} refit fit_vertex updated vertex -> ({:.2f}, {:.2f}, {:.2f})",
+                    s_log->trace("improve_vertex: cluster {} refit fit_vertex updated vertex -> ({:.2f}, {:.2f}, {:.2f})",
                         cluster.ident(),
                         vtx->wcpt().point.x()/units::cm, vtx->wcpt().point.y()/units::cm, vtx->wcpt().point.z()/units::cm);
                 }
@@ -2356,7 +2356,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         }
     }
 
-    s_log->debug("improve_vertex: cluster {} done", cluster.ident());
+    s_log->trace("improve_vertex: cluster {} done", cluster.ident());
 }
 
 void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr& main_vertex, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
@@ -2365,7 +2365,7 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     auto t_total = Clock::now();
     auto t0 = Clock::now();
 
-    s_log->debug("determine_main_vertex: cluster {}", cluster.ident());
+    s_log->trace("determine_main_vertex: cluster {}", cluster.ident());
 
     // Find the main vertex - check if we have only showers
     bool flag_save_only_showers = true;
@@ -2387,11 +2387,11 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     }
     MS t_scan_only_showers(Clock::now() - t0); t0 = Clock::now();
 
-    s_log->debug("determine_main_vertex: cluster {} flag_save_only_showers={}", cluster.ident(), flag_save_only_showers);
+    s_log->trace("determine_main_vertex: cluster {} flag_save_only_showers={}", cluster.ident(), flag_save_only_showers);
 
     // Improve vertex if not only showers and cluster is main cluster
     if (!flag_save_only_showers && cluster.get_flag(Facade::Flags::main_cluster)) {
-        s_log->debug("determine_main_vertex: cluster {} calling improve_vertex + fix_maps_shower_in_track_out", cluster.ident());
+        s_log->trace("determine_main_vertex: cluster {} calling improve_vertex + fix_maps_shower_in_track_out", cluster.ident());
         improve_vertex(graph, cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, track_fitter, dv, particle_data, recomb_model, false);
         // Fix maps with shower in and track out
         fix_maps_shower_in_track_out(graph, cluster);
@@ -2460,20 +2460,20 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     }
     MS t_select_candidates(Clock::now() - t0); t0 = Clock::now();
 
-    s_log->debug("determine_main_vertex: cluster {} ncandidates={}", cluster.ident(), main_vertex_candidates.size());
+    s_log->trace("determine_main_vertex: cluster {} ncandidates={}", cluster.ident(), main_vertex_candidates.size());
 
     // Determine main vertex based on candidates
     if (flag_save_only_showers) {
         if (main_vertex_candidates.size() > 0) {
-            s_log->debug("determine_main_vertex: cluster {} all-showers path, calling compare_main_vertices_all_showers", cluster.ident());
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_main_vertex: cluster {} all-showers, {} candidates",
+            s_log->trace("determine_main_vertex: cluster {} all-showers path, calling compare_main_vertices_all_showers", cluster.ident());
+            SPDLOG_LOGGER_TRACE(s_log, "determine_main_vertex: cluster {} all-showers, {} candidates",
                 cluster.get_cluster_id(), main_vertex_candidates.size());
             main_vertex = compare_main_vertices_all_showers(graph, cluster, main_vertex_candidates, track_fitter, dv, particle_data, recomb_model);
         } else {
-            s_log->debug("determine_main_vertex: cluster {} all-showers but no candidates, early return", cluster.ident());
+            s_log->trace("determine_main_vertex: cluster {} all-showers but no candidates, early return", cluster.ident());
             if (m_perf) {
                 MS t_total_ms(Clock::now() - t_total);
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "determine_main_vertex timing (early return, all-showers no candidates): "
                     "scan_only_showers={:.3f}ms improve_vertex={:.3f}ms "
                     "build_candidate_map={:.3f}ms select_candidates={:.3f}ms TOTAL={:.3f}ms",
@@ -2484,9 +2484,9 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
         }
     } else {
         // Examine main vertex candidates to filter and identify back-to-back tracks
-        s_log->debug("determine_main_vertex: cluster {} calling examine_main_vertices_local", cluster.ident());
+        s_log->trace("determine_main_vertex: cluster {} calling examine_main_vertices_local", cluster.ident());
         examine_main_vertices_local(graph, main_vertex_candidates, particle_data, recomb_model);
-        s_log->debug("determine_main_vertex: cluster {} after examine_main_vertices_local, ncandidates={}", cluster.ident(), main_vertex_candidates.size());
+        s_log->trace("determine_main_vertex: cluster {} after examine_main_vertices_local, ncandidates={}", cluster.ident(), main_vertex_candidates.size());
 
         for (auto vtx : main_vertex_candidates) {
             WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
@@ -2499,20 +2499,20 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
                     if (sg) seg_list += std::to_string(sg->id()) + ", ";
                 }
             }
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_main_vertex: cluster {} candidate pos=({:.1f},{:.1f},{:.1f}) connecting to: {}",
+            SPDLOG_LOGGER_TRACE(s_log, "determine_main_vertex: cluster {} candidate pos=({:.1f},{:.1f},{:.1f}) connecting to: {}",
                 cluster.get_cluster_id(), vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm, seg_list);
         }
 
         if (main_vertex_candidates.size() == 1) {
-            s_log->debug("determine_main_vertex: cluster {} single candidate, selecting directly", cluster.ident());
+            s_log->trace("determine_main_vertex: cluster {} single candidate, selecting directly", cluster.ident());
             main_vertex = main_vertex_candidates.front();
         } else if (main_vertex_candidates.size() > 1) {
-            s_log->debug("determine_main_vertex: cluster {} multiple candidates, calling compare_main_vertices", cluster.ident());
+            s_log->trace("determine_main_vertex: cluster {} multiple candidates, calling compare_main_vertices", cluster.ident());
             main_vertex = compare_main_vertices(graph, cluster, main_vertex_candidates);
         } else {
             if (m_perf) {
                 MS t_total_ms(Clock::now() - t_total);
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "determine_main_vertex timing (early return, no candidates): "
                     "scan_only_showers={:.3f}ms improve_vertex={:.3f}ms "
                     "build_candidate_map={:.3f}ms select_candidates={:.3f}ms TOTAL={:.3f}ms",
@@ -2533,14 +2533,14 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
     // Examine directions
     bool flag_check = examine_direction(graph, main_vertex, main_vertex, vertices_in_long_muon, segments_in_long_muon, particle_data, recomb_model, false);
     if (!flag_check) {
-        SPDLOG_LOGGER_DEBUG(s_log, "determine_main_vertex: cluster {} inconsistency for track directions",
+        SPDLOG_LOGGER_TRACE(s_log, "determine_main_vertex: cluster {} inconsistency for track directions",
             cluster.get_cluster_id());
     }
     MS t_examine_direction(Clock::now() - t0);
 
     if (m_perf) {
         MS t_total_ms(Clock::now() - t_total);
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "determine_main_vertex timing: "
             "scan_only_showers={:.3f}ms improve_vertex={:.3f}ms "
             "build_candidate_map={:.3f}ms select_candidates={:.3f}ms "
@@ -2550,7 +2550,7 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
             t_build_candidate_map.count(), t_select_candidates.count(),
             t_select_main_vertex.count(), t_examine_structure_final.count(),
             t_examine_direction.count());
-        SPDLOG_LOGGER_DEBUG(s_log, "determine_main_vertex timing: TOTAL={:.3f}ms", t_total_ms.count());
+        SPDLOG_LOGGER_TRACE(s_log, "determine_main_vertex timing: TOTAL={:.3f}ms", t_total_ms.count());
     }
 
     {
@@ -2564,17 +2564,17 @@ void PatternAlgorithms::determine_main_vertex(Graph& graph, Facade::Cluster& clu
                 if (sg) seg_list += std::to_string(sg->id()) + ", ";
             }
         }
-        SPDLOG_LOGGER_DEBUG(s_log, "determine_main_vertex: cluster {} main vertex pos=({:.1f},{:.1f},{:.1f}) connecting to: {}",
+        SPDLOG_LOGGER_TRACE(s_log, "determine_main_vertex: cluster {} main vertex pos=({:.1f},{:.1f},{:.1f}) connecting to: {}",
             cluster.get_cluster_id(), vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm, seg_list);
     }
 
     if (main_vertex) {
-        s_log->debug("determine_main_vertex: cluster {} done, main_vertex ({:.2f}, {:.2f}, {:.2f})",
+        s_log->trace("determine_main_vertex: cluster {} done, main_vertex ({:.2f}, {:.2f}, {:.2f})",
             cluster.ident(),
             main_vertex->wcpt().point.x()/units::cm, main_vertex->wcpt().point.y()/units::cm,
             main_vertex->wcpt().point.z()/units::cm);
     } else {
-        s_log->debug("determine_main_vertex: cluster {} done, main_vertex is null", cluster.ident());
+        s_log->trace("determine_main_vertex: cluster {} done, main_vertex is null", cluster.ident());
     }
 
    
@@ -2677,7 +2677,7 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
 }
 
 void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<VertexPtr>& vertices, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
-    s_log->debug("examine_main_vertices_local: nvertices={}", vertices.size());
+    s_log->trace("examine_main_vertices_local: nvertices={}", vertices.size());
     if (vertices.size() == 1) return;
 
     double max_length = 0;
@@ -2857,14 +2857,14 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
     
     // Update vertices collection
     if (tmp_vertices.size() == 0) {
-        s_log->debug("examine_main_vertices_local: no vertices survived filtering, returning unchanged");
+        s_log->trace("examine_main_vertices_local: no vertices survived filtering, returning unchanged");
         return;
     }
 
     vertices.clear();
     vertices.resize(tmp_vertices.size());
     std::copy(tmp_vertices.begin(), tmp_vertices.end(), vertices.begin());
-    s_log->debug("examine_main_vertices_local: done, nvertices_out={}", vertices.size());
+    s_log->trace("examine_main_vertices_local: done, nvertices_out={}", vertices.size());
 }
 
 
@@ -2933,7 +2933,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
             map_vertex_num[vtx] += 0.25;
         }
         
-        SPDLOG_LOGGER_DEBUG(s_log, "compare_main_vertices_global: cluster {} score_A={:.4f} z_norm={:.4f}",
+        SPDLOG_LOGGER_TRACE(s_log, "compare_main_vertices_global: cluster {} score_A={:.4f} z_norm={:.4f}",
             vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1,
             map_vertex_num[vtx], (vtx_pt.z() - min_z) / (200 * units::cm));
     }
@@ -2950,7 +2950,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
             map_vertex_num[vtx] += 0.5;
         }
         
-        SPDLOG_LOGGER_DEBUG(s_log, "compare_main_vertices_global: cluster {} score_B={:.4f} in_fv={}",
+        SPDLOG_LOGGER_TRACE(s_log, "compare_main_vertices_global: cluster {} score_B={:.4f} in_fv={}",
             vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1,
             map_vertex_num[vtx], in_fv);
     }
@@ -3011,7 +3011,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
             }
         }
         
-        SPDLOG_LOGGER_DEBUG(s_log, "compare_main_vertices_global: cluster {} score_E={:.4f}",
+        SPDLOG_LOGGER_TRACE(s_log, "compare_main_vertices_global: cluster {} score_E={:.4f}",
             vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1,
             map_vertex_num[vtx]);
     }
@@ -3095,7 +3095,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, Clus
                     if (seg) seg_list += std::to_string(seg->id()) + ", ";
                 }
             }
-            SPDLOG_LOGGER_DEBUG(s_log, "check_switch_main_cluster: candidate cluster {} pos=({:.1f},{:.1f},{:.1f}) connecting to: {}",
+            SPDLOG_LOGGER_TRACE(s_log, "check_switch_main_cluster: candidate cluster {} pos=({:.1f},{:.1f},{:.1f}) connecting to: {}",
                 cluster_id, vtx_pt.x()/units::cm, vtx_pt.y()/units::cm, vtx_pt.z()/units::cm, seg_list);
         }
         
@@ -3109,7 +3109,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster(Graph& graph, Clus
         if (temp_main_vertex_1 && temp_main_vertex_1 != temp_main_vertex) {
             int old_id = temp_main_vertex ? (temp_main_vertex->cluster() ? temp_main_vertex->cluster()->get_cluster_id() : -1) : -1;
             int new_id = temp_main_vertex_1->cluster() ? temp_main_vertex_1->cluster()->get_cluster_id() : -1;
-            SPDLOG_LOGGER_DEBUG(s_log, "check_switch_main_cluster: switch main cluster {} -> {}", old_id, new_id);
+            SPDLOG_LOGGER_TRACE(s_log, "check_switch_main_cluster: switch main cluster {} -> {}", old_id, new_id);
             
             // Find which cluster this vertex belongs to and swap
             for (auto& [cluster, vertex] : map_cluster_main_vertices) {
@@ -3155,7 +3155,7 @@ Facade::Cluster* PatternAlgorithms::check_switch_main_cluster_2(Graph& graph, Ve
     }
     
     if (flag_switch) {
-        SPDLOG_LOGGER_DEBUG(s_log, "check_switch_main_cluster_2: switch main cluster {} -> {}",
+        SPDLOG_LOGGER_TRACE(s_log, "check_switch_main_cluster_2: switch main cluster {} -> {}",
             main_cluster->get_cluster_id(), max_length_cluster->get_cluster_id());
         main_cluster = swap_main_cluster(*max_length_cluster, *main_cluster, other_clusters);
     }
@@ -3255,7 +3255,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             double x_reg = dnn_vtx[0] * units::cm;
             double y_reg = dnn_vtx[1] * units::cm;
             double z_reg = dnn_vtx[2] * units::cm;
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DNN prediction: ({:.2f}, {:.2f}, {:.2f}) cm",
+            SPDLOG_LOGGER_TRACE(s_log, "determine_overall_main_vertex_DL: DNN prediction: ({:.2f}, {:.2f}, {:.2f}) cm",
                                 dnn_vtx[0], dnn_vtx[1], dnn_vtx[2]);
 
             // Find nearest candidate vertex to DL prediction
@@ -3310,7 +3310,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 return false;
             }
             int K = static_cast<int>(dnn_vtx.size() / 4);
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: rerank mode, K={}", K);
+            SPDLOG_LOGGER_TRACE(s_log, "determine_overall_main_vertex_DL: rerank mode, K={}", K);
 
             // --- Parse K (pred_pt, dl_score) from the payload ---
             // dl_score = sigmoid(vertex_class) - sigmoid(bg_class), range [-1, +1].
@@ -3331,7 +3331,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 if (s > dl_score_max) dl_score_max = s;
                 if (s < dl_score_min) dl_score_min = s;
             }
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "  DL top-{} scores in [{:.4f}, {:.4f}] (scale: [-1,+1]; near 0 = model uncertain)",
                 K, dl_score_min, dl_score_max);
             {
@@ -3342,7 +3342,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 for (const auto& v : dl_voxels) dl_var += (v.dl_score - dl_mean) * (v.dl_score - dl_mean);
                 double dl_std = std::sqrt(dl_var / std::max<size_t>(1, dl_voxels.size() - 1));
                 const char* regime = (dl_score_max > 0.1) ? "confident" : (dl_score_max < 0.02 ? "uncertain" : "intermediate");
-                SPDLOG_LOGGER_DEBUG(s_log, "  DL score stats: mean={:.4f} std={:.4f} regime={}", dl_mean, dl_std, regime);
+                SPDLOG_LOGGER_TRACE(s_log, "  DL score stats: mean={:.4f} std={:.4f} regime={}", dl_mean, dl_std, regime);
             }
 
             // --- Snap each DL voxel to nearest ProtoVertex; deduplicate ---
@@ -3393,7 +3393,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     if (it != cluster_total_len.end()) L = it->second;
                 }
                 auto pt = sc.vtx->fit().valid() ? sc.vtx->fit().point : sc.vtx->wcpt().point;
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "  DL voxel {} (dl_score={:.4f}) → cluster={} pos=({:.1f},{:.1f},{:.1f})cm "
                     "L={:.1f}cm snap={:.2f}cm{}",
                     sc.voxel_rank, sc.dl_score,
@@ -3475,7 +3475,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 
                 double score = s_dl + s_snap + s_fwd_z + s_clen + s_isol + s_main + s_fv;
 
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "DL rerank cand [voxel {}] cluster={} pos=({:.1f},{:.1f},{:.1f})cm "
                     "L={:.1f}cm snap={:.2f}cm | "
                     "dl={:+.4f} snap={:+.3f} fwd_z={:+.3f} clen={:+.3f} "
@@ -3504,13 +3504,13 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                      && (best_score >= dl_vtx_min_accept_score);
 
             if (flag_pass) {
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "determine_overall_main_vertex_DL: rerank selected cluster={} "
                     "snap_dis={:.2f}cm composite_score={:.4f}",
                     min_vertex->cluster() ? min_vertex->cluster()->get_cluster_id() : -1,
                     min_dis / units::cm, best_score);
             } else {
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "determine_overall_main_vertex_DL: rerank rejected "
                     "(best_score={:.4f} < threshold={:.4f}), staying with traditional vertex",
                     best_score, dl_vtx_min_accept_score);
@@ -3525,7 +3525,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 
         if (flag_pass) {
             flag_change = true;
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "determine_overall_main_vertex_DL: switching to DL vertex (dis={:.2f} cm)",
                 min_dis / units::cm);
 
@@ -3581,12 +3581,12 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
             t_cleanup_long_muon = MS(Clock::now() - t0);
         } else {
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: staying with traditional vertex");
+            SPDLOG_LOGGER_TRACE(s_log, "determine_overall_main_vertex_DL: staying with traditional vertex");
         }
 
         if (m_perf) {
             MS t_total_ms(Clock::now() - t_total);
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "determine_overall_main_vertex_DL timing: "
                 "collect_pc={:.3f}ms scn_inference={:.3f}ms selection={:.3f}ms "
                 "examine_direction={:.3f}ms "
@@ -3676,7 +3676,7 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
     if (!main_vertex) {
         if (m_perf) {
             MS t_total_ms(Clock::now() - t_total);
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "determine_overall_main_vertex timing (early return, no main vertex): "
                 "find_max_length={:.3f}ms examine_main_vertices={:.3f}ms "
                 "check_switch={:.3f}ms TOTAL={:.3f}ms",
@@ -3743,7 +3743,7 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
 
     if (m_perf) {
         MS t_total_ms(Clock::now() - t_total);
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "determine_overall_main_vertex timing: "
             "find_max_length={:.3f}ms examine_main_vertices={:.3f}ms "
             "check_switch={:.3f}ms proton_tagging={:.3f}ms "

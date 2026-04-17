@@ -906,7 +906,7 @@ namespace WireCell::Clus::PR {
             // Calculate start_point and end_point
             const auto& fits = m_start_segment->fits();
             bool has_fit_pcloud = (this->dpcloud("fit") != nullptr);
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "calculate_kinematics start_point: nseg=1 conn_type={} nfits={} dirsign={}"
                 " has_fit_pcloud={} has_start_vertex={} vtx_fit_valid={}",
                 data.start_connection_type, fits.size(), m_start_segment->dirsign(),
@@ -924,13 +924,13 @@ namespace WireCell::Clus::PR {
                     }
                     // std::cout << "cluster: " << m_start_segment->cluster()->get_cluster_id() << " segment: " << m_start_segment->get_graph_index() << " " << data.end_point << std::endl;
                 }
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "calculate_kinematics start_point:   branch=fits start=({:.1f},{:.1f},{:.1f})cm",
                     data.start_point.x()/units::cm, data.start_point.y()/units::cm, data.start_point.z()/units::cm);
             } else {
                 if (m_start_vertex) {
                     auto [sgcp_dis, sgcp_pt] = shower_get_closest_point(*this, m_start_vertex->fit().point, "fit");
-                    SPDLOG_LOGGER_DEBUG(s_log,
+                    SPDLOG_LOGGER_TRACE(s_log,
                         "calculate_kinematics start_point:   branch=shower_get_closest vtx=({:.1f},{:.1f},{:.1f})cm"
                         " closest_dis={:.3f}cm closest_pt=({:.1f},{:.1f},{:.1f})cm fit_pcloud_npts={}",
                         m_start_vertex->fit().point.x()/units::cm,
@@ -942,7 +942,7 @@ namespace WireCell::Clus::PR {
                     data.start_point = sgcp_pt;
                     // Fallback: if "fit" pcloud is absent or empty, use fits directly (same as conn_type==1)
                     if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {
-                        SPDLOG_LOGGER_DEBUG(s_log, "calculate_kinematics start_point:   shower_get_closest returned (0,0,0), applying fits fallback");
+                        SPDLOG_LOGGER_TRACE(s_log, "calculate_kinematics start_point:   shower_get_closest returned (0,0,0), applying fits fallback");
                         if (!fits.empty()) {
                             data.start_point = (m_start_segment->dirsign() == -1) ? fits.back().point : fits.front().point;
                         }
@@ -1045,7 +1045,7 @@ namespace WireCell::Clus::PR {
             }
             // Fallback: if direction is still zero, use shower_cal_dir_3vector from start vertex
             if (data.init_dir.magnitude() == 0) {
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "calculate_kinematics: nseg={} conn_type={} seg_length={:.1f}cm"
                     " seg_nfits={} seg_dirsign={} — init_dir is zero, applying fallback",
                     get_num_segments(), data.start_connection_type,

@@ -58,9 +58,9 @@ static void configure_components(const Json::Value& configs)
                 }
             }
             icfg->configure(cfg);
-            log->debug("Configured {}", tn);
+            log->trace("Configured {}", tn);
         } catch (const std::exception& e) {
-            log->debug("Skipping {}: {}", tn, e.what());
+            log->trace("Skipping {}: {}", tn, e.what());
         }
     }
 }

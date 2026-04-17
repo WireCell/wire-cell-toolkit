@@ -22,16 +22,16 @@ void PatternAlgorithms::clustering_points(Graph& graph, Facade::Cluster& cluster
             segments.push_back(seg);
         }
     }
-    // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: collect segments ({}) took {} ms", segments.size(), MS(Clock::now() - t0).count());
+    // if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: collect segments ({}) took {} ms", segments.size(), MS(Clock::now() - t0).count());
 
     // Run clustering on the collected segments
     t0 = Clock::now();
     if (!segments.empty()) {
         clustering_points_segments(segments, dv, cloud_name, search_range, scaling_2d);
     }
-    // if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: clustering_points_segments took {} ms", MS(Clock::now() - t0).count());
+    // if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: clustering_points_segments took {} ms", MS(Clock::now() - t0).count());
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "clustering_points timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "clustering_points timing: TOTAL took {} ms", MS(Clock::now() - t_total).count());
 }
 
 void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& cluster) {
@@ -61,7 +61,7 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
         }
     }
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "separate_track_shower timing: shower_topology={:.3f}ms shower_trajectory={:.3f}ms TOTAL={:.3f}ms",
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "separate_track_shower timing: shower_topology={:.3f}ms shower_trajectory={:.3f}ms TOTAL={:.3f}ms",
         t_topology.count(), t_trajectory.count(), MS(Clock::now() - t_total).count());
 }
 
@@ -82,7 +82,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
         // Get the two vertices of this segment
         auto [start_v, end_v] = find_vertices(graph, seg);
         if (!start_v || !end_v) {
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_direction: Error in finding vertices for a segment");
+            SPDLOG_LOGGER_TRACE(s_log, "determine_direction: Error in finding vertices for a segment");
             continue;
         }
 
@@ -146,7 +146,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
                                  : "Track";
             double length = segment_track_length(seg);
             int    pdg    = seg->has_particle_info() ? seg->particle_info()->pdg()  : 0;
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "determine_direction: {} nfits={} nwcpts={} len={:.2f}cm dirsign={} dir_weak={}"
                 " start_n={} end_n={} pdg={}",
                 seg_type, seg->fits().size(), seg->wcpts().size(), length / units::cm,
@@ -155,7 +155,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
         }
     }
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(s_log, "determine_direction timing: shower_traj={:.3f}ms shower_topo={:.3f}ms track={:.3f}ms TOTAL={:.3f}ms",
+    if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "determine_direction timing: shower_traj={:.3f}ms shower_topo={:.3f}ms track={:.3f}ms TOTAL={:.3f}ms",
         t_shower_traj.count(), t_shower_topo.count(), t_track.count(), MS(Clock::now() - t_total).count());
 
    
@@ -1526,13 +1526,13 @@ bool PatternAlgorithms::examine_maps(Graph&graph, Facade::Cluster& cluster){
         
         // Check for violations
         if (n_in > 1 && n_in != n_in_shower) {
-            SPDLOG_LOGGER_DEBUG(s_log, "examine_maps: Wrong: Multiple ({}) particles into a vertex!", n_in);
+            SPDLOG_LOGGER_TRACE(s_log, "examine_maps: Wrong: Multiple ({}) particles into a vertex!", n_in);
             print_segs_info(graph, cluster, vtx);
             flag_return = false;
         }
         
         if (n_in_shower > 0 && n_out_tracks > 0) {
-            SPDLOG_LOGGER_DEBUG(s_log, "examine_maps: Wrong: {} showers in and {} tracks out!", n_in_shower, n_out_tracks);
+            SPDLOG_LOGGER_TRACE(s_log, "examine_maps: Wrong: {} showers in and {} tracks out!", n_in_shower, n_out_tracks);
             print_segs_info(graph, cluster, vtx);
             flag_return = false;
         }
@@ -1927,7 +1927,7 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
 
     if (m_perf) {
         MS t_total_ms(Clock::now() - t_total);
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "shower_determining_in_main_cluster timing: "
             "examine_good_tracks={:.3f}ms fix_multiple_tracks_in={:.3f}ms "
             "fix_shower_in_track_out_1={:.3f}ms improve_one_in={:.3f}ms "
@@ -1941,7 +1941,7 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
             t_improve_shower_in_track_out_2.count(), t_improve_multiple_tracks_in.count(),
             t_fix_shower_in_track_out_2.count(), t_judge_no_dir_tracks.count(),
             t_examine_maps.count(), t_examine_all_showers.count());
-        SPDLOG_LOGGER_DEBUG(s_log, "shower_determining_in_main_cluster timing:  TOTAL={:.3f}ms", t_total_ms.count());
+        SPDLOG_LOGGER_TRACE(s_log, "shower_determining_in_main_cluster timing:  TOTAL={:.3f}ms", t_total_ms.count());
 
         // // Print final per-segment state, matching determine_direction format
         // auto [ebegin2, eend2] = boost::edges(graph);
@@ -1964,7 +1964,7 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
         //     double mass   = seg->has_particle_info() ? seg->particle_info()->mass() / units::MeV : 0.0;
         //     double ke     = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() / units::MeV : 0.0;
         //     double score  = seg->particle_score();
-        //     SPDLOG_LOGGER_DEBUG(s_log,
+        //     SPDLOG_LOGGER_TRACE(s_log,
         //         "shower_determining_in_main_cluster: {} len={:.2f}cm dir={} weak={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
         //         seg_type, length / units::cm,
         //         seg->dirsign(), seg->dir_weak() ? 1 : 0,

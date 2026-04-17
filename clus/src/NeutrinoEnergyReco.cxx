@@ -109,7 +109,7 @@ static double kine_charge_from_maps(
                     const auto& pt0 = pcloud1->get_points()[0];
                     pc_x = pt0.x; pc_y = pt0.y; pc_z = pt0.z;
                 }
-                SPDLOG_LOGGER_DEBUG(s_log,
+                SPDLOG_LOGGER_TRACE(s_log,
                     "kine_charge_from_maps:   plane={} ts={} ch={} wire={} apa={} face={}"
                     " p2d=({:.3f},{:.3f}) dis={:.4f}cm dis_cut={:.4f}cm cluster={}"
                     " pc0_3d=({:.3f},{:.3f},{:.3f})cm",
@@ -141,7 +141,7 @@ static double kine_charge_from_maps(
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(s_log,
+    SPDLOG_LOGGER_TRACE(s_log,
         "kine_charge_from_maps:   hits total={} within_cut={} dis_cut={:.4f}cm sums=[{:.1f},{:.1f},{:.1f}]",
         n_hits_total, n_hits_within_cut, dis_cut / units::cm,
         sums[0], sums[1], sums[2]);
@@ -272,7 +272,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
 
     auto grouping = track_fitter.grouping();
     if (!grouping) {
-        SPDLOG_LOGGER_DEBUG(s_log, "calculate_shower_kinematics: grouping is null, returning early");
+        SPDLOG_LOGGER_TRACE(s_log, "calculate_shower_kinematics: grouping is null, returning early");
         return;
     }
 
@@ -280,7 +280,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
     // via collect_charge_maps()), otherwise collect here for standalone calls.
     if (m_charge_2d_u.empty()) collect_charge_maps(track_fitter);
 
-    SPDLOG_LOGGER_DEBUG(s_log,
+    SPDLOG_LOGGER_TRACE(s_log,
         "calculate_shower_kinematics: {} shower(s), charge maps U={} V={} W={} hits",
         showers.size(), m_charge_2d_u.size(), m_charge_2d_v.size(), m_charge_2d_w.size());
 
@@ -307,7 +307,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         auto pcloud1 = shower->get_pcloud("associate_points");
         auto pcloud2 = shower->get_pcloud("fit");
         if (!pcloud1 && !pcloud2) {
-            SPDLOG_LOGGER_DEBUG(s_log,
+            SPDLOG_LOGGER_TRACE(s_log,
                 "calculate_shower_kinematics:   shower pdg={} nseg={} — no pclouds, kine_charge=0",
                 shower->get_particle_type(), shower->get_num_segments());
             shower->set_flag_kinematics(true);
@@ -316,7 +316,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         if (!pcloud1) pcloud1 = pcloud2;
         if (!pcloud2) pcloud2 = pcloud1;
 
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "calculate_shower_kinematics:   shower pdg={} nseg={} pcloud1_pts={} pcloud2_pts={}",
             shower->get_particle_type(), shower->get_num_segments(),
             pcloud1->get_points().size(), pcloud2->get_points().size());
@@ -326,7 +326,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
             m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires,
             grouping, corr_fn, dis_cut);
 
-        SPDLOG_LOGGER_DEBUG(s_log,
+        SPDLOG_LOGGER_TRACE(s_log,
             "calculate_shower_kinematics:   shower pdg={} nseg={} kine_charge={:.1f}MeV",
             shower->get_particle_type(), shower->get_num_segments(), kine_charge / units::MeV);
 

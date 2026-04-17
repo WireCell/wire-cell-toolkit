@@ -88,8 +88,8 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
     }
 
-    SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph: {} clusters with beam_flash flag. main={}", filtered_clusters.size(), main_cluster ? main_cluster->ident() : -1);
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: filter clusters took {} ms", MS(Clock::now() - t0).count());
+    SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph: {} clusters with beam_flash flag. main={}", filtered_clusters.size(), main_cluster ? main_cluster->ident() : -1);
+    if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: filter clusters took {} ms", MS(Clock::now() - t0).count());
 
     // Helper that runs the full retile→graph→Steiner pipeline for one cluster.
     // `src` is the cluster to retile; `ref` is the reference cluster used for
@@ -110,28 +110,28 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         auto& new_cluster = grouping.make_child();
         new_cluster.take_children(*new_cluster_1);
         new_cluster.from(*src);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] retile->mutate took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] retile->mutate took {} ms", tag, MS(Clock::now() - t0).count());
 
         t0 = Clock::now();
         new_cluster.find_graph("ctpc_ref_pid", *src, m_dv, m_pcts);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] find_graph(ctpc_ref_pid) took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] find_graph(ctpc_ref_pid) took {} ms", tag, MS(Clock::now() - t0).count());
 
         t0 = Clock::now();
         Steiner::Grapher sg(new_cluster, m_grapher_config, log);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] Grapher construction took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] Grapher construction took {} ms", tag, MS(Clock::now() - t0).count());
 
         auto& graph = sg.get_graph("ctpc_ref_pid");
-        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
+        SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
 
         t0 = Clock::now();
         sg.establish_same_blob_steiner_edges("ctpc_ref_pid", false);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] establish_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
-        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] establish_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
 
         t0 = Clock::now();
         auto pair_points = new_cluster.get_two_boundary_wcps();
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] get_two_boundary_wcps took {} ms", tag, MS(Clock::now() - t0).count());
-        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: {} {} {} | {} {} {}", tag,
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] get_two_boundary_wcps took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: {} {} {} | {} {} {}", tag,
             pair_points.first.x(), pair_points.first.y(), pair_points.first.z(),
             pair_points.second.x(), pair_points.second.y(), pair_points.second.z());
 
@@ -139,17 +139,17 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         auto first_index  = new_cluster.get_closest_point_index(pair_points.first);
         auto second_index = new_cluster.get_closest_point_index(pair_points.second);
         std::vector<size_t> path_point_indices = new_cluster.graph_algorithms("ctpc_ref_pid").shortest_path(first_index, second_index);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] shortest_path took {} ms", tag, MS(Clock::now() - t0).count());
-        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: {} {} # of points along path: {}", tag, first_index, second_index, path_point_indices.size());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] shortest_path took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: {} {} # of points along path: {}", tag, first_index, second_index, path_point_indices.size());
 
         t0 = Clock::now();
         sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] remove_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
-        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] remove_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
+        SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
 
         t0 = Clock::now();
         sg.create_steiner_tree(src, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] create_steiner_tree took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] create_steiner_tree took {} ms", tag, MS(Clock::now() - t0).count());
 
         auto* new_cluster_ptr = &new_cluster;
         if (!new_cluster.has_graph("steiner_graph")) {
@@ -163,7 +163,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         const auto& steiner_graph       = sg.get_graph("steiner_graph");
         auto& flag_terminals = sg.get_flag_steiner_terminal();
         size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
-        SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph [{}]: steiner_graph with {} vertices and {} edges. {} {} {}", tag,
+        SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: steiner_graph with {} vertices and {} edges. {} {} {}", tag,
             boost::num_vertices(steiner_graph), boost::num_edges(steiner_graph),
             steiner_point_cloud.size(), flag_terminals.size(), num_true_terminals);
 
@@ -171,7 +171,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         Steiner::Grapher ref_sg(*src, m_grapher_config, log);
         ref_sg.transfer_pc(sg, "steiner_pc", "steiner_pc");
         ref_sg.transfer_graph(sg, "steiner_graph", "steiner_graph");
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] transfer_pc/graph took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] transfer_pc/graph took {} ms", tag, MS(Clock::now() - t0).count());
 
         if (is_main) {
             // Extra probe done only for the main cluster.
@@ -182,7 +182,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
 
         t0 = Clock::now();
         grouping.destroy_child(new_cluster_ptr, true);
-        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: [{}] destroy_child took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] destroy_child took {} ms", tag, MS(Clock::now() - t0).count());
         return true;
     };
 
@@ -198,6 +198,6 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
     }
 
-    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "CreateSteinerGraph timing: visit() TOTAL took {} ms", MS(Clock::now() - t_visit_start).count());
+    if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: visit() TOTAL took {} ms", MS(Clock::now() - t_visit_start).count());
 
 }

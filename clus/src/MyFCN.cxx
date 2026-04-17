@@ -33,7 +33,7 @@ void MyFCN::print_points()
 {
     for (size_t i = 0; i != vec_points.size(); i++) {
         for (size_t j = 0; j != vec_points.at(i).size(); j++) {
-            SPDLOG_LOGGER_DEBUG(s_log, "print_points: {} {} {} {} {}",
+            SPDLOG_LOGGER_TRACE(s_log, "print_points: {} {} {} {} {}",
                 i, j,
                 vec_points.at(i).at(j).x() / units::cm,
                 vec_points.at(i).at(j).y() / units::cm,
@@ -275,7 +275,7 @@ std::pair<bool, WireCell::Clus::Facade::geo_point_t> MyFCN::FitVertex()
             fit_pos = Facade::geo_point_t(temp_pos_3D(0), temp_pos_3D(1), temp_pos_3D(2));
             fit_flag = true;
         } else {
-            SPDLOG_LOGGER_DEBUG(s_log, "FitVertex: Cluster: {} Fit Vertex Failed!",
+            SPDLOG_LOGGER_TRACE(s_log, "FitVertex: Cluster: {} Fit Vertex Failed!",
                 vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"));
         }
     }
@@ -293,7 +293,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     // Get APA/face for the fit position
     auto test_wpid = dv->contained_by(fit_pos);
     if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
-        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Warning: fit_pos not contained in detector volume");
+        SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: fit_pos not contained in detector volume");
         return;
     }
     int apa = test_wpid.apa();
@@ -308,7 +308,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     auto slope_it = wpid_slopes.find(wpid);
     
     if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
-        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Warning: geometry parameters not found for APA {} Face {}", apa, face);
+        SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: geometry parameters not found for APA {} Face {}", apa, face);
         return;
     }
     
@@ -330,7 +330,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     
     // Print update information if vertex moved significantly
     if ((fit_pos - vtx->fit().point).magnitude() > 0.01 * units::cm) {
-        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Cluster: {} Update Vertex: ({}, {}, {}, {}) <- ({}, {}, {}, {})",
+        SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Cluster: {} Update Vertex: ({}, {}, {}, {}) <- ({}, {}, {}, {})",
             vtx->cluster() ? std::to_string(vtx->cluster()->get_cluster_id()) : std::string("unknown"),
             offset_u + (slope_yu * fit_pos_raw.y() + slope_zu * fit_pos_raw.z()),
             offset_v + (slope_yv * fit_pos_raw.y() + slope_zv * fit_pos_raw.z()),
@@ -344,7 +344,7 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
     
     // Get steiner point cloud from cluster
     if (!temp_cluster.has_pc("steiner_pc") || temp_cluster.get_pc("steiner_pc").size() == 0) {
-        SPDLOG_LOGGER_DEBUG(s_log, "UpdateInfo: Warning: steiner_pc not found in cluster");
+        SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: steiner_pc not found in cluster");
         return;
     }
     const auto& steiner_pc = temp_cluster.get_pc("steiner_pc");

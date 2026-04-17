@@ -25,12 +25,12 @@ void Steiner::Grapher::create_steiner_tree(
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
-    SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}", 
                (reference_cluster ? "provided" : "null"), path_point_indices.size());
 
     // Phase 1: Find initial steiner terminals
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
-    SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
 
     // std::cout << "Test1: " << steiner_terminals.size() << std::endl;
 
@@ -44,7 +44,7 @@ void Steiner::Grapher::create_steiner_tree(
     if (reference_cluster) {
         vertex_set original_size = steiner_terminals;
         steiner_terminals = filter_by_reference_cluster(steiner_terminals, reference_cluster);
-        SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals", 
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals", 
                    original_size.size(), steiner_terminals.size());
     }
 
@@ -55,7 +55,7 @@ void Steiner::Grapher::create_steiner_tree(
     if (!path_point_indices.empty()) {
         vertex_set pre_path_size = steiner_terminals;
         steiner_terminals = filter_by_path_constraints(steiner_terminals, path_point_indices);
-        SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: path filtering: {} -> {} terminals", 
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: path filtering: {} -> {} terminals", 
                    pre_path_size.size(), steiner_terminals.size());
     }
 
@@ -65,7 +65,7 @@ void Steiner::Grapher::create_steiner_tree(
     // Phase 4: Add extreme points
     vertex_set extreme_points = get_extreme_points_for_reference(reference_cluster);
     steiner_terminals.insert(extreme_points.begin(), extreme_points.end());
-    SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: added {} extreme points, total terminals: {}", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: added {} extreme points, total terminals: {}", 
                extreme_points.size(), steiner_terminals.size());
 
     // std::cout << "Test4: " << steiner_terminals.size() << std::endl;
@@ -107,14 +107,14 @@ void Steiner::Grapher::create_steiner_tree(
     // Store the subset point cloud
     if (!steiner_pc_name.empty()) {
         put_point_cloud(std::move(steiner_result.point_cloud), steiner_pc_name);
-        SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
     }
 
     // can I do this to store the graph ???
     m_cluster.give_graph(steiner_graph_name, std::move(steiner_result.graph));
 
     
-    SPDLOG_LOGGER_DEBUG(log, "create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges", 
                boost::num_vertices(steiner_result.graph), boost::num_vertices(base_graph),
                boost::num_edges(steiner_result.graph));
 
@@ -141,7 +141,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_reference_cluster(
     const auto& ref_time_blob_map = reference_cluster->time_blob_map(); // this one has the time blob map ...
     
     if (ref_time_blob_map.empty()) {
-        SPDLOG_LOGGER_DEBUG(log, "filter_by_reference_cluster: reference cluster has empty time_blob_map");
+        SPDLOG_LOGGER_TRACE(log, "filter_by_reference_cluster: reference cluster has empty time_blob_map");
         return terminals;
     }
 
@@ -611,8 +611,8 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell, cell_points_map);
     // if (m_perf) std::cout << "establish_same_blob_steiner_edges[" << graph_name << "] timing: find_steiner_terminals took " << MS(Clock::now()-t0).count() << " ms  terminals=" << steiner_terminals.size() << std::endl;
     
-    SPDLOG_LOGGER_DEBUG(log, "Found {} Steiner terminals for same-blob edge establishment", steiner_terminals.size());
-    // SPDLOG_LOGGER_DEBUG(log, "Processing {} blobs for same-blob edges", cell_points_map.size());
+    SPDLOG_LOGGER_TRACE(log, "Found {} Steiner terminals for same-blob edge establishment", steiner_terminals.size());
+    // SPDLOG_LOGGER_TRACE(log, "Processing {} blobs for same-blob edges", cell_points_map.size());
 
     // Build an O(1)-lookup set from the terminals (std::set lookup is O(log N)).
     std::unordered_set<vertex_type> terminal_set(steiner_terminals.begin(), steiner_terminals.end());
@@ -716,7 +716,7 @@ void Steiner::Grapher::remove_same_blob_steiner_edges(const std::string& graph_n
 
     auto it = m_added_edges_by_graph.find(graph_name);
     if (it == m_added_edges_by_graph.end() || it->second.empty()) {
-        SPDLOG_LOGGER_DEBUG(log, "No edges to remove for graph '{}'", graph_name);
+        SPDLOG_LOGGER_TRACE(log, "No edges to remove for graph '{}'", graph_name);
         return;
     }
 
