@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <list>
@@ -379,6 +380,71 @@ static void write_category_summary(const std::string& cat,
 }
 
 // ============================================================
+//  NeutrinoTaggerInfo.h default-value parser
+//
+//  Reads the header and builds a map: branch_name → default_value_string.
+//  Handles:  float/int name{val};   →  name → "val"  (omitted {} → "0")
+//            std::vector<…> name;   →  name → "[]"
+// ============================================================
+static std::map<std::string, std::string>
+parse_tagger_defaults(const std::string& path)
+{
+    std::map<std::string, std::string> defs;
+    std::ifstream f(path);
+    if (!f) {
+        std::cerr << "[warn] cannot open " << path << " — no defaults shown\n";
+        return defs;
+    }
+    std::string line;
+    while (std::getline(f, line)) {
+        // strip // comments
+        auto cpos = line.find("//");
+        if (cpos != std::string::npos) line = line.substr(0, cpos);
+        // trim leading whitespace
+        size_t s = line.find_first_not_of(" \t");
+        if (s == std::string::npos) continue;
+        line = line.substr(s);
+
+        // vector fields → default []
+        if (line.size() >= 12 && line.substr(0, 12) == "std::vector<") {
+            size_t close = line.find('>');
+            if (close == std::string::npos) continue;
+            size_t ns = line.find_first_not_of(" \t", close + 1);
+            if (ns == std::string::npos) continue;
+            size_t ne = line.find_first_of("{; \t", ns);
+            if (ne == std::string::npos) continue;
+            defs[line.substr(ns, ne - ns)] = "[]";
+            continue;
+        }
+        // scalar float/int fields
+        bool is_float = (line.size() >= 6 && line.substr(0, 6) == "float ");
+        bool is_int   = (line.size() >= 4 && line.substr(0, 4) == "int ");
+        if (!is_float && !is_int) continue;
+
+        size_t pfx = is_float ? 6 : 4;
+        size_t ns  = line.find_first_not_of(" \t", pfx);
+        if (ns == std::string::npos) continue;
+        size_t brace = line.find('{', ns);
+        size_t semi  = line.find(';', ns);
+        if (semi == std::string::npos) continue;
+
+        size_t ne = (brace != std::string::npos && brace < semi) ? brace : semi;
+        std::string name = line.substr(ns, ne - ns);
+        while (!name.empty() && std::isspace((unsigned char)name.back())) name.pop_back();
+        if (name.empty()) continue;
+
+        std::string defval = "0";
+        if (brace != std::string::npos && brace < semi) {
+            size_t cbrace = line.find('}', brace);
+            if (cbrace != std::string::npos)
+                defval = line.substr(brace + 1, cbrace - brace - 1);
+        }
+        defs[name] = defval;
+    }
+    return defs;
+}
+
+// ============================================================
 //  main
 // ============================================================
 int main(int argc, char* argv[])
@@ -386,24 +452,30 @@ int main(int argc, char* argv[])
     if (argc < 2) {
         std::cerr << "Usage: wire-cell-uboone-tagger-compare"
                      " -p<proto.root> -t<toolkit.root>"
-                     " [-o<report.root>] [-v]\n";
+                     " [-o<report.root>] [-v] [-n<NeutrinoTaggerInfo.h>]\n";
         return 1;
     }
 
     TString proto_filename;
     TString toolkit_filename;
     TString out_filename = "tagger_compare_report.root";
+    std::string info_header_path;
     bool verbose = false;
 
     for (int i = 1; i < argc; ++i) {
         if (argv[i][0] != '-' || argv[i][1] == '\0') continue;
         switch (argv[i][1]) {
-        case 'p': proto_filename   = &argv[i][2]; break;
-        case 't': toolkit_filename = &argv[i][2]; break;
-        case 'o': out_filename     = &argv[i][2]; break;
+        case 'p': proto_filename     = &argv[i][2]; break;
+        case 't': toolkit_filename   = &argv[i][2]; break;
+        case 'o': out_filename       = &argv[i][2]; break;
+        case 'n': info_header_path   = &argv[i][2]; break;
         case 'v': verbose = true; break;
         }
     }
+
+    std::map<std::string, std::string> branch_defaults;
+    if (!info_header_path.empty())
+        branch_defaults = parse_tagger_defaults(info_header_path);
 
     if (proto_filename.IsNull() || toolkit_filename.IsNull()) {
         std::cerr << "Need -p<proto.root> and -t<toolkit.root>\n";
@@ -542,45 +614,92 @@ int main(int argc, char* argv[])
     std::cout << "\nReport written to: " << out_filename << "\n";
 
     if (verbose) {
-        std::cout << "\n--- Per-branch details (differing only) ---\n";
+        // Column widths
+        constexpr int W_NAME   = 46;
+        constexpr int W_NDIFF  =  7;  // digits for n_diff and n_compared
+        constexpr int W_VAL    = 14;  // width for each numeric value
+
+        auto fmt_val = [&](std::ostream& os, double v) -> std::ostream& {
+            os << std::setw(W_VAL) << std::right << std::scientific
+               << std::setprecision(5) << v;
+            return os;
+        };
+        auto fmt_ival = [&](std::ostream& os, int v) -> std::ostream& {
+            os << std::setw(W_VAL) << std::right << v;
+            return os;
+        };
+
+        std::cout << "\n"
+                  << std::left  << std::setw(W_NAME) << "branch"
+                  << "  " << std::right << std::setw(W_NDIFF) << "n_diff"
+                  << "/" << std::left  << std::setw(W_NDIFF) << "n_cmp"
+                  << "  " << std::right << std::setw(W_VAL) << "max|diff|"
+                  << "  " << std::right << std::setw(W_VAL) << "proto"
+                  << "  " << std::right << std::setw(W_VAL) << "toolkit"
+                  << "  " << std::right << std::setw(W_VAL) << "default"
+                  << "\n"
+                  << std::string(W_NAME + 2 + 2*W_NDIFF + 1 + 4*(W_VAL+2), '-') << "\n";
+
+        std::cout << std::defaultfloat;
+
         for (const auto& bs : all_stats) {
             if (bs.n_diff == 0 || bs.type == SKIP) continue;
-            std::cout << "  " << std::left << std::setw(48) << bs.name
-                      << "  n_diff=" << bs.n_diff
-                      << "/" << bs.n_compared
-                      << "  max|diff|=" << bs.max_abs_diff;
+
+            auto it = branch_defaults.find(bs.name);
+            std::string defstr = (it != branch_defaults.end()) ? it->second : "";
+
             switch (bs.type) {
             case SCALAR_F:
-                std::cout << "  proto=" << bs.first_diff_proto_f
-                          << "  toolkit=" << bs.first_diff_tool_f;
-                break;
-            case SCALAR_I:
-                std::cout << "  proto=" << bs.first_diff_proto_i
-                          << "  toolkit=" << bs.first_diff_tool_i;
-                break;
-            case VEC_F: {
-                std::cout << "\n    proto  =[";
-                for (size_t k = 0; k < bs.first_diff_proto_vf.size(); ++k)
-                    std::cout << (k ? "," : "") << bs.first_diff_proto_vf[k];
-                std::cout << "]\n    toolkit=[";
-                for (size_t k = 0; k < bs.first_diff_tool_vf.size(); ++k)
-                    std::cout << (k ? "," : "") << bs.first_diff_tool_vf[k];
-                std::cout << "]";
+            case SCALAR_I: {
+                std::cout << std::left  << std::setw(W_NAME) << bs.name
+                          << "  " << std::right << std::setw(W_NDIFF) << bs.n_diff
+                          << "/" << std::left  << std::setw(W_NDIFF) << bs.n_compared
+                          << "  ";
+                fmt_val(std::cout, bs.max_abs_diff) << "  ";
+                if (bs.type == SCALAR_F) {
+                    fmt_val(std::cout, bs.first_diff_proto_f) << "  ";
+                    fmt_val(std::cout, bs.first_diff_tool_f)  << "  ";
+                } else {
+                    fmt_ival(std::cout, bs.first_diff_proto_i) << "  ";
+                    fmt_ival(std::cout, bs.first_diff_tool_i)  << "  ";
+                }
+                std::cout << std::right << std::setw(W_VAL)
+                          << (defstr.empty() ? "-" : defstr) << "\n";
                 break;
             }
+            case VEC_F:
             case VEC_I: {
-                std::cout << "\n    proto  =[";
-                for (size_t k = 0; k < bs.first_diff_proto_vi.size(); ++k)
-                    std::cout << (k ? "," : "") << bs.first_diff_proto_vi[k];
-                std::cout << "]\n    toolkit=[";
-                for (size_t k = 0; k < bs.first_diff_tool_vi.size(); ++k)
-                    std::cout << (k ? "," : "") << bs.first_diff_tool_vi[k];
-                std::cout << "]";
+                // Header line with stats
+                std::cout << std::left  << std::setw(W_NAME) << bs.name
+                          << "  " << std::right << std::setw(W_NDIFF) << bs.n_diff
+                          << "/" << std::left  << std::setw(W_NDIFF) << bs.n_compared
+                          << "  ";
+                fmt_val(std::cout, bs.max_abs_diff);
+                if (!defstr.empty())
+                    std::cout << "  default=" << defstr;
+                std::cout << "\n";
+                // proto / toolkit rows
+                if (bs.type == VEC_F) {
+                    std::cout << "    proto  : [";
+                    for (size_t k = 0; k < bs.first_diff_proto_vf.size(); ++k)
+                        std::cout << (k ? ", " : "") << bs.first_diff_proto_vf[k];
+                    std::cout << "]\n    toolkit: [";
+                    for (size_t k = 0; k < bs.first_diff_tool_vf.size(); ++k)
+                        std::cout << (k ? ", " : "") << bs.first_diff_tool_vf[k];
+                    std::cout << "]\n";
+                } else {
+                    std::cout << "    proto  : [";
+                    for (size_t k = 0; k < bs.first_diff_proto_vi.size(); ++k)
+                        std::cout << (k ? ", " : "") << bs.first_diff_proto_vi[k];
+                    std::cout << "]\n    toolkit: [";
+                    for (size_t k = 0; k < bs.first_diff_tool_vi.size(); ++k)
+                        std::cout << (k ? ", " : "") << bs.first_diff_tool_vi[k];
+                    std::cout << "]\n";
+                }
                 break;
             }
             default: break;
             }
-            std::cout << "\n";
         }
     }
 
