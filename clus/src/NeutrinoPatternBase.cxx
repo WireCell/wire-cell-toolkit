@@ -382,8 +382,8 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     } else {
         // main_cluster is nullptr and this is not the main cluster:
         // ordering relative to main is undefined; apply ascending-z as a deterministic fallback
-        SPDLOG_LOGGER_WARN(s_log, "init_first_segment: main_cluster is nullptr for a non-main cluster; "
-                           "point ordering is undefined, falling back to ascending-z order");
+        SPDLOG_LOGGER_TRACE(s_log, "init_first_segment: main_cluster is nullptr for a non-main cluster; "
+                            "falling back to ascending-z order");
         if (first_pt.z() > second_pt.z()) {
             std::swap(first_pt, second_pt);
         }
@@ -1540,7 +1540,8 @@ bool PatternAlgorithms::find_proto_vertex(Graph& graph, Facade::Cluster& cluster
     if (steiner_pc.size() < 2) return false;
 
     // Initialize first segment
-    SegmentPtr sg1 = init_first_segment(graph, cluster, &cluster, track_fitter, dv, flag_back_search);
+    Facade::Cluster* main_cluster_ptr = cluster.get_flag(Facade::Flags::main_cluster) ? &cluster : nullptr;
+    SegmentPtr sg1 = init_first_segment(graph, cluster, main_cluster_ptr, track_fitter, dv, flag_back_search);
     if (m_perf) SPDLOG_LOGGER_TRACE(s_log, "find_proto_vertex timing: init_first_segment took {} ms", MS(Clock::now() - t0).count());
 
     if (!sg1) return false;

@@ -321,13 +321,11 @@ struct BlobSampler::Sampler : public Aux::Logger
                 // std::cout << temp.second << " " << wind << " " << temp1.second << " " << temp1.first << std::endl;
                 
                 if (wind < 0) {
-                    SPDLOG_LOGGER_TRACE(log, "sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
-                    SPDLOG_LOGGER_WARN(log, "wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
+                    SPDLOG_LOGGER_TRACE(log, "wind {} out of range for plane {} with {} wires, clamping to 0; sampler={} point={} cartesian={} pimpos={}", wind, pind, iwires.size(), my_ident, ipt, pts[ipt], xwp);
                     wind = 0;
                 }
                 if (wind >= (int)iwires.size()) {
-                    SPDLOG_LOGGER_TRACE(log, "sampler={}, point={} cartesian={} pimpos={}", my_ident, ipt, pts[ipt], xwp);
-                    SPDLOG_LOGGER_WARN(log, "wind {} out of range for plane {} with {} wires, using nearby wires for now", wind, pind, iwires.size());
+                    SPDLOG_LOGGER_TRACE(log, "wind {} out of range for plane {} with {} wires, clamping to last; sampler={} point={} cartesian={} pimpos={}", wind, pind, iwires.size(), my_ident, ipt, pts[ipt], xwp);
                     wind = (int)iwires.size() - 1;
                 }
                 wire_index[ipt] = wind;

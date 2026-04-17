@@ -3,6 +3,7 @@
 #include "WireCellClus/PatternDebugIO.h"      // debug dump/load
 
 #include "WireCellUtil/Persist.h"
+#include <chrono>
 
 #include <cstdlib>
 
@@ -77,6 +78,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
 
 void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 {
+    using Clock = std::chrono::steady_clock;
+    using MS    = std::chrono::duration<double, std::milli>;
+    auto t_total = Clock::now();
+    auto t0 = Clock::now();
+
     // Configure the track fitter with detector volume
     m_track_fitter->set_detector_volume(m_dv);
     m_track_fitter->set_pc_transforms(m_pcts); 
@@ -136,6 +142,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         for (auto* c : other_clusters) clusters_to_preload.push_back(c);
         m_track_fitter->preload_clusters(clusters_to_preload);
     }
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: preload_clusters took {} ms", MS(Clock::now() - t0).count());
+    t0 = Clock::now();
 
     // Create PRGraph and first segment
     auto pr_graph = std::make_shared<WireCell::Clus::PR::Graph>();
@@ -197,7 +205,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
         std::cout << "After first round of main cluster PR" << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
     }
-
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: main_cluster initial PR took {} ms", MS(Clock::now() - t0).count());
+    t0 = Clock::now();
 
     // Loop over other (non-main) beam-flash clusters
     if (!other_clusters.empty()) {
@@ -232,15 +241,19 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 }
             }
         }
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: other_clusters PR took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
 
         // Deghost across all beam-flash clusters (main + others)
         std::vector<Cluster*> all_clusters;
         all_clusters.push_back(main_cluster);
         all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
-        
+
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: deghosting took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
     }
-     
+
     // Determine the overall neutrino vertex.
     // If DL weights are configured, try DL first (matches prototype flag_dl_vtx logic).
     // Fall back to traditional algorithm if DL is disabled or does not change the vertex.
@@ -273,6 +286,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             final_main_vertex = it->second;
         }
     }
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: overall main vertex took {} ms", MS(Clock::now() - t0).count());
+    t0 = Clock::now();
 
     
 
@@ -303,6 +318,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         SPDLOG_LOGGER_TRACE(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
         
         std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
 
         pattern_algos.shower_clustering_with_nv(acc_segment_id, pi0_showers,
                                                 map_shower_pio_id, map_pio_id_showers,
@@ -318,12 +335,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                 m_recomb_model);
 
         std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+        if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: shower_clustering_with_nv took {} ms", MS(Clock::now() - t0).count());
+        t0 = Clock::now();
 
     }
 
 
     // Initialize tagger features to their default values unconditionally —
     // even if no vertex was found the struct must be value-initialized.
+    t0 = Clock::now();
     TaggerInfo tagger_info;
     pattern_algos.init_tagger_info(tagger_info);
 
@@ -384,6 +404,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                           tagger_info);
     }
 
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: taggers took {} ms", MS(Clock::now() - t0).count());
+    t0 = Clock::now();
+
     // Compute match_isFC: 1 if the main cluster is fully contained inside the
     // fiducial volume, 0 otherwise.  Uses the same two-round boundary check as
     // TaggerCheckSTM so the definition is consistent across both users.
@@ -391,6 +414,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         auto fc_result = Facade::cluster_fc_check(*main_cluster, m_dv);
         tagger_info.match_isFC = fc_result.is_fc ? 1.0f : 0.0f;
     }
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fc_check took {} ms", MS(Clock::now() - t0).count());
+    t0 = Clock::now();
 
     // Fill reconstructed neutrino kinematics if a vertex was found.
     KineInfo kine_info{};
@@ -401,6 +426,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             m_geom_helper,          // nullptr when clus_geom_helper is not configured
             particle_data(), m_recomb_model);
     }
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: fill_kine_tree took {} ms", MS(Clock::now() - t0).count());
+    t0 = Clock::now(); // finalize block
 
     // Mark the main neutrino vertex and store neutrino results in TrackFitting
     // so that downstream consumers (e.g., Bee particle-flow output in MultiAlgBlobClustering)
@@ -422,6 +449,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     // Store TrackFitting in the grouping for later access by bee output and tracking sink
     grouping.set_track_fitting(m_track_fitter);
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: finalize took {} ms", MS(Clock::now() - t0).count());
+    if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: visit() TOTAL took {} ms", MS(Clock::now() - t_total).count());
 }
 
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)
