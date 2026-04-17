@@ -82,7 +82,7 @@ static std::string classify_branch(const std::string& bname,
 // ============================================================
 //  Branch-level type detection
 // ============================================================
-enum BrType { SCALAR_F, SCALAR_I, VEC_F, VEC_I, SKIP };
+enum BrType { SCALAR_F, SCALAR_D, SCALAR_I, VEC_F, VEC_I, SKIP };
 
 static BrType detect_type(TBranch* br)
 {
@@ -97,8 +97,9 @@ static BrType detect_type(TBranch* br)
     if (!leaves || leaves->GetEntries() == 0) return SKIP;
     TLeaf* leaf = (TLeaf*)leaves->At(0);
     std::string tn(leaf->GetTypeName());
-    if (tn == "Float_t" || tn == "float") return SCALAR_F;
-    if (tn == "Int_t"   || tn == "int")   return SCALAR_I;
+    if (tn == "Float_t"  || tn == "float")  return SCALAR_F;
+    if (tn == "Double_t" || tn == "double") return SCALAR_D;
+    if (tn == "Int_t"    || tn == "int")    return SCALAR_I;
     return SKIP;
 }
 
@@ -112,8 +113,9 @@ struct BranchStat {
     bool        in_kine = false;  // true for T_kine branches
 
     // scalar buffers (addresses remain stable because BranchStat lives in a list)
-    float proto_f = 0, tool_f = 0;
-    int   proto_i = 0, tool_i = 0;
+    float  proto_f = 0, tool_f = 0;
+    double proto_d = 0, tool_d = 0;
+    int    proto_i = 0, tool_i = 0;
     // object buffers (ROOT sets these pointers on first GetEntry)
     std::vector<float>* proto_vf = nullptr;
     std::vector<float>* tool_vf  = nullptr;
@@ -131,8 +133,9 @@ struct BranchStat {
     double sum_abs_diff = 0;
 
     // values at first differing event (printed in verbose mode)
-    float first_diff_proto_f{0}, first_diff_tool_f{0};
-    int   first_diff_proto_i{0}, first_diff_tool_i{0};
+    float  first_diff_proto_f{0}, first_diff_tool_f{0};
+    double first_diff_proto_d{0}, first_diff_tool_d{0};
+    int    first_diff_proto_i{0}, first_diff_tool_i{0};
     std::vector<float> first_diff_proto_vf, first_diff_tool_vf;
     std::vector<int>   first_diff_proto_vi, first_diff_tool_vi;
 
@@ -142,33 +145,35 @@ struct BranchStat {
 
 static void setup_branch_stat(BranchStat& bs, TDirectory* dir)
 {
-    BrType t = detect_type(bs.proto_br);
-    // must agree with toolkit branch type
-    if (t != detect_type(bs.tool_br)) {
+    BrType pt = detect_type(bs.proto_br);
+    BrType tt = detect_type(bs.tool_br);
+
+    // Allow Double_t ↔ Float_t mixed pairs: read both via their native buffers,
+    // compare_one promotes both to double when computing the diff.
+    bool mixed_df = (pt == SCALAR_D && tt == SCALAR_F) ||
+                    (pt == SCALAR_F && tt == SCALAR_D);
+    if (!mixed_df && pt != tt) {
         bs.type = SKIP;
         return;
     }
-    bs.type = t;
+    // Canonical type: prefer SCALAR_D if either side is double.
+    bs.type = (pt == SCALAR_D || tt == SCALAR_D) ? SCALAR_D : pt;
 
-    switch (t) {
-    case SCALAR_F:
-        bs.proto_br->SetAddress(&bs.proto_f);
-        bs.tool_br->SetAddress(&bs.tool_f);
-        break;
-    case SCALAR_I:
-        bs.proto_br->SetAddress(&bs.proto_i);
-        bs.tool_br->SetAddress(&bs.tool_i);
-        break;
-    case VEC_F:
-        bs.proto_br->SetAddress(&bs.proto_vf);
-        bs.tool_br->SetAddress(&bs.tool_vf);
-        break;
-    case VEC_I:
-        bs.proto_br->SetAddress(&bs.proto_vi);
-        bs.tool_br->SetAddress(&bs.tool_vi);
-        break;
-    default:
-        return;
+    switch (pt) {
+    case SCALAR_F: bs.proto_br->SetAddress(&bs.proto_f); break;
+    case SCALAR_D: bs.proto_br->SetAddress(&bs.proto_d); break;
+    case SCALAR_I: bs.proto_br->SetAddress(&bs.proto_i); break;
+    case VEC_F:    bs.proto_br->SetAddress(&bs.proto_vf); break;
+    case VEC_I:    bs.proto_br->SetAddress(&bs.proto_vi); break;
+    default: return;
+    }
+    switch (tt) {
+    case SCALAR_F: bs.tool_br->SetAddress(&bs.tool_f); break;
+    case SCALAR_D: bs.tool_br->SetAddress(&bs.tool_d); break;
+    case SCALAR_I: bs.tool_br->SetAddress(&bs.tool_i); break;
+    case VEC_F:    bs.tool_br->SetAddress(&bs.tool_vf); break;
+    case VEC_I:    bs.tool_br->SetAddress(&bs.tool_vi); break;
+    default: return;
     }
 
     if (dir) {
@@ -191,6 +196,7 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
     bs.tool_br->GetEntry(tool_entry);
 
     constexpr float  SENTINEL_F = -999.0f;
+    constexpr double SENTINEL_D = -999.0;
     constexpr double EPS        = 1e-6;
 
     switch (bs.type) {
@@ -208,6 +214,32 @@ static void compare_one(BranchStat& bs, long proto_entry, long tool_entry)
             if (bs.n_diff == 0) {
                 bs.first_diff_proto_f = bs.proto_f;
                 bs.first_diff_tool_f  = bs.tool_f;
+            }
+            bs.n_diff++;
+            bs.max_abs_diff  = std::max(bs.max_abs_diff, std::abs(diff));
+            bs.sum_abs_diff += std::abs(diff);
+        }
+        if (bs.h_norm_diff) bs.h_norm_diff->Fill(nd);
+        break;
+    }
+    case SCALAR_D: {
+        // Covers pure Double_t/Double_t and mixed Double_t/Float_t pairs.
+        // Each side is read into its native buffer; promote to double here.
+        bs.n_compared++;
+        double pv = (bs.proto_br->GetLeaf(bs.name.c_str()) &&
+                     std::string(bs.proto_br->GetLeaf(bs.name.c_str())->GetTypeName()).find("Double") != std::string::npos)
+                    ? bs.proto_d : (double)bs.proto_f;
+        double tv = (bs.tool_br->GetLeaf(bs.name.c_str()) &&
+                     std::string(bs.tool_br->GetLeaf(bs.name.c_str())->GetTypeName()).find("Double") != std::string::npos)
+                    ? bs.tool_d : (double)bs.tool_f;
+        if (pv == SENTINEL_D || tv == SENTINEL_D) { bs.n_sentinel++; return; }
+        double diff  = tv - pv;
+        double scale = std::max({std::abs(pv), std::abs(tv), EPS});
+        double nd    = diff / scale;
+        if (std::abs(nd) > 1e-3) {
+            if (bs.n_diff == 0) {
+                bs.first_diff_proto_d = pv;
+                bs.first_diff_tool_d  = tv;
             }
             bs.n_diff++;
             bs.max_abs_diff  = std::max(bs.max_abs_diff, std::abs(diff));
@@ -650,6 +682,7 @@ int main(int argc, char* argv[])
 
             switch (bs.type) {
             case SCALAR_F:
+            case SCALAR_D:
             case SCALAR_I: {
                 std::cout << std::left  << std::setw(W_NAME) << bs.name
                           << "  " << std::right << std::setw(W_NDIFF) << bs.n_diff
@@ -659,6 +692,9 @@ int main(int argc, char* argv[])
                 if (bs.type == SCALAR_F) {
                     fmt_val(std::cout, bs.first_diff_proto_f) << "  ";
                     fmt_val(std::cout, bs.first_diff_tool_f)  << "  ";
+                } else if (bs.type == SCALAR_D) {
+                    fmt_val(std::cout, bs.first_diff_proto_d) << "  ";
+                    fmt_val(std::cout, bs.first_diff_tool_d)  << "  ";
                 } else {
                     fmt_ival(std::cout, bs.first_diff_proto_i) << "  ";
                     fmt_ival(std::cout, bs.first_diff_tool_i)  << "  ";
