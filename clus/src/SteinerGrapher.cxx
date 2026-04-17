@@ -25,7 +25,7 @@ void Steiner::Grapher::create_steiner_tree(
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
-    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}",
                (reference_cluster ? "provided" : "null"), path_point_indices.size());
 
     // Phase 1: Find initial steiner terminals
@@ -44,7 +44,7 @@ void Steiner::Grapher::create_steiner_tree(
     if (reference_cluster) {
         vertex_set original_size = steiner_terminals;
         steiner_terminals = filter_by_reference_cluster(steiner_terminals, reference_cluster);
-        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals", 
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals",
                    original_size.size(), steiner_terminals.size());
     }
 
@@ -55,7 +55,7 @@ void Steiner::Grapher::create_steiner_tree(
     if (!path_point_indices.empty()) {
         vertex_set pre_path_size = steiner_terminals;
         steiner_terminals = filter_by_path_constraints(steiner_terminals, path_point_indices);
-        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: path filtering: {} -> {} terminals", 
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: path filtering: {} -> {} terminals",
                    pre_path_size.size(), steiner_terminals.size());
     }
 
@@ -65,7 +65,7 @@ void Steiner::Grapher::create_steiner_tree(
     // Phase 4: Add extreme points
     vertex_set extreme_points = get_extreme_points_for_reference(reference_cluster);
     steiner_terminals.insert(extreme_points.begin(), extreme_points.end());
-    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: added {} extreme points, total terminals: {}", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: added {} extreme points, total terminals: {}",
                extreme_points.size(), steiner_terminals.size());
 
     // std::cout << "Test4: " << steiner_terminals.size() << std::endl;
@@ -114,10 +114,9 @@ void Steiner::Grapher::create_steiner_tree(
     m_cluster.give_graph(steiner_graph_name, std::move(steiner_result.graph));
 
     
-    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges",
                boost::num_vertices(steiner_result.graph), boost::num_vertices(base_graph),
                boost::num_edges(steiner_result.graph));
-
 
     // return steiner_result.graph;
 

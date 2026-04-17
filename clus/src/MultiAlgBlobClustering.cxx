@@ -20,6 +20,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/GraphTools.h"
 
+#include <chrono>
 #include <map>
 #include <fstream>
 #include <iomanip>
@@ -1486,15 +1487,21 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
 
 
 struct Perf {
+    using Clock = std::chrono::steady_clock;
+    using MS    = std::chrono::duration<double, std::milli>;
+
     bool enable;
     Log::logptr_t log;
     ExecMon em;
+    Clock::time_point t_start;
+    Clock::time_point t_last;
 
     Perf(bool e, Log::logptr_t l, const std::string& t = "starting MultiAlgBlobClustering")
       : enable(e)
       , log(l)
       , em(t)
     {
+        t_start = t_last = Clock::now();
     }
 
     ~Perf()
@@ -1506,6 +1513,10 @@ struct Perf {
     void operator()(const std::string& ctx)
     {
         if (!enable) return;
+        auto now = Clock::now();
+        SPDLOG_LOGGER_DEBUG(log, "MABC timing: {} took {} ms (cumulative {} ms)",
+                            ctx, MS(now - t_last).count(), MS(now - t_start).count());
+        t_last = now;
         em(ctx);
     }
 

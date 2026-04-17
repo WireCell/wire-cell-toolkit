@@ -35,7 +35,7 @@ public:
         m_pcarray_name = get<std::string>(config, "pcarray_name", "perblob");
         m_graph_name = get<std::string>(config, "graph_name", m_graph_name);
     }
-    
+
     virtual Configuration default_configuration() const {
         Configuration cfg;
         cfg["detector_volumes"] = "";
@@ -100,7 +100,7 @@ private:
         if (cluster->get_scope_filter(m_scope)) {
             if (cluster->get_default_scope().hash() != m_scope.hash()) {
                 cluster->set_default_scope(m_scope);
-            }       
+            }
 
             // Determine which component is the "main" cluster
             auto old_cc_array = cluster->get_pcarray(m_array_name, m_pcarray_name);
