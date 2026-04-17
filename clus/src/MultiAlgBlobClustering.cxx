@@ -500,7 +500,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         return;
     }
 
-    SPDLOG_LOGGER_DEBUG(log, "Filling bee points '{}' from PR graph with {} vertices and {} edges",
+    SPDLOG_LOGGER_TRACE(log, "Filling bee points '{}' from PR graph with {} vertices and {} edges",
                name, boost::num_vertices(*pr_graph), boost::num_edges(*pr_graph));
 
     // Build segment → shower map for shower_track mode so each point gets
@@ -577,7 +577,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
                 continue;
             }
 
-            SPDLOG_LOGGER_DEBUG(log, "Segment {} has {} fitted points", encoded_id, fits.size());
+            SPDLOG_LOGGER_TRACE(log, "Segment {} has {} fitted points", encoded_id, fits.size());
 
             for (const auto& fit : fits) {
                 if (!fit.valid()) continue;
@@ -608,7 +608,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         segment_count++;
     }
 
-    SPDLOG_LOGGER_DEBUG(log, "Filled bee points '{}' from {} segments", name, segment_count);
+    SPDLOG_LOGGER_TRACE(log, "Filled bee points '{}' from {} segments", name, segment_count);
 }
 
 
@@ -655,7 +655,7 @@ void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& 
         ++vertex_count;
     }
 
-    SPDLOG_LOGGER_DEBUG(log, "Filled bee vertices '{}' from {} vertices", name, vertex_count);
+    SPDLOG_LOGGER_TRACE(log, "Filled bee vertices '{}' from {} vertices", name, vertex_count);
 }
 
 
@@ -1273,7 +1273,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     }
 
     tree.set_particles(particles);
-    SPDLOG_LOGGER_DEBUG(log, "fill_bee_pf_tree '{}': {} top-level particles",
+    SPDLOG_LOGGER_TRACE(log, "fill_bee_pf_tree '{}': {} top-level particles",
                         cfg.name, particles.size());
 }
 
@@ -1514,7 +1514,7 @@ struct Perf {
         if (!enable) return;
         if (mon) (*this)(ctx);
 
-        SPDLOG_LOGGER_DEBUG(log, "{} ensemble with {} groupings:", ctx, ensemble.nchildren());
+        SPDLOG_LOGGER_TRACE(log, "{} ensemble with {} groupings:", ctx, ensemble.nchildren());
 
         for (const auto* grouping : ensemble.children()) {
 
@@ -1536,7 +1536,7 @@ struct Perf {
 
                 
 
-                SPDLOG_LOGGER_DEBUG(log, "\tgrouping \"{}\": {}, {} points and {} clusters with no points",
+                SPDLOG_LOGGER_TRACE(log, "\tgrouping \"{}\": {}, {} points and {} clusters with no points",
                            name, *grouping, npoints_total, nzero);
                 (void)count;
             }
@@ -1548,7 +1548,7 @@ struct Perf {
             size_t count = 0;
             for (const auto* cluster : children) {
                 bool sane = cluster->sanity(log);
-                SPDLOG_LOGGER_DEBUG(log, "\t\tcluster {} {} sane:{}", count++, *cluster, sane);
+                SPDLOG_LOGGER_TRACE(log, "\t\tcluster {} {} sane:{}", count++, *cluster, sane);
             }
         }
     }
