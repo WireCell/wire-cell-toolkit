@@ -853,7 +853,7 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
     ti.shw_sp_br3_7_energy             = Eshower / units::MeV;
     ti.shw_sp_br3_7_min_angle          = min_angle;
     ti.shw_sp_br3_7_sg_length          = length / units::cm;
-    ti.shw_sp_br3_7_shower_main_length = shower_main_len / units::cm;
+    ti.shw_sp_br3_7_main_length        = shower_main_len / units::cm;
     ti.shw_sp_br3_7_flag               = !flag_bad7;
 
     // -------------------------------------------------------------------

@@ -111,7 +111,7 @@ void UbooneNumuBDTScorer::init_readers()
         m_reader_numu3 = std::make_unique<TMVA::Reader>("!V:Silent");
         m_reader_numu3->AddVariable("numu_cc_3_particle_type",   &m_numu3_particle_type);
         m_reader_numu3->AddVariable("numu_cc_3_max_length",      &m_numu3_max_length);
-        m_reader_numu3->AddVariable("numu_cc_3_acc_track_length",&m_numu3_acc_track_length);
+        m_reader_numu3->AddVariable("numu_cc_3_track_length",   &m_numu3_track_length);
         m_reader_numu3->AddVariable("numu_cc_3_max_length_all",  &m_numu3_max_length_all);
         m_reader_numu3->AddVariable("numu_cc_3_max_muon_length", &m_numu3_max_muon_length);
         m_reader_numu3->AddVariable("numu_cc_3_n_daughter_tracks",&m_numu3_n_daughter_tracks);
@@ -384,7 +384,7 @@ float UbooneNumuBDTScorer::cal_numu_3_bdt(Clus::PR::TaggerInfo& ti, float defaul
 
     m_numu3_particle_type    = ti.numu_cc_3_particle_type;
     m_numu3_max_length       = ti.numu_cc_3_max_length;
-    m_numu3_acc_track_length = ti.numu_cc_3_acc_track_length;
+    m_numu3_track_length     = ti.numu_cc_3_track_length;
     m_numu3_max_length_all   = ti.numu_cc_3_max_length_all;
     m_numu3_max_muon_length  = ti.numu_cc_3_max_muon_length;
     m_numu3_n_daughter_tracks = ti.numu_cc_3_n_daughter_tracks;
@@ -418,7 +418,7 @@ void UbooneNumuBDTScorer::cal_numu_bdts_xgboost(Clus::PR::TaggerInfo& ti,
     m_xgb_vars[ 0] = ti.numu_cc_flag_3;
     m_xgb_vars[ 1] = ti.numu_cc_3_particle_type;
     m_xgb_vars[ 2] = ti.numu_cc_3_max_length;
-    m_xgb_vars[ 3] = ti.numu_cc_3_acc_track_length;  // "numu_cc_3_track_length"
+    m_xgb_vars[ 3] = ti.numu_cc_3_track_length;
     m_xgb_vars[ 4] = ti.numu_cc_3_max_length_all;
     m_xgb_vars[ 5] = ti.numu_cc_3_max_muon_length;
     m_xgb_vars[ 6] = ti.numu_cc_3_n_daughter_tracks;

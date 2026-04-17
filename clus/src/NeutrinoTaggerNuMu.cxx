@@ -362,7 +362,7 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
     ti.numu_cc_flag_3          = static_cast<float>(flag_numu_cc_3);
     ti.numu_cc_3_particle_type = static_cast<float>(tmp_particle_type);
     ti.numu_cc_3_max_length    = static_cast<float>(max_length / units::cm);
-    ti.numu_cc_3_acc_track_length = static_cast<float>(acc_track_length / units::cm);
+    ti.numu_cc_3_track_length     = static_cast<float>(acc_track_length / units::cm);
     ti.numu_cc_3_max_length_all= static_cast<float>(max_length_all / units::cm);
     ti.numu_cc_3_max_muon_length = static_cast<float>(max_muon_length / units::cm);
     ti.numu_cc_3_n_daughter_tracks = static_cast<float>(n3_tracks);

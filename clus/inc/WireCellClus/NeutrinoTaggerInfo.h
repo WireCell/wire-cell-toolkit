@@ -801,7 +801,7 @@ namespace WireCell::Clus::PR {
         float shw_sp_br3_7_energy{0};
         float shw_sp_br3_7_min_angle{0};
         float shw_sp_br3_7_sg_length{0};
-        float shw_sp_br3_7_shower_main_length{0};
+        float shw_sp_br3_7_main_length{0};
         float shw_sp_br3_7_flag{1};
         float shw_sp_br3_8_max_dQ_dx{0};
         float shw_sp_br3_8_energy{0};
@@ -1124,7 +1124,7 @@ namespace WireCell::Clus::PR {
         float br3_7_energy{0};
         float br3_7_min_angle{0};
         float br3_7_sg_length{0};
-        float br3_7_shower_main_length{0};
+        float br3_7_main_length{0};
         float br3_7_flag{1};
         float br3_8_max_dQ_dx{0};
         float br3_8_energy{0};
@@ -1341,7 +1341,7 @@ namespace WireCell::Clus::PR {
         float numu_cc_flag_3{0};
         float numu_cc_3_particle_type{0};
         float numu_cc_3_max_length{0};
-        float numu_cc_3_acc_track_length{0};
+        float numu_cc_3_track_length{0};
         float numu_cc_3_max_length_all{0};
         float numu_cc_3_max_muon_length{0};
         float numu_cc_3_n_daughter_tracks{0};

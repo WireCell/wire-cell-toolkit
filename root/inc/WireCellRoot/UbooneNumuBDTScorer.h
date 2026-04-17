@@ -101,7 +101,7 @@ namespace WireCell {
             // numu_3: 7 vars
             mutable float m_numu3_particle_type{0};
             mutable float m_numu3_max_length{0};
-            mutable float m_numu3_acc_track_length{0};
+            mutable float m_numu3_track_length{0};
             mutable float m_numu3_max_length_all{0};
             mutable float m_numu3_max_muon_length{0};
             mutable float m_numu3_n_daughter_tracks{0};

@@ -760,7 +760,7 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     VECTOR_BR(shw_sp_br3_6_v_length); VECTOR_BR(shw_sp_br3_6_v_n_other_vtx_segs);
     VECTOR_BR(shw_sp_br3_6_v_energy); VECTOR_BR(shw_sp_br3_6_v_flag);
     SCALAR_BR(shw_sp_br3_7_energy); SCALAR_BR(shw_sp_br3_7_min_angle);
-    SCALAR_BR(shw_sp_br3_7_sg_length); SCALAR_BR(shw_sp_br3_7_shower_main_length);
+    SCALAR_BR(shw_sp_br3_7_sg_length); SCALAR_BR(shw_sp_br3_7_main_length);
     SCALAR_BR(shw_sp_br3_7_flag);
     SCALAR_BR(shw_sp_br3_8_max_dQ_dx); SCALAR_BR(shw_sp_br3_8_energy);
     SCALAR_BR(shw_sp_br3_8_n_main_segs); SCALAR_BR(shw_sp_br3_8_shower_main_length);
@@ -928,7 +928,7 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     VECTOR_BR(br3_6_v_length); VECTOR_BR(br3_6_v_n_other_vtx_segs);
     VECTOR_BR(br3_6_v_energy); VECTOR_BR(br3_6_v_flag);
     SCALAR_BR(br3_7_energy); SCALAR_BR(br3_7_min_angle); SCALAR_BR(br3_7_sg_length);
-    SCALAR_BR(br3_7_shower_main_length); SCALAR_BR(br3_7_flag);
+    SCALAR_BR(br3_7_main_length); SCALAR_BR(br3_7_flag);
     SCALAR_BR(br3_8_max_dQ_dx); SCALAR_BR(br3_8_energy); SCALAR_BR(br3_8_n_main_segs);
     SCALAR_BR(br3_8_shower_main_length); SCALAR_BR(br3_8_shower_length); SCALAR_BR(br3_8_flag);
     SCALAR_BR(br3_flag);
@@ -1049,12 +1049,9 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     VECTOR_BR(numu_cc_2_n_daughter_tracks); VECTOR_BR(numu_cc_2_n_daughter_all);
     SCALAR_BR(numu_cc_flag_3);
     SCALAR_BR(numu_cc_3_particle_type); SCALAR_BR(numu_cc_3_max_length);
-    SCALAR_BR(numu_cc_3_acc_track_length); SCALAR_BR(numu_cc_3_max_length_all);
+    SCALAR_BR(numu_cc_3_track_length); SCALAR_BR(numu_cc_3_max_length_all);
     SCALAR_BR(numu_cc_3_max_muon_length); SCALAR_BR(numu_cc_3_n_daughter_tracks);
     SCALAR_BR(numu_cc_3_n_daughter_all);
-
-    // ---- fiducial-volume flag ----
-    SCALAR_BR(match_isFC);
 
     // ---- numu BDT scores ----
     SCALAR_BR(cosmict_2_4_score); SCALAR_BR(cosmict_3_5_score);

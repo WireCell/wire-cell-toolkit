@@ -3310,7 +3310,7 @@ static bool bad_reconstruction_2(NuEContext& ctx,
     ti.br3_7_energy             = Eshower / units::MeV;
     ti.br3_7_min_angle          = min_angle;
     ti.br3_7_sg_length          = length / units::cm;
-    ti.br3_7_shower_main_length = shower_main_len / units::cm;
+    ti.br3_7_main_length        = shower_main_len / units::cm;
     ti.br3_7_flag               = !flag_bad7;
 
     // ------------------------------------------------------------------
