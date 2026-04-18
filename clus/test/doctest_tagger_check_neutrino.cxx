@@ -77,8 +77,10 @@ TEST_CASE("tagger_check_neutrino end-to-end")
     if (!dump_path)   dump_path   = default_dump;
     if (!config_path) config_path = default_config;
 
-    MESSAGE("Dump file:   ", dump_path);
-    MESSAGE("Config file: ", config_path);
+    std::string s_dump_path   = dump_path;
+    std::string s_config_path = config_path;
+    MESSAGE("Dump file:   ", s_dump_path);
+    MESSAGE("Config file: ", s_config_path);
 
     // Load plugins
     PluginManager& pm = PluginManager::instance();
@@ -122,13 +124,13 @@ TEST_CASE("tagger_check_neutrino end-to-end")
     ParticleDataSet::pointer pdata;
     IRecombinationModel::pointer recomb;
     try {
-        auto icfg = Factory::find_tn<IConfigurable>("ParticleDataSet");
+        auto icfg = Factory::find_tn<IConfigurable>("ParticleDataSet:ParticleDataSet");
         pdata = std::dynamic_pointer_cast<ParticleDataSet>(icfg);
     } catch (...) {}
     REQUIRE(pdata);
 
     try {
-        recomb = Factory::find_tn<IRecombinationModel>("BoxRecombination");
+        recomb = Factory::find_tn<IRecombinationModel>("BoxRecombination:box_recomb");
     } catch (...) {}
     REQUIRE(recomb);
 
