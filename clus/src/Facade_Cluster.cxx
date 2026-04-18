@@ -935,24 +935,32 @@ int Cluster::wire_index(size_t point_index, int plane) const {
 
 double Cluster::charge_value(size_t point_index, int plane) const {
     auto& cache_ref = cache();
-    
+
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_charges.empty()) {
                 cache_ref.point_u_charges = points_property<double>("ucharge_val");
-                //std::cout << "Xin4: " << cache_ref.point_u_charges.empty() << std::endl;
+                if (cache_ref.point_u_charges.empty()) {
+                    raise<ValueError>("'ucharge_val' missing from 3d point cloud — add '.*charge_val' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_u_charges[point_index];
         }
         case 1: {
             if (cache_ref.point_v_charges.empty()) {
                 cache_ref.point_v_charges = points_property<double>("vcharge_val");
+                if (cache_ref.point_v_charges.empty()) {
+                    raise<ValueError>("'vcharge_val' missing from 3d point cloud — add '.*charge_val' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_v_charges[point_index];
         }
         case 2: {
             if (cache_ref.point_w_charges.empty()) {
                 cache_ref.point_w_charges = points_property<double>("wcharge_val");
+                if (cache_ref.point_w_charges.empty()) {
+                    raise<ValueError>("'wcharge_val' missing from 3d point cloud — add '.*charge_val' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_w_charges[point_index];
         }
@@ -964,23 +972,32 @@ double Cluster::charge_value(size_t point_index, int plane) const {
 
 double Cluster::charge_uncertainty(size_t point_index, int plane) const {
     auto& cache_ref = cache();
-    
+
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_charge_uncs.empty()) {
                 cache_ref.point_u_charge_uncs = points_property<double>("ucharge_unc");
+                if (cache_ref.point_u_charge_uncs.empty()) {
+                    raise<ValueError>("'ucharge_unc' missing from 3d point cloud — add '.*charge_unc' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_u_charge_uncs[point_index];
         }
         case 1: {
             if (cache_ref.point_v_charge_uncs.empty()) {
                 cache_ref.point_v_charge_uncs = points_property<double>("vcharge_unc");
+                if (cache_ref.point_v_charge_uncs.empty()) {
+                    raise<ValueError>("'vcharge_unc' missing from 3d point cloud — add '.*charge_unc' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_v_charge_uncs[point_index];
         }
         case 2: {
             if (cache_ref.point_w_charge_uncs.empty()) {
                 cache_ref.point_w_charge_uncs = points_property<double>("wcharge_unc");
+                if (cache_ref.point_w_charge_uncs.empty()) {
+                    raise<ValueError>("'wcharge_unc' missing from 3d point cloud — add '.*charge_unc' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_w_charge_uncs[point_index];
         }
