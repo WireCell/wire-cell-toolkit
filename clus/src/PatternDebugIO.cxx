@@ -283,6 +283,69 @@ static Json::Value dump_cluster_data(const Facade::Cluster& cluster)
 }
 
 
+// Helper: save ctpc datasets from a grouping's local_pcs to JSON.
+// ctpc_a{apa}f{face}p{U/V/W} datasets hold x,y,charge,charge_err,cident,wind,slice_index.
+// All arrays are saved generically using their dtype ("f8"=double, "i4"=int, etc.).
+static Json::Value dump_grouping_ctpc(const Facade::Grouping& grouping)
+{
+    Json::Value jctpc(Json::objectValue);
+    const auto& lpcs = grouping.node()->value.local_pcs();
+    for (const auto& entry : lpcs) {
+        const std::string& name = entry.first;
+        const Dataset& ds       = entry.second;
+        if (name.rfind("ctpc_", 0) != 0) continue;
+        Json::Value jds(Json::objectValue);
+
+        for (const auto& key : ds.keys()) {
+            auto arr = ds.get(key);
+            if (!arr) continue;
+            Json::Value jarr(Json::arrayValue);
+            const std::string dt = arr->dtype();
+            jds["_dtypes"][key] = dt;
+            if (dt == "i4" || dt == "i2" || dt == "i1") {
+                for (auto v : arr->elements<int>()) jarr.append(v);
+            } else {
+                // treat everything else as double (float_t = double in this codebase)
+                for (auto v : arr->elements<double>()) jarr.append(v);
+            }
+            jds[key] = jarr;
+        }
+        jctpc[name] = jds;
+    }
+    return jctpc;
+}
+
+// Helper: restore ctpc datasets into the grouping's local_pcs from JSON.
+static void load_grouping_ctpc(Facade::Grouping* grouping, const Json::Value& jctpc)
+{
+    if (!grouping || jctpc.isNull() || !jctpc.isObject()) return;
+    auto& lpcs = grouping->node()->value.local_pcs();
+    for (const auto& name : jctpc.getMemberNames()) {
+        const auto& jds = jctpc[name];
+        const Json::Value& dtypes = jds.get("_dtypes", Json::objectValue);
+        std::map<std::string, Array> arrays;
+
+        for (const auto& key : jds.getMemberNames()) {
+            if (key == "_dtypes") continue;
+            const auto& jarr = jds[key];
+            const std::string dt = dtypes.get(key, "f8").asString();
+            if (dt == "i4" || dt == "i2" || dt == "i1") {
+                std::vector<int> vals;
+                vals.reserve(jarr.size());
+                for (const auto& v : jarr) vals.push_back(v.asInt());
+                arrays.emplace(key, Array(vals));
+            } else {
+                std::vector<double> vals;
+                vals.reserve(jarr.size());
+                for (const auto& v : jarr) vals.push_back(v.asDouble());
+                arrays.emplace(key, Array(vals));
+            }
+        }
+        lpcs[name] = Dataset(arrays);
+    }
+}
+
+
 void PR::DebugIO::dump_init_first_segment_inputs(
     const std::string& output_path,
     const Facade::Cluster& cluster,
@@ -310,6 +373,12 @@ void PR::DebugIO::dump_init_first_segment_inputs(
     // Main cluster (only if it differs from cluster)
     if (main_cluster && main_cluster != &cluster) {
         root["main_cluster"] = dump_cluster_data(*main_cluster);
+    }
+
+    // Raw 2D wire charge data needed by TrackFitting::prepare_data()
+    const auto* grouping = cluster.grouping();
+    if (grouping) {
+        root["grouping_ctpc"] = dump_grouping_ctpc(*grouping);
     }
 
     Persist::dump(output_path, root, true);
@@ -373,6 +442,8 @@ static Graphs::Weighted::Graph json_to_graph(const Json::Value& jg)
     return graph;
 }
 
+// Helper: save ctpc datasets from a grouping's local_pcs to JSON.
+// ctpc_a{apa}f{face}p{U/V/W} datasets hold (slice_index, wind, charge, charge_err).
 // Helper: create a minimal cluster node with blob child containing a "3d" PC
 // and inject steiner data. Returns the cluster node (raw ptr, owned by parent).
 static PointCloud::Tree::Points::node_t* make_cluster_node(
@@ -568,7 +639,6 @@ PR::DebugIO::load_init_first_segment_inputs(const std::string& input_path)
     // Create grouping node (root of the tree)
     data.grouping_node = std::make_unique<PointCloud::Tree::Points::node_t>();
     auto* grouping = data.grouping_node->value.facade<Facade::Grouping>();
-    (void)grouping;
 
     // Create the main cluster
     auto* cluster_node = make_cluster_node(*data.grouping_node, root["cluster"]);
@@ -580,6 +650,11 @@ PR::DebugIO::load_init_first_segment_inputs(const std::string& input_path)
         data.main_cluster = main_cluster_node->value.facade<Facade::Cluster>();
     } else {
         data.main_cluster = data.cluster;
+    }
+
+    // Restore raw 2D wire charge data into grouping
+    if (root.isMember("grouping_ctpc")) {
+        load_grouping_ctpc(grouping, root["grouping_ctpc"]);
     }
 
     logger().info("Loaded init_first_segment inputs from {}", input_path);
@@ -622,6 +697,12 @@ void PR::DebugIO::dump_tagger_inputs(
     }
     root["other_clusters"] = jothers;
 
+    // Raw 2D wire charge data needed by TrackFitting::prepare_data()
+    const auto* grouping = main_cluster.grouping();
+    if (grouping) {
+        root["grouping_ctpc"] = dump_grouping_ctpc(*grouping);
+    }
+
     Persist::dump(output_path, root, true);
     logger().info("Dumped tagger inputs ({} other clusters) to {}",
                   other_clusters.size(), output_path);
@@ -648,7 +729,6 @@ PR::DebugIO::load_tagger_inputs(const std::string& input_path)
     // Create grouping node
     data.grouping_node = std::make_unique<PointCloud::Tree::Points::node_t>();
     auto* grouping = data.grouping_node->value.facade<Facade::Grouping>();
-    (void)grouping;
 
     // Main cluster
     auto* main_node = make_cluster_node(*data.grouping_node, root["cluster"]);
@@ -661,6 +741,11 @@ PR::DebugIO::load_tagger_inputs(const std::string& input_path)
             auto* cn = make_cluster_node(*data.grouping_node, jc);
             data.other_clusters.push_back(cn->value.facade<Facade::Cluster>());
         }
+    }
+
+    // Restore raw 2D wire charge data into grouping
+    if (root.isMember("grouping_ctpc")) {
+        load_grouping_ctpc(grouping, root["grouping_ctpc"]);
     }
 
     logger().info("Loaded tagger inputs ({} other clusters) from {}",

@@ -118,13 +118,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     SPDLOG_LOGGER_TRACE(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());
 
 
-    // // Debug dump (only when env var is set)
-    // if (main_cluster) {
-    //     if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
-    //         DebugIO::dump_init_first_segment_inputs(
-    //             dump_path, *main_cluster, main_cluster, true, *m_track_fitter);
-    //     }
-    // }
+    // Debug dump (only when env var is set)
+    if (main_cluster) {
+        if (const char* dump_path = std::getenv("WCT_DUMP_INIT_FIRST_SEGMENT")) {
+            DebugIO::dump_init_first_segment_inputs(
+                dump_path, *main_cluster, main_cluster, true, *m_track_fitter);
+        }
+    }
 
     SPDLOG_LOGGER_TRACE(log, "Number of Main Clusters: {}", n_main_clusters);
 

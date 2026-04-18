@@ -1311,17 +1311,24 @@ namespace WireCell::Clus::PR {
             return {1.0, 1e9, 1e9, 1e9};
         }
 
+        auto muon_fn     = particle_data->get_dEdx_function("muon");
+        auto proton_fn   = particle_data->get_dEdx_function("proton");
+        auto electron_fn = particle_data->get_dEdx_function("electron");
+        if (!muon_fn || !proton_fn || !electron_fn) {
+            return {1.0, 1e9, 1e9, 1e9};
+        }
+
         // Create reference vectors for different particles
         const size_t count = static_cast<size_t>(ncount);
         std::vector<double> muon_ref(count);
         std::vector<double> const_ref(count, MIP_dQdx);  // MIP-like constant
         std::vector<double> proton_ref(count);
         std::vector<double> electron_ref(count);
-        
+
         for (size_t i = 0; i < count; i++) {
-            muon_ref[i] = particle_data->get_dEdx_function("muon")->scalar_function((vec_x[i])/units::cm) /units::cm;
-            proton_ref[i] = particle_data->get_dEdx_function("proton")->scalar_function((vec_x[i])/units::cm) / units::cm;
-            electron_ref[i] = particle_data->get_dEdx_function("electron")->scalar_function((vec_x[i])/units::cm) / units::cm;
+            muon_ref[i]     = muon_fn->scalar_function((vec_x[i])/units::cm) / units::cm;
+            proton_ref[i]   = proton_fn->scalar_function((vec_x[i])/units::cm) / units::cm;
+            electron_ref[i] = electron_fn->scalar_function((vec_x[i])/units::cm) / units::cm;
         }
         
         // Perform KS-like tests using kslike_compare
@@ -1374,8 +1381,10 @@ namespace WireCell::Clus::PR {
         }
         
         if (!range_function) {
-            // Default to muon if particle type not recognized
-            range_function = particle_data->get_range_function("muon"); 
+            range_function = particle_data->get_range_function("muon");
+        }
+        if (!range_function) {
+            return 0.0;
         }
         double kine_energy = range_function->scalar_function(L/units::cm) * units::MeV;
         return kine_energy;

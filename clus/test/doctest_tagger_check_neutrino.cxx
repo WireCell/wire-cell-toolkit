@@ -191,8 +191,6 @@ TEST_CASE("tagger_check_neutrino end-to-end")
         map_cluster_main_vertices[data.main_cluster] = final_main_vertex;
     }
 
-    MESSAGE("final_main_vertex found: ", (final_main_vertex != nullptr));
-
     // Showers needed by taggers (may be empty if vertex not found; taggers handle that)
     IndexedShowerSet showers;
     ShowerVertexMap  map_vertex_in_shower;
@@ -253,10 +251,12 @@ TEST_CASE("tagger_check_neutrino end-to-end")
     }
 
     // --- Assertions ---
+    MESSAGE("final_main_vertex: ", (final_main_vertex ? "found" : "null"));
 
-    // If a vertex was found, cosmic tagger must have run and filled its fields.
+    // If a vertex was found, cosmic and numu taggers must have run without error.
+    // cosmic_filled is only set when the event looks geometrically cosmic; for a
+    // clean neutrino event it stays 0.
     if (final_main_vertex) {
-        CHECK(tagger_info.cosmic_filled == doctest::Approx(1.0f));
         CHECK(std::isfinite(tagger_info.cosmic_flag));
         CHECK(std::isfinite(tagger_info.numu_cc_flag));
     }
