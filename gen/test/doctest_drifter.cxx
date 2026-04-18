@@ -152,7 +152,7 @@ static void test_bent(double sign)
                 const Point pt(x,y,z);
                 auto indepo = std::make_shared<DumbDepo>(pt);
                 drifter(indepo, depos);
-                drifted.insert(drifted.end(), depos.begin(), depos.begin());
+                drifted.insert(drifted.end(), depos.begin(), depos.end());
             }
         }
     }
