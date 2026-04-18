@@ -30,13 +30,12 @@ local g = import 'pgraph.jsonnet';
 
 local raw_input_label = std.extVar('raw_input_label');  // eg "daq"
 
-
-local data_params = import 'params.jsonnet';
-local simu_params = import 'simparams.jsonnet';
-local params = if reality == 'data' then data_params else simu_params;
-
-
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
+local params_maker = import 'pgrapher/experiment/iceberg/simparams.jsonnet';
+local fcl_params = {
+    G4RefTime: std.extVar('G4RefTime') * wc.us,
+};
+local params = params_maker(fcl_params);
 local tools = tools_maker(params);
 
 local wcls_maker = import 'pgrapher/ui/wcls/nodes.jsonnet';

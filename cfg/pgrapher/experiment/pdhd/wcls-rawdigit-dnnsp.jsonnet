@@ -120,7 +120,7 @@ local wcls_output = {
       //nticks: params.daq.nticks,
       // nticks: nsample,
       chanmaskmaps: [],
-      summary_tags: ['threshold'],  // retagger makes this tag
+      summary_tags: ['wiener'],  // retagger makes this tag
       //  just one threshold value
       summary_operator: { threshold: 'set' },
       nticks: -1,
@@ -340,7 +340,6 @@ local retagger = g.pnode({
       merge: {
         'gauss\\d': 'gauss',
         'wiener\\d': 'wiener',
-        'threshold\\d': 'threshold',
 	'dnnsp\\d': 'dnnsp',
       },
     }],

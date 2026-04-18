@@ -10,6 +10,8 @@
 #include <cstring>
 #include <numeric>
 #include <sstream>
+#include <fstream> 
+#include <iterator>
 
 WIRECELL_FACTORY(TritonService,
                  WireCell::Triton::TritonService,
@@ -65,6 +67,14 @@ namespace WireCell::Triton {
     cfg["output_name"] = "OUTPUT__0";
     cfg["soft_fail"]   = true;
 
+    // TLS/SSL controls (off by default)
+    cfg["use_ssl"]                 = false;   // if true, use TLS
+    cfg["ssl_root_cert"]           = "";      // PEM content or file path; empty → system trust store
+    cfg["ssl_private_key"]         = "";      // client key for mTLS (optional)
+    cfg["ssl_certificate_chain"]   = "";      // client cert chain for mTLS (optional)
+    cfg["ssl_target_name_override"] = "";     // SNI/hostname override (optional)
+
+
     // Optional gRPC channel knobs
     cfg["grpc_max_metadata_bytes"]   = 32*1024*1024;
     cfg["grpc_keepalive_time_ms"]    = 120000;
@@ -99,26 +109,52 @@ namespace WireCell::Triton {
     ch_args.SetInt(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0);
     ch_args.SetInt(GRPC_ARG_HTTP2_BDP_PROBE, bdp_probe ? 1 : 0);
 
+    // Default to true if connecting to :443 unless user explicitly sets use_ssl.
+    const bool default_ssl = (m_url.size() >= 4) && (m_url.rfind(":443") == m_url.size()-4);
+    const bool use_ssl = get<bool>(cfg, "use_ssl", default_ssl);
+    
+    auto read_pem = [&](const std::string& key) -> std::string {
+      auto val = get<std::string>(cfg, key, "");
+      if (val.empty()) return "";
+      // If it already looks like PEM, keep it; else treat as file path.
+      if (val.find("-----BEGIN") != std::string::npos) return val;
+      std::ifstream f(val);
+      if (!f) {
+	log->warn("TritonService: unable to open {}='{}'", key, val);
+	return "";
+      }
+      return std::string(std::istreambuf_iterator<char>(f),
+			 std::istreambuf_iterator<char>());
+    };
+
     triton::client::SslOptions ssl; // no SSL
+    ssl.root_certificates = read_pem("ssl_root_cert");
+    ssl.private_key       = read_pem("ssl_private_key");
+    ssl.certificate_chain = read_pem("ssl_certificate_chain");
+    
+    const auto sni_override = get<std::string>(cfg, "ssl_target_name_override", "");
+    if (!sni_override.empty()) {
+      ch_args.SetString(GRPC_SSL_TARGET_NAME_OVERRIDE_ARG, sni_override);
+    }
+
     auto err = triton::client::InferenceServerGrpcClient::Create(
 								 &m_client, m_url, ch_args, /*verbose*/false,
-								 /*use_ssl*/false, ssl, /*use_cached_channel*/false);
+								 /*use_ssl*/use_ssl, ssl, /*use_cached_channel*/false);
 
     if (!err.IsOk()) {
       log->critical("Failed to create Triton gRPC client for {}: {}", m_url, err.Message());
       THROW(RuntimeError() << errmsg{err.Message()});
     }
-    log->info("Connected to Triton at {}", m_url);
+    log->info("Connected to Triton at {} (TLS={})", m_url, use_ssl ? "on" : "off");
+    //log->info("Connected to Triton at {}", m_url);
   }
-
-
+  
   WireCell::ITensorSet::pointer TritonService::forward(const ITensorSet::pointer& input) const
   {
-    // Derive a reasonable fallback shape early (used by soft_fail exits).
     auto fallback_from_wc = [&](const WireCell::ITensor::pointer& t)->std::vector<size_t> {
       if (!t) return {1,1,800,600};
-      const auto& s = t->shape();            // [N,C,H,W] expected
-      if (s.size() == 4) return {1,1, (size_t)s[2], (size_t)s[3]};
+      const auto& s = t->shape();
+      if (s.size() == 4) return {1,1,(size_t)s[2],(size_t)s[3]};
       return {1,1,800,600};
     };
 
@@ -145,7 +181,6 @@ namespace WireCell::Triton {
     }
     const uint8_t* in_raw = reinterpret_cast<const uint8_t*>(tin->data());
 
-    
     std::vector<int64_t> triton_in_shape{
       (int64_t)wc_shape[0], (int64_t)wc_shape[1], (int64_t)wc_shape[2], (int64_t)wc_shape[3]
 	};
@@ -177,7 +212,6 @@ namespace WireCell::Triton {
     std::vector<const triton::client::InferRequestedOutput*> outputs{ triton_output.get() };
     triton::client::Headers headers;
 
-    // Measure inference time
     auto t0 = std::chrono::steady_clock::now();
     triton::client::InferResult* result_raw = nullptr;
     err = m_client->Infer(&result_raw, options, inputs, outputs, headers);
@@ -190,7 +224,6 @@ namespace WireCell::Triton {
     }
     std::unique_ptr<triton::client::InferResult> result(result_raw);
 
-    // Output shape
     std::vector<int64_t> got_shape64;
     err = result->Shape(m_output_name, &got_shape64);
     if (!err.IsOk()) {
@@ -209,7 +242,6 @@ namespace WireCell::Triton {
     log->debug("Infer took {} ms, in_shape={}, out_shape={}",
                ms, shape_str(triton_in_shape), shape_str(got_shape64));
 
-    // Pull bytes
     const uint8_t* out_raw = nullptr;
     size_t out_bytes = 0;
     err = result->RawData(m_output_name, &out_raw, &out_bytes);
@@ -218,7 +250,6 @@ namespace WireCell::Triton {
       return m_soft_fail ? make_zero_tensorset(input->ident(), fallback_from_wc(tin)) : nullptr;
     }
 
-    // Build WCT tensor (deep copy)
     std::vector<size_t> out_wc_shape{
       (size_t)got_shape64[0], (size_t)got_shape64[1],
         (size_t)got_shape64[2], (size_t)got_shape64[3]

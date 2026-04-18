@@ -14,6 +14,8 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/TimeKeeper.h"
 
+#include <algorithm>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -74,6 +76,10 @@ void Pytorch::DNNROIFinding::configure(const WireCell::Configuration& cfg)
     if (m_cfg.sort_chanids) {
         std::sort(m_chlist.begin(), m_chlist.end());
     }
+    m_channel_to_row.clear();
+    for (size_t i = 0; i < m_chlist.size(); ++i) {
+        m_channel_to_row[m_chlist[i]] = i;
+    }
 
     m_cfg.input_scale = get(cfg, "input_scale", m_cfg.input_scale);
     m_cfg.input_offset = get(cfg, "input_offset", m_cfg.input_offset);
@@ -98,6 +104,8 @@ void Pytorch::DNNROIFinding::configure(const WireCell::Configuration& cfg)
     m_cfg.debugfile = get(cfg, "debugfile", m_cfg.debugfile);
     m_cfg.nchunks = get(cfg, "nchunks", m_cfg.nchunks);
     m_cfg.save_negative_charge = get(cfg, "save_negative_charge", m_cfg.save_negative_charge);
+    m_cfg.sparcify = get(cfg, "sparcify", m_cfg.sparcify);
+    m_cfg.sparcify_zero_gap = get(cfg, "sparcify_zero_gap", m_cfg.sparcify_zero_gap);
 
     m_nrows = m_chlist.size();
     m_ncols = m_cfg.nticks;
@@ -165,6 +173,8 @@ WireCell::Configuration Pytorch::DNNROIFinding::default_configuration() const
     cfg["debugfile"] = m_cfg.debugfile;
     cfg["nchunks"] = m_cfg.nchunks;
     cfg["save_negative_charge"] = m_cfg.save_negative_charge;
+    cfg["sparcify"] = m_cfg.sparcify;
+    cfg["sparcify_zero_gap"] = m_cfg.sparcify_zero_gap;
     return cfg;
 }
 
@@ -193,37 +203,90 @@ Array::array_xxf Pytorch::DNNROIFinding::traces_to_eigen(ITrace::vector traces)
 
 IFrame::trace_summary_t Pytorch::DNNROIFinding::get_summary_e(const IFrame::pointer& inframe, const std::string &tag) const {
     IFrame::trace_summary_t summary_e(m_nrows, 0.0);
-    std::unordered_map<int, size_t> ch2row;
-    for (size_t i = 0; i < m_chlist.size(); ++i) {
-        ch2row[m_chlist[i]] = i;
-    }
     auto traces = Aux::tagged_traces(inframe, tag);
     auto summary = inframe->trace_summary(tag);
     for (size_t i = 0; i < traces.size(); ++i) {
         const auto& tr = traces[i];
         const auto& ch = tr->channel();
-        const auto& row = ch2row.find(ch);
-        if (row != ch2row.end()) {
+        const auto row = m_channel_to_row.find(ch);
+        if (row != m_channel_to_row.end()) {
             summary_e[row->second] = summary[i];
         }
     }
     return summary_e;
 }
 
-ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr, bool save_negative_charge)
+ITrace::shared_vector Pytorch::DNNROIFinding::eigen_to_traces(const Array::array_xxf& arr,
+                                                             bool save_negative_charge,
+                                                             bool sparcify)
 {
     ITrace::vector traces;
     ITrace::ChargeSequence charge(m_ncols, 0.0);
+    const int zero_gap = std::max(1, m_cfg.sparcify_zero_gap);
+    auto clamp = [save_negative_charge](float value) {
+        if (!save_negative_charge && value < 0.0f) {
+            return 0.0f;
+        }
+        return value;
+    };
     for (size_t irow = 0; irow < m_nrows; ++irow) {
         auto wave = arr.row(irow);
-        for (size_t icol=0; icol<m_ncols; ++icol) {
-            charge[icol] = wave(icol);
-            if (!save_negative_charge) { // set negative charge to zero
-                charge[icol] = charge[icol] < 0 ? 0 : charge[icol];
+        const auto ch = m_chlist[irow];
+        if (!sparcify) {
+            for (size_t icol = 0; icol < m_ncols; ++icol) {
+                charge[icol] = clamp(wave(icol));
+            }
+            traces.push_back(std::make_shared<Aux::SimpleTrace>(ch, 0, charge));
+            continue;
+        }
+
+        int roi_start = -1;
+        int zero_run = 0;
+        int ztp_end = -1;
+        auto emit_roi = [&](int start, int end) {
+            if (start < 0 || end < start) {
+                return;
+            }
+            const size_t len = end - start + 1;
+            ITrace::ChargeSequence roi_charge(len, 0.0);
+            for (size_t idx = 0; idx < len; ++idx) {
+                roi_charge[idx] = clamp(wave(start + idx));
+            }
+            traces.push_back(std::make_shared<Aux::SimpleTrace>(ch, start, roi_charge));
+        };
+        for (int icol = 0; icol < static_cast<int>(m_ncols); ++icol) {
+            const float sample = wave(icol);
+            const bool is_zero = sample == 0.0f;
+            if (!is_zero) {
+                if (roi_start < 0) {
+                    int candidate = icol;
+                    if (icol > 0 && wave(icol - 1) == 0.0f) {
+                        candidate = icol - 1;
+                    }
+                    roi_start = candidate;
+                }
+                zero_run = 0;
+                ztp_end = -1;
+                continue;
+            }
+            if (roi_start < 0) {
+                continue;
+            }
+            if (zero_run == 0) {
+                ztp_end = icol;
+            }
+            ++zero_run;
+            if (zero_run >= zero_gap) {
+                emit_roi(roi_start, ztp_end >= 0 ? ztp_end : icol);
+                roi_start = -1;
+                zero_run = 0;
+                ztp_end = -1;
             }
         }
-        const auto ch = m_chlist[irow];
-        traces.push_back(std::make_shared<Aux::SimpleTrace>(ch, 0, charge));
+        if (roi_start >= 0) {
+            const int end = ztp_end >= 0 ? ztp_end : static_cast<int>(m_ncols) - 1;
+            emit_roi(roi_start, end);
+        }
     }
     return std::make_shared<ITrace::vector>(traces.begin(), traces.end());
 }
@@ -327,7 +390,7 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
 #endif
 
     // eigen to frame
-    auto traces = eigen_to_traces(sp_charge, m_cfg.save_negative_charge);
+    auto traces = eigen_to_traces(sp_charge, m_cfg.save_negative_charge, m_cfg.sparcify);
     Aux::SimpleFrame* sframe = new Aux::SimpleFrame(
         inframe->ident(), inframe->time(),
         traces,
@@ -340,7 +403,29 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         ss += fmt::format("{:.2f} ", rms);
     }
     log->trace("call={} summary: {}", m_save_count, ss);
-    sframe->tag_traces(m_cfg.outtag, m_trace_indices, summary);
+    IFrame::trace_list_t tag_indices;
+    IFrame::trace_summary_t tag_summary;
+    if (m_cfg.sparcify) {
+        const auto ntraces = traces->size();
+        tag_indices.resize(ntraces);
+        std::iota(tag_indices.begin(), tag_indices.end(), 0);
+        tag_summary.reserve(ntraces);
+        for (size_t itrace = 0; itrace < ntraces; ++itrace) {
+            const auto& trace = traces->at(itrace);
+            const auto row = m_channel_to_row.find(trace->channel());
+            if (row != m_channel_to_row.end() && row->second < summary.size()) {
+                tag_summary.push_back(summary[row->second]);
+            }
+            else {
+                tag_summary.push_back(0.0);
+            }
+        }
+    }
+    else {
+        tag_indices = m_trace_indices;
+        tag_summary = summary;
+    }
+    sframe->tag_traces(m_cfg.outtag, tag_indices, tag_summary);
     outframe = IFrame::pointer(sframe);
     log->debug("call={} output frame: {}", m_save_count, Aux::taginfo(outframe));
 

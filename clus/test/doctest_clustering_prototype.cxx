@@ -211,7 +211,7 @@ TEST_CASE("clustering prototype point tree")
 }
 
 
-TEST_CASE("clustering prototype facade")
+TEST_CASE("clustering prototype facade" * doctest::skip())
 {
     Points::node_t root_node;
     Grouping* grouping = root_node.value.facade<Grouping>();

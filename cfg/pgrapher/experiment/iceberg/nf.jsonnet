@@ -43,7 +43,7 @@ function(params, anode, chndbobj, n, name='')
 
         //maskmap: { chirp: "bad", noisy: "bad" },
         channel_filters: [
-          wc.tn(single)
+          // wc.tn(single)
         ],
         grouped_filters: [
           // wc.tn(grouped),

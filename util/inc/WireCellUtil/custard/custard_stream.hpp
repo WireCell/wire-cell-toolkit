@@ -39,17 +39,10 @@ namespace custard {
     std::string get_string(std::istream& si, char delim=' ')
     {
         std::string s;
-        while (true) {
-            std::getline(si, s, delim);
-            //get_line(si, s, delim);
-            if (!si) {
-                // std::cerr << "get_string broke stream (delim=\""<<delim<<"\")\n";
-                return "";
-            }
-            if (s.empty()) {
-                continue;
-            }
-            break;
+        std::getline(si, s, delim);
+        if (!si) {
+            // std::cerr << "get_string broke stream (delim=\""<<delim<<"\")\n";
+            return "";
         }
         return s;
     }
