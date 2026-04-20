@@ -140,7 +140,11 @@ TEST_CASE("configuration hash speed")
     }
     kp("... std::hash'ed object");
     for (int count=0; count<ntimes; ++count) {
-        shash(Persist::dumps(cfg));
+
+        // This is "nodiscard" but we do not in fact care about the value here,
+        // only the function's speed.
+        (void)shash(Persist::dumps(cfg));
+
     }
     kp("... std::hash'ed json text");
 
