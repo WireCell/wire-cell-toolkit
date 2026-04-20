@@ -227,19 +227,41 @@ local setdrifters = [g.pnode({
                      #uses=[drifter])  
 		     for n in std.range(0,359)];
 
-local scalers = [{
+local yzmap_filter = {
+    type: "YZMap", name: "yzmap_filter",
+    data: {
+        filename: 'yzmap_icarus_v1.json',
+        bin_width:  10*wc.cm,
+        bin_height: 10*wc.cm,
+        yoffset: 180*wc.cm,
+        zoffset: 900*wc.cm,
+        nbinsy: 31,
+        nbinsz: 180,
+    }
+};
 
+local yzmap_gain = {
+    type: "YZMap", name: "yzmap_gain",
+    data: {
+        filename: 'yzmap_gain_icarus_v1.json',
+        bin_width:  10*wc.cm,
+        bin_height: 10*wc.cm,
+        yoffset: 180*wc.cm,
+        zoffset: 900*wc.cm,
+        nbinsy: 31,
+        nbinsz: 180,
+    }
+};
+
+local scalers = [{
         type: "Scaler",
-	name: "scaler%d" %n, //%std.floor(n/45),
-        data: params.lar {
-	        	 yzmap_scale_filename: 'yzmap_gain_icarus_v1.json',
-			 bin_width:  10*wc.cm,
-			 tpc_width: 1500*wc.mm,
-			 bin_height: 10*wc.cm,
-                	 anode: wc.tn(tools.anodes[std.floor(n/45)]),
-		         plane: std.mod(std.floor(n/15),3)	
-        	       	 },
-		} 
+	name: "scaler%d" %n,
+        data: {
+                 yzmap: wc.tn(yzmap_gain),
+                 anode: wc.tn(tools.anodes[std.floor(n/45)]),
+		 plane: std.mod(std.floor(n/15),3)
+        },
+	}
          for n in std.range(0,359)];
 
 local setscaler = [g.pnode({
@@ -249,7 +271,7 @@ local setscaler = [g.pnode({
                 	      scaler: wc.tn(scalers[n])
            		       }
         	  }, nin=1, nout=1,
-        	  uses=[scalers[n]])
+        	  uses=[scalers[n], yzmap_gain])
 		  for n in std.range(0,359)];
 
 
@@ -427,20 +449,13 @@ local deposetfilteryz = [ g.pnode({
             type: 'DepoSetFilterYZ',
    	    name: 'deposetfilteryz_resp%d-'%std.mod(r,15)+'plane%d-'%std.mod(std.floor(r/15),3)+tools.anodes[std.floor(r/45)].name,
             data: {
-	    	  yzmap_filename: 'yzmap_icarus_v1.json',
-		  bin_width:  10*wc.cm,
-		  tpc_width: 1500*wc.mm,
-		  bin_height: 10*wc.cm,
-		  yoffset: 180*wc.cm,
-		  zoffset: 900*wc.cm,
-		  nbinsy: 31,
-		  nbinsz: 180,
-		  resp: std.mod(r,15),	
+	    	  yzmap: wc.tn(yzmap_filter),
+		  resp: std.mod(r,15),
                   anode: wc.tn(tools.anodes[std.floor(r/45)]),
-		  plane: std.mod(std.floor(r/15),3)	
+		  plane: std.mod(std.floor(r/15),3)
             	  }
         }, nin=1, nout=1,
-        uses=tools.anodes)
+        uses=tools.anodes + [yzmap_filter])
 	for r in std.range(0,359)];
 
 local util = import 'pgrapher/experiment/icarus/funcs.jsonnet';
