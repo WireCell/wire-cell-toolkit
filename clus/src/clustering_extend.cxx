@@ -858,27 +858,25 @@ static void clustering_extend(
 
 
 std::vector<std::pair<geo_point_t, const Blob*>> WireCell::Clus::Facade::get_strategic_points(const Cluster& cluster) {
-    // Store unique points and their corresponding blobs.
-    // Use std::set for deduplication — avoids std::sort which requires strict weak ordering
-    // (D3Vector::operator< is NOT a strict weak ordering and causes UB with std::sort).
-    std::set<std::pair<geo_point_t, const Blob*>> unique_points;
+    // Collect candidate starting points; deduplicated by geo_point_t below.
+    std::vector<std::pair<geo_point_t, const Blob*>> points;
 
     // 1. Get extreme points along main axes
     {
         // Y-axis (highest/lowest)
         auto [high_y, low_y] = cluster.get_highest_lowest_points(1);
-        unique_points.emplace(high_y, cluster.blob_with_point(cluster.get_closest_point_index(high_y)));
-        unique_points.emplace(low_y, cluster.blob_with_point(cluster.get_closest_point_index(low_y)));
+        points.emplace_back(high_y, cluster.blob_with_point(cluster.get_closest_point_index(high_y)));
+        points.emplace_back(low_y, cluster.blob_with_point(cluster.get_closest_point_index(low_y)));
 
         // Z-axis (front/back)
         auto [front, back] = cluster.get_front_back_points();
-        unique_points.emplace(front, cluster.blob_with_point(cluster.get_closest_point_index(front)));
-        unique_points.emplace(back, cluster.blob_with_point(cluster.get_closest_point_index(back)));
+        points.emplace_back(front, cluster.blob_with_point(cluster.get_closest_point_index(front)));
+        points.emplace_back(back, cluster.blob_with_point(cluster.get_closest_point_index(back)));
 
         // X-axis (earliest/latest)
         auto [early, late] = cluster.get_earliest_latest_points();
-        unique_points.emplace(early, cluster.blob_with_point(cluster.get_closest_point_index(early)));
-        unique_points.emplace(late, cluster.blob_with_point(cluster.get_closest_point_index(late)));
+        points.emplace_back(early, cluster.blob_with_point(cluster.get_closest_point_index(early)));
+        points.emplace_back(late, cluster.blob_with_point(cluster.get_closest_point_index(late)));
     }
 
     // 4. Add points from convex hull vertices
@@ -886,13 +884,17 @@ std::vector<std::pair<geo_point_t, const Blob*>> WireCell::Clus::Facade::get_str
         auto hull_points = cluster.get_hull();
         for (const auto& p : hull_points) {
             auto [closest_p, blob] = cluster.get_closest_point_blob(p);
-            unique_points.emplace(closest_p, blob);
+            points.emplace_back(closest_p, blob);
         }
     }
 
-    // Convert set to vector for return
-    std::vector<std::pair<geo_point_t, const Blob*>> points;
-    points.insert(points.end(), unique_points.begin(), unique_points.end());
+    // Sort by geo_point_t only (deterministic, no pointer dependency) then deduplicate
+    std::sort(points.begin(), points.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+    points.erase(std::unique(points.begin(), points.end(),
+        [](const auto& a, const auto& b) {
+            return !(a.first < b.first) && !(b.first < a.first);
+        }), points.end());
 
     return points;
 }
