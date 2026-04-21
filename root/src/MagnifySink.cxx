@@ -179,13 +179,15 @@ void Root::MagnifySink::do_shunt(TFile* output_tf)
         rtree->SetDirectory(output_tf);
         ss << "MagnifySink: making Tree RunInfo:\n";
 
+        // Reserve before any push_back so the vector never reallocates.
+        // push_back + Branch(&ints.back()) registers a pointer into the
+        // vector; reallocation invalidates those pointers before Fill().
+        const std::size_t nkeys = truncfg.getMemberNames().size();
         std::vector<int> ints;
-        // issue to be fixed:
-        // the first element seems to be misconnected
-        // to a wrong address in the rtree->Branch when rtree->Fill
-        // So kind of initilized to the vector could solve this issues
-        ints.push_back(0);
+        ints.reserve(nkeys + 1);
+        ints.push_back(0);  // index-0 placeholder keeps first branch address stable
         std::vector<float> floats;
+        floats.reserve(nkeys + 1);
         floats.push_back(0.0);
 
         int frame_number = 0;
@@ -469,6 +471,9 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
             for (auto const& chmask : it.second) {
                 chid = chmask.first;
                 plane = m_anode->resolve(chid).index();
+                if (plane < 0) {
+                    continue;  // channel belongs to a different anode, skip
+                }
                 auto mask = chmask.second;
                 for (size_t ind = 0; ind < mask.size(); ++ind) {
                     start_time = mask[ind].first;
