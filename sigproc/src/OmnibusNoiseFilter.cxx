@@ -143,10 +143,15 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         return true;
     }
 
-    if (! m_nticks) {
+    {
+        // Always update m_nticks from the actual frame to handle variable-length inputs.
         // Warning: this implicitly assumes a dense frame (ie, all tbin=0 and all waveforms same size).
         // It also won't stop triggering a warning inside OneChannelNoise if there is a mismatch.
-        m_nticks = traces.at(0)->charge().size();
+        const size_t frame_nticks = traces.at(0)->charge().size();
+        if (m_nticks && m_nticks != frame_nticks) {
+            log->warn("call={} nticks changed from {} to {}, updating", m_count, m_nticks, frame_nticks);
+        }
+        m_nticks = frame_nticks;
     }
 
     // For now, just collect any and all masks and interpret them as "bad".
@@ -203,7 +208,6 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
             Waveform::merge(cmm, masks, m_maskmap);
             // ++filt_count;
         }
-        // (void)filt_count; // silence unused warning
     }
     traces.clear();  // done with our copy of vector of shared pointers
 
