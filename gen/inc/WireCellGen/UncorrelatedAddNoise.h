@@ -22,10 +22,10 @@
  *   2) Scale Z so that E|scaled Z| matches the target mean magnitude avg_mag(w,f)
  *      using Rayleigh-mean scaling: E|CN(0,1)| = sqrt(pi)/2
  *   3) Handle DC (force to 0) and Nyquist (real-only if N is even)
- *   4) Convert one-sided spectrum to time-domain noise via a NumPy-like irfft convention:
- *        - double bins with conjugate partners
+ *   4) Convert one-sided spectrum to time-domain noise via FFTW c2r:
+ *        - provide the one-sided spectrum (DC..Nyquist)
  *        - FFTW c2r (unnormalized)
- *        - apply 1/N normalization
+ *        - apply 1/N normalization to match NumPy irfft
  *        - apply optional ifft_scale
  *
  * IMPORTANT ASSUMPTION ABOUT CHANNEL ORDERING
