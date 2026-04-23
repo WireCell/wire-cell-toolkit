@@ -3,6 +3,7 @@
 #include <stdexcept> // For std::invalid_argument
 #include <cmath>     // For std::abs, std::max, std::sqrt
 
+#include <algorithm>             // std::sort
 #include <iostream>             // debug
 
 namespace WireCell {
@@ -42,7 +43,7 @@ namespace WireCell {
             double diff_minus = std::abs(ecdf_before_xi - theoretical_cdf_at_xi);
 
             // Update max_diff with the larger of the two differences
-            max_diff = std::max({max_diff, diff_plus, diff_minus});
+            max_diff = std::max(max_diff, std::max(diff_plus, diff_minus));
 
             ++ind;
         }

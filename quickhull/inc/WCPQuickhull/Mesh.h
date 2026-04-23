@@ -20,7 +20,7 @@
 #include <memory>
 #include "VertexDataSource.h"
 #include <unordered_map>
-
+#include <cstdint>     
 namespace quickhull {
 
 	template <typename T>
