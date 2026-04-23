@@ -54,7 +54,8 @@ static void clustering_switch_scope(
 )
 {
     if (live_grouping.wpids().empty()) {
-        throw std::runtime_error("Live grouping must have at least one wpid");
+        spdlog::warn("clustering_switch_scope: live grouping has no wpids, skipping");
+        return;
     }
 
     // Snapshot the cluster list before separation modifies the grouping.
