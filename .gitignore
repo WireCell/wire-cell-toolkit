@@ -70,7 +70,6 @@ svg-inkscape
 *.html
 tmp
 *.tar
-*.md
 README.tex
 larsoft-cfg
 *.dot
