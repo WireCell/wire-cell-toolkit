@@ -191,11 +191,9 @@ namespace WireCell::Root {
 
                 if (tree.GetBranch("parent_cluster_id")) {
                     tree.SetBranchAddress("parent_cluster_id", &parent_cluster_id_vec);
-                } else {
-                    // Fallback: if no parent_cluster_id branch, use cluster_id as parent.
-                    // Point ROOT at parent_cluster_id_vec but read from the "cluster_id" branch.
-                    tree.SetBranchAddress("cluster_id", &parent_cluster_id_vec);
                 }
+                // else: no parent_cluster_id branch; parent_cluster_id_vec stays null here
+                // and is synced to cluster_id_vec in UbooneTTrees::next() after GetEntry().
 
                 tree.SetBranchAddress("q", &q_vec);
                 tree.SetBranchAddress("time_slice", &time_slice_vec);
@@ -506,6 +504,10 @@ namespace WireCell::Root {
             }
             m_activity->GetEntry(m_entry);
             m_live->GetEntry(m_entry);
+            // If no parent_cluster_id branch, alias parent_cluster_id_vec to cluster_id_vec.
+            if (!live.parent_cluster_id_vec) {
+                live.parent_cluster_id_vec = live.cluster_id_vec;
+            }
             if (m_dead) {
                 m_dead->GetEntry(m_entry);
             }

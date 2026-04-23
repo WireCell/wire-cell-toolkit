@@ -111,7 +111,7 @@ local bs_live_face(apa, face) = {
         drift_speed: drift_speed,
         time_offset: time_offset,
         strategy: ["stepped"],
-        extra: [".*wire_index", "wpid"]
+        extra: [".*wire_index", ".*charge.*", "wpid"]
     }
 };
 local bs_dead_face(apa, face) = {
