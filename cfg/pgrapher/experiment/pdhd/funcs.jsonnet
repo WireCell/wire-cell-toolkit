@@ -55,6 +55,7 @@ local wc = import 'wirecell.jsonnet';
               ['gauss%d' % n]: ['gauss%d' % n],
               ['wiener%d' % n]: ['wiener%d' % n],
               ['threshold%d' % n]: ['threshold%d' % n],
+              ['dnnsp%d' % n]: ['dnnsp%d' % n],
             },
 
           }

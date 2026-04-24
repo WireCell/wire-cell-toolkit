@@ -60,7 +60,7 @@ local wcls_input = {
     type: 'wclsCookedFrameSource',
     name: '',
     data: {
-      art_tag: raw_input_label,
+      recobwire_tags: [raw_input_label], summary_tags: [''], trace_tags: [''],
       frame_tags: ['orig'],  // this is a WCT designator
       //nticks: params.daq.nticks,
       // nticks: nsample,
@@ -114,7 +114,7 @@ local wcls_output = {
       //nticks: params.daq.nticks,
       // nticks: nsample,
       chanmaskmaps: [],
-      summary_tags: ['wiener'],  // retagger makes this tag
+      summary_tags: ['threshold'],  // retagger makes this tag
       //  just one threshold value
       summary_operator: { threshold: 'set' },
       nticks: -1,

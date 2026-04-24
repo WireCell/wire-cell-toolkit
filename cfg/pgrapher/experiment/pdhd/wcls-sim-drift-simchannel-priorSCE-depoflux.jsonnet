@@ -33,6 +33,7 @@ local sim = sim_maker(params, tools);
 
 local nanodes = std.length(tools.anodes);
 local anode_iota = std.range(0, nanodes - 1);
+local inputTag = 'IonAndScint';
 
 
 local output = 'wct-sim-ideal-sig.npz';
@@ -44,9 +45,24 @@ local output = 'wct-sim-ideal-sig.npz';
 
 local wcls_maker = import "pgrapher/ui/wcls/nodes.jsonnet";
 local wcls = wcls_maker(params, tools);
-local wcls_input = {
-    depos: wcls.input.depos(name="", art_tag="IonAndScint", assn_art_tag="IonAndScint:priorSCE"),
+//local wcls_input = {
+//    depos: wcls.input.depos(name="", art_tag="IonAndScint", assn_art_tag="IonAndScint:priorSCE"),
     // depos: wcls.input.depos(name="electron", art_tag="IonAndScint"),  // default art_tag="blopper"
+//};
+
+local wcls_input = {
+  depos: wcls.input.depos(name='', art_tag=inputTag),
+  deposet: g.pnode({
+    type: 'wclsSimDepoSetSource',
+    name: "electron",
+    data: {
+      model: "",
+      scale: -1, //scale is -1 to correct a sign error in the SimDepoSource converter.
+      art_tag: inputTag, //name of upstream art producer of depos "label:instance:processName"
+      id_is_track: false,
+      assn_art_tag: "",
+    },
+  }, nin=0, nout=1),
 };
 
 // Collect all the wc/ls output converters for use below.  Note the
@@ -95,6 +111,13 @@ local wcls_output = {
 
 //local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;
+local setdrifter = g.pnode({
+            type: 'DepoSetDrifter',
+            data: {
+                drifter: "Drifter"
+            }
+        }, nin=1, nout=1,
+        uses=[drifter]);
 local bagger = sim.make_bagger();
 
 // signal plus noise pipelines
@@ -146,6 +169,25 @@ local wcls_simchannel_sink = g.pnode({
   },
 }, nin=1, nout=1, uses=tools.anodes);
 
+local wcls_depoflux_writer = g.pnode({
+  type: 'wclsDepoFluxWriter',
+  name: 'postdrift',
+  data: {
+    anodes: [wc.tn(anode) for anode in tools.anodes],
+    field_response: wc.tn(tools.field),
+    tick: 0.5 * wc.us,
+    window_start: 0.0 * wc.ms,
+    window_duration: self.tick * 6000,
+    nsigma: 3.0,
+    reference_time: -250 * wc.us,
+    energy: 1, # equivalent to use_energy = true
+    simchan_label: 'simpleSC',
+    sed_label: 'IonAndScint',
+    sparse: false,
+  },
+}, nin=1, nout=1, uses=tools.anodes + [tools.field]);
+
+
 // local magoutput = 'protodune-data-check.root';
 // local magnify = import 'pgrapher/experiment/pdsp/magnify-sinks.jsonnet';
 // local sinks = magnify(tools, magoutput);
@@ -185,7 +227,7 @@ local retagger = g.pnode({
 //local frameio = io.numpy.frames(output);
 local sink = sim.frame_sink;
 
-local graph = g.pipeline([wcls_input.depos, drifter, wcls_simchannel_sink, bagger, bi_manifold, retagger, wcls_output.sim_digits, sink]);
+local graph = g.pipeline([wcls_input.deposet, setdrifter, wcls_depoflux_writer, bi_manifold, retagger, wcls_output.sim_digits, sink]);
 
 local app = {
   type: 'Pgrapher',

@@ -17,18 +17,13 @@ function(params, anode, field, n, rms_cuts=[])
     // waveforms have the same number of ticks.  This must be non-zero.
     nsamples: params.nf.nsamples,
 
-    // groups: [std.range(n * 2560 + u * 40, n * 2560 + (u + 1) * 40 - 1) for u in std.range(0, 19)]
-    //         + [std.range(n * 2560 + 800 + v * 40, n * 2560 + 800 + (v + 1) * 40 - 1) for v in std.range(0, 19)]
-    //         + [std.range(n * 2560 + 1600 + w * 48, n * 2560 + 1600 + (w + 1) * 48 - 1) for w in std.range(0, 19)],
-
-    // Half-FEMB grouping
-    groups: [std.range(n * 2560 + u * 20, n * 2560 + (u + 1) * 20 - 1) for u in std.range(0, 39)]
-            + [std.range(n * 2560 + 800 + v * 20, n * 2560 + 800 + (v + 1) * 20 - 1) for v in std.range(0, 39)]
-            + [std.range(n * 2560 + 1600 + w * 24, n * 2560 + 1600 + (w + 1) * 24 - 1) for w in std.range(0, 39)],
+    groups: [std.range(n * 2560 + u * 40, n * 2560 + (u + 1) * 40 - 1) for u in std.range(0, 19)]
+            + [std.range(n * 2560 + 800 + v * 40, n * 2560 + 800 + (v + 1) * 40 - 1) for v in std.range(0, 19)]
+            + [std.range(n * 2560 + 1600 + w * 48, n * 2560 + 1600 + (w + 1) * 48 - 1) for w in std.range(0, 19)],
 
 
     // Externally determined "bad" channels.
-    bad: [],
+    bad: [2297, 5379, 5472, 5556, 5607, 5608, 5920, 5921, 6072, 7679, 2580, 2940, 3347, 3758, 3805, 3866, 4722, 9956, 9986, 9987, 9988, 7876, 9120, 9125, 9126, 9127, 9306, 9307, 9309, 9310, 9534, 10016, 10018, 10020, 10022, 10024],
 
     // Overide defaults for specific channels.  If an info is
     // mentioned for a particular channel in multiple objects in this
