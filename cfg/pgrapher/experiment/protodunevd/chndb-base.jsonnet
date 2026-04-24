@@ -396,7 +396,9 @@ top_u_groups:
 ,
 
     // Externally determined "bad" channels.
-    bad: [],
+    bad: [ 293,955,1482,2657,2705,2727,
+           4242,4243,5471,7441,7346,7435,7341,
+           11701,11702,11703,11893,11895,11996],
 
     // Overide defaults for specific channels.  If an info is
     // mentioned for a particular channel in multiple objects in this

@@ -48,16 +48,14 @@ function(params, tools, override = {}) {
 
       anode: wc.tn(anode),
       dft: wc.tn(tools.dft),
-      field_response: if anode.data.ident < 4
-                      then wc.tn(tools.fields[0])
-                      else wc.tn(tools.fields[1]),
+      field_response: wc.tn(tools.field),
       // elecresponse: wc.tn(tools.elec_resp),
       elecresponse: if anode.data.ident < 4
                     then wc.tn(tools.elec_resps[0])
                     else wc.tn(tools.elec_resps[1]),
       ftoffset: 0.0, // default 0.0
-      // ctoffset: 1.0*wc.microsecond, // old one
-      ctoffset: 4*wc.microsecond, // new one
+      // ctoffset: 1.0*wc.microsecond, // default -8.0
+      ctoffset: 4*wc.microsecond, //consistent with FR: protodunevd_FR_norminal_260324.json.bz2
       per_chan_resp: pc.name,
       fft_flag: 0,  // 1 is faster but higher memory, 0 is slightly slower but lower memory
       postgain: 1.0,  // default 1.2
@@ -72,7 +70,6 @@ function(params, tools, override = {}) {
       r_th_factor: 3.0,  // default 3
       r_fake_signal_low_th: 375,  // default 500
       r_fake_signal_high_th: 750,  // default 1000
-      // r_fake_signal_high_th: 100,  // default 1000
       r_fake_signal_low_th_ind_factor: 1.0,  // default 1
       r_fake_signal_high_th_ind_factor: 1.0,  // default 1      
       r_th_peak: 3.0, // default 3.0
@@ -82,11 +79,11 @@ function(params, tools, override = {}) {
 
       // frame tags
       wiener_tag: 'wiener%d' % anode.data.ident,
+      wiener_threshold_tag: 'threshold%d' % anode.data.ident,
       decon_charge_tag: 'decon_charge%d' % anode.data.ident,
       gauss_tag: 'gauss%d' % anode.data.ident,
 
-      // use_roi_debug_mode: false,
-      use_roi_debug_mode: true,
+      use_roi_debug_mode: false,
       tight_lf_tag: 'tight_lf%d' % anode.data.ident,
       loose_lf_tag: 'loose_lf%d' % anode.data.ident,
       cleanup_roi_tag: 'cleanup_roi%d' % anode.data.ident,
@@ -103,6 +100,6 @@ function(params, tools, override = {}) {
       // process_planes: [0, 2],
 
     } + override,
-  }, nin=1, nout=1, uses=[anode, tools.dft, tools.fields[0], tools.fields[1], tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt),
+  }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt),
 
 }

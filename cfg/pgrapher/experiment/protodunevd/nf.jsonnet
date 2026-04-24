@@ -48,28 +48,28 @@ function(params, anode, chndbobj, n, name='')
         channel_filters: [
           wc.tn(single),
         ],
-        multigroup_chanfilters: [
+             multigroup_chanfilters: [
 
             {
                channelgroups: chndbobj.data.groups,
                filters: [wc.tn(grouped)],
              },
 
-        ]
+            ]
             // only apply to top
-        +if anode.data.ident > 3 then[
+            +if anode.data.ident > 3 then[
               {
                 channelgroups: chndbobj.data.top_u_groups,
                 filters: [wc.tn(shieldcoupling_grouped)],
               },
-        ]else [],       
+            ]else []
+            ,       
         grouped_filters: [
           // wc.tn(grouped),
         ],
         channel_status_filters: [
         ],
         noisedb: wc.tn(chndbobj),
-        // intraces: 'orig%d' % n,  // frame tag get all traces
         intraces: 'orig',  // frame tag get all traces
         outtraces: 'raw%d' % anode.data.ident,
       },

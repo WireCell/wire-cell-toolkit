@@ -2,8 +2,7 @@
 // generic set of parameters and overrides things specific to PDSP.
 
 local wc = import "wirecell.jsonnet";
-// local base = import "pgrapher/dune/params.jsonnet";
-local base = import "pgrapher/common/params.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
 
 base {
     // This section will be overwritten in simparams.jsonnet
@@ -161,19 +160,10 @@ base {
         fields: [
             // "dunevdcrp2-FR-fixcoll-adjustind.json.bz2",
             // "dunevdcrp2-FR-fixcoll-adjustind.json.bz2", // repeat for top drifter
-            // "FR_1300shield_89K.json.bz2",  //new
             // "protodunevd_FR_3view_speed1d55.json.bz2", // remember to sync response plane position above
-            // "protodunevd_FR_3view_speed1d55.json.bz2", //1400shield 
-            // "protodunevd_FR_3view_speed1d55.json.bz2", //1400shield 
-            // "FR_1300shield_89K.json.bz2", //1300 shield 
-            // "FR_1300shield_89K.json.bz2", //1300 shield 
-            // "FR_xn_new.json.bz2", // after fr debug
-            // "FR_xn_new.json.bz2", //
-            // "FR_xn_C10V.json.bz2", // after fr debug
-            // "FR_xn_C10V.json.bz2", //
-            "FR_xn_D700.json.bz2", // after fr debug
-            "FR_xn_D700.json.bz2", //
-
+            // "protodunevd_FR_3view_speed1d55.json.bz2",
+            "protodunevd_FR_norminal_260324.json.bz2", //updated by xning,03/24/2026
+            "protodunevd_FR_norminal_260324.json.bz2",
         ],
 
         noises: [
