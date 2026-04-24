@@ -8,6 +8,8 @@
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Point.h"
+#include "WireCellUtil/Units.h"
 #include "WireCellAux/FrameTools.h"
 
 #include <vector>
@@ -102,6 +104,9 @@ WireCell::Configuration Root::MagnifySink::default_configuration() const
     // default operator is "sum".
     cfg["summary_operator"] = Json::objectValue;
 
+    // When non-empty, write a T_geo TTree of per-channel geometry once per output file.
+    cfg["geo_tree"] = "";
+
     return cfg;
 }
 
@@ -168,6 +173,35 @@ void Root::MagnifySink::create_file()
     output_tf->Close("R");
     delete output_tf;
     output_tf = nullptr;
+}
+
+void Root::MagnifySink::write_geo_tree(TFile* output_tf)
+{
+    const std::string treename = m_cfg["geo_tree"].asString();
+    if (treename.empty() || m_geo_written) return;
+
+    TTree* tree = new TTree(treename.c_str(), treename.c_str());
+    int chid = 0, plane = 0, nwires = 0;
+    double length = 0.0;
+    tree->Branch("chid",   &chid,   "chid/I");
+    tree->Branch("plane",  &plane,  "plane/I");
+    tree->Branch("nwires", &nwires, "nwires/I");
+    tree->Branch("length", &length, "length/D");
+    tree->SetDirectory(output_tf);
+
+    for (int ch : m_anode->channels()) {
+        plane = m_anode->resolve(ch).index();
+        if (plane < 0) continue;
+        auto wires = m_anode->wires(ch);
+        double len = 0.0;
+        for (auto w : wires) len += ray_length(w->ray());
+        chid   = ch;
+        nwires = (int) wires.size();
+        length = len / units::cm;
+        tree->Fill();
+    }
+    log->debug("MagnifySink: wrote geo tree \"{}\" with {} entries", treename, tree->GetEntries());
+    m_geo_written = true;
 }
 
 void Root::MagnifySink::do_shunt(TFile* output_tf)
@@ -484,6 +518,7 @@ bool Root::MagnifySink::operator()(const IFrame::pointer& frame, IFrame::pointer
         }
     }
 
+    write_geo_tree(output_tf);
     do_shunt(output_tf);
 
     auto count = output_tf->Write();
