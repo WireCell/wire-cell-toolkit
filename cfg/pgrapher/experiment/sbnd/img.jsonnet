@@ -44,7 +44,7 @@ local img = {
         //name: 'chsel%d' % n,
         name: 'chsel%d' % anode.data.ident,
         data: {
-          channels: std.range(5632 * anode.data.ident, 5632 * (anode.data.ident + 1) - 1),
+          channels: std.range(5638 * anode.data.ident, 5638 * (anode.data.ident + 1) - 1),
           //tags: ['orig%d' % n], // traces tag //commented? Ewerton 2023-09-xx
           tags: ['gauss%d' % anode.data.ident, 'wiener%d' % anode.data.ident], // changed Ewerton 2023-09-27
         },
@@ -86,7 +86,7 @@ local img = {
             // dead_ch_hlimit: [2176, 2096],
             ncount_org: 1,   // organize the dead channel ranges according to these boundaries 
             org_llimit: [0], // must be ordered ...
-            org_hlimit: [3400], // must be ordered ...
+            org_hlimit: [3427], // must be ordered ...
         },
     }, nin=1, nout=1, uses=[anode]),
 
@@ -142,7 +142,7 @@ local img = {
                 error_tag: "gauss_error%d" % anode.data.ident,
                 anode: wc.tn(anode),
                 min_tbin: 0,
-                max_tbin: 3400, //we used 0 previously. changed to 3400 to check Ewerton 2023-10-25 (original=8500 PD?)
+                max_tbin: 3427, // SBND DAQ readout window length (ticks); was 3400, dropped 27 ticks of real data
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
@@ -339,7 +339,7 @@ function() {
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
-        local st = if multi_slicing == "multi-2view"
+        local st = if multi_slicing == "multi-2view" || multi_slicing == "multi-3view"
         then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4)
         else g.pipeline([
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
