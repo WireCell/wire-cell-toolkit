@@ -7,6 +7,18 @@ local wc = import 'wirecell.jsonnet';
 local util = import 'pgrapher/experiment/protodunevd/funcs.jsonnet';
 
 function(params, anode, field, n, rms_cuts=[])
+  // Per-plane channel ranges derived from funcs.anode_channels() layout:
+  //   even anode: U=0-475,   V=952-1427,  W=1904-2487  (all + 3072*crp)
+  //   odd  anode: U=476-951, V=1428-1903, W=2488-3071  (all + 3072*crp)
+  // Matches top_u_groups which uses the same 0-475 / 476-951 offsets.
+  local crp = (n - n % 2) / 2;
+  local offset = 3072 * crp;
+  local u_local = if n % 2 == 0 then std.range(0, 475)    else std.range(476, 951);
+  local v_local = if n % 2 == 0 then std.range(952, 1427)  else std.range(1428, 1903);
+  local w_local = if n % 2 == 0 then std.range(1904, 2487) else std.range(2488, 3071);
+  local u_chans = [x + offset for x in u_local];
+  local v_chans = [x + offset for x in v_local];
+  local w_chans = [x + offset for x in w_local];
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
@@ -450,16 +462,16 @@ top_u_groups:
     ] + (
       if n >= 4 then [
         // Top TPCs: flat per-plane
-        { channels: { wpid: wc.WirePlaneId(wc.Ulayer) }, min_rms_cut: 8.0, max_rms_cut: 15.0 },
-        { channels: { wpid: wc.WirePlaneId(wc.Vlayer) }, min_rms_cut: 8.0, max_rms_cut: 15.0 },
-        { channels: { wpid: wc.WirePlaneId(wc.Wlayer) }, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+        { channels: u_chans, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+        { channels: v_chans, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+        { channels: w_chans, min_rms_cut: 8.0, max_rms_cut: 15.0 },
       ] else [
         // Bottom TPCs: W flat; U and V linear-in-wirelength on min
-        { channels: { wpid: wc.WirePlaneId(wc.Wlayer) }, min_rms_cut: 5.0, max_rms_cut: 15.0 },
-        { channels: { wpid: wc.WirePlaneId(wc.Ulayer) },
+        { channels: w_chans, min_rms_cut: 5.0, max_rms_cut: 15.0 },
+        { channels: u_chans,
           min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6, l1: 180.0, v1: 6.3 },
           max_rms_cut: 15.0 },
-        { channels: { wpid: wc.WirePlaneId(wc.Vlayer) },
+        { channels: v_chans,
           min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6, l1: 180.0, v1: 6.3 },
           max_rms_cut: 15.0 },
       ]
