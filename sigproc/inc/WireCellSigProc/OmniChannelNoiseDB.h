@@ -93,6 +93,11 @@ namespace WireCell {
             IFieldResponse::pointer m_fr;
             int m_rc_layers;
 
+            // per-channel summed wire length in cm; built lazily on first use
+            std::unordered_map<int, double> m_wire_length_cm;
+            bool m_wire_length_cached{false};
+            void cache_wire_lengths();
+
             typedef std::shared_ptr<filter_t> shared_filter_t;
             typedef std::vector<shared_filter_t> filter_vector_t;
 

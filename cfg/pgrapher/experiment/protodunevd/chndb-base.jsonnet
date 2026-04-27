@@ -439,5 +439,29 @@ top_u_groups:
 
       },
 
-    ] + rms_cuts,
+
+      // Per-anode-group, per-plane RMS cuts for PDVD.
+      // Top TPCs (anodes 4-7): flat (8, 15) ADC on all planes.
+      // Bottom TPCs (anodes 0-3): W plane flat (5, 15) ADC; U and V
+      //   planes use a linear min cut anchored at (0 cm, 2.6 ADC) and
+      //   (180 cm, 6.3 ADC), clamped at endpoints, with flat max 15 ADC.
+      //   The linear mode is evaluated per channel from summed wire length
+      //   (via OmniChannelNoiseDB "linear_in_wirelength" mode).
+    ] + (
+      if n >= 4 then [
+        // Top TPCs: flat per-plane
+        { channels: { wpid: wc.WirePlaneId(wc.Ulayer) }, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+        { channels: { wpid: wc.WirePlaneId(wc.Vlayer) }, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+        { channels: { wpid: wc.WirePlaneId(wc.Wlayer) }, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+      ] else [
+        // Bottom TPCs: W flat; U and V linear-in-wirelength on min
+        { channels: { wpid: wc.WirePlaneId(wc.Wlayer) }, min_rms_cut: 5.0, max_rms_cut: 15.0 },
+        { channels: { wpid: wc.WirePlaneId(wc.Ulayer) },
+          min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6, l1: 180.0, v1: 6.3 },
+          max_rms_cut: 15.0 },
+        { channels: { wpid: wc.WirePlaneId(wc.Vlayer) },
+          min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6, l1: 180.0, v1: 6.3 },
+          max_rms_cut: 15.0 },
+      ]
+    ) + rms_cuts,
   }

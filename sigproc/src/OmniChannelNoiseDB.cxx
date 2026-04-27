@@ -2,7 +2,9 @@
 #include "WireCellAux/DftTools.h"
 #include "WireCellUtil/Response.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Point.h"
 
+#include <algorithm>
 #include <cmath>
 
 WIRECELL_FACTORY(OmniChannelNoiseDB, WireCell::SigProc::OmniChannelNoiseDB, WireCell::IChannelNoiseDatabase,
@@ -25,6 +27,20 @@ OmniChannelNoiseDB::~OmniChannelNoiseDB()
     //    delete it->second;
     // }
     // m_db.clear();
+}
+
+void OmniChannelNoiseDB::cache_wire_lengths()
+{
+    if (m_wire_length_cached) return;
+    for (int ch : m_anode->channels()) {
+        double total = 0.0;
+        for (auto wire : m_anode->wires(ch)) {
+            total += ray_length(wire->ray());
+        }
+        m_wire_length_cm[ch] = total / units::cm;
+    }
+    m_wire_length_cached = true;
+    log->debug("OmniChannelNoiseDB: wire-length cache built for {} channels", m_wire_length_cm.size());
 }
 
 OmniChannelNoiseDB::ChannelInfo::ChannelInfo()
@@ -418,21 +434,49 @@ void OmniChannelNoiseDB::update_channels(Json::Value cfg)
         }
     }
     if (cfg.isMember("min_rms_cut")) {
-        double val = cfg["min_rms_cut"].asDouble();
-        // dump_cfg("minrms", chans, val);
+        const auto& jv = cfg["min_rms_cut"];
+        const bool linear = jv.isObject()
+            && jv.get("type", "").asString() == "linear_in_wirelength";
+        double scalar_val = linear ? 0.0 : jv.asDouble();
+        double l0 = 0, v0 = 0, l1 = 1, v1 = 0;
+        if (linear) {
+            cache_wire_lengths();
+            l0 = jv["l0"].asDouble(); v0 = jv["v0"].asDouble();
+            l1 = jv["l1"].asDouble(); v1 = jv["v1"].asDouble();
+        }
         for (int ch : chans) {
-            // m_db.at(ch).min_rms_cut = val;
-            // dbget(ch).min_rms_cut = val;
-            get_ci(ch).min_rms_cut = val;
+            if (linear) {
+                auto it = m_wire_length_cm.find(ch);
+                double L = (it == m_wire_length_cm.end()) ? l0 : it->second;
+                double t = std::clamp((L - l0) / (l1 - l0), 0.0, 1.0);
+                get_ci(ch).min_rms_cut = v0 + t * (v1 - v0);
+            }
+            else {
+                get_ci(ch).min_rms_cut = scalar_val;
+            }
         }
     }
     if (cfg.isMember("max_rms_cut")) {
-        double val = cfg["max_rms_cut"].asDouble();
-        // dump_cfg("maxrms", chans, val);
+        const auto& jv = cfg["max_rms_cut"];
+        const bool linear = jv.isObject()
+            && jv.get("type", "").asString() == "linear_in_wirelength";
+        double scalar_val = linear ? 0.0 : jv.asDouble();
+        double l0 = 0, v0 = 0, l1 = 1, v1 = 0;
+        if (linear) {
+            cache_wire_lengths();
+            l0 = jv["l0"].asDouble(); v0 = jv["v0"].asDouble();
+            l1 = jv["l1"].asDouble(); v1 = jv["v1"].asDouble();
+        }
         for (int ch : chans) {
-            // m_db.at(ch).max_rms_cut = val;
-            // dbget(ch).max_rms_cut = val;
-            get_ci(ch).max_rms_cut = val;
+            if (linear) {
+                auto it = m_wire_length_cm.find(ch);
+                double L = (it == m_wire_length_cm.end()) ? l0 : it->second;
+                double t = std::clamp((L - l0) / (l1 - l0), 0.0, 1.0);
+                get_ci(ch).max_rms_cut = v0 + t * (v1 - v0);
+            }
+            else {
+                get_ci(ch).max_rms_cut = scalar_val;
+            }
         }
     }
     if (cfg.isMember("pad_window_front")) {
