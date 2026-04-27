@@ -313,14 +313,14 @@ rule high_end_mp_hdf5:
 
 
 ## TODO 
-# rule convert_spng_dense_to_hdf5:
-#     input:
-#         "sigproc-spng-dense-cosmics_{sample}.tar"
-#     output:
-#         rec="cosmics_{sample}-g4-rec-dense-0.h5",
-#         tru="cosmics_{sample}-g4-tru-dense-0.h5",
-#     script:
-#         "scripts/convert_to_h5denseSnake.py"
+rule convert_spng_dense_to_hdf5:
+    input:
+        "sigproc-spng-dense-cosmics_{sample}.tar"
+    output:
+        rec="cosmics_{sample}-g4-rec-dense-0.h5",
+        tru="cosmics_{sample}-g4-tru-dense-0.h5",
+    script:
+        "scripts/convert_to_h5denseSnake.py"
 # rule convert_spng_dense_to_hdf5_lines:
 #     input:
 #         "seeds_{seeds}/sigproc-spng-dense-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
@@ -561,3 +561,73 @@ rule all_plots_w:
         tar=f'line-displays_wplane.tar',
         effpur=f'all_eff_pur_wplane.png',
         npy=f'all_eff_pur_wplane.npz',
+
+def get_epochs(wildcards):
+    from glob import glob
+    return sorted(
+        glob(f'epoch_*/all_eff_pur_{wildcards.plane}plane.npz'),
+        key = lambda s : int(s.split('/')[0].split('_')[-1])
+    )
+
+
+rule compare_effpur_epochs:
+    input: get_epochs
+    output:
+        pdf='eff_pur_epochs_{plane}plane.pdf',
+        # npz='eff_pur_epochs_{plane}plane.npz',
+    run:
+        print(input)
+        import numpy as np, matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+        matplotlib.rcParams['pdf.fonttype'] = 42
+        files = [np.load(f) for f in input]
+        epoch_nums = [int(f.split('/')[0].split('_')[-1]) for f in input]
+        n_angles = len(files[0]['effs'])
+        n_epochs = len(files)
+        effs = np.array([
+            [f['effs'][i] for f in files]
+            for i in range(n_angles)
+        ])
+        purs = np.array([
+            [f['purs'][i] for f in files]
+            for i in range(n_angles)
+        ])
+
+        from matplotlib.backends.backend_pdf import PdfPages
+        with PdfPages(output.pdf) as pdf:
+            for i in range(len(effs)):
+                plt.figure()
+                plt.plot(epoch_nums, effs[i], label='Efficiency')
+                plt.plot(epoch_nums, purs[i], label='Purity')
+                plt.plot(epoch_nums, effs[i]*purs[i], label='eff x pur')
+                plt.ylim(0,1.2)
+                plt.grid(True, axis='both')
+                plt.title(f'Angle #{i}')
+                plt.xlabel('Epoch')
+                plt.legend()
+                pdf.savefig()
+                plt.close()
+            plt.figure()
+            plt.title('Efficiency -- all epochs')
+            plt.xlabel('Angle')
+            plt.ylim(0,1.2)
+            plt.ylabel('Efficiency')
+            plt.grid(True, axis='both')
+            for i, eff in enumerate(effs.T):
+                plt.plot(eff, label=f'Epoch {epoch_nums[i]}')
+            plt.legend()
+            pdf.savefig()
+            plt.close()
+
+            plt.figure()
+            plt.title('Purity -- all epochs')
+            plt.xlabel('Angle')
+            plt.ylim(0,1.2)
+            plt.ylabel('Purity')
+            plt.grid(True, axis='both')
+            for i, pur in enumerate(purs.T):
+                plt.plot(pur, label=f'Epoch {epoch_nums[i]}')
+            plt.legend()
+            pdf.savefig()
+            plt.close()
