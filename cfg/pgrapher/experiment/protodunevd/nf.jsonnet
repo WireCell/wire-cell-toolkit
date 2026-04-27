@@ -11,6 +11,7 @@ function(params, anode, chndbobj, n, name='')
       data: {
         noisedb: wc.tn(chndbobj),
         anode: wc.tn(anode),
+        adaptive_baseline: anode.data.ident < 4,
       },
     },
     local grouped = {

@@ -67,6 +67,7 @@ namespace WireCell {
                 IAnodePlane::pointer m_anode;
                 IChannelNoiseDatabase::pointer m_noisedb;
                 IDFT::pointer m_dft;
+                bool m_adaptive_baseline{false};
             };
 
             class CoherentNoiseSub : public WireCell::IChannelFilter, public WireCell::IConfigurable {
