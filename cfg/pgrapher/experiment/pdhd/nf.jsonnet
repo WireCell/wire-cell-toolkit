@@ -14,6 +14,12 @@ function(params, anode, chndbobj, n, name='', dft=default_dft) {
             noisedb: wc.tn(chndbobj),
             anode: wc.tn(anode),
             dft: wc.tn(dft),
+            // adaptive_baseline left at C++ default (false): PDHD cold
+            // electronics is DC-coupled, so the IS_RC partial-RC gate that
+            // fronts the adaptive baseline (see Microboone.cxx:963-1047) has
+            // no physical meaning here. Side effect: the lf_noisy mask
+            // emitted under is_partial in ProtoduneHD.cxx is no longer
+            // produced; any bad-channel info will be supplied separately.
         },
     },
     local grouped = {

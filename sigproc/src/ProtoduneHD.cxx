@@ -793,6 +793,7 @@ void PDHD::OneChannelNoise::configure(const WireCell::Configuration& cfg)
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
+    m_adaptive_baseline = get<bool>(cfg, "adaptive_baseline", m_adaptive_baseline);
 }
 WireCell::Configuration PDHD::OneChannelNoise::default_configuration() const
 {
@@ -800,6 +801,7 @@ WireCell::Configuration PDHD::OneChannelNoise::default_configuration() const
     cfg["anode"] = m_anode_tn;
     cfg["noisedb"] = m_noisedb_tn;
     cfg["dft"] = "FftwDFT";     // type-name for the DFT to use
+    cfg["adaptive_baseline"] = false;
     return cfg;
 }
 
@@ -812,7 +814,7 @@ WireCell::Waveform::ChannelMaskMap PDHD::OneChannelNoise::apply(int ch, signal_t
 
     // correct rc undershoot
     auto spectrum = fwd_r2c(m_dft, signal);
-    bool is_partial = m_check_partial(spectrum);  // Xin's "IS_RC()"
+    bool is_partial = m_adaptive_baseline ? m_check_partial(spectrum) : false;
 
     // if (!is_partial) {
     //     auto const& spec = m_noisedb->rcrc(ch);  // set rc_layers in chndb-xxx.jsonnet
