@@ -15,6 +15,7 @@
 
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/Bits.h"
+#include "WireCellUtil/Logging.h"
 
 namespace WireCell {
     namespace SigProc {
@@ -68,6 +69,7 @@ namespace WireCell {
                 IChannelNoiseDatabase::pointer m_noisedb;
                 IDFT::pointer m_dft;
                 bool m_adaptive_baseline{false};
+                Log::logptr_t m_log;
             };
 
             class CoherentNoiseSub : public WireCell::IChannelFilter, public WireCell::IConfigurable {

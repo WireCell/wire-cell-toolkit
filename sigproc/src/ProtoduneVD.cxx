@@ -15,6 +15,8 @@
 #include "WireCellAux/DftTools.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Point.h"
+#include "WireCellUtil/Units.h"
 
 #include "WireCellUtil/Persist.h"
 
@@ -781,6 +783,7 @@ PDVD::OneChannelNoise::OneChannelNoise(const std::string& anode, const std::stri
   : m_anode_tn(anode)
   , m_noisedb_tn(noisedb)
   , m_check_partial()  // fixme, here too.
+  , m_log(Log::logger("sigproc"))
 {
 }
 PDVD::OneChannelNoise::~OneChannelNoise() {}
@@ -864,10 +867,8 @@ WireCell::Waveform::ChannelMaskMap PDVD::OneChannelNoise::apply(int ch, signal_t
 
     const float min_rms = m_noisedb->min_rms_cut(ch);
     const float max_rms = m_noisedb->max_rms_cut(ch);
-    // std::cout<<"min_rms = "<<min_rms<<std::endl;
-    // std::cout<<"max_rms = "<<max_rms<<std::endl;
-    // alternative RMS tagging
     PDVD::SignalFilter(signal);
+    const double rms_val = PDVD::CalcRMSWithFlags(signal);
     bool is_noisy = PDVD::NoisyFilterAlg(signal, min_rms, max_rms);
     PDVD::RemoveFilterFlags(signal);
     if (is_noisy) {
@@ -875,6 +876,14 @@ WireCell::Waveform::ChannelMaskMap PDVD::OneChannelNoise::apply(int ch, signal_t
         temp_bin_range.first = 0;
         temp_bin_range.second = signal.size();
         ret["noisy"][ch].push_back(temp_bin_range);
+    }
+    if (m_log->should_log(spdlog::level::debug)) {
+        double wire_len = 0;
+        for (auto wire : m_anode->wires(ch)) {
+            wire_len += ray_length(wire->ray()) / units::cm;
+        }
+        m_log->debug("PDVDOneChannelNoise ch={} rms={:.2f} min_rms={:.2f} max_rms={:.2f} wire_length={:.1f}cm noisy={}",
+                     ch, rms_val, min_rms, max_rms, wire_len, is_noisy);
     }
 
     return ret;
