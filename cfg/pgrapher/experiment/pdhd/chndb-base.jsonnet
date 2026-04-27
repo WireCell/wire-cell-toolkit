@@ -10,7 +10,7 @@ function(params, anode, field, n, rms_cuts=[])
     anode: wc.tn(anode),
     field_response: wc.tn(field),
 
-    tick: params.daq.tick,
+    tick: 0.5*wc.us,  // NF always sees 500 ns frames (resampled from 512 ns on data path)
 
     // This sets the number of frequency-domain bins used in the noise
     // filtering.  It is not necessarily true that the time-domain
