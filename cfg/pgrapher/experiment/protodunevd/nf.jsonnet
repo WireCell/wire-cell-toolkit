@@ -11,7 +11,10 @@ function(params, anode, chndbobj, n, name='')
       data: {
         noisedb: wc.tn(chndbobj),
         anode: wc.tn(anode),
-        adaptive_baseline: anode.data.ident < 4,
+        // adaptive_baseline left at C++ default (false): PDVD hardware has
+        // no AC coupling, so the IS_RC partial-RC gate that fronts the
+        // adaptive baseline (see Microboone.cxx:963-1047) has no physical
+        // meaning here.
       },
     },
     local grouped = {
