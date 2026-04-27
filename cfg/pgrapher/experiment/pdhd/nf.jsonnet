@@ -39,7 +39,7 @@ function(params, anode, chndbobj, n, name='', dft=default_dft) {
             // channel bin ranges are ignored
             // only when the channelmask is merged to `bad`
             // maskmap: {sticky: "bad", ledge: "bad", noisy: "bad"},
-            maskmap: {noisy:"bad", lf_noisy: "bad"},
+            // maskmap: {noisy:"bad", lf_noisy: "bad"},
             channel_filters: [
                 wc.tn(single),
             ],

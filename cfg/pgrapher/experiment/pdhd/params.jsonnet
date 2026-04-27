@@ -93,6 +93,7 @@ base {
     },
 
     daq: super.daq {
+        tick: 512*wc.ns,
         nticks: 6000,
     },
 
