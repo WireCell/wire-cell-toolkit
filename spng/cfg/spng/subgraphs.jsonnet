@@ -995,7 +995,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local prefix = "v"+std.toString(view)+"_dnnroi";
         
         local pre_ops = [
-            { operation: "noop" }
+            { operation: "noop" },
+            { operation: "unsqueeze", dims: [0,1]}
         ] + (
             if do_transpose
             then [{ operation: "transpose", dims: [-2,-1] }] else []
@@ -1348,8 +1349,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
 
         local dnnroifwd = $.dnnroi_forward_views_separate_models(modelfiles=modelfiles, 
                                                  do_transpose=do_transpose,
-                                                 change_views=[[[1,1,800,-1], [1,1,800,-1]], [[1,1,800,-1], [1,1,800,-1]], [[2,1,480,-1], [1,2,960,-1]]],
-                                                 do_threshold=[true,true,false],
+                                                //  change_views=[[[1,1,800,-1], [1,1,800,-1]], [[1,1,800,-1], [1,1,800,-1]], [[2,1,480,-1], [1,2,960,-1]]],
+                                                //  do_threshold=[true,true,false],
                                                  extra_name=extra_name+'_FWD');
         // local dnnroifwd = $.dnnroi_forward_views(modelfile=modelfiles[0], 
         //                                          crossed_views=[1,1,1],
@@ -1381,8 +1382,9 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 data: {
                     operations: [
                         { operation: "slice", dims: [0, 1, 2]},
-                        { operation: "scale", scalar: 160000.0}, //What should this be? training truth is scaled down by factor of 4k and another 10 in wcpy dnn 
+                        { operation: "scale", scalar: 1600000.0}, //What should this be? training truth is scaled down by factor of 4k and another 10 in wcpy dnn 
                                                                  //another factor of 4 for the way rebinning is done (max vs integral)?
+                                                                 //040926 -- added another factor of 10 and that made it look good. Idk?
                         { operation: "squeeze", dims: [0]},
                     ],
                 } + control,
@@ -1400,13 +1402,24 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 } + control,
             }, nin=1, nout=1);
         
+        // local unbin_charge_apa1 = pg.pnode({
+        //         local this_name = $.this_name(extra_name+'_charge', 'v'+std.toString(2)+'_unbin'+std.toString(rebin)),
+        //         type: "SPNGRebinner",
+        //         name: this_name,
+        //         data: {
+        //             norm: "maximum",
+        //             factor: -4,     // FIXME: must match upstream resampler.
+        //             tag: "charge",
+        //             datapath_format: "/traces/Rebinner/" + this_name
+        //         } + control
+        //     }, nin=1, nout=1);
         local unbin_charge_apa1 = pg.pnode({
                 local this_name = $.this_name(extra_name+'_charge', 'v'+std.toString(2)+'_unbin'+std.toString(rebin)),
-                type: "SPNGRebinner",
+                type: "SPNGResampler",
                 name: this_name,
                 data: {
-                    norm: "maximum",
-                    factor: -4,     // FIXME: must match upstream resampler.
+                    norm: "integral",
+                    ratio: 4,     // FIXME: must match upstream resampler.
                     tag: "charge",
                     datapath_format: "/traces/Rebinner/" + this_name
                 } + control
@@ -1430,6 +1443,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 operation: 'mul',
             } + control
         }, nin=2, nout=1);
+        local mul_rbl = $.applyroi_view(2, extra_name="_APPLYAPA1");
         local tag = pg.pnode({
             type: 'SPNGTransform',
             name: name,
@@ -1439,10 +1453,12 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             } + control
         }, nin=1, nout=1);
         local multag=pg.pipeline([mul, tag]);
+        // local multag=pg.pipeline([mul, unbin_charge_apa1, tag]);
 
         local connect_roi_split = pg.pipeline([split_apa1.targets.rois, unbin_roi_apa1, threshold_rois]);
         local connect_charge_split = pg.pipeline([split_apa1.targets.charge, unbin_charge_apa1, scale_charge]);
-        
+        // local connect_roi_split = pg.pipeline([split_apa1.targets.rois, threshold_rois]);
+        // local connect_charge_split = pg.pipeline([split_apa1.targets.charge, scale_charge]);
         // local rois_cap_apa1 = pg.shuntline(threshold_rois, applyrois.roi_sink, dports=[2]);
         // local dense_cap_apa1 = pg.shuntline(scale_charge, applyrois.dense_sink, dports=[2]);
         local join_apa1 = pg.intern(
@@ -1454,8 +1470,9 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             ]
         );
         pg.intern(innodes=[sg1_infer.decon_sink],
-                  outnodes=[applyrois.signal_source, join_apa1], //, pg.oport_node(rois, oport_index=2)
-                  centernodes=[rois_cap, dense_cap, apa1_cap, connect_charge_split, connect_roi_split]), //, rois_cap_apa1, dense_cap_apa1]), //
+                  outnodes=[applyrois.signal_source, join_apa1],
+                  centernodes=[rois_cap, dense_cap, apa1_cap, connect_charge_split, join_apa1, connect_roi_split],
+                ), //, rois_cap_apa1, dense_cap_apa1]), //
 
     // / [3]tensor -> tensor[3]
     ///Do decon. If requested also do a specific flavor of Filtering/ROI finding
