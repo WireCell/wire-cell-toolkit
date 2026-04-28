@@ -19,6 +19,9 @@ function(params, anode, field, n, rms_cuts=[])
   local u_chans = [x + offset for x in u_local];
   local v_chans = [x + offset for x in v_local];
   local w_chans = [x + offset for x in w_local];
+  // ADC-domain thresholds below are tuned for FE amplifier gain = 7.8 mV/fC.
+  // For other gains, scale linearly with params.elec.gain.
+  local gain_scale = params.elec.gain / (7.8 * wc.mV / wc.fC);
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
@@ -409,7 +412,11 @@ top_u_groups:
 
     // Externally determined "bad" channels.
     // NP02 CRP4 + CRP5 disconnected channels (bottom electronics); (p)-marked included.
+    // Top electronics bad channels appended at end.
     bad: [
+        // top electronics
+        293, 955, 1482, 2657, 2705, 2727, 4242, 4243, 5471,
+        11701, 11702, 11703, 11893, 11895, 11996,
         // CRP4 U
         188, 422, 423, 432, 433, 434, 435, 452, 453, 454, 455,
         464, 465, 466, 467, 471, 472, 473, 474, 475,
@@ -456,12 +463,12 @@ top_u_groups:
         response_offset: 0.0,  // ticks?
         pad_window_front: 20,  // ticks?
         pad_window_back: 20,  // ticks?
-        decon_limit: 0.02,
-        decon_limit1: 0.09,
-        adc_limit: 15,
+        decon_limit: 0.02 * gain_scale,
+        decon_limit1: 0.09 * gain_scale,
+        adc_limit: 15 * gain_scale,
         roi_min_max_ratio: 0.8, // default 0.8
-        min_rms_cut: 1.0,  // units???
-        max_rms_cut: 60.0,  // units???
+        min_rms_cut: 1.0 * gain_scale,  // ADC at 7.8 mV/fC
+        max_rms_cut: 60.0 * gain_scale,  // ADC at 7.8 mV/fC
 
         // parameter used to make "rcrc" spectrum
         rcrc: 1.1 * wc.millisecond, // 1.1 for collection, 3.3 for induction
@@ -489,18 +496,18 @@ top_u_groups:
     ] + (
       if n >= 4 then [
         // Top TPCs: flat per-plane
-        { channels: u_chans, min_rms_cut: 8.0, max_rms_cut: 15.0 },
-        { channels: v_chans, min_rms_cut: 8.0, max_rms_cut: 15.0 },
-        { channels: w_chans, min_rms_cut: 8.0, max_rms_cut: 15.0 },
+        { channels: u_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
+        { channels: v_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
+        { channels: w_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
       ] else [
         // Bottom TPCs: W flat; U and V linear-in-wirelength on min
-        { channels: w_chans, min_rms_cut: 5.0, max_rms_cut: 15.0 },
+        { channels: w_chans, min_rms_cut: 5.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
         { channels: u_chans,
-          min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6, l1: 180.0, v1: 6.3 },
-          max_rms_cut: 15.0 },
+          min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6 * gain_scale, l1: 180.0, v1: 6.3 * gain_scale },
+          max_rms_cut: 15.0 * gain_scale },
         { channels: v_chans,
-          min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6, l1: 180.0, v1: 6.3 },
-          max_rms_cut: 15.0 },
+          min_rms_cut: { type: 'linear_in_wirelength', l0: 0.0, v0: 2.6 * gain_scale, l1: 180.0, v1: 6.3 * gain_scale },
+          max_rms_cut: 15.0 * gain_scale },
       ]
     ) + rms_cuts,
   }
