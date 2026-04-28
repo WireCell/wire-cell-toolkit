@@ -164,7 +164,6 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         Waveform::ChannelMasks temp;
         for (size_t i = 0; i < bad_channels.size(); i++) {
             temp[bad_channels.at(i)].push_back(bad_bins);
-            log->debug("NF cmm[bad] add: wct_chid={} range=[{},{})", bad_channels.at(i), bad_bins.first, bad_bins.second);
         }
         Waveform::ChannelMaskMap temp_map;
         temp_map["bad"] = temp;
@@ -204,11 +203,6 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
 
             // fixme: probably should assure these masks do not lead to out-of-bounds...
 
-            for (auto const& kv : masks) {
-                for (auto const& cm : kv.second) {
-                    log->debug("NF per-ch tag: name={} wct_chid={} nranges={}", kv.first, cm.first, cm.second.size());
-                }
-            }
             Waveform::merge(cmm, masks, m_maskmap);
             // ++filt_count;
         }
