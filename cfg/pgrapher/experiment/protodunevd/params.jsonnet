@@ -93,6 +93,13 @@ base {
         nticks: 6000,
     },
 
+    // Real data frames are 8000 ticks after the 512->500 ns Resampler
+    // (7813 raw ticks * 512/500 -> 8000).  Override nf.nsamples so
+    // that the NF freqmask spectrum matches the actual FFT size.
+    nf: super.nf {
+        nsamples: 8000,
+    },
+
     adc: super.adc {
 
         resolution: 14,

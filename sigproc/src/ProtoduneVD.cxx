@@ -835,6 +835,14 @@ WireCell::Waveform::ChannelMaskMap PDVD::OneChannelNoise::apply(int ch, signal_t
     {
         auto const& spec = m_noisedb->noise(ch);
         if (!spec.empty() && spec.size() == spectrum.size()) {
+            if (m_log->should_log(spdlog::level::debug)) {
+                int nzero = 0;
+                for (const auto& v : spec) if (std::abs(v) < 1e-9) ++nzero;
+                if (nzero > 0) {
+                    m_log->debug("PDVDfreqmask ch={} zeroed {}/{} FFT bins",
+                                 ch, nzero, spec.size());
+                }
+            }
             WireCell::Waveform::scale(spectrum, spec);
         }
     }
