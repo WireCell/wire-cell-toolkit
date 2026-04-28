@@ -19,9 +19,13 @@ function(params, anode, field, n, rms_cuts=[])
   local u_chans = [x + offset for x in u_local];
   local v_chans = [x + offset for x in v_local];
   local w_chans = [x + offset for x in w_local];
-  // ADC-domain thresholds below are tuned for FE amplifier gain = 7.8 mV/fC.
-  // For other gains, scale linearly with params.elec.gain.
-  local gain_scale = params.elec.gain / (7.8 * wc.mV / wc.fC);
+  // ADC-domain thresholds below are tuned for FE amplifier gain = 7.8 mV/fC
+  // on the bottom electronics (anodes 0-3). Top electronics (anodes 4-7)
+  // gain is fixed by elecs[1] (JsonElecResponse + postgain 1.52, no scalar
+  // gain knob), so top cuts must not move when bottom gain changes.
+  // Bottom cuts scale linearly with params.elec.gain (= elecs[0].gain).
+  local gain_scale = if n >= 4 then 1.0
+                     else params.elec.gain / (7.8 * wc.mV / wc.fC);
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
