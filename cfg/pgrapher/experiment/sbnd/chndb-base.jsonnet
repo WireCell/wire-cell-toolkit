@@ -42,7 +42,7 @@ function(params, anode, field, n, rms_cuts=[])
       // wish to change them.
       {
         //channels: std.range(n * 2560, (n + 1) * 2560 - 1),
-        channels: std.range(n * 5632, n * 5632 + 5631)
+        channels: std.range(n * 5632, n * 5632 + 5631),
         nominal_baseline: 2001.0,  // adc count [879.5 mV]
         gain_correction: 1.0,  // unitless
         response_offset: 0.0,  // ticks?
