@@ -254,7 +254,44 @@ verification of `to_cluster` behavior).
 
 ---
 
-## 14. TensorFileSink header: Swapped metadata/array file extensions in comment (LOW)
+## 14. FrameFileSink: Summary written in original trace order, not sorted-channel order (HIGH) — FIXED
+
+**File:** `src/FrameFileSink.cxx`, `one_tag()` function
+
+When serializing a tagged frame, `FrameFileSink` builds the 2D waveform array in
+sorted-channel order (line 157: `std::sort(tmp.begin(), tmp.end())`), but writes
+the trace `summary` (e.g. per-wire Wiener thresholds) in the original trace-iteration
+order (osp-wire order in `OmnibusSigProc`):
+
+```cpp
+// channels written in sorted order:
+std::sort(tmp.begin(), tmp.end());
+channels.insert(channels.begin(), chbeg, chend);
+
+// summary written in original (unsorted) order:
+write(m_out, aname, summary);   // BUG: not reordered to match channels
+```
+
+When `FrameFileSource` reads the file back, it pairs `summary[i]` with the
+i-th sorted channel, creating a systematic mismatch.  In `MagnifySink` this
+caused the per-channel Wiener-threshold 1D histograms (`h{u,v,w}_threshold<N>`)
+to show threshold = 0 on channels that are *not* dead, while the actually-dead
+channels (in `T_bad`) received nonzero thresholds from adjacent good channels.
+The mismatch was exact: per-plane counts of threshold-0 channels equalled the
+dead-channel count, but the channel identities were wrong.
+
+Affected any detector whose WAN (Wire-Attachment-Number) ordering is not
+identical to WCT channel-ID ordering, which is the case for ProtoDUNE-VD and
+ProtoDUNE-HD.
+
+**Fix (committed):** Before writing the summary, build a `chid→summary_value`
+map from the traces and re-emit summary values in the same order as the sorted
+`channels` array.  This keeps the positional correspondence that
+`FrameFileSource` relies on.
+
+---
+
+## 15. TensorFileSink header: Swapped metadata/array file extensions in comment (LOW)
 
 **File:** `inc/WireCellSio/TensorFileSink.h:72-73`
 

@@ -1606,6 +1606,8 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
             // need to make sure the input names follow the OSP convention
             // e.g., bad, ls_noisy
             m_wanmm[name][och.channel] = m.second;
+            log->debug("SP cmm[{}] map: wct_chid={} -> osp_chan={} osp_wire={} plane={}",
+                       name, wct_channel_ident, och.channel, och.wire, och.plane);
         }
     }
 
@@ -1669,6 +1671,16 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         else {  // collection wire planes
             decon_2D_tightROI(iplane);
             roi_form.find_ROI_by_decon_itself(iplane, m_r_data[iplane]);
+        }
+        {
+            const std::vector<float>& rms_v = *perplane_thresholds[iplane];
+            for (size_t w = 0; w < rms_v.size(); ++w) {
+                if (rms_v[w] == 0.0f) {
+                    const auto& och = m_channel_range[iplane][w];
+                    log->debug("SP rms=0: plane={} osp_wire={} osp_chan={} -> wct_chid(trace.ident)={}",
+                               iplane, w, och.channel, och.ident);
+                }
+            }
         }
         check_data(iplane, "after 2D tight ROI");
 
