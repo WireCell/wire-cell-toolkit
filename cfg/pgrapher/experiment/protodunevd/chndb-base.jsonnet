@@ -508,8 +508,10 @@ top_u_groups:
       // Only active when freqmask_enabled=true (use_freqmask TLA).
       {
         channels: std.range(2188, 2195) + std.range(2480, 2485),
+        // Physical-frequency form: bins are resolved at runtime from the
+        // live frame size, so the same entries work for 6400/8000-tick frames.
         freqmasks: if freqmask_enabled then
-          wc.freqbinner(params.daq.tick, params.nf.nsamples).freqmasks_mirror(
+          wc.freqmasks_phys(
             [ 47.0*wc.kilohertz,
               70.5*wc.kilohertz,
               94.0*wc.kilohertz,

@@ -173,12 +173,35 @@ OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::parse_freqmasks(Json::Va
 
     auto spectrum = make_filter(std::complex<float>(1, 0));
     for (auto jone : jfm) {
-        double value = jone["value"].asDouble();
-        int lo = std::max(jone["lobin"].asInt(), 0);
-        int hi = std::min(jone["hibin"].asInt(), m_nsamples - 1);
-        // std::cerr << "freqmasks: set [" << lo << "," << hi << "] to " << value << std::endl;
+        const double value = jone["value"].asDouble();
+        int lo, hi;
+        bool auto_mirror = false;
+        if (jone.isMember("flo") || jone.isMember("fhi")) {
+            // Physical-frequency form: resolve to bins from the current m_tick/m_nsamples
+            // so the mask follows physical frequency across runtime frame-size changes.
+            const double flo = jone["flo"].asDouble();
+            const double fhi = jone["fhi"].asDouble();
+            lo = (int) std::floor(flo * m_tick * m_nsamples);
+            hi = (int) std::floor(fhi * m_tick * m_nsamples);
+            auto_mirror = true;
+        }
+        else {
+            lo = jone["lobin"].asInt();
+            hi = jone["hibin"].asInt();
+        }
+        lo = std::max(lo, 0);
+        hi = std::min(hi, m_nsamples - 1);
         for (int ind = lo; ind <= hi; ++ind) {  // inclusive
             spectrum->at(ind) = value;
+        }
+        // For physical-frequency entries, also zero the conjugate-mirror bins
+        // so the real-IFFT result remains real-valued.
+        if (auto_mirror) {
+            int mlo = std::max(m_nsamples - hi, 0);
+            int mhi = std::min(m_nsamples - lo, m_nsamples - 1);
+            for (int ind = mlo; ind <= mhi; ++ind) {
+                spectrum->at(ind) = value;
+            }
         }
     }
     return spectrum;

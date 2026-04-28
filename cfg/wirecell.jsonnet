@@ -411,6 +411,18 @@
 
     },
 
+    // Emit chndb freqmasks entries that carry physical frequencies (in toolkit
+    // units, i.e. *$.hertz / *$.kilohertz / ...) instead of pre-computed bin
+    // indices.  OmniChannelNoiseDB::parse_freqmasks resolves flo/fhi to bin
+    // indices at runtime using the live tick / nsamples and auto-mirrors to
+    // the conjugate-frequency bins.  Use this helper instead of
+    // freqbinner(...).freqmasks_mirror(...) when the runtime frame size is
+    // not known at jsonnet evaluation time (eg PDVD with mixed 6400/8000-tick
+    // frames).
+    freqmasks_phys :: function(meanfreqs, delta) [
+        { value: 0.0, flo: mf - delta, fhi: mf + delta } for mf in meanfreqs
+    ],
+
 
     // This is std.get from 0.18.0
     get(o, f, default=null, inc_hidden=true)::
