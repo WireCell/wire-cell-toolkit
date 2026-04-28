@@ -5,10 +5,14 @@
 local handmade = import 'chndb-resp.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
-function(params, anode, field, n, rms_cuts=[])
+function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
   // ADC-domain thresholds below are tuned for FE amplifier gain = 14 mV/fC.
   // For other gains, scale linearly with params.elec.gain.
   local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
+  // Frequency-mask toggle threaded through wct-nf-sp.jsonnet's use_freqmask
+  // TLA.  When false, all per-channel freqmasks below collapse to [], making
+  // the C++ consumer in PDHD::OneChannelNoise a no-op for every channel.
+  local freqmask_enabled = use_freqmask;
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
@@ -71,11 +75,13 @@ function(params, anode, field, n, rms_cuts=[])
       {
         //channels: { wpid: wc.WirePlaneId(wc.Ulayer) },
 	channels: std.range(n * 2560, n * 2560 + 800- 1),
-	freqmasks: [
-          { value: 1.0, lobin: 0, hibin: $.nsamples - 1 },
-          { value: 0.0, lobin: 169, hibin: 173 },
-          { value: 0.0, lobin: 513, hibin: 516 },
-        ],
+	// Previous content (silently parsed but never applied before the
+	// PDHD::OneChannelNoise consumer was added) was the U-plane notches
+	// at bins [169,173] (~57 kHz) and [513,516] (~171 kHz).  Left empty
+	// pending re-analysis; populate with
+	//   if freqmask_enabled then wc.freqbinner(params.daq.tick, params.nf.nsamples).freqmasks_mirror([...freqs...], delta) else []
+	// when ready.
+	freqmasks: [],
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Ulayer) },
         /// this uses hard-coded waveform.
@@ -90,11 +96,10 @@ function(params, anode, field, n, rms_cuts=[])
       {
         //channels: { wpid: wc.WirePlaneId(wc.Vlayer) },
 	channels: std.range(n * 2560 + 800, n * 2560 + 1600- 1),
-        freqmasks: [
-          { value: 1.0, lobin: 0, hibin: $.nsamples - 1 },
-          { value: 0.0, lobin: 169, hibin: 173 },
-          { value: 0.0, lobin: 513, hibin: 516 },
-        ],
+        // Same situation as the U-plane entry above: previous content was
+        // notches at bins [169,173] and [513,516].  Left empty pending
+        // re-analysis.
+        freqmasks: [],
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Vlayer) },
         /// this uses hard-coded waveform.

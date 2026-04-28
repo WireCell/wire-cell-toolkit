@@ -825,6 +825,16 @@ WireCell::Waveform::ChannelMaskMap PDHD::OneChannelNoise::apply(int ch, signal_t
     // }
 
 
+    // Per-channel frequency mask from chndb freqmasks field.
+    // Empty spectrum (default) = no-op; channels not listed in any freqmasks
+    // channel_info entry are unaffected.
+    {
+        auto const& spec = m_noisedb->noise(ch);
+        if (!spec.empty() && spec.size() == spectrum.size()) {
+            WireCell::Waveform::scale(spectrum, spec);
+        }
+    }
+
     // remove the DC component
     spectrum.front() = 0;
     signal = inv_c2r(m_dft, spectrum);

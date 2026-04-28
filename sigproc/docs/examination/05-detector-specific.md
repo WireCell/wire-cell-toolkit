@@ -52,7 +52,7 @@ ADC values are overloaded to carry status flags:
 | Sticky code mitigation | No | Yes | No | No | No | No |
 | Chirp detection | Yes | No | No | No | No | No |
 | Harmonic noise filter | No | Yes (coll.) | No | No | No | No |
-| Per-channel freqmask | Yes | Yes (harm.) | No | Yes | No | No |
+| Per-channel freqmask | Yes | Yes (harm.) | Yes | Yes | No | No |
 | RC undershoot correction | Yes | Yes | Commented out | Disabled | Yes | Yes |
 | Adaptive baseline window | 20 | 20 (via uB) | 512 | 512 | 512 | No |
 | Coherent noise sub | Yes | No | Yes | Yes | No | No |
@@ -210,6 +210,15 @@ Could be combined into fewer passes.
 - **FEMB negative pulse detection** (`FEMBNoiseSub`): Projects all channels in
   a group to 1D, finds wide ROIs below -3.5 sigma. Tags affected time ranges.
 - **Wide adaptive baseline**: 512-tick window (vs 20 for MicroBooNE)
+- **Per-channel frequency mask** (`ProtoduneHD.cxx`, `PDHD::OneChannelNoise::apply()`):
+  Same mechanism as PDVD (see ProtoDUNE-VD section below).  Pre-existing
+  U/V plane notches at FFT bins 169-173 (~57 kHz) and 513-516 (~171 kHz) in
+  `cfg/pgrapher/experiment/pdhd/chndb-base.jsonnet` were never actually
+  applied (no consumer); they have been cleared to `freqmasks: []` pending
+  re-analysis (see in-line comments).  Toggle infrastructure is identical to
+  PDVD: `use_freqmask` TLA on `pdhd/wct-nf-sp.jsonnet` (default `true`).
+  Use `wc.freqbinner(...).freqmasks_mirror(...)` when populating new
+  entries.
 
 ### ProtoDUNE-VD Unique Features
 - **Per-channel frequency mask** (`ProtoduneVD.cxx`, `PDVD::OneChannelNoise::apply()`):
