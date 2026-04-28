@@ -224,6 +224,17 @@ Could be combined into fewer passes.
   in frequency domain, using adaptive baseline on magnitude spectrum
 - **FEMB clock correction** (`FftScaling`): Frequency-domain resampling
 - **Relative gain calibration**: Pulse-area-based gain correction from JSON
+- **freqmask schema (re-verified)**: `cfg/pgrapher/experiment/pdsp/chndb-base.jsonnet`
+  defines U/V plane notches at FFT bins 169-173 and 513-516 in the legacy
+  `{value, lobin, hibin}` form.  pdsp has a single production frame size
+  (`daq.nticks = nf.nsamples = 6000`, no Resampler upstream of NF), so the
+  `OmniChannelNoiseDB::set_nsamples()` runtime rebuild is an idempotent
+  no-op and bin indices stay physically correct.  Note that the current
+  `pdOneChannelNoise` consumer (`Protodune.cxx`, gated on `iplane==2`) reads
+  `m_noisedb->noise(ch)` only for W-plane channels, so the U/V freqmasks are
+  effectively dead in today's code path — the rebuild does not regress
+  anything because there is no live consumer.  When notches are reactivated,
+  prefer `wc.freqmasks_phys([freqs], delta)` from `wirecell.jsonnet`.
 
 ### ProtoDUNE-HD Unique Features
 - **FEMB negative pulse detection** (`FEMBNoiseSub`): Projects all channels in
