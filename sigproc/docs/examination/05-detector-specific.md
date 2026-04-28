@@ -217,8 +217,11 @@ Could be combined into fewer passes.
   applied (no consumer); they have been cleared to `freqmasks: []` pending
   re-analysis (see in-line comments).  Toggle infrastructure is identical to
   PDVD: `use_freqmask` TLA on `pdhd/wct-nf-sp.jsonnet` (default `true`).
-  Use `wc.freqbinner(...).freqmasks_mirror(...)` when populating new
-  entries.
+  Use `wc.freqmasks_phys([freqs], delta)` when populating new entries (see
+  ProtoDUNE-VD section for the schema).  PDHD also emits a
+  `PDHD OneChannelNoise ch=...: freqmask size N != FFT size M, mask SKIPPED`
+  warning if the chndb spectrum size and runtime FFT size still mismatch
+  after the auto-rebuild (defensive check; should never fire in practice).
 
 ### ProtoDUNE-VD Unique Features
 - **Per-channel frequency mask** (`ProtoduneVD.cxx`, `PDVD::OneChannelNoise::apply()`):
@@ -226,12 +229,36 @@ Could be combined into fewer passes.
   per-channel `noise` spectrum read from the chndb (`m_noisedb->noise(ch)`).  The
   spectrum is populated from the `freqmasks` field in `chndb-base.jsonnet` via
   `OmniChannelNoiseDB::parse_freqmasks`.  An empty spectrum (the default) is a
-  no-op.  Use `wc.freqbinner(tick, nsamples).freqmasks_mirror([freqs], delta)` in
-  `channel_info[]` entries to specify notch frequencies; the `_mirror` variant
-  automatically masks both the positive-frequency bin and its negative-frequency
-  conjugate.  Controlled at run time with the `use_freqmask` TLA in
-  `wct-nf-sp.jsonnet` (default `true`); pass `--tla-code use_freqmask=false` to
-  disable.
+  no-op.  Use `wc.freqmasks_phys([freqs], delta)` in `channel_info[]` entries
+  to specify notch frequencies; the helper emits
+  `{value: 0.0, flo: f-delta, fhi: f+delta}` records, and `parse_freqmasks`
+  resolves them to bin indices at runtime from the live `m_tick`/`m_nsamples`
+  *and* automatically zeros the conjugate-mirror bins.  This makes the same
+  chndb work correctly for any frame size (eg PDVD has both 6400- and
+  8000-tick raw frames in production).  Currently populated for the W-plane
+  on anode 0 (channels 2188-2195 and 2480-2485, harmonics of 23.5 kHz from
+  47 kHz to 282 kHz, half-width 1 kHz) — diagnosed from
+  `magnify-run040475-evt0-anode0.root.rms.root`.  Controlled at run time with
+  the `use_freqmask` TLA in `wct-nf-sp.jsonnet` (default `true`); pass
+  `--tla-code use_freqmask=false` to disable.
+
+  The legacy `{value, lobin, hibin}` form (used by sbnd, pdsp, uboone,
+  iceberg, dune10kt-1x2x6, pcbro-50liter) is still accepted but does *not*
+  auto-mirror — it trusts the JSON to enumerate both halves explicitly, and
+  the bin indices are interpreted against the runtime `m_nsamples` as-is.
+
+  Two related runtime safety nets work alongside the freqmask:
+  1. **Auto-rebuild on size mismatch** — `OmnibusNoiseFilter` discovers the
+     real frame size from the first input frame and pushes it to the chndb
+     via `OmniChannelNoiseDB::set_nsamples`.  If it differs from the
+     jsonnet-configured `nsamples`, all spectra (rcrc, config, noise/freqmasks,
+     response) are rebuilt at the correct size and a single info-level log
+     `OmniChannelNoiseDB: nsamples X -> Y, rebuilding spectra` is emitted.
+  2. **Loud-skip warning** — if `noise(ch).size() != spectrum.size()` despite
+     the rebuild (eg a non-`OmniChannelNoiseDB` chndb implementation that
+     ignores the size handshake), the consumer logs
+     `PDVD OneChannelNoise ch=...: freqmask size N != FFT size M, mask SKIPPED`
+     instead of silently dropping the mask.
 - **Shield coupling subtraction**: Novel noise removal for capacitive coupling
   between TDE U-plane strips and shield/grid:
   1. Scale each channel's signal by inverse strip length (capacitance weighting)
