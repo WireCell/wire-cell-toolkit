@@ -6,6 +6,9 @@ local handmade = import 'chndb-resp.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
 function(params, anode, field, n, rms_cuts=[])
+  // ADC-domain thresholds below are tuned for FE amplifier gain = 14 mV/fC.
+  // For other gains, scale linearly with params.elec.gain.
+  local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
@@ -42,13 +45,13 @@ function(params, anode, field, n, rms_cuts=[])
         response_offset: 0.0,  // ticks?
         pad_window_front: 10,  // ticks?
         pad_window_back: 10,  // ticks?
-        decon_limit: 0.02,
-        decon_limit1: 0.09,
-        adc_limit: 60, // 15,
-        min_adc_limit: 200, // 50,
+        decon_limit: 0.02 * gain_scale,
+        decon_limit1: 0.09 * gain_scale,
+        adc_limit: 60 * gain_scale, // 15,
+        min_adc_limit: 200 * gain_scale, // 50,
         roi_min_max_ratio: 0.8, // default 0.8
-        min_rms_cut: 1.0,  // units???
-        max_rms_cut: 30.0,  // units???
+        min_rms_cut: 10.0 * gain_scale,  // ADC at 14 mV/fC
+        max_rms_cut: 30.0 * gain_scale,  // ADC at 14 mV/fC
 
         // parameter used to make "rcrc" spectrum
         rcrc: 1.1 * wc.millisecond, // 1.1 for collection, 3.3 for induction
@@ -79,8 +82,8 @@ function(params, anode, field, n, rms_cuts=[])
         response: { waveform: handmade.u_resp, waveformid: wc.Ulayer },
         response_offset: 120, // offset of the negative peak
         pad_window_front: 20,
-        decon_limit: 0.02,
-        decon_limit1: 0.07,
+        decon_limit: 0.02 * gain_scale,
+        decon_limit1: 0.07 * gain_scale,
         roi_min_max_ratio: 3.0,
       },
 
@@ -97,8 +100,8 @@ function(params, anode, field, n, rms_cuts=[])
         /// this uses hard-coded waveform.
         response: { waveform: handmade.v_resp, waveformid: wc.Vlayer },
         response_offset: 124,
-        decon_limit: 0.01,
-        decon_limit1: 0.08,
+        decon_limit: 0.01 * gain_scale,
+        decon_limit1: 0.08 * gain_scale,
         roi_min_max_ratio: 1.5,
       },
 
@@ -112,8 +115,8 @@ function(params, anode, field, n, rms_cuts=[])
         //channels: { wpid: wc.WirePlaneId(wc.Wlayer) },
 	channels: std.range(n * 2560 + 1600, n * 2560 + 2560- 1),
         nominal_baseline: 400.0,
-        decon_limit: 0.05,
-        decon_limit1: 0.08,
+        decon_limit: 0.05 * gain_scale,
+        decon_limit1: 0.08 * gain_scale,
         // freqmasks: freqbinner.freqmasks(harmonic_freqs, 5.0*wc.kilohertz),
       },
 

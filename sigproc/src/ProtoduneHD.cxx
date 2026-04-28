@@ -14,6 +14,8 @@
 #include "WireCellAux/DftTools.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Point.h"
+#include "WireCellUtil/Units.h"
 
 #include <cmath>
 #include <complex>
@@ -780,6 +782,7 @@ PDHD::OneChannelNoise::OneChannelNoise(const std::string& anode, const std::stri
   : m_anode_tn(anode)
   , m_noisedb_tn(noisedb)
   , m_check_partial()  // fixme, here too.
+  , m_log(Log::logger("sigproc"))
 {
 }
 PDHD::OneChannelNoise::~OneChannelNoise() {}
@@ -858,18 +861,27 @@ WireCell::Waveform::ChannelMaskMap PDHD::OneChannelNoise::apply(int ch, signal_t
         PDHD::RemoveFilterFlags(signal);
     }
 
-    // const float min_rms = m_noisedb->min_rms_cut(ch);
-    // const float max_rms = m_noisedb->max_rms_cut(ch);
-    // // alternative RMS tagging
-    // PDHD::SignalFilter(signal);
-    // bool is_noisy = PDHD::NoisyFilterAlg(signal, min_rms, max_rms);
-    // PDHD::RemoveFilterFlags(signal);
-    // if (is_noisy) {
-    //     WireCell::Waveform::BinRange temp_bin_range;
-    //     temp_bin_range.first = 0;
-    //     temp_bin_range.second = signal.size();
-    //     ret["noisy"][ch].push_back(temp_bin_range);
-    // }
+    const float min_rms = m_noisedb->min_rms_cut(ch);
+    const float max_rms = m_noisedb->max_rms_cut(ch);
+    // alternative RMS tagging
+    PDHD::SignalFilter(signal);
+    const double rms_val = PDHD::CalcRMSWithFlags(signal);
+    bool is_noisy = PDHD::NoisyFilterAlg(signal, min_rms, max_rms);
+    PDHD::RemoveFilterFlags(signal);
+    if (is_noisy) {
+        WireCell::Waveform::BinRange temp_bin_range;
+        temp_bin_range.first = 0;
+        temp_bin_range.second = signal.size();
+        ret["noisy"][ch].push_back(temp_bin_range);
+    }
+    if (m_log->should_log(spdlog::level::debug)) {
+        double wire_len = 0;
+        for (auto wire : m_anode->wires(ch)) {
+            wire_len += ray_length(wire->ray()) / units::cm;
+        }
+        m_log->debug("PDHDOneChannelNoise ch={} rms={:.2f} min_rms={:.2f} max_rms={:.2f} wire_length={:.1f}cm noisy={}",
+                     ch, rms_val, min_rms, max_rms, wire_len, is_noisy);
+    }
 
     return ret;
 }
