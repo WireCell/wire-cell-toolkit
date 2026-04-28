@@ -874,7 +874,7 @@ WireCell::Waveform::ChannelMaskMap PDHD::OneChannelNoise::apply(int ch, signal_t
         temp_bin_range.second = signal.size();
         ret["noisy"][ch].push_back(temp_bin_range);
     }
-    if (m_log->should_log(spdlog::level::debug)) {
+    if (is_noisy && m_log->should_log(spdlog::level::debug)) {
         double wire_len = 0;
         for (auto wire : m_anode->wires(ch)) {
             wire_len += ray_length(wire->ray()) / units::cm;

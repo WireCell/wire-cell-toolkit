@@ -450,6 +450,10 @@ top_u_groups:
         4892, 4893, 4894, 4895, 4896, 4897, 4898, 4899,
         // CRP5 Z
         5193, 5239, 5265, 5266, 5267, 5344, 5821, 5824, 5825,
+        // anode 4 top U hand scan (run 039324, collection-like bad signals)
+        6248, 6406, 6407,
+        // anode 4 top W hand scan (run 039324, weird smaller signals)
+        8123, 8124, 8414, 8507,
     ],
 
     // Overide defaults for specific channels.  If an info is
