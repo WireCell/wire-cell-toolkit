@@ -507,10 +507,12 @@ top_u_groups:
       // both clusters share the same spectral pattern.
       // Only active when freqmask_enabled=true (use_freqmask TLA).
       {
-        channels: std.range(2188, 2195) + std.range(2480, 2485),
+        // Channels belong to bottom anode 0 only; gate on n==0 so other anodes
+        // don't ask OmniChannelNoiseDB to look up channels they don't own.
+        channels: if n == 0 then std.range(2188, 2195) + std.range(2480, 2485) else [],
         // Physical-frequency form: bins are resolved at runtime from the
         // live frame size, so the same entries work for 6400/8000-tick frames.
-        freqmasks: if freqmask_enabled then
+        freqmasks: if freqmask_enabled && n == 0 then
           wc.freqmasks_phys(
             [ 47.0*wc.kilohertz,
               70.5*wc.kilohertz,
@@ -524,6 +526,27 @@ top_u_groups:
              258.5*wc.kilohertz,
              282.0*wc.kilohertz ],
             1.0*wc.kilohertz)
+          else [],
+      },
+
+      // Top-anode (4-7) CW lines diagnosed from run 040475 evt 0 anode-4 scan:
+      //   23.5 kHz fundamental — universal LF line, present on all planes,
+      //     max ~20 ADC on U/W; notching before coherent removal protects
+      //     downstream RMS-based bad-channel cuts from LF contamination.
+      //   ~711 kHz doublet (709.6 + 712.1 kHz) — RF pickup on all planes;
+      //     strongest on V/W (mean 0.6/1.0 ADC, ~half channels), weaker on U
+      //     (0.35 ADC mean, 32% channels); all three planes masked.
+      // Weaker U-plane harmonics (70.5, 117.5 kHz) are left to coherent removal.
+      {
+        channels: u_chans + v_chans + w_chans,
+        freqmasks: if freqmask_enabled && n >= 4 then
+          wc.freqmasks_phys([ 23.5*wc.kilohertz ], 0.5*wc.kilohertz)
+          else [],
+      },
+      {
+        channels: u_chans + v_chans + w_chans,
+        freqmasks: if freqmask_enabled && n >= 4 then
+          wc.freqmasks_phys([ 711.0*wc.kilohertz ], 2.0*wc.kilohertz)
           else [],
       },
 
