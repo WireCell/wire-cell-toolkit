@@ -75,12 +75,11 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
       {
         //channels: { wpid: wc.WirePlaneId(wc.Ulayer) },
 	channels: std.range(n * 2560, n * 2560 + 800- 1),
-	// Previous content (silently parsed but never applied before the
-	// PDHD::OneChannelNoise consumer was added) was the U-plane notches
-	// at bins [169,173] (~57 kHz) and [513,516] (~171 kHz).  Left empty
-	// pending re-analysis; populate with
-	//   if freqmask_enabled then wc.freqbinner(params.daq.tick, params.nf.nsamples).freqmasks_mirror([...freqs...], delta) else []
-	// when ready.
+	// Previous content was U-plane notches at bins [169,173] (~57 kHz)
+	// and [513,516] (~171 kHz).  Left empty pending re-analysis.  When
+	// ready, populate with wc.freqmasks_phys([...freqs in wc units...], delta)
+	// — bins are resolved at runtime from the live frame size and the
+	// conjugate-mirror bins are applied automatically.
 	freqmasks: [],
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Ulayer) },
@@ -96,9 +95,9 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
       {
         //channels: { wpid: wc.WirePlaneId(wc.Vlayer) },
 	channels: std.range(n * 2560 + 800, n * 2560 + 1600- 1),
-        // Same situation as the U-plane entry above: previous content was
-        // notches at bins [169,173] and [513,516].  Left empty pending
-        // re-analysis.
+        // Same situation as the U-plane entry above: pending re-analysis.
+        // When ready, use wc.freqmasks_phys([...freqs in wc units...], delta)
+        // — bins resolved at runtime, conjugate-mirror applied automatically.
         freqmasks: [],
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Vlayer) },

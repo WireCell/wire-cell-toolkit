@@ -95,6 +95,9 @@ base {
     daq: super.daq {
         tick: 512*wc.ns,
         nticks: 6000,
+        // nf.nsamples inherits from nticks (=6000) but is auto-rebuilt at
+        // runtime to match the post-Resampler frame size (currently 5999).
+        // No manual override is needed.
     },
 
     adc: super.adc {
