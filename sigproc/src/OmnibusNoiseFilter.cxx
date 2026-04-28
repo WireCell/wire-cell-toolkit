@@ -1,4 +1,5 @@
 #include "WireCellSigProc/OmnibusNoiseFilter.h"
+#include "WireCellSigProc/OmniChannelNoiseDB.h"
 
 #include "WireCellSigProc/Diagnostics.h"
 
@@ -146,8 +147,12 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
 
     if (! m_nticks) {
         // Warning: this implicitly assumes a dense frame (ie, all tbin=0 and all waveforms same size).
-        // It also won't stop triggering a warning inside OneChannelNoise if there is a mismatch.
         m_nticks = traces.at(0)->charge().size();
+        // Push actual frame size to chndb so frequency-domain spectra (freqmasks, rcrc, …)
+        // are rebuilt to match the real FFT length.  Only OmniChannelNoiseDB supports this.
+        if (auto* db = dynamic_cast<OmniChannelNoiseDB*>(m_noisedb.get())) {
+            db->set_nsamples((int)m_nticks);
+        }
     }
 
     // For now, just collect any and all masks and interpret them as "bad".

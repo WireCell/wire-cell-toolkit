@@ -161,8 +161,8 @@ OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::make_filter(std::complex
 }
 OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::default_filter()
 {
-    static shared_filter_t def = make_filter();
-    return def;
+    // Not cached: must reflect the current m_nsamples (which may change via set_nsamples).
+    return make_filter();
 }
 
 OmniChannelNoiseDB::shared_filter_t OmniChannelNoiseDB::parse_freqmasks(Json::Value jfm)
@@ -665,7 +665,28 @@ void OmniChannelNoiseDB::configure(const WireCell::Configuration& cfg)
     }
 
     m_miscfg_channels.clear();
-    for (auto jci : cfg["channel_info"]) {
+    m_cfg_channel_info = cfg["channel_info"];
+    for (auto jci : m_cfg_channel_info) {
+        update_channels(jci);
+    }
+}
+
+void OmniChannelNoiseDB::set_nsamples(int n)
+{
+    if (n == m_nsamples) return;
+    log->info("OmniChannelNoiseDB: nsamples {} -> {}, rebuilding spectra", m_nsamples, n);
+    m_nsamples = n;
+    m_rcrc_cache.clear();
+    m_reconfig_cache.clear();
+    m_waveform_cache.clear();
+    m_response_cache.clear();
+    for (auto& kv : m_db) {
+        kv.second.rcrc = nullptr;
+        kv.second.config = nullptr;
+        kv.second.noise = nullptr;
+        kv.second.response = nullptr;
+    }
+    for (auto jci : m_cfg_channel_info) {
         update_channels(jci);
     }
 }

@@ -94,8 +94,10 @@ base {
     },
 
     // Real data frames are 8000 ticks after the 512->500 ns Resampler
-    // (7813 raw ticks * 512/500 -> 8000).  Override nf.nsamples so
-    // that the NF freqmask spectrum matches the actual FFT size.
+    // (7813 raw ticks * 512/500 -> 8000).  OmnibusNoiseFilter now pushes
+    // the actual frame size into OmniChannelNoiseDB on first frame, so this
+    // override is no longer load-bearing — but it is kept as a documented
+    // default and to pre-size freqbinner() calls in chndb-base.jsonnet.
     nf: super.nf {
         nsamples: 8000,
     },
