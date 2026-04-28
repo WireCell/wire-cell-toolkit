@@ -497,7 +497,7 @@ top_u_groups:
 
 
       // Per-anode-group, per-plane RMS cuts for PDVD.
-      // Top TPCs (anodes 4-7): flat (8, 15) ADC on all planes.
+      // Top TPCs (anodes 4-7): flat (8, 30) ADC on all planes.
       // Bottom TPCs (anodes 0-3): W plane flat (5, 15) ADC; U and V
       //   planes use a linear min cut anchored at (0 cm, 2.6 ADC) and
       //   (180 cm, 6.3 ADC), clamped at endpoints, with flat max 15 ADC.
@@ -506,9 +506,9 @@ top_u_groups:
     ] + (
       if n >= 4 then [
         // Top TPCs: flat per-plane
-        { channels: u_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
-        { channels: v_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
-        { channels: w_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
+        { channels: u_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 30.0 * gain_scale },
+        { channels: v_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 30.0 * gain_scale },
+        { channels: w_chans, min_rms_cut: 8.0 * gain_scale, max_rms_cut: 30.0 * gain_scale },
       ] else [
         // Bottom TPCs: W flat; U and V linear-in-wirelength on min
         { channels: w_chans, min_rms_cut: 5.0 * gain_scale, max_rms_cut: 15.0 * gain_scale },
