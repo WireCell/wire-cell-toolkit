@@ -502,6 +502,28 @@ top_u_groups:
 
       },
 
+      // W-plane harmonic noise on anode 0: f0=23.5 kHz, harmonics n=2..12
+      // (47-282 kHz). Diagnosed from run 040475 evt 0 fft_w histogram;
+      // both clusters share the same spectral pattern.
+      // Only active when freqmask_enabled=true (use_freqmask TLA).
+      {
+        channels: std.range(2188, 2195) + std.range(2480, 2485),
+        freqmasks: if freqmask_enabled then
+          wc.freqbinner(params.daq.tick, params.nf.nsamples).freqmasks_mirror(
+            [ 47.0*wc.kilohertz,
+              70.5*wc.kilohertz,
+              94.0*wc.kilohertz,
+             117.5*wc.kilohertz,
+             141.0*wc.kilohertz,
+             164.5*wc.kilohertz,
+             188.0*wc.kilohertz,
+             211.5*wc.kilohertz,
+             235.0*wc.kilohertz,
+             258.5*wc.kilohertz,
+             282.0*wc.kilohertz ],
+            1.0*wc.kilohertz)
+          else [],
+      },
 
       // Per-anode-group, per-plane RMS cuts for PDVD.
       // Top TPCs (anodes 4-7): flat (8, 30) ADC on all planes.
