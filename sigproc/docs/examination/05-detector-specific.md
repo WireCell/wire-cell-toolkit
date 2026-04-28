@@ -215,6 +215,28 @@ Could be combined into fewer passes.
   harmonic notches are re-enabled after analysis, use `wc.freqmasks_phys([freqs], delta)`
   instead of `freqbinner.freqmasks`, which does not auto-mirror conjugate-frequency bins.
 
+### Other experiments (freqmask audit summary)
+
+The following experiments were audited against the runtime auto-rebuild and the
+new `{value, flo, fhi}` freqmasks schema.  All instantiate `OmniChannelNoiseDB`,
+so the `OmnibusNoiseFilter::set_nsamples()` dynamic_cast hits in every flow.
+None require code or config-data migration; in-line comment-only updates were
+applied where useful for future maintainers.
+
+| Experiment | nticks/nsamples | freqmask state | Consumer | Notes |
+|---|---|---|---|---|
+| `dune10kt-1x2x6` | 6000/6000 (Reframer) | Legacy `{lobin,hibin}` U/V notches @ 169-173, 513-516 | `Protodune.cxx` (W-only) | U/V dead config (consumer gated on iplane==2); rebuild is no-op |
+| `dune-vd` | tracks `daq.nticks` | inherits dune10kt configs; `single` filter commented out in `nf.jsonnet` | `Microboone.cxx` (inactive) | No active consumer |
+| `dune-vd-coldbox` | 6000/6000 | empty | `Protodune.cxx` | No freqmasks; rebuild is no-op |
+| `dunevd-crp2` | 6000/6000 | empty | `DuneCrp.cxx` (does not call `noise(ch)`) | No freqmask consumer at all |
+| `icarus` | 4096/4096 | empty | `Icarus.cxx` (does not call `noise(ch)`); `Microboone::CoherentNoiseSub` reads `response()` only | No freqmask consumer |
+| `iceberg` | 8256/8256 (splusn variants override `RUN_NTICKS`) | active empty; commented legacy blocks | `Microboone.cxx` (active, all-channel `noise(ch)` consumer) | Most relevant to the auto-rebuild — splusn variants align both nticks and nsamples to `RUN_NTICKS`; rebuild safety-net protects future drift |
+| `pcbro-50liter` | 6000/6000 | Legacy `{lobin,hibin}` U/V notches | `Protodune.cxx` (W-only) | Same dead-U/V pattern as pdsp/dune10kt |
+
+In-line comments documenting these invariants were added to each experiment's
+`chndb-base.jsonnet`, recommending `wc.freqmasks_phys([freqs], delta)` if/when
+notches are reactivated.
+
 ### ProtoDUNE-SP Unique Features
 - **Sticky code mitigation**: Two-stage repair:
   1. Linear interpolation for non-signal-like sticky regions
