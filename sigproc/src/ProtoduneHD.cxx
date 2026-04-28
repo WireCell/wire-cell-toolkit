@@ -830,8 +830,15 @@ WireCell::Waveform::ChannelMaskMap PDHD::OneChannelNoise::apply(int ch, signal_t
     // channel_info entry are unaffected.
     {
         auto const& spec = m_noisedb->noise(ch);
-        if (!spec.empty() && spec.size() == spectrum.size()) {
-            WireCell::Waveform::scale(spectrum, spec);
+        if (!spec.empty()) {
+            if (spec.size() == spectrum.size()) {
+                WireCell::Waveform::scale(spectrum, spec);
+            }
+            else {
+                m_log->warn("PDHD OneChannelNoise ch={}: freqmask size {} != FFT size {}, "
+                            "mask SKIPPED — check params.nf.nsamples vs actual frame nticks",
+                            ch, spec.size(), spectrum.size());
+            }
         }
     }
 
