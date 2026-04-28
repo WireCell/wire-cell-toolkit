@@ -5,7 +5,7 @@
 local handmade = import 'chndb-resp.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
-function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
+function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shift=3)
   // ADC-domain thresholds below are tuned for FE amplifier gain = 14 mV/fC.
   // For other gains, scale linearly with params.elec.gain.
   local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
@@ -24,9 +24,19 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
     // waveforms have the same number of ticks.  This must be non-zero.
     nsamples: params.nf.nsamples,
 
-    groups: [std.range(n * 2560 + u * 40, n * 2560 + (u + 1) * 40 - 1) for u in std.range(0, 19)]
-            + [std.range(n * 2560 + 800 + v * 40, n * 2560 + 800 + (v + 1) * 40 - 1) for v in std.range(0, 19)]
-            + [std.range(n * 2560 + 1600 + w * 48, n * 2560 + 1600 + (w + 1) * 48 - 1) for w in std.range(0, 19)],
+    // coh_group_shift: cyclic offset (in offline channels) applied to U and V
+    // group boundaries.  Set to 0 to recover the original (pre-fix) definition.
+    // Default 3 corrects the +3-channel FEMB-edge misassignment identified in
+    // the 027409-evt0-apa0 coherent-noise audit (U/V only; W is unchanged).
+    local shift = coh_group_shift,
+    local u_group(u) = std.map(function(j) n * 2560 + std.mod(40 * u + shift + j, 800),
+                               std.range(0, 39)),
+    local v_group(v) = std.map(function(j) n * 2560 + 800 + std.mod(40 * v + shift + j, 800),
+                               std.range(0, 39)),
+    local w_group(w) = std.range(n * 2560 + 1600 + 48 * w, n * 2560 + 1600 + 48 * (w + 1) - 1),
+    groups: [u_group(u) for u in std.range(0, 19)]
+            + [v_group(v) for v in std.range(0, 19)]
+            + [w_group(w) for w in std.range(0, 19)],
 
 
     // Externally determined "bad" channels.
