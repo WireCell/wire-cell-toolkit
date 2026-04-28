@@ -2,7 +2,7 @@
 // generic set of parameters and overrides things specific to PDSP.
 
 local wc = import "wirecell.jsonnet";
-local base = import "pgrapher/common/params.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
 
 base {
     // This section will be overwritten in simparams.jsonnet
@@ -106,8 +106,8 @@ base {
     elecs: [
       super.elec {
         // The FE amplifier gain in units of Voltage/Charge.
-        // gain : 14.0*wc.mV/wc.fC,
-        // gain : std.extVar("elecGain")*wc.mV/wc.fC,
+        // Override with: wire-cell -V elecGain=7.8 ...
+        gain : std.parseJson(std.extVar("elecGain"))*wc.mV/wc.fC,
 
         // The shaping (aka peaking) time of the amplifier shaper.
         shaping : 2.2*wc.us,

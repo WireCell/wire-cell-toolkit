@@ -116,7 +116,7 @@ void Img::BlobClustering::flush(output_queue& clusters)
         // s-b, b-w, w-c
         add_blobs(grind, (*bsit)->blobs());
         // b-b
-        Img::geom_clustering(grind, bsit, bend, m_policy);
+        // Img::geom_clustering(grind, bsit, bend, m_policy);
         ++bsit;
     }
 

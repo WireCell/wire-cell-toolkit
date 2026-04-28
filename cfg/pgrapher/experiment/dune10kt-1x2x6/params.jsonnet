@@ -1,5 +1,5 @@
 local wc = import "wirecell.jsonnet";
-local base = import "pgrapher/common/params.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
 
 function(params) base {
     // This section will be overwritten in simparams.jsonnet

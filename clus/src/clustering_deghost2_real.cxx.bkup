@@ -1,0 +1,726 @@
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringDeghost2;
+WIRECELL_FACTORY(ClusteringDeghost2, ClusteringDeghost2,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
+
+using namespace WireCell;
+using namespace WireCell::Clus;
+using namespace WireCell::Clus::Facade;
+using namespace WireCell::PointCloud::Tree;
+
+// bool Cluster::construct_skeleton(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const bool use_ctpc)
+// {
+
+static std::pair<size_t, size_t> skeleton_points_hilo(const Cluster& cluster)
+{
+    geo_point_t highest_wcp = cluster.point3d(0);
+    geo_point_t lowest_wcp = cluster.point3d(0);
+    size_t highest_index = 0;
+    size_t lowest_index = 0;
+
+    geo_point_t main_dir = cluster.get_pca().axis.at(0);
+    main_dir = main_dir.norm();
+    geo_point_t center = cluster.get_pca().center;
+    geo_point_t temp_pt(highest_wcp.x() - center.x(), highest_wcp.y() - center.y(), highest_wcp.z() - center.z());
+    double highest_value = temp_pt.dot(main_dir);
+    double lowest_value = highest_value;
+
+    for (int i = 1; i < cluster.npoints(); i++) {
+        temp_pt.set(cluster.point3d(i).x() - center.x(),
+                    cluster.point3d(i).y() - center.y(),
+                    cluster.point3d(i).z() - center.z());
+        double value = temp_pt.dot(main_dir);
+        if (value > highest_value) {
+            highest_value = value;
+            highest_wcp = cluster.point3d(i);
+            highest_index = i;
+        }
+        else if (value < lowest_value) {
+            lowest_value = value;
+            lowest_wcp = cluster.point3d(i);
+            lowest_index = i;
+        }
+    }
+    std::cout << "highest point: " << highest_wcp << " lowest point: " << lowest_wcp << std::endl;
+    return std::make_pair(highest_index, lowest_index);
+}
+std::pair<int, int> get_cluster_time_range(const Cluster* cluster, int apa, int face) {
+    // Use the existing get_uvwt_min and get_uvwt_max functions with specific APA and face
+    // These return tuples (u_min, v_min, w_min, t_min) and (u_max, v_max, w_max, t_max)
+    const auto uvwt_min = cluster->get_uvwt_min(apa, face);
+    const auto uvwt_max = cluster->get_uvwt_max(apa, face);
+    
+    // Extract time slice values (4th element of tuple)
+    int t_min = std::get<3>(uvwt_min);
+    int t_max = std::get<3>(uvwt_max);
+    
+    return {t_min, t_max};
+}
+
+double calculate_nearest_3d_distance(const Cluster* cluster1, const Cluster* cluster2) {
+    if (cluster1->npoints() == 0 || cluster2->npoints() == 0) {
+        return -1.0; // Invalid distance
+    }
+    
+    // Use the existing get_closest_points method which returns:
+    // std::tuple<int, int, double> - (index1, index2, distance)
+    std::tuple<int, int, double> results = cluster1->get_closest_points(*cluster2);
+    double nearest_distance = std::get<2>(results);
+    
+    return nearest_distance;
+}
+
+struct CoverageInfo {
+    int cluster1_id;
+    int cluster2_id;
+    std::string coverage_plane;
+    double nearest_3d_distance;
+    double nearest_2d_distance;      // NEW: nearest 2D distance in the covered plane
+    double cluster1_length;          // NEW: length of cluster1 (covering cluster)
+    double cluster2_length; 
+    int cluster1_time_min;           // NEW: minimum time slice for cluster1
+    int cluster1_time_max;           // NEW: maximum time slice for cluster1
+    int cluster2_time_min;           // NEW: minimum time slice for cluster2
+    int cluster2_time_max; 
+    int covered_points;
+    int total_points;
+    double coverage_ratio;
+};
+
+static std::vector<size_t> get_path_wcps(const Cluster& cluster, 
+                                         IDetectorVolumes::pointer dv,
+                                         IPCTransformSet::pointer pcts,
+                                         bool use_ctpc)
+{
+    auto [hi, lo] = skeleton_points_hilo(cluster);
+    if (use_ctpc) {
+        return cluster.graph_algorithms("ctpc", dv, pcts).shortest_path(hi, lo);
+    }
+    else {
+        return cluster.graph_algorithms().shortest_path(hi, lo);
+    }
+}
+
+
+
+static void clustering_deghost(Grouping& live_grouping,
+                               IDetectorVolumes::pointer dv,
+                               IPCTransformSet::pointer pcts,
+                               const Tree::Scope& scope,
+                               const bool use_ctpc,
+                               double length_cut = 0,
+                               double length_threshold = 5*units::cm,
+                               double coverage_threshold = 0.8);
+
+class ClusteringDeghost2 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringDeghost2() {}
+    virtual ~ClusteringDeghost2() {}
+
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+        
+        use_ctpc_ = get(config, "use_ctpc", true);
+        length_cut_ = get(config, "length_cut", 5.0*units::cm);
+        length_threshold_ = get(config, "length_threshold", 5.0*units::cm);
+        coverage_threshold_ = get(config, "coverage_threshold", 0.9); // 90% coverage
+    }
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        return cfg;
+    }
+    
+    void visit(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        std::cout<<"deghost2 test!!!!!!!"<<std::endl;
+        clustering_deghost(live, m_dv, m_pcts, m_scope,  use_ctpc_, length_cut_,length_threshold_,coverage_threshold_);
+    }
+    
+private:
+    double use_ctpc_{true};
+    double length_cut_{5.0*units::cm}; // 5 cm
+    double length_threshold_{5.0*units::cm}; // 5 cm
+    double coverage_threshold_{0.9}; // 90%
+};
+
+
+// The original developers do not care.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wparentheses"
+
+// #define __DEBUG__
+#ifdef __DEBUG__
+#define LogDebug(x) std::cout << "[yuhw]: " << __LINE__ << " : " << x << std::endl
+#else
+#define LogDebug(x)
+#endif
+
+// This can handle entire APA (including all faces) data
+static void clustering_deghost(
+    Grouping& live_grouping,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope,
+    const bool use_ctpc, 
+    double length_cut,
+    double length_threshold,
+    double coverage_threshold)
+{
+    std::cout << "ClusteringDeghost2: length_cut: " << length_cut/units::cm << " length_threshold: " << length_threshold/units::cm << " coverage_threshold: " << coverage_threshold << std::endl;
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = live_grouping.dv_wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+
+    // std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_u_index; 
+    // std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index; 
+    // std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index; 
+
+    for (const auto& wpid : wpids) {
+        std::cout << "DEBUG: wpid: " << wpid.apa()<< " face: "<<wpid.face()<< std::endl;
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+
+
+        // af_dead_u_index[apa][face] = live_grouping.get_dead_winds(apa, face, 0);
+        // af_dead_v_index[apa][face] = live_grouping.get_dead_winds(apa, face, 1);
+        // af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
+    }
+
+    if (apas.size() > 1) {
+        raise<ValueError>("apas.size() %d > 1", apas.size());
+    }
+  
+
+    int APA = *apas.begin();
+    std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
+
+    // sort the clusters by length using a lambda function
+    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+        return cluster1->get_length() > cluster2->get_length();
+    });
+
+    // auto global_point_cloud_legacy = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    auto global_point_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
+    // auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
+    auto global_skeleton_cloud = std::make_shared<DynamicPointCloud>(wpid_params);
+    // replace with the new DynamicPointCloud class
+
+    std::vector<Cluster *> to_be_removed_clusters;
+    // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
+    cluster_connectivity_graph_t  g;
+    std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
+    std::map<const Cluster*, int> map_cluster_index;
+    for (const Cluster* live : live_grouping.children()) {
+        size_t ilive = map_cluster_index.size();
+        // size_t ilive = live->get_cluster_id(); // Use cluster ID as index
+        map_cluster_index[live] = ilive;
+        ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    }
+
+    std::map<int, Cluster*> index_to_cluster_map;
+    for (const auto& [cluster_ptr, cluster_id] : map_cluster_index) {
+        index_to_cluster_map[cluster_id] = const_cast<Cluster*>(cluster_ptr);
+    }
+    std::vector<bool> cluster_cover_info = {false, false, false,false}; // U, V, W coverage info
+    std::map<Cluster*, std::vector<bool>> cluster_cover_final;
+    std::map<Cluster*, std::tuple<std::vector<CoverageInfo>, std::vector<CoverageInfo>, std::vector<CoverageInfo>>> cluster_cover_map;
+    std::vector<CoverageInfo> init_vec;
+    std::tuple<std::vector<CoverageInfo>, std::vector<CoverageInfo>, std::vector<CoverageInfo>> init_tuple(init_vec, init_vec, init_vec);
+    for (size_t i = 0; i < live_clusters.size(); ++i) {
+        Cluster* cluster2 = live_clusters.at(i); 
+        cluster_cover_map[cluster2] = init_tuple; // Initialize coverage counts for cluster2
+        cluster_cover_final[cluster2] = cluster_cover_info; // Initialize coverage counts for cluster2
+    }
+    std::vector<CoverageInfo> coverage_results;
+
+    // Iterate through all pairs of live clusters
+    for (size_t i = 0; i < live_clusters.size(); ++i) {
+        if(live_clusters.at(i)->get_length() < length_cut) continue; // Skip clusters shorter than length_cut
+
+        Cluster* cluster1 = live_clusters.at(i);
+        // cluster1->set_scope_filter(scope, true); 
+        // std::cout<<"Processing cluster "<<map_cluster_index[cluster1]<<" length: "<<cluster1->get_length()/units::cm<<" cm, npoints: "<<cluster1->npoints()<<std::endl;
+        // Create a DynamicPointCloud for cluster1
+        auto temp_pc_cluster1 = std::make_shared<DynamicPointCloud>(wpid_params);
+        if (cluster1->npoints() > 0) {
+             temp_pc_cluster1->add_points(make_points_cluster(cluster1, wpid_params, true));
+
+        } else {
+            continue; // Skip if cluster1 has no points
+        }
+
+            // cluster1->set_scope_filter(scope, false);
+
+        for (size_t j = i+1; j < live_clusters.size(); ++j) {
+            if(live_clusters.at(j)->get_length() < length_cut ||live_clusters.at(j)== cluster1) continue; // Skip clusters shorter than length_cut
+
+
+            Cluster* cluster2 = live_clusters.at(j);
+            // cluster2->set_scope_filter(scope, true);
+            std::vector<std::string> coverage_planes;
+
+            // Check if cluster2 is covered by cluster1 in any projection
+            bool covered_in_u = false;
+            bool covered_in_v = false;
+            bool covered_in_w = false;
+            
+            if (cluster2->npoints() > 0) {
+                // Check coverage in U projection (view_id 0)
+                    auto first_wpid = cluster2->wire_plane_id(0);
+                    int apa = first_wpid.apa();
+                    int face = first_wpid.face();
+                    auto [time1_min, time1_max] = get_cluster_time_range(cluster1, apa, face);
+                    auto [time2_min, time2_max] = get_cluster_time_range(cluster2, apa, face);
+                int covered_points_u = 0;
+                double min_2d_distance_u = 1e9; 
+                for (size_t pt_idx = 0; pt_idx < cluster2->npoints(); ++pt_idx) {
+                    geo_point_t point2 = cluster2->point3d(pt_idx);
+                    auto test_wpid = cluster2->wire_plane_id(pt_idx); // Get wire plane info for the point
+
+                    std::tuple<double, const Cluster *, size_t> results_u =
+                        temp_pc_cluster1->get_closest_2d_point_info(point2, 0, test_wpid.face(), test_wpid.apa());
+                    double nearest_dist_u = std::get<0>(results_u);
+
+                    if ( nearest_dist_u>0 && nearest_dist_u < length_threshold) {
+                        covered_points_u++;
+                    }
+
+                    if (nearest_dist_u > 0 && nearest_dist_u < min_2d_distance_u) {
+                            min_2d_distance_u = nearest_dist_u;
+                    }  
+                }
+                double coverage_ratio_u = (double)covered_points_u / cluster2->npoints();
+                if (coverage_ratio_u >= coverage_threshold) {
+                    std::cout<<map_cluster_index[cluster2] <<" is covered by "<<map_cluster_index[cluster1]<<" covered in u: " << covered_points_u << " / " << cluster2->npoints() << std::endl;
+                    // std::get<0>(cluster_cover_map[cluster2]) = 1;
+                    // std::get<0>(cluster_cover_map[cluster2]).push_back(map_cluster_index[cluster1]);
+                    coverage_planes.push_back("U");
+                    double nearest_3d_dist = calculate_nearest_3d_distance(cluster1, cluster2);
+
+                    CoverageInfo info;
+                    info.cluster1_id = map_cluster_index[cluster1];
+                    info.cluster2_id = map_cluster_index[cluster2];
+                    info.coverage_plane = "U";
+                    info.nearest_3d_distance = nearest_3d_dist;
+                    info.nearest_2d_distance = min_2d_distance_u;        // NEW: Use tracked minimum
+                    info.cluster1_length = cluster1->get_length();        // NEW
+                    info.cluster2_length = cluster2->get_length();        // NEW
+                    info.cluster1_time_min = time1_min;                   // NEW
+                    info.cluster1_time_max = time1_max;                   // NEW
+                    info.cluster2_time_min = time2_min;                   // NEW
+                    info.cluster2_time_max = time2_max;
+                    info.covered_points = covered_points_u;
+                    info.total_points = cluster2->npoints();
+                    info.coverage_ratio = coverage_ratio_u;
+                    coverage_results.push_back(info);
+
+                    std::get<0>(cluster_cover_map[cluster2]).push_back(info);
+                    // cluster2->set_scope_filter(scope, false);
+                }
+
+                // Check coverage in V projection (view_id 1)
+                int covered_points_v = 0;
+                double min_2d_distance_v = 1e9; 
+                for (size_t pt_idx = 0; pt_idx < cluster2->npoints(); ++pt_idx) {
+                    geo_point_t point2 = cluster2->point3d(pt_idx);
+                     auto test_wpid = cluster2->wire_plane_id(pt_idx); // Get wire plane info for the point
+                    std::tuple<double, const Cluster *, size_t> results_v =
+                        temp_pc_cluster1->get_closest_2d_point_info(point2, 1, test_wpid.face(), test_wpid.apa());
+                    double nearest_dist_v = std::get<0>(results_v);
+                    if (nearest_dist_v>0 && nearest_dist_v < length_threshold) {
+                        covered_points_v++;
+                    }
+                    if (nearest_dist_v > 0 && nearest_dist_v < min_2d_distance_v) {
+                        min_2d_distance_v = nearest_dist_v;
+                    }
+
+                }
+                double coverage_ratio_v = (double)covered_points_v / cluster2->npoints();
+                if ((double)covered_points_v / cluster2->npoints() >= coverage_threshold) {
+                    std::cout<<map_cluster_index[cluster2] <<" is covered by "<<map_cluster_index[cluster1]<<" covered in v: " << covered_points_v << " / " << cluster2->npoints() << std::endl;
+                    coverage_planes.push_back("V");
+                    double nearest_3d_dist = calculate_nearest_3d_distance(cluster1, cluster2);
+                    CoverageInfo info;
+                    info.cluster1_id = map_cluster_index[cluster1];
+                    info.cluster2_id = map_cluster_index[cluster2];
+                    info.coverage_plane = "V";
+                    info.nearest_3d_distance = nearest_3d_dist;
+                    info.nearest_2d_distance = min_2d_distance_v;        // NEW: Use tracked minimum
+                    info.cluster1_length = cluster1->get_length();        // NEW
+                    info.cluster2_length = cluster2->get_length();        // NEW
+                    info.cluster1_time_min = time1_min;                   // NEW
+                    info.cluster1_time_max = time1_max;                   // NEW
+                    info.cluster2_time_min = time2_min;                   // NEW
+                    info.cluster2_time_max = time2_max;
+                    info.covered_points = covered_points_v;
+                    info.total_points = cluster2->npoints();
+                    info.coverage_ratio = coverage_ratio_v;
+                    coverage_results.push_back(info);
+                    std::get<1>(cluster_cover_map[cluster2]).push_back(info);
+                }
+
+                // Check coverage in W projection (view_id 2)
+                int covered_points_w = 0;
+                double min_2d_distance_w = 1e9;
+                for (size_t pt_idx = 0; pt_idx < cluster2->npoints(); ++pt_idx) {
+                    geo_point_t point2 = cluster2->point3d(pt_idx);
+                     auto test_wpid = cluster2->wire_plane_id(pt_idx); // Get wire plane info for the point
+                        // if(test_wpid.apa()==3){
+                        //     std::cout<< "Test: point2: " << point2 << " test_wpid.face(): " << test_wpid.face() 
+                        //               << " test_wpid.apa(): " << test_wpid.apa() << std::endl;
+                        // }
+                    std::tuple<double, const Cluster *, size_t> results_w =
+                        temp_pc_cluster1->get_closest_2d_point_info(point2, 2, test_wpid.face(), test_wpid.apa());
+
+                    // Add these lines here (around line 454)
+                    // std::cout << "  Debugging search parameters for point_idx " << pt_idx << ":" << std::endl;
+                    // std::cout << "    point2: (" << point2.x() << ", " << point2.y() << ", " << point2.z() << ")" << std::endl;
+                    // std::cout << "    test_wpid.face(): " << test_wpid.face() << std::endl;
+                    // std::cout << "    test_wpid.apa(): " << test_wpid.apa() << std::endl;
+                    // std::cout << "    view_id for W plane search: 2" << std::endl; // Explicitly state the view_id being used
+
+
+                    double nearest_dist_w = std::get<0>(results_w);
+
+                    if (nearest_dist_w>0 && nearest_dist_w < length_threshold) {
+                        covered_points_w++;
+                    }
+                    if (nearest_dist_w > 0 && nearest_dist_w < min_2d_distance_w) {
+                        min_2d_distance_w = nearest_dist_w;
+                    }
+                }
+                double coverage_ratio_w = (double)covered_points_w / cluster2->npoints();
+                if ((double)covered_points_w / cluster2->npoints() >= coverage_threshold) {
+                    std::cout<<map_cluster_index[cluster2] <<" is covered by "<<map_cluster_index[cluster1]<<" covered in w: " << covered_points_w << " / " << cluster2->npoints() << std::endl;
+                    // std::get<2>(cluster_cover_map[cluster2]) = 1;
+                    // std::get<2>(cluster_cover_map[cluster2]).push_back(map_cluster_index[cluster1]);
+
+                    coverage_planes.push_back("W");
+                    double nearest_3d_dist = calculate_nearest_3d_distance(cluster1, cluster2);
+                    CoverageInfo info;
+                    info.cluster1_id = map_cluster_index[cluster1];
+                    info.cluster2_id = map_cluster_index[cluster2];
+                    info.coverage_plane = "W";
+                    info.nearest_3d_distance = nearest_3d_dist;
+                    info.nearest_2d_distance = min_2d_distance_w;        // NEW: Use tracked minimum
+                    info.cluster1_length = cluster1->get_length();        // NEW
+                    info.cluster2_length = cluster2->get_length();    
+                    info.cluster1_time_min = time1_min;                   // NEW
+                    info.cluster1_time_max = time1_max;                   // NEW
+                    info.cluster2_time_min = time2_min;                   // NEW
+                    info.cluster2_time_max = time2_max;
+                    info.covered_points = covered_points_w;
+                    info.total_points = cluster2->npoints();
+                    info.coverage_ratio = coverage_ratio_w;
+                    coverage_results.push_back(info);
+
+                    std::get<2>(cluster_cover_map[cluster2]).push_back(info);
+                }
+            }
+            // exit(0);
+
+            // If cluster2 is covered by cluster1 in any projection, mark cluster2 for removal
+
+            // if (covered_in_u || covered_in_v || covered_in_w) {
+                // to_be_removed_clusters.push_back(cluster2);
+            // }
+        }
+        // break; // Only process the longest cluster
+    }
+
+    for (size_t i = 0; i < live_clusters.size(); ++i) {
+        Cluster* cluster2 = live_clusters.at(i); 
+        auto coverage = cluster_cover_map[cluster2];
+        std::cout <<"before:: "<< map_cluster_index[cluster2] << "  :"
+                  << std::get<0>(coverage).size() << ", "
+                  << std::get<1>(coverage).size() << ", "
+                  << std::get<2>(coverage).size() << std::endl;
+        // if(std::get<0>(coverage).size()>1){
+        //     double cluster_length = std::get<0>(coverage)[0].cluster1_length/units::cm;
+        //     int cluster_id= std::get<0>(coverage)[0].cluster1_id;
+        //     for(const auto& info : std::get<0>(coverage)) {
+        //         if(info.cluster1_length>cluster_length) cluster_id = info.cluster1_id;
+
+        //         // std::cout << "Cluster " << info.cluster1_id << " covers Cluster " << info.cluster2_id 
+        //         //           << " in U projection with coverage ratio: " << info.coverage_ratio 
+        //         //           << ", nearest 3D distance: " << info.nearest_3d_distance 
+        //         //           << ", nearest 2D distance: " << info.nearest_2d_distance 
+        //         //           << ", covered points: " << info.covered_points 
+        //         //           << ", total points: " << info.total_points 
+        //         //           << ", cluster1 length: " << info.cluster1_length/units::cm 
+        //         //           << " cm, cluster2 length: " << info.cluster2_length/units::cm 
+        //         //           << " cm, time range: [" << info.cluster1_time_min << ", " 
+        //         //           << info.cluster1_time_max << "] vs [" 
+        //         //           << info.cluster2_time_min << ", " 
+        //         //           << info.cluster2_time_max << "]" 
+        //         //           << std::endl;
+        //     }
+        // }
+        if(std::get<0>(coverage).size() > 1) {
+        // Find the element with maximum cluster1_length
+        auto max_it = std::max_element(std::get<0>(coverage).begin(), 
+                                   std::get<0>(coverage).end(),
+                                   [](const auto& a, const auto& b) {
+                                       return a.cluster1_length < b.cluster1_length;
+                                   });
+    
+            if(max_it != std::get<0>(coverage).end()) {
+        // Keep only the element with maximum length
+                auto max_element = *max_it;
+                std::get<0>(coverage).clear();
+                std::get<0>(coverage).push_back(max_element);
+            }
+        }
+
+        if(std::get<1>(coverage).size() > 1) {
+        // Find the element with maximum cluster1_length
+        auto max_it = std::max_element(std::get<1>(coverage).begin(), 
+                                   std::get<1>(coverage).end(),
+                                   [](const auto& a, const auto& b) {
+                                       return a.cluster1_length < b.cluster1_length;
+                                   });
+    
+            if(max_it != std::get<1>(coverage).end()) {
+        // Keep only the element with maximum length
+                auto max_element = *max_it;
+                std::get<1>(coverage).clear();
+                std::get<1>(coverage).push_back(max_element);
+            }
+        }
+
+        if(std::get<2>(coverage).size() > 1) {
+        // Find the element with maximum cluster1_length
+        auto max_it = std::max_element(std::get<2>(coverage).begin(), 
+                                   std::get<2>(coverage).end(),
+                                   [](const auto& a, const auto& b) {
+                                       return a.cluster1_length < b.cluster1_length;
+                                   });
+    
+            if(max_it != std::get<2>(coverage).end()) {
+        // Keep only the element with maximum length
+                auto max_element = *max_it;
+                std::get<2>(coverage).clear();
+                std::get<2>(coverage).push_back(max_element);
+            }
+        }
+
+
+        std::cout <<"after:: "<< map_cluster_index[cluster2] << "  :"
+                  << std::get<0>(coverage).size() << ", "
+                  << std::get<1>(coverage).size() << ", "
+                  << std::get<2>(coverage).size() << std::endl;
+        
+        if(std::get<0>(coverage).size() > 0){
+            if(std::get<0>(coverage)[0].nearest_3d_distance >5*units::cm && 
+               std::get<0>(coverage)[0].nearest_2d_distance < 0.5*units::cm &&
+               std::get<0>(coverage)[0].coverage_ratio > 0.95
+            ) {
+               cluster_cover_final[cluster2][0] = true; // Mark cluster2 as covered in U projection 
+            }
+        }
+        if(std::get<1>(coverage).size() > 0){
+            if(std::get<1>(coverage)[0].nearest_3d_distance >5*units::cm && 
+               std::get<1>(coverage)[0].nearest_2d_distance < 0.5*units::cm &&
+               std::get<1>(coverage)[0].coverage_ratio > 0.95
+            ) {
+               cluster_cover_final[cluster2][1] = true; // Mark cluster2 as covered in U projection 
+            }
+        }
+        if(std::get<2>(coverage).size() > 0){
+            if(std::get<2>(coverage)[0].nearest_3d_distance >5*units::cm && 
+               std::get<2>(coverage)[0].nearest_2d_distance < 0.5*units::cm &&
+               std::get<2>(coverage)[0].coverage_ratio > 0.95
+            ) {
+               cluster_cover_final[cluster2][2] = true; // Mark cluster2 as covered in U projection 
+            }
+        }
+        
+        // if(std::get<0>(coverage).size() > 0 && 
+        //    std::get<1>(coverage).size() > 0 &&
+        //    std::get<2>(coverage).size() > 0) {
+        // //    cluster2->set_scope_filter(scope, false); 
+        //    std::cout<<"Cluster "<<map_cluster_index[cluster2]<<" is covered in 3 projections, marked for removal."<<std::endl;
+        //    for(const auto& cluster_id : std::get<0>(coverage)) {
+        //         auto cluster1 = index_to_cluster_map[cluster_id];
+        //         cluster1->set_scope_filter(scope, false);
+        //         std::cout<<"   covered by cluster "<<cluster_id<<" in u projection."<<std::endl;
+        //    }
+        //    for(const auto& cluster_id : std::get<1>(coverage)) {
+        //         auto cluster1 = index_to_cluster_map[cluster_id];
+        //         cluster1->set_scope_filter(scope, false);
+        //         std::cout<<"   covered by cluster "<<cluster_id<<" in v projection."<<std::endl;
+        //    }
+        //    for(const auto& cluster_id : std::get<2>(coverage)) {
+        //         auto cluster1 = index_to_cluster_map[cluster_id];
+        //         cluster1->set_scope_filter(scope, false);
+        //         std::cout<<"   covered by cluster "<<cluster_id<<" in w projection."<<std::endl;
+        //    }
+
+        //     // to_be_removed_clusters.push_back(cluster2);
+        //     // cluster2.get_cluster_id()
+        //     // std::cout << "Cluster " << map_cluster_index[cluster2] << " is covered in 2 projections, marked for removal." << std::endl;
+        //     // std::cout<<"length: " << cluster2->get_length() / units::cm << " cm, npoints: " << cluster2->npoints() << std::endl;
+        // }
+    }
+   for (size_t i = 0; i < live_clusters.size(); ++i) {
+        Cluster* cluster2 = live_clusters.at(i);  
+       int tmp =  int(cluster_cover_final[cluster2][0])+int(cluster_cover_final[cluster2][1])+int(cluster_cover_final[cluster2][2]);
+       if(tmp>1){
+            to_be_removed_clusters.push_back(cluster2);
+            cluster2->set_scope_filter(scope, false); // Mark for removal
+            std::cout << "Cluster " << map_cluster_index[cluster2] << " is covered in "<<tmp<<" projections, marked for removal." << std::endl;
+       }
+        // if(cluster_cover_final[cluster2][0] && 
+        //    cluster_cover_final[cluster2][1] && 
+        //    cluster_cover_final[cluster2][2]) {
+        //     to_be_removed_clusters.push_back(cluster2);
+        //     cluster2->set_scope_filter(scope, false); // Mark for removal
+        //     std::cout << "Cluster " << map_cluster_index[cluster2] << " is covered in 3 projections, marked for removal." << std::endl;
+        //     // std::cout<<"length: " << cluster2->get_length() / units::cm << " cm, npoints: " << cluster2->npoints() << std::endl;
+        // }
+        // if((cluster_cover_final[cluster2][0] || 
+        //    cluster_cover_final[cluster2][1] || 
+        //    cluster_cover_final[cluster2][2] )&&
+        //    (cluster2->get_length() / units::cm > 10 )){
+        //     to_be_removed_clusters.push_back(cluster2);
+        //     cluster2->set_scope_filter(scope, false); // Mark for removal
+        //     std::cout << "Cluster " << map_cluster_index[cluster2] << " is long and covered , marked for removal." << std::endl;
+        //     // std::cout<<"length: " << cluster2->get_length() / units::cm << " cm, npoints: " << cluster2->npoints() << std::endl;
+        // }
+   } 
+    // for (size_t i = 0; i < live_clusters.size(); ++i) {
+    //     Cluster* cluster2 = live_clusters.at(i); 
+    //     auto coverage = cluster_cover_map[cluster2];
+    //             std::cout << map_cluster_index[cluster2]<<"  :"
+    //               << std::get<0>(coverage) << ", "
+    //               << std::get<1>(coverage) << ", "
+    //               << std::get<2>(coverage) << std::endl;
+    //     int final_coverage = std::get<0>(cluster_cover_map[cluster2]) +
+    //                              std::get<1>(cluster_cover_map[cluster2]) +
+    //                              std::get<2>(cluster_cover_map[cluster2]);
+    //     // if (std::get<0>(coverage) == 1 || std::get<1>(coverage) == 1 || std::get<2>(coverage) == 1) {
+    //     if (final_coverage>2) {
+    //         to_be_removed_clusters.push_back(cluster2);
+    //         // cluster2.get_cluster_id()
+    //         std::cout << "Cluster " << map_cluster_index[cluster2] <<"  "<<std::get<0>(cluster_cover_map[cluster2])<<" "<<std::get<1>(cluster_cover_map[cluster2])<<"  "<<std::get<2>(cluster_cover_map[cluster2])<< " is covered in 2 projections, marked for removal." << std::endl;
+    //         std::cout<<"length: " << cluster2->get_length() / units::cm << " cm, npoints: " << cluster2->npoints() << std::endl;
+    //         // std::cout << "Cluster " << map_cluster_index[cluster2] << " is covered in 2 projections, marked for removal." << std::endl;
+    //     }
+    // }
+// exit(0);
+
+    // std::ofstream outfile("cluster_coverage_distances.txt");
+    // std::string filename = "cluster_coverage_distances_apa" + std::to_string(APA) + ".txt";
+    // if(coverage_results.size() > 0) {
+
+    // std::ofstream outfile(filename);
+    // if (outfile.is_open()) {
+    //     outfile << "# Cluster Coverage Analysis with 3D/2D Distances, Lengths, and Time Slice Ranges\n";
+    //     outfile << "# Format: cluster1_id cluster2_id coverage_plane nearest_3d_distance_cm nearest_2d_distance_cm "
+    //             << "cluster1_length_cm cluster2_length_cm cluster1_time_min cluster1_time_max cluster2_time_min "
+    //             << "cluster2_time_max covered_points total_points coverage_ratio\n";
+    //     outfile << "# cluster1 covers cluster2 in the specified plane\n";
+    //     outfile << "# nearest_3d_distance_cm: minimum 3D distance between any points in the two clusters\n";
+    //     outfile << "# nearest_2d_distance_cm: minimum 2D distance in the covered projection plane\n";
+    //     outfile << "# cluster1_length_cm: length of covering cluster, cluster2_length_cm: length of covered cluster\n";
+    //     outfile << "# cluster1_time_min/max: time slice range for covering cluster (from get_uvwt_min/max)\n";
+    //     outfile << "# cluster2_time_min/max: time slice range for covered cluster (from get_uvwt_min/max)\n";
+    //     outfile << std::fixed << std::setprecision(6);
+        
+    //     for (const auto& info : coverage_results) {
+    //         // if(APA==3&&info.cluster1_id ==221&&info.cluster2_id ==202){
+    //         // if(APA==3&&info.cluster1_id ==32){
+    //         // std::cout<< info.nearest_3d_distance / units::cm<<std::endl;
+    //         // if(info.cluster1_length / units::cm > 415 && info.cluster1_length / units::cm < 415.5
+    //         //     && info.cluster2_length / units::cm > 97.9 && info.cluster2_length / units::cm <98){
+    //         if(info.cluster1_time_min == 0 && info.cluster1_time_max == 2983
+    //             && info.cluster2_time_min == 404 && info.cluster2_time_max == 467){
+    //         // if(APA==3){
+    //            index_to_cluster_map[info.cluster1_id]->set_scope_filter(scope, false); 
+    //            index_to_cluster_map[info.cluster2_id]->set_scope_filter(scope, false); 
+    //            std::cout<<"GOT IT!!"<<std::endl;
+    //         }
+    //         outfile << info.cluster1_id << " " 
+    //                 << info.cluster2_id << " " 
+    //                 << info.coverage_plane << " " 
+    //                 << info.nearest_3d_distance / units::cm << " "  // Convert to cm
+    //                 << info.nearest_2d_distance / units::cm << " "      // NEW: Convert to cm
+    //                 << info.cluster1_length / units::cm << " "          // NEW: Convert to cm
+    //                 << info.cluster2_length / units::cm << " " 
+    //                 << info.cluster1_time_min << " "                    // NEW: Time slice (integer)
+    //                 << info.cluster1_time_max << " "                    // NEW: Time slice (integer)
+    //                 << info.cluster2_time_min << " "                    // NEW: Time slice (integer)
+    //                 << info.cluster2_time_max << " "          // NEW: Convert to cm
+    //                 << info.covered_points << " " 
+    //                 << info.total_points << " " 
+    //                 << info.coverage_ratio << "\n";
+    //     }
+    //     outfile.close();
+    //     std::cout << "Coverage results with 3D distances saved to cluster_coverage_distances.txt" << std::endl;
+    //     std::cout << "Total coverage cases found: " << coverage_results.size() << std::endl;
+    // } else {
+    //     std::cerr << "Error: Could not open output file cluster_coverage_distances.txt" << std::endl;
+    // }
+
+    // }
+
+    // remove clusters
+    LogDebug("to_be_removed_clusters.size() = " << to_be_removed_clusters.size());
+    for (auto live : to_be_removed_clusters) {
+        // std::cout << "Remove cluster " << live->nchildren() << " " << live->get_length()/units::cm << std::endl;
+        // live_grouping.destroy_child(live);
+        // live->set_scope_filter(scope, false);
+        // assert(live == nullptr);
+    } 
+// exit(0);
+
+
+
+
+
+
+//      {
+//    auto live_clusters = live_grouping.children(); // copy
+//     // Process each cluster
+//     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+//         Cluster* cluster = live_clusters.at(iclus);
+//         auto& scope = cluster->get_default_scope();
+//         std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center << std::endl;
+//     }
+//   }
+
+}

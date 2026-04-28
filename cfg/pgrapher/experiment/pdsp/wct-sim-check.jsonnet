@@ -94,6 +94,8 @@ local multi_magnify3 = multimagnify('gauss', tools, magoutput);
 local magnify_pipes3 = multi_magnify3.magnify_pipelines;
 local multi_magnify4 = multimagnify('wiener', tools, magoutput);
 local magnify_pipes4 = multi_magnify4.magnify_pipelines;
+local multi_magnify5 = multimagnify('threshold', tools, magoutput);
+local magnify_pipes5 = multi_magnify5.magnifysummaries_pipelines;
 
 local perfect = import 'pgrapher/experiment/pdsp/chndb-base.jsonnet';
 local chndb = [{
@@ -128,6 +130,7 @@ local parallel_pipes = [
                // sp_pipes[n],
                // magnify_pipes3[n],
                // magnify_pipes4[n],
+               // magnify_pipes5[n],
              ],
              'parallel_pipe_%d' % n)
   for n in std.range(0, std.length(tools.anodes) - 1)

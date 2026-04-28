@@ -44,10 +44,13 @@ public:
     virtual void visit(Ensemble& ensemble) const {
         using spdlog::debug;
 
+        std::cerr << "DEBUG ClusteringLiveDead::visit entry\n"; std::cerr.flush();
+
         auto& dead_grouping = *ensemble.with_name("dead").at(0);
 
         if (dead_grouping.nchildren() == 0) {
             // No dead, no live dead.  *taps temple*
+            std::cerr << "DEBUG ClusteringLiveDead: no dead clusters, returning early\n"; std::cerr.flush();
             return;
         }
 
@@ -76,6 +79,10 @@ public:
         std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
         std::set<int> apas;
         compute_wireplane_params(all_wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
+        // DEBUG: print wpid_params keys
+        std::cerr << "DEBUG ClusteringLiveDead: wpid_params has " << wpid_params.size() << " keys:";
+        for (const auto& kv : wpid_params) std::cerr << " ident=" << kv.first.ident() << "(apa=" << kv.first.apa() << ",face=" << kv.first.face() << ")";
+        std::cerr << "\n"; std::cerr.flush();
     
 
 
@@ -217,6 +224,16 @@ public:
                                 // Look up per-cluster APA/face geometry
                                 auto wpid_1 = cluster_1->wpid(mcell1_center);
                                 auto wpid_2 = cluster_2->wpid(mcell2_center);
+                                // DEBUG: print lookup values and check for missing keys
+                                std::cerr << "DEBUG ClusteringLiveDead at(): "
+                                          << "mcell1_center=(" << mcell1_center.x() << "," << mcell1_center.y() << "," << mcell1_center.z() << ")"
+                                          << " wpid_1 ident=" << wpid_1.ident() << "(apa=" << wpid_1.apa() << ",face=" << wpid_1.face() << ")"
+                                          << " mcell2_center=(" << mcell2_center.x() << "," << mcell2_center.y() << "," << mcell2_center.z() << ")"
+                                          << " wpid_2 ident=" << wpid_2.ident() << "(apa=" << wpid_2.apa() << ",face=" << wpid_2.face() << ")"
+                                          << " in_map1=" << (wpid_params.count(wpid_1)?"YES":"NO")
+                                          << " in_map2=" << (wpid_params.count(wpid_2)?"YES":"NO")
+                                          << "\n";
+                                std::cerr.flush();
                                 const auto& [drift_dir_1, angle_u_1, angle_v_1, angle_w_1] = wpid_params.at(wpid_1);
                                 const auto& [drift_dir_2, angle_u_2, angle_v_2, angle_w_2] = wpid_params.at(wpid_2);
 
@@ -345,7 +362,40 @@ public:
         }
 
         // new function to merge clusters ...
+        std::cerr << "DEBUG clustering_live_dead before merge_clusters\n"; std::cerr.flush();
         merge_clusters(g, live_grouping);
+        std::cerr << "DEBUG clustering_live_dead after merge_clusters\n"; std::cerr.flush();
+        // DEBUG: dump cluster+point info after merge
+        {
+            auto dbg_clusters = live_grouping.children();
+            std::cerr << "DEBUG live_dead post-merge nclusters=" << dbg_clusters.size() << "\n"; std::cerr.flush();
+            for (size_t ci = 0; ci < dbg_clusters.size(); ++ci) {
+                auto* clus = dbg_clusters[ci];
+                double len = clus->get_length();
+                size_t nblobs = clus->nchildren();
+                const auto& sv = clus->sv(clus->get_default_scope());
+                size_t npts = sv.npoints();
+                std::cerr << "DEBUG live_dead post-merge clus[" << ci << "] len=" << len/WireCell::units::cm
+                          << "cm nblobs=" << nblobs << " npts=" << npts;
+                if (npts > 0) {
+                    auto xvec = sv.template flat_vector<double>("x");
+                    auto yvec = sv.template flat_vector<double>("y");
+                    auto zvec = sv.template flat_vector<double>("z");
+                    if (!xvec.empty() && !yvec.empty() && !zvec.empty()) {
+                        double xmin=xvec[0],xmax=xvec[0],ymin=yvec[0],ymax=yvec[0],zmin=zvec[0],zmax=zvec[0];
+                        for (size_t pi=1; pi<xvec.size(); ++pi) {
+                            xmin=std::min(xmin,xvec[pi]); xmax=std::max(xmax,xvec[pi]);
+                            ymin=std::min(ymin,yvec[pi]); ymax=std::max(ymax,yvec[pi]);
+                            zmin=std::min(zmin,zvec[pi]); zmax=std::max(zmax,zvec[pi]);
+                        }
+                        std::cerr << " x=[" << xmin/WireCell::units::cm << "," << xmax/WireCell::units::cm << "]cm"
+                                  << " y=[" << ymin/WireCell::units::cm << "," << ymax/WireCell::units::cm << "]cm"
+                                  << " z=[" << zmin/WireCell::units::cm << "," << zmax/WireCell::units::cm << "]cm";
+                    }
+                }
+                std::cerr << "\n"; std::cerr.flush();
+            }
+        }
 
 
 

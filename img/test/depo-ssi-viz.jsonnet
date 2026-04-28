@@ -14,8 +14,8 @@ local pg = high.pg;
 // is interpolated by the anode plane ident.  Valid output extensions
 // include .npz, .zip. .tar, .tar.gz, .tgz, etc.  If a indepos is
 // given, read depos from there, else generate some internally.
-function(detector, variant="nominal",
-         indepos=null,
+function(detector="pdhd", variant="nominal",
+         indepos="/nfs/data/1/xning/wirecell-working/toolkit/cfg/pgrapher/experiment/pdhd/depositions.npz",
          outdepos="depos-drifted.npz",
          frames="frames-%(tier)s-%(anode)s.npz",
          clusters="clusters-%(tier)s-%(anode)s.npz")

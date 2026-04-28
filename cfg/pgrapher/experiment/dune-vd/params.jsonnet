@@ -2,7 +2,7 @@
 // generic set of parameters and overrides things specific to PDSP.
 
 local wc = import "wirecell.jsonnet";
-local base = import "pgrapher/common/params.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
 
 function(params) base {
     // This section will be overwritten in simparams.jsonnet
@@ -20,17 +20,17 @@ function(params) base {
         local upper_resp_x = upper_crp_x-self.response_plane,
         local cathode_x = -325.00*wc.cm,
         local ncrm = if std.objectHas(params, 'ncrm') then params.ncrm else 36,
-
-        local upper_face = { 
-            anode:    upper_crp_x, 
-            response: upper_resp_x, 
-            cathode:  cathode_x},
        
         volumes: [
             {
                 wires: n,       // anode number
                 name: "crm%d"%n,
-                faces: [ upper_face, upper_face ],
+                faces: [
+                        { 
+                            anode:    upper_crp_x, 
+                            response: upper_resp_x, 
+                            cathode:  cathode_x
+                        }, null ],
             } for n in std.range(0, ncrm-1)], // std.range is inclusive, i.e. [0, crm-1],
     },
 

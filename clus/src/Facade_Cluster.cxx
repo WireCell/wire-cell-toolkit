@@ -843,7 +843,7 @@ const Cluster::points_type& Cluster::points() const { return kd3d().points(); }
 const Cluster::points_type& Cluster::points_raw() const { return kd3d_raw().points(); }
 
 
-WirePlaneId Cluster::wire_plane_id(size_t point_index) const {  
+WirePlaneId Cluster::wire_plane_id(size_t point_index) const {
     auto& wpids = cache().point_wpids;
     if (wpids.empty()) {
         wpids = points_property<int>("wpid");
@@ -2232,24 +2232,25 @@ std::vector<geo_point_t> Cluster::get_hull() const
     quickhull::QuickHull<float> qh;
     std::vector<quickhull::Vector3<float>> pc;
     const auto& points = this->points();
-    for (int i = 0; i != npoints(); i++) {
+    const int npts = npoints();
+    for (int i = 0; i != npts; i++) {
         pc.emplace_back(points[0][i], points[1][i], points[2][i]);
     }
     try {
         quickhull::ConvexHull<float> hull = qh.getConvexHull(pc, false, true);
         std::set<int> indices;
-    
+
         for (size_t i = 0; i != hull.getIndexBuffer().size(); i++) {
-            indices.insert(hull.getIndexBuffer().at(i));
+            indices.insert((int)hull.getIndexBuffer().at(i));
         }
-    
+
         for (auto i : indices) {
             hull_points.push_back({points[0][i], points[1][i], points[2][i]});
         }
     } catch (const std::exception& e) {
         std::cerr << "QuickHull exception: " << e.what() << std::endl;
     }
-        
+
     return hull_points;
 }
 

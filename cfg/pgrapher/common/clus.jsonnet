@@ -320,6 +320,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
+        deghost2(name="", use_ctpc=true, length_cut=0*wc.cm,length_threshold=5*wc.cm,coverage_threshold=0.8) :: {
+            type: "ClusteringDeghost2",
+            name: prefix+name,
+            data: {
+                length_cut: length_cut,
+                length_threshold: length_threshold,
+                coverage_threshold: coverage_threshold,
+            } + dv_cfg + pcts_cfg + scope_cfg,
+            uses: [detector_volumes, pc_transforms],
+        },
+
         isolated(name="") :: {
             type: "ClusteringIsolated",
             name: prefix+name,

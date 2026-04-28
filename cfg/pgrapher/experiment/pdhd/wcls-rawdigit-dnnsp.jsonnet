@@ -20,14 +20,12 @@
 //         -J cfg cfg/pgrapher/experiment/uboone/wcls-nf-sp.jsonnet
 
 
-local epoch = std.extVar('epoch');  // eg "dynamic", "after", "before", "perfect"
+// local epoch = std.extVar('epoch');  // eg "dynamic", "after", "before", "perfect"
 local reality = std.extVar('reality');
 local sigoutform = std.extVar('signal_output_form');  // eg "sparse" or "dense"
-// local nsample_ext = std.extVar('nsample'); // eg 6000, 10000, or "auto"
-// local nsample = if nsample_ext == 'auto' then 6000 else std.parseInt(nsample_ext); // set auto to 0 once larwirecell fixed
 
 local wc = import 'wirecell.jsonnet';
-local g = import 'pgraph.jsonnet';
+local g = import 'pgrapher/common/pgraph.jsonnet'; // FIXME: use system-wide pgraph.jsonnet
 
 local raw_input_label = std.extVar('raw_input_label');  // eg "daq"
 
@@ -115,14 +113,28 @@ local wcls_output = {
       // anode: wc.tn(tools.anode),
       anode: wc.tn(mega_anode),
       digitize: false,  // true means save as RawDigit, else recob::Wire
-      frame_tags: ['gauss', 'wiener','dnnsp'],
-      frame_scale: [0.001, 0.001,0.001],
+      frame_tags: ['gauss', 'wiener'],
+      frame_scale: [0.001, 0.001],
       //nticks: params.daq.nticks,
       // nticks: nsample,
       chanmaskmaps: [],
-      summary_tags: ['threshold'],  // retagger makes this tag
+      summary_tags: ['wiener'],  // retagger makes this tag
+      summary_suffix: "",
       //  just one threshold value
       summary_operator: { threshold: 'set' },
+      nticks: -1,
+
+    },
+  }, nin=1, nout=1, uses=[mega_anode]),
+
+  dnn_signals: g.pnode({
+    type: 'wclsFrameSaver',
+    name: 'dnnsaver',
+    data: {
+      anode: wc.tn(mega_anode),
+      digitize: false,  // true means save as RawDigit, else recob::Wire
+      frame_tags: ['dnnsp'],
+      frame_scale: [0.001],
       nticks: -1,
 
     },
@@ -174,16 +186,18 @@ local sp_override = { // assume all tages sets in base sp.jsonnet
     // gauss_tag: "",
     use_roi_refinement: true,
     use_roi_debug_mode: true,
-    troi_col_th_factor: 5,
-    //tight_lf_tag: "",
+    save_negtive_charge: false, // no negative charge in gauss
+    // tight_lf_tag: "",
     // loose_lf_tag: "",
-    //cleanup_roi_tag: "",
+    // cleanup_roi_tag: "",
     break_roi_loop1_tag: "",
     break_roi_loop2_tag: "",
     shrink_roi_tag: "",
     extend_roi_tag: "",
-    //m_decon_charge_tag: "",
+    // decon_charge_tag: "",
     use_multi_plane_protection: true,
+    do_not_mp_protect_traditional: true, // do_not_mp_protect_traditional to 
+                                         // make a clear ref, defualt is false
     mp_tick_resolution: 10,
 };
 
@@ -267,38 +281,15 @@ local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        // model: "ts-model/unet-l23-cosmic500-e50.ts",
-        // model: "ts-model/CP49.ts",
-        //model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
-       // model: "ts-model/unet-cosmic300-depofluxsplat-pdhd.ts",
-       model : "ts-model/cosmic390andshower200.ts",
+        model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
         device: "cpu", // "gpucpu",
         concurrency: 1,
     },
 };
 
-
-
-
-
-
-
 local magoutput = 'protodunehd-data-check.root';
 local magnify = import 'pgrapher/experiment/pdhd/magnify-sinks.jsonnet';
 local magio = magnify(tools, magoutput);
-
-local dnn_trace_mergers = [ g.pnode({
-  type: 'Retagger',
-  name: 'dnnmerger%d' %n,
-  data: {
-    tag_rules: [{
-      // frame: {'.*': 'dnnsp',},
-      // merge: {'dnnsp\\d': 'dnnsp%d' %n,},
-      merge: {'dnnsp\\d[uvw]' : 'dnnsp%d' %n,},
-    }],
-  },
-}, nin=1, nout=1)
-for n in std.range(0, std.length(tools.anodes) - 1) ];
 
 local nfsp_pipes = [
   g.pipeline([
@@ -307,15 +298,17 @@ local nfsp_pipes = [
                // nf_pipes[n],
                // magio.raw_pipe[n],
                sp_pipes[n],
-
-               // hio_sp[n],
-               dnnroi(tools.anodes[n], ts, output_scale=1.0),
-               dnn_trace_mergers[n],
-               // hio_dnn[n],
-
-               // magio.decon_pipe[n],
+              //  magio.decon_pipe[n],
                // magio.threshold_pipe[n],
                // magio.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
+               // hio_sp[n],
+
+               dnnroi(tools.anodes[n], ts, output_scale=1.0, nticks=params.daq.nticks, nchunks=1),
+              //  magio.dnnsp_pipe[n],
+               // hio_dnn[n],
+
+               
+
              ],
              'nfsp_pipe_%d' % n)
   for n in std.range(0, std.length(tools.anodes) - 1)
@@ -329,36 +322,67 @@ local fanpipe = f.fanpipe('FrameFanout', nfsp_pipes, 'FrameFanin', 'sn_mag_nf');
 
 local retagger = g.pnode({
   type: 'Retagger',
+  name: 'dnnout',
   data: {
-    // Note: retagger keeps tag_rules an array to be like frame fanin/fanout.
     tag_rules: [{
-      // Retagger also handles "frame" and "trace" like fanin/fanout
-      // merge separately all traces like gaussN to gauss.
-      frame: {
-        '.*': 'retagger',
-      },
-      merge: {
-        'gauss\\d': 'gauss',
-        'wiener\\d': 'wiener',
-        'threshold\\d': 'threshold',
-	'dnnsp\\d': 'dnnsp',
-      },
+      frame: {'.*': 'dnnretagger',},
+      merge: {'dnnsp\\d': 'dnnsp',},
     }],
   },
 }, nin=1, nout=1);
 
 local sink = g.pnode({ type: 'DumpFrames' }, nin=1, nout=0);
+local graph = g.pipeline([wcls_input.adc_digits, fanpipe, retagger, wcls_output.dnn_signals, sink]);
 
+// Build an incomplete subgraph ending to be spliced for saving out frames 
+local ofanin = g.pnode({ 
+      type: 'FrameFanin',
+      name:"outfanin",
+      data:{
+          multiplicity: std.length(tools.anodes),
+          tag_rules: [
+            {
+              frame: {'.*': 'outfanin',},
+              trace: {
+                ['gauss%d' % n]: ['gauss%d' % n],
+                ['wiener%d' % n]: ['wiener%d' % n],
+                // ['threshold%d' % n]: ['threshold%d' % n],
+              },
+            }
+            for n in std.range(0, std.length(tools.anodes) - 1)
+          ],
+      } 
+      }, nin=std.length(tools.anodes), nout=1);
+local osink = g.pnode({ type: 'DumpFrames', name:"outsink", data:{} }, nin=1, nout=0);
+// local outsgr = g.intern(innodes=[ofanin,], centernodes = [osink],
+//                       edges=[ g.edge(ofanin, osink) ], name="outsgr");
+local outretagger = g.pnode({
+  type: 'Retagger',
+  name: 'spout',
+  data: {
+    tag_rules: [{
+      frame: {'.*': 'spretagger',},
+      merge: {
+        'gauss\\d': 'gauss',
+        'wiener\\d': 'wiener',
+        // 'threshold\\d': 'threshold',
+      },
+    }],
+  },
+}, nin=1, nout=1);
+local outgr = g.pipeline([ofanin, outretagger, wcls_output.sp_signals, osink]);
 
-//local graph = g.pipeline([wcls_input.adc_digits, rootfile_creation_frames, fanpipe, retagger, wcls_output.sp_signals, sink]);
-local graph = g.pipeline([wcls_input.adc_digits, fanpipe, retagger, wcls_output.sp_signals, sink]);
+local edge_selector(e) = std.startsWith(e.tail.node, "OmnibusSigProc:");
+local fanout_factory(n,e) = { type:'FrameFanout', name:"splice%d"%n, data:{multiplicity: 2} }; // "2-wire" splice
+
+local spliced_graph = g.splice(graph, outgr, edge_selector, fanout_factory);
 
 local app = {
   type: 'Pgrapher',
   data: {
-    edges: g.edges(graph),
+    edges: g.edges(spliced_graph),
   },
 };
 
 // Finally, the configuration sequence
-g.uses(graph) + [app]
+g.uses(spliced_graph) + [app]

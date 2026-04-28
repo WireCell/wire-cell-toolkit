@@ -241,6 +241,7 @@ void ClusterFileSource::configure(const WireCell::Configuration& cfg)
     m_inname = get(cfg, "inname", m_inname);
     m_in.clear();
     custard::input_filters(m_in, m_inname);
+    // std::cout<<"m_cur_fname: "<<m_in<<std::endl;
     if (m_in.empty()) {
         THROW(ValueError() << errmsg{"ClusterFileSource: unsupported inname: " + m_inname});
     }
@@ -261,7 +262,8 @@ bool ClusterFileSource::load_filename()
 {
     custard::read(m_in, m_cur.fname, m_cur.fsize);
     if (m_in.eof()) {
-        // log->debug("eof in file: {} size {}", m_cur.fname, m_cur.fsize);
+            std::cout<<"here1"<<std::endl;
+        log->debug("eof in file: {} size {}", m_cur.fname, m_cur.fsize);
         return false;
     }
     if (!m_in) {

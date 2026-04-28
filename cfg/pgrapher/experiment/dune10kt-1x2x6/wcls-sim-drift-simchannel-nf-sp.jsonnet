@@ -7,14 +7,21 @@
 // Output is a Python numpy .npz file.
 
 local g = import 'pgraph.jsonnet';
-local f = import 'pgrapher/common/funcs.jsonnet';
+local f = import 'pgrapher/experiment/dune-vd/funcs.jsonnet';
 local wc = import 'wirecell.jsonnet';
-
 local io = import 'pgrapher/common/fileio.jsonnet';
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local params_maker = import 'pgrapher/experiment/dune10kt-1x2x6/simparams.jsonnet';
+
+
 local fcl_params = {
     G4RefTime: std.extVar('G4RefTime') * wc.us,
+    apa_sparsity: std.extVar('apa_sparsity'),
+    use_dnnroi: std.extVar('use_dnnroi'),
+    dnn_model: std.extVar('dnn_model'), // "ts-model/CP49_mobilenetv3.ts",
+    inference_service: "TorchService", // "TorchService" or "TritonService"
+    nchunks: 1,
+    dnn_output_sparcify: true,
 };
 local params = params_maker(fcl_params) {
   lar: super.lar {
@@ -30,7 +37,14 @@ local params = params_maker(fcl_params) {
 };
 
 
-local tools = tools_maker(params);
+local tools_all = tools_maker(params);
+local tools = 
+if fcl_params.apa_sparsity == "apa0" then
+tools_all {
+  anodes: [tools_all.anodes[0]]
+}
+else
+  tools_all;
 
 local sim_maker = import 'pgrapher/experiment/dune10kt-1x2x6/sim.jsonnet';
 local sim = sim_maker(params, tools);
@@ -39,6 +53,7 @@ local nanodes = std.length(tools.anodes);
 local anode_iota = std.range(0, nanodes - 1);
 
 
+local inputTag = 'IonAndScint';
 local output = 'wct-sim-ideal-sig.npz';
 
 
@@ -49,8 +64,18 @@ local output = 'wct-sim-ideal-sig.npz';
 local wcls_maker = import 'pgrapher/ui/wcls/nodes.jsonnet';
 local wcls = wcls_maker(params, tools);
 local wcls_input = {
-  depos: wcls.input.depos(name='', art_tag='IonAndScint'),
-  // depos: wcls.input.depos(name='electron'),  // default art_tag="blopper"
+  depos: wcls.input.depos(name='', art_tag=inputTag),
+  deposet: g.pnode({
+    type: 'wclsSimDepoSetSource',
+    name: "",
+    data: {
+      model: "",
+      scale: -1, //scale is -1 to correct a sign error in the SimDepoSource converter.
+      art_tag: inputTag, //name of upstream art producer of depos "label:instance:processName"
+      id_is_track: false,
+      assn_art_tag: "",
+    },
+  }, nin=0, nout=1),
 };
 
 // Collect all the wc/ls output converters for use below.  Note the
@@ -101,10 +126,21 @@ local wcls_output = {
   },
   }, nin=1, nout=1, uses=[mega_anode]),
 
+  // save "threshold" from normal decon for each channel noise
+  // used in imaging
+  sp_thresholds: wcls.output.thresholds(name='spthresholds', tags=['threshold']),
 };
 
 //local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;
+local setdrifter = g.pnode({
+            type: 'DepoSetDrifter',
+            data: {
+                drifter: "Drifter"
+            }
+        }, nin=1, nout=1,
+        uses=[drifter]);
+
 local bagger = sim.make_bagger();
 // local bagger = g.pnode({
 //   type: 'DepoBagger',
@@ -137,8 +173,53 @@ local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n
 
 // local sigoutform = std.extVar('signal_output_form');  // eg "sparse" or "dense"
 local sp_maker = import 'pgrapher/experiment/dune10kt-1x2x6/sp.jsonnet';
-local sp = sp_maker(params, tools, { sparse: true });
+local sp_override = if fcl_params.use_dnnroi then
+{
+    sparse: false,
+    use_roi_debug_mode: true,
+    m_save_negative_charge: false,
+    use_multi_plane_protection: true,
+    mp_tick_resolution: 10,
+    tight_lf_tag: "",
+    cleanup_roi_tag: "",
+    break_roi_loop1_tag: "",
+    break_roi_loop2_tag: "",
+    shrink_roi_tag: "",
+    extend_roi_tag: "",
+}
+else
+{
+    sparse: false,
+    use_roi_debug_mode: false,
+    m_save_negative_charge: false,
+    use_multi_plane_protection: false,
+    mp_tick_resolution: 10,
+};
+local sp = sp_maker(params, tools, sp_override);
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
+
+local dnnroi = import 'pgrapher/experiment/dune-vd/dnnroi.jsonnet';
+local ts =
+if fcl_params.inference_service == "TorchService" then
+{
+    type: "TorchService",
+    name: "dnnroi",
+    data: {
+        model: fcl_params.dnn_model,
+        device: "cpu",
+        concurrency: 1,
+    },
+}
+else if fcl_params.inference_service == "TritonService" then
+{
+    type: "TritonService",
+    name: "dnnroi",
+    data: {
+        url: "ailab01.fnal.gov:8001",
+        model: fcl_params.dnn_model, // "dnn"
+    },
+}
+else error("unsupported inference_service: " + fcl_params.inference_service);
 
 local rng = tools.random;
 local wcls_simchannel_sink = g.pnode({
@@ -164,18 +245,44 @@ local wcls_simchannel_sink = g.pnode({
   },
 }, nin=1, nout=1, uses=tools.anodes);
 
+local wcls_depoflux_writer = g.pnode({
+  type: 'wclsDepoFluxWriter',
+  name: 'postdrift',
+  data: {
+    anodes: [wc.tn(anode) for anode in tools.anodes],
+    field_response: wc.tn(tools.field),
+    tick: 0.5 * wc.us,
+    window_start: 0.0 * wc.ms,
+    window_duration: self.tick * 6000,
+    nsigma: 3.0,
+    reference_time: fcl_params.G4RefTime,
+    energy: 1, # equivalent to use_energy = true
+    simchan_label: 'simpleSC',
+    sed_label: 'IonAndScint',
+    sparse: false,
+  },
+}, nin=1, nout=1, uses=tools.anodes + [tools.field]);
+
 local magoutput = 'protodune-data-check.root';
-local magnify = import 'pgrapher/experiment/pdsp/magnify-sinks.jsonnet';
+local magnify = import 'pgrapher/experiment/dune-vd/magnify-sinks.jsonnet';
 local sinks = magnify(tools, magoutput);
 
 local multipass = [
   g.pipeline([
-               // wcls_simchannel_sink[n],
                sn_pipes[n],
                // sinks.orig_pipe[n],
                // nf_pipes[n],
                sp_pipes[n],
-             ],
+               // sinks.decon_pipe[n],
+             ] + if fcl_params.use_dnnroi then [
+               dnnroi(
+                tools.anodes[n],
+                ts,
+                output_scale=1.0,
+                nchunks=fcl_params.nchunks,
+                sparcify=fcl_params.dnn_output_sparcify,),
+                // sinks.dnnroi_pipe[n],
+             ] else [],
              'multipass%d' % n)
   for n in anode_iota
 ];
@@ -189,9 +296,49 @@ local tag_rules = {
         + {['threshold%d' % anode.data.ident]: ['threshold%d' % anode.data.ident] for anode in tools.anodes}
         + {['dnnsp%d' % anode.data.ident]: ['dnnsp%d' % anode.data.ident] for anode in tools.anodes},
 };
-local bi_manifold = f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,2], [2,6], [1,2], [2,6], 'sn_mag_nf', outtags, tag_rules);
-// local bi_manifold = f.fanpipe('DepoSetFanout', multipass, 'FrameFanin', 'sn_mag_nf', outtags, tag_rules);
-// local bi_manifold = f.fanpipe('DepoFanout', multipass, 'FrameFanin', 'sn_mag_nf', outtags, tag_rules);
+
+
+local make_switch_pipe = function(d2f, anode ) {
+    local ds_filter = g.pnode({
+        type: "DepoSetFilter",
+        name: "ds-filter-switch-%d" % anode.data.ident,
+        data: {anode: wc.tn(anode)},
+        }, nin=1, nout=1, uses=[anode]),
+    local dorb = g.pnode({
+        type: "DeposOrBust",
+        name: "dorb-switch-%d" % anode.data.ident,
+        }, nin=1, nout=2),
+    local frame_sync = g.pnode({
+        type: "FrameSync",
+        name: "frame-sync-switch-%d" % anode.data.ident,
+        }, nin=2, nout=1),
+    ret1: g.intern(
+        innodes=[ds_filter],
+        outnodes=[frame_sync],
+        centernodes=[dorb, d2f],
+        edges=
+            [g.edge(ds_filter, dorb, 0, 0),
+            g.edge(dorb, d2f, 0, 0),
+            g.edge(d2f, frame_sync, 0, 0),
+            g.edge(dorb, frame_sync, 1, 1)]),
+    ret2: g.pipeline([ds_filter, d2f]),
+}.ret1;
+
+local switch_pipes = [
+    make_switch_pipe(multipass[n], tools.anodes[n]),
+    for n in std.range(0, std.length(tools.anodes) - 1)
+];
+
+// local bi_manifold = 
+local bi_manifold =
+if fcl_params.apa_sparsity == "apa0" then
+    f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,1], [1,1], [1,1], [1,1], 'sn_mag_nf', outtags, tag_rules)
+else if fcl_params.apa_sparsity == "hydra" then
+    f.multifanpipe('DepoSetFanout', switch_pipes, 'FrameFanin', [1,2], [2,6], [1,2], [2,6], 'sn_mag_nf', outtags, tag_rules)
+else if fcl_params.apa_sparsity == "all" then
+    f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,2], [2,6], [1,2], [2,6], 'sn_mag_nf', outtags, tag_rules)
+else
+    error("unsupported apa_sparsity: " + fcl_params.apa_sparsity);
 
 local retagger = g.pnode({
   type: 'Retagger',
@@ -206,6 +353,7 @@ local retagger = g.pnode({
       merge: {
         'gauss\\d+': 'gauss',
         'wiener\\d+': 'wiener',
+        'dnnsp\\d+': 'dnnsp',
       },
     }],
   },
@@ -214,10 +362,10 @@ local retagger = g.pnode({
 //local frameio = io.numpy.frames(output);
 local sink = sim.frame_sink;
 
-local graph = g.pipeline([wcls_input.depos, drifter, wcls_simchannel_sink, bagger, bi_manifold, retagger, wcls_output.sp_signals, sink]);
+local graph = g.pipeline([wcls_input.deposet, setdrifter, wcls_depoflux_writer, bi_manifold, retagger, wcls_output.sp_signals, sink]);
 
 local app = {
-  type: 'Pgrapher',
+  type: std.extVar('engine'), //Pgrapher, TbbFlow
   data: {
     edges: g.edges(graph),
   },

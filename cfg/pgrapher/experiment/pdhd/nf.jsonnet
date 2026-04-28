@@ -39,6 +39,7 @@ function(params, anode, chndbobj, n, name='', dft=default_dft) {
             // channel bin ranges are ignored
             // only when the channelmask is merged to `bad`
             // maskmap: {sticky: "bad", ledge: "bad", noisy: "bad"},
+            // maskmap: {noisy:"bad", lf_noisy: "bad"},
             channel_filters: [
                 wc.tn(single),
             ],
@@ -49,7 +50,8 @@ function(params, anode, chndbobj, n, name='', dft=default_dft) {
             ],
             noisedb: wc.tn(chndbobj),
             // intraces: 'orig%d' % n,  // frame tag get all traces
-            intraces: 'orig',  // frame tag get all traces
+            // intraces: 'orig',        // use when orig frames have tag 'orig'
+            intraces: '',  // '' means use all traces (wildcard); HD orig frames use '*' tag
             outtraces: 'raw%d' % n,
         },
     }, uses=[chndbobj, anode, single, grouped], nin=1, nout=1),

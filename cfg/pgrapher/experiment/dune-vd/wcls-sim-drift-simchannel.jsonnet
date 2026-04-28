@@ -8,6 +8,7 @@
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
+local dnnroi = import 'pgrapher/experiment/dune-vd/dnnroi.jsonnet';
 
 local io = import 'pgrapher/common/fileio.jsonnet';
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
@@ -17,7 +18,10 @@ local fcl_params = {
     G4RefTime: std.extVar('G4RefTime') * wc.us,
     response_plane: std.extVar('response_plane')*wc.cm,
     nticks: std.extVar('nticks'),
-    ncrm: std.extVar('ncrm')
+    ncrm: std.extVar('ncrm'),
+    use_dnnroi: std.extVar('use_dnnroi'),
+    use_hydra: std.extVar('use_hydra'),
+    save_rawdigits: std.extVar('save_rawdigits'),
 };
 local params = params_maker(fcl_params) {
   lar: super.lar {
@@ -98,6 +102,10 @@ local wcls_output = {
   // for charge reconstruction, the "wiener" is best for S/N
   // separation.  Both are used in downstream WC code.
   sp_signals: wcls.output.signals(name='spsignals', tags=['gauss', 'wiener']),
+
+  // save "threshold" from normal decon for each channel noise
+  // used in imaging
+  sp_thresholds: wcls.output.thresholds(name='spthresholds', tags=['threshold']),
 };
 
 //local deposio = io.numpy.depos(output);
@@ -133,8 +141,27 @@ local nf_maker = import 'pgrapher/experiment/dune-vd/nf.jsonnet';
 local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n) for n in anode_iota];
 
 local sp_maker = import 'pgrapher/experiment/dune-vd/sp.jsonnet';
-local sp = sp_maker(params, tools, { sparse: true });
+local sp_override = if fcl_params.use_dnnroi then
+{
+    sparse: true,
+    use_roi_debug_mode: true,
+    use_multi_plane_protection: true,
+    process_planes: [0, 1, 2]
+} else {
+    sparse: true,
+};
+local sp = sp_maker(params, tools, sp_override);
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
+
+local ts = {
+    type: "TorchService",
+    name: "dnnroi",
+    data: {
+        model: "ts-model/unet-l23-cosmic500-e50.ts",
+        device: "gpucpu",
+        concurrency: 1,
+    },
+};
 
 local rng = tools.random;
 local wcls_simchannel_sink = g.pnode({
@@ -165,30 +192,122 @@ local magoutput = 'dune-vd-sim-check.root';
 local magnify = import 'pgrapher/experiment/pdsp/magnify-sinks.jsonnet';
 local sinks = magnify(tools, magoutput);
 
-local multipass = [
+local full_sim_pipes = [
   g.pipeline([
                 sn_pipes[n],
                 // sinks.orig_pipe[n],
-                // nf_pipes[n],
-                // sp_pipes[n],
-                // sinks.decon_pipe[n],
-                // sinks.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
              ],
-             'multipass%d' % n)
+             'apa_dense_pipes%d' % n)
   for n in anode_iota
 ];
 
+local full_sp_pipes = [
+  g.pipeline([
+                sp_pipes[n],
+                // sinks.decon_pipe[n],
+                // sinks.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
+             ] + if fcl_params.use_dnnroi then [
+                 dnnroi(tools.anodes[n], ts, output_scale=1.2),
+                //  sinks.dnnroi_pipe[n],
+             ] else [],
+             'full_sp_pipes%d' % n)
+  for n in anode_iota
+];
+
+local multipass = [
+    g.pipeline([
+        full_sim_pipes[n],
+        full_sp_pipes[n]],
+        'multipass%d' % n)
+    for n in anode_iota
+];
+
+
+local make_switch_pipe = function(sim, sp, anode ) {
+    local d2f = g.pipeline([sim, sp]),
+    local ds_filter = g.pnode({
+        type: "DepoSetFilter",
+        name: "ds-filter-switch-%d" % anode.data.ident,
+        data: {anode: wc.tn(anode)},
+        }, nin=1, nout=1, uses=[anode]),
+    local dorb = g.pnode({
+        type: "DeposOrBust",
+        name: "dorb-switch-%d" % anode.data.ident,
+        }, nin=1, nout=2),
+    local frame_sync = g.pnode({
+        type: "FrameSync",
+        name: "frame-sync-switch-%d" % anode.data.ident,
+        }, nin=2, nout=1),
+    // direct pipe
+    local ret1 = g.pipeline([ds_filter, d2f]),
+    // hydra shortcut
+    local ret2 =  g.intern(
+        innodes=[ds_filter],
+        outnodes=[frame_sync],
+        centernodes=[dorb, d2f],
+        edges=
+            [g.edge(ds_filter, dorb, 0, 0),
+            g.edge(dorb, d2f, 0, 0),
+            g.edge(d2f, frame_sync, 0, 0),
+            g.edge(dorb, frame_sync, 1, 1)]),
+    // special case to tapout and sync rawdigits
+    local fout_bust = g.pnode({
+        type: "FrameFanout",
+        name: "fout-switch-bust-%d" % anode.data.ident,
+        data: {multiplicity: 2},
+        }, nin=1, nout=2),
+    local fout_rawdigits = g.pnode({
+        type: "FrameFanout",
+        name: "fout-switch-rawdigits-%d" % anode.data.ident,
+        data: {multiplicity: 2},
+        }, nin=1, nout=2),
+    local frame_sync_rawdigits = g.pnode({
+        type: "FrameSync",
+        name: "frame-sync-switch-rawdigits-%d" % anode.data.ident,
+        }, nin=2, nout=1),
+    
+    local dump_rawdigits = g.pnode(
+        { type: 'DumpFrames', name:"switch-dump-rawdigits-%d" % anode.data.ident, data:{} },
+        nin=1, nout=0),
+    // hydra shortcut with rawdigits
+    local ret3 = g.intern(
+        innodes=[ds_filter],
+        outnodes=[frame_sync],
+        centernodes=[dorb, sim, sp, fout_bust, fout_rawdigits, frame_sync_rawdigits, dump_rawdigits],
+        edges=
+            [g.edge(ds_filter, dorb, 0, 0),
+            g.edge(dorb, sim, 0, 0),
+            g.edge(dorb, fout_bust, 1, 0),
+            g.edge(sim, fout_rawdigits, 0, 0),
+            g.edge(fout_rawdigits, sp, 0, 0),
+            g.edge(sp, frame_sync, 0, 0),
+            g.edge(fout_bust, frame_sync, 0, 1),
+            g.edge(fout_rawdigits, frame_sync_rawdigits, 1, 0),
+            g.edge(fout_bust, frame_sync_rawdigits, 1, 1),
+            g.edge(frame_sync_rawdigits, dump_rawdigits, 0, 0),
+            ]
+    ),
+    ret: if fcl_params.save_rawdigits then ret3 else ret2,
+}.ret;
+
+local switch_pipes = [
+    make_switch_pipe(full_sim_pipes[n], full_sp_pipes[n], tools.anodes[n]),
+    for n in std.range(0, std.length(tools.anodes) - 1)
+];
+
+local process_pipes = if fcl_params.use_hydra then switch_pipes else multipass;
+
 // assert (fcl_params.ncrm == 36 || fcl_params.ncrm == 112) : "only ncrm == 36 or 112 are configured";
-local f = import 'pgrapher/common/funcs.jsonnet';
+local f = import 'pgrapher/experiment/dune-vd/funcs.jsonnet';
 local outtags = ['orig%d' % n for n in anode_iota];
 // local bi_manifold = f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', 6, 'sn_mag', outtags);
 local bi_manifold =
     if fcl_params.ncrm == 36
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,6], [6,6], [1,6], [6,6], 'sn_mag', outtags)
+    then f.multifanpipe('DepoSetFanout', process_pipes, 'FrameFanin', [1,6], [6,6], [1,6], [6,6], 'sn_mag', outtags)
     else if fcl_params.ncrm == 48
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,8], [8,6], [1,8], [8,6], 'sn_mag', outtags)
+    then f.multifanpipe('DepoSetFanout', process_pipes, 'FrameFanin', [1,8], [8,6], [1,8], [8,6], 'sn_mag', outtags)
     else if fcl_params.ncrm == 112
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,8,16], [8,2,7], [1,8,16], [8,2,7], 'sn_mag', outtags);
+    then f.multifanpipe('DepoSetFanout', process_pipes, 'FrameFanin', [1,8,16], [8,2,7], [1,8,16], [8,2,7], 'sn_mag', outtags);
 
 local retagger = g.pnode({
   type: 'Retagger',
@@ -213,7 +332,7 @@ local sink = sim.frame_sink;
 local graph = g.pipeline([wcls_input.depos, drifter, wcls_simchannel_sink, bagger, bi_manifold, retagger, wcls_output.sim_digits, sink]);
 
 local app = {
-    type: 'Pgrapher', //Pgrapher, TbbFlow
+    type: 'TbbFlow', //Pgrapher, TbbFlow
     data: {
         edges: g.edges(graph),
     },

@@ -1,3 +1,8 @@
+function(cfg={})
+local config = {
+    use_dnn_img: false,
+} + cfg;
+
 local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import 'pgrapher/common/funcs.jsonnet';
@@ -5,6 +10,16 @@ local params = import "pgrapher/experiment/pdhd/simparams.jsonnet";
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anodes = tools.anodes;
+
+local tags = {
+    signal: if config.use_dnn_img then "dnnsp%d" else "gauss%d",
+    error_tag: if config.use_dnn_img then "dnnsp_error%d" else "gauss_error%d",
+    slice_ref: if config.use_dnn_img then "dnnsp%d" else "wiener%d",
+    masking: function(ident)
+        if config.use_dnn_img
+        then ["dnnsp%d" % ident]
+        else ["gauss%d" % ident, "wiener%d" % ident],
+};
 
 local img = {
     // IFrame -> IFrame
@@ -21,8 +36,8 @@ local img = {
         type: 'ChargeErrorFrameEstimator',
         name: "cefe-"+aname,
         data: {
-            intag: "gauss%d" % anode.data.ident,
-            outtag: "gauss_error%d" % anode.data.ident,
+            intag: tags.signal % anode.data.ident,
+            outtag: tags.error_tag % anode.data.ident,
             anode: wc.tn(anode),
             rebin: 4,  // this number should be consistent with the waveform_map choice
             fudge_factors: [2.31, 2.31, 1.1],  // fudge factors for each plane [0,1,2]
@@ -36,7 +51,7 @@ local img = {
         name: "cmm-mod-"+aname,
         data: {
             cm_tag: "bad",
-            trace_tag: "gauss%d" % anode.data.ident,
+            trace_tag: tags.signal % anode.data.ident,
             anode: wc.tn(anode),
             // start: 0,   // start veto ...
             // end: 9592, // end  of veto
@@ -51,7 +66,7 @@ local img = {
             // ncount_dead_ch: 2,
             // dead_ch_llimit: [2160, 2080], // veto according to the charge size for dead channels
             // dead_ch_hlimit: [2176, 2096],
-            ncount_org: 1,   // organize the dead channel ranges according to these boundaries 
+            ncount_org: 1,   // organize the dead channel ranges according to these boundaries
             org_llimit: [0], // must be ordered ...
             org_hlimit: [8500], // must be ordered ...
         },
@@ -61,7 +76,7 @@ local img = {
         type: 'FrameQualityTagging',
         name: "frame-qual-tag-"+aname,
         data: {
-            trace_tag: "gauss%d" % anode.data.ident,
+            trace_tag: tags.signal % anode.data.ident,
             anode: wc.tn(anode),
             nrebin: 4, // rebin count ...
             length_cut: 3,
@@ -87,7 +102,7 @@ local img = {
             name: "frame-masking-"+aname,
             data: {
                 cm_tag: "bad",
-                trace_tags: ['gauss%d' % anode.data.ident,'wiener%d' % anode.data.ident,],
+                trace_tags: tags.masking(anode.data.ident),
                 anode: wc.tn(anode),
             },
         }, nin=1, nout=1, uses=[anode]),
@@ -102,9 +117,10 @@ local img = {
             name: "slicing-"+aname,
             data: {
                 tick_span: span,
-                wiener_tag: "wiener%d" % anode.data.ident,
-                charge_tag: "gauss%d" % anode.data.ident,
-                error_tag: "gauss_error%d" % anode.data.ident,
+                wiener_tag: tags.slice_ref % anode.data.ident,
+                summary_tag: tags.slice_ref % anode.data.ident,
+                charge_tag: tags.signal % anode.data.ident,
+                error_tag: tags.error_tag % anode.data.ident,
                 anode: wc.tn(anode),
                 min_tbin: 0,
                 max_tbin: 8500,
@@ -160,12 +176,12 @@ local img = {
         local active_planes = [[0,1,2],[0,1],[1,2],[0,2],],
         local masked_planes = [[],[2],[0],[1]],
         local iota = std.range(0,std.length(active_planes)-1),
-        local slicings = [$.slicing(anode, name+"_%d"%n, span, active_planes[n], masked_planes[n]) 
+        local slicings = [$.slicing(anode, name+"_%d"%n, span, active_planes[n], masked_planes[n])
             for n in iota],
         local tilings = [$.tiling(anode, name+"_%d"%n)
             for n in iota],
         local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
-        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_active_slicing_tiling"),
+        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_active_slicing_tiling_%s"%name),
     }.ret,
 
     //
@@ -179,7 +195,7 @@ local img = {
         local tilings = [$.tiling(anode, name+"_%d"%n)
             for n in iota],
         local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
-        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling"),
+        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling_%s"%name),
     }.ret,
 
     local clustering_policy = "uboone", // uboone, simple
@@ -277,18 +293,20 @@ local img = {
         local cs3 = self.solving("3rd"),
         local ld3 = self.local_deghosting(3,"3rd"),
 
-        ret: 
+        ret:
         if solving_type == "full"
         then g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc],"uboone-solving")
         else g.pipeline([bc, cs1, ld1, gc],"simple-solving"),
     }.ret,
 
-    dump :: function(anode, aname, drift_speed) {
+    dump :: function(anode, aname, drift_speed, output_dir='') {
+        local outname = if output_dir == '' then "clusters-apa-"+aname+".tar.gz"
+                        else output_dir+"/clusters-apa-"+aname+".tar.gz",
         local cs = g.pnode({
             type: "ClusterFileSink",
             name: "clustersink-"+aname,
             data: {
-                outname: "clusters-apa-"+aname+".tar.gz",
+                outname: outname,
                 format: "json", // json, numpy, dummy
             }
         }, nin=1, nout=0),
@@ -296,53 +314,46 @@ local img = {
     }.ret,
 };
 
-function() {
-    local imgpipe (anode, multi_slicing) =
+{
+    local imgpipe(anode, multi_slicing, output_dir='') =
     if multi_slicing == "single"
     then g.pipeline([
-            // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
-            // img.slicing(anode, anode.name, 1916, active_planes=[], masked_planes=[0,1],dummy_planes=[2]), // 109*22*4
-            img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
+            img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]),
             img.tiling(anode, anode.name),
             img.solving(anode, anode.name, "full"),
-            // img.clustering(anode, anode.name),
-            img.dump(anode, anode.name, params.lar.drift_speed),])
+            img.dump(anode, anode.name, params.lar.drift_speed, output_dir),])
     else if multi_slicing == "pdhd1"
     then g.pipeline([
-            // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
-            // img.slicing(anode, anode.name, 1916, active_planes=[], masked_planes=[0,1],dummy_planes=[2]), // 109*22*4
-            img.slicing(anode, anode.name, 4, active_planes=[0,1], masked_planes=[],dummy_planes=[2]), // 109*22*4
+            img.slicing(anode, anode.name, 4, active_planes=[0,1], masked_planes=[],dummy_planes=[2]),
             img.tiling(anode, anode.name),
             img.solving(anode, anode.name, "full"),
-            // img.clustering(anode, anode.name),
-            img.dump(anode, anode.name, params.lar.drift_speed),])
+            img.dump(anode, anode.name, params.lar.drift_speed, output_dir),])
     else if multi_slicing == "active"
     then g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
             img.solving(anode, anode.name+"-ms-active"),
-            // img.clustering(anode, anode.name+"-ms-active"),
-            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed)])
+            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed, output_dir)])
     else if multi_slicing == "masked"
     then g.pipeline([
             img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500),
             img.clustering(anode, anode.name+"-ms-masked"),
-            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed)])
+            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed, output_dir)])
     else {
         local active_fork = g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
             img.solving(anode, anode.name+"-ms-active", "full"),
-            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),
+            img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed, output_dir),
         ]),
         local masked_fork = g.pipeline([
-            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592)
+            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500),
             img.clustering(anode, anode.name+"-ms-masked"),
-            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),
+            img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed, output_dir),
         ]),
-        ret: g.fan.fanout("FrameFanout",[active_fork,masked_fork], "fan_active_masked"),
+        ret: g.fan.fanout("FrameFanout",[active_fork,masked_fork], "fan_active_masked-%s"%anode.name),
     }.ret,
 
-    per_anode(anode, pipe_type = "multi") :: g.pipeline([
+    per_anode(anode, pipe_type = "multi", output_dir='') :: g.pipeline([
         img.pre_proc(anode, anode.name),
-        imgpipe(anode, pipe_type),
-        ], "per_anode"),
+        imgpipe(anode, pipe_type, output_dir),
+    ], "per_anode"),
 }

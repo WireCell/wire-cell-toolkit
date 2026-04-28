@@ -7,13 +7,13 @@
 // Output is a Python numpy .npz file.
 
 local g = import 'pgraph.jsonnet';
-local f = import 'pgrapher/common/funcs.jsonnet';
+local f = import 'pgrapher/experiment/dune-vd/funcs.jsonnet';
 local wc = import 'wirecell.jsonnet';
-// Note: better switch to layers
-local dnnroi = import 'dnnroi.jsonnet';
+local hs = import "pgrapher/common/helpers.jsonnet";
 
 local io = import 'pgrapher/common/fileio.jsonnet';
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
+local params_maker = import 'pgrapher/experiment/dune-vd/params.jsonnet';
 local response_plane = std.extVar('response_plane')*wc.cm;
 local fcl_params = {
     G4RefTime: std.extVar('G4RefTime') * wc.us,
@@ -23,9 +23,6 @@ local fcl_params = {
     use_dnnroi: std.extVar('use_dnnroi'),
     process_crm: std.extVar('process_crm'),
 };
-local params_maker =
-if fcl_params.ncrm == 320 then import 'pgrapher/experiment/dune-vd/params-10kt.jsonnet'
-else import 'pgrapher/experiment/dune-vd/params.jsonnet';
 local params = params_maker(fcl_params) {
   lar: super.lar {
     // Longitudinal diffusion constant
@@ -49,9 +46,9 @@ local tools =
 if fcl_params.process_crm == "partial"
 then tools_all {anodes: [tools_all.anodes[n] for n in std.range(32, 79)]}
 else if fcl_params.process_crm == "test1"
-then tools_all {anodes: [tools_all.anodes[n] for n in [5]]}
+then tools_all {anodes: [tools_all.anodes[n] for n in [36]]}
 else if fcl_params.process_crm == "test2"
-then tools_all {anodes: [tools_all.anodes[n] for n in [4,5,8,9]]}
+then tools_all {anodes: [tools_all.anodes[n] for n in [36, 44]]}
 else tools_all;
 
 local sim_maker = import 'pgrapher/experiment/dune-vd/sim.jsonnet';
@@ -71,17 +68,8 @@ local output = 'wct-sim-ideal-sig.npz';
 local wcls_maker = import 'pgrapher/ui/wcls/nodes.jsonnet';
 local wcls = wcls_maker(params, tools);
 local wcls_input = {
-    depos: wcls.input.depos(name='', art_tag='IonAndScint'),
-    deposet: g.pnode({
-            type: 'wclsSimDepoSetSource',
-            name: "", 
-            data: {
-                model: "", 
-                scale: -1, //scale is -1 to correct a sign error in the SimDepoSource converter.
-                art_tag: "IonAndScint", //name of upstream art producer of depos "label:instance:processName"
-                assn_art_tag: "", 
-            },
-        }, nin=0, nout=1),
+  depos: wcls.input.depos(name='', art_tag='IonAndScint'),
+  // depos: wcls.input.depos(name='electron'),  // default art_tag="blopper"
 };
 
 // Collect all the wc/ls output converters for use below.  Note the
@@ -142,14 +130,14 @@ local wcls_output = {
 
 //local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;
-local setdrifter = g.pnode({
-            type: 'DepoSetDrifter',
-            data: {
-                drifter: "Drifter"
-            }
-        }, nin=1, nout=1,
-        uses=[drifter]);
 local bagger = sim.make_bagger();
+// local bagger = g.pnode({
+//   type: 'DepoBagger',
+//   name: 'bagger',
+//   data: {
+//     gate: [-250 * wc.us, 2750 * wc.us],  // fixed
+//   },
+// }, nin=1, nout=1);
 
 // signal plus noise pipelines
 // local sn_pipes = sim.signal_pipelines;
@@ -234,14 +222,14 @@ local multipass = [
                 // sinks.decon_pipe[n],
                 // sinks.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
              ] + if fcl_params.use_dnnroi then [
-                 dnnroi(tools.anodes[n], ts, output_scale=1.2),
+                 hs.dnnroi(tools.anodes[n], ts, output_scale=1.2),
                 //  sinks.dnnroi_pipe[n],
              ] else [],
              'multipass%d' % n)
   for n in anode_iota
 ];
 
-local f = import 'pgrapher/common/funcs.jsonnet';
+local f = import 'pgrapher/experiment/dune-vd/funcs.jsonnet';
 // local outtags = ['gauss%d' % anode.data.ident for anode in tools.anodes];
 local outtags = [];
 local tag_rules = {
@@ -254,20 +242,16 @@ local tag_rules = {
         + {['dnnsp%d' % anode.data.ident]: ['dnnsp%d' % anode.data.ident] for anode in tools.anodes},
 };
 local bi_manifold =
-    if fcl_params.process_crm == "test1"
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,1], [1,1], [1,1], [1,1], 'sn_mag', outtags, tag_rules)
-    else if fcl_params.process_crm == "test2"
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,4], [4,1], [1,4], [4,1], 'sn_mag', outtags, tag_rules)
-    else if fcl_params.ncrm == 36
+    if fcl_params.ncrm == 36
     then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,6], [6,6], [1,6], [6,6], 'sn_mag', outtags, tag_rules)
-    else if fcl_params.ncrm == 24
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,4], [4,6], [1,4], [4,6], 'sn_mag', outtags, tag_rules)
     else if fcl_params.ncrm == 48 || fcl_params.process_crm == "partial"
     then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,8], [8,6], [1,8], [8,6], 'sn_mag', outtags, tag_rules)
+    else if fcl_params.process_crm == "test1"
+    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,1], [1,1], [1,1], [1,1], 'sn_mag', outtags, tag_rules)
+    else if fcl_params.process_crm == "test2"
+    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,2], [2,1], [1,2], [2,1], 'sn_mag', outtags, tag_rules)
     else if fcl_params.ncrm == 112
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,8,16], [8,2,7], [1,8,16], [8,2,7], 'sn_mag', outtags, tag_rules)
-    else if fcl_params.ncrm == 320
-    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,2,8,32], [2,4,4,10], [1,2,8,32], [2,4,4,10], 'sn_mag', outtags, tag_rules);
+    then f.multifanpipe('DepoSetFanout', multipass, 'FrameFanin', [1,8,16], [8,2,7], [1,8,16], [8,2,7], 'sn_mag', outtags, tag_rules);
 
 local retagger = g.pnode({
   type: 'Retagger',
@@ -292,10 +276,10 @@ local retagger = g.pnode({
 local sink = sim.frame_sink;
 
 local graph = g.pipeline([wcls_input.depos, drifter, wcls_simchannel_sink, bagger, bi_manifold, retagger, wcls_output.sp_signals, sink]);
-// local graph = g.pipeline([wcls_input.deposet, setdrifter, wcls_simchannel_sink, bi_manifold, retagger, wcls_output.sp_signals, sink]);
+// local graph = g.pipeline([wcls_input.depos, drifter, wcls_simchannel_sink, bagger, multipass[36], retagger, wcls_output.sp_signals, sink]);
 
 local app = {
-    type: 'TbbFlow', //Pgrapher, TbbFlow
+    type: std.extVar('engine'), //Pgrapher, TbbFlow
     data: {
         edges: g.edges(graph),
     },

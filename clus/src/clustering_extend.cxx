@@ -370,7 +370,7 @@ static bool Clustering_4th_dead(
 
   geo_point_t p1;
   geo_point_t p2;
-  
+
   double dis = Find_Closest_Points(cluster_1, cluster_2, length_1, length_2, length_cut, p1, p2);
 
   // auto wpid_p1 = cluster_1.wpid(p1);
@@ -616,13 +616,12 @@ static void clustering_extend(
       live->set_default_scope(scope);
     }
   }
-
   // original algorithm ... (establish edges ... )
 
   int length_1_cut = 40*units::cm + num_try * 10*units::cm;
 
   if (flag==1) length_1_cut = 20*units::cm + num_try*10*units::cm; //prolong case
-  
+
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);
     if (!cluster_1->get_scope_filter(scope)) continue;
@@ -888,7 +887,7 @@ std::vector<std::pair<geo_point_t, const Blob*>> WireCell::Clus::Facade::get_str
         }
     }
 
-    // Sort by geo_point_t only (deterministic, no pointer dependency) then deduplicate
+    // Sort by geo_point_t only (deterministic, no pointer dependency) then deduplicate.
     std::sort(points.begin(), points.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
     points.erase(std::unique(points.begin(), points.end(),

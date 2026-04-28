@@ -2,7 +2,7 @@
 // generic set of parameters and overrides things specific to PDSP.
 
 local wc = import "wirecell.jsonnet";
-local base = import "pgrapher/common/params.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
 
 base {
     // This section will be overwritten in simparams.jsonnet
@@ -24,7 +24,7 @@ base {
         // start.  Garfield calcualtions start somewhere relative to
         // something, here's where that is made concrete.  This MUST
         // match what field response functions also used.
-        response_plane: 18.92*wc.cm, // relative to collection wires
+        response_plane: 18.1*wc.cm, // relative to collection wires
         local res_plane = 0.5*apa_w2w + self.response_plane,
 
         // The cathode plane is like the anode cut off plane.  Any
@@ -57,8 +57,8 @@ base {
         // rectangular solid.  Again "wirecell-util wires-info" helps
         // to choose something.
         bounds : {
-            tail: wc.point( 0.0, -150,   0.0, wc.cm),
-            head: wc.point(23.0,  150, 300.0, wc.cm),
+            tail: wc.point(-4.0, 0.0, 0.0, wc.m),
+            head: wc.point(+4.0, 6.1, 7.0, wc.m),
         }
     },
 
@@ -117,10 +117,11 @@ base {
         wires: "dunevdcrp2-wires-larsoft-v1.json.bz2",
 
         fields: [
-            "dunevd-resp-isoc3views-18d92.json.bz2",
+            // "dunevdcrp2-resp-high-setting.json.bz2",
+            "dunevdcrp2-FR-fixcoll-adjustind.json.bz2",
         ],
 
-        noise: "protodune-noise-spectra-v1.json.bz2",
+        noise: "pdvd-top-noise-spectra-v2.json.bz2",
 
 
         chresp: null,

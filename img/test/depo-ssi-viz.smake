@@ -100,7 +100,7 @@ rule plot_drifted:
     output:
         f"{pltdir}/depos-drifted-i{{index}}-{{plotname}}.pdf"
     shell: """
-    wirecell-gen plot-depos -p {wildcards.plotname} -i{wildcards.index} {input} {output}
+    wirecell-gen plot-depos -p {wildcards.plotname} -i{wildcards.index}  -o {output} {input}
     """
 rule plot_interned:
     input:
@@ -108,7 +108,7 @@ rule plot_interned:
     output:
         f"{pltdir}/depos-interned-i{{index}}-{{plotname}}.pdf"
     shell: """
-    wirecell-gen plot-depos -p {wildcards.plotname} -i{wildcards.index} {input} {output}
+    wirecell-gen plot-depos -p {wildcards.plotname} -i{wildcards.index}  -o {output} {input}
     """
 
 rule plot_depos_all:
@@ -116,7 +116,7 @@ rule plot_depos_all:
         expand(rules.plot_drifted.output, dname=depofiles,
                index=event_indices, plotname=["tyqscat", "tzqscat"]),
         expand(rules.plot_interned.output, dname=depofiles,
-               index=event_indices, plotname=["qxz", "qzy", "qxy"])
+               index=event_indices, plotname=[ "qzy"])
 
 rule plot_adc_frames:
     input:
@@ -334,7 +334,6 @@ rule all:
     input:
         expand(rules.dotify.output, dname=depofiles),
         rules.pv_all.input,
-        rules.plot_all.input
 
         
 

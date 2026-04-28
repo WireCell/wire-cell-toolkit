@@ -17,6 +17,10 @@ namespace WireCell {
         IChannel::vector plane_channels(IAnodePlane::pointer anode,
                                         int wire_plane_index);
 
+        IChannel::vector plane_channels_for_face(IAnodePlane::pointer anode,
+                                               int wire_plane_index,
+                                               int target_face);
+
         struct WirePlaneInfo {
             int start_index;
             int end_index;

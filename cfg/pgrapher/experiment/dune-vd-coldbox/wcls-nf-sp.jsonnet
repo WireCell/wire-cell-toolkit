@@ -60,7 +60,7 @@ local wcls_input = {
     type: 'wclsCookedFrameSource',
     name: '',
     data: {
-      art_tag: raw_input_label,
+      recobwire_tags: [raw_input_label], summary_tags: [''], trace_tags: [''],
       frame_tags: ['orig'],  // this is a WCT designator
       // nticks: params.daq.nticks,
     },

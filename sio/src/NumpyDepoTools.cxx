@@ -13,6 +13,7 @@ bool Sio::NumpyDepoTools::load(const std::string& fname, int count,
     // match names used by NDS
     const std::string data_name = String::format("depo_data_%d", count);
     const std::string info_name = String::format("depo_info_%d", count);
+    std::cout<<fname<<" "<<data_name<<" "<<info_name<<std::endl;
 
     Array::array_xxf data;
     try {

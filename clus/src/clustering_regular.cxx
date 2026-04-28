@@ -67,11 +67,6 @@ static bool Clustering_1st_round(
   geo_point_t p1;
   geo_point_t p2;
 
-  // debug
-    // bool flag_print = false;
-    // if (fabs(length_1 + length_2 - 12.9601*units::cm - 83.8829*units::cm) < 0.3*units::cm 
-    // && fabs(fabs(length_1-length_2) - fabs(12.9601*units::cm - 83.8829*units::cm)) < 0.3*units::cm) flag_print =true;
-
   double dis = WireCell::Clus::Facade::Find_Closest_Points(cluster1, cluster2,
                                                                  length_1, length_2,
                                                                  length_cut, p1,p2);
@@ -79,7 +74,6 @@ static bool Clustering_1st_round(
   auto wpid_p1 = cluster1.wpid(p1);
   auto wpid_p2 = cluster2.wpid(p2);
   auto wpid_ps = get_wireplaneid(p1, wpid_p1, p2, wpid_p2, dv);
-
 
   if (dis < length_cut){
     bool flag_para = false;
@@ -478,7 +472,6 @@ static void clustering_regular(
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
     if (live->get_default_scope().hash() != scope.hash()) {
       live->set_default_scope(scope);
-      // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
    }
   }
 

@@ -1,5 +1,5 @@
 local g = import "pgraph.jsonnet";
-local f = import "pgrapher/common/funcs.jsonnet";
+local f = import "pgrapher/experiment/dune-vd/funcs.jsonnet";
 local wc = import "wirecell.jsonnet";
 
 local io = import 'pgrapher/common/fileio.jsonnet';

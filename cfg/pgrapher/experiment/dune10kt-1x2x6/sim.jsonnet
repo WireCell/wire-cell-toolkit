@@ -55,21 +55,31 @@ function(params, tools) {
         },
         uses: [anode, tools.dft] + if std.type(csdb) == "null" then [] else [csdb],
     },
-    local noise_models = [make_noise_model(anode) for anode in tools.anodes],
 
+    local mega_anode = {
+        type: 'MegaAnodePlane',
+        name: 'meganodes',
+        data: {
+            anodes_tn: [wc.tn(anode) for anode in tools.anodes],
+        },
+    },
 
-    local add_noise = function(model) g.pnode({
+    local add_noise = function(model, name="") g.pnode({
         type: "AddNoise",
-        name: "addnoise%s"%[model.name],
+        name: "addnoise%s"%[name],
         data: {
             rng: wc.tn(tools.random),
             dft: wc.tn(tools.dft),
             model: wc.tn(model),
-	    nsamples: params.daq.nticks,
+            nsamples: params.daq.nticks,
             replacement_percentage: 0.02, // random optimization
         }}, nin=1, nout=1, uses=[tools.random, tools.dft, model]),
 
-    local noises = [add_noise(model) for model in noise_models],
+    // TODO: make this an option?
+    local use_shared_model = true,
+    local noises = if use_shared_model == true
+    then [add_noise(make_noise_model(mega_anode), anode.name) for anode in tools.anodes]
+    else [add_noise(make_noise_model(anode), anode.name) for anode in tools.anodes],
     
     local outtags = ["orig%d"%n for n in std.range(0, nanodes-1)],
 

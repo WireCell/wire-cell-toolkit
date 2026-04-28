@@ -75,6 +75,7 @@ function(params, tools, override = {}) {
 
       // frame tags
       wiener_tag: 'wiener%d' % anode.data.ident,
+      wiener_threshold_tag: 'threshold%d' % anode.data.ident,
       gauss_tag: 'gauss%d' % anode.data.ident,
 
       use_roi_debug_mode: false,

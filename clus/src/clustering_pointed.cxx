@@ -7,6 +7,7 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/PointTree.h"
+#include "WireCellUtil/Units.h"
 
 #include <vector>
 
@@ -41,7 +42,6 @@ public:
     }
 
     void visit(Ensemble& ensemble) const {
-
         for (const auto& name : m_groupings) {
             auto got = ensemble.with_name(name);
             if (got.empty()) { continue; }
@@ -58,7 +58,7 @@ public:
                         doomed_blobs.push_back(blob);
                     }
                 }
-                
+
                 for (auto* dead : doomed_blobs) {
                     cluster->destroy_child(dead);
                 }

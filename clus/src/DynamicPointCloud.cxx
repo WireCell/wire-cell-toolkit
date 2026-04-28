@@ -82,7 +82,8 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     if (points.empty()) {
         return;
     }
-    
+   
+    // std::cerr << "DEBUG: add_points called with " << points.size() << " points" << std::endl;
     // Preallocate memory and get original size
     size_t original_size = m_points.size();
     m_points.reserve(original_size + points.size());
@@ -104,6 +105,11 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     // Prepare maps to store 2D points for each plane and track local-to-global mappings
     std::map<int, NFKDVec::Tree<double>::points_type> planes_pts;
     std::map<int, std::vector<size_t>> planes_global_indices;
+    // Debug counters
+    int valid_points = 0;
+    int invalid_wpid_points = 0;
+    std::map<int, int> plane_point_counts; // Count points per plane
+    std::map<std::string, int> wpid_counts; // Count points per wpid
     
     // Extract data and prepare for batch processing
     for (size_t i = 0; i < points.size(); ++i) {
@@ -117,6 +123,8 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
         
         // Check 2D projection validity
         if (pt.x_2d.size() != 3 || pt.y_2d.size() != 3) {
+            // std::cerr << "DEBUG: Point " << i << " has invalid 2D projection size: x_2d=" 
+            //          << pt.x_2d.size() << ", y_2d=" << pt.y_2d.size() << std::endl;
             raise<RuntimeError>("DynamicPointCloud: unexpected 2D projection size x_2d %d y_2d %d", 
                                pt.x_2d.size(), pt.y_2d.size());
         }
@@ -124,12 +132,28 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
         // Skip 2D KD if wpid is not valid
         WirePlaneId wpid_volume(pt.wpid);
         if (wpid_volume.face() == -1 || wpid_volume.apa() == -1) {
+                 invalid_wpid_points++;
+            // std::cerr << "DEBUG: Point " << i << " has invalid wpid: " << wpid_volume.name() 
+            //          << " (face=" << wpid_volume.face() << ", apa=" << wpid_volume.apa() << ")" << std::endl;
             continue;
         }
         
+        valid_points++;
+        wpid_counts[wpid_volume.name()]++;
+
         // Process 2D points for each plane
         for (size_t pindex = 0; pindex < 3; ++pindex) {
 
+            plane_point_counts[pindex] += pt.x_2d[pindex].size();
+            
+            // Debug specific to plane 2 (W-layer)
+            // if (pindex == 2) {
+            //     std::cerr << "DEBUG: Point " << i << " plane 2 (W-layer) processing:" << std::endl;
+            //     std::cerr << "  wpid: " << wpid_volume.name() << std::endl;
+            //     std::cerr << "  x_2d[2].size(): " << pt.x_2d[pindex].size() << std::endl;
+            //     std::cerr << "  y_2d[2].size(): " << pt.y_2d[pindex].size() << std::endl;
+            //     std::cerr << "  wpid_2d[2].size(): " << pt.wpid_2d[pindex].size() << std::endl;
+            // }
             // std::cout << "Test: " << pindex << " " << pt.x_2d[pindex].size() << " " << pt.y_2d[pindex].size() << " " << pt.wpid_2d[pindex].size() << std::endl;
 
             // Add 2D point to plane data
@@ -137,12 +161,23 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
                 WirePlaneId wpid_2d(pt.wpid_2d[pindex].at(j));
                 WirePlaneId wpid_plane(iplane2layer[pindex], wpid_2d.face(), wpid_2d.apa());
                 int key = wpid_plane.ident();
+                                // Debug for plane 2 (W-layer)
+                // if (pindex == 2) {
+                //     std::cerr << "    2D point " << j << ":" << std::endl;
+                //     std::cerr << "      wpid_2d: " << wpid_2d.name() << std::endl;
+                //     std::cerr << "      wpid_plane: " << wpid_plane.name() << " (ident: " << key << ")" << std::endl;
+                //     std::cerr << "      x_2d: " << pt.x_2d[pindex][j] << ", y_2d: " << pt.y_2d[pindex][j] << std::endl;
+                // }
+
                 // Initialize plane data structures if not exists
                 if (planes_pts.find(key) == planes_pts.end()) {
                     planes_pts[key] = NFKDVec::Tree<double>::points_type(2);
                     planes_pts[key][0].reserve(points.size());
                     planes_pts[key][1].reserve(points.size());
                     planes_global_indices[key].reserve(points.size());
+                    // if (pindex == 2) {
+                    //     std::cerr << "      Created new plane data for wpid: " << wpid_plane.name() << std::endl;
+                    // }
                 }
                 planes_pts[key][0].push_back(pt.x_2d[pindex][j]);
                 planes_pts[key][1].push_back(pt.y_2d[pindex][j]);
@@ -154,14 +189,26 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     
     // Batch append 3D points
     kd3d.append(pts3d);
-    
+        // Print debug summary
+    // std::cerr << "DEBUG: add_points summary:" << std::endl;
+    // std::cerr << "  Valid points: " << valid_points << std::endl;
+    // std::cerr << "  Invalid wpid points: " << invalid_wpid_points << std::endl;
+    // std::cerr << "  Points per plane:" << std::endl;
+    // for (const auto& [plane, count] : plane_point_counts) {
+    //     std::cerr << "    Plane " << plane << " (" << (plane == 0 ? "U" : plane == 1 ? "V" : "W") 
+    //              << "-layer): " << count << " 2D points" << std::endl;
+    // }
+    // std::cerr << "  WirePlaneId distribution:" << std::endl;
+    // for (const auto& [wpid_name, count] : wpid_counts) {
+    //     std::cerr << "    " << wpid_name << ": " << count << " points" << std::endl;
+    // }
     
     // Create a reverse mapping from layer to iplane based on the existing iplane2layer array
     std::unordered_map<WirePlaneLayer_t, int> layer2iplane;
     for (int i = 0; i < 3; ++i) {
         layer2iplane[iplane2layer[i]] = i;
     }
-
+// std::cerr << "DEBUG: Processing " << planes_pts.size() << " different plane combinations:" << std::endl;
 
     // Batch append 2D points for each plane
     for (const auto& [key, pts] : planes_pts) {
@@ -169,6 +216,10 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
         int pindex = layer2iplane[wpid_plane.layer()];
         auto& kd2d = this->kd2d(pindex, wpid_plane.face(), wpid_plane.apa());
         
+// std::cerr << "  Processing wpid: " << wpid_plane.name() 
+//                  << " (plane=" << pindex << ", face=" << wpid_plane.face() 
+//                  << ", apa=" << wpid_plane.apa() << ") - " << pts[0].size() << " points" << std::endl;
+
         // Get the starting index for the new points
         size_t start_idx = kd2d.npoints();
         
@@ -183,8 +234,11 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
             m_kd2d_index_l2g[key][local_idx] = global_idx;
             m_kd2d_index_g2l[key][global_idx].push_back(local_idx); // save things to a vector
         }
+        //  std::cerr << "    KD-tree now has " << kd2d.npoints() << " total points" << std::endl;
     }
+    // std::cerr << "DEBUG: add_points completed" << std::endl;
 }
+
 
 geo_point_t DynamicPointCloud::get_center_point_radius(const geo_point_t &p_test, const double radius) const{
     auto &kd3d = this->kd3d();
@@ -211,8 +265,6 @@ geo_point_t DynamicPointCloud::get_center_point_radius(const geo_point_t &p_test
     
     return center;
 }
-
-
 
 
 std::vector<std::tuple<double, const Cluster *, size_t>>
@@ -284,6 +336,7 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
 {
     // Create WirePlaneId only once
     const WirePlaneId wpid_volume(kAllLayers, face, apa);
+    // std::cout<<"XN::debug: kALLLayers = "<<kAllLayers<<std::endl;
     
     // Get KD tree and mapping - only need l2g here, g2l isn't used
     auto &kd2d = this->kd2d(plane, face, apa);
@@ -308,6 +361,58 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
 
     // Early return for empty results
     if (results.empty()) {
+   // Print detailed debugging information
+        // std::cerr << "DEBUG: get_closest_2d_point_info - Empty results!" << std::endl;
+        // std::cerr << "  Input parameters:" << std::endl;
+        // std::cerr << "    Query point: (" << p.x() << ", " << p.y() << ", " << p.z() << ")" << std::endl;
+        // std::cerr << "    Plane: " << plane << ", Face: " << face << ", APA: " << apa << std::endl;
+        // std::cerr << "    WirePlaneId: " << wpid_volume.name() << " (ident: " << wpid_volume.ident() << ")" << std::endl;
+        // std::cerr << "  Projection details:" << std::endl;
+        // std::cerr << "    Angle used: " << angle << " radians (" << (angle * 180.0 / M_PI) << " degrees)" << std::endl;
+        // std::cerr << "    Projected Y: " << projected_y << std::endl;
+        // std::cerr << "    2D query point: (" << query[0] << ", " << query[1] << ")" << std::endl;
+        // std::cerr << "  KD-tree status:" << std::endl;
+        // std::cerr << "    KD2D points count: " << kd2d.npoints() << std::endl;
+        // std::cerr << "    L2G mapping size: " << l2g.size() << std::endl;
+        // std::cerr << "    Total m_points size: " << m_points.size() << std::endl;
+        
+        // // Check if KD-tree is empty or query point is valid
+        // if (kd2d.npoints() == 0) {
+        //     std::cerr << "    WARNING: KD-tree for this plane/face/apa combination is empty!" << std::endl;
+            
+        //     // Print available KD-trees to see what data actually exists
+        //     std::cerr << "  Available KD-trees in m_kd2d:" << std::endl;
+        //     for (const auto& [wpid_ident, kd_ptr] : m_kd2d) {
+        //         WirePlaneId available_wpid(wpid_ident);
+        //         std::cerr << "    WirePlaneId: " << available_wpid.name() 
+        //                  << " (ident: " << wpid_ident 
+        //                  << ", plane: " << available_wpid.index()
+        //                  << ", face: " << available_wpid.face()
+        //                  << ", apa: " << available_wpid.apa()
+        //                  << ", layer: " << available_wpid.layer()
+        //                  << ") - Points: " << kd_ptr->npoints() << std::endl;
+        //     }
+            
+        //     // Check specifically for plane 2 variations
+        //     std::cerr << "  Checking for plane 2 (W-layer) variations:" << std::endl;
+        //     for (int test_face = 0; test_face <= 1; test_face++) {
+        //         for (int test_apa = 0; test_apa <= 5; test_apa++) {
+        //             WirePlaneId test_wpid(kWlayer, test_face, test_apa);
+        //             auto test_iter = m_kd2d.find(test_wpid.ident());
+        //             if (test_iter != m_kd2d.end() && test_iter->second->npoints() > 0) {
+        //                 std::cerr << "    Found plane 2 data at " << test_wpid.name() 
+        //                          << " with " << test_iter->second->npoints() << " points" << std::endl;
+        //             }
+        //         }
+        //     }
+        // }
+        
+        // // Check for NaN or infinite values in query
+        // if (!std::isfinite(query[0]) || !std::isfinite(query[1])) {
+        //     std::cerr << "    WARNING: Query point contains non-finite values!" << std::endl;
+        // }
+        
+        // std::cerr << "  Returning invalid result: (-1.0, nullptr, -1)" << std::endl;
         return std::make_tuple(-1.0, nullptr, static_cast<size_t>(-1));
     }
     
@@ -497,6 +602,7 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
         
         if (flag_wrap){
             fill_wrap_points(cluster, pt, WirePlaneId(wpid), point.x_2d, point.y_2d, point.wpid_2d);
+            // std::cout<<"debug: fill_wrap_points called for wpid "<<wpid.name()<<" "<<WirePlaneId(wpid)<<std::endl;
         }else{
             for (size_t pindex = 0; pindex < 3; ++pindex) {
                 point.x_2d[pindex].push_back(point.x);
@@ -514,6 +620,7 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
 
     return dpc_points;
 }
+
 
 std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_steiner(const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap){
     if (!cluster) {
@@ -541,19 +648,19 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_stein
     const auto& y_coords = y_ptr->elements<double>();
     const auto& z_coords = z_ptr->elements<double>();
     const auto& wpid_array = wpid_ptr->elements<WirePlaneId>();
-    
+
     const size_t num_points = x_coords.size();
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
     dpc_points.reserve(num_points);
 
     // Cache commonly referenced WPIDs and their params to avoid map lookups
     std::unordered_map<int, std::tuple<geo_point_t, double, double, double>> cached_params;
-    
+
     for (size_t ipt = 0; ipt < num_points; ++ipt) {
         geo_point_t pt(x_coords[ipt], y_coords[ipt], z_coords[ipt]);
         const auto wpid = wpid_array[ipt];
         int wpid_ident = wpid.ident();
-        
+
         // Check cache first, then populate if needed
         auto param_it = cached_params.find(wpid_ident);
         if (param_it == cached_params.end()) {
@@ -563,7 +670,7 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_stein
             }
             param_it = cached_params.emplace(wpid_ident, wpid_it->second).first;
         }
-        
+
         const auto &[drift_dir, angle_u, angle_v, angle_w] = param_it->second;
         const double angle_uvw[3] = {angle_u, angle_v, angle_w};
 
@@ -574,12 +681,12 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_stein
         point.wpid = wpid.ident();
         point.cluster = cluster;
         point.blob = nullptr;  // Steiner points don't have blob associations
-        
+
         // Pre-allocate vectors with correct size
         point.x_2d.resize(3);
         point.y_2d.resize(3);
         point.wpid_2d.resize(3);
-        
+
         if (flag_wrap){
             fill_wrap_points(cluster, pt, wpid, point.x_2d, point.y_2d, point.wpid_2d);
         }else{
@@ -601,8 +708,8 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_stein
 }
 
 
-std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const Cluster *cluster, const IDetectorVolumes::pointer dv, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, std::vector<std::pair<geo_point_t,WirePlaneId>>& points_info, bool flag_wrap){
-     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_direct(const Cluster *cluster, const IDetectorVolumes::pointer dv, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, std::vector<std::pair<geo_point_t,WirePlaneId>>& points_info, bool flag_wrap){
+    std::vector<DynamicPointCloud::DPCPoint> dpc_points;
 
     if (!cluster) {
         SPDLOG_WARN("make_points_cluster_skeleton: null cluster return empty points");
@@ -612,44 +719,30 @@ std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const
 
     // Cache for angle values per wpid to avoid repeated tuple unpacking
     std::unordered_map<int, std::array<double, 3>> wpid_angles_cache;
-    
+
     for (auto& [test_point, wpid_test_point] : points_info) {
-        // std::cout << test_point << " " <<  wpid_test_point << std::endl;
-        // Skip points outside the detector volume (apa=-1) or with unknown wpid
         if (wpid_test_point.apa() == -1) continue;
         if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
         }
-        
-        // Get or compute angle values for this wpid
-        // std::array<double, 3> angle_uvw;
-        // auto cache_it = wpid_angles_cache.find(wpid_test_point.ident());
-        // if (cache_it == wpid_angles_cache.end()) {
-        //     const auto& [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid_test_point);
-        //     angle_uvw = {angle_u, angle_v, angle_w};
-        //     wpid_angles_cache[wpid_test_point.ident()] = angle_uvw;
-        // } else {
-        //     angle_uvw = cache_it->second;
-        // }
 
         DynamicPointCloud::DPCPoint point;
-        point.wpid = wpid_test_point.ident(); // Direct assignment without recreation
+        point.wpid = wpid_test_point.ident();
         point.cluster = cluster;
         point.blob = nullptr;
-            
+
         // Pre-allocate and initialize vectors
         point.x_2d.resize(3);
         point.y_2d.resize(3);
         point.wpid_2d.resize(3);
         point.wind = wind_bogus;
         point.dist_cut = dist_cut_bogus;
-            
+
         point.x = test_point.x();
         point.y = test_point.y();
         point.z = test_point.z();
 
         if (wpid_test_point.apa() != -1) {
-            // Get cached angles if available
             std::array<double, 3> temp_angle_uvw;
             auto cache_it = wpid_angles_cache.find(wpid_test_point.ident());
             if (cache_it == wpid_angles_cache.end()) {
@@ -660,32 +753,21 @@ std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const
                 temp_angle_uvw = cache_it->second;
             }
 
-
             if (flag_wrap){
-                fill_wrap_points(cluster, test_point, wpid_test_point,  point.x_2d, point.y_2d, point.wpid_2d);
+                fill_wrap_points(cluster, test_point, wpid_test_point, point.x_2d, point.y_2d, point.wpid_2d);
             }else{
                 for (size_t pindex = 0; pindex < 3; ++pindex) {
                     point.x_2d[pindex].push_back(point.x);
-                    point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z - 
+                    point.y_2d[pindex].push_back(cos(temp_angle_uvw[pindex]) * point.z -
                                         sin(temp_angle_uvw[pindex]) * point.y);
                     point.wpid_2d[pindex].push_back(wpid_test_point.ident());
-
                 }
             }
-            // std::cout << flag_wrap << " " << point.x << " " << point.y << " " << point.z << std::endl;
-            // std::cout << temp_angle_uvw[0] << " " << temp_angle_uvw[1] << " " << temp_angle_uvw[2] << " " << point.x_2d[0].back() << " " << point.y_2d[0].back() << " " << point.y_2d[1].back() << " " << point.y_2d[2].back() << std::endl;
-
-        } 
-        // else {
-            // point.x_2d = {-1e12, -1e12, -1e12};
-            // point.y_2d = {-1e12, -1e12, -1e12};
-        // }
+        }
         dpc_points.push_back(std::move(point));
     }
-   
-   
-    return dpc_points;
 
+    return dpc_points;
 }
 
 
@@ -957,24 +1039,28 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
         const double angle = map_angles.at(face)[pind];
         const double pitch = map_pitch_mags.at(face).at(pind);
         const double center = map_proj_centers.at(face).at(pind);
+        // std::cout<<pind<<" face = "<<face<<" center = "<< center<<" angle = "<<angle<<" pitch = "<<pitch<<std::endl;
+        // std::cout<<"center face 0:"<<map_proj_centers.at(0).at(2)<<" angle face 0:"<<map_angles.at(0)[2]<<" pitch face 0:"<<map_pitch_mags.at(0).at(2)<<std::endl;
+        // std::cout<<"center face 1:"<<map_proj_centers.at(1).at(2)<<" angle face 1:"<<map_angles.at(1)[2]<<" pitch face 1:"<<map_pitch_mags.at(1).at(2)<<std::endl;
         int wind = point2wind(point, angle, pitch, center);
+        // std::cout<<" wind_ori:"<<wind<<std::endl; //max should be 1147?
         if (wind < 0) wind = 0;
         auto plane_ptr =iface->plane(pind);
         const auto& wires_all = plane_ptr->wires();
-        size_t max_wind = wires_all.size();
+       size_t max_wind = wires_all.size(); 
         // size_t max_wind = grouping->get_plane_channels(apa, face, iplane2layer[pind]).size() - 1;
         if ((size_t)wind > max_wind) wind = max_wind;
-        // get channel ...
         auto wire = wires_all[wind];
         int channel_number = wire->channel();
         // auto channel = grouping->get_plane_channel_wind(apa, face, iplane2layer[pind], wind);
 
+        // std::cout<<"point face:"<<face<<" apa:"<<apa<<" pid:"<<pind<<" wind:"<<wind<<" channel:"<<channel_number<<std::endl;
         // get all wires
-        // auto wires = anode->wires(channel->ident());
         auto wires = anode->wires(channel_number);
         for (const auto &wire : wires) {
             auto wire_wpid = wire->planeid();
-           
+            // std::cout<<"face:"<<wire_wpid.face()<<" apa:"<<wire_wpid.apa()<<" wind:"<<wire->index()<<" channel:"<<channel->ident()<<std::endl;
+            // std::cout<<"face:"<<wire_wpid.face()<<" apa:"<<wire_wpid.apa()<<" wind:"<<wire->index()<<" channel:"<<channel_number<<std::endl;
             // std::cout << "Test: " << map_time_offset.size() <<  " " << map_time_offset.begin()->first << " " << wire_wpid.face() << std::endl;
             p_x[pind].push_back(time2drift(anode->faces()[wire_wpid.face()], map_time_offset.at(wire_wpid.face()), map_drift_speed.at(wire_wpid.face()), time));
             if (map_angles.find(wire_wpid.face()) == map_angles.end()) {
@@ -984,19 +1070,12 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
                 angles.push_back(std::get<1>(wire_angles1));
                 angles.push_back(std::get<2>(wire_angles1));
             }
-            
-            // Check if this wire is the same as the original wire (wire index, apa, face are all the same)
-            if (wire_wpid.apa() == wpid.apa() && wire_wpid.face() == wpid.face() && wire->index() == wind) {
-                // Use the original wire's angles to calculate p_y
-                p_y[pind].push_back(cos(angles[pind]) * point.z() - sin(angles[pind]) * point.y());
-            } else {
-                // Use the current algorithm
-                p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
-            }
+            p_y[pind].push_back(wind2point2dproj(wind, map_angles.at(wire_wpid.face()).at(pind), map_pitch_mags.at(wire_wpid.face()).at(pind), map_proj_centers.at(wire_wpid.face()).at(pind)));
             p_wpid[pind].push_back(WirePlaneId(kAllLayers, wire_wpid.face(), wire_wpid.apa()).ident());
-
-
+            // p_wpid[pind].push_back(WirePlaneId(kAllLayers, face, wire_wpid.apa()).ident());
         }
+        // std::cout<<std::endl;
     }
+    // exit(0);
     
 }

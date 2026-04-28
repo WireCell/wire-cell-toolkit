@@ -207,6 +207,7 @@ bool Img::BlobDepoFill::operator()(const input_tuple_type& intup,
         ++m_count;
         return true;
     }
+    std::cout<<"call blobdepofill here"<<std::endl;
     log->debug("call={} fill cluster {} with deposet {}",
                m_count, icluster->ident(), ideposet->ident());
 

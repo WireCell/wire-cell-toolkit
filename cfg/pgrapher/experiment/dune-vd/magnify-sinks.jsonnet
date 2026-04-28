@@ -67,7 +67,7 @@ function(tools, outputfile) {
         output_filename: outputfile,
         root_file_mode: 'UPDATE',
         frames: ['tight_lf%d' %anode.data.ident, 'loose_lf%d' %anode.data.ident, 'cleanup_roi%d' %anode.data.ident,
-                 'break_roi_1st%d' %anode.data.ident, 'break_roi_2nd%d' %anode.data.ident, 'decon_charge%d' %anode.data.ident,
+                 'break_roi_1st%d' %anode.data.ident, 'break_roi_2nd%d' %anode.data.ident,
                  'shrink_roi%d' %anode.data.ident, 'extend_roi%d' %anode.data.ident, 'mp2_roi%d' %anode.data.ident, 'mp3_roi%d' %anode.data.ident],
         trace_has_tag: true,
         anode: wc.tn(anode),
@@ -83,8 +83,8 @@ function(tools, outputfile) {
       data: {
         output_filename: outputfile,
         root_file_mode: 'UPDATE',
-        summaries: ['wiener%d' % anode.data.ident],  // note that if tag set, each apa should have a tag set for FrameFanin
-        summary_operator: { ['wiener%d' % anode.data.ident]: 'set' },  // []: obj comprehension
+        summaries: ['threshold%d' % anode.data.ident],  // note that if tag set, each apa should have a tag set for FrameFanin
+        summary_operator: { ['threshold%d' % anode.data.ident]: 'set' },  // []: obj comprehension
         anode: wc.tn(anode),
       },
     }, nin=1, nout=1)

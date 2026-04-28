@@ -1645,54 +1645,66 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     // THE MAIN LOOP
     for (const auto& cmeth : m_pipeline) {
+
+
         cmeth.meth->visit(ensemble);
+        std::cerr << "DEBUG MABC after visit: " << cmeth.name << "\n"; std::cerr.flush();
         perf.dump(cmeth.name, ensemble);
+        std::cerr << "DEBUG MABC after perf.dump: " << cmeth.name << "\n"; std::cerr.flush();
 
         for (auto* grouping : ensemble.children()) {
+            std::cerr << "DEBUG MABC enumerate_idents: " << cmeth.name << " grouping=" << grouping->get_name() << "\n"; std::cerr.flush();
             grouping->enumerate_idents(m_clusters_id_order);
         }
+        std::cerr << "DEBUG MABC after enumerate_idents: " << cmeth.name << "\n"; std::cerr.flush();
 
         // Dump bee points right after specific visitor runs
+        std::cerr << "DEBUG MABC line1661: " << cmeth.name << "\n"; std::cerr.flush();
         for (const auto& config : m_bee_points_configs) {
             if (config.name == "img") continue;
             if (config.visitor.empty() || config.visitor != cmeth.name) continue;
 
+            std::cerr << "DEBUG MABC line1665 bee_pts config.name=" << config.name << " config.grouping=" << config.grouping << "\n"; std::cerr.flush();
             auto gs = ensemble.with_name(config.grouping);
             if (gs.empty()) {
                 continue;
             }
 
             // Check if this visitor produced a PRGraph that we should save
+            std::cerr << "DEBUG MABC line1672 get_pr_graph\n"; std::cerr.flush();
             auto pr_graph = gs[0]->get_pr_graph();
-
-            // std::cout << "Test: Visitor: " << cmeth.name << " Grouping: " << config.grouping << " " << pr_graph << std::endl;
+            std::cerr << "DEBUG MABC line1673 pr_graph=" << (pr_graph?"yes":"no") << "\n"; std::cerr.flush();
 
             if (pr_graph) {
                 if (config.use_graph_vertices) {
                     fill_bee_vertices_from_pr_graph(config.name, *gs[0]);
                 } else {
-                    // Fill bee points from PRGraph (for track trajectories)
                     fill_bee_points_from_pr_graph(config.name, *gs[0]);
                 }
-                // std::cout << "Filled bee points from PR graph for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
             } else {
-                // Fill bee points from clusters normally
+                std::cerr << "DEBUG MABC line1684 fill_bee_points\n"; std::cerr.flush();
                 fill_bee_points(config.name, *gs[0]);
-                // std::cout << "Filled bee points from clusters for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
+                std::cerr << "DEBUG MABC line1686 fill_bee_points done\n"; std::cerr.flush();
             }
         }
+        std::cerr << "DEBUG MABC line1690 bee_pts loop done\n"; std::cerr.flush();
 
         // Particle-flow dump triggered by the same visitor
         for (const auto& pf_cfg : m_bee_pf_configs) {
             if (pf_cfg.visitor.empty() || pf_cfg.visitor != cmeth.name) continue;
+            std::cerr << "DEBUG MABC line1693 pf_cfg\n"; std::cerr.flush();
             auto pf_gs = ensemble.with_name(pf_cfg.grouping);
             if (pf_gs.empty()) continue;
             const auto& pf_grouping = *pf_gs[0];
             auto tf = pf_grouping.get_track_fitting();
             if (!tf) continue;
+            std::cerr << "DEBUG MABC line1699 fill_bee_pf_tree\n"; std::cerr.flush();
             fill_bee_pf_tree(pf_cfg, pf_grouping);
         }
+        std::cerr << "DEBUG MABC pipeline iteration done: " << cmeth.name << "\n"; std::cerr.flush();
+        std::cerr << "DEBUG MABC before loop-end brace\n"; std::cerr.flush();
     }
+    std::cerr << "DEBUG MABC pipeline loop done\n"; std::cerr.flush();
 
     //
     // At this point, the ensemble may have more or fewer groupings just "live"
@@ -1700,7 +1712,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // original "live" and "dead" still exist and with their original facades.
     // Famous last words....
     //
-    
+    std::cerr << "DEBUG MABC post-pipeline fill_bee_points loop\n"; std::cerr.flush();
 
     // Fill all configured bee points sets (except those with visitor-specific handling)
     for (const auto& config : m_bee_points_configs) {
@@ -1713,9 +1725,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         if (gs.empty()) {
             continue;
         }
+        std::cerr << "DEBUG MABC fill_bee_points: " << config.name << "\n"; std::cerr.flush();
         fill_bee_points(config.name, *gs[0]);
 
     }
+    std::cerr << "DEBUG MABC fill_bee_points done\n"; std::cerr.flush();
     perf("dump live clusters to bee");
 
     if (m_grouping2file_prefix.size()) {
