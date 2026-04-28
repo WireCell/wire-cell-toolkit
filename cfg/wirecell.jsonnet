@@ -388,9 +388,27 @@
             value: 0.0, lobin: br[0], hibin: br[1],
         } for mf in meanfreqs],
 
+        // Like freqmasks but also masks the negative-frequency mirror of each
+        // notch.  For a real-valued FFT of length nsamples, positive-frequency
+        // bin k has its conjugate mirror at bin (nsamples - k).  Without
+        // mirroring, a single notch entry only suppresses one side of the
+        // spectrum and the inverse FFT produces a complex-valued artefact.
+        // Use this variant instead of freqmasks when adding new notch filters
+        // so that the user only needs to supply the physical (positive)
+        // frequency.
+        freqmasks_mirror :: function(meanfreqs, delta) [
+            { value: 1.0, lobin: 0, hibin: nsamples-1 }
+        ] + std.flattenArrays([
+            [
+                { value: 0.0, lobin: _br(mf, delta)[0], hibin: _br(mf, delta)[1] },
+                { value: 0.0, lobin: nsamples - _br(mf, delta)[1], hibin: nsamples - _br(mf, delta)[0] },
+            ]
+            for mf in meanfreqs
+        ]),
+
         testfreqs :: [f*$.kilohertz for f in [51.5, 102.8, 154.2, 205.5, 256.8, 308.2, 359.2, 410.5, 461.8, 513.2, 564.5, 615.8]],
         testmasks : self.freqmasks(self.testfreqs, 2*$.kilohertz),
-        
+
     },
 
 

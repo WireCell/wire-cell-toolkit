@@ -52,6 +52,7 @@ ADC values are overloaded to carry status flags:
 | Sticky code mitigation | No | Yes | No | No | No | No |
 | Chirp detection | Yes | No | No | No | No | No |
 | Harmonic noise filter | No | Yes (coll.) | No | No | No | No |
+| Per-channel freqmask | Yes | Yes (harm.) | No | Yes | No | No |
 | RC undershoot correction | Yes | Yes | Commented out | Disabled | Yes | Yes |
 | Adaptive baseline window | 20 | 20 (via uB) | 512 | 512 | 512 | No |
 | Coherent noise sub | Yes | No | Yes | Yes | No | No |
@@ -211,6 +212,17 @@ Could be combined into fewer passes.
 - **Wide adaptive baseline**: 512-tick window (vs 20 for MicroBooNE)
 
 ### ProtoDUNE-VD Unique Features
+- **Per-channel frequency mask** (`ProtoduneVD.cxx`, `PDVD::OneChannelNoise::apply()`):
+  After the forward FFT, the waveform spectrum is element-wise multiplied by the
+  per-channel `noise` spectrum read from the chndb (`m_noisedb->noise(ch)`).  The
+  spectrum is populated from the `freqmasks` field in `chndb-base.jsonnet` via
+  `OmniChannelNoiseDB::parse_freqmasks`.  An empty spectrum (the default) is a
+  no-op.  Use `wc.freqbinner(tick, nsamples).freqmasks_mirror([freqs], delta)` in
+  `channel_info[]` entries to specify notch frequencies; the `_mirror` variant
+  automatically masks both the positive-frequency bin and its negative-frequency
+  conjugate.  Controlled at run time with the `use_freqmask` TLA in
+  `wct-nf-sp.jsonnet` (default `true`); pass `--tla-code use_freqmask=false` to
+  disable.
 - **Shield coupling subtraction**: Novel noise removal for capacitive coupling
   between TDE U-plane strips and shield/grid:
   1. Scale each channel's signal by inverse strip length (capacitance weighting)

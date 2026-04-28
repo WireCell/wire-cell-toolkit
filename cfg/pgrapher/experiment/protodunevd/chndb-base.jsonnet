@@ -6,7 +6,7 @@ local handmade = import 'chndb-resp.jsonnet';
 local wc = import 'wirecell.jsonnet';
 local util = import 'pgrapher/experiment/protodunevd/funcs.jsonnet';
 
-function(params, anode, field, n, rms_cuts=[])
+function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
   // Per-plane channel ranges derived from funcs.anode_channels() layout:
   //   even anode: U=0-475,   V=952-1427,  W=1904-2487  (all + 3072*crp)
   //   odd  anode: U=476-951, V=1428-1903, W=2488-3071  (all + 3072*crp)
@@ -26,6 +26,9 @@ function(params, anode, field, n, rms_cuts=[])
   // Bottom cuts scale linearly with params.elec.gain (= elecs[0].gain).
   local gain_scale = if n >= 4 then 1.0
                      else params.elec.gain / (7.8 * wc.mV / wc.fC);
+  // Frequency-mask helper: use wc.freqbinner(...).freqmasks_mirror([freqs], delta)
+  // in per-channel channel_info[] entries and gate on this local.
+  local freqmask_enabled = use_freqmask;
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
