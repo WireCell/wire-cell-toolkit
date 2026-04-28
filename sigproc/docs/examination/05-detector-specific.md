@@ -195,6 +195,25 @@ Could be combined into fewer passes.
 - **Chirp noise detection** (`Diagnostics::Chirp`): Window-based RMS analysis
 - **Partial RC undershoot detection** (`Diagnostics::Partial`): Spectral shape
 - **Low-frequency noise identification** (`OneChannelStatus::ID_lf_noisy`)
+- **freqmask schema (re-verified)**: `cfg/pgrapher/experiment/uboone/chndb-base.jsonnet`
+  uses the legacy `{value, lobin, hibin}` bin-baked-at-jsonnet-time form.  This is
+  safe because `Microboone::OneChannelNoise` uses a half-complex `fwd_r2c` FFT —
+  only bins 0..nticks/2 (~4797) are consumed, so the positive-frequency notches at
+  bins 169-173 and 513-516 (~35 kHz, ~107 kHz) hit correctly without explicit
+  conjugate-mirror.  The intentional `daq.nticks=9595` vs `nf.nsamples=9592` offset
+  was re-verified safe under `OmniChannelNoiseDB::set_nsamples()`: the auto-rebuild
+  widens the spectrum to 9595, but the notch bin indices land at the same physical
+  frequencies (±0.03%) and the consumer reads only the first 4798 bins regardless.
+  New notches should use `wc.freqmasks_phys([freqs], delta)` from `wirecell.jsonnet`.
+
+### SBND Unique Features
+- **freqmask status**: `cfg/pgrapher/experiment/sbnd/chndb-base.jsonnet` has a
+  `freqbinner.freqmasks(harmonic_freqs, ...)` call, but `harmonic_freqs == []`
+  (all candidate frequencies commented out), so the effective mask is a pass-through.
+  SBND's single production frame size (3400 ticks) matches `params.nf.nsamples`, so
+  `OmniChannelNoiseDB::set_nsamples()` rebuilds to the same size — a no-op.  When
+  harmonic notches are re-enabled after analysis, use `wc.freqmasks_phys([freqs], delta)`
+  instead of `freqbinner.freqmasks`, which does not auto-mirror conjugate-frequency bins.
 
 ### ProtoDUNE-SP Unique Features
 - **Sticky code mitigation**: Two-stage repair:

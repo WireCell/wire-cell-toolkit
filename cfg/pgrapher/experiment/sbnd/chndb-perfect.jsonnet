@@ -110,6 +110,11 @@ function(params, anode, field, n, rms_cuts=[])
         roi_min_max_ratio: 1.5,
       },
 
+      // When re-enabling these notches, prefer wc.freqmasks_phys([freqs], delta)
+      // from wirecell.jsonnet — it resolves bins at runtime against the live
+      // tick × nsamples and auto-mirrors conjugate-frequency bins.  The
+      // freqbinner.freqmasks helper below bakes bin indices at jsonnet eval
+      // time and does not auto-mirror.
       local freqbinner = wc.freqbinner(params.daq.tick, params.nf.nsamples);
       local harmonic_freqs = [
         //f*wc.kilohertz for f in
