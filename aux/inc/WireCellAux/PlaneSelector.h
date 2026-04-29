@@ -34,12 +34,12 @@ namespace WireCell::Aux {
 
       private:
         std::vector<std::string> m_tags;
+        std::vector<std::string> m_summary_tags;
         tagrules::Context m_ft;
         int m_count{0};
 
         // The channel ident numbers we will select
         std::unordered_set<int> m_chids;
-
     };
 
 }  // namespace WireCell::Aux
