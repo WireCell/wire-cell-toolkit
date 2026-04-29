@@ -105,10 +105,10 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this uses hard-coded waveform.
         response: { waveform: scale_resp(handmade.u_resp), waveformid: wc.Ulayer },
         response_offset: 127, // argmin of PDHD FR⊗ER kernel (was 120, SBND copy)
-        pad_window_front: 20,
-        decon_limit: 0.02 * gain_scale,
+        pad_window_front: 10,
+        decon_limit: 0.01 * gain_scale,
         decon_limit1: 0.07 * gain_scale,
-        roi_min_max_ratio: 3.0,
+        roi_min_max_ratio: 0.8,
       },
 
       {
@@ -121,11 +121,15 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Vlayer) },
         /// this uses hard-coded waveform.
-        response: { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
-        response_offset: 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
+        // APA 0 (n==0) V plane is hardware-faulty and behaves as a collection
+        // plane.  Drop the FR⊗ER kernel and zero the response_offset there so
+        // PDHD::SignalProtection's deconvolution gate falls through (the gate
+        // requires respec.size()>0, respec[0]!=(1,0), and res_offset!=0).
+        response: if n == 0 then {} else { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
+        response_offset: if n == 0 then 0 else 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
         decon_limit: 0.01 * gain_scale,
-        decon_limit1: 0.08 * gain_scale,
-        roi_min_max_ratio: 1.5,
+        decon_limit1: 0.07 * gain_scale,
+        roi_min_max_ratio: 0.8,
       },
 
       // local freqbinner = wc.freqbinner(params.daq.tick, params.nf.nsamples);

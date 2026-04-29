@@ -20,7 +20,6 @@
 #include <cmath>
 #include <complex>
 #include <iostream>
-#include <set>
 
 WIRECELL_FACTORY(PDHDOneChannelNoise, WireCell::SigProc::PDHD::OneChannelNoise, WireCell::IChannelFilter,
                  WireCell::IConfigurable)
@@ -314,19 +313,6 @@ std::vector<std::vector<int> > PDHD::SignalProtection(WireCell::Waveform::realse
     double mean = temp.first;
     double rms = temp.second;
 
-    // debug: print first 5 calls to verify response scale and offset; silence when done
-    { static int sp_print_count = 0;
-      if (sp_print_count++ < 5) {
-        std::cerr << "PDHD::SignalProtection: nbin=" << nbin
-                  << " mean=" << mean << " rms=" << rms
-                  << " respec.size()=" << respec.size()
-                  << " res_offset=" << res_offset
-                  << " pad_f=" << pad_f << " pad_b=" << pad_b
-                  << (respec.size() > 0 ? " respec[0]=" + std::to_string(respec.at(0).real()) : "")
-                  << std::endl;
-      }
-    }
-
     float limit;
     if (protection_factor * rms > upper_adc_limit) {
         limit = protection_factor * rms;
@@ -363,18 +349,6 @@ std::vector<std::vector<int> > PDHD::SignalProtection(WireCell::Waveform::realse
         }
     }
 
-    // debug: log whether the deconvolution path is taken (first 5 calls)
-    { static int dp_print_count = 0;
-      if (dp_print_count++ < 5) {
-        std::cerr << "PDHD::SignalProtection: respec.size()=" << respec.size()
-                  << " res_offset=" << res_offset
-                  << " => decon path "
-                  << ((respec.size() > 0
-                       && (respec.at(0).real() != 1 || respec.at(0).imag() != 0)
-                       && res_offset != 0) ? "ON" : "OFF")
-                  << std::endl;
-      }
-    }
     // the deconvolution protection code ...
     if (respec.size() > 0 && (respec.at(0).real() != 1 || respec.at(0).imag() != 0) && res_offset != 0) {
         // std::cout << nbin << std::endl;
@@ -939,15 +913,6 @@ WireCell::Waveform::ChannelMaskMap PDHD::CoherentNoiseSub::apply(channel_signals
 
     // For Xin: here is how you can get the response spectrum for this group.
     const int achannel = chansig.begin()->first;
-
-    // debug: print once per FEMB representative to verify config reached C++
-    if (achannel % 800 == 0) {
-        std::cerr << "PDHD::CoherentNoiseSub: ch=" << achannel
-                  << " response_offset=" << m_noisedb->response_offset(achannel)
-                  << " gain_correction=" << m_noisedb->gain_correction(achannel)
-                  << " respec.size=" << m_noisedb->response(achannel).size()
-                  << std::endl;
-    }
 
     const Waveform::compseq_t& respec = m_noisedb->response(achannel);
     const int res_offset = m_noisedb->response_offset(achannel);
