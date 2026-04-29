@@ -3,12 +3,9 @@
 
 #include "WireCellIface/IDrifter.h"
 #include "WireCellIface/IConfigurable.h"
-#include "WireCellIface/IRandom.h"
-#include "WireCellUtil/Units.h"
+#include "WireCellIface/IYZMap.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/BoundingBox.h"
-
-#include <set>
 
 namespace WireCell {
 
@@ -31,23 +28,10 @@ namespace WireCell {
 
     private:
       std::vector<WireCell::BoundingBox> m_boxes;
-     //std::size_t m_count{0};
 
-      double bin_width;
-      double tpc_width;
-      double bin_height;
-      int n_ybin;
-      int n_zbin;
-      double yoffset;
-      double zoffset;
-      int plane;
+      int plane{0};
       std::string anode_name;
-      std::string yzmap_scale_filename;
-      //Json::Value map = Json::arrayValue;
-      //Json::arrayValue map;
-      Json::Value jmap;
-
-      std::vector<std::vector<double>> yzmap;
+      IYZMap::pointer m_yzmap_svc{nullptr};
 
 
     };  // Scaler

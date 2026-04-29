@@ -110,6 +110,7 @@
 #include "WireCellIface/IWireSource.h"
 #include "WireCellIface/IWireSummarizer.h"
 #include "WireCellIface/IWireSummary.h"
+#include "WireCellIface/IYZMap.h"
 
 using namespace WireCell;
 
@@ -215,4 +216,5 @@ IWireSchema::~IWireSchema() {}
 IWireSource::~IWireSource() {}
 IWireSummarizer::~IWireSummarizer() {}
 IWireSummary::~IWireSummary() {}
+IYZMap::~IYZMap() {}
 
