@@ -20,21 +20,23 @@
 #include <cstdlib>
 #include <cmath>
 
-// Usage:
-//   # Generate fixture (run from qlport/ directory):
-//   WCT_DUMP_TAGGER_INPUTS=./tmp/tagger_check_neutrino_input.json \
-//     wire-cell -A infiles=rootfiles/nuselEval_5384_130_6501.root uboone-mabc.jsonnet
-//
-//   # Generate WCT config:
-//   wcsonnet -o ./tmp/uboone-mabc_config.json uboone-mabc.jsonnet
-//
-//   # Run test (default fixtures from clus/test/data/):
-//   wcdoctest-clus -tc="tagger_check_neutrino end-to-end"
-//
-//   # Run with custom fixtures:
-//   WCT_TEST_DUMP=/path/to/tagger_check_neutrino_input.json \
-//   WCT_TEST_CONFIG=/path/to/uboone-mabc_config.json \
-//     wcdoctest-clus -tc="tagger_check_neutrino end-to-end"
+/*
+Usage:
+  # Generate fixture (run from qlport/ directory):
+  WCT_DUMP_TAGGER_INPUTS=./tmp/tagger_check_neutrino_input.json \
+    wire-cell -A infiles=rootfiles/nuselEval_5384_130_6501.root uboone-mabc.jsonnet
+
+  # Generate WCT config:
+  wcsonnet -o ./tmp/uboone-mabc_config.json uboone-mabc.jsonnet
+
+  # Run test (default fixtures from clus/test/data/):
+  wcdoctest-clus -tc="tagger_check_neutrino end-to-end"
+
+  # Run with custom fixtures:
+  WCT_TEST_DUMP=/path/to/tagger_check_neutrino_input.json \
+  WCT_TEST_CONFIG=/path/to/uboone-mabc_config.json \
+    wcdoctest-clus -tc="tagger_check_neutrino end-to-end"
+*/
 
 using namespace WireCell;
 using namespace WireCell::Clus;

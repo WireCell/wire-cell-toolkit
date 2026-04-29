@@ -24,19 +24,21 @@
 #include <cstdlib>
 #include <fstream>
 
-// Usage:
-//   wcdoctest-clus -tc="pattern_recognition*"
-//   wcdoctest-clus -ts="pattern_recognition pure helpers"
-//   wcdoctest-clus -ts="pattern_recognition replay [A]"
-//
-//   # Generate fixture [A] (vertex-not-found event):
-//   WCT_DUMP_TAGGER_INPUTS=../clus/test/data/tagger_check_neutrino_input.json \
-//     wire-cell -A infiles=rootfiles/nuselEval_5384_130_6501.root uboone-mabc.jsonnet
-//
-//   # Generate fixture [B] (vertex-found event — pick a CC numu from the 35-event sample):
-//   WCT_DUMP_TAGGER_INPUTS=../clus/test/data/pattern_recognition_vertex_input.json \
-//     wire-cell -A infiles=rootfiles/<your_numu_file>.root uboone-mabc.jsonnet
-//   Then set WCT_TEST_DUMP_B to that path when running.
+/*
+Usage:
+  wcdoctest-clus -tc="pattern_recognition*"
+  wcdoctest-clus -ts="pattern_recognition pure helpers"
+  wcdoctest-clus -ts="pattern_recognition replay [A]"
+
+  # Generate fixture [A] (vertex-not-found event):
+  WCT_DUMP_TAGGER_INPUTS=../clus/test/data/tagger_check_neutrino_input.json \
+    wire-cell -A infiles=rootfiles/nuselEval_5384_130_6501.root uboone-mabc.jsonnet
+
+  # Generate fixture [B] (vertex-found event — pick a CC numu from the 35-event sample):
+  WCT_DUMP_TAGGER_INPUTS=../clus/test/data/pattern_recognition_vertex_input.json \
+    wire-cell -A infiles=rootfiles/<your_numu_file>.root uboone-mabc.jsonnet
+  Then set WCT_TEST_DUMP_B to that path when running.
+*/
 
 using namespace WireCell;
 using namespace WireCell::Clus;
