@@ -78,6 +78,7 @@ namespace WireCell {
             struct TimerClocks {
                 double wall{0};
                 double core{0};
+		double dur{0};
             };
             std::unordered_map<Node*, TimerClocks> m_nodes_timer;
             bool m_enable_em = false;

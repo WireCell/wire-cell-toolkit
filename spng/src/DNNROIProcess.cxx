@@ -5,7 +5,6 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/Util.h"
 #include "WireCellUtil/NamedFactory.h"
-#include "WireCellSpng/TorchnvTools.h"
 
 WIRECELL_FACTORY(SPNGDNNROIProcess,
      WireCell::SPNG::DNNROIProcess, 
@@ -69,7 +68,6 @@ void DNNROIProcess::configure(const WireCell::Configuration& cfg)
 
 bool DNNROIProcess::operator()(const input_pointer& in, output_pointer& out)
 {
-    NVTX_SCOPED_RANGE("DNNROIProcess::operator()");
     out = nullptr;
     log->debug("DNNROIProcess: Calling operator()");
     if (!in) {
