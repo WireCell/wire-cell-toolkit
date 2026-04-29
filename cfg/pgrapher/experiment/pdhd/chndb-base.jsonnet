@@ -5,10 +5,19 @@
 local handmade = import 'chndb-resp.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
+// TODO (follow-up): decon_limit, decon_limit1, adc_limit, min_adc_limit and
+// roi_min_max_ratio were tuned against the old SBND-copy kernel (peak ~±56 ADC).
+// The new PDHD kernel has peak ~±206/247 ADC (~4× larger), so these thresholds
+// are not yet re-optimised for PDHD.  Re-tune empirically once NF runs with
+// the new kernel.
+
 function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shift=3)
   // ADC-domain thresholds below are tuned for FE amplifier gain = 14 mV/fC.
   // For other gains, scale linearly with params.elec.gain.
   local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
+  // chndb-resp.jsonnet stores the FR⊗ER kernel at reference gain=14 mV/fC.
+  // Scale element-wise so the kernel tracks the runtime FE gain.
+  local scale_resp(arr) = std.map(function(x) x * gain_scale, arr);
   // Frequency-mask toggle threaded through wct-nf-sp.jsonnet's use_freqmask
   // TLA.  When false, all per-channel freqmasks below collapse to [], making
   // the C++ consumer in PDHD::OneChannelNoise a no-op for every channel.
@@ -94,8 +103,8 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Ulayer) },
         /// this uses hard-coded waveform.
-        response: { waveform: handmade.u_resp, waveformid: wc.Ulayer },
-        response_offset: 120, // offset of the negative peak
+        response: { waveform: scale_resp(handmade.u_resp), waveformid: wc.Ulayer },
+        response_offset: 127, // argmin of PDHD FR⊗ER kernel (was 120, SBND copy)
         pad_window_front: 20,
         decon_limit: 0.02 * gain_scale,
         decon_limit1: 0.07 * gain_scale,
@@ -112,8 +121,8 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Vlayer) },
         /// this uses hard-coded waveform.
-        response: { waveform: handmade.v_resp, waveformid: wc.Vlayer },
-        response_offset: 124,
+        response: { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
+        response_offset: 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
         decon_limit: 0.01 * gain_scale,
         decon_limit1: 0.08 * gain_scale,
         roi_min_max_ratio: 1.5,
