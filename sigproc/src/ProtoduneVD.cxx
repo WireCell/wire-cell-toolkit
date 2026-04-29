@@ -40,34 +40,13 @@ using WireCell::Aux::DftTools::fwd_r2c;
 using WireCell::Aux::DftTools::inv_c2r;
 
 
-/*
- * Functions (adapted from Microboone)
- */
-double PDVD::filter_time(double freq)
-{
-    double a = 0.143555;
-    double b = 4.95096;
-    return (freq > 0) * exp(-0.5 * pow(freq / a, b));
-}
-
-double PDVD::filter_low(double freq, double cut_off)
-{
-    if ((freq > 0.177 && freq < 0.18) || (freq > 0.2143 && freq < 0.215) || (freq >= 0.106 && freq <= 0.109) ||
-        (freq > 0.25 && freq < 0.251)) {
-        return 0;
-    }
-    else {
-        return 1 - exp(-pow(freq / cut_off, 8));
-    }
-}
-
-double PDVD::filter_low_loose(double freq) { return 1 - exp(-pow(freq / 0.005, 2)); }
-
 bool PDVD::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& chansig,
                                    const WireCell::Waveform::realseq_t& medians,
                                    const WireCell::Waveform::compseq_t& respec, int res_offset,
                                    std::vector<std::vector<int> >& rois,
                                    const IDFT::pointer& dft,
+                                   const WireCell::Waveform::realseq_t& time_filter_wf,
+                                   const WireCell::Waveform::realseq_t& lf_filter_wf,
                                    float decon_limit1, float roi_min_max_ratio,
                                    float rms_threshold)
 {
@@ -168,16 +147,7 @@ bool PDVD::Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& chansi
             WireCell::Waveform::compseq_t signal_roi_freq = fwd_r2c(dft, signal_roi);
             WireCell::Waveform::shrink(signal_roi_freq, respec);
             for (size_t i = 0; i != signal_roi_freq.size(); i++) {
-                double freq;
-                // assuming 2 MHz digitization
-                if (i < signal_roi_freq.size() / 2.) {
-                    freq = i / (1. * signal_roi_freq.size()) * 2.;
-                }
-                else {
-                    freq = (signal_roi_freq.size() - i) / (1. * signal_roi_freq.size()) * 2.;
-                }
-                std::complex<float> factor = PDVD::filter_time(freq) * PDVD::filter_low_loose(freq);
-                signal_roi_freq.at(i) = signal_roi_freq.at(i) * factor;
+                signal_roi_freq.at(i) *= time_filter_wf.at(i) * lf_filter_wf.at(i);
             }
             WireCell::Waveform::realseq_t signal_roi_decon = inv_c2r(dft, signal_roi_freq);
 
@@ -285,8 +255,11 @@ std::vector<std::vector<int> > PDVD::SignalProtection(WireCell::Waveform::realse
                                                             const WireCell::Waveform::compseq_t& respec,
                                                             const IDFT::pointer& dft,
                                                             int res_offset,
-                                                            int pad_f, int pad_b, float upper_decon_limit,
-                                                            float decon_lf_cutoff, float upper_adc_limit,
+                                                            int pad_f, int pad_b,
+                                                            const WireCell::Waveform::realseq_t& time_filter_wf,
+                                                            const WireCell::Waveform::realseq_t& lf_filter_wf,
+                                                            float upper_decon_limit,
+                                                            float upper_adc_limit,
                                                             float protection_factor, float min_adc_limit)
 {
     // WireCell::Waveform::realseq_t temp1;
@@ -363,16 +336,7 @@ std::vector<std::vector<int> > PDVD::SignalProtection(WireCell::Waveform::realse
         WireCell::Waveform::shrink(medians_freq, respec);
 
         for (size_t i = 0; i != medians_freq.size(); i++) {
-            double freq;
-            // assuming 2 MHz digitization
-            if (i < medians_freq.size() / 2.) {
-                freq = i / (1. * medians_freq.size()) * 2.;
-            }
-            else {
-                freq = (medians_freq.size() - i) / (1. * medians_freq.size()) * 2.;
-            }
-            std::complex<float> factor = PDVD::filter_time(freq) * PDVD::filter_low(freq, decon_lf_cutoff);
-            medians_freq.at(i) = medians_freq.at(i) * factor;
+            medians_freq.at(i) *= time_filter_wf.at(i) * lf_filter_wf.at(i);
         }
         WireCell::Waveform::realseq_t medians_decon = inv_c2r(dft, medians_freq);
 
@@ -952,13 +916,18 @@ WireCell::Waveform::ChannelMaskMap PDVD::CoherentNoiseSub::apply(channel_signals
     // need to move these to data base, consult with Brett ...
     // also need to be time dependent ...
     const float decon_limit = m_noisedb->coherent_nf_decon_limit(achannel);  // 0.02;
-    const float decon_lf_cutoff = m_noisedb->coherent_nf_decon_lf_cutoff(achannel);
     const float adc_limit = m_noisedb->coherent_nf_adc_limit(achannel);                  // 15;
     const float decon_limit1 = m_noisedb->coherent_nf_decon_limit1(achannel);            // 0.08; // loose filter
     const float roi_min_max_ratio = m_noisedb->coherent_nf_roi_min_max_ratio(achannel);  // 0.8 default
 
     const float protection_factor = m_noisedb->coherent_nf_protection_factor(achannel);
     const float min_adc_limit = m_noisedb->coherent_nf_min_adc_limit(achannel);
+
+    const int plane = m_anode->resolve(achannel).index();
+    const int nfbins = respec.size();
+    auto time_filter_wf = Factory::find<IFilterWaveform>("HfFilter", m_time_filters.at(plane))->filter_waveform(nfbins);
+    auto lf_tighter_wf = Factory::find<IFilterWaveform>("LfFilter", m_lf_tighter_filter)->filter_waveform(nfbins);
+    auto lf_loose_wf = Factory::find<IFilterWaveform>("LfFilter", m_lf_loose_filter)->filter_waveform(nfbins);
 
     // std::cout << decon_limit << " " << adc_limit << " " << protection_factor << " " << min_adc_limit << std::endl;
 
@@ -973,7 +942,8 @@ WireCell::Waveform::ChannelMaskMap PDVD::CoherentNoiseSub::apply(channel_signals
     // do the signal protection and adaptive baseline
     std::vector<std::vector<int> > rois =
         PDVD::SignalProtection(medians, respec, m_dft,
-                                     res_offset, pad_f, pad_b, decon_limit, decon_lf_cutoff, adc_limit,
+                                     res_offset, pad_f, pad_b, time_filter_wf, lf_tighter_wf,
+                                     decon_limit, adc_limit,
                                      protection_factor, min_adc_limit);
 
     // if (achannel == 3840){
@@ -1016,8 +986,8 @@ WireCell::Waveform::ChannelMaskMap PDVD::CoherentNoiseSub::apply(channel_signals
     // }
 
     // calculate the scaling coefficient and subtract
-    PDVD::Subtract_WScaling(chansig, medians, respec, res_offset, rois, 
-                                  m_dft,
+    PDVD::Subtract_WScaling(chansig, medians, respec, res_offset, rois,
+                                  m_dft, time_filter_wf, lf_loose_wf,
                                   decon_limit1, roi_min_max_ratio,
                                   m_rms_threshold);
 
@@ -1051,6 +1021,13 @@ void PDVD::CoherentNoiseSub::configure(const WireCell::Configuration& cfg)
     m_dft = Factory::find_tn<IDFT>(dft_tn);
 
     m_rms_threshold = get<float>(cfg, "rms_threshold", m_rms_threshold);
+
+    m_time_filters.clear();
+    for (auto jtf : cfg["time_filters"]) {
+        m_time_filters.push_back(jtf.asString());
+    }
+    m_lf_tighter_filter = get<std::string>(cfg, "lf_tighter_filter", m_lf_tighter_filter);
+    m_lf_loose_filter = get<std::string>(cfg, "lf_loose_filter", m_lf_loose_filter);
 }
 WireCell::Configuration PDVD::CoherentNoiseSub::default_configuration() const
 {
@@ -1060,6 +1037,12 @@ WireCell::Configuration PDVD::CoherentNoiseSub::default_configuration() const
     cfg["dft"] = "FftwDFT";     // type-name for the DFT to use
 
     cfg["rms_threshold"] = m_rms_threshold;
+    cfg["time_filters"] = Json::arrayValue;
+    for (const auto& f : m_time_filters) {
+        cfg["time_filters"].append(f);
+    }
+    cfg["lf_tighter_filter"] = m_lf_tighter_filter;
+    cfg["lf_loose_filter"] = m_lf_loose_filter;
 
     return cfg;
 }

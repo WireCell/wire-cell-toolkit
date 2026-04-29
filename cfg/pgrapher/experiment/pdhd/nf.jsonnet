@@ -2,6 +2,7 @@
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
+local sp_filters = import 'pgrapher/experiment/pdhd/sp-filters.jsonnet';
 
 local default_dft = { type: 'FftwDFT' };
 
@@ -25,12 +26,18 @@ function(params, anode, chndbobj, n, name='', dft=default_dft) {
     local grouped = {
         type: 'PDHDCoherentNoiseSub',
         name: name,
-        uses: [dft, chndbobj, anode],
+        uses: [dft, chndbobj, anode] + sp_filters,
         data: {
             noisedb: wc.tn(chndbobj),
             anode: wc.tn(anode),
             dft: wc.tn(dft),
             rms_threshold: 0.0,
+            time_filters:
+              if anode.data.ident == 0
+              then ['Wiener_tight_U_APA1', 'Wiener_tight_V_APA1', 'Wiener_tight_W_APA1']
+              else ['Wiener_tight_U', 'Wiener_tight_V', 'Wiener_tight_W'],
+            lf_tighter_filter: 'ROI_tighter_lf',
+            lf_loose_filter: 'ROI_loose_lf',
         },
     },
 

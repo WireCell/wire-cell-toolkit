@@ -12,6 +12,7 @@
 #include "WireCellIface/IChannelNoiseDatabase.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDFT.h"
+#include "WireCellIface/IFilterWaveform.h"
 
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/Bits.h"
@@ -28,21 +29,23 @@ namespace WireCell {
             bool RemoveFilterFlags(WireCell::Waveform::realseq_t& sig);
             bool NoisyFilterAlg(WireCell::Waveform::realseq_t& spec, float min_rms, float max_rms);
 
-            double filter_low(double freq, double cut_off = 0.08);
-            double filter_time(double freq);
-            double filter_low_loose(double freq);
             std::vector<std::vector<int> > SignalProtection(WireCell::Waveform::realseq_t& sig,
                                                             const WireCell::Waveform::compseq_t& respec,
                                                             const IDFT::pointer& dft,
                                                             int res_offset,
-                                                            int pad_f, int pad_b, float upper_decon_limit = 0.02,
-                                                            float decon_lf_cutoff = 0.08, float upper_adc_limit = 15,
+                                                            int pad_f, int pad_b,
+                                                            const WireCell::Waveform::realseq_t& time_filter_wf,
+                                                            const WireCell::Waveform::realseq_t& lf_filter_wf,
+                                                            float upper_decon_limit = 0.02,
+                                                            float upper_adc_limit = 15,
                                                             float protection_factor = 5.0, float min_adc_limit = 50);
             bool Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& chansig,
                                    const WireCell::Waveform::realseq_t& medians,
                                    const WireCell::Waveform::compseq_t& respec, int res_offset,
                                    std::vector<std::vector<int> >& rois,
                                    const IDFT::pointer& dft,
+                                   const WireCell::Waveform::realseq_t& time_filter_wf,
+                                   const WireCell::Waveform::realseq_t& lf_filter_wf,
                                    float upper_decon_limit1 = 0.08,
                                    float roi_min_max_ratio = 0.8, float rms_threshold = 0.);
 
@@ -104,6 +107,9 @@ namespace WireCell {
                 IDFT::pointer m_dft;
 
                 float m_rms_threshold;
+                std::vector<std::string> m_time_filters;
+                std::string m_lf_tighter_filter;
+                std::string m_lf_loose_filter;
             };
 
             /**
