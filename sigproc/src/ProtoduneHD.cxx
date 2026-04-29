@@ -853,18 +853,18 @@ WireCell::Waveform::ChannelMaskMap PDHD::OneChannelNoise::apply(int ch, signal_t
         PDHD::RemoveFilterFlags(signal);
     }
 
-    // const float min_rms = m_noisedb->min_rms_cut(ch);
-    // const float max_rms = m_noisedb->max_rms_cut(ch);
-    // // alternative RMS tagging
-    // PDHD::SignalFilter(signal);
-    // bool is_noisy = PDHD::NoisyFilterAlg(signal, min_rms, max_rms);
-    // PDHD::RemoveFilterFlags(signal);
-    // if (is_noisy) {
-    //     WireCell::Waveform::BinRange temp_bin_range;
-    //     temp_bin_range.first = 0;
-    //     temp_bin_range.second = signal.size();
-    //     ret["noisy"][ch].push_back(temp_bin_range);
-    // }
+    const float min_rms = m_noisedb->min_rms_cut(ch);
+    const float max_rms = m_noisedb->max_rms_cut(ch);
+    // alternative RMS tagging
+    PDHD::SignalFilter(signal);
+    bool is_noisy = PDHD::NoisyFilterAlg(signal, min_rms, max_rms);
+    PDHD::RemoveFilterFlags(signal);
+    if (is_noisy) {
+        WireCell::Waveform::BinRange temp_bin_range;
+        temp_bin_range.first = 0;
+        temp_bin_range.second = signal.size();
+        ret["noisy"][ch].push_back(temp_bin_range);
+    }
 
     return ret;
 }
