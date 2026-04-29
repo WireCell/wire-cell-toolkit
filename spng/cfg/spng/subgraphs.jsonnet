@@ -1180,7 +1180,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 extra_name=extra_name)
             for vi in wc.enumerate([modelfiles[0], modelfiles[1]])
         ] + [
-            $.dnnroi_forward_view_special(models[2], view=2, do_transpose=do_transpose, change_view=[[2,1,480,-1], [1,2,960,-1]], extra_name=extra_name)
+            $.dnnroi_forward_view_special(models[2], view=2, do_transpose=do_transpose, change_view=[[2,1,480,-1], [1,1,960,-1]], extra_name=extra_name)
         ];
         pg.crossline(nodes),
 
@@ -1381,8 +1381,8 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 name: $.this_name(extra_name, "_scale_charge"),
                 data: {
                     operations: [
-                        { operation: "slice", dims: [0, 1, 2]},
-                        { operation: "scale", scalar: 1600000.0}, //What should this be? training truth is scaled down by factor of 4k and another 10 in wcpy dnn 
+                        // { operation: "slice", dims: [0, 1, 2]}, //Single output
+                        { operation: "scale", scalar: 40000.0}, //What should this be? training truth is scaled down by factor of 4k and another 10 in wcpy dnn 
                                                                  //another factor of 4 for the way rebinning is done (max vs integral)?
                                                                  //040926 -- added another factor of 10 and that made it look good. Idk?
                         { operation: "squeeze", dims: [0]},
@@ -1394,8 +1394,9 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 name: $.this_name(extra_name, "_threshold_rois"),
                 data: {
                     operations: [
-                        { operation: "slice", dims: [0, 0, 1]},
-                        { operation: "treshold", scalar: 0.5},
+                        // { operation: "slice", dims: [0, 0, 1]}, //Single output
+                        // { operation: "treshold", scalar: 0.5},
+                        { operation: "treshold", scalar: 0.005},
                         { operation: "squeeze", dims: [0]},
                         { operation: "to", dtype: "float32"}
                     ],
@@ -1455,7 +1456,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         local multag=pg.pipeline([mul, tag]);
         // local multag=pg.pipeline([mul, unbin_charge_apa1, tag]);
 
-        local connect_roi_split = pg.pipeline([split_apa1.targets.rois, unbin_roi_apa1, threshold_rois]);
+        local connect_roi_split = pg.pipeline([split_apa1.targets.rois, threshold_rois, unbin_roi_apa1]);
         local connect_charge_split = pg.pipeline([split_apa1.targets.charge, unbin_charge_apa1, scale_charge]);
         // local connect_roi_split = pg.pipeline([split_apa1.targets.rois, threshold_rois]);
         // local connect_charge_split = pg.pipeline([split_apa1.targets.charge, scale_charge]);

@@ -4,7 +4,7 @@ local detectors = import "detectors.jsonnet";
 local detname = "pdhd";
 local det = detectors[detname];  // me
 
-local osp = import "pdhd/osp.jsonnet";
+local osp = import "pdhd_badAPA1/osp.jsonnet";
 
 // Caution, PDHD hardware tick is 512ns but we use 500ns internally.  This
 // assumes any real DAQ data is resampled.  Changing to 512ns REQUIRES a change
@@ -92,7 +92,7 @@ local view_wpids = [
 ];
 
 local pirs(anode, this_fr) = [#Why is anode here?
-    api.plane_impact_response("", plane,
+    api.plane_impact_response((if anode.data.ident == 0 then "tpc0" else ""), plane,
                               tick=adc.tick,
                               nticks=adc.readout_nticks,
                               fr=this_fr, er=er_sim,
