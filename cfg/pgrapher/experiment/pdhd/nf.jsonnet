@@ -6,7 +6,8 @@ local sp_filters = import 'pgrapher/experiment/pdhd/sp-filters.jsonnet';
 
 local default_dft = { type: 'FftwDFT' };
 
-function(params, anode, chndbobj, n, name='', dft=default_dft) {
+function(params, anode, chndbobj, n, name='', dft=default_dft,
+         debug_dump_path='', debug_dump_groups=[]) {
     local single = {
         type: 'PDHDOneChannelNoise',
         name: name,
@@ -38,6 +39,8 @@ function(params, anode, chndbobj, n, name='', dft=default_dft) {
               else ['Wiener_tight_U', 'Wiener_tight_V', 'Wiener_tight_W'],
             lf_tighter_filter: 'ROI_tighter_lf',
             lf_loose_filter: 'ROI_loose_lf',
+            debug_dump_path: debug_dump_path,
+            debug_dump_groups: debug_dump_groups,
         },
     },
 

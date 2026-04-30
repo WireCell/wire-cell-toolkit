@@ -4,7 +4,8 @@ local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
 local sp_filters = import 'pgrapher/experiment/protodunevd/sp-filters.jsonnet';
 
-function(params, anode, chndbobj, n, name='')
+function(params, anode, chndbobj, n, name='',
+         debug_dump_path='', debug_dump_groups=[])
   {
     local single = {
       type: 'PDVDOneChannelNoise',
@@ -32,6 +33,8 @@ function(params, anode, chndbobj, n, name='')
           else ['Wiener_tight_U', 'Wiener_tight_V', 'Wiener_tight_W'],
         lf_tighter_filter: 'ROI_tighter_lf',
         lf_loose_filter: 'ROI_loose_lf',
+        debug_dump_path: debug_dump_path,
+        debug_dump_groups: debug_dump_groups,
       },
     },
     local shieldcoupling_grouped = {

@@ -275,6 +275,19 @@ notches are reactivated.
   `cfg/pgrapher/experiment/pdhd/sp-filters.jsonnet` and registered via
   `nf.jsonnet`'s `uses: ... + sp_filters`.  MicroBooNE still uses the original
   hardcoded helpers in `Microboone.cxx`.
+- **Opt-in coherent-sub validation dump** (`PDHDCoherentNoiseSub`,
+  `PDVDCoherentNoiseSub`, shared header
+  `WireCellSigProc/CoherentNoiseDump.h`):
+  When jsonnet field `data.debug_dump_path` is non-empty, `apply()` emits one
+  `.npz` per group capturing the median + deconvolved-aligned median, the
+  full pad-window-resolved `signal_bool`, the ROI list, the per-ROI
+  `max/min/ratio_obs` computed against `decon_limit1` /
+  `roi_min_max_ratio` on the median, and the per-(channel, ROI) accept
+  matrix that `Subtract_WScaling` actually used.  Default `''` (off) is
+  bit-identical to the pre-instrumentation hot path — one `.empty()`
+  check per group.  Consumed by the Bokeh-based viewer at
+  `wcp-porting-img/{pdhd,pdvd}/nf_plot/coherent_dump_viewer.py`; see that
+  directory's `README.md` for usage.  Not implemented for MicroBooNE/SBND.
 - **Per-channel frequency mask** (`ProtoduneHD.cxx`, `PDHD::OneChannelNoise::apply()`):
   Same mechanism as PDVD (see ProtoDUNE-VD section below).  Pre-existing
   U/V plane notches at FFT bins 169-173 (~57 kHz) and 513-516 (~171 kHz) in
