@@ -488,12 +488,12 @@ top_u_groups:
         nominal_baseline: 2048.0,  // adc count
         gain_correction: 1.0,  // unitless
         response_offset: 0.0,  // ticks?
-        pad_window_front: 10,  // ticks
-        pad_window_back: 10,  // ticks
-        decon_limit: 0.05,
-        decon_limit1: 0.08,
+        pad_window_front: 20,  // ticks
+        pad_window_back: 20,  // ticks
+        decon_limit: 0.005,
+        decon_limit1: 0.008,
         adc_limit: 60 * gain_scale,
-        min_adc_limit: 200 * gain_scale,
+        min_adc_limit: if n >= 4 then 60 else 50 * gain_scale,
         roi_min_max_ratio: 0.8, // default 0.8
         min_rms_cut: 1.0 * gain_scale,  // ADC at 7.8 mV/fC
         max_rms_cut: 60.0 * gain_scale,  // ADC at 7.8 mV/fC
@@ -517,16 +517,23 @@ top_u_groups:
         channels: u_chans,
         response: { waveform: scale_resp(u_resp_arr), waveformid: wc.Ulayer },
         response_offset: u_offset,
-        decon_limit: if n >= 4 then 0.02 else 0.01,
-        decon_limit1: 0.07,
+        decon_limit: if n >= 4 then 0.002 else 0.001,
+        decon_limit1: 0.007,
+        adc_limit: if n >= 4 then 20 else 15 * gain_scale,
       },
 
       {
         channels: v_chans,
         response: { waveform: scale_resp(v_resp_arr), waveformid: wc.Vlayer },
         response_offset: v_offset,
-        decon_limit: if n >= 4 then 0.02 else 0.01,
-        decon_limit1: 0.07,
+        decon_limit: if n >= 4 then 0.002 else 0.001,
+        decon_limit1: 0.007,
+        adc_limit: if n >= 4 then 20 else 15 * gain_scale,
+      },
+
+      {
+        channels: w_chans,
+        adc_limit: 20 * gain_scale,
       },
 
       // W-plane harmonic noise on anode 0: f0=23.5 kHz, harmonics n=2..12

@@ -68,12 +68,12 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         nominal_baseline: 2048.0,  // adc count
         gain_correction: 1.0,  // unitless
         response_offset: 0.0,  // ticks?
-        pad_window_front: 10,  // ticks?
-        pad_window_back: 10,  // ticks?
+        pad_window_front: 20,  // ticks?
+        pad_window_back: 20,  // ticks?
         decon_limit: 0.02,
         decon_limit1: 0.09,
-        adc_limit: 60 * gain_scale, // 15,
-        min_adc_limit: 200 * gain_scale, // 50,
+        adc_limit: 30 * gain_scale, // 15,
+        min_adc_limit: 100 * gain_scale, // 50,
         roi_min_max_ratio: 0.8, // default 0.8
         min_rms_cut: 10.0 * gain_scale,  // ADC at 14 mV/fC
         max_rms_cut: 30.0 * gain_scale,  // ADC at 14 mV/fC
@@ -107,7 +107,6 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this uses hard-coded waveform.
         response: { waveform: scale_resp(handmade.u_resp), waveformid: wc.Ulayer },
         response_offset: 127, // argmin of PDHD FR⊗ER kernel (was 120, SBND copy)
-        pad_window_front: 10,
         decon_limit: 0.01,
         decon_limit1: 0.07,
         roi_min_max_ratio: 0.8,
