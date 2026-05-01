@@ -232,24 +232,20 @@ nearby ROIs are also considered **across channels**, within ±1 channel and
 
 ### Implication for PDHD/PDVD adaptation
 
-Two of the four layers transfer directly to the PDHD/PDVD unipolar problem
-(see next section) and one needs modification:
+`L1SPFilterPD` (see `L1SPFilterPD.md`) is the PD-specific implementation. It
+keeps Layers 1 and 2 with modifications; Layers 3 and 4 are intentionally
+dropped because their sole purpose was handling the uBooNE shorted-wire pathology:
 
-- **Layer 1 (channel selection):** keep — pdhd/pdvd will use a different
-  channel list (or no list, if running everywhere).
-- **Layer 2 (per-ROI flag):** **modify** — the one-sided `temp_sum > 0`
-  test must become a **two-sided** asymmetry test, because the
-  anode-induction case produces *negative* unipolar signals. Replacing
-  `temp_sum / (...)` with `|temp_sum| / temp1_sum` and gating both unipolar
-  polarities is the minimum change.
-- **Layer 3 (time propagation):** keep — the rescue logic is independent of
-  polarity sign; once Layer 2 fires for negative-unipolar, Layer 3
-  automatically extends the rescue along the wire.
-- **Layer 4 (cross-channel cleaning):** keep — same reasoning.
-
-This is why Strategy B in the next section is favoured: most of the
-existing trigger machinery is reusable, and only the per-ROI classifier
-needs to be made polarity-symmetric.
+- **Layer 1 (channel selection):** kept — configurable `process_planes` (default
+  U+V) plus optional `eligible_channels` whitelist for a known positive-half list.
+- **Layer 2 (per-ROI flag):** modified to two-sided `{0, +1, -1}` — positive
+  asymmetry → `+1` (arriving electrons); negative asymmetry → `-1` (leaving
+  electrons). No `flag=2` zero-out: PD has no shorted-wire phantom-signal pathology.
+- **Layer 3 (time propagation):** dropped — it only rescued `flag=2` ROIs from
+  neighbouring confident hits. With `flag=2` gone, Layer 3 is a no-op and has
+  been removed.
+- **Layer 4 (cross-channel cleaning):** dropped — it suppressed phantom signals on
+  `ch±1` neighbours of confirmed shorted-region hits. PD channels are not shorted.
 
 ---
 
@@ -524,49 +520,42 @@ without modification.
 starts near the anode anywhere in the active volume produces it). A static
 channel list cannot capture it.
 
-### Strategy B — Per-ROI polarity-asymmetry detection (recommended starting point)
+### Strategy B — Per-ROI polarity-asymmetry detection *(implemented in `L1SPFilterPD`)*
 
 Run `OmnibusSigProc` on all channels as today. Then apply a downstream L1SP
 pass only on ROIs where the **raw ADC** polarity asymmetry exceeds a
-threshold:
+threshold.
 
-```
-asymmetry = (Σ⁺ADC + Σ⁻ADC) / (Σ⁺ADC − Σ⁻ADC)
-```
-
-where Σ⁺ sums samples above noise and Σ⁻ sums (negative) samples below. A
-balanced bipolar waveform gives asymmetry ≈ 0; a purely positive unipolar
-gives +1; a purely negative unipolar gives −1.
-
-In `L1_fit()`, the existing flag-1 condition (`cxx:555-558`) is replaced or
-supplemented:
+**Implemented** in `L1SPFilterPD::l1_fit()`:
 
 ```cpp
-// current (uBooNE):  flag=1 when net charge is significantly positive
-if (temp1_sum > adc_sum_threshold &&
-    temp_sum / (...) > adc_ratio_threshold) { flag_l1 = 1; }
-
-// extension needed: also flag=1 when ADC is strongly unipolar-negative
-// (currently this path falls through to flag=0 and no L1 is run)
-if (|temp_sum| / temp1_sum > asymmetry_threshold) { flag_l1 = 1; }
+double ratio = (temp1_sum > 0)
+             ? temp_sum / (temp1_sum * adc_sum_rescaling / nbin_fit)
+             : 0.0;
+int flag_l1 = 0;
+if (temp1_sum > adc_sum_threshold) {
+    if      (ratio >  adc_ratio_threshold) flag_l1 = +1;  // positive unipolar
+    else if (ratio < -adc_ratio_threshold) flag_l1 = -1;  // negative unipolar
+}
 ```
 
 When flagged, the G matrix is assembled with the polarity-appropriate basis:
 
-- Positive unipolar ROI → col[N..2N] = arriving-only (positive-half) response.
-- Negative unipolar ROI → col[N..2N] = leaving-only (negative-half) response.
+- `flag_l1 = +1` → col[N..2N] = arriving-only (`fields_pos_unipolar`) response.
+- `flag_l1 = -1` → col[N..2N] = leaving-only (`fields_neg_unipolar`) response.
 
-In both cases col[0..N] retains the standard bipolar induction response so
-the solver can also explain any normal induction component present alongside
-the unipolar one.
+col[0..N] retains the standard bipolar induction response in both cases.
 
-**Pros:** no static channel list; handles the event-by-event nature of the
-anode-induction case; the detection test is cheap (ADC sum, already computed
-in `L1_fit`); basis selection adds ~10 lines of code.
+**Threshold values** (`adc_sum_threshold=160`, `adc_sum_rescaling=90`,
+`adc_ratio_threshold=0.2`) are inherited from uBooNE and need re-tuning from
+PDHD/PDVD dump-mode hand-scan data (see `L1SPFilterPD.md`, Pending Work).
 
-**Cons:** requires implementing the asymmetry threshold logic and a
-configurable switch between the two unipolar bases inside `L1_fit`. The
-threshold value needs calibration.
+**Pros:** no static channel list; handles event-by-event unipolar occurrence;
+detection test is cheap (ADC sum over ROI window).
+
+**Cons:** threshold calibration required; unipolar field-response files for
+PDHD/PDVD needed before the fit actually runs (component degrades gracefully
+to pass-through without them).
 
 ### Strategy C — 3-basis LASSO (most flexible, highest cost)
 
