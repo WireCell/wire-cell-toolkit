@@ -3,6 +3,7 @@
 // See chndb.jsonnet
 
 local handmade = import 'chndb-resp.jsonnet';
+local femb_params = import 'femb-negpulse-groups-shifted.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
 // TODO (follow-up): decon_limit, decon_limit1, adc_limit, min_adc_limit and
@@ -49,6 +50,7 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
             + [v_group(v) for v in std.range(0, 19)]
             + [w_group(w) for w in std.range(0, 19)],
 
+    femb_negpulse_groups: femb_params.groups,
 
     // Externally determined "bad" channels.
     bad: [2297, 5379, 5472, 5556, 5607, 5608, 5920, 5921, 6072, 7099, 7288, 7679, 2580, 2940, 3347, 3758, 3805, 3866, 4722, 9956, 9986, 9987, 9988, 7876, 9120, 9125, 9126, 9127, 9306, 9307, 9309, 9310, 9534],

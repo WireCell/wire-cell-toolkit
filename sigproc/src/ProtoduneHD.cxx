@@ -786,7 +786,7 @@ float PDHD::get_rms_and_rois(const WireCell::Waveform::realseq_t& signal, std::v
     return temp.second;
 }
 
-bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig, int& beg, int& end, float min_width)
+bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig, int& beg, int& end, float min_width, int pad_nticks)
 {
     // project all channels to 1D signal
     int nsignals = chansig.begin()->second.size();
@@ -800,8 +800,8 @@ bool PDHD::Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chan
     for(auto roi_tmp : rois){
         double width = roi_tmp.size();
         if( width > min_width ){ // found the noise
-            beg = std::max(roi_tmp[0]-20, 0); // FIXME: make it configurable? 
-            end = std::min(roi_tmp.back()+20, nsignals-1);
+            beg = std::max(roi_tmp[0]-pad_nticks, 0);
+            end = std::min(roi_tmp.back()+pad_nticks, nsignals-1);
             return true;
         }
     }
@@ -1089,30 +1089,64 @@ WireCell::Configuration PDHD::CoherentNoiseSub::default_configuration() const
     return cfg;
 }
 
-PDHD::FEMBNoiseSub::FEMBNoiseSub(const std::string& anode, float width)
+PDHD::FEMBNoiseSub::FEMBNoiseSub(const std::string& anode, float width, int pad_nticks)
   : m_anode_tn(anode)
   , m_width(width)
+  , m_pad_nticks(pad_nticks)
 {
 }
 PDHD::FEMBNoiseSub::~FEMBNoiseSub() {}
 
 WireCell::Waveform::ChannelMaskMap PDHD::FEMBNoiseSub::apply(channel_signals_t& chansig) const
 {
-    WireCell::Waveform::ChannelMaskMap ret;
+WireCell::Waveform::ChannelMaskMap ret;
 
     // WireCell::Waveform::realseq_t medians = Derivations::CalcMedian(chansig);
     // const int achannel = chansig.begin()->first;
     // std::cout << "[wgu] PDHD::FEMBNoiseSub::apply first channel: " << achannel << std::endl;
 
     // determine if FEMB negative pulse
-    WireCell::Waveform::BinRange fembnoise_bins;
-    bool is_femb_noise = Is_FEMB_noise(chansig, fembnoise_bins.first, fembnoise_bins.second, m_width);
-    if (is_femb_noise) {
+    // WireCell::Waveform::BinRange fembnoise_bins;
+    WireCell::Waveform::BinRange original_fembnoise_bins;
+    bool is_original_femb_noise = Is_FEMB_noise(chansig, original_fembnoise_bins.first, original_fembnoise_bins.second, m_width,m_pad_nticks);
+
+    if (is_original_femb_noise) {
+        // Separate channels by plane
+        channel_signals_t chansig_p0, chansig_p1, chansig_p2;
         for (auto const& cs : chansig) {
-            ret["femb_noise"][cs.first].push_back(fembnoise_bins);
-            // std::cout << "[wgu] FEMB Noise channel= " << cs.first << " , time bins: "
-            // << fembnoise_bins.first << " " << fembnoise_bins.second << std::endl;
+            int ch = cs.first;
+            // Assuming m_anode is accessible here (likely from the outer PDHD class)
+            auto wpid = m_anode->resolve(ch);
+            const int iplane = wpid.index();
+            if (iplane == 0) {
+                chansig_p0[ch] = cs.second;
+            } else if (iplane == 1) {
+                chansig_p1[ch] = cs.second;
+            } else if (iplane == 2) {
+                chansig_p2[ch] = cs.second;
+            }
+            // Note: Channels not belonging to plane 0, 1, or 2 will be ignored in the per-plane check
         }
+
+        // Check FEMB noise condition for each plane individually
+        WireCell::Waveform::BinRange dummy_bins_p0, dummy_bins_p1, dummy_bins_p2;
+        // Is_FEMB_noise likely returns false for empty maps, fulfilling the "all three" requirement implicitly
+        bool is_femb_noise_p0 = Is_FEMB_noise(chansig_p0, dummy_bins_p0.first, dummy_bins_p0.second, m_width,m_pad_nticks);
+        bool is_femb_noise_p1 = Is_FEMB_noise(chansig_p1, dummy_bins_p1.first, dummy_bins_p1.second, m_width,m_pad_nticks);
+        bool is_femb_noise_p2 = Is_FEMB_noise(chansig_p2, dummy_bins_p2.first, dummy_bins_p2.second, m_width,m_pad_nticks);
+
+        // If all three planes show FEMB noise characteristics
+        if (is_femb_noise_p0 && is_femb_noise_p1 && is_femb_noise_p2) {
+             // Mark all channels from the original input map using the original time bins
+             for (auto const& cs : chansig) {
+                 ret["femb_noise"][cs.first].push_back(original_fembnoise_bins);
+                 std::cout << "[wgu] FEMB Noise (Plane " << m_anode->resolve(cs.first).index()
+                           << ") channel= " << cs.first << " , time bins: "
+                           << original_fembnoise_bins.first << " " << original_fembnoise_bins.second << std::endl;
+             }
+            //  exit(0);  // Exit after processing the first channel
+        }
+        // Else: If not all three planes show the noise, do not mark any channels, even if the combined signal did.
     }
 
     return ret;
@@ -1128,12 +1162,14 @@ void PDHD::FEMBNoiseSub::configure(const WireCell::Configuration& cfg)
     m_anode = Factory::find_tn<IAnodePlane>(m_anode_tn);
 
     m_width = get<float>(cfg, "width", m_width);
+    m_pad_nticks = get<int>(cfg, "pad_nticks", m_pad_nticks);
 }
 WireCell::Configuration PDHD::FEMBNoiseSub::default_configuration() const
 {
     Configuration cfg;
     cfg["anode"] = m_anode_tn;
     cfg["width"] = m_width;
+    cfg["pad_nticks"] = m_pad_nticks;
 
     return cfg;
 }

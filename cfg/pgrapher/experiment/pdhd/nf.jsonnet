@@ -43,6 +43,16 @@ function(params, anode, chndbobj, n, name='', dft=default_dft,
             debug_dump_groups: debug_dump_groups,
         },
     },
+    local fembfilt = {
+         type: 'PDHDFEMBNoiseSub',
+         name: name,
+         uses: [anode],
+         data: {
+             anode: wc.tn(anode),
+             width: 50.0,
+             pad_nticks: 20,
+         },
+     },
 
     local obnf = g.pnode({
         type: 'OmnibusNoiseFilter',
@@ -55,13 +65,24 @@ function(params, anode, chndbobj, n, name='', dft=default_dft,
             // channel bin ranges are ignored
             // only when the channelmask is merged to `bad`
             // maskmap: {sticky: "bad", ledge: "bad", noisy: "bad"},
-            // maskmap: {noisy:"bad", lf_noisy: "bad"},
+            maskmap: {noisy:"bad", lf_noisy: "bad",femb_noise:"bad"},
             channel_filters: [
                 wc.tn(single),
             ],
             grouped_filters: [
-                wc.tn(grouped),
+            //     wc.tn(grouped),
             ],
+            multigroup_chanfilters: [
+             {
+               channelgroups: chndbobj.data.femb_negpulse_groups,
+               filters: [wc.tn(fembfilt)],
+             },
+            {
+               channelgroups: chndbobj.data.groups,
+               filters: [wc.tn(grouped)],
+             },
+            ],
+
             channel_status_filters: [
             ],
             noisedb: wc.tn(chndbobj),
@@ -70,7 +91,7 @@ function(params, anode, chndbobj, n, name='', dft=default_dft,
             intraces: '',  // '' means use all traces (wildcard); HD orig frames use '*' tag
             outtraces: 'raw%d' % n,
         },
-    }, uses=[chndbobj, anode, single, grouped], nin=1, nout=1),
+    }, uses=[chndbobj, anode, single, grouped, fembfilt], nin=1, nout=1),
 
 
     pipe: g.pipeline([obnf], name=name),
