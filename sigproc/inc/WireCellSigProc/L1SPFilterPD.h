@@ -9,10 +9,10 @@
  * LASSO using {bipolar, +unipolar} (positive case) or {bipolar, -unipolar}
  * (negative case) response bases.
  *
- * STUB STATUS: trigger classification always returns 0 (pass-through).
- * Fill in classify_roi_flag() in L1SPFilterPD.cxx after dedicated event-scan
- * analysis.  Unipolar response bases are configured via "fields_pos_unipolar"
- * and "fields_neg_unipolar"; if empty the component is a no-op.
+ * Trigger thresholds are wired to default uBooNE values and need re-tuning
+ * from PDHD/PDVD dump-mode hand-scan data.  Unipolar response bases are
+ * configured via "fields_pos_unipolar" and "fields_neg_unipolar"; if empty
+ * the component acts as a pass-through.
  * See sigproc/docs/l1sp/README.md, Strategy B.
  */
 #ifndef WIRECELLSIGPROC_L1SPFILTERPD
@@ -28,6 +28,7 @@
 #include "WireCellUtil/Interpolate.h"
 
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace WireCell {
@@ -58,19 +59,19 @@ namespace WireCell {
             // Called lazily on first operator() invocation.
             void init_resp();
 
-            // Classify one ROI and, if triggered, run the LASSO fit on
-            // newtrace samples in [start_tick, end_tick).
-            //
-            // hint_polarity: 0=auto-classify, 1=force positive, -1=force negative.
-            // Returns: 0=pass-through, 1=L1-positive, -1=L1-negative, 2=zero-out.
+            // Classify one ROI by raw-ADC asymmetry; if triggered, run the LASSO
+            // fit on newtrace samples in [start_tick, end_tick).
+            // Returns: 0=pass-through, +1=L1-positive, -1=L1-negative.
             int l1_fit(std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
-                       int start_tick, int end_tick,
-                       int hint_polarity = 0);
+                       int start_tick, int end_tick);
 
             // True if channel belongs to a plane in m_process_planes.
             // Always returns true when m_process_planes is empty or m_anode is null.
             bool channel_in_scope(int channel) const;
+
+            // True if channel is in m_eligible_channels (or that set is empty).
+            bool channel_eligible(int ch) const;
 
             // Bipolar induction-plane response (always built from "fields" config).
             // Unipolar responses built from "fields_pos_unipolar" / "fields_neg_unipolar"
@@ -109,7 +110,6 @@ namespace WireCell {
             double m_adc_l1_threshold{6};
             double m_adc_sum_threshold{160};
             double m_adc_sum_rescaling{90.0};
-            double m_adc_sum_rescaling_limit{50.0};
             // Asymmetry ratio threshold.  The trigger fires when
             //   |temp_sum| / (temp1_sum * rescaling / nbin) > adc_ratio_threshold
             // with sign(temp_sum) selecting positive vs negative polarity.
@@ -142,6 +142,9 @@ namespace WireCell {
             std::string m_cfg_anode;
             IAnodePlane::pointer m_anode;
             std::vector<int> m_process_planes{0, 1};  // 0=U, 1=V; skip W
+
+            // Optional eligibility whitelist (channel IDs). Empty = all in scope.
+            std::set<int> m_eligible_channels;
 
             // Calibration dump mode
             bool m_dump_mode{false};

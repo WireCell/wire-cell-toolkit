@@ -22,9 +22,9 @@ Key structural differences:
 |---|---|---|
 | Physical problem | uBooNE shorted U/Y wires | PDHD/PDVD unipolar induction |
 | Response basis | {collection W, induction V} | {bipolar, ±unipolar} polarity-selected |
-| Polarity | always flag=1 (net-positive) | flag=+1 / −1 / 0 (stub, see below) |
-| Layer 4 cross-channel cleaning | ✓ (ch±1, ±3 ticks) | removed |
-| Propagation polarity tracking | `bool flag_shorted` | `int active_polarity` (±1 / 0) |
+| Polarity | always flag=1 (net-positive) | flag=+1 / −1 / 0 (Strategy B, per-ROI ratio) |
+| Layer 4 cross-channel cleaning | ✓ (ch±1, ±3 ticks) | removed (shorted-wire only) |
+| Propagation polarity tracking | `bool flag_shorted` | removed (flag=2 not ported) |
 | Response pointers | raw `linterp<double>*` | `unique_ptr<linterp<double>>` |
 | Response init | `init_resp()` at every `operator()` call | lazy (once per configure cycle) |
 
@@ -285,22 +285,35 @@ production configs remain bit-identical with the feature off.
 
 ## Pending work
 
-1. **Trigger cuts** — run the event-scan + ROI tagging analysis on PDHD/PDVD data;
-   fill in the Strategy B condition in `l1_fit()` (cxx:298–341, see stub comment).
+1. **Threshold tuning** — the Strategy B trigger is wired (`l1_fit()` now
+   implements `{0, +1, -1}` flag logic) but uses uBooNE default values
+   (`adc_sum_threshold=160`, `adc_sum_rescaling=90`, `adc_ratio_threshold=0.2`).
+   Retune from hand-labeled PDHD/PDVD dump-mode NPZ data.
 
 2. **Unipolar field-response inputs** — collect or derive the truncated-drift
    field responses for the PDHD/PDVD induction plane; supply them via
-   `fields_pos_unipolar` / `fields_neg_unipolar` config keys.
+   `fields_pos_unipolar` / `fields_neg_unipolar` config keys.  Until these are
+   provided the component is a graceful pass-through (trigger fires but fit
+   early-exits; see `l1_fit()` unipolar-nullptr check).
 
 3. **Threshold calibration** — retune `adc_ratio_threshold`, `unipolar_time_offset`,
    `l1_basis0_scale`, `l1_basis1_scale`, and the smearing `filter` kernel from
    PDHD/PDVD field responses.
 
-4. **Jsonnet wiring** — add `L1SPFilterPD` to the PDHD/PDVD graph in
-   `cfg/pgrapher/experiment/pdhd/sp.jsonnet` (and the pdvd equivalent) behind a
-   boolean gate (default off).
+4. **Jsonnet wiring** — done; `cfg/pgrapher/experiment/{pdhd,protodunevd}/sp.jsonnet`
+   wire `L1SPFilterPD` behind `l1sp_pd_mode` (default `''`).  Set
+   `l1sp_pd_mode='process'` to enable.
 
-5. **Review BUG-L1-1** from `sigproc/docs/examination/03-l1sp-filter.md` before
-   relying on the propagation layers in production — the reverse-scan index
-   mismatch in `L1SPFilter.cxx:378–397` was reproduced in the propagation logic
-   here; it should be verified or fixed before shipping.
+## Design decisions
+
+- **`flag=2` (zero-out) not ported** — uBooNE's flag=2 branch zeros ROIs with
+  very low ADC content or "phantom decon, flat ADC" signatures.  Both conditions
+  are specific to the uBooNE shorted-wire pathology and have no analog in PDHD/PDVD.
+  PDHD/PDVD uses only `{0, +1, -1}` flags.
+
+- **Propagation layers not ported** — uBooNE's forward/reverse same-channel sweep
+  (rescues flag=2 ROIs near a confident fit) and `ch±1` cross-channel cleanup
+  (suppresses phantom signals on shorted neighbors) were removed.  Both exist
+  exclusively because of shorted U/Y wires.  The Layer 4 comment in `operator()`
+  documents the cross-channel decision.  BUG-L1-1 (reverse-scan index mismatch in
+  the propagation loops) is moot since those loops no longer exist.

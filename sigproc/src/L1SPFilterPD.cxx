@@ -171,7 +171,6 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["adc_l1_threshold"] = 6;
     cfg["adc_sum_threshold"] = 160;
     cfg["adc_sum_rescaling"] = 90.;
-    cfg["adc_sum_rescaling_limit"] = 50.;
     cfg["adc_ratio_threshold"] = 0.2;
 
     cfg["l1_seg_length"] = 120;
@@ -201,6 +200,10 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["anode"] = "";
     cfg["process_planes"][0] = 0;   // U
     cfg["process_planes"][1] = 1;   // V
+
+    // Optional per-channel eligibility whitelist (channel ID ints).
+    // Empty = all channels in process_planes are eligible (default).
+    cfg["eligible_channels"] = Json::arrayValue;
 
     // Calibration dump mode: write per-ROI asymmetry records to NPZ files.
     cfg["dump_mode"] = false;
@@ -238,7 +241,6 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_adc_l1_threshold = get(cfg, "adc_l1_threshold", m_adc_l1_threshold);
     m_adc_sum_threshold = get(cfg, "adc_sum_threshold", m_adc_sum_threshold);
     m_adc_sum_rescaling = get(cfg, "adc_sum_rescaling", m_adc_sum_rescaling);
-    m_adc_sum_rescaling_limit = get(cfg, "adc_sum_rescaling_limit", m_adc_sum_rescaling_limit);
     m_adc_ratio_threshold = get(cfg, "adc_ratio_threshold", m_adc_ratio_threshold);
 
     m_l1_seg_length = get(cfg, "l1_seg_length", m_l1_seg_length);
@@ -271,6 +273,12 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
         m_process_planes.clear();
         for (auto const& v : cfg["process_planes"]) {
             m_process_planes.push_back(v.asInt());
+        }
+    }
+    m_eligible_channels.clear();
+    if (cfg.isMember("eligible_channels") && cfg["eligible_channels"].isArray()) {
+        for (auto const& v : cfg["eligible_channels"]) {
+            m_eligible_channels.insert(v.asInt());
         }
     }
 
@@ -324,6 +332,12 @@ bool L1SPFilterPD::channel_in_scope(int channel) const
     return false;
 }
 
+bool L1SPFilterPD::channel_eligible(int ch) const
+{
+    if (m_eligible_channels.empty()) return true;
+    return m_eligible_channels.count(ch) > 0;
+}
+
 void L1SPFilterPD::init_resp()
 {
     if (!m_lin_bipolar) {
@@ -339,65 +353,30 @@ void L1SPFilterPD::init_resp()
 
 int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                           const std::shared_ptr<const WireCell::ITrace>& adctrace,
-                          int start_tick, int end_tick,
-                          int hint_polarity)
+                          int start_tick, int end_tick)
 {
     const int nbin_fit = end_tick - start_tick;
 
-    VectorXd init_W    = VectorXd::Zero(nbin_fit);
-    VectorXd init_beta = VectorXd::Zero(nbin_fit);
+    VectorXd init_W = VectorXd::Zero(nbin_fit);
 
-    double temp_sum = 0, temp1_sum = 0, temp2_sum = 0;
-    double max_val = -1, min_val = 1;
+    double temp_sum = 0, temp1_sum = 0;
     for (int i = 0; i < nbin_fit; i++) {
-        init_W(i)    = adctrace->charge().at(i + start_tick - newtrace->tbin());
-        init_beta(i) = newtrace->charge().at(i + start_tick - newtrace->tbin());
-
-        if (init_W(i) > max_val) max_val = init_W(i);
-        if (init_W(i) < min_val) min_val = init_W(i);
-
+        init_W(i) = adctrace->charge().at(i + start_tick - newtrace->tbin());
         if (std::fabs(init_W(i)) > m_adc_l1_threshold) {
             temp_sum  += init_W(i);
             temp1_sum += std::fabs(init_W(i));
-            temp2_sum += std::fabs(init_beta(i));
         }
     }
 
-    // These are computed above for the trigger; suppress unused-variable
-    // warnings while the stub below is in place.
-    (void)temp_sum; (void)temp1_sum; (void)temp2_sum;
-    (void)max_val;  (void)min_val;
-
-    // ── STUB: trigger classification ──────────────────────────────────────────
-    // Always returns 0 (pass-through) until trigger cuts are determined.
-    //
-    // When implementing Strategy B (see sigproc/docs/l1sp/README.md):
-    //
-    //   Polarity asymmetry ratio = temp_sum / (temp1_sum * m_adc_sum_rescaling / nbin_fit)
-    //   Guard against temp1_sum == 0 before dividing.
-    //
-    //   Positive polarity (electrons collected on induction, +unipolar):
-    //     if (temp1_sum > m_adc_sum_threshold && temp1_sum > 0 &&
-    //         temp_sum / (temp1_sum * m_adc_sum_rescaling / nbin_fit) > m_adc_ratio_threshold)
-    //         flag_l1 = 1;
-    //
-    //   Negative polarity (anode-induction, -unipolar):
-    //     if (temp1_sum > m_adc_sum_threshold && temp1_sum > 0 &&
-    //         -temp_sum / (temp1_sum * m_adc_sum_rescaling / nbin_fit) > m_adc_ratio_threshold)
-    //         flag_l1 = -1;
-    //
-    //   Artifact (flag=2) — same logic as L1SPFilter:
-    //     else if (temp1_sum * m_adc_sum_rescaling / nbin_fit < m_adc_sum_rescaling_limit)
-    //         flag_l1 = 2;
-    //     else if (temp2_sum > 30*nbin_fit && temp1_sum < 2.0*nbin_fit && max_val-min_val < 22)
-    //         flag_l1 = 2;
-    //
-    //   Pass-through (0): otherwise.
-    // ──────────────────────────────────────────────────────────────────────────
+    // Strategy B: classify by signed/unsigned ADC asymmetry ratio.
+    double ratio = (temp1_sum > 0)
+                 ? temp_sum / (temp1_sum * m_adc_sum_rescaling / nbin_fit)
+                 : 0.0;
     int flag_l1 = 0;
-
-    // When propagation hints a polarity, override the stub.
-    if (hint_polarity != 0) flag_l1 = hint_polarity;
+    if (temp1_sum > m_adc_sum_threshold) {
+        if      (ratio >  m_adc_ratio_threshold) flag_l1 = +1;
+        else if (ratio < -m_adc_ratio_threshold) flag_l1 = -1;
+    }
 
     // Select the appropriate unipolar basis according to polarity.
     linterp<double>* lin_unipolar = (flag_l1 > 0) ? m_lin_pos_unipolar.get()
@@ -502,10 +481,6 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                 newtrace->charge().at(t - newtrace->tbin()) = l1_signal[t - start_tick];
         }
     }
-    else if (flag_l1 == 2) {
-        for (int t = start_tick; t < end_tick; t++)
-            newtrace->charge().at(t - newtrace->tbin()) = 0;
-    }
 
     return flag_l1;
 }
@@ -537,9 +512,11 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     }
 
     // Collect ticks with positive decon signal per channel.
+    // Only in-scope, eligible channels need ROI build work.
     std::map<int, std::set<int>> init_map;
     for (auto trace : sigtraces) {
         int ch = trace->channel();
+        if (!channel_in_scope(ch) || !channel_eligible(ch)) continue;
         int tbin = trace->tbin();
         auto const& charges = trace->charge();
         std::set<int>& ticks = init_map[ch];
@@ -549,10 +526,13 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     }
 
     // Augment with ticks above the raw-ADC noise threshold.
+    // adctrace_ch_map is populated for all channels; the expensive
+    // percentile sort and tick addition are skipped for out-of-scope ones.
     std::map<int, std::shared_ptr<const WireCell::ITrace>> adctrace_ch_map;
     for (auto trace : adctraces) {
         int ch = trace->channel();
         adctrace_ch_map[ch] = trace;
+        if (!channel_in_scope(ch) || !channel_eligible(ch)) continue;
         int tbin = trace->tbin();
         auto const& charges = trace->charge();
         const int ntbins = (int)charges.size();
@@ -609,7 +589,6 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     }
 
     // Main per-channel processing: classify ROIs and run L1 fits (or dump).
-    std::map<int, std::vector<int>> map_ch_flag_rois;
     ITrace::vector out_traces;
 
     // Calibration dump: per-ROI parallel vectors accumulated across all channels.
@@ -623,8 +602,9 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
 
         int ch = trace->channel();
 
-        // Skip channels with no ROIs or outside the configured plane scope.
-        if (map_ch_rois.find(ch) == map_ch_rois.end() || !channel_in_scope(ch)) {
+        // Skip channels with no ROIs (includes out-of-scope/ineligible channels
+        // that were not added to init_map above).
+        if (map_ch_rois.find(ch) == map_ch_rois.end()) {
             out_traces.push_back(newtrace);
             continue;
         }
@@ -662,60 +642,12 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
             }
         } else {
             // Normal processing path: classify ROIs and run L1 fits.
-            std::vector<int> flag_rois;
-            flag_rois.reserve(rois_save.size());
-
-            // First pass: classify and fit each ROI.
             for (auto& roi : rois_save) {
-                int flag = l1_fit(newtrace, adctrace, roi.first, roi.second + 1);
-                flag_rois.push_back(flag);
-                // Zero any negative decon values within the ROI (same as L1SPFilter).
+                l1_fit(newtrace, adctrace, roi.first, roi.second + 1);
+                // Zero any negative decon values within the ROI.
                 for (int t = roi.first; t <= roi.second; t++) {
                     auto& v = newtrace->charge().at(t - trace->tbin());
                     if (v < 0) v = 0;
-                }
-            }
-            map_ch_flag_rois[ch] = flag_rois;
-
-            // Forward propagation: if a flag-1 or flag-(-1) ROI is within 20 ticks
-            // of a flag-2 ROI, re-run the flag-2 ROI with the neighbour's polarity.
-            {
-                int active_polarity = 0;
-                int prev_end = -2000;
-                for (size_t i = 0; i < rois_save.size(); i++) {
-                    if (rois_save[i].first - prev_end > 20) active_polarity = 0;
-                    int f = flag_rois[i];
-                    if (f == 1 || f == -1) {
-                        active_polarity = f;
-                    } else if (f == 2 && active_polarity != 0) {
-                        l1_fit(newtrace, adctrace, rois_save[i].first, rois_save[i].second + 1,
-                               active_polarity);
-                        flag_rois[i] = 0;
-                    } else if (f == 0) {
-                        active_polarity = 0;
-                    }
-                    prev_end = rois_save[i].second;
-                }
-            }
-
-            // Reverse propagation.
-            if (!rois_save.empty()) {
-                int active_polarity = 0;
-                int prev_start = rois_save.back().second + 2000;
-                for (size_t i = 0; i < rois_save.size(); i++) {
-                    size_t ri = rois_save.size() - 1 - i;
-                    if (prev_start - rois_save[ri].second > 20) active_polarity = 0;
-                    int f = flag_rois[ri];
-                    if (f == 1 || f == -1) {
-                        active_polarity = f;
-                    } else if (f == 2 && active_polarity != 0) {
-                        l1_fit(newtrace, adctrace, rois_save[ri].first, rois_save[ri].second + 1,
-                               active_polarity);
-                        flag_rois[ri] = 0;
-                    } else if (f == 0) {
-                        active_polarity = 0;
-                    }
-                    prev_start = rois_save[ri].first;
                 }
             }
         }
