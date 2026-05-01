@@ -21,6 +21,7 @@
 #include "WireCellIface/IFrameFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IDFT.h"
+#include "WireCellIface/IAnodePlane.h"
 
 #include "WireCellAux/SimpleTrace.h"
 #include "WireCellAux/Logger.h"
@@ -66,6 +67,10 @@ namespace WireCell {
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
                        int start_tick, int end_tick,
                        int hint_polarity = 0);
+
+            // True if channel belongs to a plane in m_process_planes.
+            // Always returns true when m_process_planes is empty or m_anode is null.
+            bool channel_in_scope(int channel) const;
 
             // Bipolar induction-plane response (always built from "fields" config).
             // Unipolar responses built from "fields_pos_unipolar" / "fields_neg_unipolar"
@@ -132,6 +137,16 @@ namespace WireCell {
             std::string m_cfg_fields;
             std::string m_cfg_fields_pos;
             std::string m_cfg_fields_neg;
+
+            // Anode + plane-scope filter
+            std::string m_cfg_anode;
+            IAnodePlane::pointer m_anode;
+            std::vector<int> m_process_planes{0, 1};  // 0=U, 1=V; skip W
+
+            // Calibration dump mode
+            bool m_dump_mode{false};
+            std::string m_dump_path;
+            std::string m_dump_tag;
         };
 
     }  // namespace SigProc

@@ -11,7 +11,9 @@
 #include "WireCellUtil/Eigen.h"
 #include "WireCellUtil/Response.h"
 #include "WireCellUtil/Waveform.h"
+#include "WireCellUtil/cnpy.h"
 
+#include <filesystem>
 #include <numeric>
 #include <cmath>
 
@@ -84,6 +86,39 @@ VectorXd lasso_solve(const MatrixXd& G, const VectorXd& W,
     m.SetData(G, W);
     m.Fit();
     return m.Getbeta();
+}
+
+// Per-ROI asymmetry statistics used by the trigger and the calibration dump.
+struct AsymRecord {
+    int    nbin_fit{0};
+    double temp_sum{0}, temp1_sum{0}, temp2_sum{0};
+    double max_val{-1e30}, min_val{1e30};
+};
+
+// Compute ADC asymmetry quantities for ticks [start_tick, end_tick).
+// adc/sig charges are indexed with the same tbin offset (both traces assumed
+// to share the same tbin, which is the case for all pdhd/pdvd frames).
+AsymRecord compute_asym(const WireCell::ITrace::ChargeSequence& adc,
+                        const WireCell::ITrace::ChargeSequence& sig,
+                        int tbin,
+                        int start_tick, int end_tick,
+                        double threshold)
+{
+    AsymRecord r;
+    r.nbin_fit = end_tick - start_tick;
+    for (int i = 0; i < r.nbin_fit; i++) {
+        int idx = i + start_tick - tbin;
+        double w = adc.at(idx);
+        double b = sig.at(idx);
+        if (w > r.max_val) r.max_val = w;
+        if (w < r.min_val) r.min_val = w;
+        if (std::fabs(w) > threshold) {
+            r.temp_sum  += w;
+            r.temp1_sum += std::fabs(w);
+            r.temp2_sum += std::fabs(b);
+        }
+    }
+    return r;
 }
 
 }  // namespace
@@ -161,6 +196,17 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
 
     cfg["dft"] = "FftwDFT";
 
+    // Plane-scope filter: IAnodePlane typename + list of plane indices to process.
+    // Leave "anode" empty to disable plane filtering (all channels processed).
+    cfg["anode"] = "";
+    cfg["process_planes"][0] = 0;   // U
+    cfg["process_planes"][1] = 1;   // V
+
+    // Calibration dump mode: write per-ROI asymmetry records to NPZ files.
+    cfg["dump_mode"] = false;
+    cfg["dump_path"] = "";    // directory; one NPZ per operator() call written here
+    cfg["dump_tag"] = "";     // label baked into filename (e.g. "apa1")
+
     return cfg;
 }
 
@@ -216,6 +262,23 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_cfg_fields_pos = get<std::string>(cfg, "fields_pos_unipolar", "");
     m_cfg_fields_neg = get<std::string>(cfg, "fields_neg_unipolar", "");
 
+    // Plane-scope filter
+    m_cfg_anode = get<std::string>(cfg, "anode", "");
+    if (!m_cfg_anode.empty()) {
+        m_anode = Factory::find_tn<IAnodePlane>(m_cfg_anode);
+    }
+    if (cfg.isMember("process_planes") && cfg["process_planes"].isArray()) {
+        m_process_planes.clear();
+        for (auto const& v : cfg["process_planes"]) {
+            m_process_planes.push_back(v.asInt());
+        }
+    }
+
+    // Calibration dump mode
+    m_dump_mode = get(cfg, "dump_mode", m_dump_mode);
+    m_dump_path = get<std::string>(cfg, "dump_path", m_dump_path);
+    m_dump_tag  = get<std::string>(cfg, "dump_tag", m_dump_tag);
+
     // Reset interpolators so init_resp() rebuilds them on next operator() call.
     m_lin_bipolar.reset();
     m_lin_pos_unipolar.reset();
@@ -249,6 +312,16 @@ std::unique_ptr<linterp<double>> L1SPFilterPD::build_response(const std::string&
     double xstep = fravg.period;
 
     return std::make_unique<linterp<double>>(resp.begin(), resp.end(), x0, xstep);
+}
+
+bool L1SPFilterPD::channel_in_scope(int channel) const
+{
+    if (m_process_planes.empty() || !m_anode) return true;
+    int plane = m_anode->resolve(channel).index();
+    for (int p : m_process_planes) {
+        if (p == plane) return true;
+    }
+    return false;
 }
 
 void L1SPFilterPD::init_resp()
@@ -535,16 +608,23 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         map_ch_rois[wire_index] = merged;
     }
 
-    // Main per-channel processing: classify ROIs and run L1 fits.
+    // Main per-channel processing: classify ROIs and run L1 fits (or dump).
     std::map<int, std::vector<int>> map_ch_flag_rois;
     ITrace::vector out_traces;
+
+    // Calibration dump: per-ROI parallel vectors accumulated across all channels.
+    std::vector<int32_t> d_channel, d_roi_start, d_roi_end, d_nbin_fit;
+    std::vector<double>  d_temp_sum, d_temp1_sum, d_temp2_sum, d_max_val, d_min_val;
+    std::vector<int32_t> d_prev_roi_end, d_next_roi_start, d_prev_gap, d_next_gap;
 
     for (auto trace : sigtraces) {
         auto newtrace = std::make_shared<Aux::SimpleTrace>(
             trace->channel(), trace->tbin(), trace->charge());
 
         int ch = trace->channel();
-        if (map_ch_rois.find(ch) == map_ch_rois.end()) {
+
+        // Skip channels with no ROIs or outside the configured plane scope.
+        if (map_ch_rois.find(ch) == map_ch_rois.end() || !channel_in_scope(ch)) {
             out_traces.push_back(newtrace);
             continue;
         }
@@ -552,64 +632,139 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         auto& rois_save = map_ch_rois[ch];
         auto& adctrace  = adctrace_ch_map[ch];
 
-        std::vector<int> flag_rois;
-        flag_rois.reserve(rois_save.size());
-
-        // First pass: classify and fit each ROI.
-        for (auto& roi : rois_save) {
-            int flag = l1_fit(newtrace, adctrace, roi.first, roi.second + 1);
-            flag_rois.push_back(flag);
-            // Zero any negative decon values within the ROI (same as L1SPFilter).
-            for (int t = roi.first; t <= roi.second; t++) {
-                auto& v = newtrace->charge().at(t - trace->tbin());
-                if (v < 0) v = 0;
-            }
-        }
-        map_ch_flag_rois[ch] = flag_rois;
-
-        // Forward propagation: if a flag-1 or flag-(-1) ROI is within 20 ticks
-        // of a flag-2 ROI, re-run the flag-2 ROI with the neighbour's polarity.
-        {
-            int active_polarity = 0;
-            int prev_end = -2000;
+        if (m_dump_mode) {
+            // Calibration / dump path: compute asymmetry stats per ROI, record
+            // them, then pass the trace through unchanged (no LASSO, no zeroing).
             for (size_t i = 0; i < rois_save.size(); i++) {
-                if (rois_save[i].first - prev_end > 20) active_polarity = 0;
-                int f = flag_rois[i];
-                if (f == 1 || f == -1) {
-                    active_polarity = f;
-                } else if (f == 2 && active_polarity != 0) {
-                    l1_fit(newtrace, adctrace, rois_save[i].first, rois_save[i].second + 1,
-                           active_polarity);
-                    flag_rois[i] = 0;
-                } else if (f == 0) {
-                    active_polarity = 0;
-                }
-                prev_end = rois_save[i].second;
-            }
-        }
+                auto rec = compute_asym(adctrace->charge(), trace->charge(),
+                                        trace->tbin(),
+                                        rois_save[i].first, rois_save[i].second + 1,
+                                        m_adc_l1_threshold);
+                d_channel.push_back(ch);
+                d_roi_start.push_back(rois_save[i].first);
+                d_roi_end.push_back(rois_save[i].second);
+                d_nbin_fit.push_back(rec.nbin_fit);
+                d_temp_sum.push_back(rec.temp_sum);
+                d_temp1_sum.push_back(rec.temp1_sum);
+                d_temp2_sum.push_back(rec.temp2_sum);
+                d_max_val.push_back(rec.max_val);
+                d_min_val.push_back(rec.min_val);
 
-        // Reverse propagation.
-        if (!rois_save.empty()) {
-            int active_polarity = 0;
-            int prev_start = rois_save.back().second + 2000;
-            for (size_t i = 0; i < rois_save.size(); i++) {
-                size_t ri = rois_save.size() - 1 - i;
-                if (prev_start - rois_save[ri].second > 20) active_polarity = 0;
-                int f = flag_rois[ri];
-                if (f == 1 || f == -1) {
-                    active_polarity = f;
-                } else if (f == 2 && active_polarity != 0) {
-                    l1_fit(newtrace, adctrace, rois_save[ri].first, rois_save[ri].second + 1,
-                           active_polarity);
-                    flag_rois[ri] = 0;
-                } else if (f == 0) {
-                    active_polarity = 0;
+                int32_t prev_end   = (i > 0) ? rois_save[i - 1].second : -1;
+                int32_t next_start = (i + 1 < rois_save.size())
+                                     ? rois_save[i + 1].first : -1;
+                d_prev_roi_end.push_back(prev_end);
+                d_next_roi_start.push_back(next_start);
+                d_prev_gap.push_back(prev_end >= 0
+                                     ? (int32_t)(rois_save[i].first - prev_end) : -1);
+                d_next_gap.push_back(next_start >= 0
+                                     ? (int32_t)(next_start - rois_save[i].second) : -1);
+            }
+        } else {
+            // Normal processing path: classify ROIs and run L1 fits.
+            std::vector<int> flag_rois;
+            flag_rois.reserve(rois_save.size());
+
+            // First pass: classify and fit each ROI.
+            for (auto& roi : rois_save) {
+                int flag = l1_fit(newtrace, adctrace, roi.first, roi.second + 1);
+                flag_rois.push_back(flag);
+                // Zero any negative decon values within the ROI (same as L1SPFilter).
+                for (int t = roi.first; t <= roi.second; t++) {
+                    auto& v = newtrace->charge().at(t - trace->tbin());
+                    if (v < 0) v = 0;
                 }
-                prev_start = rois_save[ri].first;
+            }
+            map_ch_flag_rois[ch] = flag_rois;
+
+            // Forward propagation: if a flag-1 or flag-(-1) ROI is within 20 ticks
+            // of a flag-2 ROI, re-run the flag-2 ROI with the neighbour's polarity.
+            {
+                int active_polarity = 0;
+                int prev_end = -2000;
+                for (size_t i = 0; i < rois_save.size(); i++) {
+                    if (rois_save[i].first - prev_end > 20) active_polarity = 0;
+                    int f = flag_rois[i];
+                    if (f == 1 || f == -1) {
+                        active_polarity = f;
+                    } else if (f == 2 && active_polarity != 0) {
+                        l1_fit(newtrace, adctrace, rois_save[i].first, rois_save[i].second + 1,
+                               active_polarity);
+                        flag_rois[i] = 0;
+                    } else if (f == 0) {
+                        active_polarity = 0;
+                    }
+                    prev_end = rois_save[i].second;
+                }
+            }
+
+            // Reverse propagation.
+            if (!rois_save.empty()) {
+                int active_polarity = 0;
+                int prev_start = rois_save.back().second + 2000;
+                for (size_t i = 0; i < rois_save.size(); i++) {
+                    size_t ri = rois_save.size() - 1 - i;
+                    if (prev_start - rois_save[ri].second > 20) active_polarity = 0;
+                    int f = flag_rois[ri];
+                    if (f == 1 || f == -1) {
+                        active_polarity = f;
+                    } else if (f == 2 && active_polarity != 0) {
+                        l1_fit(newtrace, adctrace, rois_save[ri].first, rois_save[ri].second + 1,
+                               active_polarity);
+                        flag_rois[ri] = 0;
+                    } else if (f == 0) {
+                        active_polarity = 0;
+                    }
+                    prev_start = rois_save[ri].first;
+                }
             }
         }
 
         out_traces.push_back(newtrace);
+    }
+
+    // Calibration dump: write NPZ for this frame.
+    if (m_dump_mode && !m_dump_path.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(m_dump_path, ec);
+        const std::string fname =
+            fmt::format("{}/{}_{:04d}_{}.npz", m_dump_path, m_dump_tag, m_count, in->ident());
+        std::filesystem::remove(fname, ec);
+
+        auto save_i32 = [&](const std::string& key, const std::vector<int32_t>& v) {
+            if (v.empty()) { int32_t d = 0; cnpy::npz_save(fname, key, &d, {0}, "a"); }
+            else cnpy::npz_save(fname, key, v.data(), {v.size()}, "a");
+        };
+        auto save_f64 = [&](const std::string& key, const std::vector<double>& v) {
+            if (v.empty()) { double d = 0; cnpy::npz_save(fname, key, &d, {0}, "a"); }
+            else cnpy::npz_save(fname, key, v.data(), {v.size()}, "a");
+        };
+        auto save_i32s = [&](const std::string& key, int32_t val) {
+            cnpy::npz_save(fname, key, &val, {1}, "a");
+        };
+        auto save_f64s = [&](const std::string& key, double val) {
+            cnpy::npz_save(fname, key, &val, {1}, "a");
+        };
+
+        save_i32s("frame_ident",  (int32_t)in->ident());
+        save_f64s("frame_time",   in->time());
+        save_i32s("call_count",   (int32_t)m_count);
+        save_i32s("n_rois",       (int32_t)d_channel.size());
+        save_i32("channel",       d_channel);
+        save_i32("roi_start",     d_roi_start);
+        save_i32("roi_end",       d_roi_end);
+        save_i32("nbin_fit",      d_nbin_fit);
+        save_f64("temp_sum",      d_temp_sum);
+        save_f64("temp1_sum",     d_temp1_sum);
+        save_f64("temp2_sum",     d_temp2_sum);
+        save_f64("max_val",       d_max_val);
+        save_f64("min_val",       d_min_val);
+        save_i32("prev_roi_end",  d_prev_roi_end);
+        save_i32("next_roi_start", d_next_roi_start);
+        save_i32("prev_gap",      d_prev_gap);
+        save_i32("next_gap",      d_next_gap);
+
+        log->debug("call={} dump_mode: {} ROIs -> {}", m_count, d_channel.size(), fname);
     }
 
     // Layer 4 cross-channel cleaning is intentionally omitted.
