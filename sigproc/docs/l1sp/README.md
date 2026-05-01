@@ -123,6 +123,136 @@ Called per ROI. Signature: `int L1_fit(newtrace, adctrace, start_tick, end_tick,
 
 ---
 
+## How L1SP is triggered: the flag logic in detail
+
+The decision "should we run an L1 solve on this waveform?" is taken in **four
+layers**, applied in sequence. None of them is a generic two-sided asymmetry
+test — MicroBooNE's trigger is **one-sided, biased toward positive net
+charge**, because the artifact L1SP was designed to fix is collection-plane
+charge leaking onto a shorted induction wire.
+
+### Layer 1 — Static channel selection (graph level)
+
+Before any ROI logic runs, the WCT graph already restricts L1SP's input to a
+fixed channel range via `ChannelSelector(channels = std.range(3566, 4305))`.
+Channels outside that range never reach `L1SPFilter::operator()`. There is no
+runtime predicate at this layer — the channel list is part of the cfg.
+
+### Layer 2 — Per-ROI flag classification in `L1_fit()`
+
+For each ROI on each selected channel, `L1_fit` (cxx:530-564) computes three
+ADC sums over samples whose `|ADC| > adc_l1_threshold` (default 6):
+
+```
+temp_sum   = Σ ADC_i        (signed sum)
+temp1_sum  = Σ |ADC_i|      (unsigned sum)
+temp2_sum  = Σ |decon_i|    (unsigned sum of the gauss decon signal)
+```
+
+It then assigns one of three flags:
+
+```cpp
+// flag = 1  (run L1 solve)
+if (temp1_sum > adc_sum_threshold &&
+    temp_sum / (temp1_sum * adc_sum_rescaling / nbin_fit) > adc_ratio_threshold)
+
+// flag = 2  (zero output -- artifact)
+else if (temp1_sum * adc_sum_rescaling / nbin_fit < adc_sum_rescaling_limit)
+else if (temp2_sum > 30*nbin_fit && temp1_sum < 2*nbin_fit && (max_W - min_W) < 22)
+
+// flag = 0  (pass through, leave gauss decon unchanged)
+else
+```
+
+Reading the flag-1 inequality: it is essentially `temp_sum / temp1_sum >
+adc_ratio_threshold * adc_sum_rescaling / nbin_fit`. With defaults
+(0.2 × 90 / nbin_fit ≈ 18/nbin_fit) it asks **"does the signed ADC sum
+exceed a fraction of the unsigned sum, scaled by ROI length?"**
+
+This **is** an asymmetry-style test, but **only one-sided**: `temp_sum` is
+signed and the comparison is `> threshold`. A purely *negative* unipolar ROI
+gives `temp_sum ≈ −temp1_sum` and fails the test; the ratio is large but
+negative. So flag-1 fires on **net-positive** ROIs only. A balanced bipolar
+ROI gives `temp_sum ≈ 0` and also fails (correctly — there is nothing to
+fix). A fully positive collection-leaked ROI gives `temp_sum/temp1_sum ≈ 1`
+and passes.
+
+The flag-2 conditions are pure-noise cleanup: either the ROI has too little
+unsigned ADC activity, or the decon claims a large signal where the raw ADC
+is essentially flat (a deconvolution artifact).
+
+### Layer 3 — Same-channel time propagation (forward + reverse)
+
+`operator()` then walks the channel's ROI list **twice** — once in time
+order, once in reverse (cxx:383-402 and cxx:404-426). Each pass carries a
+`flag_shorted` boolean state:
+
+- A flag-1 ROI **sets** `flag_shorted = true`.
+- A flag-2 ROI **within 20 ticks** of the previous ROI, *while*
+  `flag_shorted` is true, gets **rescued**: `L1_fit` is called again on it
+  and its flag is rewritten to 0 (handled). The rationale: a real shorted
+  region produces a run of ROIs along the wire; if one of them looked like
+  an artifact (flag-2) but its neighbour was clearly shorted (flag-1), it
+  was probably also shorted but failed the flag-1 cut by chance.
+- A flag-0 ROI **clears** `flag_shorted` (the run has ended).
+- A gap of more than 20 ticks between adjacent ROIs **clears**
+  `flag_shorted` (different runs).
+
+The reverse pass repeats the same logic scanning ROIs from latest to
+earliest, so a flag-2 ROI can be rescued by a flag-1 neighbour on either
+side. (Note: BUG-L1-1 in the audit doc reports the reverse pass has an
+index-mismatch bug; the *intent* is what is described here.)
+
+So nearby ROIs **are** considered — temporally, on the same channel,
+within ±20 ticks.
+
+### Layer 4 — Cross-channel cleaning
+
+After all per-channel propagation finishes, a final loop (cxx:432-476)
+looks at neighbouring channels (`ch ± 1`):
+
+- Take each ROI on channel `ch` whose flag is still 2.
+- If channel `ch + 1` *or* channel `ch − 1` has a flag-1 ROI whose time
+  range overlaps within ±3 ticks → **zero this ROI's output**.
+- Otherwise leave it alone.
+
+This is the spatial counterpart to Layer 3: a flag-2 ROI sandwiched between
+truly-shorted neighbours is treated as confirmed-artifact and silenced. So
+nearby ROIs are also considered **across channels**, within ±1 channel and
+±3 ticks.
+
+### Summary of the trigger
+
+| Question | Answer |
+|----------|--------|
+| Is the trigger asymmetry-based? | Yes, but **one-sided** (net-positive only). |
+| Does it look at neighbouring ROIs in time? | Yes — ±20 ticks, same channel, both directions. |
+| Does it look at neighbouring channels? | Yes — ±1 channel, ±3 tick overlap, for artifact cleanup. |
+| Is it event-by-event or static? | Static channel range; per-ROI flag within that range. |
+
+### Implication for PDHD/PDVD adaptation
+
+Two of the four layers transfer directly to the PDHD/PDVD unipolar problem
+(see next section) and one needs modification:
+
+- **Layer 1 (channel selection):** keep — pdhd/pdvd will use a different
+  channel list (or no list, if running everywhere).
+- **Layer 2 (per-ROI flag):** **modify** — the one-sided `temp_sum > 0`
+  test must become a **two-sided** asymmetry test, because the
+  anode-induction case produces *negative* unipolar signals. Replacing
+  `temp_sum / (...)` with `|temp_sum| / temp1_sum` and gating both unipolar
+  polarities is the minimum change.
+- **Layer 3 (time propagation):** keep — the rescue logic is independent of
+  polarity sign; once Layer 2 fires for negative-unipolar, Layer 3
+  automatically extends the rescue along the wire.
+- **Layer 4 (cross-channel cleaning):** keep — same reasoning.
+
+This is why Strategy B in the next section is favoured: most of the
+existing trigger machinery is reusable, and only the per-ROI classifier
+needs to be made polarity-symmetric.
+
+---
+
 ## Configuration parameters
 
 Defaults from `default_configuration()` (cxx:109-175). All are overridable in
@@ -318,6 +448,219 @@ that `L1SPFilter` performs. The two are complementary, not duplicates.
   production configs remain bit-identical with the feature off.
 - Review (and ideally fix) **BUG-L1-1** (reverse-scan index mismatch) in
   `L1SPFilter.cxx:378-397` before shipping on new data.
+
+---
+
+## Adapting L1SP for pdhd / pdvd unipolar-induction artifacts
+
+### The physical problem
+
+ProtoDUNE-HD and ProtoDUNE-VD induction planes see two distinct failure modes
+that standard 2D deconvolution cannot handle, because it assumes the detector
+response is **bipolar with zero net integral** (∫response dt ≈ 0).
+
+**Case 1 — Anode-induction (electrons only leaving).** When ionization
+originates at or very near the induction plane, the electrons only drift
+*away* from the wire — they never approach it. Only the **negative** lobe of
+the induced-current waveform is observed. The raw ADC on the induction wire
+carries a purely negative unipolar signal.
+
+**Case 2 — Imperfect-geometry collection on induction (electrons only
+arriving).** In regions of the detector where mechanical geometry deviates
+from design, some electrons that should pass through the induction plane
+instead are collected on it. Only the **positive** (approaching) lobe of the
+response is induced before the electrons stop. The raw ADC carries a purely
+positive unipolar signal.
+
+**Why standard deconvolution fails.** The inverse filter is the Fourier-space
+reciprocal of the bipolar response. Applied to a unipolar input, the filter
+tries to "close" the missing lobe, producing a long monotone tail that
+stretches hundreds of ticks past the real hit location. The artifact is
+visible in two reference examples from real data:
+
+- V-plane channel 4340 (`pdvd/pics/Picture1.png`): strong positive/negative
+  asymmetry in the raw waveform maps to a large oscillating artifact in the
+  deconvolved signal.
+- U-plane channel 48 (`pdvd/pics/Picture2.png`): a brief unipolar raw pulse
+  deconvolves to a tall positive peak followed by a plateau extending
+  hundreds of ticks — the 2D image shows it as long vertical colour streaks
+  stretching well beyond the true track region.
+
+### What L1SP contributes
+
+L1SP's core machinery — a LASSO solver over a configurable G-matrix response
+basis, per-ROI gating, and the existing WireCell graph plumbing (ChannelSelector,
+FrameMerger) — is exactly the framework needed. Only two things require
+adaptation:
+
+1. **The response basis** in the G matrix. Instead of {bipolar-induction,
+   collection-unipolar} as in MicroBooNE, we need one or more
+   *truncated-unipolar* basis functions derived from the PDHD/PDVD field
+   response.
+2. **The ROI gating logic** inside `L1_fit()`. The current flag-1 test
+   (`temp_sum / rescaled_abs_sum > adc_ratio_threshold`) detects net-positive
+   charge as the proxy for "shorted". The PDHD/PDVD problem requires a
+   **polarity-asymmetry** test that fires on either strongly positive *or*
+   strongly negative ROIs.
+
+### Strategy A — Static channel list (uBooNE-style port)
+
+Identify the geometric channel ranges where the collection-on-induction case
+is concentrated (e.g. channels near the CRP/APA edge where the field
+geometry distorts). Construct a "arriving-only" response (positive lobe of
+the field response, zeroed past the zero-crossing) and wire L1SP exactly as
+MicroBooNE does:
+
+```
+G ∈ ℝᴺˣ²ᴺ  with  col[0..N] = standard bipolar induction response
+                   col[N..2N] = arriving-only (positive-half) response
+```
+
+**Pros:** smallest code change; the entire uBooNE graph fragment
+(`rawsplit / sigsplit / rawsigmerge / chsel / l1spfilter / l1merge`) ports
+without modification.
+
+**Cons:** the **anode-induction case is event-by-event** (any track that
+starts near the anode anywhere in the active volume produces it). A static
+channel list cannot capture it.
+
+### Strategy B — Per-ROI polarity-asymmetry detection (recommended starting point)
+
+Run `OmnibusSigProc` on all channels as today. Then apply a downstream L1SP
+pass only on ROIs where the **raw ADC** polarity asymmetry exceeds a
+threshold:
+
+```
+asymmetry = (Σ⁺ADC + Σ⁻ADC) / (Σ⁺ADC − Σ⁻ADC)
+```
+
+where Σ⁺ sums samples above noise and Σ⁻ sums (negative) samples below. A
+balanced bipolar waveform gives asymmetry ≈ 0; a purely positive unipolar
+gives +1; a purely negative unipolar gives −1.
+
+In `L1_fit()`, the existing flag-1 condition (`cxx:555-558`) is replaced or
+supplemented:
+
+```cpp
+// current (uBooNE):  flag=1 when net charge is significantly positive
+if (temp1_sum > adc_sum_threshold &&
+    temp_sum / (...) > adc_ratio_threshold) { flag_l1 = 1; }
+
+// extension needed: also flag=1 when ADC is strongly unipolar-negative
+// (currently this path falls through to flag=0 and no L1 is run)
+if (|temp_sum| / temp1_sum > asymmetry_threshold) { flag_l1 = 1; }
+```
+
+When flagged, the G matrix is assembled with the polarity-appropriate basis:
+
+- Positive unipolar ROI → col[N..2N] = arriving-only (positive-half) response.
+- Negative unipolar ROI → col[N..2N] = leaving-only (negative-half) response.
+
+In both cases col[0..N] retains the standard bipolar induction response so
+the solver can also explain any normal induction component present alongside
+the unipolar one.
+
+**Pros:** no static channel list; handles the event-by-event nature of the
+anode-induction case; the detection test is cheap (ADC sum, already computed
+in `L1_fit`); basis selection adds ~10 lines of code.
+
+**Cons:** requires implementing the asymmetry threshold logic and a
+configurable switch between the two unipolar bases inside `L1_fit`. The
+threshold value needs calibration.
+
+### Strategy C — 3-basis LASSO (most flexible, highest cost)
+
+Extend G to three response blocks:
+
+```
+G ∈ ℝᴺˣ³ᴺ  with  col[0..N]   = standard bipolar induction
+                   col[N..2N]  = positive-unipolar (arriving-only)
+                   col[2N..3N] = negative-unipolar (leaving-only)
+```
+
+The LASSO solver discovers the mixture per tick without requiring an upstream
+detector. Normal hits get solved by the bipolar block; unipolar hits get
+solved by whichever unipolar block matches.
+
+**Pros:** handles both unipolar cases plus normal bipolar uniformly without
+any classifier.
+
+**Cons:** the 30–50% larger matrix increases solve time; the positive-unipolar
+and bipolar responses share the positive lobe, making the G columns
+correlated and the LASSO convergence slower or less stable. Needs careful
+λ retuning.
+
+### Building the unipolar response basis
+
+Two options, in increasing accuracy:
+
+1. **Approximate (fast start):** take the existing `IFieldResponse` for the
+   induction plane, load the average response into a temporary vector, and
+   zero all samples after the zero-crossing. This gives the arriving-only
+   (positive) half. Negate and zero the other half for the leaving-only
+   (negative) version. No new Garfield/COMSOL run needed.
+
+2. **Physical (higher accuracy):** re-run the field-response calculation
+   starting the drift path at the induction plane (no approaching phase) or
+   terminating it on the induction plane (no leaving phase). This correctly
+   captures the field shaping near the boundary; the approximate approach
+   may mis-model the onset ramp.
+
+Recommendation: start with (1) to validate the L1SP path end-to-end; switch
+to (2) if the reconstruction residuals are larger than acceptable.
+
+### PDVD 3-view geometry
+
+PDVD has **two induction views** (U, V) and one collection view (X). Both U
+and V can suffer both unipolar cases. L1SP's response storage currently
+hard-codes two `linterp<double>` objects (`lin_V`, `lin_W` in `L1SPFilter.h`)
+and averages `fravg.planes[1]` and `fravg.planes[2]` in `init_resp()` (cxx:80-81).
+
+Two practical options for supporting both induction views:
+
+- **Two L1SP instances:** instantiate `L1SPFilter` twice in the WCT graph,
+  once for U channels (with U-plane field response) and once for V channels
+  (with V-plane field response). Each uses the same code; only the
+  `field_response`, `collect_time_offset`, and channel-selection inputs
+  differ. This is the lowest-risk option.
+- **Generalize `init_resp()`:** add a `plane_index` config key that selects
+  which plane from `IFieldResponse` to average into `lin_V`. This removes the
+  duplication but requires a small code change.
+
+The unipolar-basis construction above applies identically to both views.
+
+### Recommended first step: diagnostic-only asymmetry scan
+
+Before touching any signal-processing path, implement a standalone diagnostic
+that reads existing PDHD/PDVD processed frames and, for each induction-plane
+ROI, computes and logs the polarity asymmetry. This is safe (read-only), fast
+to write (~50 lines), and answers the key scoping questions:
+
+- What fraction of induction ROIs are significantly asymmetric?
+- Are asymmetric ROIs concentrated in predictable geometric regions (→
+  supports Strategy A) or distributed across all channels and events (→
+  motivates Strategy B)?
+- Is the negative-unipolar (anode-induction) case, the positive-unipolar
+  (collection-on-induction) case, or both common enough to matter?
+
+The diagnostic drives the choice between Strategies A, B, and C without any
+risk of altering production outputs.
+
+### Open questions before implementation
+
+1. **Unipolar-response basis files** — do the PDHD/PDVD field-response sets
+   include a truncated-drift variant, or should we start with the
+   zero-the-second-lobe approximation described above?
+2. **Geometric localization** — is the collection-on-induction case
+   concentrated in specific known channel ranges (edge channels, dead-wire
+   neighbours), or is it scattered? If localized, Strategy A may be
+   sufficient for that case.
+3. **Validation data** — can existing data or simulation provide
+   hand-labelled unipolar ROIs to tune and validate the asymmetry threshold?
+4. **Threshold calibration** — the polarity-asymmetry cut and the modified
+   flag-1 condition both need dedicated tuning on pdhd/pdvd field responses,
+   since the MicroBooNE values (net-positive proxy for shorted wires) are
+   physically different from the new detection target.
 
 ---
 
