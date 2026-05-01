@@ -51,6 +51,7 @@ function(params, anode, chndbobj, n, name='', dft=default_dft,
              anode: wc.tn(anode),
              width: 50.0,
              pad_nticks: 20,
+             nsigma: 3.5,
          },
      },
 
@@ -65,7 +66,12 @@ function(params, anode, chndbobj, n, name='', dft=default_dft,
             // channel bin ranges are ignored
             // only when the channelmask is merged to `bad`
             // maskmap: {sticky: "bad", ledge: "bad", noisy: "bad"},
-            maskmap: {noisy:"bad", lf_noisy: "bad",femb_noise:"bad"},
+            // Explicit maskmap replaces the OmnibusNoiseFilter defaults
+            // (chirp+noisy), so any keys we want active must be listed here.
+            // Mirrors MicroBooNE's chirp+noisy and adds femb_noise produced
+            // by PDHDFEMBNoiseSub.  lf_noisy is intentionally NOT routed to
+            // "bad" (matching MicroBooNE).
+            maskmap: {chirp: "bad", noisy: "bad", femb_noise: "bad"},
             channel_filters: [
                 wc.tn(single),
             ],

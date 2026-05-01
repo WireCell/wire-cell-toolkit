@@ -260,7 +260,23 @@ notches are reactivated.
 
 ### ProtoDUNE-HD Unique Features
 - **FEMB negative pulse detection** (`FEMBNoiseSub`): Projects all channels in
-  a group to 1D, finds wide ROIs below -3.5 sigma. Tags affected time ranges.
+  a 64-channel FEMB group (mixing U/V/W) to 1D, finds ROIs wider than `width`
+  ticks below `-nsigma * RMS`, and tags those time ranges via the
+  `femb_noise` mask.  The mask is routed to `bad` by `nf.jsonnet`'s `maskmap`,
+  so SP treats those ticks as bad on every channel of the FEMB.  Detection
+  is gated by a per-plane re-confirmation: each of U/V/W must independently
+  show at least one qualifying ROI in its own subset projection before any
+  bin is marked.  All qualifying ROIs (not only the first) are emitted, so
+  multiple FEMB pulses in the same frame are all masked.  Configurable via
+  `width` (ticks, default 50), `pad_nticks` (ticks of padding on each side,
+  default 0; `nf.jsonnet` sets 20), and `nsigma` (default 3.5).  Detection
+  is gain-independent (signal and threshold both scale with FE gain).
+  Channel groupings live in
+  `cfg/pgrapher/experiment/pdhd/femb-negpulse-groups{,-shifted}.jsonnet`
+  and are wired into the chndb as `femb_negpulse_groups`; `nf.jsonnet`
+  routes them through `multigroup_chanfilters` so FEMB tagging runs before
+  the standard 40-ch coherent subtraction (`CoherentNoiseSub`), avoiding
+  bias of the latter's median by large coherent FEMB transients.
 - **Wide adaptive baseline**: 512-tick window (vs 20 for MicroBooNE)
 - **Coherent-sub uses SP `IFilterWaveform` instances** (`PDHDCoherentNoiseSub`):
   The three hardcoded inline filter helpers (`PDHD::filter_time`,
