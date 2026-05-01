@@ -262,6 +262,32 @@ notches are reactivated.
 - **FEMB negative pulse detection** (`FEMBNoiseSub`): Projects all channels in
   a group to 1D, finds wide ROIs below -3.5 sigma. Tags affected time ranges.
 - **Wide adaptive baseline**: 512-tick window (vs 20 for MicroBooNE)
+- **Coherent-sub uses SP `IFilterWaveform` instances** (`PDHDCoherentNoiseSub`):
+  The three hardcoded inline filter helpers (`PDHD::filter_time`,
+  `PDHD::filter_low`, `PDHD::filter_low_loose`) have been removed and replaced
+  by lookups into the SP factory:
+  - `SignalProtection` (median deconv) applies `HfFilter Wiener_tight_{U,V,W}`
+    (per-plane, `_APA1` variants on APA 0) × `LfFilter ROI_tighter_lf` (τ=0.08 MHz).
+  - `Subtract_WScaling` (per-channel deconv) applies the same Wiener ×
+    `LfFilter ROI_loose_lf` (τ=0.002 MHz).
+  The four hardcoded MicroBooNE-era notch bands (≈107/178/214/250 kHz) that
+  were embedded in `filter_low` are dropped.  Filter instances are defined in
+  `cfg/pgrapher/experiment/pdhd/sp-filters.jsonnet` and registered via
+  `nf.jsonnet`'s `uses: ... + sp_filters`.  MicroBooNE still uses the original
+  hardcoded helpers in `Microboone.cxx`.
+- **Opt-in coherent-sub validation dump** (`PDHDCoherentNoiseSub`,
+  `PDVDCoherentNoiseSub`, shared header
+  `WireCellSigProc/CoherentNoiseDump.h`):
+  When jsonnet field `data.debug_dump_path` is non-empty, `apply()` emits one
+  `.npz` per group capturing the median + deconvolved-aligned median, the
+  full pad-window-resolved `signal_bool`, the ROI list, the per-ROI
+  `max/min/ratio_obs` computed against `decon_limit1` /
+  `roi_min_max_ratio` on the median, and the per-(channel, ROI) accept
+  matrix that `Subtract_WScaling` actually used.  Default `''` (off) is
+  bit-identical to the pre-instrumentation hot path — one `.empty()`
+  check per group.  Consumed by the Bokeh-based viewer at
+  `wcp-porting-img/{pdhd,pdvd}/nf_plot/coherent_dump_viewer.py`; see that
+  directory's `README.md` for usage.  Not implemented for MicroBooNE/SBND.
 - **Per-channel frequency mask** (`ProtoduneHD.cxx`, `PDHD::OneChannelNoise::apply()`):
   Same mechanism as PDVD (see ProtoDUNE-VD section below).  Pre-existing
   U/V plane notches at FFT bins 169-173 (~57 kHz) and 513-516 (~171 kHz) in
@@ -276,6 +302,14 @@ notches are reactivated.
   after the auto-rebuild (defensive check; should never fire in practice).
 
 ### ProtoDUNE-VD Unique Features
+- **Coherent-sub uses SP `IFilterWaveform` instances** (`PDVDCoherentNoiseSub`):
+  Symmetric to PDHD above.  `PDVD::filter_time`, `PDVD::filter_low`,
+  `PDVD::filter_low_loose` removed; replaced by `HfFilter Wiener_tight_{U,V,W}`
+  × `LfFilter ROI_tighter_lf` (τ=0.06 MHz, PDVD) in `SignalProtection` and
+  × `LfFilter ROI_loose_lf` in `Subtract_WScaling`. The jsonnet
+  `time_filters` dispatch uses `anode.data.ident < 4` (bottom CRP) /
+  `ident >= 4` (top CRP) so per-CRP Wiener divergence is a one-line change.
+  Filter instances defined in `cfg/pgrapher/experiment/protodunevd/sp-filters.jsonnet`.
 - **Per-channel frequency mask** (`ProtoduneVD.cxx`, `PDVD::OneChannelNoise::apply()`):
   After the forward FFT, the waveform spectrum is element-wise multiplied by the
   per-channel `noise` spectrum read from the chndb (`m_noisedb->noise(ch)`).  The

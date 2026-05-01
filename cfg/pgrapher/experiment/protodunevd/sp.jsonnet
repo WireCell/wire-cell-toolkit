@@ -10,14 +10,23 @@ function(params, tools, override = {}) {
   local pc = tools.perchanresp_nameuses,
 
   // pDSP needs a per-anode sigproc
-  make_sigproc(anode, name=null):: g.pnode({
-    type: 'OmnibusSigProc',
-    name:
-      if std.type(name) == 'null'
-      then anode.name + 'sigproc%d' % anode.data.ident
-      else name,
+  //
+  // l1sp_pd_mode: '' (default, OFF) / 'process' (process triggered ROIs, still stubbed)
+  //               / 'dump' (calibration dump of per-ROI asymmetry quantities to NPZ)
+  // l1sp_pd_dump_path: directory to write per-event NPZ files when mode='dump'
+  // l1sp_pd_planes: plane indices processed by L1SPFilterPD (default [0,1] = U+V)
+  make_sigproc(anode, name=null,
+               l1sp_pd_mode='',
+               l1sp_pd_dump_path='',
+               l1sp_pd_planes=[0, 1])::
+    local sp_node = g.pnode({
+      type: 'OmnibusSigProc',
+      name:
+        if std.type(name) == 'null'
+        then anode.name + 'sigproc%d' % anode.data.ident
+        else name,
 
-    data: {
+      data: {
       /**  
        *  Default SP parameters (till May 2019)
        */
@@ -99,7 +108,28 @@ function(params, tools, override = {}) {
       isWrapped: false,
       // process_planes: [0, 2],
 
-    } + override,
-  }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt),
+      } + override,
+    }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt);
+
+    if l1sp_pd_mode == '' then sp_node
+    else
+      local n = anode.data.ident;
+      local l1sp_node = g.pnode({
+        type: 'L1SPFilterPD',
+        name: 'l1sppd%d' % n,
+        data: {
+          dft: wc.tn(tools.dft),
+          anode: wc.tn(anode),
+          fields: wc.tn(tools.field),
+          adctag: 'raw%d' % n,
+          sigtag: 'gauss%d' % n,
+          outtag: 'gauss%d' % n,
+          process_planes: l1sp_pd_planes,
+          dump_mode: l1sp_pd_mode == 'dump',
+          dump_path: l1sp_pd_dump_path,
+          dump_tag: 'apa%d' % n,
+        },
+      }, nin=1, nout=1, uses=[tools.dft, anode, tools.field]);
+      g.pipeline([sp_node, l1sp_node], 'sigproc_l1sppd_%d' % n),
 
 }

@@ -12,8 +12,10 @@ local wc = import 'wirecell.jsonnet';
 // the new kernel.
 
 function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shift=3)
-  // ADC-domain thresholds below are tuned for FE amplifier gain = 14 mV/fC.
-  // For other gains, scale linearly with params.elec.gain.
+  // ADC-domain thresholds (adc_limit, min/max_rms_cut) are tuned at 14 mV/fC
+  // and scale with gain_scale for other gains.  Deconvolved-domain thresholds
+  // (decon_limit, decon_limit1) operate on the gain-normalised output and do
+  // not scale with FE gain.
   local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
   // chndb-resp.jsonnet stores the FR⊗ER kernel at reference gain=14 mV/fC.
   // Scale element-wise so the kernel tracks the runtime FE gain.
@@ -66,12 +68,12 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         nominal_baseline: 2048.0,  // adc count
         gain_correction: 1.0,  // unitless
         response_offset: 0.0,  // ticks?
-        pad_window_front: 10,  // ticks?
-        pad_window_back: 10,  // ticks?
-        decon_limit: 0.02 * gain_scale,
-        decon_limit1: 0.09 * gain_scale,
-        adc_limit: 60 * gain_scale, // 15,
-        min_adc_limit: 200 * gain_scale, // 50,
+        pad_window_front: 20,  // ticks?
+        pad_window_back: 20,  // ticks?
+        decon_limit: 0.02,
+        decon_limit1: 0.09,
+        adc_limit: 30 * gain_scale, // 15,
+        min_adc_limit: 100 * gain_scale, // 50,
         roi_min_max_ratio: 0.8, // default 0.8
         min_rms_cut: 10.0 * gain_scale,  // ADC at 14 mV/fC
         max_rms_cut: 30.0 * gain_scale,  // ADC at 14 mV/fC
@@ -105,10 +107,9 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this uses hard-coded waveform.
         response: { waveform: scale_resp(handmade.u_resp), waveformid: wc.Ulayer },
         response_offset: 127, // argmin of PDHD FR⊗ER kernel (was 120, SBND copy)
-        pad_window_front: 20,
-        decon_limit: 0.02 * gain_scale,
-        decon_limit1: 0.07 * gain_scale,
-        roi_min_max_ratio: 3.0,
+        decon_limit: 0.01,
+        decon_limit1: 0.07,
+        roi_min_max_ratio: 0.8,
       },
 
       {
@@ -121,11 +122,15 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
         /// this will use an average calculated from the anode
         // response: { wpid: wc.WirePlaneId(wc.Vlayer) },
         /// this uses hard-coded waveform.
-        response: { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
-        response_offset: 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
-        decon_limit: 0.01 * gain_scale,
-        decon_limit1: 0.08 * gain_scale,
-        roi_min_max_ratio: 1.5,
+        // APA 0 (n==0) V plane is hardware-faulty and behaves as a collection
+        // plane.  Drop the FR⊗ER kernel and zero the response_offset there so
+        // PDHD::SignalProtection's deconvolution gate falls through (the gate
+        // requires respec.size()>0, respec[0]!=(1,0), and res_offset!=0).
+        response: if n == 0 then {} else { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
+        response_offset: if n == 0 then 0 else 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
+        decon_limit: 0.01,
+        decon_limit1: 0.07,
+        roi_min_max_ratio: 0.8,
       },
 
       // local freqbinner = wc.freqbinner(params.daq.tick, params.nf.nsamples);
@@ -133,13 +138,13 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
       //   // [51.5, 102.8, 154.2, 205.5, 256.8, 308.2, 359.2, 410.5, 461.8, 513.2, 564.5, 615.8]
       //   [51.5, 77.2, 102.8, 128.5, 154.2, 180.0, 205.5, 231.5, 256.8, 282.8, 308.2, 334.0, 359.2, 385.5, 410.5, 461.8, 513.2, 564.5, 615.8, 625.0]
       // ];
-      
+
       {
         //channels: { wpid: wc.WirePlaneId(wc.Wlayer) },
 	channels: std.range(n * 2560 + 1600, n * 2560 + 2560- 1),
         nominal_baseline: 400.0,
-        decon_limit: 0.05 * gain_scale,
-        decon_limit1: 0.08 * gain_scale,
+        decon_limit: 0.05,
+        decon_limit1: 0.08,
         // freqmasks: freqbinner.freqmasks(harmonic_freqs, 5.0*wc.kilohertz),
       },
 

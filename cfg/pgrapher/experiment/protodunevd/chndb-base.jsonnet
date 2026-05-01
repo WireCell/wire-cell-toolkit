@@ -2,7 +2,8 @@
 // This does not include any run dependent RMS cuts.
 // See chndb.jsonnet
 
-local handmade = import 'chndb-resp.jsonnet';
+local resp_bot = import 'chndb-resp-bot.jsonnet';
+local resp_top = import 'chndb-resp-top.jsonnet';
 local wc = import 'wirecell.jsonnet';
 local util = import 'pgrapher/experiment/protodunevd/funcs.jsonnet';
 
@@ -26,6 +27,15 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
   // Bottom cuts scale linearly with params.elec.gain (= elecs[0].gain).
   local gain_scale = if n >= 4 then 1.0
                      else params.elec.gain / (7.8 * wc.mV / wc.fC);
+  // chndb-resp-{bot,top}.jsonnet store the FR⊗ER kernel at reference gain.
+  // scale_resp applies gain_scale element-wise so the kernel tracks runtime gain.
+  // Top electronics (n>=4) has gain_scale=1.0 (no scalar gain knob).
+  local scale_resp(arr) = std.map(function(x) x * gain_scale, arr);
+  local u_resp_arr = if n >= 4 then resp_top.u_resp else resp_bot.u_resp;
+  local v_resp_arr = if n >= 4 then resp_top.v_resp else resp_bot.v_resp;
+  // response_offset = argmin of FR⊗ER kernel (from chndb-resp-{bot,top}.jsonnet headers)
+  local u_offset = if n >= 4 then 240 else 239;  // top U=240, bottom U=239
+  local v_offset = if n >= 4 then 243 else 245;  // top V=243, bottom V=245
   // Frequency-mask helper: use wc.freqbinner(...).freqmasks_mirror([freqs], delta)
   // in per-channel channel_info[] entries and gate on this local.
   local freqmask_enabled = use_freqmask;
@@ -478,11 +488,12 @@ top_u_groups:
         nominal_baseline: 2048.0,  // adc count
         gain_correction: 1.0,  // unitless
         response_offset: 0.0,  // ticks?
-        pad_window_front: 20,  // ticks?
-        pad_window_back: 20,  // ticks?
-        decon_limit: 0.02 * gain_scale,
-        decon_limit1: 0.09 * gain_scale,
-        adc_limit: 15 * gain_scale,
+        pad_window_front: 20,  // ticks
+        pad_window_back: 20,  // ticks
+        decon_limit: 0.005,
+        decon_limit1: 0.008,
+        adc_limit: 60 * gain_scale,
+        min_adc_limit: if n >= 4 then 60 else 50 * gain_scale,
         roi_min_max_ratio: 0.8, // default 0.8
         min_rms_cut: 1.0 * gain_scale,  // ADC at 7.8 mV/fC
         max_rms_cut: 60.0 * gain_scale,  // ADC at 7.8 mV/fC
@@ -500,6 +511,29 @@ top_u_groups:
         // field response waveform to make "response" spectrum.
         response: {},
 
+      },
+
+      {
+        channels: u_chans,
+        response: { waveform: scale_resp(u_resp_arr), waveformid: wc.Ulayer },
+        response_offset: u_offset,
+        decon_limit: if n >= 4 then 0.002 else 0.001,
+        decon_limit1: 0.007,
+        adc_limit: if n >= 4 then 20 else 15 * gain_scale,
+      },
+
+      {
+        channels: v_chans,
+        response: { waveform: scale_resp(v_resp_arr), waveformid: wc.Vlayer },
+        response_offset: v_offset,
+        decon_limit: if n >= 4 then 0.002 else 0.001,
+        decon_limit1: 0.007,
+        adc_limit: if n >= 4 then 20 else 15 * gain_scale,
+      },
+
+      {
+        channels: w_chans,
+        adc_limit: 20 * gain_scale,
       },
 
       // W-plane harmonic noise on anode 0: f0=23.5 kHz, harmonics n=2..12
