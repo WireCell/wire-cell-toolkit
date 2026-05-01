@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <map>
+#include <set>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -72,6 +73,55 @@ std::string MultiAlgBlobClustering::inpath(const std::string& name, int ident)
 std::string MultiAlgBlobClustering::outpath(const std::string& name, int ident)
 {
     return format_path(m_outpath, name, ident, m_outsubpaths);
+}
+
+static std::string format_flag_names(const std::set<std::string>& flag_names)
+{
+    std::ostringstream ss;
+    ss << "[";
+    bool first = true;
+    for (const auto& flag_name : flag_names) {
+        if (!first) {
+            ss << ",";
+        }
+        ss << flag_name;
+        first = false;
+    }
+    ss << "]";
+    return ss.str();
+}
+
+static void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const std::string& grouping_name, int ident)
+{
+    std::set<std::string> flag_names;
+    for (const auto* cluster : grouping.children()) {
+        for (const auto& flag_name : cluster->flag_names()) {
+            flag_names.insert(flag_name);
+        }
+    }
+
+    SPDLOG_LOGGER_DEBUG(log, "normalize_cluster_flags: ident={} grouping={} nclusters={} all_flags={}",
+                        ident, grouping_name, grouping.children().size(), format_flag_names(flag_names));
+
+    if (flag_names.empty()) {
+        return;
+    }
+
+    size_t nmissing = 0;
+    for (auto* cluster : grouping.children()) {
+        const auto cluster_flags = cluster->flag_names();
+        const std::set<std::string> cluster_flag_set(cluster_flags.begin(), cluster_flags.end());
+
+        for (const auto& flag_name : flag_names) {
+            if (cluster_flag_set.count(flag_name)) {
+                continue;
+            }
+            cluster->set_flag(flag_name, 0);
+            ++nmissing;
+        }
+    }
+    SPDLOG_LOGGER_DEBUG(log, "normalize_cluster_flags: ident={} grouping={} added={} missing flag values",
+                        ident, grouping_name, nmissing);
 }
 
 
@@ -1767,6 +1817,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         // as this loop progresses.
         auto gs = ensemble.with_name(name);
         auto& grouping = *gs[0];
+        normalize_cluster_flags(grouping, log, name, ident);
         auto node = ensemble.remove_child(grouping);
         auto tens = as_tensors(*node, outpath(name, ident));
         outtens.insert(outtens.end(), tens.begin(), tens.end());

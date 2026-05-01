@@ -177,7 +177,7 @@ namespace WireCell::Clus::Facade::Mixins {
             const auto& spc = get_pc(scalar_pc_name);
             for (const auto& key : spc.keys()) {
                 if (String::startswith(key, prefix)) {
-                    ret.push_back(key.substr(0, prefix.size()));
+                    ret.push_back(key.substr(prefix.size()));
                 }
             }
             return ret;

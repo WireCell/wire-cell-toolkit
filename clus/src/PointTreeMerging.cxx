@@ -7,6 +7,8 @@
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellAux/TensorDMcommon.h"
 
+#include <map>
+
 WIRECELL_FACTORY(PointTreeMerging, WireCell::Clus::PointTreeMerging,
                  WireCell::INamed,
                  WireCell::ITensorSetFanin,
@@ -51,6 +53,49 @@ WireCell::Configuration Clus::PointTreeMerging::default_configuration() const
 
 void Clus::PointTreeMerging::finalize()
 {
+}
+
+static size_t normalize_pctree_local_pcs(Points::node_t* root)
+{
+    if (!root) {
+        return 0;
+    }
+
+    std::vector<Points::node_t*> nodes;
+    for (auto& noderef : root->depth()) {
+        nodes.push_back(&noderef);
+    }
+
+    std::map<std::string, std::map<std::string, WireCell::PointCloud::Array>> templates;
+    for (const auto* node : nodes) {
+        for (const auto& [pcname, ds] : node->value.local_pcs()) {
+            auto& pc_templates = templates[pcname];
+            for (const auto& key : ds.keys()) {
+                if (pc_templates.count(key)) {
+                    continue;
+                }
+                pc_templates.emplace(key, *ds.get(key));
+            }
+        }
+    }
+
+    size_t nadded = 0;
+    for (auto* node : nodes) {
+        for (auto& [pcname, ds] : node->value.local_pcs()) {
+            const auto it = templates.find(pcname);
+            if (it == templates.end()) {
+                continue;
+            }
+            for (const auto& [key, arr_template] : it->second) {
+                if (ds.has(key)) {
+                    continue;
+                }
+                ds.add(key, arr_template.zeros_like(ds.size_major()));
+                ++nadded;
+            }
+        }
+    }
+    return nadded;
 }
 
 static void merge_pct(Points::node_t* tgt, Points::node_t* src)
@@ -165,6 +210,10 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
 
     SPDLOG_LOGGER_DEBUG(log, "merged live PC tree with {} children", root_live->nchildren());
     SPDLOG_LOGGER_DEBUG(log, "merged dead PC tree with {} children", root_dead->nchildren());
+    const auto nlive_added = normalize_pctree_local_pcs(root_live.get());
+    const auto ndead_added = normalize_pctree_local_pcs(root_dead.get());
+    SPDLOG_LOGGER_DEBUG(log, "normalized merged PC trees with {} live and {} dead arrays added",
+                        nlive_added, ndead_added);
 
     // output
     std::string outpath = m_outpath;
