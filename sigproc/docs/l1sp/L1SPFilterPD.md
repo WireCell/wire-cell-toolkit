@@ -209,7 +209,6 @@ Leave both `fields_*_unipolar` keys empty to keep the component as a pass-throug
 | `adc_l1_threshold` | `6` | Min |ADC| to include a sample in the sum |
 | `adc_sum_threshold` | `160` | Min Σ|ADC| required to evaluate the trigger |
 | `adc_sum_rescaling` | `90` | Rescaling denominator for the asymmetry ratio |
-| `adc_sum_rescaling_limit` | `50` | Rescaling guard for artifact detection |
 | `adc_ratio_threshold` | `0.2` | Asymmetry ratio cut for flag=±1 |
 
 ### LASSO solve
@@ -247,6 +246,80 @@ Leave both `fields_*_unipolar` keys empty to keep the component as a pass-throug
 | `fine_time_offset` | `0` | Fine time offset |
 | `coarse_time_offset` | `−8.0 µs` | Coarse time offset |
 | `dft` | `"FftwDFT"` | IDFT component type-name |
+
+---
+
+## Calibration dump schema
+
+When `dump_mode=true` a single NPZ file per frame is written to `dump_path`.
+All per-ROI arrays are parallel (same length = total ROI count across all
+in-scope channels).
+
+### Frame scalars
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `frame_ident` | int32 | Frame identifier |
+| `frame_time` | float64 | Frame timestamp |
+| `call_count` | int32 | `operator()` invocation index |
+| `n_rois` | int32 | Total number of ROIs in this frame |
+
+### Per-ROI locator
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `channel` | int32\[\] | Channel ID |
+| `roi_start` | int32\[\] | First tick of the ROI (inclusive) |
+| `roi_end` | int32\[\] | Last tick of the ROI (inclusive) |
+| `nbin_fit` | int32\[\] | ROI width in ticks (`roi_end - roi_start + 1`) |
+
+### Per-ROI asymmetry scalars (threshold-gated, `|adc| > adc_l1_threshold`)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `temp_sum` | float64\[\] | Σ ADC (signed) |
+| `temp1_sum` | float64\[\] | Σ \|ADC\| |
+| `temp2_sum` | float64\[\] | Σ \|gauss\| (sig absolute sum, gated) |
+| `max_val` | float64\[\] | Max ADC in ROI (ungated) |
+| `min_val` | float64\[\] | Min ADC in ROI (ungated) |
+
+### Per-ROI same-channel adjacency
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `prev_roi_end` | int32\[\] | `roi_end` of preceding ROI on same channel (−1 if none) |
+| `next_roi_start` | int32\[\] | `roi_start` of following ROI on same channel (−1 if none) |
+| `prev_gap` | int32\[\] | Gap in ticks to preceding ROI (−1 if none) |
+| `next_gap` | int32\[\] | Gap in ticks to following ROI (−1 if none) |
+
+### Per-ROI polarity classification (Tier 1)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `flag` | int32\[\] | `{0, +1, -1}` under current threshold config |
+| `ratio` | float64\[\] | `temp_sum / (temp1_sum * adc_sum_rescaling / nbin_fit)`; 0 when `temp1_sum==0` |
+| `temp_sum_pos` | float64\[\] | Σ ADC for positive thresholded samples only |
+| `temp_sum_neg` | float64\[\] | Σ ADC for negative thresholded samples only (≤ 0) |
+| `n_above_pos` | int32\[\] | Count of samples with `adc > +adc_l1_threshold` |
+| `n_above_neg` | int32\[\] | Count of samples with `adc < −adc_l1_threshold` |
+
+A pure bipolar signal has `temp_sum_pos ≈ −temp_sum_neg`; a pure unipolar signal
+has one of them ≈ 0.  `n_above_pos / n_above_neg` carries similar information as
+a sample-count ratio.
+
+### Per-ROI peak location and decon scalars (Tier 2)
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `argmax_tick` | int32\[\] | Absolute tick of `max_val` within the ROI |
+| `argmin_tick` | int32\[\] | Absolute tick of `min_val` within the ROI |
+| `sig_peak` | float64\[\] | Max of gauss (decon) signal within the ROI, ungated |
+| `sig_integral` | float64\[\] | Σ gauss within the ROI, ungated (signed sum) |
+
+`sig_peak` and `sig_integral` are independent of the ADC threshold gate — they
+capture the full decon content without the raw-ADC bias.  `argmax_tick` /
+`argmin_tick` are useful for `unipolar_time_offset` calibration once unipolar
+field-response files are available.
 
 ---
 
@@ -299,10 +372,6 @@ production configs remain bit-identical with the feature off.
 3. **Threshold calibration** — retune `adc_ratio_threshold`, `unipolar_time_offset`,
    `l1_basis0_scale`, `l1_basis1_scale`, and the smearing `filter` kernel from
    PDHD/PDVD field responses.
-
-4. **Jsonnet wiring** — done; `cfg/pgrapher/experiment/{pdhd,protodunevd}/sp.jsonnet`
-   wire `L1SPFilterPD` behind `l1sp_pd_mode` (default `''`).  Set
-   `l1sp_pd_mode='process'` to enable.
 
 ## Design decisions
 

@@ -93,6 +93,13 @@ struct AsymRecord {
     int    nbin_fit{0};
     double temp_sum{0}, temp1_sum{0}, temp2_sum{0};
     double max_val{-1e30}, min_val{1e30};
+    // Split-sign accumulators (same threshold gate as temp_sum / temp1_sum)
+    double temp_sum_pos{0}, temp_sum_neg{0};
+    int    n_above_pos{0}, n_above_neg{0};
+    // Absolute tick of max_val / min_val within the ROI
+    int    argmax_tick{-1}, argmin_tick{-1};
+    // Decon (gauss) peak and integral over the ROI, ungated
+    double sig_peak{-1e30}, sig_integral{0};
 };
 
 // Compute ADC asymmetry quantities for ticks [start_tick, end_tick).
@@ -110,13 +117,17 @@ AsymRecord compute_asym(const WireCell::ITrace::ChargeSequence& adc,
         int idx = i + start_tick - tbin;
         double w = adc.at(idx);
         double b = sig.at(idx);
-        if (w > r.max_val) r.max_val = w;
-        if (w < r.min_val) r.min_val = w;
+        if (w > r.max_val) { r.max_val = w; r.argmax_tick = start_tick + i; }
+        if (w < r.min_val) { r.min_val = w; r.argmin_tick = start_tick + i; }
         if (std::fabs(w) > threshold) {
             r.temp_sum  += w;
             r.temp1_sum += std::fabs(w);
             r.temp2_sum += std::fabs(b);
+            if (w > 0) { r.temp_sum_pos += w; ++r.n_above_pos; }
+            else       { r.temp_sum_neg += w; ++r.n_above_neg; }
         }
+        if (b > r.sig_peak) r.sig_peak = b;
+        r.sig_integral += b;
     }
     return r;
 }
@@ -595,6 +606,13 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     std::vector<int32_t> d_channel, d_roi_start, d_roi_end, d_nbin_fit;
     std::vector<double>  d_temp_sum, d_temp1_sum, d_temp2_sum, d_max_val, d_min_val;
     std::vector<int32_t> d_prev_roi_end, d_next_roi_start, d_prev_gap, d_next_gap;
+    // Tier 1: pre-computed flag/ratio and split-sign shape discriminants
+    std::vector<int32_t> d_flag;
+    std::vector<double>  d_ratio, d_temp_sum_pos, d_temp_sum_neg;
+    std::vector<int32_t> d_n_above_pos, d_n_above_neg;
+    // Tier 2: peak locations and decon-side scalars
+    std::vector<int32_t> d_argmax_tick, d_argmin_tick;
+    std::vector<double>  d_sig_peak, d_sig_integral;
 
     for (auto trace : sigtraces) {
         auto newtrace = std::make_shared<Aux::SimpleTrace>(
@@ -639,6 +657,27 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                                      ? (int32_t)(rois_save[i].first - prev_end) : -1);
                 d_next_gap.push_back(next_start >= 0
                                      ? (int32_t)(next_start - rois_save[i].second) : -1);
+
+                // Tier 1: flag + ratio (same formula as l1_fit trigger)
+                double ratio = (rec.temp1_sum > 0)
+                             ? rec.temp_sum / (rec.temp1_sum * m_adc_sum_rescaling / rec.nbin_fit)
+                             : 0.0;
+                int flag = 0;
+                if (rec.temp1_sum > m_adc_sum_threshold) {
+                    if      (ratio >  m_adc_ratio_threshold) flag = +1;
+                    else if (ratio < -m_adc_ratio_threshold) flag = -1;
+                }
+                d_flag.push_back(flag);
+                d_ratio.push_back(ratio);
+                d_temp_sum_pos.push_back(rec.temp_sum_pos);
+                d_temp_sum_neg.push_back(rec.temp_sum_neg);
+                d_n_above_pos.push_back(rec.n_above_pos);
+                d_n_above_neg.push_back(rec.n_above_neg);
+                // Tier 2: peak locations and decon scalars
+                d_argmax_tick.push_back(rec.argmax_tick);
+                d_argmin_tick.push_back(rec.argmin_tick);
+                d_sig_peak.push_back(rec.sig_peak);
+                d_sig_integral.push_back(rec.sig_integral);
             }
         } else {
             // Normal processing path: classify ROIs and run L1 fits.
@@ -695,6 +734,18 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         save_i32("next_roi_start", d_next_roi_start);
         save_i32("prev_gap",      d_prev_gap);
         save_i32("next_gap",      d_next_gap);
+        // Tier 1
+        save_i32("flag",          d_flag);
+        save_f64("ratio",         d_ratio);
+        save_f64("temp_sum_pos",  d_temp_sum_pos);
+        save_f64("temp_sum_neg",  d_temp_sum_neg);
+        save_i32("n_above_pos",   d_n_above_pos);
+        save_i32("n_above_neg",   d_n_above_neg);
+        // Tier 2
+        save_i32("argmax_tick",   d_argmax_tick);
+        save_i32("argmin_tick",   d_argmin_tick);
+        save_f64("sig_peak",      d_sig_peak);
+        save_f64("sig_integral",  d_sig_integral);
 
         log->debug("call={} dump_mode: {} ROIs -> {}", m_count, d_channel.size(), fname);
     }
