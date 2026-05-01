@@ -130,6 +130,37 @@ function(params, tools, override = {}) {
           dump_tag: 'apa%d' % n,
         },
       }, nin=1, nout=1, uses=[tools.dft, anode, tools.field]);
-      g.pipeline([sp_node, l1sp_node], 'sigproc_l1sppd_%d' % n),
+      // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.
+      // OmnibusSigProc drops raw traces from its output, so we split the
+      // input frame, run SP on one copy, then merge raw+gauss for L1SP.
+      // The final output (sigsplit port 0 = gauss+wiener) is bit-identical
+      // to a run without L1SP; L1SP's output is discarded via l1sp_sink.
+      local rawsplit     = g.pnode({type: 'FrameSplitter', name: 'rawsplit%d' % n}, nin=1, nout=2);
+      local sigsplit     = g.pnode({type: 'FrameSplitter', name: 'sigsplit%d' % n}, nin=1, nout=2);
+      local rawsigmerge  = g.pnode({
+        type: 'FrameMerger', name: 'rawsigmerge%d' % n,
+        data: {
+          rule: 'replace',
+          mergemap: [
+            ['raw%d' % n, 'raw%d' % n, 'raw%d' % n],
+            ['gauss%d' % n, 'gauss%d' % n, 'gauss%d' % n],
+          ],
+        },
+      }, nin=2, nout=1);
+      local l1sp_sink    = g.pnode({type: 'DumpFrames', name: 'l1spsnk%d' % n}, nin=1, nout=0);
+      g.intern(
+        innodes=[rawsplit],
+        centernodes=[sp_node, sigsplit, rawsigmerge, l1sp_node, l1sp_sink],
+        edges=[
+          g.edge(rawsplit,    sp_node,      0, 0),
+          g.edge(sp_node,     sigsplit,     0, 0),
+          g.edge(sigsplit,    rawsigmerge,  1, 0),
+          g.edge(rawsplit,    rawsigmerge,  1, 1),
+          g.edge(rawsigmerge, l1sp_node,   0, 0),
+          g.edge(l1sp_node,   l1sp_sink,   0, 0),
+        ],
+        oports=[sigsplit.oports[0]],
+        name='sigproc_l1sppd_%d' % n
+      ),
 
 }
