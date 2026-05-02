@@ -43,7 +43,10 @@ namespace {
 
 // Build N×2N response matrix for one segment.
 // Column j           ← basis0(dt + overall)
-// Column N+j         ← basis1(dt + overall + basis1_offset)
+// Column N+j         ← basis1(dt + overall − basis1_offset)
+//   basis1_offset is stored in the kernel file as (zero_crossing − W_peak),
+//   so subtracting it places the W peak at LASSO dt = zero_crossing (the
+//   bipolar zero-crossing) — i.e. inside the response window.
 // Response window: dt ∈ (t_lo, t_hi) relative to overall_time_offset.
 // Tick size assumed 0.5 µs (2 MHz ADC).
 MatrixXd build_G(int nbin,
@@ -68,7 +71,7 @@ MatrixXd build_G(int nbin,
 #pragma GCC diagnostic ignored "-Wstringop-overread"
 #endif
                 G(i, j)        = (*basis0)(dt_adj)                 * scaling * resp_scale;
-                G(i, nbin + j) = (*basis1)(dt_adj + basis1_offset) * scaling * resp_scale;
+                G(i, nbin + j) = (*basis1)(dt_adj - basis1_offset) * scaling * resp_scale;
 #if HAS_WARNING("-Wstringop-overread")
 #pragma GCC diagnostic pop
 #endif
@@ -486,14 +489,14 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["l1_fill_shape_fwhm_thr"]   = m_l1_fill_shape_fwhm_thr;
 
     cfg["l1_seg_length"] = 120;
-    cfg["l1_scaling_factor"] = 500;
-    cfg["l1_lambda"] = 5;
+    cfg["l1_scaling_factor"] = 500;  // numerical conditioning only; cancels in linear algebra
+    cfg["l1_lambda"] = 10;           // doubled from 5: compensates for 2× larger G (resp_scale 0.5→1)
     cfg["l1_epsilon"] = 0.05;
     cfg["l1_niteration"] = 100000;
     cfg["l1_decon_limit"] = 100;
-    cfg["l1_resp_scale"] = 0.5;
-    cfg["l1_basis0_scale"] = 1.15;  // weight for bipolar component
-    cfg["l1_basis1_scale"] = 0.5;   // weight for unipolar component
+    cfg["l1_resp_scale"] = 1.0;      // kernel amplitude scale; must be 1.0 for ADC/electron kernels
+    cfg["l1_basis0_scale"] = 1.0;    // post-LASSO weight for bipolar component (electrons)
+    cfg["l1_basis1_scale"] = 1.0;    // post-LASSO weight for unipolar component (electrons)
 
     cfg["peak_threshold"] = 1000;
     cfg["mean_threshold"] = 500;
@@ -694,6 +697,12 @@ void L1SPFilterPD::init_resp()
     const double xstep     = period_ns * units::ns;
     const double x0        = t0_us * units::us;
 
+    // Global LASSO frame origin: kernel native time at which "source signal
+    // = 0" in the LASSO fit (= reference plane's bipolar zero crossing,
+    // typically V).  Used uniformly for all induction planes; per-plane
+    // arrival differences are encoded in the kernel shapes.
+    m_frame_origin = meta.get("frame_origin_us", 0.0).asDouble() * units::us;
+
     auto load_array = [&](const Json::Value& jv) {
         Waveform::realseq_t v;
         v.reserve(jv.size());
@@ -732,9 +741,9 @@ void L1SPFilterPD::init_resp()
         m_unipolar_toff_pos[plane] = toff_pos_us * units::us;
 
         log->debug("loaded plane {} kernels from {}: n={} period={} ns t0={:.3f} us "
-                   "W-shift(pos)={:+.3f} us kernels_scale={:.4f}",
+                   "W-shift(pos)={:+.3f} us frame_origin={:+.3f} us kernels_scale={:.4f}",
                    plane, m_kernels_file, n_samples, period_ns, t0_us, toff_pos_us,
-                   m_kernels_scale);
+                   m_frame_origin / units::us, m_kernels_scale);
     }
 }
 
@@ -824,10 +833,13 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
             VectorXd W_seg = VectorXd::Zero(sn);
             for (int j = 0; j < sn; j++) W_seg(j) = init_W(bounds[s] + j);
 
+            // overall_time_offset = global LASSO frame origin (from kernel
+            // file meta.frame_origin_us) + cfg additive override (default 0).
+            const double overall_toff = m_frame_origin + m_overall_time_offset;
             MatrixXd G = build_G(sn,
-                                 -15 * units::us - m_overall_time_offset,
-                                  10 * units::us - m_overall_time_offset,
-                                 m_overall_time_offset,
+                                 -15 * units::us - overall_toff,
+                                  10 * units::us - overall_toff,
+                                 overall_toff,
                                  basis1_toff,
                                  m_l1_scaling_factor, m_l1_resp_scale,
                                  lin_bipolar, lin_unipolar);
@@ -845,13 +857,17 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
         for (int i = 0; i < nbin_fit * 2; i++) sum_beta += final_beta(i);
 
         if (sum_beta > m_adc_l1_threshold) {
-            // Combine basis components and apply smearing filter.
+            // Combine basis components and undo the LASSO numerical conditioning
+            // (× m_l1_scaling_factor) so l1_signal is already in electron units
+            // before smearing.  The smearing kernel is sum-normalized to 1, so
+            // applying it now preserves the integral.
             Waveform::realseq_t l1_signal(nbin_fit, 0);
             for (int j = 0; j < nbin_fit; j++) {
-                l1_signal[j] = final_beta(j)           * m_l1_basis0_scale
-                             + final_beta(nbin_fit + j) * m_l1_basis1_scale;
+                l1_signal[j] = (final_beta(j)           * m_l1_basis0_scale
+                              + final_beta(nbin_fit + j) * m_l1_basis1_scale)
+                             * m_l1_scaling_factor;
             }
-            // Snapshot the unsmeared LASSO output before smearing overwrites l1_signal.
+            // Snapshot the unsmeared LASSO output (in electron units).
             if (lasso_unsmeared) {
                 lasso_unsmeared->assign(l1_signal.begin(), l1_signal.end());
             }
@@ -868,10 +884,9 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                 }
             }
 
+            // Apply per-tick floor (m_l1_decon_limit is in electrons).
             for (int j = 0; j < nbin_fit; j++) {
-                l1_signal[j] = (l2_signal[j] < m_l1_decon_limit / m_l1_scaling_factor)
-                               ? 0.0
-                               : l2_signal[j] * m_l1_scaling_factor;
+                l1_signal[j] = (l2_signal[j] < m_l1_decon_limit) ? 0.0 : l2_signal[j];
             }
 
             // Remove small isolated peaks.

@@ -53,8 +53,22 @@ needed.
 **`build_G(nbin, t_lo, t_hi, overall_offset, basis1_offset, scaling, resp_scale, basis0, basis1)`**
 
 Builds the N×2N response matrix for one segment:
-- Columns `[0, N)` — `basis0` evaluated at each `(meas-tick, signal-tick)` pair.
-- Columns `[N, 2N)` — `basis1` evaluated at the same pairs, shifted by `basis1_offset`.
+- Columns `[0, N)` — `basis0(dt + overall_offset)` at each `(meas-tick, signal-tick)` pair.
+- Columns `[N, 2N)` — `basis1(dt + overall_offset − basis1_offset)`.
+
+`overall_offset` is the global LASSO frame origin (kernel-file metadata
+`frame_origin_us`, in WCT time units): the kernel native time at which
+"source signal at t = 0" sits in the LASSO frame.  By convention this is
+the reference plane's bipolar zero-crossing (V plane for PDHD/PDVD), so
+β at LASSO tick j ↔ "charge passed V plane at tick j".  A single global
+value is used for both U and V channel fits; the U/V geometric arrival
+difference is already encoded in each plane's kernel shape.
+
+`basis1_offset` is the per-plane W shift loaded from the kernel file
+(`unipolar_time_offset_us = zero_crossing − W_peak`).  Subtracting it puts
+the W kernel peak at LASSO `dt = zero_crossing` (= bipolar zero-crossing),
+i.e. inside the response window.  Negative-polarity case has
+`basis1_offset = 0` (no shift).
 
 The caller passes whichever `{basis0, basis1}` pair is appropriate for the
 detected polarity (see `l1_fit` below).
@@ -140,11 +154,14 @@ Called per ROI.  Sequence:
 4. **Pass-through guard** — if the matching unipolar basis is null
    (config keys empty), early-return without modifying `newtrace`.
 5. **Segmented LASSO solve** — segments of `l1_seg_length` ticks; for each
-   segment call `build_G` then `lasso_solve`.  Scatter beta into
-   `l1_signal[t] += m_l1_basis0_scale * beta[j] + m_l1_basis1_scale * beta[N+j]`.
-6. **Post-processing** — Gaussian smearing (if `filter` key is non-empty),
-   zero samples below `l1_decon_limit`, remove peaks below `peak_threshold` /
-   `mean_threshold`, write back into `newtrace`.
+   segment call `build_G` then `lasso_solve`.  Combine the two basis
+   coefficients and rescale to electron units in one step:
+   `l1_signal[t] = (β₀ * basis0_scale + β₁ * basis1_scale) * scaling_factor`.
+6. **Post-processing** — apply Gaussian smearing on `l1_signal` (which is
+   already in electron units; the smearing kernel is sum-normalised to 1
+   so the integral is preserved), then floor at `l1_decon_limit` (also in
+   electrons), remove peaks below `peak_threshold`/`mean_threshold`, write
+   back into `newtrace`.
 
 The propagation/hint-polarity path (uBooNE Layer 3) and the `flag_l1 = 2`
 zero-out branch are deliberately not ported — see Design decisions below.
@@ -247,13 +264,17 @@ Validators live next to the iter-7 detector:
 
 **Kernel file**: `pdhd_l1sp_kernels.json.bz2` in `wire-cell-data` (PDHD).
 Contains per-plane (U=0, V=1) bipolar + positive/negative unipolar kernels
-with per-plane W shifts auto-derived from the zero-crossing calculation.
-Regenerate when the PDHD field response or electronics parameters change:
+with per-plane W shifts auto-derived from the zero-crossing calculation,
+plus a top-level `meta.frame_origin_us` (= reference plane's bipolar
+zero-crossing, V plane by default) used as the global LASSO frame origin.
+Regenerate when the PDHD field response or electronics parameters change.
+Use the PDHD-correct calibration constants — `postgain=1.0` and
+`adc-per-mv = 16384/1400 ≈ 11.703` (14-bit ADC, 1.4 V fullscale):
 
 ```
 wirecell-sigproc gen-l1sp-kernels \
     --gain '14*mV/fC' --shaping '2.2*us' \
-    --postgain 1.2 --adc-per-mv 2.048 \
+    --postgain 1.0 --adc-per-mv 11.7028571 \
     --coarse-time-offset '-8*us' \
     dune-garfield-1d565.json.bz2  pdhd_l1sp_kernels.json.bz2
 ```
@@ -344,23 +365,28 @@ Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `l1_seg_length` | `120` | Segment length (ticks) for the segmented solve |
-| `l1_scaling_factor` | `500` | Global scaling applied to the G matrix |
-| `l1_lambda` | `5` | LASSO L1 regularization weight |
+| `l1_scaling_factor` | `500` | Numerical conditioning on G; cancels in linear algebra |
+| `l1_lambda` | `10` | LASSO L1 regularization weight |
 | `l1_epsilon` | `0.05` | Convergence tolerance |
 | `l1_niteration` | `100000` | Maximum LASSO iterations |
-| `l1_resp_scale` | `0.5` | Additional response scaling inside `build_G` |
-| `overall_time_offset` | `0` | Global time offset applied to both bases |
+| `l1_resp_scale` | `1.0` | Kernel amplitude scale; must be 1.0 for ADC/electron kernels |
+| `overall_time_offset` | `0` | Additive override on top of the kernel-file `frame_origin_us` (default 0; tuning only) |
 
 Per-plane unipolar time offsets (positive case) are read from the kernel file
 (`unipolar_time_offset_us` per plane); the negative case has no shift.
+
+The global LASSO frame origin is loaded from kernel-file
+`meta.frame_origin_us` (= reference plane's bipolar zero-crossing) and used
+for *all* induction planes.  `overall_time_offset` is added on top as an
+additive override (default 0); typical operation should leave it at 0.
 
 ### Output reconstruction
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `l1_decon_limit` | `100` | Zero samples below this value after solve |
-| `l1_basis0_scale` | `1.15` | Weight for the bipolar (basis0) component |
-| `l1_basis1_scale` | `0.5` | Weight for the unipolar (basis1) component |
+| `l1_decon_limit` | `100` | Floor (electrons) applied per-tick after smearing |
+| `l1_basis0_scale` | `1.0` | Weight for the bipolar (basis0) component (β₀ already in electrons) |
+| `l1_basis1_scale` | `1.0` | Weight for the unipolar (basis1) component (β₁ already in electrons) |
 | `peak_threshold` | `1000` | Drop an output ROI if its peak < this |
 | `mean_threshold` | `500` | Drop an output ROI if its mean < this |
 | `filter` | `[]` | Explicit smearing kernel taps (overrides auto-derivation if non-empty) |

@@ -100,9 +100,12 @@ namespace WireCell {
             //   m_lin_bipolar[plane]      — plane bipolar kernel (same kernel
             //                               used for positive and negative cases).
             //   m_lin_pos_unipolar[plane] — collection (W) kernel; queried at
-            //                               (t + m_unipolar_toff_pos[plane]) so
+            //                               (t − m_unipolar_toff_pos[plane]) so
             //                               its peak lands at the bipolar zero
-            //                               crossing.
+            //                               crossing.  The stored offset is
+            //                               (zero_crossing − W_peak); subtracting
+            //                               it puts W_peak at LASSO dt =
+            //                               zero_crossing.
             //   m_lin_neg_unipolar[plane] — neg-half(bipolar); queried at t (no shift).
             std::map<int, std::unique_ptr<linterp<double>>> m_lin_bipolar;
             std::map<int, std::unique_ptr<linterp<double>>> m_lin_pos_unipolar;
@@ -132,6 +135,16 @@ namespace WireCell {
             double m_raw_ROI_th_nsigma{4};
             double m_raw_ROI_th_adclimit{10};
 
+            // Global LASSO frame origin loaded from kernel file
+            // meta.frame_origin_us (= V-plane bipolar zero-crossing in
+            // kernel native time).  In WCT time units (ns).  Used uniformly
+            // for all induction planes as the "source signal at t = 0"
+            // anchor; build_G calls pass (m_frame_origin + m_overall_time_offset)
+            // as the overall_time_offset argument.
+            double m_frame_origin{0};
+
+            // Additive cfg override on top of m_frame_origin.  Default 0;
+            // typically only used for tuning/diagnostics.
             double m_overall_time_offset{0};
 
             double m_adc_l1_threshold{6};
@@ -187,15 +200,16 @@ namespace WireCell {
 
             double m_l1_seg_length{120};
             double m_l1_scaling_factor{500};
-            double m_l1_lambda{5};
+            double m_l1_lambda{10};        // doubled from 5 to compensate for 2× G (resp_scale 0.5→1)
             double m_l1_epsilon{0.05};
             double m_l1_niteration{100000};
             double m_l1_decon_limit{100};
-            double m_l1_resp_scale{0.5};
+            double m_l1_resp_scale{1.0};   // must equal 1.0 when kernels are in ADC/electron
             // Output weights for each basis component of the reconstructed signal.
             // basis0 = bipolar (first half of beta), basis1 = unipolar (second half).
-            double m_l1_basis0_scale{1.15};
-            double m_l1_basis1_scale{0.5};
+            // Default 1.0: both components are in electrons; override to down-weight one.
+            double m_l1_basis0_scale{1.0};
+            double m_l1_basis1_scale{1.0};
             double m_peak_threshold{1000};
             double m_mean_threshold{500};
             std::vector<double> m_smearing_vec;

@@ -113,12 +113,13 @@ Called per ROI. Signature: `int L1_fit(newtrace, adctrace, start_tick, end_tick,
   `lin_V` (induction columns), windowed to [−15 µs, +10 µs] around each tick.
 - Run LASSO: `LassoModel(l1_lambda, l1_niteration, l1_epsilon)`.
 
-**Post-processing** (cxx:593-680):
+**Post-processing** (cxx:850-905):
 
-- Reconstruct signal: `β_col × l1_col_scale + β_ind × l1_ind_scale`,
-  scaled by `l1_scaling_factor`.
-- Convolve with `filter` smearing kernel.
-- Zero bins below `l1_decon_limit / l1_scaling_factor`.
+- Combine basis coefficients and rescale to electrons in one step:
+  `l1_signal[t] = (β₀ × l1_basis0_scale + β₁ × l1_basis1_scale) × l1_scaling_factor`.
+- Convolve with `filter` smearing kernel (sum-normalised to 1, so the
+  integral is preserved; the result stays in electron units).
+- Zero bins below `l1_decon_limit` (in electrons).
 - Remove ROI if peak < `peak_threshold` or mean < `mean_threshold`.
 
 ---
@@ -273,7 +274,7 @@ the jsonnet config block.
 | `raw_ROI_th_adclimit` | 10 | Upper ADC limit (same threshold) |
 | `roi_pad` | 3 | Gap tolerance (ticks) when merging ROI intervals |
 | `raw_pad` | 15 | Padding added on each side of raw-ADC ROI hits |
-| `overall_time_offset` | 0 | Global time offset (µs); ⚠ known unit bug — see audit |
+| `overall_time_offset` | 0 | Additive override (µs) on top of kernel-file `frame_origin_us`. The global LASSO frame origin is loaded from `meta.frame_origin_us` (= reference plane's bipolar zero crossing); this knob is for tuning only and should normally stay 0. |
 | `collect_time_offset` | 3.0 | Collection-plane time offset relative to induction (µs) |
 
 ### ROI flag classification
@@ -291,19 +292,19 @@ the jsonnet config block.
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
 | `l1_seg_length` | 120 | Max ticks per LASSO segment |
-| `l1_scaling_factor` | 500 | Response matrix scale (numerical conditioning) |
-| `l1_lambda` | 5 | L1 regularization strength |
+| `l1_scaling_factor` | 500 | Numerical conditioning on G (cancels in linear algebra) |
+| `l1_lambda` | 10 | L1 regularization strength |
 | `l1_epsilon` | 0.05 | LASSO convergence tolerance |
 | `l1_niteration` | 100000 | Max LASSO iterations |
-| `l1_decon_limit` | 100 | Min output signal (electrons) after solve |
+| `l1_decon_limit` | 100 | Per-tick floor (electrons) applied after smearing |
 
 ### Reconstruction & cleanup
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
-| `l1_resp_scale` | 0.5 | Response scaling for matrix construction |
-| `l1_col_scale` | 1.15 | Collection-component weight in output reconstruction |
-| `l1_ind_scale` | 0.5 | Induction-component weight in output reconstruction |
+| `l1_resp_scale` | 1.0 | Kernel amplitude scale; must be 1.0 for ADC/electron kernels |
+| `l1_basis0_scale` | 1.0 | Bipolar (basis0) component weight (β₀ already in electrons) |
+| `l1_basis1_scale` | 1.0 | Unipolar (basis1) component weight (β₁ already in electrons) |
 | `peak_threshold` | 1000 | Drop ROI if peak < this (electrons) |
 | `mean_threshold` | 500 | Drop ROI if mean < this (electrons) |
 
