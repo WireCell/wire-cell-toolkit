@@ -121,7 +121,9 @@ function(params, tools, override = {}) {
           sigtag: 'gauss%d' % n,
           outtag: 'gauss%d' % n,
           process_planes: l1sp_planes,
-          // ADC-domain thresholds, scaled to runtime FE gain.
+          // ADC-domain thresholds and kernel amplitudes, scaled to runtime FE gain.
+          // kernels_file is generated at 14 mV/fC; gain_scale corrects to actual gain.
+          kernels_scale:       gain_scale,
           l1_raw_asym_eps:     20.0 * gain_scale,
           raw_ROI_th_adclimit: 10.0 * gain_scale,
           adc_sum_threshold:  160.0 * gain_scale,

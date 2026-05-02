@@ -101,6 +101,14 @@ namespace WireCell {
             // Per-plane W-shift in WCT time units (positive case).  Negative
             // case has no shift (always 0) — handled inline in l1_fit().
             std::map<int, double> m_unipolar_toff_pos;
+            // Amplitude multiplier applied to every loaded kernel sample at
+            // init_resp() time.  Kernels in ``kernels_file`` are in ADC/electron
+            // at the reference 14 mV/fC FE gain; set this to
+            //   params.elec.gain / (14*mV/fC)
+            // (i.e. the same gain_scale used for ADC-domain thresholds in
+            // sp.jsonnet) so the LASSO bases track the runtime FE gain.
+            // Default 1.0 = no scaling (reference gain).
+            double m_kernels_scale{1.0};
 
             IDFT::pointer m_dft;
             size_t m_count{0};
@@ -130,8 +138,11 @@ namespace WireCell {
             // raw ADC counts at the 14 mV/fC reference FE gain.  When the
             // detector runs at a different gain, the jsonnet multiplies these
             // by gain_scale = params.elec.gain / 14 (cfg/.../pdhd/sp.jsonnet),
-            // mirroring the chndb-base pattern.  Deconvolved-domain knobs
-            // (m_l1_gmax_min, asym ratios, lengths, energy fractions) operate
+            // mirroring the chndb-base pattern.  The response kernel amplitudes
+            // (m_lin_bipolar/pos_unipolar/neg_unipolar) are scaled by
+            // m_kernels_scale (= gain_scale) at init_resp() time.
+            // Deconvolved-domain knobs (m_l1_gmax_min, asym ratios, lengths,
+            // energy fractions) operate
             // on gain-normalised signals and do NOT scale with FE gain.
             //
             // The trigger requires three pre-filters

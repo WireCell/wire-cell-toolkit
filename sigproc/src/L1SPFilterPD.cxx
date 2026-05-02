@@ -434,6 +434,11 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     //     <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2
     // See wire-cell-python/wirecell/sigproc/l1sp.py for the schema.
     cfg["kernels_file"] = "";
+    // Multiplier applied to every loaded kernel amplitude at init_resp() time.
+    // Kernels in ``kernels_file`` are in ADC/electron at the reference 14 mV/fC
+    // FE gain; set this to params.elec.gain / (14*mV/fC) when the detector runs
+    // at a different gain (same gain_scale as for ADC-domain thresholds).
+    cfg["kernels_scale"] = 1.0;
 
     cfg["filter"] = Json::arrayValue;
     // Auto-derived smearing kernel: if "filter" is empty, look up this
@@ -515,7 +520,8 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
 
 void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
 {
-    m_kernels_file = get<std::string>(cfg, "kernels_file", "");
+    m_kernels_file  = get<std::string>(cfg, "kernels_file", "");
+    m_kernels_scale = get(cfg, "kernels_scale", m_kernels_scale);
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
@@ -710,14 +716,21 @@ void L1SPFilterPD::init_resp()
                   + std::to_string(plane) + " in '" + m_kernels_file + "'"});
         }
 
+        if (m_kernels_scale != 1.0) {
+            for (auto& v : k_bip_pos) v *= m_kernels_scale;
+            for (auto& v : k_uni_pos) v *= m_kernels_scale;
+            for (auto& v : k_uni_neg) v *= m_kernels_scale;
+        }
+
         m_lin_bipolar[plane]      = make_lin(k_bip_pos);
         m_lin_pos_unipolar[plane] = make_lin(k_uni_pos);
         m_lin_neg_unipolar[plane] = make_lin(k_uni_neg);
         m_unipolar_toff_pos[plane] = toff_pos_us * units::us;
 
         log->debug("loaded plane {} kernels from {}: n={} period={} ns t0={:.3f} us "
-                   "W-shift(pos)={:+.3f} us",
-                   plane, m_kernels_file, n_samples, period_ns, t0_us, toff_pos_us);
+                   "W-shift(pos)={:+.3f} us kernels_scale={:.4f}",
+                   plane, m_kernels_file, n_samples, period_ns, t0_us, toff_pos_us,
+                   m_kernels_scale);
     }
 }
 

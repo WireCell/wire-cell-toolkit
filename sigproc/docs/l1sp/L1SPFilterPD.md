@@ -74,6 +74,13 @@ reconfigure, loads `m_kernels_file` (resolved via `WIRECELL_PATH`) using
 - `m_unipolar_toff_pos[plane]` — W shift in WCT time units (positive case).
   Negative case has no shift; handled inline in `l1_fit()`.
 
+After loading, every kernel sample is multiplied by `m_kernels_scale`
+(= `kernels_scale` config key, default 1.0) before being handed to the
+linterp.  The kernels are stored in ADC/electron at the reference 14 mV/fC
+FE gain; `kernels_scale = params.elec.gain / (14 mV/fC)` corrects the
+amplitudes to the runtime gain, keeping the LASSO bases consistent with
+the actual raw-ADC data.
+
 The kernel file is generated offline by `wirecell-sigproc gen-l1sp-kernels`
 (see `wire-cell-python/wirecell/sigproc/l1sp.py`).  The PDHD file is
 `pdhd_l1sp_kernels.json.bz2` (in `wire-cell-data`); it contains per-plane
@@ -274,6 +281,7 @@ python3 pdhd/nf_plot/track_response_l1sp_kernels.py \
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `kernels_file` | `""` | Path (resolved via `WIRECELL_PATH`) to the pre-built JSON+bz2 kernel file |
+| `kernels_scale` | `1.0` | Amplitude multiplier applied to every loaded kernel sample. Set to `params.elec.gain / (14 mV/fC)` when the detector runs at a gain other than the reference 14 mV/fC. |
 
 The kernel file is **required** — `init_resp()` throws if the key is empty.
 Generate it offline with:
@@ -519,7 +527,8 @@ local l1spfilterpd = g.pnode({
     type: "L1SPFilterPD",
     data: {
         dft: wc.tn(tools.dft),
-        kernels_file: "pdhd_l1sp_kernels.json.bz2",  // resolved via WIRECELL_PATH
+        kernels_file:  "pdhd_l1sp_kernels.json.bz2",  // resolved via WIRECELL_PATH
+        kernels_scale: params.elec.gain / (14.0 * wc.mV / wc.fC),
         adctag: "raw%d" % n,    // post-NF raw ADC
         sigtag: "gauss%d" % n,  // post-OmnibusSigProc decon
         outtag: "gauss%d" % n,
