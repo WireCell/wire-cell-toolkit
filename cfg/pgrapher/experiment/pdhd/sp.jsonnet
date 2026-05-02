@@ -28,6 +28,7 @@ function(params, tools, override = {}) {
   make_sigproc(anode, name=null,
                l1sp_pd_mode='',
                l1sp_pd_dump_path='',
+               l1sp_pd_wf_dump_path='',
                l1sp_pd_planes=null)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
@@ -133,6 +134,7 @@ function(params, tools, override = {}) {
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
+          waveform_dump_path: l1sp_pd_wf_dump_path,
         },
       }, nin=1, nout=1, uses=[tools.dft, anode]);
       // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.

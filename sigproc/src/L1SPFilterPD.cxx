@@ -514,6 +514,9 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["dump_mode"] = false;
     cfg["dump_path"] = "";    // directory; one NPZ per operator() call written here
     cfg["dump_tag"] = "";     // label baked into filename (e.g. "apa1")
+    // Waveform dump: write per-triggered-ROI NPZ (raw/decon/lasso/smeared).
+    // Non-empty path enables it; files go under <waveform_dump_path>/<dump_tag>_<frame_ident>/.
+    cfg["waveform_dump_path"] = "";
 
     return cfg;
 }
@@ -639,9 +642,10 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     }
 
     // Calibration dump mode
-    m_dump_mode = get(cfg, "dump_mode", m_dump_mode);
-    m_dump_path = get<std::string>(cfg, "dump_path", m_dump_path);
-    m_dump_tag  = get<std::string>(cfg, "dump_tag", m_dump_tag);
+    m_dump_mode   = get(cfg, "dump_mode", m_dump_mode);
+    m_dump_path   = get<std::string>(cfg, "dump_path", m_dump_path);
+    m_dump_tag    = get<std::string>(cfg, "dump_tag", m_dump_tag);
+    m_wf_dump_path = get<std::string>(cfg, "waveform_dump_path", m_wf_dump_path);
 
     // Reset interpolators so init_resp() reloads them on next operator() call.
     m_lin_bipolar.clear();
@@ -737,7 +741,8 @@ void L1SPFilterPD::init_resp()
 int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                           const std::shared_ptr<const WireCell::ITrace>& adctrace,
                           const std::shared_ptr<const WireCell::ITrace>& sigtrace,
-                          int start_tick, int end_tick, int plane)
+                          int start_tick, int end_tick, int plane,
+                          std::vector<double>* lasso_unsmeared)
 {
     const int nbin_fit = end_tick - start_tick;
 
@@ -846,6 +851,10 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                 l1_signal[j] = final_beta(j)           * m_l1_basis0_scale
                              + final_beta(nbin_fit + j) * m_l1_basis1_scale;
             }
+            // Snapshot the unsmeared LASSO output before smearing overwrites l1_signal.
+            if (lasso_unsmeared) {
+                lasso_unsmeared->assign(l1_signal.begin(), l1_signal.end());
+            }
 
             Waveform::realseq_t l2_signal(nbin_fit, 0);
             int mid_bin = ((int)m_smearing_vec.size() - 1) / 2;
@@ -899,6 +908,61 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
     }
 
     return flag_l1;
+}
+
+void L1SPFilterPD::dump_roi_waveforms(int frame_ident, int channel, int plane,
+                                       int start_tick, int end_tick, int polarity,
+                                       const std::shared_ptr<const WireCell::ITrace>& adctrace,
+                                       const std::shared_ptr<const WireCell::ITrace>& sigtrace,
+                                       const std::shared_ptr<Aux::SimpleTrace>& newtrace,
+                                       const std::vector<double>& lasso_unsmeared)
+{
+    const int nbin = end_tick - start_tick;
+    const int tbin = sigtrace->tbin();
+
+    // Build output directory and filename.
+    const std::string subdir = fmt::format("{}/{}_{:04d}_{}", m_wf_dump_path,
+                                           m_dump_tag, m_count, frame_ident);
+    std::error_code ec;
+    std::filesystem::create_directories(subdir, ec);
+    const std::string polsign = (polarity > 0) ? "pos" : "neg";
+    const std::string fname = fmt::format("{}/wf_p{}_c{}_t{}_{}.npz",
+                                          subdir, plane, channel, start_tick, polsign);
+
+    // Slice the four waveforms over [start_tick, end_tick).
+    std::vector<float> raw_arr(nbin), decon_arr(nbin), smeared_arr(nbin);
+    for (int i = 0; i < nbin; ++i) {
+        const int t = start_tick + i;
+        raw_arr[i]    = adctrace->charge().at(t - adctrace->tbin());
+        decon_arr[i]  = sigtrace->charge().at(t - tbin);
+        smeared_arr[i] = newtrace->charge().at(t - newtrace->tbin());
+    }
+
+    bool first = true;
+    auto save_f32 = [&](const std::string& key, const std::vector<float>& v) {
+        cnpy::npz_save(fname, key, v.data(), {v.size()}, first ? "w" : "a");
+        first = false;
+    };
+    auto save_f64v = [&](const std::string& key, const std::vector<double>& v) {
+        cnpy::npz_save(fname, key, v.data(), {v.size()}, first ? "w" : "a");
+        first = false;
+    };
+    auto save_i32s = [&](const std::string& key, int32_t val) {
+        cnpy::npz_save(fname, key, &val, {1}, first ? "w" : "a");
+        first = false;
+    };
+
+    save_f32("raw",    raw_arr);
+    save_f32("decon",  decon_arr);
+    save_f64v("lasso", lasso_unsmeared);
+    save_f32("smeared", smeared_arr);
+    save_i32s("channel",     (int32_t)channel);
+    save_i32s("plane",       (int32_t)plane);
+    save_i32s("start_tick",  (int32_t)start_tick);
+    save_i32s("end_tick",    (int32_t)end_tick);
+    save_i32s("polarity",    (int32_t)polarity);
+    save_i32s("frame_ident", (int32_t)frame_ident);
+    save_i32s("call_count",  (int32_t)m_count);
 }
 
 bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
@@ -1133,7 +1197,15 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
             // Resolve channel → plane once (kernels are indexed by plane).
             const int plane = m_anode ? m_anode->resolve(ch).index() : 0;
             for (auto& roi : rois_save) {
-                l1_fit(newtrace, adctrace, trace, roi.first, roi.second + 1, plane);
+                std::vector<double> lasso_unsmeared_buf;
+                const int polarity = l1_fit(newtrace, adctrace, trace,
+                                            roi.first, roi.second + 1, plane,
+                                            m_wf_dump_path.empty() ? nullptr : &lasso_unsmeared_buf);
+                if (!m_wf_dump_path.empty() && polarity != 0) {
+                    dump_roi_waveforms(in->ident(), ch, plane,
+                                       roi.first, roi.second + 1, polarity,
+                                       adctrace, trace, newtrace, lasso_unsmeared_buf);
+                }
                 // Zero any negative decon values within the ROI.
                 for (int t = roi.first; t <= roi.second; t++) {
                     auto& v = newtrace->charge().at(t - trace->tbin());

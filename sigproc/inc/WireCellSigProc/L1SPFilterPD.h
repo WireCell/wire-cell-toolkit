@@ -76,7 +76,16 @@ namespace WireCell {
             int l1_fit(std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
                        const std::shared_ptr<const WireCell::ITrace>& sigtrace,
-                       int start_tick, int end_tick, int plane);
+                       int start_tick, int end_tick, int plane,
+                       std::vector<double>* lasso_unsmeared = nullptr);
+
+            // Write per-ROI waveform NPZ when m_wf_dump_path is non-empty.
+            void dump_roi_waveforms(int frame_ident, int channel, int plane,
+                                    int start_tick, int end_tick, int polarity,
+                                    const std::shared_ptr<const WireCell::ITrace>& adctrace,
+                                    const std::shared_ptr<const WireCell::ITrace>& sigtrace,
+                                    const std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
+                                    const std::vector<double>& lasso_unsmeared);
 
             // True if channel belongs to a plane in m_process_planes.
             // Always returns true when m_process_planes is empty or m_anode is null.
@@ -213,6 +222,10 @@ namespace WireCell {
             bool m_dump_mode{false};
             std::string m_dump_path;
             std::string m_dump_tag;
+            // Waveform dump: write per-triggered-ROI NPZ files with the four
+            // waveforms (raw, decon, lasso_unsmeared, lasso_smeared) when
+            // non-empty.  Independent of m_dump_mode.  Default "" = OFF.
+            std::string m_wf_dump_path;
         };
 
     }  // namespace SigProc
