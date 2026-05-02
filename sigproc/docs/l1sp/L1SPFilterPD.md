@@ -82,92 +82,170 @@ If either unipolar config key is empty, the corresponding pointer stays null and
 the trigger stub (which always returns 0) prevents the missing-pointer path from
 being exercised.
 
-### `l1_fit()` (cxx:267–438)
+### `compute_asym()` (anonymous helper, cxx)
+
+Single helper that runs five passes over the ROI region and returns an
+`AsymRecord` with all per-ROI features used by both the trigger and the
+calibration dump:
+
+1. In-ROI accumulators (`temp_sum`, `temp1_sum`, `temp2_sum`, `max_val`,
+   `min_val`, threshold-gated by `adc_l1_threshold`).
+2. Per-ROI gauss `gmax`, `gauss_fill`, `gauss_fwhm_frac`.
+3. Wide-window decon energy fraction `roi_energy_frac` over
+   `[roi_start − energy_pad, roi_end + energy_pad]`.
+4. Wide-window raw asymmetry `raw_asym_wide` over
+   `[roi_start − raw_asym_pad, roi_end + raw_asym_pad]`, with positive /
+   negative samples gated by `raw_asym_eps`.
+5. Core sub-window scan: identifies `|gauss| > core_g_thr` runs and reports
+   the longest one's `(core_lo, core_hi, core_length, core_fill,
+   core_fwhm_frac, core_raw_asym_wide)` for the dump record.
+
+Definitions match `pdhd/nf_plot/find_long_decon_artifacts.py` (iter-7) so
+Python ↔ C++ values can be compared bit-for-bit during validation.
+
+### `decide_trigger()` (anonymous helper, cxx)
+
+Independent of `compute_asym()`'s record so the dump and the live trigger
+can disagree without coupling.  Walks every `|gauss| > core_g_thr`
+sub-window in the ROI; for each sub-window computes its own
+`(run_len, fill, fwhm, ef, aw)` and fires if all of:
+
+- `gmax >= l1_gmax_min`
+- `run_len >= l1_min_length`
+- per-sub-window `ef >= l1_energy_frac_thr`
+- ANY of the four arms:
+  - `|aw| >= l1_asym_strong`, OR
+  - `run_len >= l1_len_long_mod   AND |aw| >= l1_asym_mod`, OR
+  - `run_len >= l1_len_long_loose AND |aw| >= l1_asym_loose`, OR
+  - `run_len >= l1_len_fill_shape AND fill <= l1_fill_shape_fill_thr
+                                  AND fwhm <= l1_fill_shape_fwhm_thr
+                                  AND |aw| >= l1_asym_mod`.
+
+Polarity = `sign(aw)` of the first firing sub-window.  Returns
+`{−1, 0, +1}`.
+
+### `l1_fit()` (cxx)
 
 Called per ROI.  Sequence:
 
-1. **ADC accumulation** — compute `temp_sum` (signed), `temp1_sum` (absolute),
-   `temp2_sum` (absolute decon), `max_val`, `min_val` over samples above
-   `adc_l1_threshold`.
-
-2. **Trigger (STUB)** — currently always returns `flag_l1 = 0` (pass-through).
-   See [stub](#trigger-stub-and-strategy-b-implementation) below.
-
-3. **Polarity override** — if `hint_polarity ≠ 0` (propagation pass), that
-   polarity is used instead of the stub result.
-
-4. **Basis selection** — `flag_l1 = 1` → `{m_lin_bipolar, m_lin_pos_unipolar}`;
+1. **Feature extraction** — `compute_asym()` once, populating the dump
+   record (used in dump mode and never mutated afterwards).
+2. **Trigger** — `decide_trigger()` returns `flag_l1 ∈ {0, ±1}`.
+3. **Basis selection** — `flag_l1 = +1` → `{m_lin_bipolar, m_lin_pos_unipolar}`;
    `flag_l1 = -1` → `{m_lin_bipolar, m_lin_neg_unipolar}`.
-
+4. **Pass-through guard** — if the matching unipolar basis is null
+   (config keys empty), early-return without modifying `newtrace`.
 5. **Segmented LASSO solve** — segments of `l1_seg_length` ticks; for each
    segment call `build_G` then `lasso_solve`.  Scatter beta into
    `l1_signal[t] += m_l1_basis0_scale * beta[j] + m_l1_basis1_scale * beta[N+j]`.
-
 6. **Post-processing** — Gaussian smearing (if `filter` key is non-empty),
    zero samples below `l1_decon_limit`, remove peaks below `peak_threshold` /
    `mean_threshold`, write back into `newtrace`.
 
-7. **Zero-out path** — `flag_l1 = 2`: zero the ROI in `newtrace`.
+The propagation/hint-polarity path (uBooNE Layer 3) and the `flag_l1 = 2`
+zero-out branch are deliberately not ported — see Design decisions below.
 
-### `operator()` (cxx:440–631)
+### `operator()` (cxx)
 
 1. Retrieve `adctag` and `sigtag` traces.  Sizes must match.
-2. Pre-compute `ntot_ticks` (max trace length) — avoids repeated per-trace passes.
-3. Build per-channel tick sets from decon signal (positive samples) and raw ADC
-   (samples above noise threshold, padded ±`raw_pad` ticks).
-4. Merge and pad into ROI pairs per channel (±`roi_pad`).
-5. **First pass**: call `l1_fit` on each ROI; record `flag_rois`.  Also zero any
-   negative decon values inside the ROI (same behaviour as `L1SPFilter`).
-6. **Forward propagation** (Layer 3): iterate ROIs in time order; maintain
-   `active_polarity` (±1 / 0).  A flag-2 ROI within 20 ticks of a flag-±1 ROI
-   is re-fitted with that polarity hint.
-7. **Reverse propagation**: same, iterating in reverse time order.
-8. **Layer 4 omitted** — cross-channel cleaning (ch±1, ±3 ticks) is not applicable
-   to PDHD/PDVD geometry.
-9. Emit `IFrame` with traces tagged `outtag`.
+2. Build per-channel tick sets from decon signal (positive samples) and raw ADC
+   (samples above the noise threshold, padded ±`raw_pad` ticks).
+3. Merge and pad into ROI pairs per channel (±`roi_pad`).
+4. Call `l1_fit` on each in-scope ROI (channel filtered by `process_planes`
+   and the optional `eligible_channels` whitelist).  Negative decon samples
+   inside the ROI are zeroed in `newtrace` regardless of trigger result
+   (matching `L1SPFilter` behaviour).
+5. In `dump_mode`, write a per-frame NPZ with all ROI records plus the
+   live `flag_l1` decision.
+6. Emit `IFrame` with traces tagged `outtag`.
+
+Layer 3 propagation and Layer 4 cross-channel cleaning are intentionally
+omitted for PDHD/PDVD — see Design decisions.
 
 ---
 
-## Trigger stub and Strategy B implementation
+## Per-ROI trigger gate (Strategy B, retuned)
 
-### Current state
+The legacy uBooNE single-ratio gate
+(`temp_sum / (temp1_sum * rescaling / nbin_fit) > adc_ratio_threshold`) is
+preserved in the dump record as `flag` / `ratio` for diagnostics, but no
+longer drives the live `flag_l1`.  The retuned trigger uses six per-ROI
+shape features computed per `|gauss| > l1_core_g_thr` sub-window, then
+fires polarised on `sign(raw_asym_wide)`.
 
-The trigger in `l1_fit` (cxx:298–341) always returns `flag_l1 = 0` (pass-through).
-The ADC-sum variables are computed but suppressed with `(void)` casts, and the
-comment enumerates the planned cuts.
+### Why per-sub-window and not per-ROI
 
-### When implementing Strategy B
+The C++ ROI window (`gauss > 0` plus raw-ADC noise hits, padded
+±`raw_pad` ticks) is wider than the iter-7 reference window
+(`|gauss| > 50`).  A single C++ ROI can wrap several iter-7 candidates.
+Computing features over the whole padded ROI dilutes asymmetry and length;
+computing them per `|gauss| > l1_core_g_thr` run mirrors iter-7 and
+recovers per-candidate granularity.
 
-Replace the stub with:
+### Trigger logic
 
-```cpp
-// Guard: only evaluate if there is enough signal.
-if (temp1_sum > m_adc_sum_threshold && temp1_sum > 0) {
-    double ratio = m_adc_sum_rescaling / nbin_fit;  // ~rescaling factor
-    double asym  = temp_sum / (temp1_sum * ratio);
+Fixed ROI preconditions: `gmax >= l1_gmax_min`.  Per sub-window
+preconditions: `run_len >= l1_min_length`, `ef >= l1_energy_frac_thr`.
+Then ANY of:
 
-    if (asym > m_adc_ratio_threshold)        flag_l1 =  1;  // +unipolar
-    else if (-asym > m_adc_ratio_threshold)  flag_l1 = -1;  // −unipolar
-    else if (temp1_sum * ratio < m_adc_sum_rescaling_limit) flag_l1 = 2; // artifact
-}
-```
+- **strong-asym arm**: `|raw_asym_wide| >= l1_asym_strong`
+- **long-moderate arm**: `run_len >= l1_len_long_mod`
+  AND `|raw_asym_wide| >= l1_asym_mod`
+- **very-long-loose arm**: `run_len >= l1_len_long_loose`
+  AND `|raw_asym_wide| >= l1_asym_loose`
+- **fill-shape arm**: `run_len >= l1_len_fill_shape`
+  AND `gauss_fill <= l1_fill_shape_fill_thr`
+  AND `gauss_fwhm_frac <= l1_fill_shape_fwhm_thr`
+  AND `|raw_asym_wide| >= l1_asym_mod`
 
-The sign of `asym` selects the polarity; `m_adc_ratio_threshold` is the asymmetry
-cut to tune.  All threshold parameters are already in `default_configuration()`.
+The four arms map 1:1 onto the four iter-7 `cluster_pass()` rules in
+`pdhd/nf_plot/find_long_decon_artifacts.py`.  Polarity = sign of the
+firing sub-window's `raw_asym_wide` (more stable than the in-ROI ratio:
+the wide window has a well-defined denominator gate via `l1_raw_asym_eps`
+and looks at the surrounding context).
 
-### Calibration inputs needed
+### Gain-scale convention
 
-Before filling in the trigger:
+Raw-ADC trigger knobs (`l1_raw_asym_eps`, `raw_ROI_th_adclimit`,
+`adc_sum_threshold`) are tuned at the 14 mV/fC reference FE gain.  The
+PDHD jsonnet (`cfg/pgrapher/experiment/pdhd/sp.jsonnet`) multiplies them
+by `gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC)` at configure
+time, mirroring the same convention used for `adc_limit`, `min_rms_cut`,
+and `max_rms_cut` in `chndb-base.jsonnet`.
 
-1. **Event-scan + ROI tagging**: scan PDHD/PDVD data, tag ROIs where the raw ADC
-   is clearly unipolar (by eye or with a prototype classifier), and histogram
-   `asym` for the tagged vs untagged populations.  This gives the operating point
-   for `adc_ratio_threshold`.
+Deconvolved-domain knobs (`l1_gmax_min`, `l1_core_g_thr`, all asym
+ratios, lengths, energy fraction) operate on gain-normalised signals
+and are gain-invariant — they are NOT scaled by `gain_scale`.
 
-2. **Unipolar field-response files**: the `fields_pos_unipolar` and
-   `fields_neg_unipolar` config keys accept any `IFieldResponse` type-name.  Until
-   these are provided (and the trigger is enabled), `L1SPFilterPD` acts as a
-   pass-through on every frame.
+### Validation status
+
+Tuned and verified against the iter-7 offline detector
+(`pdhd/nf_plot/find_long_decon_artifacts.py`) on R=27409 evts 0–7,12,
+U-plane APA 0–3:
+
+| Metric | Value | Target |
+|---|---|---|
+| Recall vs iter-7 (clusters hit) | **90.0 %** | ≥ 90 % |
+| Extras / cpp_fired (over-triggers) | **7.7 %** | ≤ 10 % |
+| iter-7 clusters (reference)       | 230   | — |
+| C++ fired ROIs                    | 432   | — |
+
+Validators live next to the iter-7 detector:
+
+- `pdhd/nf_plot/eval_l1sp_trigger.py` — compares C++ `flag_l1` vs a
+  hand-scan CSV of (ch_lo,ch_hi,t_lo,t_hi) ground-truth boxes
+  (`pdhd/nf_plot/handscan_27409.csv`).
+- `pdhd/nf_plot/compare_trigger_vs_iter7.py` — compares C++ `flag_l1` vs
+  iter-7 cluster CSVs over multi-event/multi-APA aggregates with
+  `--show-misses` / `--show-extras` for spot-checks.
+
+### Calibration inputs still needed
+
+**Unipolar field-response files**: the `fields_pos_unipolar` and
+`fields_neg_unipolar` config keys accept any `IFieldResponse` type-name.
+Until these are provided, the trigger fires correctly but `l1_fit()`
+falls through to pass-through (the unipolar-nullptr early-exit at
+the top of the LASSO block).
 
 ---
 
@@ -202,14 +280,40 @@ Leave both `fields_*_unipolar` keys empty to keep the component as a pass-throug
 | `raw_ROI_th_nsigma` | `4` | Raw-ADC threshold in units of estimated σ |
 | `raw_ROI_th_adclimit` | `10` | Minimum absolute raw-ADC threshold (ADC counts) |
 
-### Trigger thresholds
+### Trigger thresholds — Strategy B retuned
+
+Defaults seeded from the iter-7 offline detector
+(`pdhd/nf_plot/find_long_decon_artifacts.py`) and validated on the C++
+dump corpus (R=27409 evts 0–7,12 U-plane APA 0–3).  See "Per-ROI trigger
+gate" above for how each knob is combined.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `adc_l1_threshold` | `6` | Min |ADC| to include a sample in the sum |
-| `adc_sum_threshold` | `160` | Min Σ|ADC| required to evaluate the trigger |
-| `adc_sum_rescaling` | `90` | Rescaling denominator for the asymmetry ratio |
-| `adc_ratio_threshold` | `0.2` | Asymmetry ratio cut for flag=±1 |
+| `l1_min_length`              | `30`    | Min sub-window run length (ticks) |
+| `l1_gmax_min`                | `1500`  | Min ROI peak `\|gauss\|` (electron units) |
+| `l1_energy_frac_thr`         | `0.66`  | Min sub-window decon energy fraction (isolated-lobe gate) |
+| `l1_energy_pad_ticks`        | `500`   | Wide-window pad for `roi_energy_frac` |
+| `l1_raw_asym_pad_ticks`      | `20`    | Wide-window pad for `raw_asym_wide` |
+| `l1_raw_asym_eps`            | `20.0`  | Per-tick raw-ADC gate (sign-routed) |
+| `l1_core_g_thr`              | `50.0`  | Per-tick `\|gauss\|` gate defining sub-windows |
+| `l1_asym_strong`             | `0.65`  | Strong-asym arm threshold |
+| `l1_asym_mod`                | `0.40`  | Moderate-asym arm threshold |
+| `l1_asym_loose`              | `0.30`  | Loose-asym arm threshold |
+| `l1_len_long_mod`            | `100`   | Length needed to enable moderate-asym arm |
+| `l1_len_long_loose`          | `200`   | Length needed to enable loose-asym arm |
+| `l1_len_fill_shape`          | `50`    | Length needed to enable fill-shape arm |
+| `l1_fill_shape_fill_thr`     | `0.38`  | `gauss_fill` ceiling for fill-shape arm |
+| `l1_fill_shape_fwhm_thr`     | `0.30`  | `gauss_fwhm_frac` ceiling for fill-shape arm |
+
+Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
+`ratio` fields in the calibration dump but no longer affect `flag_l1`):
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `adc_l1_threshold`           | `6`     | Min `\|ADC\|` for in-ROI accumulators |
+| `adc_sum_threshold`          | `160`   | Legacy Σ`\|ADC\|` floor (gain-scaled in pdhd jsonnet) |
+| `adc_sum_rescaling`          | `90`    | Legacy ratio denominator |
+| `adc_ratio_threshold`        | `0.2`   | Legacy asymmetry-ratio cut |
 
 ### LASSO solve
 
@@ -321,6 +425,31 @@ capture the full decon content without the raw-ADC bias.  `argmax_tick` /
 `argmin_tick` are useful for `unipolar_time_offset` calibration once unipolar
 field-response files are available.
 
+### Per-ROI Strategy-B features (Tier 3)
+
+Computed by `compute_asym()` and matching the iter-7 detector's feature
+definitions bit-for-bit.  Used by `decide_trigger()` and as offline
+analysis inputs.
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `gmax`                | float64\[\] | `max(\|gauss[t]\|)` for `t ∈ [roi_start, roi_end]` |
+| `gauss_fill`          | float64\[\] | `Σ\|gauss\| / (gmax · nbin_fit)` (full ROI) |
+| `gauss_fwhm_frac`     | float64\[\] | `count(\|gauss\| > 0.5·gmax) / nbin_fit` (full ROI) |
+| `roi_energy_frac`     | float64\[\] | `Σ\|gauss\|_ROI / Σ\|gauss\|_(ROI±l1_energy_pad_ticks)` |
+| `raw_asym_wide`       | float64\[\] | `(pos+neg)/(pos−neg)` over raw ADC in ROI±`l1_raw_asym_pad_ticks`, gated by `±l1_raw_asym_eps` |
+| `core_lo`             | int32\[\]   | First tick of longest `\|gauss\|>l1_core_g_thr` sub-window (−1 if none) |
+| `core_hi`             | int32\[\]   | Last tick of that sub-window (−1 if none) |
+| `core_length`         | int32\[\]   | `core_hi − core_lo + 1` |
+| `core_fill`           | float64\[\] | `gauss_fill` recomputed on the core sub-window |
+| `core_fwhm_frac`      | float64\[\] | `gauss_fwhm_frac` recomputed on the core sub-window |
+| `core_raw_asym_wide`  | float64\[\] | `raw_asym_wide` recomputed around the core sub-window |
+| `flag_l1`             | int32\[\]   | Live `decide_trigger()` result `{−1, 0, +1}` under current config |
+
+`flag_l1` is the trigger that drove the LASSO branch for this ROI.
+Compare against legacy `flag` to see how the new gate diverges from the
+uBooNE single-ratio decision.
+
 ---
 
 ## Wiring into a PDHD/PDVD graph
@@ -358,20 +487,20 @@ production configs remain bit-identical with the feature off.
 
 ## Pending work
 
-1. **Threshold tuning** — the Strategy B trigger is wired (`l1_fit()` now
-   implements `{0, +1, -1}` flag logic) but uses uBooNE default values
-   (`adc_sum_threshold=160`, `adc_sum_rescaling=90`, `adc_ratio_threshold=0.2`).
-   Retune from hand-labeled PDHD/PDVD dump-mode NPZ data.
-
-2. **Unipolar field-response inputs** — collect or derive the truncated-drift
+1. **Unipolar field-response inputs** — collect or derive the truncated-drift
    field responses for the PDHD/PDVD induction plane; supply them via
    `fields_pos_unipolar` / `fields_neg_unipolar` config keys.  Until these are
-   provided the component is a graceful pass-through (trigger fires but fit
-   early-exits; see `l1_fit()` unipolar-nullptr check).
+   provided the component is a graceful pass-through (trigger fires but the
+   LASSO early-exits; see `l1_fit()` unipolar-nullptr check).
 
-3. **Threshold calibration** — retune `adc_ratio_threshold`, `unipolar_time_offset`,
-   `l1_basis0_scale`, `l1_basis1_scale`, and the smearing `filter` kernel from
-   PDHD/PDVD field responses.
+2. **LASSO body tuning** — once unipolar bases are populated, calibrate
+   `unipolar_time_offset`, `l1_basis0_scale`, `l1_basis1_scale`, and the
+   smearing `filter` kernel.  Trigger gate is independent of these and does
+   not need to be re-run.
+
+3. **PDVD jsonnet port** — the trigger logic itself is detector-symmetric;
+   the only change needed in `cfg/pgrapher/experiment/protodunevd/sp.jsonnet`
+   is the same `gain_scale` block applied here for PDHD.
 
 ## Design decisions
 

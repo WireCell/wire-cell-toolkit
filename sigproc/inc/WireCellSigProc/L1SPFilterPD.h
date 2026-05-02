@@ -59,11 +59,17 @@ namespace WireCell {
             // Called lazily on first operator() invocation.
             void init_resp();
 
-            // Classify one ROI by raw-ADC asymmetry; if triggered, run the LASSO
-            // fit on newtrace samples in [start_tick, end_tick).
-            // Returns: 0=pass-through, +1=L1-positive, -1=L1-negative.
+            // Classify one ROI by per-ROI shape features computed from raw ADC
+            // (adctrace) and the unmodified gauss decon signal (sigtrace), then
+            // if triggered run the LASSO fit on newtrace samples in
+            // [start_tick, end_tick).  sigtrace is the original gauss-side trace
+            // for this channel; it is read for the wide-window energy fraction
+            // and is never mutated.  newtrace holds the writable output and is
+            // initially a copy of sigtrace.  Returns: 0=pass-through,
+            // +1=L1-positive, -1=L1-negative.
             int l1_fit(std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
+                       const std::shared_ptr<const WireCell::ITrace>& sigtrace,
                        int start_tick, int end_tick);
 
             // True if channel belongs to a plane in m_process_planes.
@@ -110,10 +116,50 @@ namespace WireCell {
             double m_adc_l1_threshold{6};
             double m_adc_sum_threshold{160};
             double m_adc_sum_rescaling{90.0};
-            // Asymmetry ratio threshold.  The trigger fires when
-            //   |temp_sum| / (temp1_sum * rescaling / nbin) > adc_ratio_threshold
-            // with sign(temp_sum) selecting positive vs negative polarity.
+            // Legacy uBooNE asymmetry-ratio knob; kept for the dump-record
+            // 'flag' / 'ratio' fields but no longer drives the trigger.  See
+            // m_l1_asym_strong / m_l1_asym_mod / m_l1_asym_loose below.
             double m_adc_ratio_threshold{0.2};
+
+            // ── Per-ROI trigger gate (PDHD/PDVD Strategy B, retuned) ─────────
+            // Convention: m_l1_raw_asym_eps and the adc_* gates above are in
+            // raw ADC counts at the 14 mV/fC reference FE gain.  When the
+            // detector runs at a different gain, the jsonnet multiplies these
+            // by gain_scale = params.elec.gain / 14 (cfg/.../pdhd/sp.jsonnet),
+            // mirroring the chndb-base pattern.  Deconvolved-domain knobs
+            // (m_l1_gmax_min, asym ratios, lengths, energy fractions) operate
+            // on gain-normalised signals and do NOT scale with FE gain.
+            //
+            // The trigger requires three pre-filters
+            //   nbin_fit         >= m_l1_min_length
+            //   gmax             >= m_l1_gmax_min
+            //   roi_energy_frac  >= m_l1_energy_frac_thr
+            // followed by ANY of four arms:
+            //   |raw_asym_wide| >= m_l1_asym_strong, OR
+            //   nbin_fit >= m_l1_len_long_mod   AND |raw_asym_wide| >= m_l1_asym_mod, OR
+            //   nbin_fit >= m_l1_len_long_loose AND |raw_asym_wide| >= m_l1_asym_loose, OR
+            //   nbin_fit >= m_l1_len_fill_shape AND gauss_fill <= m_l1_fill_shape_fill_thr
+            //                                   AND gauss_fwhm_frac <= m_l1_fill_shape_fwhm_thr
+            //                                   AND |raw_asym_wide| >= m_l1_asym_mod.
+            // Polarity is sign(raw_asym_wide).  Defaults seeded from the iter-7
+            // offline detector (find_long_decon_artifacts.py).
+            int    m_l1_min_length{30};
+            double m_l1_gmax_min{1500.0};
+            double m_l1_energy_frac_thr{0.66};
+            int    m_l1_energy_pad_ticks{500};
+            int    m_l1_raw_asym_pad_ticks{20};
+            double m_l1_raw_asym_eps{20.0};
+            // Per-tick |gauss| gate defining the core sub-window used by the
+            // trigger feature computation.  Matches iter-7 g_thr=50.
+            double m_l1_core_g_thr{50.0};
+            double m_l1_asym_strong{0.65};
+            double m_l1_asym_mod{0.40};
+            double m_l1_asym_loose{0.30};
+            int    m_l1_len_long_mod{100};
+            int    m_l1_len_long_loose{200};
+            int    m_l1_len_fill_shape{50};
+            double m_l1_fill_shape_fill_thr{0.38};
+            double m_l1_fill_shape_fwhm_thr{0.30};
 
             double m_l1_seg_length{120};
             double m_l1_scaling_factor{500};

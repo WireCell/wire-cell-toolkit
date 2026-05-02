@@ -101,6 +101,11 @@ function(params, tools, override = {}) {
     if l1sp_pd_mode == '' then sp_node
     else
       local n = anode.data.ident;
+      // Raw-ADC thresholds are tuned at the 14 mV/fC reference and scale
+      // with FE gain.  Deconvolved-domain thresholds (l1_gmax_min, asym
+      // ratios, lengths, energy fractions) operate on gain-normalised
+      // signals and are gain-invariant.  Same convention as chndb-base.
+      local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
       local l1sp_node = g.pnode({
         type: 'L1SPFilterPD',
         name: 'l1sppd%d' % n,
@@ -112,6 +117,10 @@ function(params, tools, override = {}) {
           sigtag: 'gauss%d' % n,
           outtag: 'gauss%d' % n,
           process_planes: l1sp_pd_planes,
+          // ADC-domain thresholds, scaled to runtime FE gain.
+          l1_raw_asym_eps:     20.0 * gain_scale,
+          raw_ROI_th_adclimit: 10.0 * gain_scale,
+          adc_sum_threshold:  160.0 * gain_scale,
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,

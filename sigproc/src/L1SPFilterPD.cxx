@@ -100,23 +100,62 @@ struct AsymRecord {
     int    argmax_tick{-1}, argmin_tick{-1};
     // Decon (gauss) peak and integral over the ROI, ungated
     double sig_peak{-1e30}, sig_integral{0};
+    // Gauss-side shape features (in-ROI)
+    double gmax{0};                 // max(|gauss[t]|) for t in [start, end)
+    double gauss_abs_sum_roi{0};    // Σ|gauss[t]| over [start, end)
+    double gauss_fill{0};           // gauss_abs_sum_roi / (gmax · nbin_fit)
+    double gauss_fwhm_frac{0};      // fraction of ticks with |gauss| > gmax/2
+    // Wide-window features (require pad outside the ROI)
+    double roi_energy_frac{0};      // gauss_abs_sum_roi / Σ|gauss| over padded
+    double raw_asym_wide{0};        // (pos+neg)/(pos-neg) of raw ADC over padded
+    // Core sub-window (contiguous run of |gauss|>core_g_thr around argmax|gauss|).
+    // Aligns the trigger features with iter-7's `|gauss|>g_thr=50` ROIs even when
+    // the C++ gauss>0 + raw-noise ROI extraction reports a wider window.
+    int    core_lo{-1}, core_hi{-1};   // tick bounds (absolute), -1 if no core
+    int    core_length{0};
+    double core_fill{0};               // Σ|gauss[core]|/(gmax·core_length)
+    double core_fwhm_frac{0};
+    double core_raw_asym_wide{0};      // (pos+neg)/(pos-neg) on raw over core ± pad
 };
 
-// Compute ADC asymmetry quantities for ticks [start_tick, end_tick).
+// Compute per-ROI shape and asymmetry quantities for ticks [start_tick, end_tick).
 // adc/sig charges are indexed with the same tbin offset (both traces assumed
 // to share the same tbin, which is the case for all pdhd/pdvd frames).
+//
+// The wide-window features (roi_energy_frac, raw_asym_wide) are computed over
+// padded windows clamped to the trace boundary.  Wide-padded ranges that run
+// past the trace edges are silently truncated; downstream divides by zero are
+// guarded.
+//
+//   threshold     — per-tick |ADC| gate for temp_sum / temp1_sum / temp2_sum
+//   energy_pad    — ticks added on each side for roi_energy_frac denominator
+//   raw_asym_pad  — ticks added on each side for raw_asym_wide / core_raw_asym_wide
+//   raw_eps       — per-tick raw ADC threshold for the asymmetry sum (sign-gated)
+//   core_g_thr    — per-tick |gauss| gate defining the core sub-window
+//                   (matches iter-7 g_thr=50 ADC; pass 0 to disable the core
+//                   computation, in which case core fields stay at defaults)
 AsymRecord compute_asym(const WireCell::ITrace::ChargeSequence& adc,
                         const WireCell::ITrace::ChargeSequence& sig,
                         int tbin,
                         int start_tick, int end_tick,
-                        double threshold)
+                        double threshold,
+                        int    energy_pad,
+                        int    raw_asym_pad,
+                        double raw_eps,
+                        double core_g_thr)
 {
     AsymRecord r;
     r.nbin_fit = end_tick - start_tick;
+    if (r.nbin_fit <= 0) return r;
+
+    const int ntot_adc = (int)adc.size();
+    const int ntot_sig = (int)sig.size();
+
+    // Pass 1: in-ROI accumulators (existing + gmax + gauss_abs_sum_roi).
     for (int i = 0; i < r.nbin_fit; i++) {
-        int idx = i + start_tick - tbin;
-        double w = adc.at(idx);
-        double b = sig.at(idx);
+        const int idx = i + start_tick - tbin;
+        const double w = adc.at(idx);
+        const double b = sig.at(idx);
         if (w > r.max_val) { r.max_val = w; r.argmax_tick = start_tick + i; }
         if (w < r.min_val) { r.min_val = w; r.argmin_tick = start_tick + i; }
         if (std::fabs(w) > threshold) {
@@ -128,8 +167,251 @@ AsymRecord compute_asym(const WireCell::ITrace::ChargeSequence& adc,
         }
         if (b > r.sig_peak) r.sig_peak = b;
         r.sig_integral += b;
+        const double absb = std::fabs(b);
+        if (absb > r.gmax) r.gmax = absb;
+        r.gauss_abs_sum_roi += absb;
     }
+
+    // Pass 2: gauss_fill + gauss_fwhm_frac (need gmax from pass 1).
+    if (r.gmax > 0) {
+        const double half = 0.5 * r.gmax;
+        int n_above_half = 0;
+        for (int i = 0; i < r.nbin_fit; i++) {
+            const int idx = i + start_tick - tbin;
+            if (std::fabs(sig.at(idx)) > half) ++n_above_half;
+        }
+        r.gauss_fwhm_frac = (double)n_above_half / (double)r.nbin_fit;
+        r.gauss_fill      = r.gauss_abs_sum_roi
+                          / (r.gmax * (double)r.nbin_fit);
+    }
+
+    // Pass 3: roi_energy_frac over [start - energy_pad, end + energy_pad).
+    {
+        const int wide_lo = std::max(0, (start_tick - tbin) - energy_pad);
+        const int wide_hi = std::min(ntot_sig, (end_tick - tbin) + energy_pad);
+        double wide_sum = 0;
+        for (int idx = wide_lo; idx < wide_hi; idx++) {
+            wide_sum += std::fabs(sig.at(idx));
+        }
+        if (wide_sum > 0) {
+            r.roi_energy_frac = r.gauss_abs_sum_roi / wide_sum;
+        }
+    }
+
+    // Pass 4: raw_asym_wide over [start - raw_asym_pad, end + raw_asym_pad).
+    {
+        const int wide_lo = std::max(0, (start_tick - tbin) - raw_asym_pad);
+        const int wide_hi = std::min(ntot_adc, (end_tick - tbin) + raw_asym_pad);
+        double pos = 0, neg = 0;
+        for (int idx = wide_lo; idx < wide_hi; idx++) {
+            const double w = adc.at(idx);
+            if      (w >  raw_eps) pos += w;
+            else if (w < -raw_eps) neg += w;   // neg is ≤ 0 by construction
+        }
+        const double denom = pos - neg;        // pos - neg = pos + |neg|
+        if (denom > 0) {
+            r.raw_asym_wide = (pos + neg) / denom;
+        }
+    }
+
+    // Pass 5: scan ALL contiguous runs of |gauss|>core_g_thr inside the C++
+    // ROI and pick the one most likely to be the artifact body.
+    //
+    // Why iterate all runs: the C++ ROI extraction (gauss>0 + raw-noise merge)
+    // can contain multiple separate iter-7 ROIs (each is `|gauss|>g_thr`).
+    // Anchoring only on argmax(|gauss|) misses the others.
+    //
+    // Selection score: `len · |aw|` — rewards runs that are simultaneously
+    // long *and* asymmetric.  A short +1.0-asym noise sliver loses to a
+    // medium-length 0.6-asym artifact body.  Ties broken by length.
+    if (core_g_thr > 0 && r.gmax > core_g_thr) {
+        double best_score = -1.0;
+        int   best_lo = -1, best_hi = -1, best_len = 0;
+        double best_aw = 0, best_fill = 0, best_fwhm = 0;
+
+        int run_lo = -1;
+        for (int i = 0; i <= r.nbin_fit; i++) {
+            const bool above = (i < r.nbin_fit) &&
+                std::fabs(sig.at(i + start_tick - tbin)) > core_g_thr;
+            if (above) {
+                if (run_lo < 0) run_lo = i;
+                continue;
+            }
+            if (run_lo < 0) continue;
+            const int lo_i = run_lo, hi_i = i - 1;
+            run_lo = -1;
+            const int run_start = lo_i + start_tick;
+            const int run_end   = hi_i + start_tick + 1;
+            const int run_len   = run_end - run_start;
+
+            double abs_sum = 0;
+            int n_above_half = 0;
+            const double half_core = 0.5 * r.gmax;
+            for (int j = lo_i; j <= hi_i; j++) {
+                const double absb = std::fabs(sig.at(j + start_tick - tbin));
+                abs_sum += absb;
+                if (absb > half_core) ++n_above_half;
+            }
+            const double fill = (r.gmax > 0)
+                ? abs_sum / (r.gmax * (double)run_len) : 0.0;
+            const double fwhm = (double)n_above_half / (double)run_len;
+
+            const int wlo = std::max(0, (run_start - tbin) - raw_asym_pad);
+            const int whi = std::min(ntot_adc, (run_end - tbin) + raw_asym_pad);
+            double pos = 0, neg = 0;
+            for (int idx = wlo; idx < whi; idx++) {
+                const double w = adc.at(idx);
+                if      (w >  raw_eps) pos += w;
+                else if (w < -raw_eps) neg += w;
+            }
+            const double denom = pos - neg;
+            const double aw    = (denom > 0) ? (pos + neg) / denom : 0.0;
+            const double score = (double)run_len * std::fabs(aw);
+
+            if (score > best_score ||
+                (score == best_score && run_len > best_len)) {
+                best_score = score;
+                best_aw    = aw;
+                best_fill  = fill;
+                best_fwhm  = fwhm;
+                best_lo    = run_start;
+                best_hi    = run_end - 1;
+                best_len   = run_len;
+            }
+        }
+        if (best_len > 0) {
+            r.core_lo            = best_lo;
+            r.core_hi            = best_hi;
+            r.core_length        = best_len;
+            r.core_fill          = best_fill;
+            r.core_fwhm_frac     = best_fwhm;
+            r.core_raw_asym_wide = best_aw;
+        }
+    }
+
     return r;
+}
+
+// ── Per-ROI trigger gate (Strategy B retuned) ─────────────────────────────────
+// Knobs bundled into a small struct so the same gate can be applied in
+// l1_fit() (drives the LASSO) and in the dump path (records the decision
+// alongside per-ROI features for offline cross-checking).
+struct TriggerCfg {
+    int    min_length;
+    double gmax_min;
+    double energy_frac_thr;
+    double asym_strong, asym_mod, asym_loose;
+    int    len_long_mod, len_long_loose, len_fill_shape;
+    double fill_shape_fill_thr, fill_shape_fwhm_thr;
+};
+
+// Per-sub-window trigger walk.  Iterates every contiguous run of
+// |gauss|>core_g_thr inside [start_tick, end_tick) and tests the multi-arm
+// gate against each run's own features.  Fires (returns +1/-1) on the first
+// run that passes — matches iter-7's per-candidate gating where each
+// |gauss|>g_thr ROI is its own trigger candidate.
+//
+// Why per-sub-window rather than per-aggregate-or-per-best:
+//   - The C++ ROI extraction (gauss>0+raw-noise-merge) often spans multiple
+//     iter-7 candidates; aggregating mixes their features ("longest length"
+//     from one sub-window with "extreme asym" from another) which lets the
+//     L_long arm fire on weak-asym backgrounds.
+//   - Picking one "best" sub-window misses real artifacts whose features are
+//     split across several |gauss|>50 runs (e.g. evt 12 apa 1 ch=203-212).
+//
+// Returns: -1, 0, or +1.  Polarity = sign(raw_asym_wide) of the firing run.
+int decide_trigger(const WireCell::ITrace::ChargeSequence& adc,
+                   const WireCell::ITrace::ChargeSequence& sig,
+                   int tbin,
+                   int start_tick, int end_tick,
+                   double gmax,
+                   const TriggerCfg& cfg,
+                   double core_g_thr,
+                   int    energy_pad,
+                   int    raw_asym_pad,
+                   double raw_eps)
+{
+    if (gmax < cfg.gmax_min) return 0;
+    if (core_g_thr <= 0)     return 0;
+
+    const int nbin = end_tick - start_tick;
+    if (nbin <= 0) return 0;
+
+    const int ntot_adc = (int)adc.size();
+    const int ntot_sig = (int)sig.size();
+    const double half_g = 0.5 * gmax;
+
+    // First pass: collect every |gauss|>core_g_thr sub-window plus its
+    // per-sub-window (fill, fwhm, ef, aw).  Each sub-window is one
+    // iter-7-style trigger candidate.
+    struct SubInfo {
+        int    lo_i, hi_i, run_len;
+        double fill, fwhm, ef, aw;
+    };
+    std::vector<SubInfo> subs;
+    subs.reserve(8);
+    int run_lo = -1;
+    for (int i = 0; i <= nbin; i++) {
+        const bool above = (i < nbin) &&
+            std::fabs(sig.at(i + start_tick - tbin)) > core_g_thr;
+        if (above) { if (run_lo < 0) run_lo = i; continue; }
+        if (run_lo < 0) continue;
+        const int lo_i = run_lo, hi_i = i - 1;
+        run_lo = -1;
+        const int run_start = lo_i + start_tick;
+        const int run_end   = hi_i + start_tick + 1;
+        const int run_len   = run_end - run_start;
+        if (run_len < cfg.min_length) continue;
+
+        double abs_sum = 0;
+        int n_above_half = 0;
+        for (int j = lo_i; j <= hi_i; j++) {
+            const double absb = std::fabs(sig.at(j + start_tick - tbin));
+            abs_sum += absb;
+            if (absb > half_g) ++n_above_half;
+        }
+        const double fill = abs_sum / (gmax * (double)run_len);
+        const double fwhm = (double)n_above_half / (double)run_len;
+
+        double wide_sum = 0;
+        const int elo = std::max(0, (run_start - tbin) - energy_pad);
+        const int ehi = std::min(ntot_sig, (run_end - tbin) + energy_pad);
+        for (int idx = elo; idx < ehi; idx++) {
+            wide_sum += std::fabs(sig.at(idx));
+        }
+        const double ef = (wide_sum > 0) ? abs_sum / wide_sum : 0.0;
+
+        double pos = 0, neg = 0;
+        const int wlo = std::max(0, (run_start - tbin) - raw_asym_pad);
+        const int whi = std::min(ntot_adc, (run_end - tbin) + raw_asym_pad);
+        for (int idx = wlo; idx < whi; idx++) {
+            const double w = adc.at(idx);
+            if      (w >  raw_eps) pos += w;
+            else if (w < -raw_eps) neg += w;
+        }
+        const double denom = pos - neg;
+        const double aw    = (denom > 0) ? (pos + neg) / denom : 0.0;
+
+        subs.push_back({lo_i, hi_i, run_len, fill, fwhm, ef, aw});
+    }
+    if (subs.empty()) return 0;
+
+    // Per-sub-window gate: each candidate sub-window must individually pass
+    // the energy-fraction (isolated-lobe) precondition before the arm tests.
+    for (const auto& s : subs) {
+        if (s.ef < cfg.energy_frac_thr) continue;
+        const double aabs = std::fabs(s.aw);
+        const bool fire =
+            (aabs >= cfg.asym_strong) ||
+            (s.run_len >= cfg.len_long_mod   && aabs >= cfg.asym_mod)   ||
+            (s.run_len >= cfg.len_long_loose && aabs >= cfg.asym_loose) ||
+            (s.run_len >= cfg.len_fill_shape &&
+             s.fill <= cfg.fill_shape_fill_thr &&
+             s.fwhm <= cfg.fill_shape_fwhm_thr &&
+             aabs >= cfg.asym_mod);
+        if (fire) return (s.aw > 0.0) ? +1 : -1;
+    }
+    return 0;
 }
 
 }  // namespace
@@ -183,6 +465,25 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["adc_sum_threshold"] = 160;
     cfg["adc_sum_rescaling"] = 90.;
     cfg["adc_ratio_threshold"] = 0.2;
+
+    // Per-ROI trigger gate (PDHD/PDVD Strategy B retuned).  See header
+    // for the exact gate definition.  Defaults seeded from the iter-7
+    // offline detector (find_long_decon_artifacts.py).
+    cfg["l1_min_length"]            = m_l1_min_length;
+    cfg["l1_gmax_min"]              = m_l1_gmax_min;
+    cfg["l1_energy_frac_thr"]       = m_l1_energy_frac_thr;
+    cfg["l1_energy_pad_ticks"]      = m_l1_energy_pad_ticks;
+    cfg["l1_raw_asym_pad_ticks"]    = m_l1_raw_asym_pad_ticks;
+    cfg["l1_raw_asym_eps"]          = m_l1_raw_asym_eps;
+    cfg["l1_core_g_thr"]            = m_l1_core_g_thr;
+    cfg["l1_asym_strong"]           = m_l1_asym_strong;
+    cfg["l1_asym_mod"]              = m_l1_asym_mod;
+    cfg["l1_asym_loose"]            = m_l1_asym_loose;
+    cfg["l1_len_long_mod"]          = m_l1_len_long_mod;
+    cfg["l1_len_long_loose"]        = m_l1_len_long_loose;
+    cfg["l1_len_fill_shape"]        = m_l1_len_fill_shape;
+    cfg["l1_fill_shape_fill_thr"]   = m_l1_fill_shape_fill_thr;
+    cfg["l1_fill_shape_fwhm_thr"]   = m_l1_fill_shape_fwhm_thr;
 
     cfg["l1_seg_length"] = 120;
     cfg["l1_scaling_factor"] = 500;
@@ -253,6 +554,22 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_adc_sum_threshold = get(cfg, "adc_sum_threshold", m_adc_sum_threshold);
     m_adc_sum_rescaling = get(cfg, "adc_sum_rescaling", m_adc_sum_rescaling);
     m_adc_ratio_threshold = get(cfg, "adc_ratio_threshold", m_adc_ratio_threshold);
+
+    m_l1_min_length          = get(cfg, "l1_min_length",          m_l1_min_length);
+    m_l1_gmax_min            = get(cfg, "l1_gmax_min",            m_l1_gmax_min);
+    m_l1_energy_frac_thr     = get(cfg, "l1_energy_frac_thr",     m_l1_energy_frac_thr);
+    m_l1_energy_pad_ticks    = get(cfg, "l1_energy_pad_ticks",    m_l1_energy_pad_ticks);
+    m_l1_raw_asym_pad_ticks  = get(cfg, "l1_raw_asym_pad_ticks",  m_l1_raw_asym_pad_ticks);
+    m_l1_raw_asym_eps        = get(cfg, "l1_raw_asym_eps",        m_l1_raw_asym_eps);
+    m_l1_core_g_thr          = get(cfg, "l1_core_g_thr",          m_l1_core_g_thr);
+    m_l1_asym_strong         = get(cfg, "l1_asym_strong",         m_l1_asym_strong);
+    m_l1_asym_mod            = get(cfg, "l1_asym_mod",            m_l1_asym_mod);
+    m_l1_asym_loose          = get(cfg, "l1_asym_loose",          m_l1_asym_loose);
+    m_l1_len_long_mod        = get(cfg, "l1_len_long_mod",        m_l1_len_long_mod);
+    m_l1_len_long_loose      = get(cfg, "l1_len_long_loose",      m_l1_len_long_loose);
+    m_l1_len_fill_shape      = get(cfg, "l1_len_fill_shape",      m_l1_len_fill_shape);
+    m_l1_fill_shape_fill_thr = get(cfg, "l1_fill_shape_fill_thr", m_l1_fill_shape_fill_thr);
+    m_l1_fill_shape_fwhm_thr = get(cfg, "l1_fill_shape_fwhm_thr", m_l1_fill_shape_fwhm_thr);
 
     m_l1_seg_length = get(cfg, "l1_seg_length", m_l1_seg_length);
     m_l1_scaling_factor = get(cfg, "l1_scaling_factor", m_l1_scaling_factor);
@@ -364,29 +681,46 @@ void L1SPFilterPD::init_resp()
 
 int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                           const std::shared_ptr<const WireCell::ITrace>& adctrace,
+                          const std::shared_ptr<const WireCell::ITrace>& sigtrace,
                           int start_tick, int end_tick)
 {
     const int nbin_fit = end_tick - start_tick;
 
-    VectorXd init_W = VectorXd::Zero(nbin_fit);
+    // Compute all per-ROI features once.  sigtrace carries the unmodified
+    // gauss data for the whole frame; reading from it (rather than newtrace)
+    // ensures the wide-window energy fraction is not corrupted by L1 fits
+    // already written into prior ROIs on the same channel.
+    const AsymRecord rec = compute_asym(adctrace->charge(),
+                                        sigtrace->charge(),
+                                        newtrace->tbin(),
+                                        start_tick, end_tick,
+                                        m_adc_l1_threshold,
+                                        m_l1_energy_pad_ticks,
+                                        m_l1_raw_asym_pad_ticks,
+                                        m_l1_raw_asym_eps,
+                                        m_l1_core_g_thr);
 
-    double temp_sum = 0, temp1_sum = 0;
+    // Per-ROI multi-arm gate, walked per |gauss|>core_g_thr sub-window.
+    const TriggerCfg tcfg{
+        m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
+        m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
+        m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
+        m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
+    };
+    int flag_l1 = decide_trigger(adctrace->charge(), sigtrace->charge(),
+                                 newtrace->tbin(),
+                                 start_tick, end_tick,
+                                 rec.gmax, tcfg,
+                                 m_l1_core_g_thr,
+                                 m_l1_energy_pad_ticks,
+                                 m_l1_raw_asym_pad_ticks,
+                                 m_l1_raw_asym_eps);
+
+    // Build the per-tick LASSO input from raw ADC.  Kept as a separate pass
+    // (rather than wiring into compute_asym) to keep the helper data-only.
+    VectorXd init_W = VectorXd::Zero(nbin_fit);
     for (int i = 0; i < nbin_fit; i++) {
         init_W(i) = adctrace->charge().at(i + start_tick - newtrace->tbin());
-        if (std::fabs(init_W(i)) > m_adc_l1_threshold) {
-            temp_sum  += init_W(i);
-            temp1_sum += std::fabs(init_W(i));
-        }
-    }
-
-    // Strategy B: classify by signed/unsigned ADC asymmetry ratio.
-    double ratio = (temp1_sum > 0)
-                 ? temp_sum / (temp1_sum * m_adc_sum_rescaling / nbin_fit)
-                 : 0.0;
-    int flag_l1 = 0;
-    if (temp1_sum > m_adc_sum_threshold) {
-        if      (ratio >  m_adc_ratio_threshold) flag_l1 = +1;
-        else if (ratio < -m_adc_ratio_threshold) flag_l1 = -1;
     }
 
     // Select the appropriate unipolar basis according to polarity.
@@ -613,6 +947,26 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     // Tier 2: peak locations and decon-side scalars
     std::vector<int32_t> d_argmax_tick, d_argmin_tick;
     std::vector<double>  d_sig_peak, d_sig_integral;
+    // Tier 3: per-ROI shape features driving the new trigger gate
+    std::vector<double>  d_gmax, d_gauss_fill, d_gauss_fwhm_frac;
+    std::vector<double>  d_roi_energy_frac, d_raw_asym_wide;
+    // Tier 3 (cont.): core sub-window features actually used by the trigger.
+    std::vector<int32_t> d_core_lo, d_core_hi, d_core_length;
+    std::vector<double>  d_core_fill, d_core_fwhm_frac, d_core_raw_asym_wide;
+    // Tier 3 (cont.): the new-gate trigger decision actually applied.  Kept
+    // alongside the legacy 'flag' (above, derived from the old ratio test) so
+    // offline analyses can compare both decisions on the same ROI.
+    std::vector<int32_t> d_flag_l1;
+
+    // Trigger gate config snapshot used by both dump-side decide_trigger calls
+    // and the live l1_fit path.  Kept identical so the dump's flag_l1 matches
+    // what l1_fit() would have produced if dump_mode were off.
+    const TriggerCfg tcfg_dump{
+        m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
+        m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
+        m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
+        m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
+    };
 
     for (auto trace : sigtraces) {
         auto newtrace = std::make_shared<Aux::SimpleTrace>(
@@ -637,7 +991,11 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                 auto rec = compute_asym(adctrace->charge(), trace->charge(),
                                         trace->tbin(),
                                         rois_save[i].first, rois_save[i].second + 1,
-                                        m_adc_l1_threshold);
+                                        m_adc_l1_threshold,
+                                        m_l1_energy_pad_ticks,
+                                        m_l1_raw_asym_pad_ticks,
+                                        m_l1_raw_asym_eps,
+                                        m_l1_core_g_thr);
                 d_channel.push_back(ch);
                 d_roi_start.push_back(rois_save[i].first);
                 d_roi_end.push_back(rois_save[i].second);
@@ -678,11 +1036,31 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                 d_argmin_tick.push_back(rec.argmin_tick);
                 d_sig_peak.push_back(rec.sig_peak);
                 d_sig_integral.push_back(rec.sig_integral);
+                // Tier 3: shape features driving the trigger gate
+                d_gmax.push_back(rec.gmax);
+                d_gauss_fill.push_back(rec.gauss_fill);
+                d_gauss_fwhm_frac.push_back(rec.gauss_fwhm_frac);
+                d_roi_energy_frac.push_back(rec.roi_energy_frac);
+                d_raw_asym_wide.push_back(rec.raw_asym_wide);
+                d_core_lo.push_back(rec.core_lo);
+                d_core_hi.push_back(rec.core_hi);
+                d_core_length.push_back(rec.core_length);
+                d_core_fill.push_back(rec.core_fill);
+                d_core_fwhm_frac.push_back(rec.core_fwhm_frac);
+                d_core_raw_asym_wide.push_back(rec.core_raw_asym_wide);
+                d_flag_l1.push_back((int32_t)decide_trigger(
+                    adctrace->charge(), trace->charge(), trace->tbin(),
+                    rois_save[i].first, rois_save[i].second + 1,
+                    rec.gmax, tcfg_dump,
+                    m_l1_core_g_thr,
+                    m_l1_energy_pad_ticks,
+                    m_l1_raw_asym_pad_ticks,
+                    m_l1_raw_asym_eps));
             }
         } else {
             // Normal processing path: classify ROIs and run L1 fits.
             for (auto& roi : rois_save) {
-                l1_fit(newtrace, adctrace, roi.first, roi.second + 1);
+                l1_fit(newtrace, adctrace, trace, roi.first, roi.second + 1);
                 // Zero any negative decon values within the ROI.
                 for (int t = roi.first; t <= roi.second; t++) {
                     auto& v = newtrace->charge().at(t - trace->tbin());
@@ -746,6 +1124,19 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         save_i32("argmin_tick",   d_argmin_tick);
         save_f64("sig_peak",      d_sig_peak);
         save_f64("sig_integral",  d_sig_integral);
+        // Tier 3 — features driving the per-ROI trigger gate
+        save_f64("gmax",            d_gmax);
+        save_f64("gauss_fill",      d_gauss_fill);
+        save_f64("gauss_fwhm_frac", d_gauss_fwhm_frac);
+        save_f64("roi_energy_frac", d_roi_energy_frac);
+        save_f64("raw_asym_wide",   d_raw_asym_wide);
+        save_i32("core_lo",            d_core_lo);
+        save_i32("core_hi",            d_core_hi);
+        save_i32("core_length",        d_core_length);
+        save_f64("core_fill",          d_core_fill);
+        save_f64("core_fwhm_frac",     d_core_fwhm_frac);
+        save_f64("core_raw_asym_wide", d_core_raw_asym_wide);
+        save_i32("flag_l1",         d_flag_l1);
 
         log->debug("call={} dump_mode: {} ROIs -> {}", m_count, d_channel.size(), fname);
     }
