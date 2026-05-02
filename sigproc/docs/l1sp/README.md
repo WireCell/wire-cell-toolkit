@@ -259,7 +259,7 @@ the jsonnet config block.
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
 | `fields` | `"FieldResponse"` | WCT component name providing `IFieldResponse` |
-| `filter` | `[]` | Smearing kernel (array of doubles). **Must be set by user.** |
+| `filter` | `[]` | Smearing kernel (array of doubles). PDHD/PDVD: leave empty to auto-derive from `Gaus_wide`; uBooNE keeps explicit 21-tap array. |
 | `adctag` | `"raw"` | Trace tag for NF-output raw ADC |
 | `sigtag` | `"gauss"` | Trace tag for OmnibusSigProc gauss signal |
 | `outtag` | `"l1sp"` | Trace tag on output waveforms |
@@ -397,6 +397,10 @@ filter: [0.000305453, 0.000978027, 0.00277049, 0.00694322, 0.0153945,
 ```
 
 All other parameters match the defaults.
+
+The explicit 21-tap array is numerically equivalent to the IFFT-derived kernel
+(σ = 0.111408 MHz, 500 ns tick) to within max |Δ| ≈ 5×10⁻⁶; see
+`pdhd/nf_plot/plot_l1sp_smearing_kernel.py` (in `wcp-porting-validation`) for validation.
 
 ---
 

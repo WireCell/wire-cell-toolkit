@@ -5,6 +5,7 @@
 #include "WireCellAux/SimpleFrame.h"
 
 #include "WireCellIface/IFieldResponse.h"
+#include "WireCellIface/IFilterWaveform.h"
 
 #include "WireCellUtil/LassoModel.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -445,6 +446,14 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["unipolar_plane"] = 1;
 
     cfg["filter"] = Json::arrayValue;
+    // Auto-derived smearing kernel: if "filter" is empty, look up this
+    // IFilterWaveform (by "TypeName:InstanceName"), IFFT it, take a centered
+    // window of taps above kernel_threshold*peak, and sum-normalize.
+    // Set to "" to leave m_smearing_vec empty (disables L1SP smearing).
+    cfg["gauss_filter"]      = "HfFilter:Gaus_wide";
+    cfg["kernel_threshold"]  = 1.0e-3;   // relative amplitude cutoff
+    cfg["kernel_max_half"]   = 64;        // max half-width in ticks (safety cap)
+    cfg["kernel_nticks"]     = 4096;      // IFFT length (>> expected kernel width)
 
     cfg["adctag"] = "raw";
     cfg["sigtag"] = "gauss";
@@ -584,6 +593,53 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_mean_threshold = get(cfg, "mean_threshold", m_mean_threshold);
 
     m_smearing_vec = get<std::vector<double>>(cfg, "filter");
+    if (m_smearing_vec.empty()) {
+        m_gauss_filter_tn  = get<std::string>(cfg, "gauss_filter",     m_gauss_filter_tn);
+        m_kernel_threshold = get(cfg, "kernel_threshold", m_kernel_threshold);
+        m_kernel_max_half  = get(cfg, "kernel_max_half",  m_kernel_max_half);
+        m_kernel_nticks    = get(cfg, "kernel_nticks",    m_kernel_nticks);
+
+        if (!m_gauss_filter_tn.empty()) {
+            // The IFFT bin spacing is 1/(2·max_freq); for the standard
+            // HfFilter max_freq=1 MHz this implies a 500 ns tick — the SP
+            // tick on uBooNE and on PDHD post-resampler.  Same assumption
+            // already baked into build_G (t_meas = i * 0.5 * units::us).
+            auto hf = Factory::find_tn<IFilterWaveform>(m_gauss_filter_tn);
+            const int N = m_kernel_nticks;
+            auto freq_wf = hf->filter_waveform(N);   // vector<float>, length N, freq-domain
+
+            Aux::DftTools::complex_vector_t spec(N);
+            for (int i = 0; i < N; ++i) spec[i] = {freq_wf[i], 0.0f};
+            auto time_wf = inv_c2r(m_dft, spec);     // vector<float>, peak at [0], wraps for t<0
+
+            // Find half-width by scanning outward from the peak until both
+            // the positive-time and negative-time (wrapped) sides drop below threshold.
+            const double peak = std::fabs(time_wf[0]);
+            const double thr  = m_kernel_threshold * peak;
+            int n_half = 0;
+            for (int k = 1; k <= m_kernel_max_half; ++k) {
+                if (std::fabs(time_wf[k]) < thr && std::fabs(time_wf[N - k]) < thr) break;
+                n_half = k;
+            }
+
+            // Build centered kernel: time index i ∈ [-n_half, n_half]
+            // maps to array index (i + N) % N in time_wf (circular).
+            m_smearing_vec.assign(2 * n_half + 1, 0.0);
+            for (int i = -n_half; i <= n_half; ++i)
+                m_smearing_vec[i + n_half] = time_wf[(i + N) % N];
+
+            // Sum-normalize → kernel sums to 1 (absorbs small DC=0 offset).
+            double s = 0.0;
+            for (double v : m_smearing_vec) s += v;
+            if (s > 0.0)
+                for (double& v : m_smearing_vec) v /= s;
+
+            log->debug("smearing kernel from {} n_half={} ntaps={} peak={:.5f}",
+                       m_gauss_filter_tn, n_half, (int)m_smearing_vec.size(),
+                       m_smearing_vec[n_half]);
+        }
+        // If gauss_filter_tn is empty, m_smearing_vec stays empty → L1SP smearing disabled.
+    }
 
     m_bipolar_plane = get(cfg, "bipolar_plane", m_bipolar_plane);
     m_unipolar_plane = get(cfg, "unipolar_plane", m_unipolar_plane);

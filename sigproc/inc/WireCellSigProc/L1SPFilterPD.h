@@ -175,6 +175,11 @@ namespace WireCell {
             double m_peak_threshold{1000};
             double m_mean_threshold{500};
             std::vector<double> m_smearing_vec;
+            // Auto-derived smearing kernel config (used when "filter" is empty).
+            std::string m_gauss_filter_tn{"HfFilter:Gaus_wide"};
+            double m_kernel_threshold{1.0e-3};
+            int    m_kernel_max_half{64};
+            int    m_kernel_nticks{4096};
 
             int m_bipolar_plane{1};    // field-response plane index for bipolar basis
             int m_unipolar_plane{1};   // field-response plane index for unipolar bases

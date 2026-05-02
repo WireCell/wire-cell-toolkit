@@ -337,7 +337,34 @@ Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
 | `l1_basis1_scale` | `0.5` | Weight for the unipolar (basis1) component |
 | `peak_threshold` | `1000` | Drop an output ROI if its peak < this |
 | `mean_threshold` | `500` | Drop an output ROI if its mean < this |
-| `filter` | `[]` | Gaussian smearing kernel (empty = no smearing) |
+| `filter` | `[]` | Explicit smearing kernel taps (overrides auto-derivation if non-empty) |
+
+#### Smearing kernel — auto-derived from `Gaus_wide`
+
+When `filter` is empty (the PDHD/PDVD default), the time-domain smearing
+kernel is built once at `configure()` time from the SP `Gaus_wide` HfFilter:
+
+1. Fetch `IFilterWaveform` named by `gauss_filter` (`"HfFilter:Gaus_wide"`).
+2. Build the frequency-domain spectrum: `H[k] = exp(−½(|f_k|/σ)²)`, DC zeroed.
+3. IFFT (1/N normalisation) → `h[n]`, peak at index 0.
+4. Scan outward until `|h[k]| < kernel_threshold · h[0]` to find `n_half`.
+5. Extract `kernel[i] = h[(i+N) % N]` for `i ∈ [−n_half, n_half]` and sum-normalise.
+
+The IFFT bin spacing is `1/(2·max_freq)`. With `HfFilter`'s default
+`max_freq = 1 MHz` this gives exactly 500 ns per bin, matching the SP tick on
+both uBooNE and PDHD (post-resampler from 512 ns native).
+
+The uBooNE explicit 21-tap `filter` array is numerically equivalent to the
+IFFT-derived kernel (σ = 0.111408 MHz, 500 ns tick) to within max |Δ| ≈ 5×10⁻⁶.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `gauss_filter` | `"HfFilter:Gaus_wide"` | Type-name of the frequency-domain filter to IFFT |
+| `kernel_threshold` | `1e-3` | Truncation threshold as a fraction of the peak |
+| `kernel_max_half` | `64` | Maximum half-width of the derived kernel (ticks) |
+| `kernel_nticks` | `4096` | FFT size used for the IFFT derivation |
+
+Set `gauss_filter` to `""` (and leave `filter` empty) to disable smearing entirely.
 
 ### Electronics response
 
@@ -494,9 +521,9 @@ production configs remain bit-identical with the feature off.
    LASSO early-exits; see `l1_fit()` unipolar-nullptr check).
 
 2. **LASSO body tuning** — once unipolar bases are populated, calibrate
-   `unipolar_time_offset`, `l1_basis0_scale`, `l1_basis1_scale`, and the
-   smearing `filter` kernel.  Trigger gate is independent of these and does
-   not need to be re-run.
+   `unipolar_time_offset`, `l1_basis0_scale`, `l1_basis1_scale`, and verify
+   the auto-derived smearing kernel against post-fit reconstruction.
+   Trigger gate is independent of these and does not need to be re-run.
 
 3. **PDVD jsonnet port** — the trigger logic itself is detector-symmetric;
    the only change needed in `cfg/pgrapher/experiment/protodunevd/sp.jsonnet`

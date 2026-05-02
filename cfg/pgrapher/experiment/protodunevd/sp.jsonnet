@@ -125,6 +125,9 @@ function(params, tools, override = {}) {
           sigtag: 'gauss%d' % n,
           outtag: 'gauss%d' % n,
           process_planes: l1sp_pd_planes,
+          // Derive time-domain smearing kernel by IFFT of the SP Gaus_wide
+          // filter so both are driven by the same sigma.
+          gauss_filter: 'HfFilter:Gaus_wide',
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,

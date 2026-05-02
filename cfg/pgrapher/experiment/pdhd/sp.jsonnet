@@ -121,6 +121,9 @@ function(params, tools, override = {}) {
           l1_raw_asym_eps:     20.0 * gain_scale,
           raw_ROI_th_adclimit: 10.0 * gain_scale,
           adc_sum_threshold:  160.0 * gain_scale,
+          // Derive time-domain smearing kernel by IFFT of the SP Gaus_wide
+          // filter so both are driven by the same sigma.
+          gauss_filter: 'HfFilter:Gaus_wide',
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
