@@ -19,6 +19,9 @@ function(params, anode, chndbobj, n, name='',
         // meaning here.
       },
     },
+    // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
+    // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
+    local sfx = if anode.data.ident < 4 then '_b' else '_t',
     local grouped = {
       type: 'PDVDCoherentNoiseSub',
       name: name,
@@ -27,12 +30,11 @@ function(params, anode, chndbobj, n, name='',
         noisedb: wc.tn(chndbobj),
         anode: wc.tn(anode),
         rms_threshold: 0.0,
-        time_filters:
-          if anode.data.ident < 4
-          then ['Wiener_tight_U', 'Wiener_tight_V', 'Wiener_tight_W']
-          else ['Wiener_tight_U', 'Wiener_tight_V', 'Wiener_tight_W'],
-        lf_tighter_filter: 'ROI_tighter_lf',
-        lf_loose_filter: 'ROI_loose_lf',
+        time_filters: ['Wiener_tight_U' + sfx,
+                       'Wiener_tight_V' + sfx,
+                       'Wiener_tight_W' + sfx],
+        lf_tighter_filter: 'ROI_tighter_lf' + sfx,
+        lf_loose_filter:   'ROI_loose_lf'   + sfx,
         debug_dump_path: debug_dump_path,
         debug_dump_groups: debug_dump_groups,
       },

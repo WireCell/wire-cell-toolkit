@@ -19,6 +19,9 @@ function(params, tools, override = {}) {
                l1sp_pd_mode='',
                l1sp_pd_dump_path='',
                l1sp_pd_planes=[0, 1])::
+    // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
+    // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
+    local sfx = if anode.data.ident < 4 then '_b' else '_t';
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -62,6 +65,23 @@ function(params, tools, override = {}) {
       elecresponse: if anode.data.ident < 4
                     then wc.tn(tools.elec_resps[0])
                     else wc.tn(tools.elec_resps[1]),
+
+      // Per-anode-side filter type-name overrides.  All values are equal
+      // between top and bottom for now; the split is structural.
+      ROI_tight_lf_filter:   'ROI_tight_lf'   + sfx,
+      ROI_tighter_lf_filter: 'ROI_tighter_lf' + sfx,
+      ROI_loose_lf_filter:   'ROI_loose_lf'   + sfx,
+      Gaus_wide_filter:      'Gaus_wide'      + sfx,
+      Wiener_tight_filters: ['Wiener_tight_U' + sfx,
+                             'Wiener_tight_V' + sfx,
+                             'Wiener_tight_W' + sfx],
+      Wiener_wide_filters:  ['Wiener_wide_U'  + sfx,
+                             'Wiener_wide_V'  + sfx,
+                             'Wiener_wide_W'  + sfx],
+      // Default Wire_filters layout is [ind, ind, col]; preserve it.
+      Wire_filters:         ['Wire_ind'       + sfx,
+                             'Wire_ind'       + sfx,
+                             'Wire_col'       + sfx],
       ftoffset: 0.0, // default 0.0
       // ctoffset: 1.0*wc.microsecond, // default -8.0
       ctoffset: 4*wc.microsecond, //consistent with FR: protodunevd_FR_imbalance3p_260501.json.bz2
@@ -126,8 +146,9 @@ function(params, tools, override = {}) {
           outtag: 'gauss%d' % n,
           process_planes: l1sp_pd_planes,
           // Derive time-domain smearing kernel by IFFT of the SP Gaus_wide
-          // filter so both are driven by the same sigma.
-          gauss_filter: 'HfFilter:Gaus_wide',
+          // filter so both are driven by the same sigma.  Use the per-side
+          // (_b/_t) instance to match this anode's OmnibusSigProc.
+          gauss_filter: 'HfFilter:Gaus_wide' + sfx,
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
