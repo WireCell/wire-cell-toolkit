@@ -357,6 +357,12 @@ both uBooNE and PDHD (post-resampler from 512 ns native).
 The uBooNE explicit 21-tap `filter` array is numerically equivalent to the
 IFFT-derived kernel (σ = 0.111408 MHz, 500 ns tick) to within max |Δ| ≈ 5×10⁻⁶.
 
+**PDVD per-side filter**: the PDVD jsonnet registers `Gaus_wide_b`
+(bottom CRP, `anode.data.ident < 4`) and `Gaus_wide_t` (top CRP) as
+separate instances, and `make_sigproc` sets `gauss_filter` to
+`'HfFilter:Gaus_wide_b'` or `'HfFilter:Gaus_wide_t'` per anode.  PDHD has
+a single `Gaus_wide` shared across all four APAs.
+
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `gauss_filter` | `"HfFilter:Gaus_wide"` | Type-name of the frequency-domain filter to IFFT |

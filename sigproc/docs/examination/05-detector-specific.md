@@ -322,10 +322,19 @@ notches are reactivated.
   Symmetric to PDHD above.  `PDVD::filter_time`, `PDVD::filter_low`,
   `PDVD::filter_low_loose` removed; replaced by `HfFilter Wiener_tight_{U,V,W}`
   × `LfFilter ROI_tighter_lf` (τ=0.06 MHz, PDVD) in `SignalProtection` and
-  × `LfFilter ROI_loose_lf` in `Subtract_WScaling`. The jsonnet
-  `time_filters` dispatch uses `anode.data.ident < 4` (bottom CRP) /
-  `ident >= 4` (top CRP) so per-CRP Wiener divergence is a one-line change.
-  Filter instances defined in `cfg/pgrapher/experiment/protodunevd/sp-filters.jsonnet`.
+  × `LfFilter ROI_loose_lf` in `Subtract_WScaling`.
+- **Per-side filter instances** (`cfg/pgrapher/experiment/protodunevd/sp-filters.jsonnet`):
+  Every filter consumed by NF / SP / L1SP is registered as two separate
+  instances with `_b` (bottom CRP, `anode.data.ident < 4`) and `_t` (top CRP,
+  `ident >= 4`) suffixes — `Wiener_tight_{U,V,W}_{b,t}`,
+  `Wiener_wide_{U,V,W}_{b,t}`, `ROI_{tight,tighter,loose}_lf_{b,t}`,
+  `Gaus_wide_{b,t}`, `Wire_{ind,col}_{b,t}` (24 instances total).  Numeric
+  values are identical between the two sides at the moment; the split is
+  structural so per-CRP divergence is a parameter edit, not a wiring change.
+  `nf.jsonnet` and `sp.jsonnet` derive a `local sfx = if anode.data.ident < 4
+  then '_b' else '_t'` and pass per-side type-names via the existing config
+  knobs (`time_filters`, `lf_*_filter`, `Gaus_wide_filter`, `Wiener_*_filters`,
+  `Wire_filters`, `gauss_filter`).
 - **Per-channel frequency mask** (`ProtoduneVD.cxx`, `PDVD::OneChannelNoise::apply()`):
   After the forward FFT, the waveform spectrum is element-wise multiplied by the
   per-channel `noise` spectrum read from the chndb (`m_noisedb->noise(ch)`).  The
