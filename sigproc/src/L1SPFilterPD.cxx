@@ -4,13 +4,13 @@
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/SimpleFrame.h"
 
-#include "WireCellIface/IFieldResponse.h"
 #include "WireCellIface/IFilterWaveform.h"
 
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/LassoModel.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Eigen.h"
-#include "WireCellUtil/Response.h"
+#include "WireCellUtil/Persist.h"
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/cnpy.h"
 
@@ -36,7 +36,6 @@ using namespace Eigen;
 using namespace WireCell;
 using namespace WireCell::SigProc;
 
-using WireCell::Aux::DftTools::fwd_r2c;
 using WireCell::Aux::DftTools::inv_c2r;
 
 // ── anonymous helpers ─────────────────────────────────────────────────────────
@@ -419,15 +418,8 @@ int decide_trigger(const WireCell::ITrace::ChargeSequence& adc,
 
 // ── L1SPFilterPD ─────────────────────────────────────────────────────────────
 
-L1SPFilterPD::L1SPFilterPD(double gain, double shaping, double postgain, double ADC_mV,
-                            double fine_time_offset, double coarse_time_offset)
+L1SPFilterPD::L1SPFilterPD()
   : Aux::Logger("L1SPFilterPD", "sigproc")
-  , m_gain(gain)
-  , m_shaping(shaping)
-  , m_postgain(postgain)
-  , m_ADC_mV(ADC_mV)
-  , m_fine_time_offset(fine_time_offset)
-  , m_coarse_time_offset(coarse_time_offset)
 {
 }
 
@@ -435,15 +427,13 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
 {
     Configuration cfg;
 
-    // Name of component providing the bipolar induction-plane field response.
-    cfg["fields"] = "FieldResponse";
-    cfg["bipolar_plane"] = 1;   // plane index within that response (0=U, 1=V, 2=W)
-
-    // Optional: field responses for the unipolar bases.  Empty = not configured;
-    // the component acts as a pass-through until these are provided.
-    cfg["fields_pos_unipolar"] = "";   // arriving-only (electrons collected on induction)
-    cfg["fields_neg_unipolar"] = "";   // leaving-only  (anode-induction)
-    cfg["unipolar_plane"] = 1;
+    // Path (resolved via WIRECELL_PATH) to the JSON+bz2 file holding the
+    // pre-built L1SP response kernels.  Generated offline with:
+    //   wirecell-sigproc gen-l1sp-kernels --gain '14*mV/fC' --shaping '2.2*us'
+    //     --postgain 1.2 --adc-per-mv 2.048 --coarse-time-offset '-8*us'
+    //     <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2
+    // See wire-cell-python/wirecell/sigproc/l1sp.py for the schema.
+    cfg["kernels_file"] = "";
 
     cfg["filter"] = Json::arrayValue;
     // Auto-derived smearing kernel: if "filter" is empty, look up this
@@ -462,10 +452,6 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["raw_ROI_th_nsigma"] = 4;
     cfg["raw_ROI_th_adclimit"] = 10;
     cfg["overall_time_offset"] = 0;
-    // Time offset of the unipolar basis relative to the bipolar basis (µs).
-    // Analogous to collect_time_offset in L1SPFilter.  Tune once the
-    // unipolar field-response files are available.
-    cfg["unipolar_time_offset"] = 3.0;
 
     cfg["roi_pad"] = 3;
     cfg["raw_pad"] = 15;
@@ -507,13 +493,6 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["peak_threshold"] = 1000;
     cfg["mean_threshold"] = 500;
 
-    cfg["gain"] = m_gain;
-    cfg["shaping"] = m_shaping;
-    cfg["postgain"] = m_postgain;
-    cfg["ADC_mV"] = m_ADC_mV;
-    cfg["fine_time_offset"] = m_fine_time_offset;
-    cfg["coarse_time_offset"] = m_coarse_time_offset;
-
     cfg["dft"] = "FftwDFT";
 
     // Plane-scope filter: IAnodePlane typename + list of plane indices to process.
@@ -536,12 +515,7 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
 
 void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
 {
-    m_gain = get(cfg, "gain", m_gain);
-    m_shaping = get(cfg, "shaping", m_shaping);
-    m_postgain = get(cfg, "postgain", m_postgain);
-    m_ADC_mV = get(cfg, "ADC_mV", m_ADC_mV);
-    m_fine_time_offset = get(cfg, "fine_time_offset", m_fine_time_offset);
-    m_coarse_time_offset = get(cfg, "coarse_time_offset", m_coarse_time_offset);
+    m_kernels_file = get<std::string>(cfg, "kernels_file", "");
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
@@ -557,7 +531,6 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
 
     // fixme: the use of units here is broken (same issue as in L1SPFilter)
     m_overall_time_offset = get(cfg, "overall_time_offset", 0.0) * units::us;
-    m_unipolar_time_offset = get(cfg, "unipolar_time_offset", 3.0) * units::us;
 
     m_adc_l1_threshold = get(cfg, "adc_l1_threshold", m_adc_l1_threshold);
     m_adc_sum_threshold = get(cfg, "adc_sum_threshold", m_adc_sum_threshold);
@@ -641,13 +614,6 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
         // If gauss_filter_tn is empty, m_smearing_vec stays empty → L1SP smearing disabled.
     }
 
-    m_bipolar_plane = get(cfg, "bipolar_plane", m_bipolar_plane);
-    m_unipolar_plane = get(cfg, "unipolar_plane", m_unipolar_plane);
-
-    m_cfg_fields     = get<std::string>(cfg, "fields", "FieldResponse");
-    m_cfg_fields_pos = get<std::string>(cfg, "fields_pos_unipolar", "");
-    m_cfg_fields_neg = get<std::string>(cfg, "fields_neg_unipolar", "");
-
     // Plane-scope filter
     m_cfg_anode = get<std::string>(cfg, "anode", "");
     if (!m_cfg_anode.empty()) {
@@ -671,39 +637,11 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_dump_path = get<std::string>(cfg, "dump_path", m_dump_path);
     m_dump_tag  = get<std::string>(cfg, "dump_tag", m_dump_tag);
 
-    // Reset interpolators so init_resp() rebuilds them on next operator() call.
-    m_lin_bipolar.reset();
-    m_lin_pos_unipolar.reset();
-    m_lin_neg_unipolar.reset();
-}
-
-std::unique_ptr<linterp<double>> L1SPFilterPD::build_response(const std::string& fields_tn,
-                                                               int plane_index)
-{
-    auto ifr = Factory::find_tn<IFieldResponse>(fields_tn);
-    Response::Schema::FieldResponse fr = ifr->field_response();
-    Response::Schema::FieldResponse fravg = Response::average_1D(fr);
-
-    WireCell::Binning tbins(Response::as_array(fravg.planes[0]).cols(), 0,
-                            Response::as_array(fravg.planes[0]).cols() * fravg.period);
-    Response::ColdElec ce(m_gain, m_shaping);
-    auto ewave = ce.generate(tbins);
-    Waveform::scale(ewave, m_postgain * m_ADC_mV * (-1));
-    auto elec = fwd_r2c(m_dft, ewave);
-
-    std::complex<float> fine_period(fravg.period, 0);
-
-    WireCell::Waveform::realseq_t resp = fravg.planes[plane_index].paths[0].current;
-    auto spectrum = fwd_r2c(m_dft, resp);
-    Waveform::scale(spectrum, elec);
-    Waveform::scale(spectrum, fine_period);
-    resp = inv_c2r(m_dft, spectrum);
-
-    double intrinsic_time_offset = fravg.origin / fravg.speed;
-    double x0   = (-intrinsic_time_offset - m_coarse_time_offset + m_fine_time_offset);
-    double xstep = fravg.period;
-
-    return std::make_unique<linterp<double>>(resp.begin(), resp.end(), x0, xstep);
+    // Reset interpolators so init_resp() reloads them on next operator() call.
+    m_lin_bipolar.clear();
+    m_lin_pos_unipolar.clear();
+    m_lin_neg_unipolar.clear();
+    m_unipolar_toff_pos.clear();
 }
 
 bool L1SPFilterPD::channel_in_scope(int channel) const
@@ -724,21 +662,69 @@ bool L1SPFilterPD::channel_eligible(int ch) const
 
 void L1SPFilterPD::init_resp()
 {
-    if (!m_lin_bipolar) {
-        m_lin_bipolar = build_response(m_cfg_fields, m_bipolar_plane);
+    if (!m_lin_bipolar.empty()) return;   // already loaded
+
+    if (m_kernels_file.empty()) {
+        THROW(ValueError() << errmsg{"L1SPFilterPD: 'kernels_file' is required. "
+              "Generate one with: wirecell-sigproc gen-l1sp-kernels "
+              "<field-response> <output>.json.bz2"});
     }
-    if (!m_lin_pos_unipolar && !m_cfg_fields_pos.empty()) {
-        m_lin_pos_unipolar = build_response(m_cfg_fields_pos, m_unipolar_plane);
+
+    auto top = Persist::load(m_kernels_file);   // resolves WIRECELL_PATH; .json.bz2 OK
+
+    if (!top.isMember("meta") || !top.isMember("planes")) {
+        THROW(ValueError() << errmsg{"L1SPFilterPD: malformed kernels_file '"
+              + m_kernels_file + "' (missing 'meta' or 'planes')"});
     }
-    if (!m_lin_neg_unipolar && !m_cfg_fields_neg.empty()) {
-        m_lin_neg_unipolar = build_response(m_cfg_fields_neg, m_unipolar_plane);
+
+    const auto& meta = top["meta"];
+    const double period_ns = meta["period_ns"].asDouble();
+    const double t0_us     = meta["t0_us"].asDouble();
+    const int    n_samples = meta["n_samples"].asInt();
+    const double xstep     = period_ns * units::ns;
+    const double x0        = t0_us * units::us;
+
+    auto load_array = [&](const Json::Value& jv) {
+        Waveform::realseq_t v;
+        v.reserve(jv.size());
+        for (const auto& x : jv) v.push_back(x.asDouble());
+        return v;
+    };
+
+    auto make_lin = [&](const Waveform::realseq_t& v) {
+        return std::make_unique<linterp<double>>(v.begin(), v.end(), x0, xstep);
+    };
+
+    for (const auto& jpl : top["planes"]) {
+        const int plane = jpl["plane_index"].asInt();
+
+        auto k_bip_pos = load_array(jpl["positive"]["bipolar"]);
+        auto k_uni_pos = load_array(jpl["positive"]["unipolar"]);
+        auto k_uni_neg = load_array(jpl["negative"]["unipolar"]);
+        const double toff_pos_us = jpl["positive"]["unipolar_time_offset_us"].asDouble();
+
+        if ((int)k_bip_pos.size() != n_samples ||
+            (int)k_uni_pos.size() != n_samples ||
+            (int)k_uni_neg.size() != n_samples) {
+            THROW(ValueError() << errmsg{"L1SPFilterPD: kernel length mismatch for plane "
+                  + std::to_string(plane) + " in '" + m_kernels_file + "'"});
+        }
+
+        m_lin_bipolar[plane]      = make_lin(k_bip_pos);
+        m_lin_pos_unipolar[plane] = make_lin(k_uni_pos);
+        m_lin_neg_unipolar[plane] = make_lin(k_uni_neg);
+        m_unipolar_toff_pos[plane] = toff_pos_us * units::us;
+
+        log->debug("loaded plane {} kernels from {}: n={} period={} ns t0={:.3f} us "
+                   "W-shift(pos)={:+.3f} us",
+                   plane, m_kernels_file, n_samples, period_ns, t0_us, toff_pos_us);
     }
 }
 
 int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                           const std::shared_ptr<const WireCell::ITrace>& adctrace,
                           const std::shared_ptr<const WireCell::ITrace>& sigtrace,
-                          int start_tick, int end_tick)
+                          int start_tick, int end_tick, int plane)
 {
     const int nbin_fit = end_tick - start_tick;
 
@@ -779,14 +765,30 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
         init_W(i) = adctrace->charge().at(i + start_tick - newtrace->tbin());
     }
 
-    // Select the appropriate unipolar basis according to polarity.
-    linterp<double>* lin_unipolar = (flag_l1 > 0) ? m_lin_pos_unipolar.get()
-                                                   : m_lin_neg_unipolar.get();
+    // Select the appropriate per-plane bases.  Bipolar is the same for
+    // positive and negative cases; unipolar differs (W kernel vs neg-half).
+    auto bip_it = m_lin_bipolar.find(plane);
+    if (bip_it == m_lin_bipolar.end()) {
+        log->warn("l1_fit: no kernels loaded for plane {}; passing through", plane);
+        return 0;
+    }
+    linterp<double>* lin_bipolar  = bip_it->second.get();
+    linterp<double>* lin_unipolar = nullptr;
+    double basis1_toff = 0.0;     // negative case: no shift
+    if (flag_l1 > 0) {
+        auto it = m_lin_pos_unipolar.find(plane);
+        if (it != m_lin_pos_unipolar.end()) lin_unipolar = it->second.get();
+        auto tit = m_unipolar_toff_pos.find(plane);
+        if (tit != m_unipolar_toff_pos.end()) basis1_toff = tit->second;
+    }
+    else if (flag_l1 < 0) {
+        auto it = m_lin_neg_unipolar.find(plane);
+        if (it != m_lin_neg_unipolar.end()) lin_unipolar = it->second.get();
+    }
 
     if ((flag_l1 == 1 || flag_l1 == -1) && lin_unipolar == nullptr) {
-        // Unipolar basis not yet configured — fall back to pass-through.
-        log->warn("l1_fit: polarity {} triggered but unipolar response not configured; "
-                  "falling back to pass-through", flag_l1);
+        log->warn("l1_fit: polarity {} triggered on plane {} but unipolar kernel "
+                  "not loaded; falling back to pass-through", flag_l1, plane);
         flag_l1 = 0;
     }
 
@@ -808,9 +810,9 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                                  -15 * units::us - m_overall_time_offset,
                                   10 * units::us - m_overall_time_offset,
                                  m_overall_time_offset,
-                                 m_unipolar_time_offset,
+                                 basis1_toff,
                                  m_l1_scaling_factor, m_l1_resp_scale,
-                                 m_lin_bipolar.get(), lin_unipolar);
+                                 lin_bipolar, lin_unipolar);
 
             VectorXd beta = lasso_solve(G, W_seg, m_l1_lambda,
                                         (int)m_l1_niteration, m_l1_epsilon);
@@ -1115,8 +1117,10 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
             }
         } else {
             // Normal processing path: classify ROIs and run L1 fits.
+            // Resolve channel → plane once (kernels are indexed by plane).
+            const int plane = m_anode ? m_anode->resolve(ch).index() : 0;
             for (auto& roi : rois_save) {
-                l1_fit(newtrace, adctrace, trace, roi.first, roi.second + 1);
+                l1_fit(newtrace, adctrace, trace, roi.first, roi.second + 1, plane);
                 // Zero any negative decon values within the ROI.
                 for (int t = roi.first; t <= roi.second; t++) {
                     auto& v = newtrace->charge().at(t - trace->tbin());

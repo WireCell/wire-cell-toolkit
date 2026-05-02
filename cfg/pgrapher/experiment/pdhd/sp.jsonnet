@@ -22,11 +22,15 @@ function(params, tools, override = {}) {
   // l1sp_pd_mode: '' (default, OFF) / 'process' (process triggered ROIs, still stubbed)
   //               / 'dump' (calibration dump of per-ROI asymmetry quantities to NPZ)
   // l1sp_pd_dump_path: directory to write per-event NPZ files when mode='dump'
-  // l1sp_pd_planes: plane indices processed by L1SPFilterPD (default [0,1] = U+V)
+  // l1sp_pd_planes: plane indices processed by L1SPFilterPD.
+  //   null (default): APA0 → [0] (U only; V anomalous), APA1-3 → [0,1] (U+V).
+  //   explicit list: overrides the per-APA default.
   make_sigproc(anode, name=null,
                l1sp_pd_mode='',
                l1sp_pd_dump_path='',
-               l1sp_pd_planes=[0, 1])::
+               l1sp_pd_planes=null)::
+    local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
+                        else if anode.data.ident == 0 then [0] else [0, 1];
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -112,11 +116,11 @@ function(params, tools, override = {}) {
         data: {
           dft: wc.tn(tools.dft),
           anode: wc.tn(anode),
-          fields: wc.tn(tools.field),
+          kernels_file: "pdhd_l1sp_kernels.json.bz2",
           adctag: 'raw%d' % n,
           sigtag: 'gauss%d' % n,
           outtag: 'gauss%d' % n,
-          process_planes: l1sp_pd_planes,
+          process_planes: l1sp_planes,
           // ADC-domain thresholds, scaled to runtime FE gain.
           l1_raw_asym_eps:     20.0 * gain_scale,
           raw_ROI_th_adclimit: 10.0 * gain_scale,
@@ -128,7 +132,7 @@ function(params, tools, override = {}) {
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
         },
-      }, nin=1, nout=1, uses=[tools.dft, anode, tools.field]);
+      }, nin=1, nout=1, uses=[tools.dft, anode]);
       // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.
       // OmnibusSigProc drops raw traces from its output, so we split the
       // input frame, run SP on one copy, then merge raw+gauss for L1SP.

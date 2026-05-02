@@ -9,10 +9,28 @@
  * LASSO using {bipolar, +unipolar} (positive case) or {bipolar, -unipolar}
  * (negative case) response bases.
  *
- * Trigger thresholds are wired to default uBooNE values and need re-tuning
- * from PDHD/PDVD dump-mode hand-scan data.  Unipolar response bases are
- * configured via "fields_pos_unipolar" and "fields_neg_unipolar"; if empty
- * the component acts as a pass-through.
+ * ┌──────────────────────────────────────────────────────────────────────────┐
+ * │ Response kernels are NOT computed in C++.  They are pre-built offline by │
+ * │ the wire-cell-python tool and shipped as a JSON+bz2 file (one per        │
+ * │ detector, e.g. wire-cell-data/pdhd_l1sp_kernels.json.bz2):               │
+ * │                                                                          │
+ * │   wirecell-sigproc gen-l1sp-kernels \                                    │
+ * │     --gain '14*mV/fC' --shaping '2.2*us' \                               │
+ * │     --postgain 1.2 --adc-per-mv 2.048 \                                  │
+ * │     --coarse-time-offset '-8*us' \                                       │
+ * │     <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2               │
+ * │                                                                          │
+ * │ See wirecell/sigproc/l1sp.py for the schema and the reference            │
+ * │ algorithm.  pdhd/nf_plot/track_response_l1sp_kernels.py validates a      │
+ * │ generated file (--from-file) by re-building from FR and asserting        │
+ * │ bitwise agreement.                                                       │
+ * └──────────────────────────────────────────────────────────────────────────┘
+ *
+ * The file provides per induction plane (U=0, V=1):
+ *   - positive case: bipolar kernel + W-plane unipolar kernel + per-plane
+ *     unipolar_time_offset (W peak ↔ this plane's bipolar zero crossing).
+ *   - negative case: bipolar kernel + neg-half(bipolar) unipolar, no shift.
+ *
  * See sigproc/docs/l1sp/README.md, Strategy B.
  */
 #ifndef WIRECELLSIGPROC_L1SPFILTERPD
@@ -27,6 +45,7 @@
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/Interpolate.h"
 
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -36,12 +55,7 @@ namespace WireCell {
 
         class L1SPFilterPD : public Aux::Logger, public IFrameFilter, public IConfigurable {
         public:
-            L1SPFilterPD(double gain = 14.0 * units::mV / units::fC,
-                         double shaping = 2.2 * units::microsecond,
-                         double postgain = 1.2,
-                         double ADC_mV = 4096 / (2000. * units::mV),
-                         double fine_time_offset = 0.0 * units::microsecond,
-                         double coarse_time_offset = -8.0 * units::microsecond);
+            L1SPFilterPD();
             virtual ~L1SPFilterPD() = default;
 
             virtual bool operator()(const input_pointer& in, output_pointer& out);
@@ -49,28 +63,20 @@ namespace WireCell {
             virtual WireCell::Configuration default_configuration() const;
 
         private:
-            // Build one linterp<double> from the named IFieldResponse, using the
-            // response of plane `plane_index` (0=U, 1=V, 2=W) convolved with
-            // the electronics response and current gain/shaping settings.
-            std::unique_ptr<linterp<double>> build_response(const std::string& fields_tn,
-                                                            int plane_index);
-
-            // Populate m_lin_bipolar (always) and m_lin_pos/neg_unipolar (if configured).
-            // Called lazily on first operator() invocation.
+            // Lazy-load the per-plane bipolar and unipolar interpolators from
+            // the pre-built JSON+bz2 kernel file (see header comment).
             void init_resp();
 
             // Classify one ROI by per-ROI shape features computed from raw ADC
             // (adctrace) and the unmodified gauss decon signal (sigtrace), then
             // if triggered run the LASSO fit on newtrace samples in
-            // [start_tick, end_tick).  sigtrace is the original gauss-side trace
-            // for this channel; it is read for the wide-window energy fraction
-            // and is never mutated.  newtrace holds the writable output and is
-            // initially a copy of sigtrace.  Returns: 0=pass-through,
-            // +1=L1-positive, -1=L1-negative.
+            // [start_tick, end_tick).  ``plane`` is the induction-plane index
+            // (0=U, 1=V) used to select the appropriate kernel set.  Returns:
+            // 0=pass-through, +1=L1-positive, -1=L1-negative.
             int l1_fit(std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
                        const std::shared_ptr<const WireCell::ITrace>& sigtrace,
-                       int start_tick, int end_tick);
+                       int start_tick, int end_tick, int plane);
 
             // True if channel belongs to a plane in m_process_planes.
             // Always returns true when m_process_planes is empty or m_anode is null.
@@ -79,23 +85,25 @@ namespace WireCell {
             // True if channel is in m_eligible_channels (or that set is empty).
             bool channel_eligible(int ch) const;
 
-            // Bipolar induction-plane response (always built from "fields" config).
-            // Unipolar responses built from "fields_pos_unipolar" / "fields_neg_unipolar"
-            // if those config keys are non-empty; otherwise they remain null.
-            std::unique_ptr<linterp<double>> m_lin_bipolar;
-            std::unique_ptr<linterp<double>> m_lin_pos_unipolar;
-            std::unique_ptr<linterp<double>> m_lin_neg_unipolar;
+            // Per-plane interpolators loaded from the kernel file (m_kernels_file).
+            // Keys are induction-plane indices (typically 0=U, 1=V).
+            //
+            //   m_lin_bipolar[plane]      — plane bipolar kernel (same kernel
+            //                               used for positive and negative cases).
+            //   m_lin_pos_unipolar[plane] — collection (W) kernel; queried at
+            //                               (t + m_unipolar_toff_pos[plane]) so
+            //                               its peak lands at the bipolar zero
+            //                               crossing.
+            //   m_lin_neg_unipolar[plane] — neg-half(bipolar); queried at t (no shift).
+            std::map<int, std::unique_ptr<linterp<double>>> m_lin_bipolar;
+            std::map<int, std::unique_ptr<linterp<double>>> m_lin_pos_unipolar;
+            std::map<int, std::unique_ptr<linterp<double>>> m_lin_neg_unipolar;
+            // Per-plane W-shift in WCT time units (positive case).  Negative
+            // case has no shift (always 0) — handled inline in l1_fit().
+            std::map<int, double> m_unipolar_toff_pos;
 
             IDFT::pointer m_dft;
             size_t m_count{0};
-
-            // Detector response parameters
-            double m_gain;
-            double m_shaping;
-            double m_postgain;
-            double m_ADC_mV;
-            double m_fine_time_offset;
-            double m_coarse_time_offset;
 
             // Cached config scalars (populated in configure())
             std::string m_adctag;
@@ -108,10 +116,6 @@ namespace WireCell {
             double m_raw_ROI_th_adclimit{10};
 
             double m_overall_time_offset{0};
-            // Time offset of the unipolar basis relative to the bipolar basis.
-            // Analogous to collect_time_offset in L1SPFilter.  Tune once the
-            // unipolar field-response files are available.
-            double m_unipolar_time_offset{3.0 * units::microsecond};
 
             double m_adc_l1_threshold{6};
             double m_adc_sum_threshold{160};
@@ -181,13 +185,10 @@ namespace WireCell {
             int    m_kernel_max_half{64};
             int    m_kernel_nticks{4096};
 
-            int m_bipolar_plane{1};    // field-response plane index for bipolar basis
-            int m_unipolar_plane{1};   // field-response plane index for unipolar bases
-
-            // Field-response type-names stored at configure() time for lazy init_resp()
-            std::string m_cfg_fields;
-            std::string m_cfg_fields_pos;
-            std::string m_cfg_fields_neg;
+            // Path to the JSON+bz2 file holding the pre-built L1SP response
+            // kernels.  Resolved via WIRECELL_PATH.  See class header comment
+            // for the wirecell-sigproc gen-l1sp-kernels invocation.
+            std::string m_kernels_file;
 
             // Anode + plane-scope filter
             std::string m_cfg_anode;

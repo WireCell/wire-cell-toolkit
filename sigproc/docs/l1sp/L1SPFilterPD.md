@@ -25,8 +25,9 @@ Key structural differences:
 | Polarity | always flag=1 (net-positive) | flag=+1 / −1 / 0 (Strategy B, per-ROI ratio) |
 | Layer 4 cross-channel cleaning | ✓ (ch±1, ±3 ticks) | removed (shorted-wire only) |
 | Propagation polarity tracking | `bool flag_shorted` | removed (flag=2 not ported) |
-| Response pointers | raw `linterp<double>*` | `unique_ptr<linterp<double>>` |
-| Response init | `init_resp()` at every `operator()` call | lazy (once per configure cycle) |
+| Response pointers | raw `linterp<double>*` | `std::map<int, unique_ptr<linterp<double>>>` (per-plane) |
+| Response init | builds from `IFieldResponse` on every `operator()` call | lazy (once per configure cycle); loads from pre-built JSON+bz2 via `Persist::load` |
+| Response source | `IFieldResponse` + in-C++ FR⊗ER convolution | pre-built kernel file (`kernels_file`); generated offline by `wirecell-sigproc gen-l1sp-kernels` |
 
 ---
 
@@ -62,25 +63,21 @@ detected polarity (see `l1_fit` below).
 
 Thin wrapper around `WireCell::LassoModel`: sets data, fits, returns `Getbeta()`.
 
-### `build_response(fields_tn, plane_index)` (cxx:225–251)
-
-Loads the named `IFieldResponse`, averages it across all wires in `plane_index`,
-convolves with `Response::ColdElec` at the configured gain/shaping, and returns
-a `unique_ptr<linterp<double>>`.  Called by `init_resp()`.
-
-### `init_resp()` (cxx:254–265)
+### `init_resp()` (cxx:667–)
 
 Lazy, idempotent.  On the first `operator()` call after construction or
-reconfigure:
-- Always builds `m_lin_bipolar` from `fields` / `bipolar_plane`.
-- Builds `m_lin_pos_unipolar` from `fields_pos_unipolar` / `unipolar_plane` only
-  if that config key is non-empty.
-- Builds `m_lin_neg_unipolar` from `fields_neg_unipolar` / `unipolar_plane` only
-  if that config key is non-empty.
+reconfigure, loads `m_kernels_file` (resolved via `WIRECELL_PATH`) using
+`Persist::load`.  For each plane entry in `"planes"`:
+- `m_lin_bipolar[plane]` — bipolar kernel (positive case; shared with negative).
+- `m_lin_pos_unipolar[plane]` — W-plane unipolar kernel (collection-on-induction).
+- `m_lin_neg_unipolar[plane]` — neg-half(bipolar) (anode-induction).
+- `m_unipolar_toff_pos[plane]` — W shift in WCT time units (positive case).
+  Negative case has no shift; handled inline in `l1_fit()`.
 
-If either unipolar config key is empty, the corresponding pointer stays null and
-the trigger stub (which always returns 0) prevents the missing-pointer path from
-being exercised.
+The kernel file is generated offline by `wirecell-sigproc gen-l1sp-kernels`
+(see `wire-cell-python/wirecell/sigproc/l1sp.py`).  The PDHD file is
+`pdhd_l1sp_kernels.json.bz2` (in `wire-cell-data`); it contains per-plane
+(U=0, V=1) kernels for both positive and negative cases.
 
 ### `compute_asym()` (anonymous helper, cxx)
 
@@ -239,13 +236,26 @@ Validators live next to the iter-7 detector:
   iter-7 cluster CSVs over multi-event/multi-APA aggregates with
   `--show-misses` / `--show-extras` for spot-checks.
 
-### Calibration inputs still needed
+### Calibration inputs
 
-**Unipolar field-response files**: the `fields_pos_unipolar` and
-`fields_neg_unipolar` config keys accept any `IFieldResponse` type-name.
-Until these are provided, the trigger fires correctly but `l1_fit()`
-falls through to pass-through (the unipolar-nullptr early-exit at
-the top of the LASSO block).
+**Kernel file**: `pdhd_l1sp_kernels.json.bz2` in `wire-cell-data` (PDHD).
+Contains per-plane (U=0, V=1) bipolar + positive/negative unipolar kernels
+with per-plane W shifts auto-derived from the zero-crossing calculation.
+Regenerate when the PDHD field response or electronics parameters change:
+
+```
+wirecell-sigproc gen-l1sp-kernels \
+    --gain '14*mV/fC' --shaping '2.2*us' \
+    --postgain 1.2 --adc-per-mv 2.048 \
+    --coarse-time-offset '-8*us' \
+    dune-garfield-1d565.json.bz2  pdhd_l1sp_kernels.json.bz2
+```
+
+Validate the output with:
+```
+python3 pdhd/nf_plot/track_response_l1sp_kernels.py \
+    --from-file pdhd_l1sp_kernels.json.bz2
+```
 
 ---
 
@@ -259,17 +269,23 @@ the top of the LASSO block).
 | `sigtag` | `"gauss"` | Input tag for decon signal traces (post-OmnibusSigProc) |
 | `outtag` | `"l1sp"` | Output tag for corrected signal traces |
 
-### Field response
+### Kernel file
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `fields` | `"FieldResponse"` | IFieldResponse type-name for the bipolar basis |
-| `bipolar_plane` | `1` | Plane index within `fields` (0=U, 1=V, 2=W) |
-| `fields_pos_unipolar` | `""` | IFieldResponse for arriving-only (+unipolar) basis |
-| `fields_neg_unipolar` | `""` | IFieldResponse for leaving-only (−unipolar) basis |
-| `unipolar_plane` | `1` | Plane index within the unipolar field responses |
+| `kernels_file` | `""` | Path (resolved via `WIRECELL_PATH`) to the pre-built JSON+bz2 kernel file |
 
-Leave both `fields_*_unipolar` keys empty to keep the component as a pass-through.
+The kernel file is **required** — `init_resp()` throws if the key is empty.
+Generate it offline with:
+```
+wirecell-sigproc gen-l1sp-kernels \
+    --gain '14*mV/fC' --shaping '2.2*us' \
+    --postgain 1.2 --adc-per-mv 2.048 \
+    --coarse-time-offset '-8*us' \
+    <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2
+```
+See `wire-cell-python/wirecell/sigproc/l1sp.py` for the schema.
+The PDHD file is `pdhd_l1sp_kernels.json.bz2`; place it in `wire-cell-data`.
 
 ### ROI building
 
@@ -325,8 +341,10 @@ Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
 | `l1_epsilon` | `0.05` | Convergence tolerance |
 | `l1_niteration` | `100000` | Maximum LASSO iterations |
 | `l1_resp_scale` | `0.5` | Additional response scaling inside `build_G` |
-| `unipolar_time_offset` | `3.0 µs` | Time offset of unipolar basis relative to bipolar |
 | `overall_time_offset` | `0` | Global time offset applied to both bases |
+
+Per-plane unipolar time offsets (positive case) are read from the kernel file
+(`unipolar_time_offset_us` per plane); the negative case has no shift.
 
 ### Output reconstruction
 
@@ -372,17 +390,15 @@ a single `Gaus_wide` shared across all four APAs.
 
 Set `gauss_filter` to `""` (and leave `filter` empty) to disable smearing entirely.
 
-### Electronics response
+### DFT
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `gain` | `14 mV/fC` | Preamp gain |
-| `shaping` | `2.2 µs` | Shaping time |
-| `postgain` | `1.2` | Post-amp gain |
-| `ADC_mV` | `4096/2000` | ADC-to-mV ratio |
-| `fine_time_offset` | `0` | Fine time offset |
-| `coarse_time_offset` | `−8.0 µs` | Coarse time offset |
-| `dft` | `"FftwDFT"` | IDFT component type-name |
+| `dft` | `"FftwDFT"` | IDFT component type-name (used for smearing kernel derivation) |
+
+Electronics response parameters (gain, shaping, postgain, ADC_mV,
+coarse/fine time offsets) are no longer C++ config keys — they are baked
+into the kernel file at build time by `gen-l1sp-kernels`.
 
 ---
 
@@ -496,44 +512,42 @@ The main differences are:
   same frame.
 - The output merger writes `outtag` back over `gauss` (and optionally `wiener`).
 
-Skeleton (jsonnet, to be finalized after trigger calibration):
+Skeleton (jsonnet):
 
 ```jsonnet
 local l1spfilterpd = g.pnode({
     type: "L1SPFilterPD",
     data: {
         dft: wc.tn(tools.dft),
-        fields: wc.tn(tools.field),
-        // fields_pos_unipolar: wc.tn(tools.field_pos_unipolar),  // uncomment when ready
-        // fields_neg_unipolar: wc.tn(tools.field_neg_unipolar),
-        adctag: "orig",    // post-NF raw ADC
-        sigtag: "gauss",   // post-OmnibusSigProc decon
-        outtag: "l1sp",
+        kernels_file: "pdhd_l1sp_kernels.json.bz2",  // resolved via WIRECELL_PATH
+        adctag: "raw%d" % n,    // post-NF raw ADC
+        sigtag: "gauss%d" % n,  // post-OmnibusSigProc decon
+        outtag: "gauss%d" % n,
+        process_planes: [0, 1],  // 0=U, 1=V; skip W
     }
-}, nin=1, nout=1, uses=[tools.dft, tools.field]),
+}, nin=1, nout=1, uses=[tools.dft, anode]),
 ```
 
-Gate the feature with a boolean in the params file (default `false`) so existing
-production configs remain bit-identical with the feature off.
+See `cfg/pgrapher/experiment/pdhd/sp.jsonnet` for the live PDHD wiring
+(the `l1sp_pd_mode != ''` branch) and the per-APA `process_planes` defaults
+(APA0 → `[0]` U only; APA1-3 → `[0, 1]` U+V).
 
 ---
 
 ## Pending work
 
-1. **Unipolar field-response inputs** — collect or derive the truncated-drift
-   field responses for the PDHD/PDVD induction plane; supply them via
-   `fields_pos_unipolar` / `fields_neg_unipolar` config keys.  Until these are
-   provided the component is a graceful pass-through (trigger fires but the
-   LASSO early-exits; see `l1_fit()` unipolar-nullptr check).
+1. **LASSO body tuning** — calibrate `l1_basis0_scale`, `l1_basis1_scale`
+   and verify the auto-derived smearing kernel against post-fit reconstruction.
+   The trigger gate (trigger thresholds, dump validation) is independent and
+   does not need to be re-run.  Kernel regeneration (if PDHD electronics
+   parameters change) uses `wirecell-sigproc gen-l1sp-kernels`; the new file
+   must be placed in `wire-cell-data` and its name updated in
+   `cfg/.../pdhd/sp.jsonnet:kernels_file`.
 
-2. **LASSO body tuning** — once unipolar bases are populated, calibrate
-   `unipolar_time_offset`, `l1_basis0_scale`, `l1_basis1_scale`, and verify
-   the auto-derived smearing kernel against post-fit reconstruction.
-   Trigger gate is independent of these and does not need to be re-run.
-
-3. **PDVD jsonnet port** — the trigger logic itself is detector-symmetric;
-   the only change needed in `cfg/pgrapher/experiment/protodunevd/sp.jsonnet`
-   is the same `gain_scale` block applied here for PDHD.
+2. **PDVD jsonnet port** — the trigger logic is detector-symmetric; wire
+   `L1SPFilterPD` into `cfg/pgrapher/experiment/protodunevd/sp.jsonnet`
+   with a PDVD-specific `kernels_file` (generate with the PDVD field response).
+   The same `gain_scale` block applies.
 
 ## Design decisions
 
