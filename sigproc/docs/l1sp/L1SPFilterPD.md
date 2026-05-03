@@ -138,13 +138,16 @@ sub-window in the ROI; for each sub-window computes its own
 - `gmax >= l1_gmax_min`
 - `run_len >= l1_min_length`
 - per-sub-window `ef >= l1_energy_frac_thr`
-- ANY of the four arms:
+- ANY of the five arms:
   - `|aw| >= l1_asym_strong`, OR
   - `run_len >= l1_len_long_mod   AND |aw| >= l1_asym_mod`, OR
   - `run_len >= l1_len_long_loose AND |aw| >= l1_asym_loose`, OR
   - `run_len >= l1_len_fill_shape AND fill <= l1_fill_shape_fill_thr
                                   AND fwhm <= l1_fill_shape_fwhm_thr
-                                  AND |aw| >= l1_asym_mod`.
+                                  AND |aw| >= l1_asym_mod`, OR
+  - `run_len >= l1_len_very_long  AND |aw| >= l1_asym_very_long`
+    (very-long arm — OFF by C++ default; PDHD enables at `(140, 0.35)` via
+    `cfg/pgrapher/experiment/pdhd/sp.jsonnet`).
 
 Polarity = `sign(aw)` of the first firing sub-window.  Returns
 `{−1, 0, +1}`.
@@ -239,8 +242,19 @@ Then ANY of:
   AND `gauss_fill <= l1_fill_shape_fill_thr`
   AND `gauss_fwhm_frac <= l1_fill_shape_fwhm_thr`
   AND `|raw_asym_wide| >= l1_asym_mod`
+- **very-long arm** (default OFF; PDHD enables at `(140, 0.35)`):
+  `run_len >= l1_len_very_long` AND `|raw_asym_wide| >= l1_asym_very_long`.
+  Targets long sub-windows whose per-sub-window asym sits below
+  `l1_asym_mod` (0.40) but whose great length still indicates a unipolar
+  artifact.  Calibrated 2026-05-02 against APA3 V ch 8753 in 027409:0
+  (core_length=144, |craw|=0.36 — fails mod arm by 0.04).  Multi-event
+  scan across 027409 events 0–7 measured ~1 new promotion/event globally
+  on a baseline of ~74 — surgical enough to ship default-on for PDHD
+  without rerunning the iter-7 calibration.  C++ default keeps the arm
+  OFF (`l1_len_very_long = INT_MAX`, `l1_asym_very_long = 1.0`) so other
+  experiments inherit prior behaviour bit-identically.
 
-The four arms map 1:1 onto the four iter-7 `cluster_pass()` rules in
+The four core arms map 1:1 onto the four iter-7 `cluster_pass()` rules in
 `pdhd/nf_plot/find_long_decon_artifacts.py`.  Polarity = sign of the
 firing sub-window's `raw_asym_wide` (more stable than the in-ROI ratio:
 the wide window has a well-defined denominator gate via `l1_raw_asym_eps`
@@ -370,6 +384,8 @@ gate" above for how each knob is combined.
 | `l1_len_fill_shape`          | `50`    | Length needed to enable fill-shape arm |
 | `l1_fill_shape_fill_thr`     | `0.38`  | `gauss_fill` ceiling for fill-shape arm |
 | `l1_fill_shape_fwhm_thr`     | `0.30`  | `gauss_fwhm_frac` ceiling for fill-shape arm |
+| `l1_len_very_long`           | `INT_MAX` | Length needed to enable very-long arm (OFF default) — PDHD overrides to `140` |
+| `l1_asym_very_long`          | `1.0`   | Very-long arm asym threshold (OFF default) — PDHD overrides to `0.35` |
 
 Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
 `ratio` fields in the calibration dump but no longer affect `flag_l1`):

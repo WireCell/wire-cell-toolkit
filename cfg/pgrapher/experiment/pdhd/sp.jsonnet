@@ -140,6 +140,19 @@ function(params, tools, override = {}) {
           // Derive time-domain smearing kernel by IFFT of the SP Gaus_wide
           // filter so both are driven by the same sigma.
           gauss_filter: 'HfFilter:Gaus_wide',
+          // PDHD trigger-gate overrides (calibrated 2026-05-02 against run
+          // 027409 events 0-7; see sigproc/docs/l1sp/L1SPFilterPD.md).
+          // Enable the 5th "very-long" arm at (sub-window length>=140,
+          // |raw_asym_wide|>=0.35); OFF in the C++ default.  Catches
+          // long-but-moderate-asym artifacts whose per-sub-window asymmetry
+          // sits between the strong (0.65) and mod (0.40) thresholds —
+          // e.g. APA3 V ch 8753 in 027409:0 (core_length=144, |craw|=0.36).
+          // Adds ~1 promotion/event globally on a baseline of ~74.  The
+          // strong (0.65) and mod (0.40) arms are NOT touched: lowering
+          // them carries a ~24-58 promotion/event blast radius that the
+          // multi-event scan could not justify without ground truth.
+          l1_len_very_long:  140,
+          l1_asym_very_long: 0.35,
           // Cross-channel adjacency expansion (default ON).  Threshold knobs
           // (overlap_pad, gap_max, len_ratio, loose_*) keep the values baked
           // into L1SPFilterPD.h unless overridden in the data block.

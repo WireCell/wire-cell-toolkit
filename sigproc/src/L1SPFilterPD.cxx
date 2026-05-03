@@ -309,6 +309,8 @@ struct TriggerCfg {
     double asym_strong, asym_mod, asym_loose;
     int    len_long_mod, len_long_loose, len_fill_shape;
     double fill_shape_fill_thr, fill_shape_fwhm_thr;
+    int    len_very_long;       // 5th arm: long-ROI moderate-asym
+    double asym_very_long;
 };
 
 // Per-sub-window trigger walk.  Iterates every contiguous run of
@@ -414,7 +416,8 @@ int decide_trigger(const WireCell::ITrace::ChargeSequence& adc,
             (s.run_len >= cfg.len_fill_shape &&
              s.fill <= cfg.fill_shape_fill_thr &&
              s.fwhm <= cfg.fill_shape_fwhm_thr &&
-             aabs >= cfg.asym_mod);
+             aabs >= cfg.asym_mod) ||
+            (s.run_len >= cfg.len_very_long  && aabs >= cfg.asym_very_long);
         if (fire) return (s.aw > 0.0) ? +1 : -1;
     }
     return 0;
@@ -490,6 +493,9 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["l1_len_fill_shape"]        = m_l1_len_fill_shape;
     cfg["l1_fill_shape_fill_thr"]   = m_l1_fill_shape_fill_thr;
     cfg["l1_fill_shape_fwhm_thr"]   = m_l1_fill_shape_fwhm_thr;
+    // Very-long arm (default OFF; see header comment).  PDHD overrides via sp.jsonnet.
+    cfg["l1_len_very_long"]         = m_l1_len_very_long;
+    cfg["l1_asym_very_long"]        = m_l1_asym_very_long;
 
     // Cross-channel adjacency expansion (default OFF; see header).
     cfg["l1_adj_enable"]         = m_l1_adj_enable;
@@ -577,6 +583,8 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_l1_len_fill_shape      = get(cfg, "l1_len_fill_shape",      m_l1_len_fill_shape);
     m_l1_fill_shape_fill_thr = get(cfg, "l1_fill_shape_fill_thr", m_l1_fill_shape_fill_thr);
     m_l1_fill_shape_fwhm_thr = get(cfg, "l1_fill_shape_fwhm_thr", m_l1_fill_shape_fwhm_thr);
+    m_l1_len_very_long       = get(cfg, "l1_len_very_long",       m_l1_len_very_long);
+    m_l1_asym_very_long      = get(cfg, "l1_asym_very_long",      m_l1_asym_very_long);
 
     m_l1_adj_enable         = get(cfg, "l1_adj_enable",         m_l1_adj_enable);
     m_l1_adj_overlap_pad    = get(cfg, "l1_adj_overlap_pad",    m_l1_adj_overlap_pad);
@@ -1166,6 +1174,7 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
         m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
         m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
+        m_l1_len_very_long, m_l1_asym_very_long,
     };
 
     // sigtrace lookup keyed by channel (mirrors adctrace_ch_map; built once).

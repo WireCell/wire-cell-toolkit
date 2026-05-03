@@ -45,6 +45,7 @@
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/Interpolate.h"
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -179,15 +180,21 @@ namespace WireCell {
             //   nbin_fit         >= m_l1_min_length
             //   gmax             >= m_l1_gmax_min
             //   roi_energy_frac  >= m_l1_energy_frac_thr
-            // followed by ANY of four arms:
+            // followed by ANY of five arms:
             //   |raw_asym_wide| >= m_l1_asym_strong, OR
             //   nbin_fit >= m_l1_len_long_mod   AND |raw_asym_wide| >= m_l1_asym_mod, OR
             //   nbin_fit >= m_l1_len_long_loose AND |raw_asym_wide| >= m_l1_asym_loose, OR
             //   nbin_fit >= m_l1_len_fill_shape AND gauss_fill <= m_l1_fill_shape_fill_thr
             //                                   AND gauss_fwhm_frac <= m_l1_fill_shape_fwhm_thr
-            //                                   AND |raw_asym_wide| >= m_l1_asym_mod.
+            //                                   AND |raw_asym_wide| >= m_l1_asym_mod, OR
+            //   nbin_fit >= m_l1_len_very_long  AND |raw_asym_wide| >= m_l1_asym_very_long.
             // Polarity is sign(raw_asym_wide).  Defaults seeded from the iter-7
             // offline detector (find_long_decon_artifacts.py).
+            //
+            // The "very-long" arm is OFF by default (m_l1_len_very_long=INT_MAX,
+            // m_l1_asym_very_long=1.0); PDHD enables it via sp.jsonnet at
+            // (140, 0.35) to catch long-but-moderate-asym artifacts (e.g.
+            // 027409:0 APA3 V ch 8753).  See sigproc/docs/l1sp/L1SPFilterPD.md.
             int    m_l1_min_length{30};
             double m_l1_gmax_min{1500.0};
             double m_l1_energy_frac_thr{0.66};
@@ -205,6 +212,9 @@ namespace WireCell {
             int    m_l1_len_fill_shape{50};
             double m_l1_fill_shape_fill_thr{0.38};
             double m_l1_fill_shape_fwhm_thr{0.30};
+            // Fifth ("very-long") arm — OFF by default; PDHD overrides to (150, 0.35).
+            int    m_l1_len_very_long{std::numeric_limits<int>::max()};
+            double m_l1_asym_very_long{1.0};
 
             // ── Cross-channel adjacency expansion (default ON) ───────────────
             // For an in-scope ROI on channel c that did NOT trigger by itself,
