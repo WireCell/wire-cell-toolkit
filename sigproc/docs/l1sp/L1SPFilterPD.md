@@ -485,29 +485,44 @@ is just below `l1_gmax_min`.
 
 To recover those candidates, `operator()` runs a pass (default ON
 since 2026-05-02) between the trigger decision and the LASSO apply
-that *promotes* a ROI's polarity to that of an originally-triggered
-neighbour ROI when the criteria below are met.  The donor must be on
-the same plane and originally triggered — there is no transitive
-chain.  Set `l1_adj_enable=false` to recover the pre-2026-05-02
-behaviour.
+that *promotes* a ROI's polarity to that of an adjacent neighbour
+ROI when the criteria below are met.  The expansion is **iterative**
+(BFS layer by layer, default since 2026-05-03): originally-triggered
+ROIs are hop 0, direct ±1 neighbours hop 1, neighbours-of-neighbours
+hop 2, and so on, capped at `l1_adj_max_hops` (default 3 ⇔ ±3
+channels from any original donor).  The loose preconditions are
+re-applied independently at every hop, so a transitive promotion
+only happens when each link in the chain looks unipolar in its own
+right.  Within one hop, all promotions are computed from the donor
+state at the *end of the previous hop* (no in-layer chaining), which
+makes the result independent of map iteration order.
+
+Set `l1_adj_enable=false` to disable the pass entirely (pre-2026-05-02
+behaviour); set `l1_adj_max_hops=1` to recover the pre-2026-05-03
+single-hop behaviour (donors must be originally-triggered).
 
 ### Promotion criteria
 
-For candidate ROI `R_c` on channel `c` (with `polarity_c == 0`) and
-donor ROI `R_d` on channel `c±1` (with `polarity_d != 0`):
+For candidate ROI `R_c` on channel `c` (with `hop == −1`) and donor
+ROI `R_d` on channel `c±1` (with `0 ≤ donor_hop < current_hop`):
 
 | Knob | Default | Check |
 |------|---------|-------|
 | `l1_adj_overlap_pad` | 3 ticks | `(R_c.start − pad) ≤ R_d.end + pad` AND `(R_c.end + pad) ≥ R_d.start − pad` |
 | `l1_adj_gap_max` | 100 ticks | `|R_c.start − R_d.start| ≤ gap_max` (sanity check) |
+| `l1_adj_max_hops` | 3 | maximum BFS depth from any original trigger |
 | `l1_adj_len_ratio` | 0.40 | `min(len_c, len_d) / max(len_c, len_d) ≥ ratio` |
 | `l1_adj_loose_gmax` | 300 (gain-normalised) | `R_c.gmax ≥ this` |
 | `l1_adj_loose_core_len` | 2 ticks | `R_c.core_length ≥ this` |
 | `l1_adj_loose_asym_abs` | 0.30 | `|R_c.core_raw_asym_wide| ≥ this` |
 
 The loose preconditions on the candidate itself prevent noise ROIs
-from being swept up.  Defaults are first-cut from event 027409:0
-APA0 (the screenshot reproducer).
+from being swept up — they apply at *every* hop, so a chain can only
+extend through ROIs that each independently look unipolar.  Defaults
+were first tuned on event 027409:0 APA0 (the original screenshot
+reproducer); the iterative cap was added after event 027409:0 APA1
+showed a 4-channel chain (ch 4071 ⇆ 4072 ⇆ 4073) where the second
+hop was needed to catch ch 4071.
 
 ### Honest framing on prior art
 
@@ -519,30 +534,48 @@ from MicroBooNE here is limited to the ±3-tick overlap convention.
 
 ### Validation
 
-Verified on event 027409:0 APA0 (the screenshot reproducer).  With
-adjacency disabled (`l1sp_pd_adj_enable=false`), the long unipolar
-tail on channel 324 (ticks ~5830-5945) was passed through unchanged
-with peak ~4750 ADC.  With adjacency enabled (the new default), the
-tail beyond the leading peak is zeroed by the LASSO fit; only the
-genuine ~5830-5840 collection-induction lobe survives.  The number
-of triggered ROIs across APA0 increases from 8 → 17, all of which
-trace to a same-plane donor.  Setting `l1_adj_enable=false` reverts
-to the pre-2026-05-02 output, bit-identical at the inner-`.npy`
-level.
+**Single-hop (2026-05-02), event 027409:0 APA0.**  With adjacency
+disabled, the long unipolar tail on channel 324 (ticks ~5830-5945)
+was passed through unchanged with peak ~4750 ADC.  With adjacency
+enabled, the tail beyond the leading peak is zeroed by the LASSO
+fit; only the genuine ~5830-5840 collection-induction lobe survives.
+The number of triggered ROIs across APA0 increases from 8 → 17.
+
+**Iterative expansion (2026-05-03), event 027409:0 APA1 V-plane.**
+Channels 4073 and 4074 trigger originally; ±1 hop catches 4072
+(donor 4073) and 4075 (donor 4074); the second hop catches 4071
+(donor 4072), which has `|core_raw_asym_wide|=0.75`, length 154 vs
+donor 180 (ratio 0.86), and meets every loose precondition.  Across
+the whole event APA1: 24 originals, 20 hop-1 adjacency promotions
+under the old behaviour (`l1_adj_max_hops=1`), 35 promotions under
+the new default — i.e. iterative adds 15 hop-2/3 promotions on top
+of the 20 hop-1 ones, all gated by the per-candidate loose
+preconditions.
+
+Setting `l1_adj_enable=false` reverts to the pre-2026-05-02 output,
+bit-identical at the inner-`.npy` level.  Setting `l1_adj_max_hops=1`
+reverts to the pre-2026-05-03 single-hop output.
 
 ### Toggling
 
-The pass is on by default.  To disable it (recover the
-pre-2026-05-02 output):
+The pass is on by default with `l1_adj_max_hops=3`.  To disable it
+entirely (pre-2026-05-02 output):
 
 ```bash
 wire-cell --tla-code l1sp_pd_adj_enable=false ... -c wct-nf-sp.jsonnet
+```
+
+To restrict to a single hop (pre-2026-05-03 output):
+
+```bash
+wire-cell --tla-code l1sp_pd_adj_max_hops=1 ... -c wct-nf-sp.jsonnet
 ```
 
 Or in `pgrapher/experiment/pdhd/sp.jsonnet`:
 
 ```jsonnet
 sp.make_sigproc(anode, l1sp_pd_adj_enable=false)
+sp.make_sigproc(anode, l1sp_pd_adj_max_hops=1)
 ```
 
 The threshold knobs above are exposed via `L1SPFilterPD`'s direct

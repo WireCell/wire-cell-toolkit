@@ -495,6 +495,7 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["l1_adj_enable"]         = m_l1_adj_enable;
     cfg["l1_adj_overlap_pad"]    = m_l1_adj_overlap_pad;
     cfg["l1_adj_gap_max"]        = m_l1_adj_gap_max;
+    cfg["l1_adj_max_hops"]       = m_l1_adj_max_hops;
     cfg["l1_adj_len_ratio"]      = m_l1_adj_len_ratio;
     cfg["l1_adj_loose_gmax"]     = m_l1_adj_loose_gmax;
     cfg["l1_adj_loose_core_len"] = m_l1_adj_loose_core_len;
@@ -580,6 +581,7 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_l1_adj_enable         = get(cfg, "l1_adj_enable",         m_l1_adj_enable);
     m_l1_adj_overlap_pad    = get(cfg, "l1_adj_overlap_pad",    m_l1_adj_overlap_pad);
     m_l1_adj_gap_max        = get(cfg, "l1_adj_gap_max",        m_l1_adj_gap_max);
+    m_l1_adj_max_hops       = get(cfg, "l1_adj_max_hops",       m_l1_adj_max_hops);
     m_l1_adj_len_ratio      = get(cfg, "l1_adj_len_ratio",      m_l1_adj_len_ratio);
     m_l1_adj_loose_gmax     = get(cfg, "l1_adj_loose_gmax",     m_l1_adj_loose_gmax);
     m_l1_adj_loose_core_len = get(cfg, "l1_adj_loose_core_len", m_l1_adj_loose_core_len);
@@ -1154,6 +1156,7 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         int polarity{0};        // original (in-isolation) decision
         int polarity_final{0};  // post-adjacency (initialised = polarity)
         int donor_ch{-1};       // adjacency donor channel, or -1 if none
+        int hop{-1};            // BFS layer: 0 = original trigger, k>0 = promoted at hop k, -1 = not promoted
         int plane{0};
     };
     std::map<int, std::vector<RoiFeat>> map_ch_feat;
@@ -1201,64 +1204,93 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                                         m_l1_raw_asym_pad_ticks,
                                         m_l1_raw_asym_eps);
             f.polarity_final = f.polarity;
+            f.hop = (f.polarity != 0) ? 0 : -1;
             feats.push_back(std::move(f));
         }
         map_ch_feat[ch] = std::move(feats);
     }
 
-    // ── Pass 3: cross-channel adjacency expansion (default OFF).
-    // For each ROI on channel c that did not trigger by itself, promote its
-    // polarity to that of an adjacent (c±1) ROI which did.  The donor must
-    // be on the same plane and originally-triggered (no transitive chain).
+    // ── Pass 3: cross-channel adjacency expansion (default ON, iterative).
+    // BFS layer by layer.  Hop 0 = originally-triggered ROIs.  At each
+    // subsequent hop we promote candidates whose neighbour (c±1, same plane)
+    // was promoted in a strictly earlier hop, AND who independently meet the
+    // loose preconditions (gmax / core_length / |core_raw_asym_wide|).  This
+    // lets a chain of unipolar ROIs across many channels propagate the
+    // polarity from a single triggered seed, while each link must look
+    // unipolar in its own right.  Stops when a layer adds nothing or when
+    // m_l1_adj_max_hops is reached.
+    //
+    // Within one hop, all promotions use the donor state from the END of the
+    // previous hop (no in-layer chaining), which makes the result independent
+    // of map iteration order.
     if (m_l1_adj_enable) {
         const int pad        = m_l1_adj_overlap_pad;
         const int gap_max    = m_l1_adj_gap_max;
+        const int max_hops   = m_l1_adj_max_hops;
         const double lr_min  = m_l1_adj_len_ratio;
         const double lg_min  = m_l1_adj_loose_gmax;
         const int lcl_min    = m_l1_adj_loose_core_len;
         const double lasym   = m_l1_adj_loose_asym_abs;
 
-        for (auto& [ch, feats] : map_ch_feat) {
-            const auto& rois_c = map_ch_rois.at(ch);
-            for (size_t i = 0; i < feats.size(); i++) {
-                if (feats[i].polarity != 0) continue;        // already triggered
-                const int len_c    = rois_c[i].second - rois_c[i].first + 1;
-                const auto& rec_c  = feats[i].rec;
-                if (rec_c.gmax        < lg_min)  continue;
-                if (rec_c.core_length < lcl_min) continue;
-                if (std::fabs(rec_c.core_raw_asym_wide) < lasym) continue;
+        for (int hop = 1; hop <= max_hops; hop++) {
+            // (ch, idx, donor_ch, donor_polarity) — applied after the scan.
+            std::vector<std::tuple<int, size_t, int, int>> to_promote;
 
-                int chosen_donor = -1;
-                int chosen_polarity = 0;
-                for (int side : {-1, +1}) {
-                    const int n = ch + side;
-                    auto fit = map_ch_feat.find(n);
-                    if (fit == map_ch_feat.end()) continue;
-                    if (fit->second.empty() || fit->second.front().plane != feats[i].plane) continue;
-                    const auto& rois_n = map_ch_rois.at(n);
-                    for (size_t j = 0; j < fit->second.size(); j++) {
-                        const int polarity_d = fit->second[j].polarity;  // donor must be originally-triggered
-                        if (polarity_d == 0) continue;
-                        const int len_n = rois_n[j].second - rois_n[j].first + 1;
-                        const bool overlap =
-                            (rois_c[i].first  - pad) <= (rois_n[j].second + pad) &&
-                            (rois_c[i].second + pad) >= (rois_n[j].first  - pad);
-                        if (!overlap) continue;
-                        if (std::abs(rois_c[i].first - rois_n[j].first) > gap_max) continue;
-                        const int len_lo = std::min(len_c, len_n);
-                        const int len_hi = std::max(len_c, len_n);
-                        if (len_hi == 0) continue;
-                        if ((double)len_lo / (double)len_hi < lr_min) continue;
-                        chosen_donor = n;
-                        chosen_polarity = polarity_d;
-                        break;
+            for (auto& kv : map_ch_feat) {
+                const int ch = kv.first;
+                auto& feats = kv.second;
+                const auto& rois_c = map_ch_rois.at(ch);
+                for (size_t i = 0; i < feats.size(); i++) {
+                    if (feats[i].hop >= 0) continue;            // already promoted or original
+                    const int len_c    = rois_c[i].second - rois_c[i].first + 1;
+                    const auto& rec_c  = feats[i].rec;
+                    if (rec_c.gmax        < lg_min)  continue;
+                    if (rec_c.core_length < lcl_min) continue;
+                    if (std::fabs(rec_c.core_raw_asym_wide) < lasym) continue;
+
+                    int chosen_donor = -1;
+                    int chosen_polarity = 0;
+                    for (int side : {-1, +1}) {
+                        const int n = ch + side;
+                        auto fit = map_ch_feat.find(n);
+                        if (fit == map_ch_feat.end()) continue;
+                        if (fit->second.empty() || fit->second.front().plane != feats[i].plane) continue;
+                        const auto& rois_n = map_ch_rois.at(n);
+                        for (size_t j = 0; j < fit->second.size(); j++) {
+                            // Donor must have been promoted (or originally triggered)
+                            // in a strictly earlier hop.
+                            const int donor_hop = fit->second[j].hop;
+                            if (donor_hop < 0 || donor_hop >= hop) continue;
+                            const int polarity_d = fit->second[j].polarity_final;
+                            if (polarity_d == 0) continue;
+                            const int len_n = rois_n[j].second - rois_n[j].first + 1;
+                            const bool overlap =
+                                (rois_c[i].first  - pad) <= (rois_n[j].second + pad) &&
+                                (rois_c[i].second + pad) >= (rois_n[j].first  - pad);
+                            if (!overlap) continue;
+                            if (std::abs(rois_c[i].first - rois_n[j].first) > gap_max) continue;
+                            const int len_lo = std::min(len_c, len_n);
+                            const int len_hi = std::max(len_c, len_n);
+                            if (len_hi == 0) continue;
+                            if ((double)len_lo / (double)len_hi < lr_min) continue;
+                            chosen_donor = n;
+                            chosen_polarity = polarity_d;
+                            break;
+                        }
+                        if (chosen_donor != -1) break;
                     }
-                    if (chosen_donor != -1) break;
+                    if (chosen_donor != -1) {
+                        to_promote.emplace_back(ch, i, chosen_donor, chosen_polarity);
+                    }
                 }
-                if (chosen_donor != -1) {
-                    feats[i].polarity_final = chosen_polarity;
-                    feats[i].donor_ch       = chosen_donor;
-                }
+            }
+
+            if (to_promote.empty()) break;
+            for (const auto& t : to_promote) {
+                auto& f = map_ch_feat[std::get<0>(t)][std::get<1>(t)];
+                f.polarity_final = std::get<3>(t);
+                f.donor_ch       = std::get<2>(t);
+                f.hop            = hop;
             }
         }
     }

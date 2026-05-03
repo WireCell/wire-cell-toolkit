@@ -34,7 +34,11 @@ function(params, tools, override = {}) {
                // Cross-channel adjacency expansion (default ON; see
                // sigproc/docs/l1sp/L1SPFilterPD.md).  Pass false to recover
                // the pre-2026-05-02 behaviour (no neighbour-driven promotion).
-               l1sp_pd_adj_enable=true)::
+               l1sp_pd_adj_enable=true,
+               // Iterative-expansion hop cap (default 3 ⇔ ±3 channels from any
+               // original donor).  Set 1 to recover the pre-2026-05-03
+               // single-hop behaviour (donors must be originally-triggered).
+               l1sp_pd_adj_max_hops=3)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
     local sp_node = g.pnode({
@@ -140,6 +144,7 @@ function(params, tools, override = {}) {
           // (overlap_pad, gap_max, len_ratio, loose_*) keep the values baked
           // into L1SPFilterPD.h unless overridden in the data block.
           l1_adj_enable: l1sp_pd_adj_enable,
+          l1_adj_max_hops: l1sp_pd_adj_max_hops,
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,

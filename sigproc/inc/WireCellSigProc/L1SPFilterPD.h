@@ -213,9 +213,16 @@ namespace WireCell {
             // start-tick gap is within gap_max, the lengths are similar
             // (min/max ratio ≥ len_ratio), AND the candidate ROI itself meets
             // the loose preconditions (gmax / core_length / |core_raw_asym_wide|).
-            // Donors are originally-triggered ROIs only — no transitive chain.
+            // Expansion is iterative (BFS layer by layer): originals are hop 0,
+            // direct ±1 neighbours hop 1, neighbours-of-neighbours hop 2, etc.
+            // Each hop independently re-applies the loose preconditions, so a
+            // transitive promotion only happens when every intermediate ROI
+            // looks unipolar in its own right.  m_l1_adj_max_hops caps the
+            // chain length (default 3 ⇔ ±3 channels from any original donor).
             // Set m_l1_adj_enable = false to recover the pre-2026-05-02
-            // behaviour (no cross-channel promotion).
+            // behaviour (no cross-channel promotion); set m_l1_adj_max_hops = 1
+            // to recover the pre-iteration behaviour (only originally-triggered
+            // donors).
             //
             // gap_max is an absolute |start_c − start_d| sanity check; the real
             // physics is enforced by overlap + len_ratio.  Donor ROIs in the
@@ -224,6 +231,7 @@ namespace WireCell {
             bool   m_l1_adj_enable      {true};
             int    m_l1_adj_overlap_pad {3};
             int    m_l1_adj_gap_max     {100};
+            int    m_l1_adj_max_hops    {3};
             double m_l1_adj_len_ratio   {0.40};
             double m_l1_adj_loose_gmax     {300.0};
             int    m_l1_adj_loose_core_len {2};
