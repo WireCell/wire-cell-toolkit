@@ -140,8 +140,15 @@ function(params, tools, override = {}) {
       // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.
       // OmnibusSigProc drops raw traces from its output, so we split the
       // input frame, run SP on one copy, then merge raw+gauss for L1SP.
-      // The final output (sigsplit port 0 = gauss+wiener) is bit-identical
-      // to a run without L1SP; L1SP's output is discarded via l1sp_sink.
+      // After L1SP, a final merger replaces BOTH the gauss and wiener
+      // traces of the original sp output with the L1SP-modified gauss
+      // (the L1SP fit is the canonical deconvolved signal post-L1, so
+      // both deconvolved tags should reflect it). With FrameMerger's
+      // 'replace' rule (cxx:93-113) the *first* input wins per channel,
+      // so L1SP feeds input 0 and its modified gauss traces are emitted
+      // under both the gauss and wiener output tags. The untouched sp
+      // copy on sigsplit port 0 (input 1) only contributes channels not
+      // covered by L1SP, which in practice is none.
       local rawsplit     = g.pnode({type: 'FrameSplitter', name: 'rawsplit%d' % n}, nin=1, nout=2);
       local sigsplit     = g.pnode({type: 'FrameSplitter', name: 'sigsplit%d' % n}, nin=1, nout=2);
       local rawsigmerge  = g.pnode({
@@ -154,19 +161,29 @@ function(params, tools, override = {}) {
           ],
         },
       }, nin=2, nout=1);
-      local l1sp_sink    = g.pnode({type: 'DumpFrames', name: 'l1spsnk%d' % n}, nin=1, nout=0);
+      local final_merger = g.pnode({
+        type: 'FrameMerger', name: 'l1spfinal%d' % n,
+        data: {
+          rule: 'replace',
+          mergemap: [
+            ['gauss%d' % n, 'gauss%d'  % n, 'gauss%d'  % n],   // L1SP gauss → output gauss
+            ['gauss%d' % n, 'wiener%d' % n, 'wiener%d' % n],   // L1SP gauss → output wiener
+          ],
+        },
+      }, nin=2, nout=1);
       g.intern(
         innodes=[rawsplit],
-        centernodes=[sp_node, sigsplit, rawsigmerge, l1sp_node, l1sp_sink],
+        centernodes=[sp_node, sigsplit, rawsigmerge, l1sp_node, final_merger],
         edges=[
-          g.edge(rawsplit,    sp_node,      0, 0),
-          g.edge(sp_node,     sigsplit,     0, 0),
-          g.edge(sigsplit,    rawsigmerge,  1, 0),
-          g.edge(rawsplit,    rawsigmerge,  1, 1),
-          g.edge(rawsigmerge, l1sp_node,   0, 0),
-          g.edge(l1sp_node,   l1sp_sink,   0, 0),
+          g.edge(rawsplit,     sp_node,       0, 0),
+          g.edge(sp_node,      sigsplit,      0, 0),
+          g.edge(sigsplit,     rawsigmerge,   1, 0),
+          g.edge(rawsplit,     rawsigmerge,   1, 1),
+          g.edge(rawsigmerge,  l1sp_node,     0, 0),
+          g.edge(l1sp_node,    final_merger,  0, 0),
+          g.edge(sigsplit,     final_merger,  0, 1),
         ],
-        oports=[sigsplit.oports[0]],
+        oports=[final_merger.oports[0]],
         name='sigproc_l1sppd_%d' % n
       ),
 
