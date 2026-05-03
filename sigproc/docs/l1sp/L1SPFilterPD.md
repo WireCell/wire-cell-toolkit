@@ -555,7 +555,7 @@ are outside this component:
 
 - **`OmnibusSigProc` (40.7%)** — FFTW-bound; FFT-plan caching,
   batched DFT calls, or replacing `inv_c2r`/`fwd_r2c` with a
-  faster path are the levers.
+  faster path are the levers.  See follow-up below.
 - **`FrameFileSink` bzip2 compression (17.1%)** — swapping bzip2
   for zstd or lz4 would likely save 10-15% of total wall-clock
   outright.  Reader-side coordination required.
@@ -567,6 +567,76 @@ are outside this component:
 
 Profile artifacts (raw `.prof` + `pprof --pdf` callgraph) live
 under `/home/xqian/tmp/l1sp_efficiency/` on the dev host.
+
+### Follow-up: `OmnibusSigProc` Tier 1 + 2 (2026-05-02)
+
+Two FFT-side cleanups landed against the 40.7% OmnibusSigProc
+budget identified above.  Neither touched signal-processing
+algorithm; both are pure plumbing.
+
+**Tier 1 — eliminate redundant 2D-array copies in `DftTools`
+(commit `4e37cd83`).**  `DftTools::fwd`/`inv` (axis form) at
+`aux/src/DftTools.cxx:67,76` allocated a fresh complex array and
+copied the input into it before running the FFT in-place.  Added
+`fwd_inplace`/`inv_inplace` overloads that skip the copy when the
+caller is about to overwrite the input anyway, and rewired
+`fwd_r2c(2D)`/`inv_c2r(2D)` to use them internally (drops a second
+copy that the cast-then-`fwd` chain was incurring).  Three
+overwrite call sites in `OmnibusSigProc::decon_2D_init` (lines
+1070/1083/1107) switched to the in-place overload.  Bit-identical
+(same FFTW plan signature → same cached plan → same butterflies);
+verified 41/41 dump-NPZ arrays equal via `np.array_equal` on
+027409:0 APA0+APA1.
+
+**Tier 2 — batch the per-channel electronics FFT loop (commit
+`42705188`).**  `decon_2D_init` ran ~960 separate 1D r2c FFTs per
+plane via the per-channel correction loop at `cxx:1050-1066`.
+Replaced with a single batched `fwd_r2c(2D)` on a stacked response
+matrix, followed by a per-row vectorized correction.  The FFTW plan
+signature changes (howmany goes from 1 to nchans), so this is *not*
+guaranteed bit-identical in general — but on the verification run
+across all four PDHD APAs of 027409:0 the dump-mode L1SP NPZ
+outputs were 41/41 bit-identical and `flag_l1` / `flag_l1_adj` sums
+matched exactly: FFTW_ESTIMATE picks the same butterfly path for
+both decompositions at these sizes.
+
+**Wall-clock impact** (APA1 NF+SP, 3-run averages on the dev host):
+
+| Build                       | Wall (s)   | Δ vs pre-Tier-1 |
+|-----------------------------|------------|------------------|
+| Pre-Tier-1 (`bc7817f7`)     | 19.73 ± 0.10 | —              |
+| Tier 1 alone (`4e37cd83`)   | 18.96 ± 0.05 | −0.77 s (−3.9%)|
+| Tier 1 + Tier 2 (`42705188`) | 18.83 ± 0.08 | −0.90 s (−4.6%)|
+
+Tier 1 captured most of the gain; Tier 2 added another ~0.7%.
+
+**Item considered and dropped — field-response frequency-domain
+cache.**  The plan called for caching `c_resp` per plane to avoid
+the 2D field-response FFT inside every `decon_2D_init`.
+Invariance check fails: `overall_resp[plane]` is mutated in-place
+at `OmnibusSigProc.cxx:1653` by the filter-response multiplication
+*before* the first `decon_2D_init` call (pass 1), and the second
+pass (APA0 only, line 1818) reloads it fresh.  Within-event caching
+therefore needs state tracking, and cross-event caching depends on
+`m_fft_nticks` derived from input frame trace size (cxx:802).
+Combined complexity outweighs the ~2-3% potential gain.
+
+**Items NOT pursued (out of scope for "low-hanging fruit"):**
+
+- **r2c at the `IDFT` interface level.**  Using a true r2c plan
+  instead of zero-imag c2c saves ~half the butterfly work on real
+  inputs and would be the largest single FFT-side win, but
+  requires extending `IDFT` (`iface/inc/WireCellIface/IDFT.h`)
+  with new method families and updating `FftwDFT` plus any other
+  backends.  Future architectural work.
+- **Wire-axis transpose-then-FFT.**  FFTW handles strided data
+  internally; not a measured bottleneck.
+- **Output-tag duplication (FrameFileSink budget).**  Confirmed
+  not an FFT lever — all OmnibusSigProc output tags share the
+  same time-domain `m_r_data[plane]`; tags are labels on the same
+  trace, no extra IFFTs.  The remaining FrameFileSink savings
+  come from codec/IO work (zstd swap), which is a separate
+  effort.
 
 ---
 
