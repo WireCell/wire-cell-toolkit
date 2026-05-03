@@ -30,8 +30,10 @@ using namespace WireCell;
 using namespace WireCell::SigProc;
 
 using WireCell::Aux::DftTools::fwd;
+using WireCell::Aux::DftTools::fwd_inplace;
 using WireCell::Aux::DftTools::fwd_r2c;
 using WireCell::Aux::DftTools::inv;
+using WireCell::Aux::DftTools::inv_inplace;
 using WireCell::Aux::DftTools::inv_c2r;
 
 OmnibusSigProc::OmnibusSigProc(    )
@@ -1067,7 +1069,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     }
 
     // second round of FFT on wire
-    m_c_data[plane] = fwd(m_dft, m_c_data[plane], 0);
+    fwd_inplace(m_dft, m_c_data[plane], 0);
 
     // response part ...
     Array::array_xxf r_resp = Array::array_xxf::Zero(m_r_data[plane].rows(), m_fft_nticks);
@@ -1080,7 +1082,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     // do first round FFT on the resposne on time
     Array::array_xxc c_resp = fwd_r2c(m_dft, r_resp, 1);
     // do second round FFT on the response on wire
-    c_resp = fwd(m_dft, c_resp, 0);
+    fwd_inplace(m_dft, c_resp, 0);
 
     // make ratio to the response and apply wire filter
     m_c_data[plane] = m_c_data[plane] / c_resp;
@@ -1104,7 +1106,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     }
 
     // do the first round of inverse FFT on wire
-    m_c_data[plane] = inv(m_dft, m_c_data[plane], 0);
+    inv_inplace(m_dft, m_c_data[plane], 0);
 
     // do the second round of inverse FFT on time
     m_r_data[plane] = inv_c2r(m_dft, m_c_data[plane], 1);

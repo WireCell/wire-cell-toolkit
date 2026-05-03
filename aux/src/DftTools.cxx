@@ -60,11 +60,11 @@ DftTools::real_vector_t DftTools::inv_c2r(const IDFT::pointer& dft, const DftToo
 // - We then have column-wise storage order but IDFT assumes row-wise
 // - so we reverse (nrows, ncols) and meaning of axis.
 
-DftTools::complex_array_t DftTools::fwd(const IDFT::pointer& dft, 
-                              const DftTools::complex_array_t& arr, 
+DftTools::complex_array_t DftTools::fwd(const IDFT::pointer& dft,
+                              const DftTools::complex_array_t& arr,
                               int axis)
 {
-    DftTools::complex_array_t ret = arr; 
+    DftTools::complex_array_t ret = arr;
     dft->fwd1b(ret.data(), ret.data(), ret.cols(), ret.rows(), !axis);
     return ret;
 }
@@ -73,9 +73,23 @@ DftTools::complex_array_t DftTools::inv(const IDFT::pointer& dft,
                               const DftTools::complex_array_t& arr,
                               int axis)
 {
-    DftTools::complex_array_t ret = arr; 
+    DftTools::complex_array_t ret = arr;
     dft->inv1b(ret.data(), ret.data(), ret.cols(), ret.rows(), !axis);
     return ret;
+}
+
+void DftTools::fwd_inplace(const IDFT::pointer& dft,
+                           DftTools::complex_array_t& arr,
+                           int axis)
+{
+    dft->fwd1b(arr.data(), arr.data(), arr.cols(), arr.rows(), !axis);
+}
+
+void DftTools::inv_inplace(const IDFT::pointer& dft,
+                           DftTools::complex_array_t& arr,
+                           int axis)
+{
+    dft->inv1b(arr.data(), arr.data(), arr.cols(), arr.rows(), !axis);
 }
 
 
@@ -127,15 +141,16 @@ DftTools::complex_array_t DftTools::inv(const IDFT::pointer& dft, const DftTools
 DftTools::complex_array_t DftTools::fwd_r2c(const IDFT::pointer& dft, const DftTools::real_array_t& wave, int axis)
 {
     complex_array_t cwave = wave.cast<complex_t>();
-    return fwd(dft, cwave, axis);
+    fwd_inplace(dft, cwave, axis);
+    return cwave;
 }
 
 DftTools::real_array_t DftTools::inv_c2r(const IDFT::pointer& dft, const DftTools::complex_array_t& spec, int axis)
 {
     complex_array_t symspec = hermitian_mirror(spec, axis);
-    complex_array_t cwave = inv(dft, symspec, axis);
+    inv_inplace(dft, symspec, axis);
     // Drops the small imaginary that is accrued due to round-off errors.
-    return cwave.real();        
+    return symspec.real();
 }
 
 
