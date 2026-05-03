@@ -31,10 +31,10 @@ function(params, tools, override = {}) {
                l1sp_pd_dump_path='',
                l1sp_pd_wf_dump_path='',
                l1sp_pd_planes=null,
-               // Cross-channel adjacency expansion (default OFF; see
-               // sigproc/docs/l1sp/L1SPFilterPD.md).  Pass true to promote
-               // sub-threshold ROIs whose neighbours triggered.
-               l1sp_pd_adj_enable=false)::
+               // Cross-channel adjacency expansion (default ON; see
+               // sigproc/docs/l1sp/L1SPFilterPD.md).  Pass false to recover
+               // the pre-2026-05-02 behaviour (no neighbour-driven promotion).
+               l1sp_pd_adj_enable=true)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
     local sp_node = g.pnode({
@@ -136,8 +136,9 @@ function(params, tools, override = {}) {
           // Derive time-domain smearing kernel by IFFT of the SP Gaus_wide
           // filter so both are driven by the same sigma.
           gauss_filter: 'HfFilter:Gaus_wide',
-          // Cross-channel adjacency expansion (default OFF).  When ON the
-          // remaining knobs default to the values baked into L1SPFilterPD.h.
+          // Cross-channel adjacency expansion (default ON).  Threshold knobs
+          // (overlap_pad, gap_max, len_ratio, loose_*) keep the values baked
+          // into L1SPFilterPD.h unless overridden in the data block.
           l1_adj_enable: l1sp_pd_adj_enable,
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,

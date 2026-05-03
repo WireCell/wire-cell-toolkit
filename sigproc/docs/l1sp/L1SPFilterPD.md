@@ -187,7 +187,7 @@ zero-out branch are deliberately not ported — see Design decisions below.
    features and run `decide_trigger` once.  Cache the per-ROI
    `(polarity, AsymRecord)` keyed by `(channel, roi_index)`.
 5. **Pass 3 — adjacency expansion** (gated by `l1_adj_enable`, default
-   OFF; see "Cross-channel adjacency expansion" below).
+   ON; see "Cross-channel adjacency expansion" below).
 6. **Pass 4 — apply.**  For each ROI with a non-zero post-adjacency
    polarity, call `l1_fit` with `polarity_override` so the LASSO writeback
    honours the cached / promoted decision instead of recomputing it.
@@ -483,12 +483,13 @@ can miss such ROIs when the per-sub-window asymmetry is diluted, the
 core sub-window is shorter than `l1_min_length`, or the ROI's `gmax`
 is just below `l1_gmax_min`.
 
-To recover those candidates, `operator()` runs an optional pass
-(default OFF) between the trigger decision and the LASSO apply that
-*promotes* a ROI's polarity to that of an originally-triggered
+To recover those candidates, `operator()` runs a pass (default ON
+since 2026-05-02) between the trigger decision and the LASSO apply
+that *promotes* a ROI's polarity to that of an originally-triggered
 neighbour ROI when the criteria below are met.  The donor must be on
 the same plane and originally triggered — there is no transitive
-chain.
+chain.  Set `l1_adj_enable=false` to recover the pre-2026-05-02
+behaviour.
 
 ### Promotion criteria
 
@@ -519,27 +520,29 @@ from MicroBooNE here is limited to the ±3-tick overlap convention.
 ### Validation
 
 Verified on event 027409:0 APA0 (the screenshot reproducer).  With
-adjacency OFF, the long unipolar tail on channel 324 (ticks
-~5830-5945) was passed through unchanged with peak ~4750 ADC.  With
-adjacency ON (`l1sp_pd_adj_enable=true`), the tail beyond the leading
-peak is zeroed by the LASSO fit; only the genuine ~5830-5840
-collection-induction lobe survives.  The number of triggered ROIs
-across APA0 increases from 8 → 17, all of which trace to a same-
-plane donor.  Default-OFF runs are bit-identical to the
-pre-refactor pipeline.
+adjacency disabled (`l1sp_pd_adj_enable=false`), the long unipolar
+tail on channel 324 (ticks ~5830-5945) was passed through unchanged
+with peak ~4750 ADC.  With adjacency enabled (the new default), the
+tail beyond the leading peak is zeroed by the LASSO fit; only the
+genuine ~5830-5840 collection-induction lobe survives.  The number
+of triggered ROIs across APA0 increases from 8 → 17, all of which
+trace to a same-plane donor.  Setting `l1_adj_enable=false` reverts
+to the pre-2026-05-02 output, bit-identical at the inner-`.npy`
+level.
 
 ### Toggling
 
-In jsonnet (`pgrapher/experiment/pdhd/sp.jsonnet`):
-
-```jsonnet
-sp.make_sigproc(anode, l1sp_pd_adj_enable=true)
-```
-
-In `wcp-porting-img/pdhd/wct-nf-sp.jsonnet`:
+The pass is on by default.  To disable it (recover the
+pre-2026-05-02 output):
 
 ```bash
-wire-cell --tla-code l1sp_pd_adj_enable=true ... -c wct-nf-sp.jsonnet
+wire-cell --tla-code l1sp_pd_adj_enable=false ... -c wct-nf-sp.jsonnet
+```
+
+Or in `pgrapher/experiment/pdhd/sp.jsonnet`:
+
+```jsonnet
+sp.make_sigproc(anode, l1sp_pd_adj_enable=false)
 ```
 
 The threshold knobs above are exposed via `L1SPFilterPD`'s direct
@@ -640,7 +643,7 @@ analysis inputs.
 | `core_fwhm_frac`      | float64\[\] | `gauss_fwhm_frac` recomputed on the core sub-window |
 | `core_raw_asym_wide`  | float64\[\] | `raw_asym_wide` recomputed around the core sub-window |
 | `flag_l1`             | int32\[\]   | Pre-adjacency `decide_trigger()` result `{−1, 0, +1}` under current config |
-| `flag_l1_adj`         | int32\[\]   | Post-adjacency polarity actually used to drive the LASSO branch.  Equals `flag_l1` when `l1_adj_enable=false` |
+| `flag_l1_adj`         | int32\[\]   | Post-adjacency polarity actually used to drive the LASSO branch.  With `l1_adj_enable=true` (the default) this can differ from `flag_l1`; equals `flag_l1` when `l1_adj_enable=false` |
 | `adj_donor_ch`        | int32\[\]   | Channel of the adjacent donor ROI when an originally `flag_l1==0` ROI was promoted, else −1 |
 
 `flag_l1_adj` is the trigger that drove the LASSO branch for this ROI.

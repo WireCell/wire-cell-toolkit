@@ -206,7 +206,7 @@ namespace WireCell {
             double m_l1_fill_shape_fill_thr{0.38};
             double m_l1_fill_shape_fwhm_thr{0.30};
 
-            // ── Cross-channel adjacency expansion (default OFF) ──────────────
+            // ── Cross-channel adjacency expansion (default ON) ───────────────
             // For an in-scope ROI on channel c that did NOT trigger by itself,
             // promote its polarity to that of an adjacent (c±1) ROI which did
             // trigger, provided: time-overlap (with ±overlap_pad margin), the
@@ -214,13 +214,14 @@ namespace WireCell {
             // (min/max ratio ≥ len_ratio), AND the candidate ROI itself meets
             // the loose preconditions (gmax / core_length / |core_raw_asym_wide|).
             // Donors are originally-triggered ROIs only — no transitive chain.
-            // Defaults make this a no-op when m_l1_adj_enable is false.
+            // Set m_l1_adj_enable = false to recover the pre-2026-05-02
+            // behaviour (no cross-channel promotion).
             //
             // gap_max is an absolute |start_c − start_d| sanity check; the real
             // physics is enforced by overlap + len_ratio.  Donor ROIs in the
             // PDHD U/V planes typically span ~150 ticks, so a sub-window
             // candidate can legitimately start tens of ticks after the donor.
-            bool   m_l1_adj_enable      {false};
+            bool   m_l1_adj_enable      {true};
             int    m_l1_adj_overlap_pad {3};
             int    m_l1_adj_gap_max     {100};
             double m_l1_adj_len_ratio   {0.40};
