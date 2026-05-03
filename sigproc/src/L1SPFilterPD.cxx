@@ -1053,18 +1053,34 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
 
     // Pre-compute total tick extent before iterating over ADC traces.
     int ntot_ticks = 0;
-    for (auto trace : adctraces) {
+    for (const auto& trace : adctraces) {
         int n = (int)trace->charge().size();
         if (n > ntot_ticks) ntot_ticks = n;
     }
 
-    // Collect ticks with positive decon signal per channel.
-    // Only in-scope, eligible channels need ROI build work.
+    // Per-channel plane cache.  Resolves once per channel so that the
+    // hot loops (and pass 2 below) don't re-invoke m_anode->resolve.
+    // Out-of-scope or non-eligible channels are stored as -1 so the
+    // body of each loop can do a single int comparison instead of two
+    // member-function calls per iteration.
+    std::map<int, int> ch_to_plane;
+    for (const auto& trace : sigtraces) {
+        const int ch = trace->channel();
+        const int plane = m_anode ? m_anode->resolve(ch).index() : 0;
+        const bool in_scope = channel_in_scope(ch) && channel_eligible(ch);
+        ch_to_plane[ch] = in_scope ? plane : -1;
+    }
+
+    // Single sweep over sigtraces: build sigtrace_ch_map AND seed init_map
+    // with the positive decon ticks for in-scope channels.  (Previously two
+    // separate passes — see the cxx history if reverting.)
     std::map<int, std::set<int>> init_map;
-    for (auto trace : sigtraces) {
-        int ch = trace->channel();
-        if (!channel_in_scope(ch) || !channel_eligible(ch)) continue;
-        int tbin = trace->tbin();
+    std::map<int, std::shared_ptr<const WireCell::ITrace>> sigtrace_ch_map;
+    for (const auto& trace : sigtraces) {
+        const int ch = trace->channel();
+        sigtrace_ch_map[ch] = trace;
+        if (ch_to_plane[ch] < 0) continue;
+        const int tbin = trace->tbin();
         auto const& charges = trace->charge();
         std::set<int>& ticks = init_map[ch];
         for (int qi = 0; qi < (int)charges.size(); qi++) {
@@ -1076,10 +1092,10 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     // adctrace_ch_map is populated for all channels; the expensive
     // percentile sort and tick addition are skipped for out-of-scope ones.
     std::map<int, std::shared_ptr<const WireCell::ITrace>> adctrace_ch_map;
-    for (auto trace : adctraces) {
-        int ch = trace->channel();
+    for (const auto& trace : adctraces) {
+        const int ch = trace->channel();
         adctrace_ch_map[ch] = trace;
-        if (!channel_in_scope(ch) || !channel_eligible(ch)) continue;
+        if (ch_to_plane[ch] < 0) continue;
         int tbin = trace->tbin();
         auto const& charges = trace->charge();
         const int ntbins = (int)charges.size();
@@ -1165,9 +1181,7 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         m_l1_len_very_long, m_l1_asym_very_long,
     };
 
-    // sigtrace lookup keyed by channel (mirrors adctrace_ch_map; built once).
-    std::map<int, std::shared_ptr<const WireCell::ITrace>> sigtrace_ch_map;
-    for (auto trace : sigtraces) sigtrace_ch_map[trace->channel()] = trace;
+    // sigtrace_ch_map was built earlier in the same pass that seeded init_map.
 
     for (const auto& kv : map_ch_rois) {
         const int ch = kv.first;
@@ -1177,7 +1191,12 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         if (adctrace_it == adctrace_ch_map.end() || sigtrace_it == sigtrace_ch_map.end()) continue;
         const auto& adctrace = adctrace_it->second;
         const auto& sigtrace = sigtrace_it->second;
-        const int plane = m_anode ? m_anode->resolve(ch).index() : 0;
+        // Plane index was resolved once into ch_to_plane; out-of-scope
+        // channels were filtered before init_map was populated, so any
+        // channel reaching this loop has a non-negative plane.
+        auto plane_it = ch_to_plane.find(ch);
+        const int plane = (plane_it != ch_to_plane.end() && plane_it->second >= 0)
+                          ? plane_it->second : 0;
 
         std::vector<RoiFeat> feats;
         feats.reserve(rois.size());
@@ -1332,7 +1351,7 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     // Cross-channel adjacency-expansion outcome (parallel to the rows above).
     std::vector<int32_t> d_flag_l1_adj, d_adj_donor_ch;
 
-    for (auto trace : sigtraces) {
+    for (const auto& trace : sigtraces) {
         auto newtrace = std::make_shared<Aux::SimpleTrace>(
             trace->channel(), trace->tbin(), trace->charge());
 
