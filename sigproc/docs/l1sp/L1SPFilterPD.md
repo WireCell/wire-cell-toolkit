@@ -50,11 +50,18 @@ needed.
 
 ### Anonymous helpers (cxx, `namespace {}`)
 
-**`build_G(nbin, t_lo, t_hi, overall_offset, basis1_offset, scaling, resp_scale, basis0, basis1)`**
+**`build_G(nrow, ncol, row_offset, t_lo, t_hi, overall_offset, basis1_offset, scaling, resp_scale, basis0, basis1)`**
 
-Builds the N×2N response matrix for one segment:
-- Columns `[0, N)` — `basis0(dt + overall_offset)` at each `(meas-tick, signal-tick)` pair.
-- Columns `[N, 2N)` — `basis1(dt + overall_offset − basis1_offset)`.
+Builds an `nrow × 2·ncol` response matrix:
+- Columns `[0, ncol)` — `basis0(dt + overall_offset)` at each `(meas-tick, signal-tick)` pair.
+- Columns `[ncol, 2·ncol)` — `basis1(dt + overall_offset − basis1_offset)`.
+
+`row_offset = (W_first_tick − β_first_tick)` decouples the W tick range
+from the β tick range so the W vector can be **padded** by pad_L=30 ticks
+before / pad_R=20 ticks after the β-coverage span (matching the
+`(−15 µs, +10 µs)` response window). Without that padding, the boundary
+β coefficients see only one half of the kernel and can be inflated
+arbitrarily by the LASSO to soak up unexplained ADC residuals.
 
 `overall_offset` is the global LASSO frame origin (kernel-file metadata
 `frame_origin_us`, in WCT time units): the kernel native time at which
@@ -154,7 +161,11 @@ Called per ROI.  Sequence:
 4. **Pass-through guard** — if the matching unipolar basis is null
    (config keys empty), early-return without modifying `newtrace`.
 5. **Segmented LASSO solve** — segments of `l1_seg_length` ticks; for each
-   segment call `build_G` then `lasso_solve`.  Combine the two basis
+   segment call `build_G` then `lasso_solve`.  The W vector for each
+   segment is loaded with pad_L=30 / pad_R=20 ticks of raw-ADC context
+   around the segment's β span (clipped to the trace bounds) so boundary
+   β coefficients have full kernel support; the padded raw ADC is fit
+   context only and never written back. Combine the two basis
    coefficients and rescale to electron units in one step:
    `l1_signal[t] = (β₀ * basis0_scale + β₁ * basis1_scale) * scaling_factor`.
 6. **Post-processing** — apply Gaussian smearing on `l1_signal` (which is

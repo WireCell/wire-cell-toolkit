@@ -41,15 +41,18 @@ using WireCell::Aux::DftTools::inv_c2r;
 // ── anonymous helpers ─────────────────────────────────────────────────────────
 namespace {
 
-// Build N×2N response matrix for one segment.
-// Column j           ← basis0(dt + overall)
-// Column N+j         ← basis1(dt + overall − basis1_offset)
+// Build nrow × 2·ncol response matrix.
+// Column j        ← basis0(dt + overall)
+// Column ncol+j   ← basis1(dt + overall − basis1_offset)
 //   basis1_offset is stored in the kernel file as (zero_crossing − W_peak),
 //   so subtracting it places the W peak at LASSO dt = zero_crossing (the
 //   bipolar zero-crossing) — i.e. inside the response window.
 // Response window: dt ∈ (t_lo, t_hi) relative to overall_time_offset.
-// Tick size assumed 0.5 µs (2 MHz ADC).
-MatrixXd build_G(int nbin,
+// row_offset = (W_first_tick − beta_first_tick), in ticks; lets the W vector
+// extend pad_L ticks before / pad_R ticks after the β-coverage span, so that
+// boundary β coefficients have full kernel support and cannot grow to fit
+// imaginary (out-of-window) signal. Tick size assumed 0.5 µs (2 MHz ADC).
+MatrixXd build_G(int nrow, int ncol, int row_offset,
                  double t_lo, double t_hi,
                  double overall_time_offset,
                  double basis1_offset,
@@ -57,10 +60,10 @@ MatrixXd build_G(int nbin,
                  linterp<double>* basis0,
                  linterp<double>* basis1)
 {
-    MatrixXd G = MatrixXd::Zero(nbin, nbin * 2);
-    for (int i = 0; i < nbin; i++) {
-        double t_meas = i * 0.5 * units::us;
-        for (int j = 0; j < nbin; j++) {
+    MatrixXd G = MatrixXd::Zero(nrow, ncol * 2);
+    for (int i = 0; i < nrow; i++) {
+        double t_meas = (i + row_offset) * 0.5 * units::us;
+        for (int j = 0; j < ncol; j++) {
             double t_sig = j * 0.5 * units::us;
             double dt = t_meas - t_sig;
             if (dt > t_lo && dt < t_hi) {
@@ -71,7 +74,7 @@ MatrixXd build_G(int nbin,
 #pragma GCC diagnostic ignored "-Wstringop-overread"
 #endif
                 G(i, j)        = (*basis0)(dt_adj)                 * scaling * resp_scale;
-                G(i, nbin + j) = (*basis1)(dt_adj - basis1_offset) * scaling * resp_scale;
+                G(i, ncol + j) = (*basis1)(dt_adj - basis1_offset) * scaling * resp_scale;
 #if HAS_WARNING("-Wstringop-overread")
 #pragma GCC diagnostic pop
 #endif
@@ -785,11 +788,28 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                                  m_l1_raw_asym_pad_ticks,
                                  m_l1_raw_asym_eps);
 
-    // Build the per-tick LASSO input from raw ADC.  Kept as a separate pass
-    // (rather than wiring into compute_asym) to keep the helper data-only.
-    VectorXd init_W = VectorXd::Zero(nbin_fit);
-    for (int i = 0; i < nbin_fit; i++) {
-        init_W(i) = adctrace->charge().at(i + start_tick - newtrace->tbin());
+    // Build the per-tick LASSO input from raw ADC.  init_W is loaded over a
+    // *padded* window [start_tick − pad_L, end_tick + pad_R) so that boundary
+    // β coefficients see the full kernel response in W; without this padding
+    // the rightmost / leftmost β can grow arbitrarily to fit signal that
+    // would have appeared in the missing kernel half outside the ROI.
+    // pad_L / pad_R match the build_G window (dt ∈ (−15 µs, +10 µs) at
+    // 0.5 µs/tick = 30 / 20 ticks). The padded raw ADC is fit context only —
+    // β positions and the writeback range stay strictly within the original
+    // ROI, so the final replaced waveform is unaffected outside [start_tick,
+    // end_tick).
+    const double tick_us = 0.5;
+    const int pad_L = (int)std::ceil(15.0 / tick_us);   // 30 ticks
+    const int pad_R = (int)std::ceil(10.0 / tick_us);   // 20 ticks
+    const int trace_lo = newtrace->tbin();
+    const int trace_hi = trace_lo + (int)adctrace->charge().size();
+    const int W_start  = std::max(trace_lo, start_tick - pad_L);
+    const int W_end    = std::min(trace_hi, end_tick   + pad_R);
+    const int nbin_W   = W_end - W_start;
+
+    VectorXd init_W = VectorXd::Zero(nbin_W);
+    for (int i = 0; i < nbin_W; i++) {
+        init_W(i) = adctrace->charge().at(W_start - trace_lo + i);
     }
 
     // Select the appropriate per-plane bases.  Bipolar is the same for
@@ -830,13 +850,30 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
 
         for (int s = 0; s < n_section; s++) {
             int sn = bounds[s + 1] - bounds[s];
-            VectorXd W_seg = VectorXd::Zero(sn);
-            for (int j = 0; j < sn; j++) W_seg(j) = init_W(bounds[s] + j);
+
+            // β-position span for this segment, in absolute ticks:
+            //   [start_tick + bounds[s], start_tick + bounds[s+1]).
+            // Extend the W slice by pad_L/pad_R around it, clipped to the
+            // global padded W range, so the segment's boundary β's see the
+            // full kernel response. (start_tick − W_start) is the offset
+            // from the padded W to the ROI's first tick.
+            const int roi_in_W = start_tick - W_start;          // ≥ 0
+            const int W_seg_lo = std::max(0, roi_in_W + bounds[s]   - pad_L);
+            const int W_seg_hi = std::min(nbin_W, roi_in_W + bounds[s+1] + pad_R);
+            const int sn_W = W_seg_hi - W_seg_lo;
+
+            VectorXd W_seg = VectorXd::Zero(sn_W);
+            for (int i = 0; i < sn_W; i++) W_seg(i) = init_W(W_seg_lo + i);
+
+            // row_offset_seg = W_first_tick − beta_first_tick (in ticks).
+            // Negative when the segment's W slice starts before its first β.
+            const int row_offset_seg = (W_start + W_seg_lo)
+                                     - (start_tick + bounds[s]);
 
             // overall_time_offset = global LASSO frame origin (from kernel
             // file meta.frame_origin_us) + cfg additive override (default 0).
             const double overall_toff = m_frame_origin + m_overall_time_offset;
-            MatrixXd G = build_G(sn,
+            MatrixXd G = build_G(sn_W, sn, row_offset_seg,
                                  -15 * units::us - overall_toff,
                                   10 * units::us - overall_toff,
                                  overall_toff,
