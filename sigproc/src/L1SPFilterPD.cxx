@@ -491,6 +491,15 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["l1_fill_shape_fill_thr"]   = m_l1_fill_shape_fill_thr;
     cfg["l1_fill_shape_fwhm_thr"]   = m_l1_fill_shape_fwhm_thr;
 
+    // Cross-channel adjacency expansion (default OFF; see header).
+    cfg["l1_adj_enable"]         = m_l1_adj_enable;
+    cfg["l1_adj_overlap_pad"]    = m_l1_adj_overlap_pad;
+    cfg["l1_adj_gap_max"]        = m_l1_adj_gap_max;
+    cfg["l1_adj_len_ratio"]      = m_l1_adj_len_ratio;
+    cfg["l1_adj_loose_gmax"]     = m_l1_adj_loose_gmax;
+    cfg["l1_adj_loose_core_len"] = m_l1_adj_loose_core_len;
+    cfg["l1_adj_loose_asym_abs"] = m_l1_adj_loose_asym_abs;
+
     cfg["l1_seg_length"] = 120;
     cfg["l1_scaling_factor"] = 500;  // numerical conditioning only; cancels in linear algebra
     cfg["l1_lambda"] = 10;           // sparsity prior; lambda_in_e = l1_lambda * l1_scaling_factor
@@ -567,6 +576,14 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_l1_len_fill_shape      = get(cfg, "l1_len_fill_shape",      m_l1_len_fill_shape);
     m_l1_fill_shape_fill_thr = get(cfg, "l1_fill_shape_fill_thr", m_l1_fill_shape_fill_thr);
     m_l1_fill_shape_fwhm_thr = get(cfg, "l1_fill_shape_fwhm_thr", m_l1_fill_shape_fwhm_thr);
+
+    m_l1_adj_enable         = get(cfg, "l1_adj_enable",         m_l1_adj_enable);
+    m_l1_adj_overlap_pad    = get(cfg, "l1_adj_overlap_pad",    m_l1_adj_overlap_pad);
+    m_l1_adj_gap_max        = get(cfg, "l1_adj_gap_max",        m_l1_adj_gap_max);
+    m_l1_adj_len_ratio      = get(cfg, "l1_adj_len_ratio",      m_l1_adj_len_ratio);
+    m_l1_adj_loose_gmax     = get(cfg, "l1_adj_loose_gmax",     m_l1_adj_loose_gmax);
+    m_l1_adj_loose_core_len = get(cfg, "l1_adj_loose_core_len", m_l1_adj_loose_core_len);
+    m_l1_adj_loose_asym_abs = get(cfg, "l1_adj_loose_asym_abs", m_l1_adj_loose_asym_abs);
 
     m_l1_seg_length = get(cfg, "l1_seg_length", m_l1_seg_length);
     m_l1_scaling_factor = get(cfg, "l1_scaling_factor", m_l1_scaling_factor);
@@ -754,32 +771,38 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                           const std::shared_ptr<const WireCell::ITrace>& adctrace,
                           const std::shared_ptr<const WireCell::ITrace>& sigtrace,
                           int start_tick, int end_tick, int plane,
-                          std::vector<double>* lasso_unsmeared)
+                          std::vector<double>* lasso_unsmeared,
+                          int polarity_override)
 {
     const int nbin_fit = end_tick - start_tick;
 
-    // Compute all per-ROI features once.  sigtrace carries the unmodified
-    // gauss data for the whole frame; reading from it (rather than newtrace)
-    // ensures the wide-window energy fraction is not corrupted by L1 fits
-    // already written into prior ROIs on the same channel.
-    const AsymRecord rec = compute_asym(adctrace->charge(),
-                                        sigtrace->charge(),
-                                        newtrace->tbin(),
-                                        start_tick, end_tick,
-                                        m_adc_l1_threshold,
-                                        m_l1_energy_pad_ticks,
-                                        m_l1_raw_asym_pad_ticks,
-                                        m_l1_raw_asym_eps,
-                                        m_l1_core_g_thr);
+    // Decide polarity.  When polarity_override is the sentinel 2, classify
+    // this ROI in isolation (legacy path); otherwise honor the externally-
+    // decided polarity (used by the cross-channel adjacency expansion).
+    int flag_l1;
+    if (polarity_override == 2) {
+        // Compute all per-ROI features once.  sigtrace carries the unmodified
+        // gauss data for the whole frame; reading from it (rather than newtrace)
+        // ensures the wide-window energy fraction is not corrupted by L1 fits
+        // already written into prior ROIs on the same channel.
+        const AsymRecord rec = compute_asym(adctrace->charge(),
+                                            sigtrace->charge(),
+                                            newtrace->tbin(),
+                                            start_tick, end_tick,
+                                            m_adc_l1_threshold,
+                                            m_l1_energy_pad_ticks,
+                                            m_l1_raw_asym_pad_ticks,
+                                            m_l1_raw_asym_eps,
+                                            m_l1_core_g_thr);
 
-    // Per-ROI multi-arm gate, walked per |gauss|>core_g_thr sub-window.
-    const TriggerCfg tcfg{
-        m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
-        m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
-        m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
-        m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
-    };
-    int flag_l1 = decide_trigger(adctrace->charge(), sigtrace->charge(),
+        // Per-ROI multi-arm gate, walked per |gauss|>core_g_thr sub-window.
+        const TriggerCfg tcfg{
+            m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
+            m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
+            m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
+            m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
+        };
+        flag_l1 = decide_trigger(adctrace->charge(), sigtrace->charge(),
                                  newtrace->tbin(),
                                  start_tick, end_tick,
                                  rec.gmax, tcfg,
@@ -787,6 +810,9 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
                                  m_l1_energy_pad_ticks,
                                  m_l1_raw_asym_pad_ticks,
                                  m_l1_raw_asym_eps);
+    } else {
+        flag_l1 = polarity_override;
+    }
 
     // Build the per-tick LASSO input from raw ADC.  init_W is loaded over a
     // *padded* window [start_tick − pad_L, end_tick + pad_R) so that boundary
@@ -1120,7 +1146,124 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         map_ch_rois[wire_index] = merged;
     }
 
-    // Main per-channel processing: classify ROIs and run L1 fits (or dump).
+    // ── Pass 2: decide trigger per ROI; cache features for the LASSO/dump
+    //            and for the cross-channel adjacency-expansion pass.
+    //            One RoiFeat per (channel, roi-index).
+    struct RoiFeat {
+        AsymRecord rec;
+        int polarity{0};        // original (in-isolation) decision
+        int polarity_final{0};  // post-adjacency (initialised = polarity)
+        int donor_ch{-1};       // adjacency donor channel, or -1 if none
+        int plane{0};
+    };
+    std::map<int, std::vector<RoiFeat>> map_ch_feat;
+
+    const TriggerCfg tcfg{
+        m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
+        m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
+        m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
+        m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
+    };
+
+    // sigtrace lookup keyed by channel (mirrors adctrace_ch_map; built once).
+    std::map<int, std::shared_ptr<const WireCell::ITrace>> sigtrace_ch_map;
+    for (auto trace : sigtraces) sigtrace_ch_map[trace->channel()] = trace;
+
+    for (const auto& kv : map_ch_rois) {
+        const int ch = kv.first;
+        const auto& rois = kv.second;
+        auto adctrace_it = adctrace_ch_map.find(ch);
+        auto sigtrace_it = sigtrace_ch_map.find(ch);
+        if (adctrace_it == adctrace_ch_map.end() || sigtrace_it == sigtrace_ch_map.end()) continue;
+        const auto& adctrace = adctrace_it->second;
+        const auto& sigtrace = sigtrace_it->second;
+        const int plane = m_anode ? m_anode->resolve(ch).index() : 0;
+
+        std::vector<RoiFeat> feats;
+        feats.reserve(rois.size());
+        for (const auto& roi : rois) {
+            RoiFeat f;
+            f.plane = plane;
+            f.rec = compute_asym(adctrace->charge(), sigtrace->charge(),
+                                 sigtrace->tbin(),
+                                 roi.first, roi.second + 1,
+                                 m_adc_l1_threshold,
+                                 m_l1_energy_pad_ticks,
+                                 m_l1_raw_asym_pad_ticks,
+                                 m_l1_raw_asym_eps,
+                                 m_l1_core_g_thr);
+            f.polarity = decide_trigger(adctrace->charge(), sigtrace->charge(),
+                                        sigtrace->tbin(),
+                                        roi.first, roi.second + 1,
+                                        f.rec.gmax, tcfg,
+                                        m_l1_core_g_thr,
+                                        m_l1_energy_pad_ticks,
+                                        m_l1_raw_asym_pad_ticks,
+                                        m_l1_raw_asym_eps);
+            f.polarity_final = f.polarity;
+            feats.push_back(std::move(f));
+        }
+        map_ch_feat[ch] = std::move(feats);
+    }
+
+    // ── Pass 3: cross-channel adjacency expansion (default OFF).
+    // For each ROI on channel c that did not trigger by itself, promote its
+    // polarity to that of an adjacent (c±1) ROI which did.  The donor must
+    // be on the same plane and originally-triggered (no transitive chain).
+    if (m_l1_adj_enable) {
+        const int pad        = m_l1_adj_overlap_pad;
+        const int gap_max    = m_l1_adj_gap_max;
+        const double lr_min  = m_l1_adj_len_ratio;
+        const double lg_min  = m_l1_adj_loose_gmax;
+        const int lcl_min    = m_l1_adj_loose_core_len;
+        const double lasym   = m_l1_adj_loose_asym_abs;
+
+        for (auto& [ch, feats] : map_ch_feat) {
+            const auto& rois_c = map_ch_rois.at(ch);
+            for (size_t i = 0; i < feats.size(); i++) {
+                if (feats[i].polarity != 0) continue;        // already triggered
+                const int len_c    = rois_c[i].second - rois_c[i].first + 1;
+                const auto& rec_c  = feats[i].rec;
+                if (rec_c.gmax        < lg_min)  continue;
+                if (rec_c.core_length < lcl_min) continue;
+                if (std::fabs(rec_c.core_raw_asym_wide) < lasym) continue;
+
+                int chosen_donor = -1;
+                int chosen_polarity = 0;
+                for (int side : {-1, +1}) {
+                    const int n = ch + side;
+                    auto fit = map_ch_feat.find(n);
+                    if (fit == map_ch_feat.end()) continue;
+                    if (fit->second.empty() || fit->second.front().plane != feats[i].plane) continue;
+                    const auto& rois_n = map_ch_rois.at(n);
+                    for (size_t j = 0; j < fit->second.size(); j++) {
+                        const int polarity_d = fit->second[j].polarity;  // donor must be originally-triggered
+                        if (polarity_d == 0) continue;
+                        const int len_n = rois_n[j].second - rois_n[j].first + 1;
+                        const bool overlap =
+                            (rois_c[i].first  - pad) <= (rois_n[j].second + pad) &&
+                            (rois_c[i].second + pad) >= (rois_n[j].first  - pad);
+                        if (!overlap) continue;
+                        if (std::abs(rois_c[i].first - rois_n[j].first) > gap_max) continue;
+                        const int len_lo = std::min(len_c, len_n);
+                        const int len_hi = std::max(len_c, len_n);
+                        if (len_hi == 0) continue;
+                        if ((double)len_lo / (double)len_hi < lr_min) continue;
+                        chosen_donor = n;
+                        chosen_polarity = polarity_d;
+                        break;
+                    }
+                    if (chosen_donor != -1) break;
+                }
+                if (chosen_donor != -1) {
+                    feats[i].polarity_final = chosen_polarity;
+                    feats[i].donor_ch       = chosen_donor;
+                }
+            }
+        }
+    }
+
+    // ── Pass 4: apply (LASSO writeback, or dump records).
     ITrace::vector out_traces;
 
     // Calibration dump: per-ROI parallel vectors accumulated across all channels.
@@ -1144,16 +1287,8 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
     // alongside the legacy 'flag' (above, derived from the old ratio test) so
     // offline analyses can compare both decisions on the same ROI.
     std::vector<int32_t> d_flag_l1;
-
-    // Trigger gate config snapshot used by both dump-side decide_trigger calls
-    // and the live l1_fit path.  Kept identical so the dump's flag_l1 matches
-    // what l1_fit() would have produced if dump_mode were off.
-    const TriggerCfg tcfg_dump{
-        m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
-        m_l1_asym_strong, m_l1_asym_mod, m_l1_asym_loose,
-        m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
-        m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
-    };
+    // Cross-channel adjacency-expansion outcome (parallel to the rows above).
+    std::vector<int32_t> d_flag_l1_adj, d_adj_donor_ch;
 
     for (auto trace : sigtraces) {
         auto newtrace = std::make_shared<Aux::SimpleTrace>(
@@ -1161,28 +1296,22 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
 
         int ch = trace->channel();
 
-        // Skip channels with no ROIs (includes out-of-scope/ineligible channels
-        // that were not added to init_map above).
-        if (map_ch_rois.find(ch) == map_ch_rois.end()) {
+        auto rois_it = map_ch_rois.find(ch);
+        if (rois_it == map_ch_rois.end()) {
             out_traces.push_back(newtrace);
             continue;
         }
 
-        auto& rois_save = map_ch_rois[ch];
+        auto& rois_save = rois_it->second;
         auto& adctrace  = adctrace_ch_map[ch];
+        auto& feats     = map_ch_feat.at(ch);
 
         if (m_dump_mode) {
-            // Calibration / dump path: compute asymmetry stats per ROI, record
-            // them, then pass the trace through unchanged (no LASSO, no zeroing).
+            // Calibration / dump path: record cached per-ROI features and the
+            // pre/post-adjacency trigger decisions, then pass the trace through
+            // unchanged (no LASSO, no zeroing).
             for (size_t i = 0; i < rois_save.size(); i++) {
-                auto rec = compute_asym(adctrace->charge(), trace->charge(),
-                                        trace->tbin(),
-                                        rois_save[i].first, rois_save[i].second + 1,
-                                        m_adc_l1_threshold,
-                                        m_l1_energy_pad_ticks,
-                                        m_l1_raw_asym_pad_ticks,
-                                        m_l1_raw_asym_eps,
-                                        m_l1_core_g_thr);
+                const AsymRecord& rec = feats[i].rec;
                 d_channel.push_back(ch);
                 d_roi_start.push_back(rois_save[i].first);
                 d_roi_end.push_back(rois_save[i].second);
@@ -1203,7 +1332,7 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                 d_next_gap.push_back(next_start >= 0
                                      ? (int32_t)(next_start - rois_save[i].second) : -1);
 
-                // Tier 1: flag + ratio (same formula as l1_fit trigger)
+                // Tier 1: legacy flag + ratio (uBooNE adc-ratio test).
                 double ratio = (rec.temp1_sum > 0)
                              ? rec.temp_sum / (rec.temp1_sum * m_adc_sum_rescaling / rec.nbin_fit)
                              : 0.0;
@@ -1235,26 +1364,23 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                 d_core_fill.push_back(rec.core_fill);
                 d_core_fwhm_frac.push_back(rec.core_fwhm_frac);
                 d_core_raw_asym_wide.push_back(rec.core_raw_asym_wide);
-                d_flag_l1.push_back((int32_t)decide_trigger(
-                    adctrace->charge(), trace->charge(), trace->tbin(),
-                    rois_save[i].first, rois_save[i].second + 1,
-                    rec.gmax, tcfg_dump,
-                    m_l1_core_g_thr,
-                    m_l1_energy_pad_ticks,
-                    m_l1_raw_asym_pad_ticks,
-                    m_l1_raw_asym_eps));
+                d_flag_l1.push_back((int32_t)feats[i].polarity);
+                d_flag_l1_adj.push_back((int32_t)feats[i].polarity_final);
+                d_adj_donor_ch.push_back((int32_t)feats[i].donor_ch);
             }
         } else {
-            // Normal processing path: classify ROIs and run L1 fits.
-            // Resolve channel → plane once (kernels are indexed by plane).
-            const int plane = m_anode ? m_anode->resolve(ch).index() : 0;
-            for (auto& roi : rois_save) {
+            // Normal processing path: run L1 fits using the (possibly
+            // adjacency-promoted) per-ROI polarity from passes 2-3.
+            for (size_t i = 0; i < rois_save.size(); i++) {
+                const auto& roi = rois_save[i];
+                const int polarity_in = feats[i].polarity_final;
                 std::vector<double> lasso_unsmeared_buf;
                 const int polarity = l1_fit(newtrace, adctrace, trace,
-                                            roi.first, roi.second + 1, plane,
-                                            m_wf_dump_path.empty() ? nullptr : &lasso_unsmeared_buf);
+                                            roi.first, roi.second + 1, feats[i].plane,
+                                            m_wf_dump_path.empty() ? nullptr : &lasso_unsmeared_buf,
+                                            polarity_in);
                 if (!m_wf_dump_path.empty() && polarity != 0) {
-                    dump_roi_waveforms(in->ident(), ch, plane,
+                    dump_roi_waveforms(in->ident(), ch, feats[i].plane,
                                        roi.first, roi.second + 1, polarity,
                                        adctrace, trace, newtrace, lasso_unsmeared_buf);
                 }
@@ -1334,6 +1460,9 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         save_f64("core_fwhm_frac",     d_core_fwhm_frac);
         save_f64("core_raw_asym_wide", d_core_raw_asym_wide);
         save_i32("flag_l1",         d_flag_l1);
+        // Cross-channel adjacency-expansion outcome (matches non-dump path).
+        save_i32("flag_l1_adj",     d_flag_l1_adj);
+        save_i32("adj_donor_ch",    d_adj_donor_ch);
 
         log->debug("call={} dump_mode: {} ROIs -> {}", m_count, d_channel.size(), fname);
     }

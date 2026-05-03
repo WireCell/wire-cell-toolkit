@@ -73,11 +73,19 @@ namespace WireCell {
             // [start_tick, end_tick).  ``plane`` is the induction-plane index
             // (0=U, 1=V) used to select the appropriate kernel set.  Returns:
             // 0=pass-through, +1=L1-positive, -1=L1-negative.
+            //
+            // ``polarity_override`` lets callers bypass the internal trigger
+            // gate and force a polarity decided elsewhere (e.g. by the cross-
+            // channel adjacency-expansion pass in ``operator()``).  Default
+            // sentinel value 2 means "decide internally" (legacy behaviour).
+            // Pass +1 / -1 to force a triggered LASSO with that polarity, or 0
+            // to short-circuit to pass-through without computing features.
             int l1_fit(std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
                        const std::shared_ptr<const WireCell::ITrace>& sigtrace,
                        int start_tick, int end_tick, int plane,
-                       std::vector<double>* lasso_unsmeared = nullptr);
+                       std::vector<double>* lasso_unsmeared = nullptr,
+                       int polarity_override = 2);
 
             // Write per-ROI waveform NPZ when m_wf_dump_path is non-empty.
             void dump_roi_waveforms(int frame_ident, int channel, int plane,
@@ -197,6 +205,28 @@ namespace WireCell {
             int    m_l1_len_fill_shape{50};
             double m_l1_fill_shape_fill_thr{0.38};
             double m_l1_fill_shape_fwhm_thr{0.30};
+
+            // ── Cross-channel adjacency expansion (default OFF) ──────────────
+            // For an in-scope ROI on channel c that did NOT trigger by itself,
+            // promote its polarity to that of an adjacent (c±1) ROI which did
+            // trigger, provided: time-overlap (with ±overlap_pad margin), the
+            // start-tick gap is within gap_max, the lengths are similar
+            // (min/max ratio ≥ len_ratio), AND the candidate ROI itself meets
+            // the loose preconditions (gmax / core_length / |core_raw_asym_wide|).
+            // Donors are originally-triggered ROIs only — no transitive chain.
+            // Defaults make this a no-op when m_l1_adj_enable is false.
+            //
+            // gap_max is an absolute |start_c − start_d| sanity check; the real
+            // physics is enforced by overlap + len_ratio.  Donor ROIs in the
+            // PDHD U/V planes typically span ~150 ticks, so a sub-window
+            // candidate can legitimately start tens of ticks after the donor.
+            bool   m_l1_adj_enable      {false};
+            int    m_l1_adj_overlap_pad {3};
+            int    m_l1_adj_gap_max     {100};
+            double m_l1_adj_len_ratio   {0.40};
+            double m_l1_adj_loose_gmax     {300.0};
+            int    m_l1_adj_loose_core_len {2};
+            double m_l1_adj_loose_asym_abs {0.30};
 
             double m_l1_seg_length{120};
             double m_l1_scaling_factor{500};

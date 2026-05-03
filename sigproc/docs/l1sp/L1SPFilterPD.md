@@ -183,16 +183,26 @@ zero-out branch are deliberately not ported — see Design decisions below.
 2. Build per-channel tick sets from decon signal (positive samples) and raw ADC
    (samples above the noise threshold, padded ±`raw_pad` ticks).
 3. Merge and pad into ROI pairs per channel (±`roi_pad`).
-4. Call `l1_fit` on each in-scope ROI (channel filtered by `process_planes`
-   and the optional `eligible_channels` whitelist).  Negative decon samples
-   inside the ROI are zeroed in `newtrace` regardless of trigger result
-   (matching `L1SPFilter` behaviour).
-5. In `dump_mode`, write a per-frame NPZ with all ROI records plus the
-   live `flag_l1` decision.
-6. Emit `IFrame` with traces tagged `outtag`.
+4. **Pass 2 — decide.** For every in-scope ROI compute the `AsymRecord`
+   features and run `decide_trigger` once.  Cache the per-ROI
+   `(polarity, AsymRecord)` keyed by `(channel, roi_index)`.
+5. **Pass 3 — adjacency expansion** (gated by `l1_adj_enable`, default
+   OFF; see "Cross-channel adjacency expansion" below).
+6. **Pass 4 — apply.**  For each ROI with a non-zero post-adjacency
+   polarity, call `l1_fit` with `polarity_override` so the LASSO writeback
+   honours the cached / promoted decision instead of recomputing it.
+   Negative decon samples inside every ROI are zeroed in `newtrace`
+   regardless of trigger result (matching `L1SPFilter` behaviour).
+7. In `dump_mode`, write a per-frame NPZ with all ROI records, the
+   pre-adjacency `flag_l1`, the post-adjacency `flag_l1_adj`, and
+   `adj_donor_ch` (channel of the donor ROI, or −1 if none).
+8. Emit `IFrame` with traces tagged `outtag`.
 
-Layer 3 propagation and Layer 4 cross-channel cleaning are intentionally
-omitted for PDHD/PDVD — see Design decisions.
+Layer 3 propagation and Layer 4 cross-channel cleaning (uBooNE shorted-wire
+heuristic) are intentionally omitted for PDHD/PDVD — see Design decisions.
+The adjacency-expansion pass is a *different* mechanism: it admits more
+ROIs into LASSO based on a triggered neighbour, rather than zeroing one
+out.
 
 ---
 
@@ -462,6 +472,82 @@ single-threaded (no OpenMP/TBB/MKL linked).
 
 ---
 
+## Cross-channel adjacency expansion
+
+Long unipolar artifacts have spatial coherence: when a neighbouring
+channel clearly fires L1SP and a sub-threshold ROI on the current
+channel time-overlaps it with similar extent, that ROI is almost
+certainly the same artifact and should be processed.  The Strategy B
+multi-arm gate is computed per-sub-window inside `decide_trigger` and
+can miss such ROIs when the per-sub-window asymmetry is diluted, the
+core sub-window is shorter than `l1_min_length`, or the ROI's `gmax`
+is just below `l1_gmax_min`.
+
+To recover those candidates, `operator()` runs an optional pass
+(default OFF) between the trigger decision and the LASSO apply that
+*promotes* a ROI's polarity to that of an originally-triggered
+neighbour ROI when the criteria below are met.  The donor must be on
+the same plane and originally triggered — there is no transitive
+chain.
+
+### Promotion criteria
+
+For candidate ROI `R_c` on channel `c` (with `polarity_c == 0`) and
+donor ROI `R_d` on channel `c±1` (with `polarity_d != 0`):
+
+| Knob | Default | Check |
+|------|---------|-------|
+| `l1_adj_overlap_pad` | 3 ticks | `(R_c.start − pad) ≤ R_d.end + pad` AND `(R_c.end + pad) ≥ R_d.start − pad` |
+| `l1_adj_gap_max` | 100 ticks | `|R_c.start − R_d.start| ≤ gap_max` (sanity check) |
+| `l1_adj_len_ratio` | 0.40 | `min(len_c, len_d) / max(len_c, len_d) ≥ ratio` |
+| `l1_adj_loose_gmax` | 300 (gain-normalised) | `R_c.gmax ≥ this` |
+| `l1_adj_loose_core_len` | 2 ticks | `R_c.core_length ≥ this` |
+| `l1_adj_loose_asym_abs` | 0.30 | `|R_c.core_raw_asym_wide| ≥ this` |
+
+The loose preconditions on the candidate itself prevent noise ROIs
+from being swept up.  Defaults are first-cut from event 027409:0
+APA0 (the screenshot reproducer).
+
+### Honest framing on prior art
+
+`L1SPFilter`'s `cxx:432-476` neighbour-channel pass is *not* the
+inspiration: that path is a shorted-wire suppression heuristic that
+zeroes a flag-2 seed ROI when an adjacent flag-1 ROI overlaps in
+time, which does not apply to PDHD/PDVD geometry.  The borrowing
+from MicroBooNE here is limited to the ±3-tick overlap convention.
+
+### Validation
+
+Verified on event 027409:0 APA0 (the screenshot reproducer).  With
+adjacency OFF, the long unipolar tail on channel 324 (ticks
+~5830-5945) was passed through unchanged with peak ~4750 ADC.  With
+adjacency ON (`l1sp_pd_adj_enable=true`), the tail beyond the leading
+peak is zeroed by the LASSO fit; only the genuine ~5830-5840
+collection-induction lobe survives.  The number of triggered ROIs
+across APA0 increases from 8 → 17, all of which trace to a same-
+plane donor.  Default-OFF runs are bit-identical to the
+pre-refactor pipeline.
+
+### Toggling
+
+In jsonnet (`pgrapher/experiment/pdhd/sp.jsonnet`):
+
+```jsonnet
+sp.make_sigproc(anode, l1sp_pd_adj_enable=true)
+```
+
+In `wcp-porting-img/pdhd/wct-nf-sp.jsonnet`:
+
+```bash
+wire-cell --tla-code l1sp_pd_adj_enable=true ... -c wct-nf-sp.jsonnet
+```
+
+The threshold knobs above are exposed via `L1SPFilterPD`'s direct
+config (`l1_adj_overlap_pad`, etc.) and can be overridden through the
+component's `data:` block in jsonnet.
+
+---
+
 ## Calibration dump schema
 
 When `dump_mode=true` a single NPZ file per frame is written to `dump_path`.
@@ -553,11 +639,14 @@ analysis inputs.
 | `core_fill`           | float64\[\] | `gauss_fill` recomputed on the core sub-window |
 | `core_fwhm_frac`      | float64\[\] | `gauss_fwhm_frac` recomputed on the core sub-window |
 | `core_raw_asym_wide`  | float64\[\] | `raw_asym_wide` recomputed around the core sub-window |
-| `flag_l1`             | int32\[\]   | Live `decide_trigger()` result `{−1, 0, +1}` under current config |
+| `flag_l1`             | int32\[\]   | Pre-adjacency `decide_trigger()` result `{−1, 0, +1}` under current config |
+| `flag_l1_adj`         | int32\[\]   | Post-adjacency polarity actually used to drive the LASSO branch.  Equals `flag_l1` when `l1_adj_enable=false` |
+| `adj_donor_ch`        | int32\[\]   | Channel of the adjacent donor ROI when an originally `flag_l1==0` ROI was promoted, else −1 |
 
-`flag_l1` is the trigger that drove the LASSO branch for this ROI.
-Compare against legacy `flag` to see how the new gate diverges from the
-uBooNE single-ratio decision.
+`flag_l1_adj` is the trigger that drove the LASSO branch for this ROI.
+Compare against `flag_l1` to see ROIs the cross-channel adjacency pass
+recovered, and against legacy `flag` to see how the new gate diverges
+from the uBooNE single-ratio decision.
 
 ---
 
