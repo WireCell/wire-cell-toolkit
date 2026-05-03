@@ -109,31 +109,47 @@ The kernel file is generated offline by `wirecell-sigproc gen-l1sp-kernels`
 
 ### `compute_asym()` (anonymous helper, cxx)
 
-Single helper that runs five passes over the ROI region and returns an
-`AsymRecord` with all per-ROI features used by both the trigger and the
-calibration dump:
+Single helper that returns an `AsymRecord` with the per-ROI features used
+by the trigger, the adjacency-expansion pass, and the calibration dump.
+A `bool fill_dump_fields` parameter gates the dump-only computations so
+production (non-dump) runs only pay for what `decide_trigger()` and the
+adjacency pass actually consume.
 
-1. In-ROI accumulators (`temp_sum`, `temp1_sum`, `temp2_sum`, `max_val`,
-   `min_val`, threshold-gated by `adc_l1_threshold`).
-2. Per-ROI gauss `gmax`, `gauss_fill`, `gauss_fwhm_frac`.
-3. Wide-window decon energy fraction `roi_energy_frac` over
-   `[roi_start − energy_pad, roi_end + energy_pad]`.
-4. Wide-window raw asymmetry `raw_asym_wide` over
-   `[roi_start − raw_asym_pad, roi_end + raw_asym_pad]`, with positive /
-   negative samples gated by `raw_asym_eps`.
-5. Core sub-window scan: identifies `|gauss| > core_g_thr` runs and reports
-   the longest one's `(core_lo, core_hi, core_length, core_fill,
-   core_fwhm_frac, core_raw_asym_wide)` for the dump record.
+Always computed:
+
+- `gmax` — drives `decide_trigger()` and the adjacency loose precondition.
+- `raw_asym_wide` — wide-window raw asymmetry over
+  `[roi_start − raw_asym_pad, roi_end + raw_asym_pad]`, gated by
+  `raw_asym_eps`.  Used by the adjacency sign-aligned precondition.
+- `sub_windows` (`std::vector<SubInfo>`) — every `|gauss| > core_g_thr`
+  contiguous run inside the ROI with its `(run_len, abs_sum, fill, fwhm,
+  aw)`.  Walked once by `enumerate_subwindows()` and consumed by both
+  `decide_trigger()` (first-firing) and the best-by-score selection
+  below.  `ef` (energy fraction) is intentionally **not** in `SubInfo`:
+  it requires the wide ±`energy_pad` pad and is only consulted for runs
+  that survive `min_length`, so `decide_trigger` computes it on demand.
+- `core_length`, `core_raw_asym_wide` — selected by walking `sub_windows`
+  and picking `argmax(run_len · |aw|)`; used by the adjacency loose
+  precondition.
+
+Dump-only (computed only when `fill_dump_fields == true`):
+
+- In-ROI accumulators: `temp_sum`, `temp1_sum`, `temp2_sum`, `max_val`,
+  `min_val`, `temp_sum_pos/neg`, `n_above_pos/neg`, `argmax/argmin_tick`,
+  `sig_peak`, `sig_integral`, `gauss_abs_sum_roi`.
+- Per-ROI gauss shape: `gauss_fill`, `gauss_fwhm_frac`.
+- Wide-window decon energy fraction `roi_energy_frac` over
+  `[roi_start − energy_pad, roi_end + energy_pad]`.
+- Remaining best-sub-window fields: `core_lo`, `core_hi`, `core_fill`,
+  `core_fwhm_frac`.
 
 Definitions match `pdhd/nf_plot/find_long_decon_artifacts.py` (iter-7) so
 Python ↔ C++ values can be compared bit-for-bit during validation.
 
 ### `decide_trigger()` (anonymous helper, cxx)
 
-Independent of `compute_asym()`'s record so the dump and the live trigger
-can disagree without coupling.  Walks every `|gauss| > core_g_thr`
-sub-window in the ROI; for each sub-window computes its own
-`(run_len, fill, fwhm, ef, aw)` and fires if all of:
+Walks the precomputed `AsymRecord::sub_windows` (no second pass over the
+ROI ticks).  For each sub-window the multi-arm gate fires if all of:
 
 - `gmax >= l1_gmax_min`
 - `run_len >= l1_min_length`
@@ -154,16 +170,16 @@ Polarity = `sign(aw)` of the first firing sub-window.  Returns
 
 ### `l1_fit()` (cxx)
 
-Called per ROI.  Sequence:
+Called per ROI as the LASSO-applier; the trigger decision is precomputed
+in `operator()` pass 2 (so each ROI's features are computed exactly once)
+and passed in via the `polarity` argument.  Sequence:
 
-1. **Feature extraction** — `compute_asym()` once, populating the dump
-   record (used in dump mode and never mutated afterwards).
-2. **Trigger** — `decide_trigger()` returns `flag_l1 ∈ {0, ±1}`.
-3. **Basis selection** — `flag_l1 = +1` → `{m_lin_bipolar, m_lin_pos_unipolar}`;
-   `flag_l1 = -1` → `{m_lin_bipolar, m_lin_neg_unipolar}`.
-4. **Pass-through guard** — if the matching unipolar basis is null
+1. **Basis selection** — `polarity = +1` → `{m_lin_bipolar, m_lin_pos_unipolar}`;
+   `polarity = -1` → `{m_lin_bipolar, m_lin_neg_unipolar}`; `polarity = 0`
+   → pass-through (no LASSO).
+2. **Pass-through guard** — if the matching unipolar basis is null
    (config keys empty), early-return without modifying `newtrace`.
-5. **Segmented LASSO solve** — segments of `l1_seg_length` ticks; for each
+3. **Segmented LASSO solve** — segments of `l1_seg_length` ticks; for each
    segment call `build_G` then `lasso_solve`.  The W vector for each
    segment is loaded with pad_L=30 / pad_R=20 ticks of raw-ADC context
    around the segment's β span (clipped to the trace bounds) so boundary
@@ -171,7 +187,7 @@ Called per ROI.  Sequence:
    context only and never written back. Combine the two basis
    coefficients and rescale to electron units in one step:
    `l1_signal[t] = (β₀ * basis0_scale + β₁ * basis1_scale) * scaling_factor`.
-6. **Post-processing** — apply Gaussian smearing on `l1_signal` (which is
+4. **Post-processing** — apply Gaussian smearing on `l1_signal` (which is
    already in electron units; the smearing kernel is sum-normalised to 1
    so the integral is preserved), then floor at `l1_decon_limit` (also in
    electrons), remove peaks below `peak_threshold`/`mean_threshold`, write
@@ -187,12 +203,13 @@ zero-out branch are deliberately not ported — see Design decisions below.
    (samples above the noise threshold, padded ±`raw_pad` ticks).
 3. Merge and pad into ROI pairs per channel (±`roi_pad`).
 4. **Pass 2 — decide.** For every in-scope ROI compute the `AsymRecord`
-   features and run `decide_trigger` once.  Cache the per-ROI
-   `(polarity, AsymRecord)` keyed by `(channel, roi_index)`.
+   features (with `fill_dump_fields = m_dump_mode`) and run
+   `decide_trigger` once over the precomputed `sub_windows`.  Cache the
+   per-ROI `(polarity, AsymRecord)` keyed by `(channel, roi_index)`.
 5. **Pass 3 — adjacency expansion** (gated by `l1_adj_enable`, default
    ON; see "Cross-channel adjacency expansion" below).
 6. **Pass 4 — apply.**  For each ROI with a non-zero post-adjacency
-   polarity, call `l1_fit` with `polarity_override` so the LASSO writeback
+   polarity, call `l1_fit` with that polarity so the LASSO writeback
    honours the cached / promoted decision instead of recomputing it.
    Negative decon samples inside every ROI are zeroed in `newtrace`
    regardless of trigger result (matching `L1SPFilter` behaviour).

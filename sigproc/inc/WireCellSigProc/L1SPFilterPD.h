@@ -68,25 +68,21 @@ namespace WireCell {
             // the pre-built JSON+bz2 kernel file (see header comment).
             void init_resp();
 
-            // Classify one ROI by per-ROI shape features computed from raw ADC
-            // (adctrace) and the unmodified gauss decon signal (sigtrace), then
-            // if triggered run the LASSO fit on newtrace samples in
-            // [start_tick, end_tick).  ``plane`` is the induction-plane index
-            // (0=U, 1=V) used to select the appropriate kernel set.  Returns:
-            // 0=pass-through, +1=L1-positive, -1=L1-negative.
-            //
-            // ``polarity_override`` lets callers bypass the internal trigger
-            // gate and force a polarity decided elsewhere (e.g. by the cross-
-            // channel adjacency-expansion pass in ``operator()``).  Default
-            // sentinel value 2 means "decide internally" (legacy behaviour).
-            // Pass +1 / -1 to force a triggered LASSO with that polarity, or 0
-            // to short-circuit to pass-through without computing features.
+            // Run the LASSO fit on ``newtrace`` samples in [start_tick,
+            // end_tick) with the given pre-decided ``polarity``
+            // (+1=L1-positive, -1=L1-negative, 0=pass-through).  ``plane``
+            // is the induction-plane index (0=U, 1=V) used to select the
+            // appropriate kernel set.  The trigger decision is made by
+            // operator() in pass 2 (so per-ROI features are computed
+            // exactly once); this method is purely the LASSO-applier.
+            // Returns: the input polarity (or 0 if a required kernel is
+            // missing for the requested polarity).
             int l1_fit(std::shared_ptr<WireCell::Aux::SimpleTrace>& newtrace,
                        const std::shared_ptr<const WireCell::ITrace>& adctrace,
                        const std::shared_ptr<const WireCell::ITrace>& sigtrace,
                        int start_tick, int end_tick, int plane,
-                       std::vector<double>* lasso_unsmeared = nullptr,
-                       int polarity_override = 2);
+                       std::vector<double>* lasso_unsmeared,
+                       int polarity);
 
             // Write per-ROI waveform NPZ when m_wf_dump_path is non-empty.
             void dump_roi_waveforms(int frame_ident, int channel, int plane,
