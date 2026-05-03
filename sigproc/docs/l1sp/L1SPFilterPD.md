@@ -898,6 +898,76 @@ See `cfg/pgrapher/experiment/pdhd/sp.jsonnet` for the live PDHD wiring
 
 ---
 
+## Test coverage
+
+Added 2026-05-02 alongside the PDHD NF+SP chain.  All sit under
+`sigproc/test/` and are auto-discovered by `./wcb build --tests`.
+
+### Atomic doctest tests (no external fixtures)
+
+- `doctest_dfttools_inplace.cxx` — pins the `Aux::DftTools::fwd_inplace` /
+  `inv_inplace` overloads added in commit 4e37cd83 (Tier 1 FFT path).
+  Bit-equal vs the allocating overload, both axes, both directions.
+- `doctest_framemerger.cxx` — `replace` and `include` rules, per-trace
+  summary propagation, channel-mask union (commit 7d05a7cb).
+- `doctest_framesplitter.cxx` — broadcast + EOS pass-through.
+- `doctest_femb_noise.cxx` — `PDHD::Is_FEMB_noise` width gate, padding,
+  `nsigma` threshold, polarity (negative-only), boundary clamping
+  (commit 139d782f).
+- `doctest_l1sp_structural.cxx` — config schema, lazy `init_resp()`
+  (configure does not throw without a kernel), explicit `ValueError`
+  when `kernels_file` is empty.
+
+### Kernel-gated doctest (auto-skips if `WIRECELL_PATH` cannot resolve
+the production kernel)
+
+- `doctest_l1sp_kernel.cxx`:
+  - Loads `pdhd_l1sp_kernels.json.bz2`, runs `operator()` against a
+    minimal synthetic `raw`+`gauss` frame, asserts no exception and
+    that the output carries the L1SP output tag.
+  - Pins the `dump_mode` NPZ schema: every documented per-frame
+    scalar (`frame_ident`, `frame_time`, `call_count`, `n_rois`)
+    and per-ROI Tier 1/2/3 column (Tier 3 includes `gmax`,
+    `gauss_fill`, `gauss_fwhm_frac`, `roi_energy_frac`,
+    `raw_asym_wide`, `core_*`, `flag_l1`, `flag_l1_adj`,
+    `adj_donor_ch`).  Schema-pin only; no value assertions.
+
+### End-to-end APA1 regression (BATS)
+
+`check_pdhd_apa1_nf_sp.bats` runs the production
+`wct-nf-sp.jsonnet` graph on the APA1 raw frame
+(`run027409` / `evt 0`) and compares the SP output (`gauss1`,
+`wiener1` tags) against the in-tree fixture
+`sigproc/test/data/protodunehd-sp-frames-anode1.tar.bz2`.
+Tolerances: ≤1% per-channel RMS on ≥99% of channels, ≤0.1% per-tag
+absolute integral, soft `np.allclose(atol=1.0_ADC, rtol=1e-3)`.
+Observed run-to-run spread is bit-zero on this branch (commit
+47d16673 fixed the FFTW plan-cache nondeterminism), so the tolerances
+are conservative against future drift.
+
+The reference fixture was generated from current HEAD on 2026-05-02
+after the L1SP→`wiener1` routing change in commits 616cfcb2 and
+eab4e6ac.  Refresh it (and update `WCT_PDHD_REF` if you don't want
+to overwrite the in-tree copy) only when a deliberate algorithmic
+change is being baselined.
+
+Skip semantics: the BATS test skips cleanly when any of
+`WCT_PDHD_DATA` (raw input), `WCT_PDHD_DEPLOY` (jsonnet entry
+point), or the in-tree reference fixture is absent.
+
+### What's deliberately not tested at unit level
+
+- **`OmnibusSigProc` Tier 1 + 2 batched FFT path** — already
+  paired-run verified bit-identical on all 4 APAs (commits 4e37cd83,
+  42705188).  Covered empirically by the BATS test.
+- **L1SP Strategy-B trigger branches** (synthetic polarity /
+  adjacency) — modelling the trigger gates well enough to fabricate
+  inputs that hit each branch is brittle and high-cost.  The BATS
+  test on real data is strictly stronger evidence and already
+  caught the wiener-routing change on first run.
+- **`CoherentNoiseDump` round-trip** — diagnostic-only emitter, not
+  in the data flow; format is not a stable contract.
+
 ## Pending work
 
 1. **LASSO body tuning** — calibrate `l1_basis0_scale`, `l1_basis1_scale`
