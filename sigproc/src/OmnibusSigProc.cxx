@@ -1049,15 +1049,25 @@ void OmnibusSigProc::decon_2D_init(int plane)
         auto ewave = (*m_elecresponse).waveform_samples(tbins);
         const WireCell::Waveform::compseq_t elec = fwd_r2c(m_dft, ewave);
 
-        for (auto och : m_channel_range[plane]) {
-            // const auto& ch_resp = cr->channel_response(och.ident);
-            Waveform::realseq_t tch_resp = cr->channel_response(och.ident);
-            tch_resp.resize(m_fft_nticks, 0);
-            const WireCell::Waveform::compseq_t ch_elec = fwd_r2c(m_dft, tch_resp);
+        // Stack per-channel responses into one 2D array and run a
+        // single batched fwd_r2c along the time axis, instead of
+        // ~960 separate 1D r2c FFTs.
+        const auto& chans = m_channel_range[plane];
+        const size_t nchans = chans.size();
+        Array::array_xxf ch_resp_2d = Array::array_xxf::Zero(nchans, m_fft_nticks);
+        for (size_t i = 0; i < nchans; ++i) {
+            const Waveform::realseq_t& tch_resp = cr->channel_response(chans[i].ident);
+            const int n = std::min<int>(tch_resp.size(), m_fft_nticks);
+            for (int j = 0; j < n; ++j) {
+                ch_resp_2d(i, j) = tch_resp[j];
+            }
+        }
+        Array::array_xxc ch_elec_2d = fwd_r2c(m_dft, ch_resp_2d, 1);
 
-            const int irow = och.wire + m_pad_nwires[plane];
+        for (size_t i = 0; i < nchans; ++i) {
+            const int irow = chans[i].wire + m_pad_nwires[plane];
             for (int icol = 0; icol != m_c_data[plane].cols(); icol++) {
-                const auto four = ch_elec.at(icol);
+                const auto four = ch_elec_2d(i, icol);
                 if (std::abs(four) != 0) {
                     m_c_data[plane](irow, icol) *= elec.at(icol) / four;
                 }
