@@ -19,14 +19,15 @@ function(params, tools, override = {}) {
 
   // pDSP needs a per-anode sigproc
   //
-  // l1sp_pd_mode: '' (default, OFF) / 'process' (process triggered ROIs, still stubbed)
+  // l1sp_pd_mode: 'process' (default, ON; replaces gauss/wiener with L1SP fit)
   //               / 'dump' (calibration dump of per-ROI asymmetry quantities to NPZ)
+  //               / '' (OFF, bypass L1SP entirely — bare OmnibusSigProc output)
   // l1sp_pd_dump_path: directory to write per-event NPZ files when mode='dump'
   // l1sp_pd_planes: plane indices processed by L1SPFilterPD.
   //   null (default): APA0 → [0] (U only; V anomalous), APA1-3 → [0,1] (U+V).
   //   explicit list: overrides the per-APA default.
   make_sigproc(anode, name=null,
-               l1sp_pd_mode='',
+               l1sp_pd_mode='process',
                l1sp_pd_dump_path='',
                l1sp_pd_wf_dump_path='',
                l1sp_pd_planes=null)::
