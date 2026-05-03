@@ -156,11 +156,13 @@ function(params, tools, override = {}) {
       local gain_scale = if anode.data.ident < 4
                          then params.elec.gain / (7.8 * wc.mV / wc.fC)
                          else 1.0;
-      // TODO: generate per-region kernel JSON via
-      //   wirecell-sigproc gen-l1sp-kernels <field-response> <out>.json.bz2
-      // and populate the strings below as
-      //   "pdvd_l1sp_kernels_b.json.bz2" (ident<4) and
-      //   "pdvd_l1sp_kernels_t.json.bz2" (ident>=4).
+      // Per-region kernel JSON, generated offline via
+      //   wirecell-sigproc gen-l1sp-kernels -d pdvd-bottom  pdvd_bottom_l1sp_kernels.json.bz2
+      //   wirecell-sigproc gen-l1sp-kernels -d pdvd-top     pdvd_top_l1sp_kernels.json.bz2
+      // Both files live in wire-cell-data/ (resolve via WIRECELL_PATH).
+      // To switch from dump → process mode, set kernels_file to
+      //   "pdvd_bottom_l1sp_kernels.json.bz2" (ident<4) or
+      //   "pdvd_top_l1sp_kernels.json.bz2"    (ident>=4).
       // Until then, leave empty: dump mode does not invoke LASSO and
       // therefore does not need the kernel file (see L1SPFilterPD.cxx
       // operator(): init_resp() is guarded by !m_dump_mode).
