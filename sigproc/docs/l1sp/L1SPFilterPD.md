@@ -366,7 +366,7 @@ Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
 |-----|---------|---------|
 | `l1_seg_length` | `120` | Segment length (ticks) for the segmented solve |
 | `l1_scaling_factor` | `500` | Numerical conditioning on G; cancels in linear algebra |
-| `l1_lambda` | `10` | LASSO L1 regularization weight |
+| `l1_lambda` | `10` | LASSO L1 regularization weight; per-coefficient sparsity threshold in electrons = `l1_lambda × l1_scaling_factor` (default 5000 e) |
 | `l1_epsilon` | `0.05` | Convergence tolerance |
 | `l1_niteration` | `100000` | Maximum LASSO iterations |
 | `l1_resp_scale` | `1.0` | Kernel amplitude scale; must be 1.0 for ADC/electron kernels |

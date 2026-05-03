@@ -200,7 +200,7 @@ namespace WireCell {
 
             double m_l1_seg_length{120};
             double m_l1_scaling_factor{500};
-            double m_l1_lambda{10};        // doubled from 5 to compensate for 2× G (resp_scale 0.5→1)
+            double m_l1_lambda{10};        // sparsity prior; lambda_in_e = m_l1_lambda * m_l1_scaling_factor
             double m_l1_epsilon{0.05};
             double m_l1_niteration{100000};
             double m_l1_decon_limit{100};

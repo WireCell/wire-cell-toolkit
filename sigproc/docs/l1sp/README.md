@@ -42,6 +42,9 @@ where:
   time, computed separately for W- and V-planes.
 - **λ** (`l1_lambda`) — L1 regularization weight enforcing sparsity; physically
   appropriate because ionization from tracks occupies only a few ticks.
+  Because the writeback line multiplies β by `l1_scaling_factor`, the
+  per-coefficient sparsity threshold/shrinkage in electron units is
+  `λ_in_e = l1_lambda × l1_scaling_factor` (default 10 × 500 = 5000 e).
 
 The solver is `WireCell::LassoModel` (`util/inc/WireCellUtil/LassoModel.h`).
 The response interpolators `lin_W` / `lin_V` are built once in `init_resp()`
@@ -293,7 +296,7 @@ the jsonnet config block.
 |-----------|---------|---------|
 | `l1_seg_length` | 120 | Max ticks per LASSO segment |
 | `l1_scaling_factor` | 500 | Numerical conditioning on G (cancels in linear algebra) |
-| `l1_lambda` | 10 | L1 regularization strength |
+| `l1_lambda` | 10 | L1 regularization strength; per-coefficient threshold in electrons = `l1_lambda × l1_scaling_factor` (default 5000 e) |
 | `l1_epsilon` | 0.05 | LASSO convergence tolerance |
 | `l1_niteration` | 100000 | Max LASSO iterations |
 | `l1_decon_limit` | 100 | Per-tick floor (electrons) applied after smearing |

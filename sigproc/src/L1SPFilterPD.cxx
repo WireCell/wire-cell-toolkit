@@ -490,7 +490,7 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
 
     cfg["l1_seg_length"] = 120;
     cfg["l1_scaling_factor"] = 500;  // numerical conditioning only; cancels in linear algebra
-    cfg["l1_lambda"] = 10;           // doubled from 5: compensates for 2× larger G (resp_scale 0.5→1)
+    cfg["l1_lambda"] = 10;           // sparsity prior; lambda_in_e = l1_lambda * l1_scaling_factor
     cfg["l1_epsilon"] = 0.05;
     cfg["l1_niteration"] = 100000;
     cfg["l1_decon_limit"] = 100;
