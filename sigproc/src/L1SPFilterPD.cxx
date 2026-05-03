@@ -1246,7 +1246,8 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                     const auto& rec_c  = feats[i].rec;
                     if (rec_c.gmax        < lg_min)  continue;
                     if (rec_c.core_length < lcl_min) continue;
-                    if (std::fabs(rec_c.core_raw_asym_wide) < lasym) continue;
+                    // Asymmetry precondition is checked per-donor (sign-aligned)
+                    // inside the donor loop below.
 
                     int chosen_donor = -1;
                     int chosen_polarity = 0;
@@ -1263,6 +1264,19 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                             if (donor_hop < 0 || donor_hop >= hop) continue;
                             const int polarity_d = fit->second[j].polarity_final;
                             if (polarity_d == 0) continue;
+                            // Sign-aligned asym precondition: at least one of the
+                            // candidate's wide-window or core raw-asymmetry indicators
+                            // must point in the donor's polarity direction with
+                            // magnitude ≥ l1_adj_loose_asym_abs.  Using the larger of
+                            // |raw_asym_wide|, |core_raw_asym_wide| (when aligned with
+                            // the donor's sign) avoids dropping ROIs whose wide
+                            // asymmetry is strong but whose core asym is just below
+                            // threshold (e.g. ev 027409:0 APA3 U-plane ch 8354,
+                            // sandwiched between triggered chs 8353 and 8355).
+                            const double sign_d = (polarity_d > 0) ? +1.0 : -1.0;
+                            const double aw_a   = sign_d * rec_c.raw_asym_wide;
+                            const double craw_a = sign_d * rec_c.core_raw_asym_wide;
+                            if (std::max(aw_a, craw_a) < lasym) continue;
                             const int len_n = rois_n[j].second - rois_n[j].first + 1;
                             const bool overlap =
                                 (rois_c[i].first  - pad) <= (rois_n[j].second + pad) &&

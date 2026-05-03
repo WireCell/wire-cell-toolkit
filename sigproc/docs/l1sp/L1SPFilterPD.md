@@ -514,7 +514,7 @@ ROI `R_d` on channel `c±1` (with `0 ≤ donor_hop < current_hop`):
 | `l1_adj_len_ratio` | 0.40 | `min(len_c, len_d) / max(len_c, len_d) ≥ ratio` |
 | `l1_adj_loose_gmax` | 300 (gain-normalised) | `R_c.gmax ≥ this` |
 | `l1_adj_loose_core_len` | 2 ticks | `R_c.core_length ≥ this` |
-| `l1_adj_loose_asym_abs` | 0.30 | `|R_c.core_raw_asym_wide| ≥ this` |
+| `l1_adj_loose_asym_abs` | 0.30 | `max(aw_aligned, craw_aligned) ≥ this`, where `aw_aligned = sign(polarity_d) · raw_asym_wide` and likewise for `craw_aligned`. The candidate must have at least one wide- or core-window asymmetry pointing in the donor's polarity direction with magnitude ≥ this. |
 
 The loose preconditions on the candidate itself prevent noise ROIs
 from being swept up — they apply at *every* hop, so a chain can only
@@ -522,7 +522,17 @@ extend through ROIs that each independently look unipolar.  Defaults
 were first tuned on event 027409:0 APA0 (the original screenshot
 reproducer); the iterative cap was added after event 027409:0 APA1
 showed a 4-channel chain (ch 4071 ⇆ 4072 ⇆ 4073) where the second
-hop was needed to catch ch 4071.
+hop was needed to catch ch 4071.  The asymmetry precondition was
+loosened from `|core_raw_asym_wide|` to a sign-aligned
+`max(aw_aligned, craw_aligned)` after event 027409:0 APA3 U-plane
+showed ch 8354 sandwiched between two originally-triggered chs
+(8353, 8355) with `aw=+0.45` (matching donor sign) but
+`craw=+0.28` (just below the legacy 0.30 cut).  The sign-alignment
+also tightens the gate against wrong-sign promotions: in the same
+revision, three APA0 ev0 channels (223, 588, 590) that the legacy
+sign-agnostic check accepted are now rejected because their
+strongest asymmetry indicator points opposite to the donor's
+polarity (their LASSO fits would have been wrong-signed).
 
 ### Honest framing on prior art
 
