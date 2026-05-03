@@ -447,6 +447,21 @@ into the kernel file at build time by `gen-l1sp-kernels`.
 
 ---
 
+## Run-to-run determinism
+
+`L1SPFilterPD` is bit-deterministic for a fixed input frame (verified
+2026-05-02 on PDHD event 027409:0, APA0 and APA1, two consecutive
+runs each with `setarch -R`).  All `frame_gauss{N}` / `frame_wiener{N}`
+arrays compared bit-identical.  The component has no RNG, no
+threading, no hash-keyed containers (only `std::map<int,…>` /
+`std::set<int>` keyed by channel/tick), constructs a fresh
+`LassoModel` per ROI (no carry-over), and rides on the
+`FFTW_ESTIMATE | FFTW_UNALIGNED` plans established by
+`aux/src/FftwDFT.cxx` for upstream NF/SP determinism.  Eigen runs
+single-threaded (no OpenMP/TBB/MKL linked).
+
+---
+
 ## Calibration dump schema
 
 When `dump_mode=true` a single NPZ file per frame is written to `dump_path`.
