@@ -505,6 +505,71 @@ single-threaded (no OpenMP/TBB/MKL linked).
 
 ---
 
+## Performance profile
+
+Measured 2026-05-02 with gperftools (`libprofiler` LD_PRELOAD,
+`CPUPROFILE_FREQUENCY=400`) on a single-event NF+SP run of PDHD event
+027409:0 APA1 (U+V planes both processed by L1SP).  Total 4953
+samples ≈ 12 s of CPU.  Reported as percent of total wall-clock to
+calibrate where future optimisation effort is worth spending.
+
+| Component                          | %total | Notes                                                                          |
+|------------------------------------|--------|--------------------------------------------------------------------------------|
+| `OmnibusSigProc::operator()`       | 40.7%  | dominated by FFTs (`FftwDFT::inv1b` 12.9%, `fwd1b` 7.8%) inside `decon_2D_*`   |
+| `FrameFileSink` output             | 22.7%  | `BZ2_compressBlock` 17.1% — pure I/O cost, codec-bound                         |
+| `Main::initialize`                 | 16.7%  | one-time JSON / FieldResponse load (`Persist::load` 10.9%)                     |
+| `OmnibusNoiseFilter::operator()`   | 9.4%   | NF stage                                                                       |
+| `FrameFileSource` input            | 5.5%   | bzip2 decompression of input frames                                            |
+| **`L1SPFilterPD::operator()`**     | **1.6%** | breakdown below                                                              |
+
+Within `L1SPFilterPD::operator()` (78 samples = 1.6% of total):
+
+| Sub-cost                           | % of L1SP | % of total |
+|------------------------------------|-----------|------------|
+| `std::nth_element` (noise percentile in operator() setup) | 33%  | 0.52% |
+| `l1_fit` total                     | 22%       | 0.34%      |
+|  └ `LassoModel::Fit`               | 19%       | 0.30%      |
+| `std::set::insert` (`init_map` per-tick fills) | 21%  | 0.32%      |
+| `compute_asym` + `enumerate_subwindows`        | 2.6% | 0.04%      |
+
+### What this tells us
+
+L1SPFilterPD is a small slice of total runtime.  The shipped
+optimisations (single-copy noise percentile, walk-once `SubInfo`
+refactor, dump-only field gating, plane cache, single sigtraces
+sweep) extracted the bulk of the addressable budget here.
+
+Items that were considered but **deliberately dropped** after the
+profile because the addressable improvement is too small to justify:
+
+- `init_map` `std::set<int>` → bitmap.  Targets the 0.32% set-insert
+  bucket; saves ≤ 0.25% of total runtime even in the best case.
+- Consolidating `compute_asym` pass 1 with the sub-window walk.
+  Targets a 0.04% bucket; effectively zero return.
+- Replacing `.at(idx)` with `[idx]` in the per-ROI inner loops.
+  Same 0.04% ceiling; trades the bounds check for a sub-millisecond
+  win.
+
+If a future pass wants real wall-clock improvements, the targets
+are outside this component:
+
+- **`OmnibusSigProc` (40.7%)** — FFTW-bound; FFT-plan caching,
+  batched DFT calls, or replacing `inv_c2r`/`fwd_r2c` with a
+  faster path are the levers.
+- **`FrameFileSink` bzip2 compression (17.1%)** — swapping bzip2
+  for zstd or lz4 would likely save 10-15% of total wall-clock
+  outright.  Reader-side coordination required.
+- **Output tag duplication** — L1SP feeds the corrected gauss
+  trace under both the `gauss%d` and `wiener%d` output tags
+  (`cfg/pgrapher/experiment/pdhd/sp.jsonnet` `final_merger`).
+  Dropping the wiener copy if downstream no longer consumes it
+  would cut both output size and `FrameFileSink` time.
+
+Profile artifacts (raw `.prof` + `pprof --pdf` callgraph) live
+under `/home/xqian/tmp/l1sp_efficiency/` on the dev host.
+
+---
+
 ## Cross-channel adjacency expansion
 
 Long unipolar artifacts have spatial coherence: when a neighbouring
