@@ -919,10 +919,14 @@ two structural differences driven by PDVD's dual electronics:
 
 | Knob | Bottom (anodes 0–3) | Top (anodes 4–7) |
 |------|---------------------|------------------|
-| `kernels_file` | `pdvd_l1sp_kernels_b.json.bz2` (placeholder name; not yet generated) | `pdvd_l1sp_kernels_t.json.bz2` (placeholder name; not yet generated) |
+| `kernels_file` | `pdvd_bottom_l1sp_kernels.json.bz2` | `pdvd_top_l1sp_kernels.json.bz2` |
 | `kernels_scale` | `params.elec.gain / (7.8 mV/fC)` (runtime scalar gain knob) | `1.0` (fixed `JsonElecResponse`, no runtime gain knob) |
 | `gauss_filter` | `HfFilter:Gaus_wide_b` | `HfFilter:Gaus_wide_t` |
 | ADC threshold reference | 7.8 mV/fC bottom electronics | top JsonElecResponse + 1.52 postgain |
+
+Both kernel files live in `wire-cell-data/` and resolve via `WIRECELL_PATH`.
+Generated offline with `wirecell-sigproc gen-l1sp-kernels -d pdvd-bottom <out>.json.bz2`
+(and `-d pdvd-top` for the top region).
 
 The dispatch primitive is `local sfx = if anode.data.ident < 4 then '_b' else '_t';` —
 the same suffix used elsewhere in the PDVD jsonnet (e.g. `nf.jsonnet:24`,
@@ -932,10 +936,13 @@ selection.
 **Default mode is `'dump'`**, not `'process'` as on PDHD: the ROI tagger runs
 and writes per-event NPZ records, but `l1_fit()` is bypassed and the LASSO
 output is not written back into `gauss`/`wiener`.  This lets the user
-validate the tagger before the per-region kernel files exist.  To support
-this, `operator()` guards `init_resp()` with `if (!m_dump_mode)` so an empty
-`kernels_file` is allowed in dump mode (added 2026-05-03).  Switching to
-`'process'` requires populating `kernels_file` for both regions.
+validate the tagger and the per-region kernel files independently before
+turning on full replacement.  To support this, `operator()` guards
+`init_resp()` with `if (!m_dump_mode)` so the kernel JSON is not loaded
+until the user opts into process mode (added 2026-05-03).  Switching to
+`'process'` is a runtime decision (`-w <wf_dir>` on
+`pdvd/run_nf_sp_evt.sh`); no jsonnet change is needed since the
+`kernels_file` paths are already wired.
 
 PDHD's `l1_len_very_long=140` / `l1_asym_very_long=0.35` overrides are **not**
 applied on PDVD; the very-long arm is left at the C++ default (OFF) until

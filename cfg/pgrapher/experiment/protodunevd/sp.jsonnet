@@ -159,14 +159,16 @@ function(params, tools, override = {}) {
       // Per-region kernel JSON, generated offline via
       //   wirecell-sigproc gen-l1sp-kernels -d pdvd-bottom  pdvd_bottom_l1sp_kernels.json.bz2
       //   wirecell-sigproc gen-l1sp-kernels -d pdvd-top     pdvd_top_l1sp_kernels.json.bz2
-      // Both files live in wire-cell-data/ (resolve via WIRECELL_PATH).
-      // To switch from dump → process mode, set kernels_file to
-      //   "pdvd_bottom_l1sp_kernels.json.bz2" (ident<4) or
-      //   "pdvd_top_l1sp_kernels.json.bz2"    (ident>=4).
-      // Until then, leave empty: dump mode does not invoke LASSO and
-      // therefore does not need the kernel file (see L1SPFilterPD.cxx
-      // operator(): init_resp() is guarded by !m_dump_mode).
-      local kernels_file = '';
+      // Both files live in wire-cell-data/ (resolved via WIRECELL_PATH).
+      // The path is set unconditionally; in dump mode init_resp() is
+      // guarded by !m_dump_mode (L1SPFilterPD.cxx) so the file is not
+      // actually loaded until the user opts into process mode (-w on
+      // run_nf_sp_evt.sh).  Default behaviour therefore stays unchanged:
+      // tagger runs, no LASSO writeback, SP output bit-identical to a
+      // no-L1SP run.
+      local kernels_file = if anode.data.ident < 4
+                           then 'pdvd_bottom_l1sp_kernels.json.bz2'
+                           else 'pdvd_top_l1sp_kernels.json.bz2';
       local l1sp_node = g.pnode({
         type: 'L1SPFilterPD',
         name: 'l1sppd%d' % n,
