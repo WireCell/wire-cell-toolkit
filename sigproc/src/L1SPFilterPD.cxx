@@ -454,9 +454,8 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
 
     // Path (resolved via WIRECELL_PATH) to the JSON+bz2 file holding the
     // pre-built L1SP response kernels.  Generated offline with:
-    //   wirecell-sigproc gen-l1sp-kernels --gain '14*mV/fC' --shaping '2.2*us'
-    //     --postgain 1.2 --adc-per-mv 2.048 --coarse-time-offset '-8*us'
-    //     <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2
+    //   wirecell-sigproc gen-l1sp-kernels -d <detector>  <out>_l1sp_kernels.json.bz2
+    // where <detector> is pdhd | pdvd-bottom | pdvd-top | uboone | sbnd.
     // See wire-cell-python/wirecell/sigproc/l1sp.py for the schema.
     cfg["kernels_file"] = "";
     // Multiplier applied to every loaded kernel amplitude at init_resp() time.
@@ -726,7 +725,7 @@ void L1SPFilterPD::init_resp()
     if (m_kernels_file.empty()) {
         THROW(ValueError() << errmsg{"L1SPFilterPD: 'kernels_file' is required. "
               "Generate one with: wirecell-sigproc gen-l1sp-kernels "
-              "<field-response> <output>.json.bz2"});
+              "-d <detector> <output>.json.bz2"});
     }
 
     auto top = Persist::load(m_kernels_file);   // resolves WIRECELL_PATH; .json.bz2 OK
@@ -1040,7 +1039,12 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         return true;
     }
 
-    init_resp();
+    // Kernels are only consumed by l1_fit().  In dump mode l1_fit is never
+    // called, so allow operation with an empty kernels_file (useful for
+    // ROI-tagger validation before kernels are generated).
+    if (!m_dump_mode) {
+        init_resp();
+    }
 
     auto adctraces = Aux::tagged_traces(in, m_adctag);
     auto sigtraces = Aux::tagged_traces(in, m_sigtag);

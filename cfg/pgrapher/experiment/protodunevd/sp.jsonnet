@@ -11,14 +11,24 @@ function(params, tools, override = {}) {
 
   // pDSP needs a per-anode sigproc
   //
-  // l1sp_pd_mode: '' (default, OFF) / 'process' (process triggered ROIs, still stubbed)
-  //               / 'dump' (calibration dump of per-ROI asymmetry quantities to NPZ)
+  // l1sp_pd_mode: 'dump' (default; ROI tagger ON, LASSO writeback OFF — for
+  //               tagger validation prior to kernel generation)
+  //               / 'process' (full L1SP fit and replacement; requires
+  //               kernels_file populated below)
+  //               / '' (OFF, bypass L1SP entirely — bare OmnibusSigProc output)
   // l1sp_pd_dump_path: directory to write per-event NPZ files when mode='dump'
+  // l1sp_pd_wf_dump_path: directory to write per-triggered-ROI waveform NPZ
+  //               files when mode='process' (raw/decon/lasso/smeared)
   // l1sp_pd_planes: plane indices processed by L1SPFilterPD (default [0,1] = U+V)
+  // l1sp_pd_adj_enable / l1sp_pd_adj_max_hops: cross-channel adjacency expansion
+  //               knobs, mirror the PDHD defaults (see sigproc/docs/l1sp/L1SPFilterPD.md).
   make_sigproc(anode, name=null,
-               l1sp_pd_mode='',
+               l1sp_pd_mode='dump',
                l1sp_pd_dump_path='',
-               l1sp_pd_planes=[0, 1])::
+               l1sp_pd_wf_dump_path='',
+               l1sp_pd_planes=[0, 1],
+               l1sp_pd_adj_enable=true,
+               l1sp_pd_adj_max_hops=3)::
     // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
     // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
     local sfx = if anode.data.ident < 4 then '_b' else '_t';
@@ -134,31 +144,72 @@ function(params, tools, override = {}) {
     if l1sp_pd_mode == '' then sp_node
     else
       local n = anode.data.ident;
+      // Per-region (top vs bottom) L1SP parameters.  Bottom = anodes 0..3
+      // (params.elec[0], 7.8 mV/fC reference); top = anodes 4..7
+      // (JsonElecResponse, fixed reference, no runtime gain knob).
+      //
+      // Raw-ADC thresholds and kernel amplitudes are tuned at the per-region
+      // reference electronics and scale with runtime FE gain via
+      // gain_scale.  Deconvolved-domain thresholds (l1_gmax_min, asym ratios,
+      // lengths, energy fractions) operate on gain-normalised signals and
+      // are gain-invariant — same convention as chndb-base.
+      local gain_scale = if anode.data.ident < 4
+                         then params.elec.gain / (7.8 * wc.mV / wc.fC)
+                         else 1.0;
+      // TODO: generate per-region kernel JSON via
+      //   wirecell-sigproc gen-l1sp-kernels <field-response> <out>.json.bz2
+      // and populate the strings below as
+      //   "pdvd_l1sp_kernels_b.json.bz2" (ident<4) and
+      //   "pdvd_l1sp_kernels_t.json.bz2" (ident>=4).
+      // Until then, leave empty: dump mode does not invoke LASSO and
+      // therefore does not need the kernel file (see L1SPFilterPD.cxx
+      // operator(): init_resp() is guarded by !m_dump_mode).
+      local kernels_file = '';
       local l1sp_node = g.pnode({
         type: 'L1SPFilterPD',
         name: 'l1sppd%d' % n,
         data: {
           dft: wc.tn(tools.dft),
           anode: wc.tn(anode),
-          fields: wc.tn(tools.field),
+          kernels_file: kernels_file,
           adctag: 'raw%d' % n,
           sigtag: 'gauss%d' % n,
           outtag: 'gauss%d' % n,
           process_planes: l1sp_pd_planes,
+          // ADC-domain thresholds and kernel amplitudes, scaled to runtime FE gain.
+          // The PDHD-tuned numerical defaults (20/10/160 at the 14 mV/fC reference)
+          // are reused as a starting point; PDVD calibration may retune them
+          // once dump-mode tagger validation is complete.
+          kernels_scale:       gain_scale,
+          l1_raw_asym_eps:     20.0 * gain_scale,
+          raw_ROI_th_adclimit: 10.0 * gain_scale,
+          adc_sum_threshold:  160.0 * gain_scale,
           // Derive time-domain smearing kernel by IFFT of the SP Gaus_wide
           // filter so both are driven by the same sigma.  Use the per-side
           // (_b/_t) instance to match this anode's OmnibusSigProc.
           gauss_filter: 'HfFilter:Gaus_wide' + sfx,
+          // Cross-channel adjacency expansion (default ON, hops=3 — PDHD
+          // defaults).  PDVD-side calibration may justify different values.
+          l1_adj_enable: l1sp_pd_adj_enable,
+          l1_adj_max_hops: l1sp_pd_adj_max_hops,
+          // PDHD's "very-long" arm (l1_len_very_long=140, l1_asym_very_long=0.35)
+          // is left at the C++ default (OFF) here; revisit after PDVD tagger
+          // validation if long-but-moderate-asym artifacts are observed.
           dump_mode: l1sp_pd_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
+          waveform_dump_path: l1sp_pd_wf_dump_path,
         },
-      }, nin=1, nout=1, uses=[tools.dft, anode, tools.field]);
+      }, nin=1, nout=1, uses=[tools.dft, anode]);
       // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.
       // OmnibusSigProc drops raw traces from its output, so we split the
       // input frame, run SP on one copy, then merge raw+gauss for L1SP.
-      // The final output (sigsplit port 0 = gauss+wiener) is bit-identical
-      // to a run without L1SP; L1SP's output is discarded via l1sp_sink.
+      // After L1SP, a final merger replaces BOTH the gauss and wiener
+      // traces of the original sp output with the L1SP-modified gauss
+      // (the L1SP fit is the canonical deconvolved signal post-L1, so
+      // both deconvolved tags should reflect it).  In dump mode the L1SP
+      // node passes the frame through unchanged, so the merger output is
+      // bit-identical to a no-L1SP run.
       local rawsplit     = g.pnode({type: 'FrameSplitter', name: 'rawsplit%d' % n}, nin=1, nout=2);
       local sigsplit     = g.pnode({type: 'FrameSplitter', name: 'sigsplit%d' % n}, nin=1, nout=2);
       local rawsigmerge  = g.pnode({
@@ -171,19 +222,29 @@ function(params, tools, override = {}) {
           ],
         },
       }, nin=2, nout=1);
-      local l1sp_sink    = g.pnode({type: 'DumpFrames', name: 'l1spsnk%d' % n}, nin=1, nout=0);
+      local final_merger = g.pnode({
+        type: 'FrameMerger', name: 'l1spfinal%d' % n,
+        data: {
+          rule: 'replace',
+          mergemap: [
+            ['gauss%d' % n, 'gauss%d'  % n, 'gauss%d'  % n],   // L1SP gauss -> output gauss
+            ['gauss%d' % n, 'wiener%d' % n, 'wiener%d' % n],   // L1SP gauss -> output wiener
+          ],
+        },
+      }, nin=2, nout=1);
       g.intern(
         innodes=[rawsplit],
-        centernodes=[sp_node, sigsplit, rawsigmerge, l1sp_node, l1sp_sink],
+        centernodes=[sp_node, sigsplit, rawsigmerge, l1sp_node, final_merger],
         edges=[
-          g.edge(rawsplit,    sp_node,      0, 0),
-          g.edge(sp_node,     sigsplit,     0, 0),
-          g.edge(sigsplit,    rawsigmerge,  1, 0),
-          g.edge(rawsplit,    rawsigmerge,  1, 1),
-          g.edge(rawsigmerge, l1sp_node,   0, 0),
-          g.edge(l1sp_node,   l1sp_sink,   0, 0),
+          g.edge(rawsplit,     sp_node,       0, 0),
+          g.edge(sp_node,      sigsplit,      0, 0),
+          g.edge(sigsplit,     rawsigmerge,   1, 0),
+          g.edge(rawsplit,     rawsigmerge,   1, 1),
+          g.edge(rawsigmerge,  l1sp_node,     0, 0),
+          g.edge(l1sp_node,    final_merger,  0, 0),
+          g.edge(sigsplit,     final_merger,  0, 1),
         ],
-        oports=[sigsplit.oports[0]],
+        oports=[final_merger.oports[0]],
         name='sigproc_l1sppd_%d' % n
       ),
 

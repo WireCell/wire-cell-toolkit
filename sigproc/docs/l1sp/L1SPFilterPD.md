@@ -320,15 +320,30 @@ with per-plane W shifts auto-derived from the zero-crossing calculation,
 plus a top-level `meta.frame_origin_us` (= reference plane's bipolar
 zero-crossing, V plane by default) used as the global LASSO frame origin.
 Regenerate when the PDHD field response or electronics parameters change.
-Use the PDHD-correct calibration constants — `postgain=1.0` and
-`adc-per-mv = 16384/1400 ≈ 11.703` (14-bit ADC, 1.4 V fullscale):
+Use the `-d/--detector` preset (recommended; reads detector-specific
+defaults from `wirecell/sigproc/track_response_defaults.jsonnet`):
+
+```
+wirecell-sigproc gen-l1sp-kernels -d pdhd        pdhd_l1sp_kernels.json.bz2
+wirecell-sigproc gen-l1sp-kernels -d pdvd-bottom pdvd_bottom_l1sp_kernels.json.bz2
+wirecell-sigproc gen-l1sp-kernels -d pdvd-top    pdvd_top_l1sp_kernels.json.bz2
+```
+
+`pdvd-top` uses a JsonElecResponse JSON.bz2 (cold-box characterised
+electronics); `pdhd` and `pdvd-bottom` use the parametric cold model
+with `gain` / `shaping`.  All three add an output-window pad on PDVD
+(160 µs) so the bipolar induction tail does not wrap circularly.
+
+The flat-flag form is still supported when overriding individual
+parameters; the FR file moves to a `--fr` option:
 
 ```
 wirecell-sigproc gen-l1sp-kernels \
+    --fr dune-garfield-1d565.json.bz2 \
     --gain '14*mV/fC' --shaping '2.2*us' \
     --postgain 1.0 --adc-per-mv 11.7028571 \
     --coarse-time-offset '-8*us' \
-    dune-garfield-1d565.json.bz2  pdhd_l1sp_kernels.json.bz2
+    pdhd_l1sp_kernels.json.bz2
 ```
 
 Validate the output with:
@@ -359,14 +374,15 @@ python3 pdhd/nf_plot/track_response_l1sp_kernels.py \
 The kernel file is **required** — `init_resp()` throws if the key is empty.
 Generate it offline with:
 ```
-wirecell-sigproc gen-l1sp-kernels \
-    --gain '14*mV/fC' --shaping '2.2*us' \
-    --postgain 1.2 --adc-per-mv 2.048 \
-    --coarse-time-offset '-8*us' \
-    <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2
+wirecell-sigproc gen-l1sp-kernels -d <detector>  <out>_l1sp_kernels.json.bz2
 ```
+where `<detector>` is one of `pdhd`, `pdvd-bottom`, `pdvd-top`,
+`uboone`, `sbnd` (presets in
+`wirecell/sigproc/track_response_defaults.jsonnet`).
 See `wire-cell-python/wirecell/sigproc/l1sp.py` for the schema.
-The PDHD file is `pdhd_l1sp_kernels.json.bz2`; place it in `wire-cell-data`.
+The detector kernels live in `wire-cell-data/`:
+`pdhd_l1sp_kernels.json.bz2`, `pdvd_top_l1sp_kernels.json.bz2`,
+`pdvd_bottom_l1sp_kernels.json.bz2`.
 
 ### ROI building
 
@@ -895,6 +911,40 @@ local l1spfilterpd = g.pnode({
 See `cfg/pgrapher/experiment/pdhd/sp.jsonnet` for the live PDHD wiring
 (the `l1sp_pd_mode != ''` branch) and the per-APA `process_planes` defaults
 (APA0 → `[0]` U only; APA1-3 → `[0, 1]` U+V).
+
+### PDVD wiring
+
+`cfg/pgrapher/experiment/protodunevd/sp.jsonnet` mirrors the PDHD wiring with
+two structural differences driven by PDVD's dual electronics:
+
+| Knob | Bottom (anodes 0–3) | Top (anodes 4–7) |
+|------|---------------------|------------------|
+| `kernels_file` | `pdvd_l1sp_kernels_b.json.bz2` (placeholder name; not yet generated) | `pdvd_l1sp_kernels_t.json.bz2` (placeholder name; not yet generated) |
+| `kernels_scale` | `params.elec.gain / (7.8 mV/fC)` (runtime scalar gain knob) | `1.0` (fixed `JsonElecResponse`, no runtime gain knob) |
+| `gauss_filter` | `HfFilter:Gaus_wide_b` | `HfFilter:Gaus_wide_t` |
+| ADC threshold reference | 7.8 mV/fC bottom electronics | top JsonElecResponse + 1.52 postgain |
+
+The dispatch primitive is `local sfx = if anode.data.ident < 4 then '_b' else '_t';` —
+the same suffix used elsewhere in the PDVD jsonnet (e.g. `nf.jsonnet:24`,
+`sp.jsonnet:24`) for region-specific filter / channel-noise-DB / electronics-response
+selection.
+
+**Default mode is `'dump'`**, not `'process'` as on PDHD: the ROI tagger runs
+and writes per-event NPZ records, but `l1_fit()` is bypassed and the LASSO
+output is not written back into `gauss`/`wiener`.  This lets the user
+validate the tagger before the per-region kernel files exist.  To support
+this, `operator()` guards `init_resp()` with `if (!m_dump_mode)` so an empty
+`kernels_file` is allowed in dump mode (added 2026-05-03).  Switching to
+`'process'` requires populating `kernels_file` for both regions.
+
+PDHD's `l1_len_very_long=140` / `l1_asym_very_long=0.35` overrides are **not**
+applied on PDVD; the very-long arm is left at the C++ default (OFF) until
+PDVD-side calibration justifies enabling it.
+
+The runtime entry point (`pdvd/run_nf_sp_evt.sh`) provides flags that mirror
+PDHD's: `-c <calib_dir>` overrides the auto-generated calibration dump
+location, `-w <wf_dir>` switches to process mode + per-ROI waveform dump
+(requires kernels), `-x` disables L1SP entirely.
 
 ---
 

@@ -14,11 +14,9 @@
  * │ the wire-cell-python tool and shipped as a JSON+bz2 file (one per        │
  * │ detector, e.g. wire-cell-data/pdhd_l1sp_kernels.json.bz2):               │
  * │                                                                          │
- * │   wirecell-sigproc gen-l1sp-kernels \                                    │
- * │     --gain '14*mV/fC' --shaping '2.2*us' \                               │
- * │     --postgain 1.2 --adc-per-mv 2.048 \                                  │
- * │     --coarse-time-offset '-8*us' \                                       │
- * │     <field-response.json.bz2>  <out>_l1sp_kernels.json.bz2               │
+ * │   wirecell-sigproc gen-l1sp-kernels -d <detector>  \                     │
+ * │       <out>_l1sp_kernels.json.bz2                                        │
+ * │   where <detector> is pdhd | pdvd-bottom | pdvd-top | uboone | sbnd      │
  * │                                                                          │
  * │ See wirecell/sigproc/l1sp.py for the schema and the reference            │
  * │ algorithm.  pdhd/nf_plot/track_response_l1sp_kernels.py validates a      │
