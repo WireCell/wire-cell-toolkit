@@ -210,6 +210,22 @@ namespace WireCell {
             int    m_l1_len_very_long{std::numeric_limits<int>::max()};
             double m_l1_asym_very_long{1.0};
 
+            // ── PDVD-only opt-in track veto (default OFF → PDHD bit-identical)
+            // Applied per-sub-window AFTER decide_trigger's arms fire.  The
+            // veto rejects sub-windows that look like real prolonged tracks
+            // (long, moderate-asym, or medium-with-track-shape) to suppress
+            // residual FPs observed against
+            // pdvd/sp_plot/handscan_039324_anode0.csv on PDVD bottom anode 0.
+            // Enable in cfg/pgrapher/experiment/protodunevd/sp.jsonnet via
+            //   l1_pdvd_track_veto_enable: true
+            // PDHD config never sets this, so PDHD trigger output is unchanged.
+            bool   m_l1_pdvd_track_veto_enable{false};
+            double m_l1_pdvd_track_high_asym{0.85};   // |aw| escape: tracks rarely this asym
+            int    m_l1_pdvd_track_long_cl{170};      // long-only arm: any cl above this
+            int    m_l1_pdvd_track_med_cl{100};       // shape-arm: shorter floor
+            double m_l1_pdvd_track_med_fill{0.40};    // shape-arm: high fill suggests multi-peak
+            double m_l1_pdvd_track_med_fwhm{0.40};    // shape-arm: high fwhm suggests multi-peak
+
             // ── Cross-channel adjacency expansion (default ON) ───────────────
             // For an in-scope ROI on channel c that did NOT trigger by itself,
             // promote its polarity to that of an adjacent (c±1) ROI which did

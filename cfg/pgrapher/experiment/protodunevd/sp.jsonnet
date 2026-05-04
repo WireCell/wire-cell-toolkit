@@ -203,7 +203,37 @@ function(params, tools, override = {}) {
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
           waveform_dump_path: l1sp_pd_wf_dump_path,
-        },
+        // ── PDVD-tuned trigger-gate overrides (BOTTOM anodes only) ──────
+        // Tuned against pdvd/sp_plot/handscan_039324_anode0.csv (run
+        // 39324 events 0-5, bottom anode 0).  See pdvd/sp_plot/
+        // eval_l1sp_trigger_pdvd.py for the validation harness.
+        // Evaluated per-ROI on the C++ NPZ dumps: these four overrides
+        // drop the per-ROI FP count from 70 → 62 with no loss of GT-
+        // positive hits (27/28).  l1_asym_mod is left at C++ default
+        // 0.40 even though the Python cluster-level sweep prefers 0.50:
+        // at the per-ROI gate, raising it kills ch 386 of the evt-0
+        // U 386-388 cluster (per-ROI asym=0.43; cluster max-asym=0.56,
+        // but C++ checks each ROI individually).  Top anodes (n >= 4)
+        // are left at the PDHD-inherited C++ defaults pending their own
+        // hand-scan validation — toggle on by extending the conditional.
+        } + (if n < 4 then {
+          l1_len_long_mod:         180,     // C++ default 100
+          l1_len_fill_shape:       90,      // C++ default 50
+          l1_fill_shape_fill_thr:  0.30,    // C++ default 0.38
+          l1_fill_shape_fwhm_thr:  0.25,    // C++ default 0.30
+          // PDVD-only opt-in track veto (added in this commit).
+          // Rejects sub-windows that look like real prolonged tracks rather
+          // than L1SP unipolar lobes — the residual FP class against
+          // pdvd/sp_plot/handscan_039324_anode0.csv (evt 0 U 82-87, 89-91,
+          // 96; evt 3 U 319-331).  PDHD never sets this so its trigger
+          // remains bit-identical to the pre-veto behaviour.
+          l1_pdvd_track_veto_enable: true,
+          l1_pdvd_track_high_asym:   0.85,
+          l1_pdvd_track_long_cl:     170,
+          l1_pdvd_track_med_cl:      100,
+          l1_pdvd_track_med_fill:    0.40,
+          l1_pdvd_track_med_fwhm:    0.40,
+        } else {}),
       }, nin=1, nout=1, uses=[tools.dft, anode]);
       // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.
       // OmnibusSigProc drops raw traces from its output, so we split the

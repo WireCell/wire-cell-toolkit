@@ -375,7 +375,40 @@ struct TriggerCfg {
     double fill_shape_fill_thr, fill_shape_fwhm_thr;
     int    len_very_long;       // 5th arm: long-ROI moderate-asym
     double asym_very_long;
+
+    // ── PDVD-only opt-in track-veto (post-trigger, per sub-window) ──────
+    // OFF by default → PDHD bit-identical.  Enabled in
+    // cfg/pgrapher/experiment/protodunevd/sp.jsonnet for bottom anodes.
+    // A sub-window that passes the trigger arms is REJECTED if it looks
+    // like a real prolonged track (long, moderate-asym, multi-peak shape):
+    //   |aw| < pdvd_track_high_asym  AND  (
+    //       run_len >= pdvd_track_long_cl                                OR
+    //       run_len >= pdvd_track_med_cl  AND  fill >= pdvd_track_med_fill
+    //                                      AND  fwhm >= pdvd_track_med_fwhm
+    //   )
+    // Tuned against pdvd/sp_plot/handscan_039324_anode0.csv (run 39324
+    // events 0-5, anode 0); see pdvd/sp_plot/eval_l1sp_trigger_pdvd.py.
+    bool   pdvd_track_veto_enable;
+    double pdvd_track_high_asym;
+    int    pdvd_track_long_cl;
+    int    pdvd_track_med_cl;
+    double pdvd_track_med_fill;
+    double pdvd_track_med_fwhm;
 };
+
+// Returns true if the sub-window matches the PDVD track signature (long
+// or medium-with-shape, both at moderate asym).  Returns false trivially
+// when the veto is disabled (PDHD path).
+inline bool pdvd_track_veto_hits(const SubInfo& s, double aabs, const TriggerCfg& cfg)
+{
+    if (!cfg.pdvd_track_veto_enable) return false;
+    if (aabs >= cfg.pdvd_track_high_asym) return false;
+    if (s.run_len >= cfg.pdvd_track_long_cl) return true;
+    if (s.run_len >= cfg.pdvd_track_med_cl &&
+        s.fill    >= cfg.pdvd_track_med_fill &&
+        s.fwhm    >= cfg.pdvd_track_med_fwhm) return true;
+    return false;
+}
 
 // Per-sub-window trigger walk.  Walks the precomputed SubInfo vector and
 // tests the multi-arm gate against each run's own features; ``ef`` (energy
@@ -434,7 +467,13 @@ int decide_trigger(const std::vector<SubInfo>& subs,
              s.fwhm <= cfg.fill_shape_fwhm_thr &&
              aabs >= cfg.asym_mod) ||
             (s.run_len >= cfg.len_very_long  && aabs >= cfg.asym_very_long);
-        if (fire) return (s.aw > 0.0) ? +1 : -1;
+        if (!fire) continue;
+        // PDVD opt-in: reject sub-windows whose shape matches a real
+        // prolonged track rather than an L1SP unipolar lobe.  No-op
+        // (returns false immediately) when the veto is disabled, so
+        // PDHD's gate is bit-identical.
+        if (pdvd_track_veto_hits(s, aabs, cfg)) continue;
+        return (s.aw > 0.0) ? +1 : -1;
     }
     return 0;
 }
@@ -511,6 +550,15 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     // Very-long arm (default OFF; see header comment).  PDHD overrides via sp.jsonnet.
     cfg["l1_len_very_long"]         = m_l1_len_very_long;
     cfg["l1_asym_very_long"]        = m_l1_asym_very_long;
+
+    // PDVD-only opt-in track veto (default OFF → PDHD bit-identical).
+    // PDVD enables it via cfg/.../protodunevd/sp.jsonnet for bottom anodes.
+    cfg["l1_pdvd_track_veto_enable"] = m_l1_pdvd_track_veto_enable;
+    cfg["l1_pdvd_track_high_asym"]   = m_l1_pdvd_track_high_asym;
+    cfg["l1_pdvd_track_long_cl"]     = m_l1_pdvd_track_long_cl;
+    cfg["l1_pdvd_track_med_cl"]      = m_l1_pdvd_track_med_cl;
+    cfg["l1_pdvd_track_med_fill"]    = m_l1_pdvd_track_med_fill;
+    cfg["l1_pdvd_track_med_fwhm"]    = m_l1_pdvd_track_med_fwhm;
 
     // Cross-channel adjacency expansion (default OFF; see header).
     cfg["l1_adj_enable"]         = m_l1_adj_enable;
@@ -600,6 +648,13 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_l1_fill_shape_fwhm_thr = get(cfg, "l1_fill_shape_fwhm_thr", m_l1_fill_shape_fwhm_thr);
     m_l1_len_very_long       = get(cfg, "l1_len_very_long",       m_l1_len_very_long);
     m_l1_asym_very_long      = get(cfg, "l1_asym_very_long",      m_l1_asym_very_long);
+
+    m_l1_pdvd_track_veto_enable = get(cfg, "l1_pdvd_track_veto_enable", m_l1_pdvd_track_veto_enable);
+    m_l1_pdvd_track_high_asym   = get(cfg, "l1_pdvd_track_high_asym",   m_l1_pdvd_track_high_asym);
+    m_l1_pdvd_track_long_cl     = get(cfg, "l1_pdvd_track_long_cl",     m_l1_pdvd_track_long_cl);
+    m_l1_pdvd_track_med_cl      = get(cfg, "l1_pdvd_track_med_cl",      m_l1_pdvd_track_med_cl);
+    m_l1_pdvd_track_med_fill    = get(cfg, "l1_pdvd_track_med_fill",    m_l1_pdvd_track_med_fill);
+    m_l1_pdvd_track_med_fwhm    = get(cfg, "l1_pdvd_track_med_fwhm",    m_l1_pdvd_track_med_fwhm);
 
     m_l1_adj_enable         = get(cfg, "l1_adj_enable",         m_l1_adj_enable);
     m_l1_adj_overlap_pad    = get(cfg, "l1_adj_overlap_pad",    m_l1_adj_overlap_pad);
@@ -1183,6 +1238,9 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         m_l1_len_long_mod, m_l1_len_long_loose, m_l1_len_fill_shape,
         m_l1_fill_shape_fill_thr, m_l1_fill_shape_fwhm_thr,
         m_l1_len_very_long, m_l1_asym_very_long,
+        m_l1_pdvd_track_veto_enable, m_l1_pdvd_track_high_asym,
+        m_l1_pdvd_track_long_cl, m_l1_pdvd_track_med_cl,
+        m_l1_pdvd_track_med_fill, m_l1_pdvd_track_med_fwhm,
     };
 
     // sigtrace_ch_map was built earlier in the same pass that seeded init_map.

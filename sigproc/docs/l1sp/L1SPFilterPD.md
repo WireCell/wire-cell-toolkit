@@ -165,8 +165,51 @@ ROI ticks).  For each sub-window the multi-arm gate fires if all of:
     (very-long arm — OFF by C++ default; PDHD enables at `(140, 0.35)` via
     `cfg/pgrapher/experiment/pdhd/sp.jsonnet`).
 
-Polarity = `sign(aw)` of the first firing sub-window.  Returns
-`{−1, 0, +1}`.
+A fired sub-window is then handed to `pdvd_track_veto_hits()` (default
+no-op — see "PDVD-only opt-in track veto" below).  If the veto rejects
+it, the loop continues to the next sub-window.
+
+Polarity = `sign(aw)` of the first firing (and non-vetoed) sub-window.
+Returns `{−1, 0, +1}`.
+
+### PDVD-only opt-in track veto (`pdvd_track_veto_hits()`)
+
+PDVD bottom anode 0 turns up four prolonged-track FPs that the five
+trigger arms cannot cleanly suppress with threshold tuning alone:
+they fire `asym_strong` at `|aw|` in 0.69–0.85 (matching real
+high-asym TPs in the same range), or fire the length-only arms with
+multi-channel spread.  See `pdvd/sp_plot/handscan_039324_anode0.csv`
+(run 39324 events 0-5, anode 0) for the four reference cases.
+
+The veto is a per-sub-window **post-trigger** rejection that adds
+shape evidence to the existing arms.  It is OFF by C++ default (so
+PDHD `decide_trigger` is bit-identical to before this change) and
+enabled via the PDVD `data:` block (`l1_pdvd_track_veto_enable:
+true`).  The check is:
+
+```
+|aw| < l1_pdvd_track_high_asym  AND  (
+  run_len >= l1_pdvd_track_long_cl
+  OR (run_len >= l1_pdvd_track_med_cl
+      AND fill   >= l1_pdvd_track_med_fill
+      AND fwhm   >= l1_pdvd_track_med_fwhm)
+)
+```
+
+Defaults (see "Configuration parameters" below): `high_asym=0.85,
+long_cl=170, med_cl=100, med_fill=0.40, med_fwhm=0.40`.  The first
+arm catches long sub-windows whose `|aw|` is just above the trigger
+floor; the second arm catches medium-length sub-windows that look
+multi-peak (high fill+fwhm) at moderate asym.  Real L1SP unipolar
+lobes either land above `0.85 |aw|` (escape) or stay below 100 ticks
+(too short to trigger the veto).
+
+Validated against `handscan_039324_anode0.csv`: 7 prolonged-track
+fires suppressed (4 standalone clusters + 3 adjacency-coupled
+sub-fires); 0 GT-positive hits lost (each cluster always has another
+firing ROI that escapes the veto).  Aggregate per-ROI metrics on the
+PDVD bottom anode 0 NPZ dumps moved from `F1=0.862` (4 jsonnet
+threshold tweaks alone) to `F1=0.923` (with veto enabled).
 
 ### `l1_fit()` (cxx)
 
@@ -419,6 +462,12 @@ gate" above for how each knob is combined.
 | `l1_fill_shape_fwhm_thr`     | `0.30`  | `gauss_fwhm_frac` ceiling for fill-shape arm |
 | `l1_len_very_long`           | `INT_MAX` | Length needed to enable very-long arm (OFF default) — PDHD overrides to `140` |
 | `l1_asym_very_long`          | `1.0`   | Very-long arm asym threshold (OFF default) — PDHD overrides to `0.35` |
+| `l1_pdvd_track_veto_enable`  | `false` | Master switch for the PDVD-only post-trigger track veto (see "PDVD-only opt-in track veto" above).  PDVD bottom anodes set this `true` in `cfg/pgrapher/experiment/protodunevd/sp.jsonnet`; PDHD never sets it, so PDHD's `decide_trigger` is bit-identical to the pre-veto behaviour |
+| `l1_pdvd_track_high_asym`    | `0.85`  | `\|aw\|` escape: sub-windows above this never veto |
+| `l1_pdvd_track_long_cl`      | `170`   | Long-arm: any sub-window with `run_len ≥ this` (and `\|aw\|` below escape) is rejected |
+| `l1_pdvd_track_med_cl`       | `100`   | Shape-arm length floor |
+| `l1_pdvd_track_med_fill`     | `0.40`  | Shape-arm `fill` floor (high fill suggests multi-peak track) |
+| `l1_pdvd_track_med_fwhm`     | `0.40`  | Shape-arm `fwhm_frac` floor |
 
 Legacy uBooNE knobs retained for diagnostics only (drive the `flag` /
 `ratio` fields in the calibration dump but no longer affect `flag_l1`):
@@ -947,6 +996,22 @@ until the user opts into process mode (added 2026-05-03).  Switching to
 PDHD's `l1_len_very_long=140` / `l1_asym_very_long=0.35` overrides are **not**
 applied on PDVD; the very-long arm is left at the C++ default (OFF) until
 PDVD-side calibration justifies enabling it.
+
+PDVD bottom anodes (`anode.data.ident < 4`) additionally override four
+trigger thresholds and enable the PDVD-only track veto, tuned against
+`pdvd/sp_plot/handscan_039324_anode0.csv`:
+
+| Knob | C++ default | PDVD-bottom override |
+|---|---|---|
+| `l1_len_long_mod` | 100 | 180 |
+| `l1_len_fill_shape` | 50 | 90 |
+| `l1_fill_shape_fill_thr` | 0.38 | 0.30 |
+| `l1_fill_shape_fwhm_thr` | 0.30 | 0.25 |
+| `l1_pdvd_track_veto_enable` | false | **true** |
+| `l1_pdvd_track_{high_asym,long_cl,med_cl,med_fill,med_fwhm}` | (defaults) | left at defaults (0.85, 170, 100, 0.40, 0.40) |
+
+PDVD top anodes (`anode.data.ident >= 4`) inherit all C++ defaults
+pending their own hand-scan validation.
 
 The runtime entry point (`pdvd/run_nf_sp_evt.sh`) provides flags that mirror
 PDHD's: `-c <calib_dir>` overrides the auto-generated calibration dump
