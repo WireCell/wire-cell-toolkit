@@ -10,6 +10,16 @@
 // ADC/mV    : 11.7
 // tick      : 500 ns  (post-resampler; NF chain runs at 500 ns)
 //
+// NOTE: The FR file above contained an all-zero sentinel path at pp=0 on the
+// W plane, which under-normalised the W collection peak by ~12%.  The postgain
+// of 1.1365 was calibrated through the W plane and absorbed that deficit.
+// The FR has since been corrected (FR_xn_boost_3.json.bz2, same filename),
+// so the physically correct postgain is now 1.0 (PDHD-equivalent).
+// These kernel arrays are NOT regenerated here because the NF thresholds
+// (RMS cuts, frequency masks) were tuned against this response shape; the
+// shape mismatch is small and the threshold calibration takes precedence.
+// Regenerate and retune when the NF is re-calibrated against the corrected FR.
+//
 // These arrays are stored at the reference gain above.  In chndb-base.jsonnet
 // apply:  std.map(function(x) x * gain_scale, u_resp)
 // where   gain_scale = params.elec.gain / (7.8 * wc.mV / wc.fC)

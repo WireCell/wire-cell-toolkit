@@ -121,14 +121,14 @@ base {
     // also, see later overwriting in simparams.jsonnet
     elecs: [
       super.elec { // bottom drifter
-        postgain: 1.1365, 
+        postgain: 1.0,
         shaping: 2.2 * wc.us,
         gain:7.8*wc.mV/wc.fC,
       },
       super.elec { // top
         type: "JsonElecResponse",
         filename: "dunevd-coldbox-elecresp-top-psnorm_400.json.bz2",
-        postgain: 1.52, // 11mV/fC, 1.94 -> 14mV/fC
+        postgain: 1.36, // 11mV/fC, 1.94 -> 14mV/fC
       },
     ],
     elec: $.elecs[0], // nominal 
