@@ -6,7 +6,7 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
 Steiner::Grapher::Grapher(Cluster& cluster, const Steiner::Grapher::Config& cfg, Log::logptr_t log)
-    : log(log), m_cluster(cluster), m_config(cfg)
+    : log(log), m_cluster(cluster), m_config(cfg), m_perf(cfg.perf)
 {
 
 }

@@ -6,15 +6,20 @@
 #define WIRECELLSIGPROC_PDHD
 
 #include "WireCellSigProc/Diagnostics.h"
+#include "WireCellSigProc/CoherentNoiseDump.h"
 
 #include "WireCellIface/IChannelFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IChannelNoiseDatabase.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDFT.h"
+#include "WireCellIface/IFilterWaveform.h"
 
 #include "WireCellUtil/Waveform.h"
 #include "WireCellUtil/Bits.h"
+#include "WireCellUtil/Logging.h"
+
+#include <set>
 
 namespace WireCell {
     namespace SigProc {
@@ -27,26 +32,38 @@ namespace WireCell {
             bool RemoveFilterFlags(WireCell::Waveform::realseq_t& sig);
             bool NoisyFilterAlg(WireCell::Waveform::realseq_t& spec, float min_rms, float max_rms);
 
-            double filter_low(double freq, double cut_off = 0.08);
-            double filter_time(double freq);
-            double filter_low_loose(double freq);
             std::vector<std::vector<int> > SignalProtection(WireCell::Waveform::realseq_t& sig,
                                                             const WireCell::Waveform::compseq_t& respec,
                                                             const IDFT::pointer& dft,
                                                             int res_offset,
-                                                            int pad_f, int pad_b, float upper_decon_limit = 0.02,
-                                                            float decon_lf_cutoff = 0.08, float upper_adc_limit = 15,
-                                                            float protection_factor = 5.0, float min_adc_limit = 50);
+                                                            int pad_f, int pad_b,
+                                                            const WireCell::Waveform::realseq_t& time_filter_wf,
+                                                            const WireCell::Waveform::realseq_t& lf_filter_wf,
+                                                            float upper_decon_limit = 0.02,
+                                                            float upper_adc_limit = 15,
+                                                            float protection_factor = 5.0, float min_adc_limit = 50,
+                                                            WireCell::SigProc::CoherentNoiseDump* dump = nullptr);
             bool Subtract_WScaling(WireCell::IChannelFilter::channel_signals_t& chansig,
                                    const WireCell::Waveform::realseq_t& medians,
                                    const WireCell::Waveform::compseq_t& respec, int res_offset,
                                    std::vector<std::vector<int> >& rois,
                                    const IDFT::pointer& dft,
+                                   const WireCell::Waveform::realseq_t& time_filter_wf,
+                                   const WireCell::Waveform::realseq_t& lf_filter_wf,
                                    float upper_decon_limit1 = 0.08,
-                                   float roi_min_max_ratio = 0.8, float rms_threshold = 0.);
+                                   float roi_min_max_ratio = 0.8, float rms_threshold = 0.,
+                                   WireCell::SigProc::CoherentNoiseDump* dump = nullptr);
 
-            float get_rms_and_rois(const WireCell::Waveform::realseq_t& signal, std::vector<std::vector<int> >& rois);
-            bool Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig, int& beg, int& end, float minwidth);
+            float get_rms_and_rois(const WireCell::Waveform::realseq_t& signal,
+                                   std::vector<std::vector<int> >& rois,
+                                   float nsigma = 3.5);
+            // Find every qualifying FEMB-noise ROI (width > min_width) in the
+            // projected sum of `chansig`, applying `pad_nticks` of padding on
+            // each side and clamping to the waveform.  Returns the list via
+            // `rois`; the bool return is `!rois.empty()`.  Safe on empty maps.
+            bool Is_FEMB_noise(const WireCell::IChannelFilter::channel_signals_t& chansig,
+                               WireCell::Waveform::BinRangeList& rois,
+                               float min_width, int pad_nticks, float nsigma = 3.5);
 
             class OneChannelNoise : public WireCell::IChannelFilter, public WireCell::IConfigurable {
                public:
@@ -71,6 +88,8 @@ namespace WireCell {
                 IAnodePlane::pointer m_anode;
                 IChannelNoiseDatabase::pointer m_noisedb;
                 IDFT::pointer m_dft;
+                bool m_adaptive_baseline{false};
+                Log::logptr_t m_log;
             };
 
             /**
@@ -101,6 +120,16 @@ namespace WireCell {
                 IDFT::pointer m_dft;
 
                 float m_rms_threshold;
+                std::vector<std::string> m_time_filters;
+                std::string m_lf_tighter_filter;
+                std::string m_lf_loose_filter;
+
+                // Opt-in coherent-NF debug dump. When m_dump_path is empty (default)
+                // the apply() hot path is bit-identical to the pre-instrumentation
+                // build. When set, one .npz per group is emitted under
+                // <m_dump_path>/apa<N>/<plane>_g<gid>.npz.
+                std::string m_dump_path;
+                std::set<int> m_dump_groups;  // empty → all groups
             };
 
             /**
@@ -109,25 +138,29 @@ namespace WireCell {
              */
             class FEMBNoiseSub : public WireCell::IChannelFilter, public WireCell::IConfigurable {
                public:
-                FEMBNoiseSub(const std::string& anode = "AnodePlane", float width=50.0);
+                FEMBNoiseSub(const std::string& anode = "AnodePlane",
+                             float width = 50.0, int pad_nticks = 0, float nsigma = 3.5);
                 virtual ~FEMBNoiseSub();
- 
+
                 virtual void configure(const WireCell::Configuration& config);
                 virtual WireCell::Configuration default_configuration() const;
- 
+
                 //// IChannelFilter interface
- 
+
                 /** Filter in place the signal `sig` from given `channel`. */
                 virtual WireCell::Waveform::ChannelMaskMap apply(int channel, signal_t& sig) const;
- 
+
                 /** Filter in place a group of signals together. */
                 virtual WireCell::Waveform::ChannelMaskMap apply(channel_signals_t& chansig) const;
- 
+
                private:
                 std::string m_anode_tn;
                 IAnodePlane::pointer m_anode;
- 
+
                 float m_width;
+                int m_pad_nticks;
+                float m_nsigma;
+                Log::logptr_t m_log;
             };
 
         }  // namespace PDHD

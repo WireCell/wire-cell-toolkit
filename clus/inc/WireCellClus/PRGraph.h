@@ -15,6 +15,7 @@
 
 #include "WireCellUtil/Graph.h"
 #include "WireCellUtil/Exceptions.h"
+#include <set>
 
 namespace WireCell::Clus::PR {
 
@@ -115,9 +116,48 @@ namespace WireCell::Clus::PR {
     /// The two Vertex objects are those associated with the source/target nodes
     /// of the segment's edge.  The pair is ordered.  The first Vertex is the
     /// one with a "wcpoint" closest to the segment's initial "wcpoint".
-    std::pair<VertexPtr, VertexPtr> find_endpoints(Graph& graph, SegmentPtr seg);
+    std::pair<VertexPtr, VertexPtr> find_vertices(Graph& graph, SegmentPtr seg);
 
-    
+    /// Return the other vertex connected to a segment, given one known vertex.
+    ///
+    /// Returns nullptr if:
+    /// - The segment edge is not in the graph
+    /// - The given vertex is not connected to the segment
+    ///
+    /// This is useful when you have one vertex of a segment and need to find
+    /// the vertex at the other end.
+    VertexPtr find_other_vertex(Graph& graph, SegmentPtr seg, VertexPtr vertex);
+
+    /// Find the segment connecting two vertices.
+    ///
+    /// Returns nullptr if:
+    /// - Either vertex is not in the graph
+    /// - No edge exists between the two vertices
+    ///
+    /// This function searches for an edge between the two given vertices and
+    /// returns the associated segment if found.
+    SegmentPtr find_segment(Graph& graph, VertexPtr vtx1, VertexPtr vtx2);
+
+    /** Comparators for VertexPtr and SegmentPtr that order by the stable graph
+     *  index stored directly in the object rather than by raw pointer address.
+     *  No graph reference is required.
+     *
+     *  Use these (via IndexedVertexSet / IndexedSegmentSet) wherever a
+     *  std::set<VertexPtr> or std::set<SegmentPtr> must produce a deterministic
+     *  iteration order across runs.
+     */
+    struct VertexIndexCmp {
+        bool operator()(const VertexPtr& a, const VertexPtr& b) const {
+            return a->get_graph_index() < b->get_graph_index();
+        }
+    };
+    struct SegmentIndexCmp {
+        bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
+            return a->get_graph_index() < b->get_graph_index();
+        }
+    };
+    using IndexedVertexSet  = std::set<VertexPtr,  VertexIndexCmp>;
+    using IndexedSegmentSet = std::set<SegmentPtr, SegmentIndexCmp>;
 
 };
 #endif

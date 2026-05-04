@@ -15,19 +15,19 @@ void Clus::ParticleDataSet::configure(const WireCell::Configuration& config) {
         const auto& dedx_config = config["dedx_functions"];
         for (const auto& particle : dedx_config.getMemberNames()) {
             const auto& func_name = dedx_config[particle].asString();
-            auto func = Factory::find_tn<IScalarFunction>(func_name);
+            auto func = Factory::lookup_tn<IScalarFunction>(func_name);
             if (func) {
                 m_dedx_functions[particle] = func;
             }
         }
     }
-    
-    // Configure range functions  
+
+    // Configure range functions
     if (config.isMember("range_functions")) {
         const auto& range_config = config["range_functions"];
         for (const auto& particle : range_config.getMemberNames()) {
             const auto& func_name = range_config[particle].asString();
-            auto func = Factory::find_tn<IScalarFunction>(func_name);
+            auto func = Factory::lookup_tn<IScalarFunction>(func_name);
             if (func) {
                 m_range_functions[particle] = func;
             }

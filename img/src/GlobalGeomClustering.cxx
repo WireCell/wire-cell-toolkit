@@ -72,13 +72,13 @@ bool GlobalGeomClustering::operator()(const input_pointer& in, output_pointer& o
         return true;
     }
     const auto in_graph = in->graph();
-    dump_cg(in_graph, log);
 
-    /// DEBUGONLY:
-    std::unordered_map<cluster_vertex_t, int> clusters;
+    /// DEBUGONLY: count input clusters
     using Filtered =
         typename boost::filtered_graph<cluster_graph_t, boost::keep_all, std::function<bool(cluster_vertex_t)> >;
-    {
+    if (log->level() <= spdlog::level::debug) {
+        dump_cg(in_graph, log);
+        std::unordered_map<cluster_vertex_t, int> clusters;
         Filtered bcg(in_graph, {}, [&](auto vtx) { return in_graph[vtx].code() == 'b'; });
         auto nclust = boost::connected_components(bcg, boost::make_assoc_property_map(clusters));
         log->debug("in #clusters {}", nclust);
@@ -101,23 +101,19 @@ bool GlobalGeomClustering::operator()(const input_pointer& in, output_pointer& o
     /// make new edges
     cluster_graph_t cg_new_bb;
     boost::copy_graph(fg_no_bb, cg_new_bb);
-    /// DEBUGONLY:
-    log->debug("rm bb:");
-    dump_cg(cg_new_bb, log);
     grouped_geom_clustering(cg_new_bb, m_clustering_policy);
 
-    /// DEBUGONLY:
-    {
+    /// DEBUGONLY: count output clusters and dump
+    if (log->level() <= spdlog::level::debug) {
+        std::unordered_map<cluster_vertex_t, int> clusters;
         Filtered bcg(cg_new_bb, {}, [&](auto vtx) { return cg_new_bb[vtx].code() == 'b'; });
         auto nclust = boost::connected_components(bcg, boost::make_assoc_property_map(clusters));
         log->debug("out #clusters {}", nclust);
+        log->debug("in_graph:");
+        dump_cg(in_graph, log);
+        log->debug("out:");
+        dump_cg(cg_new_bb, log);
     }
-
-    // debug info
-    log->debug("in_graph:");
-    dump_cg(in_graph, log);
-    log->debug("out:");
-    dump_cg(cg_new_bb, log);
 
     out = std::make_shared<Aux::SimpleCluster>(cg_new_bb, in->ident());
     return true;

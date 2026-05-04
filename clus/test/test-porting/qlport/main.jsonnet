@@ -50,7 +50,7 @@ local ub = {
             strategy: [
                 "stepped",
             ],
-            extra: [".*wire_index", "wpid"] //
+            extra: [".*wire_index", ".*charge.*", "wpid"] //
         }
     },
 

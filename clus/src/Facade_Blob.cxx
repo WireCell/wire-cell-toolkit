@@ -10,7 +10,6 @@ using namespace WireCell::PointCloud;
 using namespace WireCell::PointCloud::Tree;  // for "Points" node value type
 
 #include "WireCellUtil/Logging.h"
-using spdlog::debug;
 
 // #define __DEBUG__
 #ifdef __DEBUG__
@@ -224,7 +223,7 @@ size_t Blob::nbpoints() const
 bool Blob::sanity(Log::logptr_t log) const
 {
     if (nbpoints() == (size_t) npoints()) return true;
-    if (log) log->debug("blob sanity: blob points mismatch: {}", *this);
+    if (log) SPDLOG_LOGGER_TRACE(log, "blob sanity: blob points mismatch: {}", *this);
     return false;
 }
 

@@ -56,9 +56,18 @@ namespace WireCell {
             if (index < max_flags) { m_flags |= ( 1ULL << index); };
         }
 
+        /// Clear a specific bit to false.  If index is out of bounds, this is a quiet no-op.
+        void unset_flag(index_t index) {
+            if (index < max_flags) { m_flags &= ~( 1ULL << index); };
+        }
+
         /// Set any number of flags.  The bits set in "flags" are set in our
         /// internal flags.  Any existing set flags are kept.
         void set_flags(FlagsType flags) { m_flags |= static_cast<flags_t>(flags); }
+
+        /// Clear any number of flags.  The bits set in "flags" are cleared in our
+        /// internal flags.  Other existing flags are kept.
+        void unset_flags(FlagsType flags) { m_flags &= ~static_cast<flags_t>(flags); }
 
         /// Keep only the set flags in "flags" that are also set in our flags.
         /// New flags are not set, this disable existing flags not in set in the

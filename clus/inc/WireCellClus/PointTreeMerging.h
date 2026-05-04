@@ -53,6 +53,17 @@ namespace WireCell::Clus {
          */
         //bool m_perf{true};
 
+        /** Config: "tolerate_missing"
+         *
+         * If true, inputs whose tensors lack the expected
+         * "inpath + /live" or "inpath + /dead" datapath are treated as
+         * empty trees and merged as a no-op (instead of raising
+         * KeyError).  Useful when upstream per-APA pipelines may emit
+         * empty cluster outputs (e.g. after a selection masks an entire
+         * APA to zero).  Default is false for backward compatibility.
+         */
+        bool m_tolerate_missing{false};
+
         // Count how many times we are called
         size_t m_count{0};
         size_t m_multiplicity{0};

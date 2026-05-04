@@ -7,7 +7,7 @@
 WIRECELL_FACTORY(RootfileCreation_depos, WireCell::Root::RootfileCreation_depos, WireCell::IDepoFilter,
                  WireCell::IConfigurable)
 
-WIRECELL_FACTORY(RootfileCreation_frames, WireCell::Root::RootfileCreation_frames, WireCell::IDepoFilter,
+WIRECELL_FACTORY(RootfileCreation_frames, WireCell::Root::RootfileCreation_frames, WireCell::IFrameFilter,
                  WireCell::IConfigurable)
 
 using namespace WireCell;

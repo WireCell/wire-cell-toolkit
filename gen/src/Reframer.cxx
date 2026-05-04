@@ -67,9 +67,13 @@ void Gen::Reframer::configure(const WireCell::Configuration& cfg)
 }
 
 std::pair<ITrace::vector, IFrame::trace_summary_t> Gen::Reframer::process_one(const ITrace::vector& itraces, const IFrame::trace_summary_t& isummary) {
-    if(isummary.size() !=0 && itraces.size() != isummary.size()) {
-        log->error("itraces.size() != isummary.size()");
-        THROW(RuntimeError() << errmsg{"itraces.size() != isummary.size()"});
+    if(isummary.size() != 0 && isummary.size() < itraces.size()) {
+        log->error("isummary.size()={} < itraces.size()={}", isummary.size(), itraces.size());
+        THROW(RuntimeError() << errmsg{"isummary.size() < itraces.size()"});
+    }
+    if(isummary.size() != 0 && isummary.size() != itraces.size()) {
+        log->warn("isummary.size()={} != itraces.size()={}, using first {} summary values",
+                  isummary.size(), itraces.size(), itraces.size());
     }
     // Storage for samples indexed by channel ident.
     std::map<int, std::vector<float> > waves;

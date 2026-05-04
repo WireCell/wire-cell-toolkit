@@ -6,6 +6,9 @@
 
 #include "WireCellUtil/NamedFactory.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 class ClusteringLiveDead;
 WIRECELL_FACTORY(ClusteringLiveDead, ClusteringLiveDead,
                  WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
@@ -65,17 +68,14 @@ public:
         // check if the grouping's wpid ... 
         //std::cout << "Live: " << live_grouping.wpids().size() << " " << dead_grouping.wpids().size() << std::endl;
     
-        // Check that groupings has less than one wpid
-        if (live_grouping.wpids().size() > 1 || dead_grouping.wpids().size() > 1) {
-            for (const auto& wpid : live_grouping.wpids()) {
-                std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
-            }
-            for (const auto& wpid : dead_grouping.wpids()) {
-                std::cout << "Dead grouping wpid: " << wpid.name() << std::endl;
-            }
-            raise<ValueError>("Live %d > 1, Dead %d > 1", live_grouping.wpids().size(), dead_grouping.wpids().size());
-        }
-        auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, m_dv);
+        // Build per-APA/face wire geometry maps (supports multiple APAs/faces)
+        const auto& all_wpids = live_grouping.wpids();
+        std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> wpid_params;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_U_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_V_dir;
+        std::map<WirePlaneId, std::pair<geo_point_t, double>> wpid_W_dir;
+        std::set<int> apas;
+        compute_wireplane_params(all_wpids, m_dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
     
 
 
@@ -94,10 +94,7 @@ public:
         }
 
 
-        std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-            return cluster1->get_length() > cluster2->get_length();
-        });
-        // sort_clusters(live_clusters);
+        sort_clusters(live_clusters);
 
         auto dead_clusters = dead_grouping.children(); // copy
         sort_clusters(dead_clusters);
@@ -110,10 +107,11 @@ public:
 	
                 auto blobs = live->is_connected(*dead, dead_live_overlap_offset_);
                 if (blobs.size() > 0) {
-                    if (dead_live_cluster_mapping.find(dead) == dead_live_cluster_mapping.end()) {
+                    auto [it, inserted] = dead_live_cluster_mapping.emplace(dead, std::vector<Cluster*>{});
+                    if (inserted) {
                         dead_cluster_order.push_back(dead);
                     }
-                    dead_live_cluster_mapping[dead].push_back(live);
+                    it->second.push_back(live);
                     dead_live_mcells_mapping[dead].push_back(blobs);
                 }
             }
@@ -132,14 +130,23 @@ public:
 
         Graph g;
         std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-        std::map<const Cluster*, int> map_cluster_index;
+        std::unordered_map<const Cluster*, int> map_cluster_index;
         for (const Cluster* live : live_grouping.children()) {
-            size_t ilive = map_cluster_index.size();
+            int ilive = (int)map_cluster_index.size();
             map_cluster_index[live] = ilive;
             ilive2desc[ilive] = boost::add_vertex(ilive, g);
         }
+        const int nlive = (int)map_cluster_index.size();
 
-        std::set<std::pair<const Cluster*, const Cluster* > > tested_pairs;
+        // Index-based pair set: key = min_idx * nlive + max_idx.
+        // Symmetric by construction — no need to insert both (a,b) and (b,a).
+        std::unordered_set<size_t> tested_pairs;
+        auto pair_key = [&](const Cluster* a, const Cluster* b) -> size_t {
+            int ia = map_cluster_index.at(a);
+            int ib = map_cluster_index.at(b);
+            if (ia > ib) std::swap(ia, ib);
+            return (size_t)ia * nlive + ib;
+        };
 
         // start to form edges ...
         for (const auto& the_dead_cluster : dead_cluster_order) {
@@ -157,9 +164,7 @@ public:
                         const auto& cluster_2 = connected_live_clusters.at(j);
         
 
-                        if (tested_pairs.find(std::make_pair(cluster_1, cluster_2)) == tested_pairs.end()) {
-                            tested_pairs.insert(std::make_pair(cluster_1, cluster_2));
-                            tested_pairs.insert(std::make_pair(cluster_2, cluster_1));
+                        if (tested_pairs.insert(pair_key(cluster_1, cluster_2)).second) {
 
                             bool flag_merge = false;
                             const Blob* prev_mcell1 = 0;
@@ -209,12 +214,18 @@ public:
 
                                 bool flag_para = false;
 
+                                // Look up per-cluster APA/face geometry
+                                auto wpid_1 = cluster_1->wpid(mcell1_center);
+                                auto wpid_2 = cluster_2->wpid(mcell2_center);
+                                const auto& [drift_dir_1, angle_u_1, angle_v_1, angle_w_1] = wpid_params.at(wpid_1);
+                                const auto& [drift_dir_2, angle_u_2, angle_v_2, angle_w_2] = wpid_params.at(wpid_2);
+
                                 double angle1, angle2, angle3;
                                 if (!flag_merge) {
-                               
-                                    angle1 = dir1.angle(drift_dir);
-                                    angle2 = dir2.angle(drift_dir);
-                                    angle3 = dir3.angle(drift_dir);
+
+                                    angle1 = dir1.angle(drift_dir_1);
+                                    angle2 = dir2.angle(drift_dir_1);
+                                    angle3 = dir3.angle(drift_dir_2);
 
                                     if (fabs(angle1 - 3.1415926 / 2.) < 5 / 180. * 3.1415926 &&
                                         fabs(angle2 - 3.1415926 / 2.) < 5 / 180. * 3.1415926 &&
@@ -232,28 +243,28 @@ public:
                                         flag_para = true;
 
                                         if (WireCell::Clus::Facade::is_angle_consistent(
-                                                dir1, dir2, false, 15, angle_u, angle_v, angle_w, 3) &&
+                                                dir1, dir2, false, 15, angle_u_1, angle_v_1, angle_w_1, 3) &&
                                             WireCell::Clus::Facade::is_angle_consistent(
-                                                dir3, dir2, true, 15, angle_u, angle_v, angle_w, 3))
+                                                dir3, dir2, true, 15, angle_u_2, angle_v_2, angle_w_2, 3))
                                             flag_merge = true;
                                     }
                                     else {
                                         bool flag_const1 = WireCell::Clus::Facade::is_angle_consistent(
-                                            dir1, dir2, false, 10, angle_u, angle_v, angle_w, 2);
+                                            dir1, dir2, false, 10, angle_u_1, angle_v_1, angle_w_1, 2);
                                         bool flag_const2 = WireCell::Clus::Facade::is_angle_consistent(
-                                            dir3, dir2, true, 10, angle_u, angle_v, angle_w, 2);
+                                            dir3, dir2, true, 10, angle_u_2, angle_v_2, angle_w_2, 2);
 
                                         if (flag_const1 && flag_const2) {
                                             flag_merge = true;
                                         }
                                         else if (flag_const1 && length_2 < 6 * units::cm && length_1 > 15 * units::cm) {
                                             if (WireCell::Clus::Facade::is_angle_consistent(
-                                                    dir1, dir2, false, 5, angle_u, angle_v, angle_w, 3))
+                                                    dir1, dir2, false, 5, angle_u_1, angle_v_1, angle_w_1, 3))
                                                 flag_merge = true;
                                         }
                                         else if (flag_const2 && length_1 < 6 * units::cm && length_2 > 15 * units::cm) {
                                             if (WireCell::Clus::Facade::is_angle_consistent(
-                                                    dir3, dir2, true, 5, angle_u, angle_v, angle_w, 3))
+                                                    dir3, dir2, true, 5, angle_u_2, angle_v_2, angle_w_2, 3))
                                                 flag_merge = true;
                                         }
                                     }

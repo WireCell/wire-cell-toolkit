@@ -187,6 +187,18 @@ function(params, anode, field, n, rms_cuts=[])
     // list then last mention wins.
     channel_info: [
 
+      // Note: U/V freqmasks below use the legacy {value, lobin, hibin} schema
+      // with bin indices baked at jsonnet eval time.  pdsp has a single
+      // production frame size (daq.nticks=nf.nsamples=6000, no Resampler), so
+      // OmniChannelNoiseDB::set_nsamples() rebuilds to the same size and the
+      // bin indices remain physically correct.  Note also that the current
+      // pdOneChannelNoise consumer (Protodune.cxx, gated on iplane==2)
+      // reads m_noisedb->noise(ch) only for W-plane channels — the U/V
+      // freqmasks defined here are effectively dead config in the current
+      // code path.  If reactivating notches, prefer wc.freqmasks_phys([freqs],
+      // delta) from wirecell.jsonnet for runtime-resolved bins and automatic
+      // conjugate-mirror.
+
       // First entry provides default channel info across ALL
       // channels.  Subsequent entries override a subset of channels
       // with a subset of these entries.  There's no reason to

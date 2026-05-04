@@ -44,7 +44,7 @@ namespace WireCell {
 
             typedef std::multimap<std::pair<int, int>, std::pair<int, int>> MapMPROI;
             const MapMPROI& get_mp2_rois() const { return mp_rois; }
-            MapMPROI get_mp2_rois() { return mp_rois; }
+            MapMPROI& get_mp2_rois() { return mp_rois; }
             const MapMPROI& get_mp3_rois() const { return proteced_rois; }
             MapMPROI& get_mp3_rois() { return proteced_rois; }
 

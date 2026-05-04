@@ -22,6 +22,7 @@
 #include "WireCellClus/Graphs.h"
 
 #include <functional>
+#include <set>
 
 namespace WireCell::Clus::Facade {
 
@@ -132,6 +133,10 @@ namespace WireCell::Clus::Facade {
 
         /// Order is synchronized with children().
         std::vector<WireCell::WirePlaneId> wpids_blob() const;
+
+        /// Unique set of WirePlaneIds over all blobs.  More efficient than
+        /// building a set from wpids_blob() at every call site.
+        std::set<WireCell::WirePlaneId> wpids_blob_set() const;
 
         /// return the wpid given a point ...
         WirePlaneId wpid(const geo_point_t& point) const;
@@ -279,6 +284,30 @@ namespace WireCell::Clus::Facade {
             size_t point_index,
             double charge_cut = 4000.0,
             bool disable_dead_mix_cell = true) const;
+
+        /// Get segment IDs for all points (computed from graph analysis)
+        /// @return Vector of segment IDs, -1 for unassigned points
+        std::vector<int> segment_ids() const;
+        
+        /// Get shower flags for all points (computed from graph analysis)
+        /// @return Vector of flags, 1=shower, 0=track
+        std::vector<int> shower_flags() const;
+        
+        /// Get segment ID for a specific point
+        /// @param point_index Global point index in cluster
+        /// @return Segment ID or -1 if unassigned
+        int segment_id(size_t point_index) const;
+        
+        /// Get shower flag for a specific point
+        /// @param point_index Global point index in cluster
+        /// @return 1 if shower, 0 if track
+        int shower_flag(size_t point_index) const;
+        
+        /// Invalidate cached segment data (IDs and shower flags)
+        /// Call this before re-computing segment information
+        void invalidate_segment_data() {
+            cache().invalidate_segment_data();
+        }
 
 
 
@@ -484,7 +513,7 @@ namespace WireCell::Clus::Facade {
         ///
         /// Note, this method used to be called "examine_graph()".
         ///
-        std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const;
+        std::vector<int> connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const std::string& flavor = "relaxed") const;
         
         /// Return graph of given flavor or try to make it if it does not exist.
         /// See graph_algorithms() for flavors that can be made.
@@ -766,6 +795,14 @@ namespace WireCell::Clus::Facade {
             min_vertex = std::min(min_vertex, vertex_idx);
         }
     };
+
+    /// The point cloud scope produced by the T0Correction transform
+    /// (i.e. T0Correction::output_scope()).  Defined here as a compile-time
+    /// constant so that ClusteringRetile can validate its configured scope at
+    /// configure() time without needing a live IPCTransform instance.
+    ///
+    /// Must stay in sync with T0Correction::output_scope() in PCTransforms.cxx.
+    inline const PointCloud::Tree::Scope kT0CorrectionScope{"3d", {"x_t0cor", "y", "z"}};
 
 }  // namespace WireCell::Clus::Facade
 

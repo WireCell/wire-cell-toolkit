@@ -159,6 +159,31 @@ namespace WireCell::Bee {
     };
 
 
+    /// Represents a hierarchical particle-flow tree for the Bee viewer.
+    ///
+    /// Matches the prototype "mc" JSON format exactly.  The serialized form is a
+    /// bare JSON array (no object wrapper), where each element is a jsTree node:
+    ///   { "id":N, "text":"mu-  214 MeV",
+    ///     "data":{"start":[x,y,z],"end":[x,y,z]},
+    ///     "children":[...] }
+    /// Leaf nodes (empty children) also carry "icon":"jstree-file".
+    ///
+    /// The Bee sink writes this array verbatim under data/{index}/{index}-mc.json.
+    class ParticleTree : public Object {
+    public:
+        ParticleTree() = default;
+        explicit ParticleTree(const std::string& name);
+
+        /// Replace the entire particle array with a pre-built JSON array.
+        void set_particles(const Configuration& particles_array);
+
+        void reset();
+
+        bool empty() const;
+        size_t size() const;
+    };
+
+
     // todo: source
 
     /// A Bee Sink persists Objects to some store.

@@ -16,7 +16,7 @@ bool Diagnostics::Partial::operator()(const WireCell::Waveform::compseq_t& spec)
 {
     const double mag0 = std::abs(spec[0 + 1]);
     double sum = mag0;
-    for (int ind = 1; ind <= nfreqs && ind < (int) spec.size(); ++ind) {
+    for (int ind = 1; ind <= nfreqs && ind + 1 < (int) spec.size(); ++ind) {
         const double magi = std::abs(spec[ind + 1]);
         if (mag0 <= magi) {
             return false;
@@ -73,7 +73,7 @@ bool Diagnostics::Chirp::operator()(const WireCell::Waveform::realseq_t& sig, in
         if (counter == windowSize) {
             runningAmpMean /= (double) windowSize;
             runningAmpRMS /= (double) windowSize;
-            runningAmpRMS = std::sqrt(runningAmpRMS - runningAmpMean * runningAmpMean);
+            runningAmpRMS = std::sqrt(std::max(0.0, runningAmpRMS - runningAmpMean * runningAmpMean));
 
             RMSfirst = RMSsecond;
             RMSsecond = RMSthird;

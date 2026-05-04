@@ -18,11 +18,15 @@
 #include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
+// Include PRGraphType for PR::Graph (it's a type alias, not a class, so can't forward declare)
+#include "WireCellClus/PRGraphType.h"
+
 
 // forward declare
 namespace WireCell::Clus {
     class FiducialUtils;
     using FiducialUtilsPtr = std::shared_ptr<FiducialUtils>;
+    class TrackFitting;
 }
 
 namespace WireCell::Clus::Facade {
@@ -189,7 +193,8 @@ namespace WireCell::Clus::Facade {
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;
         // In class Grouping definition
-        std::pair<double,double> convert_time_ch_2Dpoint(const int timeslice, const int channel, const int apa, const int face, const int plane) const;
+        /// @param wire  local wire index within the plane (NOT global channel number)
+        std::pair<double,double> convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const;
 
         /// @brief Get number of points for a given plane
         /// @param plane The plane index (0=U, 1=V, 2=W)
@@ -241,8 +246,20 @@ namespace WireCell::Clus::Facade {
         // FiducialUtils.
         FiducialUtilsPtr get_fiducialutils() const { return m_fiducialutils; }
         void set_fiducialutils(FiducialUtilsPtr fd) { m_fiducialutils = fd; }
+
+        // TrackFitting storage for track fitting data
+        // Visitors like TaggerCheckNeutrino can store their TrackFitting here
+        // for access by other components (e.g., bee output in MABC, UbooneMagnifyTrackingSink)
+        // The PRGraph is accessible via get_track_fitting()->get_graph()
+        std::shared_ptr<WireCell::Clus::TrackFitting> get_track_fitting() const { return m_track_fitting; }
+        void set_track_fitting(std::shared_ptr<WireCell::Clus::TrackFitting> tf) { m_track_fitting = tf; }
+
+        // Convenience accessor for PRGraph (delegates to TrackFitting)
+        std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const;
+
       private:
         FiducialUtilsPtr m_fiducialutils;
+        std::shared_ptr<WireCell::Clus::TrackFitting> m_track_fitting;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;

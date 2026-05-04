@@ -15,4 +15,13 @@ namespace WireCell::Clus::PR {
         return nodes;
     }
 
+    std::vector<edge_descriptor> ordered_edges(Graph& g) {
+        auto [ebegin, eend] = boost::edges(g);
+        std::vector<edge_descriptor> edges(ebegin, eend);
+        std::sort(edges.begin(), edges.end(), [&g](const edge_descriptor& a, const edge_descriptor& b) {
+            return g[a].index < g[b].index;
+        });
+        return edges;
+    }
+
 }

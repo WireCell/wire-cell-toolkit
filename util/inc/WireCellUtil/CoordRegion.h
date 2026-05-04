@@ -119,10 +119,25 @@ namespace WireCell {
 
         virtual double distance(const Point& pt) const {
             const auto res = m_kd.knn(3, pt);
-
             const Point a = m_kd.point3d(res[0].first);
-
-            return pt[m_axes[0]] - a[m_axes[0]];
+            if (res.size() < 3) {
+                return pt[m_axes[0]] - a[m_axes[0]];
+            }
+            const Point b = m_kd.point3d(res[1].first);
+            const Point c = m_kd.point3d(res[2].first);
+            const Point ab = b - a;
+            const Point ac = c - a;
+            // Normal to plane through a, b, c
+            const double nx = ab[m_axes[1]]*ac[m_axes[2]] - ab[m_axes[2]]*ac[m_axes[1]];
+            const double ny = ab[m_axes[2]]*ac[m_axes[0]] - ab[m_axes[0]]*ac[m_axes[2]];
+            const double nz = ab[m_axes[0]]*ac[m_axes[1]] - ab[m_axes[1]]*ac[m_axes[0]];
+            if (nx == 0.0) {
+                return pt[m_axes[0]] - a[m_axes[0]];
+            }
+            // Interpolate surface coordinate at pt's transverse position
+            const double x_surface = a[m_axes[0]]
+                - (ny*(pt[m_axes[1]] - a[m_axes[1]]) + nz*(pt[m_axes[2]] - a[m_axes[2]])) / nx;
+            return pt[m_axes[0]] - x_surface;
         }
         virtual double location() const { return m_location; }
 

@@ -159,9 +159,9 @@ static void clustering_ctpointcloud(
 
     std::cout << "Test Ave Charge: " << live_grouping.get_ave_3d_charge(p,0,0,1*units::cm) << " " << live_grouping.get_ave_charge(p,0,0,0,1*units::cm) << " " << live_grouping.get_ave_charge(p,0,0,1,1*units::cm) << " " << live_grouping.get_ave_charge(p,0,0,2,1*units::cm) << " " << std::endl; 
 
-    auto point_u = live_grouping.convert_time_ch_2Dpoint(10*4, 10, 0, 0, 0);
-    auto point_v = live_grouping.convert_time_ch_2Dpoint(10*4, 10, 0, 0, 1);
-    auto point_w = live_grouping.convert_time_ch_2Dpoint(10*4, 10, 0, 0, 2);
+    auto point_u = live_grouping.convert_time_wire_2Dpoint(10*4, 10, 0, 0, 0);
+    auto point_v = live_grouping.convert_time_wire_2Dpoint(10*4, 10, 0, 0, 1);
+    auto point_w = live_grouping.convert_time_wire_2Dpoint(10*4, 10, 0, 0, 2);
 
     std::cout << "Test 2D Conversion " << point_u.first << " " << point_u.second << " " << point_v.first << " " << point_v.second << " "  << point_w.first << " " << point_w.second << std::endl;
 

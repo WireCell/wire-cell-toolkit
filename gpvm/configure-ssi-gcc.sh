@@ -1,4 +1,5 @@
 env CC=gcc CXX=g++ FC=gfortran \
+ROOTSYS=$(root-config --prefix) \
 ./wcb configure \
 --build-debug="-O3 -g -fno-omit-frame-pointer" \
 --with-tbb="$TBBROOT" \
@@ -6,7 +7,7 @@ env CC=gcc CXX=g++ FC=gfortran \
 --with-jsonnet-include="$GOJSONNET_FQ_DIR/include" \
 --with-jsonnet-lib="$GOJSONNET_FQ_DIR/lib" \
 --with-eigen-include="$EIGEN_DIR/include/eigen3/" \
---with-root="$ROOTSYS" \
+--with-root=yes \
 --with-fftw="$FFTW_FQ_DIR" \
 --with-fftw-include="$FFTW_INC" \
 --with-fftw-lib="$FFTW_LIBRARY" \

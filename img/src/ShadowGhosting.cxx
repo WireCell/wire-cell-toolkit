@@ -46,6 +46,12 @@ bool ShadowGhosting::operator()(const input_pointer& in, output_pointer& out)
     
     const auto& cgraph = in->graph();
 
+    if (m_shadow_type.empty()) {
+        log->error("shadow_type is empty, pass-through");
+        out = in;
+        ++m_count;
+        return true;
+    }
     auto bsg = BlobShadow::shadow(cgraph, m_shadow_type[0]);
     log->debug("nblobs={}", boost::num_vertices(bsg));
 

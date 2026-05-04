@@ -6,19 +6,49 @@ local wc = import 'wirecell.jsonnet';
 
 local io = import 'pgrapher/common/fileio.jsonnet';
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
-local params = import 'pgrapher/experiment/pdhd/simparams.jsonnet';
+local base = import 'pgrapher/experiment/pdhd/simparams.jsonnet';
+local params = base {
+  lar: super.lar {
+        // Longitudinal diffusion constant
+        DL :  6.2 * wc.cm2/wc.s,
+        // Transverse diffusion constant
+        DT : 16.3 * wc.cm2/wc.s,
+        lifetime : 50*wc.ms,
+        drift_speed : 1.565*wc.mm/wc.us,
+  },
+};
 
 local tools = tools_maker(params);
 
 local sim_maker = import 'pgrapher/experiment/pdhd/sim.jsonnet';
 local sim = sim_maker(params, tools);
 
+local beam_dir = [-0.178177, -0.196387, 0.959408];
+local beam_center = [-27.173, 421.445, 0];
+
+local track0 = {
+  head: wc.point(beam_center[0], beam_center[1], beam_center[2], wc.cm),
+  tail: wc.point(beam_center[0] + 100*beam_dir[0], beam_center[1] + 100*beam_dir[1], beam_center[2] + 100*beam_dir[2], wc.cm),
+
+  // head: wc.point(-260,300, 50,wc.cm), // apa1
+  // tail: wc.point(-260,300, 200,wc.cm), // apa1 w
+  // tail: wc.point(-260,300 - 0.58364 * 300, 50 + 0.812013 * 300 ,wc.cm), // apa1 u
+  // tail: wc.point(-260,300 + 0.58364 * 300, 50 + 0.812013 * 300 ,wc.cm), // apa1 v
+
+  // head: wc.point(260,300, 50,wc.cm), // apa2
+  // tail: wc.point(260,300, 200,wc.cm), // apa2 w
+  // tail: wc.point(260,300 + 0.58364 * 300, 50 + 0.812013 * 300,wc.cm), // apa2 u
+  // tail: wc.point(260,300 - 0.58364 * 300, 50 + 0.812013 * 300,wc.cm), // apa2 v
+
+};
+
+
 local tracklist = [
 
   {
     time: 0 * wc.us,
     charge: -500, // negative means # electrons per step (see below configuration) 
-    ray: params.det.bounds,
+    ray: track0, // params.det.bounds,
   },
 
 ];
@@ -59,7 +89,7 @@ local sp_maker = import 'pgrapher/experiment/pdhd/sp.jsonnet';
 local sp = sp_maker(params, tools, sp_override);
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
 
-local magoutput = 'porotdunehd-sim-check.root';
+local magoutput = 'protodunehd-sim-check.root';
 local magnify = import 'pgrapher/experiment/pdhd/magnify-sinks.jsonnet';
 local magnifyio = magnify(tools, magoutput);
 

@@ -3,9 +3,19 @@
 
 #include "WireCellClus/PRCommon.h"
 #include "WireCellClus/PRTrajectoryView.h"
+#include "WireCellClus/PRVertex.h"
+#include "WireCellClus/PRSegment.h"
+#include "WireCellClus/PRGraph.h"
+#include "WireCellClus/Facade_Cluster.h"
 
 #include "WireCellUtil/Flagged.h"
 #include "WireCellUtil/Point.h"
+
+#include "WireCellIface/IRecombinationModel.h"
+#include "WireCellClus/ParticleDataSet.h"
+
+#include <map>
+#include <set>
 
 namespace WireCell::Clus::PR {
 
@@ -62,6 +72,7 @@ namespace WireCell::Clus::PR {
     public:
 
         Shower(Graph& graph);
+        
         virtual ~Shower();
 
         // The bag of attributes is directly exposed to user.
@@ -96,21 +107,130 @@ namespace WireCell::Clus::PR {
             the underlying graph, this function is a no-op and the stored
             start_vertex is nullified.
         */
-        Shower& start_vertex(VertexPtr vtx);
+        Shower& set_start_vertex(VertexPtr vtx, int type);
+        std::pair<VertexPtr, int> get_start_vertex_and_type() {
+            return std::make_pair(m_start_vertex, data.start_connection_type);
+        }
 
         /** Chainable setter of start segment.
 
             This has the same semantics and caveats as the chainable setter:
             `start_vertex(VertexPtr)`.
         */
-        Shower& start_segment(SegmentPtr seg);
+        Shower& set_start_segment(SegmentPtr seg, bool flag_include_vertices = false, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+
+        Shower& set_start_point( WireCell::Point pt ) {
+            data.start_point = pt;
+            return *this;
+        }
+        WireCell::Point get_start_point() const {
+            return data.start_point;
+        }
+        WireCell::Point get_end_point() const {
+            return data.end_point;
+        }
+
+        void add_segment(SegmentPtr seg, bool flag_include_vertices = false, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+
+        // stable shower ID (assigned at construction, unique per run)
+        int get_shower_id() const { return m_shower_id; }
+
+        // particle type
+        int get_particle_type(){return data.particle_type;};
+        void set_particle_type(int val){data.particle_type = val;};
+
+        // access flags
+        void set_flag_kinematics(bool val);
+        bool get_flag_kinematics();
+        bool get_flag_shower();
+
+        // return kinematic energy estimation
+        double get_kine_range(){return data.kenergy_range;};
+        double get_kine_dQdx(){return data.kenergy_dQdx;};
+        void set_kine_charge(double val){data.kenergy_charge = val;};
+        double get_kine_charge(){return data.kenergy_charge;};
+        double get_kine_best(){  
+            if (data.kenergy_best != 0) return data.kenergy_best; else return data.kenergy_charge;};
+
+        // return initial direction ...
+        WireCell::Vector& get_init_dir(){return data.init_dir;};
+
+        // Get point cloud by name (convenience wrapper around dpcloud)
+        std::shared_ptr<Facade::DynamicPointCloud> get_pcloud(const std::string& cloud_name = "fit") {
+            return this->dpcloud(cloud_name);
+        }
+        std::shared_ptr<const Facade::DynamicPointCloud> get_pcloud(const std::string& cloud_name = "associate_points") const {
+            return this->dpcloud(cloud_name);
+        }
+
+        // Add all segments and vertices from another shower to this one
+        void add_shower(Shower& temp_shower, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+        void complete_structure_with_start_segment(IndexedSegmentSet& used_segments, const std::string& cloud_name_fit = "fit", const std::string& cloud_name_associate = "associate_points");
+
+
+        // get the information from the shower
+        void fill_sets(IndexedVertexSet& used_vertices, IndexedSegmentSet& used_segments, bool flag_exclude_start_segment = true);
+        void fill_point_vector(std::vector<WireCell::Point>& points, bool flag_main = true);
+        TrajectoryView& fill_maps();
+
+        int count_connected_segments(SegmentPtr seg);
+        std::pair<IndexedVertexSet, IndexedSegmentSet> get_connected_pieces(SegmentPtr seg);
+
+        std::pair<SegmentPtr, VertexPtr> get_last_segment_vertex_long_muon(IndexedSegmentSet& segments_in_muons);
+
+        // some simple get functions
+        int get_num_main_segments();
+        int get_num_segments();
+
+        double get_total_length();
+        double get_total_length(Facade::Cluster* cluster);
+        double get_total_track_length();
+
+        std::vector<double> get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit = 20);
+
+        // calculate the kinematics
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
 
     private:
 
+        Graph& m_full_graph;
         VertexPtr m_start_vertex;
         SegmentPtr m_start_segment;
+        int m_shower_id{-1};
+
+        // Lazy caches — invalidated whenever segments are added.
+        mutable double m_total_length_cache{-1.0};
+        mutable int    m_num_main_segs_cache{-1};
+
+        void invalidate_segment_caches() {
+            m_total_length_cache  = -1.0;
+            m_num_main_segs_cache = -1;
+        }
 
     };
+
+    using ShowerPtr = std::shared_ptr<Shower>;
+
+    struct ShowerIndexCmp {
+        bool operator()(const ShowerPtr& a, const ShowerPtr& b) const {
+            return a->get_shower_id() < b->get_shower_id();
+        }
+    };
+    using IndexedShowerSet   = std::set<ShowerPtr, ShowerIndexCmp>;
+    using ShowerVertexMap    = std::map<VertexPtr,  ShowerPtr, VertexIndexCmp>;
+    using ShowerSegmentMap   = std::map<SegmentPtr, ShowerPtr, SegmentIndexCmp>;
+    using VertexShowerSetMap = std::map<VertexPtr,  IndexedShowerSet, VertexIndexCmp>;
+    using ShowerIntMap       = std::map<ShowerPtr,  int, ShowerIndexCmp>;
+
+    struct ClusterPtrCmp {
+        bool operator()(Facade::Cluster* a, Facade::Cluster* b) const {
+            return a->get_cluster_id() < b->get_cluster_id();
+        }
+    };
+    using ClusterPtrSet    = std::set<Facade::Cluster*, ClusterPtrCmp>;
+    using ClusterVertexMap = std::map<Facade::Cluster*, VertexPtr, ClusterPtrCmp>;
 
 }
 #endif

@@ -2,8 +2,12 @@
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellUtil/Logging.h"
 
 #include "connect_graphs.h"
+#include <sstream>
+
+static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -17,53 +21,32 @@ void Graphs::connect_graph(const Cluster& cluster, Weighted::Graph& graph)
     std::vector<int> component(num_vertices(graph));
     const size_t num = connected_components(graph, &component[0]);
 
-    // Create ordered components
-    std::vector<ComponentInfo> ordered_components;
-    ordered_components.reserve(component.size());
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components.emplace_back(i);
-    }
-
-    // Assign vertices to components
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components[component[i]].add_vertex(i);
-    }
-
-    // Sort components by minimum vertex index
-    std::sort(ordered_components.begin(), ordered_components.end(), 
-        [](const ComponentInfo& a, const ComponentInfo& b) {
-            return a.min_vertex < b.min_vertex;
-        });
-
     if (num <= 1) return;
 
-    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
-    std::vector<std::vector<size_t>> pt_clouds_global_indices;
-    // use this to link the global index to the local index
-    // Create point clouds using ordered components
-    const auto& points = cluster.points();
-    for (const auto& comp : ordered_components) {
-        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
-        std::vector<size_t> global_indices;
+    // Allocate exactly num point clouds (one per component)
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds(num);
+    std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
+    for (size_t c = 0; c < num; ++c) {
+        pt_clouds[c] = std::make_shared<Simple3DPointCloud>();
+    }
 
-        for (size_t vertex_idx : comp.vertex_indices) {
-            pt_cloud->add({points[0][vertex_idx], points[1][vertex_idx], points[2][vertex_idx]});
-            global_indices.push_back(vertex_idx);
-        }
-        
-        pt_clouds.push_back(pt_cloud);
-        pt_clouds_global_indices.push_back(global_indices);
+    // use this to link the global index to the local index
+    const auto& points = cluster.points();
+    for (size_t i = 0; i < component.size(); ++i) {
+        size_t c = component[i];
+        pt_clouds[c]->add({points[0][i], points[1][i], points[2][i]});
+        pt_clouds_global_indices[c].push_back(i);
     }
 
     /// DEBUGONLY:
     if (0) {
         for (size_t i = 0; i != num; i++) {
-            std::cout << *pt_clouds.at(i) << std::endl;
-            std::cout << "global indices: ";
+            { std::ostringstream oss; oss << *pt_clouds.at(i); SPDLOG_LOGGER_TRACE(s_log, "connect_graph: {}", oss.str()); }
+            std::string idx_str;
             for (size_t j = 0; j != pt_clouds_global_indices.at(i).size(); j++) {
-                std::cout << pt_clouds_global_indices.at(i).at(j) << " ";
+                idx_str += std::to_string(pt_clouds_global_indices.at(i).at(j)) + " ";
             }
-            std::cout << std::endl;
+            SPDLOG_LOGGER_TRACE(s_log, "connect_graph: global indices: {}", idx_str);
         }
     }
 
@@ -241,34 +224,13 @@ void Graphs::connect_graph_with_reference(
     std::vector<int> component(num_vertices(graph));
     const size_t num = connected_components(graph, &component[0]);
 
-    // Create ordered components (same as baseline)
-    std::vector<ComponentInfo> ordered_components;
-    ordered_components.reserve(component.size());
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components.emplace_back(i);
-    }
-
-    // Assign vertices to components
-    for (size_t i = 0; i < component.size(); ++i) {
-        ordered_components[component[i]].add_vertex(i);
-    }
-
-    // Sort components by minimum vertex index
-    std::sort(ordered_components.begin(), ordered_components.end(), 
-        [](const ComponentInfo& a, const ComponentInfo& b) {
-            return a.min_vertex < b.min_vertex;
-        });
-
     if (num <= 1) return;
 
-    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds;
-    std::vector<std::vector<size_t>> pt_clouds_global_indices;
-    
-    // Initialize pt_clouds for each component (same as baseline)
-    for (size_t comp_idx = 0; comp_idx < ordered_components.size(); ++comp_idx) {
-        auto pt_cloud = std::make_shared<Simple3DPointCloud>();
-        pt_clouds.push_back(pt_cloud);
-        pt_clouds_global_indices.push_back(std::vector<size_t>());
+    // Allocate exactly num point clouds (one per component)
+    std::vector<std::shared_ptr<Simple3DPointCloud>> pt_clouds(num);
+    std::vector<std::vector<size_t>> pt_clouds_global_indices(num);
+    for (size_t c = 0; c < num; ++c) {
+        pt_clouds[c] = std::make_shared<Simple3DPointCloud>();
     }
     
     const auto& points = cluster.points();
@@ -277,6 +239,10 @@ void Graphs::connect_graph_with_reference(
     // Check if reference cluster is empty
     bool use_reference_filtering = (ref_cluster.is_valid() && ref_cluster.npoints() > 0);
     
+    // Hoist KD-tree reference and query_point allocation out of the per-point loop
+    const auto* ref_kd_ptr = use_reference_filtering ? &ref_cluster.kd3d() : nullptr;
+    std::vector<double> query_point(3);
+
     // Process each point with reference filtering (matches prototype exactly)
     for (size_t i = 0; i < component.size(); ++i) {
         bool should_exclude = false;
@@ -286,11 +252,11 @@ void Graphs::connect_graph_with_reference(
             should_exclude = true;
         } else if (use_reference_filtering) {
             // Only check distance to reference cluster if it's not empty
-            const auto& ref_kd = ref_cluster.kd3d();  // Use reference cluster's KD-tree
             double temp_min_dis = 0;
-            geo_point_t temp_p(points[0][i], points[1][i], points[2][i]);
-            std::vector<double> query_point = {temp_p.x(), temp_p.y(), temp_p.z()};
-            auto knn_result = ref_kd.knn(1, query_point);
+            query_point[0] = points[0][i];
+            query_point[1] = points[1][i];
+            query_point[2] = points[2][i];
+            auto knn_result = ref_kd_ptr->knn(1, query_point);
             
             if (!knn_result.empty()) {
                 temp_min_dis = std::sqrt(knn_result[0].second);  // knn returns squared distance
@@ -347,6 +313,9 @@ void Graphs::connect_graph_with_reference(
 
     for (size_t j=0;j!=num;j++){
       for (size_t k=j+1;k!=num;k++){
+            // Skip pairs where reference filtering emptied a component
+            if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
+
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
 
             int index1 = j;
@@ -361,6 +330,9 @@ void Graphs::connect_graph_with_reference(
 
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
+            // Skip pairs where reference filtering emptied a component
+            if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
+
             if (std::get<2>(index_index_dis[j][k])<3*units::cm){
                 index_index_dis_mst[j][k] = index_index_dis[j][k];
             }
@@ -513,4 +485,75 @@ bool Graphs::is_point_good(const Cluster& cluster, size_t point_index, int ncut)
     if (charge_w > 10) ncount++;
     
     return ncount >= ncut;
+}
+
+std::vector<bool> Graphs::check_direction(const Facade::Cluster& cluster, Facade::geo_vector_t& v1, int apa, int face, double angle_cut_1, double angle_cut_2){
+    // Get grouping to access wire geometry
+    auto grouping = cluster.grouping();
+    if (!grouping) {
+        // Return all false if no grouping available
+        return std::vector<bool>(4, false);
+    }
+    
+    // Get wire angles from grouping for this APA and face
+    auto [angle_u, angle_v, angle_w] = grouping->wire_angles(apa, face);
+    
+    // Get drift direction from grouping
+    int drift_dirx = grouping->get_drift_dir().at(apa).at(face);
+    Facade::geo_vector_t drift_dir_abs(std::fabs(drift_dirx), 0, 0);
+    
+    // Construct wire direction vectors
+    // U wire: angle_u from Y axis in YZ plane
+    Facade::geo_vector_t U_dir(0, std::cos(angle_u), std::sin(angle_u));
+    // V wire: angle_v from Y axis in YZ plane  
+    Facade::geo_vector_t V_dir(0, std::cos(angle_v), std::sin(angle_v));
+    // W wire: angle_w from Y axis in YZ plane
+    Facade::geo_vector_t W_dir(0, std::cos(angle_w), std::sin(angle_w));
+    
+    // Project v1 onto YZ plane
+    Facade::geo_vector_t tempV1(0, v1.y(), v1.z());
+    Facade::geo_vector_t tempV5;
+    
+    // Prolonged U - project onto plane perpendicular to U wire direction
+    double angle1 = tempV1.angle(U_dir);
+    tempV5 = Facade::geo_vector_t(
+        std::fabs(v1.x()),
+        std::sqrt(v1.y()*v1.y() + v1.z()*v1.z()) * std::sin(angle1),
+        0
+    );
+    angle1 = tempV5.angle(drift_dir_abs);
+    
+    // Prolonged V - project onto plane perpendicular to V wire direction
+    double angle2 = tempV1.angle(V_dir);
+    tempV5 = Facade::geo_vector_t(
+        std::fabs(v1.x()),
+        std::sqrt(v1.y()*v1.y() + v1.z()*v1.z()) * std::sin(angle2),
+        0
+    );
+    angle2 = tempV5.angle(drift_dir_abs);
+    
+    // Prolonged W - project onto plane perpendicular to W wire direction
+    double angle3 = tempV1.angle(W_dir);
+    tempV5 = Facade::geo_vector_t(
+        std::fabs(v1.x()),
+        std::sqrt(v1.y()*v1.y() + v1.z()*v1.z()) * std::sin(angle3),
+        0
+    );
+    angle3 = tempV5.angle(drift_dir_abs);
+    
+    // Parallel - angle with respect to drift direction
+    double angle4 = v1.angle(drift_dir_abs);
+    
+    std::vector<bool> results(4, false);
+    
+    // Check if prolonged along U wire (< 12.5 degrees)
+    if (angle1 < angle_cut_1 / 180.0 * M_PI) results.at(0) = true;
+    // Check if prolonged along V wire (< 12.5 degrees)
+    if (angle2 < angle_cut_1 / 180.0 * M_PI) results.at(1) = true;
+    // Check if prolonged along W wire (< 12.5 degrees)
+    if (angle3 < angle_cut_1 / 180.0 * M_PI) results.at(2) = true;
+    // Check if perpendicular to drift (within 10 degrees of 90 degrees)
+    if (std::fabs(angle4 - M_PI/2.0) < angle_cut_2 / 180.0 * M_PI) results.at(3) = true;
+    
+    return results;
 }

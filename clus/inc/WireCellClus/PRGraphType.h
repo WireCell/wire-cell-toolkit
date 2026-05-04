@@ -194,6 +194,18 @@ namespace WireCell::Clus::PR {
     /// @endcode
     node_vector ordered_nodes(Graph& g);
 
+    /// Return a vector of edge descriptors ordered by EdgeBundle::index.
+    ///
+    /// Use this wherever boost::edges(g) is used in decision-making loops
+    /// to get stable, deterministic iteration order across runs.
+    ///
+    /// @code{.cpp}
+    /// for (const auto& ed : ordered_edges(my_graph)) {
+    ///     std::cout << "Edge index: " << my_graph[ed].index << std::endl;
+    /// }
+    /// @endcode
+    std::vector<edge_descriptor> ordered_edges(Graph& g);
+
     
 
     /** A mixin class for Vertex/Segment to manage their stored descriptor.

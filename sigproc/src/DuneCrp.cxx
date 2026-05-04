@@ -181,8 +181,10 @@ bool DuneCrp::RawAdapativeBaselineAlg(WireCell::Waveform::realseq_t& sig)
                 }
 
                 if ((downFlag == false) && (upFlag == false)) {
-                    baselineVec[j] = ((j - downIndex) * baselineVec[downIndex] + (upIndex - j) * baselineVec[upIndex]) /
-                                     ((double) upIndex - downIndex);
+                    baselineVec[j] = (upIndex != downIndex)
+                        ? ((j - downIndex) * baselineVec[downIndex] + (upIndex - j) * baselineVec[upIndex]) /
+                              ((double) upIndex - downIndex)
+                        : baselineVec[downIndex];
                 }
                 else if ((downFlag == true) && (upFlag == false)) {
                     baselineVec[j] = baselineVec[upIndex];
@@ -226,6 +228,7 @@ float DuneCrp::CalcRMSWithFlags(const WireCell::Waveform::realseq_t& sig)
     float theRMS = 0.0;
 
     WireCell::Waveform::realseq_t temp;
+    temp.reserve(sig.size());
     for (size_t i = 0; i != sig.size(); i++) {
         if (sig.at(i) < 16384.0/*4096*/) temp.push_back(sig.at(i));
     }

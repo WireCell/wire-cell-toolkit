@@ -70,7 +70,7 @@ namespace WireCell {
             };
 
            private:
-            double cal_RMS(Waveform::realseq_t signal);
+            double cal_RMS(const Waveform::realseq_t& signal);
             double local_ave(Waveform::realseq_t& signal, int bin, int width);
             int find_ROI_end(Waveform::realseq_t& signal, int bin, double th = 0, int jump_one_bin = 0);
             int find_ROI_begin(Waveform::realseq_t& signal, int bin, double th = 0, int jump_one_bin = 0);

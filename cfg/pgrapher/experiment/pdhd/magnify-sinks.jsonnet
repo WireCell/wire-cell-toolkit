@@ -107,10 +107,10 @@ function(tools, outputfile) {
     for n in std.range(0, nanodes - 1)
   ],
 
-  local magdnnroi = [
+  local magdnnsp = [
     g.pnode({
       type: 'MagnifySink',
-      name: 'magdnnroi%d' % n,
+      name: 'magdnnsp%d' % n,
       data: {
         output_filename: outputfile,
         root_file_mode: 'UPDATE',
@@ -130,7 +130,7 @@ function(tools, outputfile) {
     decon_pipe: [g.pipeline([magdecon[n]], name='magdeconpipe%d' % n) for n in std.range(0, nanodes - 1)],
     debug_pipe: [g.pipeline([magdebug[n]], name='magdebugpipe%d' % n) for n in std.range(0, nanodes - 1)],
     threshold_pipe: [g.pipeline([magthr[n]], name='magthrpipe%d' % n) for n in std.range(0, nanodes - 1)],
-    dnnroi_pipe: [g.pipeline([magdnnroi[n]], name='magdnnroipipe%d' % n) for n in std.range(0, nanodes - 1)],
+    dnnsp_pipe: [g.pipeline([magdnnsp[n]], name='magdnnsppipe%d' % n) for n in std.range(0, nanodes - 1)],
   },
 
 

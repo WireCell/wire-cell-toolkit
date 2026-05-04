@@ -30,8 +30,10 @@ using namespace WireCell;
 using namespace WireCell::SigProc;
 
 using WireCell::Aux::DftTools::fwd;
+using WireCell::Aux::DftTools::fwd_inplace;
 using WireCell::Aux::DftTools::fwd_r2c;
 using WireCell::Aux::DftTools::inv;
+using WireCell::Aux::DftTools::inv_inplace;
 using WireCell::Aux::DftTools::inv_c2r;
 
 OmnibusSigProc::OmnibusSigProc(    )
@@ -317,7 +319,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["r_low_peak_sep_threshold_pre"] = m_r_low_peak_sep_threshold_pre;
     cfg["r_max_npeaks"] = m_r_max_npeaks;
     cfg["r_sigma"] = m_r_sigma;
-    cfg["r_th_precent"] = m_r_th_percent;
+    cfg["r_th_percent"] = m_r_th_percent;
 
     cfg["ROI_tight_lf_filter"] = m_ROI_tight_lf_filter;
     cfg["ROI_tighter_lf_filter"] = m_ROI_tighter_lf_filter;
@@ -354,7 +356,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     
     cfg["rebase_nbins"] = m_rebase_nbins;    
 
-    cfg["isWarped"] = m_isWrapped;  // default false
+    cfg["isWrapped"] = m_isWrapped;  // default false
 
     cfg["sparse"] = false;
 
@@ -1047,15 +1049,25 @@ void OmnibusSigProc::decon_2D_init(int plane)
         auto ewave = (*m_elecresponse).waveform_samples(tbins);
         const WireCell::Waveform::compseq_t elec = fwd_r2c(m_dft, ewave);
 
-        for (auto och : m_channel_range[plane]) {
-            // const auto& ch_resp = cr->channel_response(och.ident);
-            Waveform::realseq_t tch_resp = cr->channel_response(och.ident);
-            tch_resp.resize(m_fft_nticks, 0);
-            const WireCell::Waveform::compseq_t ch_elec = fwd_r2c(m_dft, tch_resp);
+        // Stack per-channel responses into one 2D array and run a
+        // single batched fwd_r2c along the time axis, instead of
+        // ~960 separate 1D r2c FFTs.
+        const auto& chans = m_channel_range[plane];
+        const size_t nchans = chans.size();
+        Array::array_xxf ch_resp_2d = Array::array_xxf::Zero(nchans, m_fft_nticks);
+        for (size_t i = 0; i < nchans; ++i) {
+            const Waveform::realseq_t& tch_resp = cr->channel_response(chans[i].ident);
+            const int n = std::min<int>(tch_resp.size(), m_fft_nticks);
+            for (int j = 0; j < n; ++j) {
+                ch_resp_2d(i, j) = tch_resp[j];
+            }
+        }
+        Array::array_xxc ch_elec_2d = fwd_r2c(m_dft, ch_resp_2d, 1);
 
-            const int irow = och.wire + m_pad_nwires[plane];
+        for (size_t i = 0; i < nchans; ++i) {
+            const int irow = chans[i].wire + m_pad_nwires[plane];
             for (int icol = 0; icol != m_c_data[plane].cols(); icol++) {
-                const auto four = ch_elec.at(icol);
+                const auto four = ch_elec_2d(i, icol);
                 if (std::abs(four) != 0) {
                     m_c_data[plane](irow, icol) *= elec.at(icol) / four;
                 }
@@ -1067,7 +1079,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     }
 
     // second round of FFT on wire
-    m_c_data[plane] = fwd(m_dft, m_c_data[plane], 0);
+    fwd_inplace(m_dft, m_c_data[plane], 0);
 
     // response part ...
     Array::array_xxf r_resp = Array::array_xxf::Zero(m_r_data[plane].rows(), m_fft_nticks);
@@ -1080,7 +1092,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     // do first round FFT on the resposne on time
     Array::array_xxc c_resp = fwd_r2c(m_dft, r_resp, 1);
     // do second round FFT on the response on wire
-    c_resp = fwd(m_dft, c_resp, 0);
+    fwd_inplace(m_dft, c_resp, 0);
 
     // make ratio to the response and apply wire filter
     m_c_data[plane] = m_c_data[plane] / c_resp;
@@ -1104,7 +1116,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     }
 
     // do the first round of inverse FFT on wire
-    m_c_data[plane] = inv(m_dft, m_c_data[plane], 0);
+    inv_inplace(m_dft, m_c_data[plane], 0);
 
     // do the second round of inverse FFT on time
     m_r_data[plane] = inv_c2r(m_dft, m_c_data[plane], 1);

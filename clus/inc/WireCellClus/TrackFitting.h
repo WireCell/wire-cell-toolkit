@@ -4,8 +4,12 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellClus/PRGraph.h"
+#include "WireCellClus/PRShower.h"
+#include "WireCellClus/NeutrinoTaggerInfo.h"
 
 #include <Eigen/IterativeLinearSolvers>
+#include <unordered_map>
+#include <unordered_set>
 
 
 namespace WireCell::Clus {
@@ -110,6 +114,12 @@ namespace WireCell::Clus {
         void set_fitting_type(FittingType fitting_type) { m_fitting_type = fitting_type; }
 
         /**
+         * Enable/disable per-step timing output (printed to stdout)
+         */
+        void set_perf(bool perf) { m_perf = perf; }
+        bool get_perf() const { return m_perf; }
+
+        /**
          * Get the current fitting type
          * @return The current fitting type
          */
@@ -149,9 +159,48 @@ namespace WireCell::Clus {
         // multi-track fitting utilized the Graph ... 
         void add_graph(std::shared_ptr<PR::Graph> graph);
         std::shared_ptr<PR::Graph> get_graph() const { return m_graph; }
+
+        /// Store / retrieve the identified neutrino interaction vertex.
+        void set_main_vertex(PR::VertexPtr v) { m_main_vertex = v; }
+        PR::VertexPtr get_main_vertex() const { return m_main_vertex; }
+
+        /// Store / retrieve the full set of reconstructed showers.
+        void set_showers(PR::IndexedShowerSet showers) { m_showers = std::move(showers); }
+        const PR::IndexedShowerSet& get_showers() const { return m_showers; }
+
+        /// Store / retrieve pi0 identification results from TaggerCheckNeutrino.
+        void set_pi0_data(PR::IndexedShowerSet pi0_showers,
+                          PR::ShowerIntMap map_shower_pio_id,
+                          std::map<int, std::vector<PR::ShowerPtr>> map_pio_id_showers,
+                          std::map<int, std::pair<double, int>> map_pio_id_mass)
+        {
+            m_pi0_showers        = std::move(pi0_showers);
+            m_map_shower_pio_id  = std::move(map_shower_pio_id);
+            m_map_pio_id_showers = std::move(map_pio_id_showers);
+            m_map_pio_id_mass    = std::move(map_pio_id_mass);
+        }
+        const PR::IndexedShowerSet& get_pi0_showers() const { return m_pi0_showers; }
+        const PR::ShowerIntMap& get_map_shower_pio_id() const { return m_map_shower_pio_id; }
+        const std::map<int, std::vector<PR::ShowerPtr>>& get_map_pio_id_showers() const { return m_map_pio_id_showers; }
+        const std::map<int, std::pair<double, int>>& get_map_pio_id_mass() const { return m_map_pio_id_mass; }
+
+        /// Store / retrieve reconstructed neutrino kinematics (filled by TaggerCheckNeutrino).
+        void set_kine_info(PR::KineInfo ki)  { m_kine_info = std::move(ki); }
+        const PR::KineInfo& get_kine_info()  const { return m_kine_info; }
+
+        /// Store / retrieve BDT input features (filled by TaggerCheckNeutrino).
+        void set_tagger_info(PR::TaggerInfo ti) { m_tagger_info = std::move(ti); }
+        const PR::TaggerInfo& get_tagger_info() const { return m_tagger_info; }
+        PR::TaggerInfo& get_tagger_info_mutable() { return m_tagger_info; }
+
         void clear_graph();
 
+        void add_cluster(std::shared_ptr<Facade::Cluster> cluster);
 
+        /// Pre-load all clusters at once and call prepare_data() a single time.
+        /// Call this before starting pattern recognition so that subsequent
+        /// do_multi_tracking calls can use flag_force_load_data=false.
+        void preload_clusters(const std::vector<Facade::Cluster*>& clusters);
 
         // collect charge
         void prepare_data();
@@ -274,6 +323,19 @@ namespace WireCell::Clus {
             if (time != other.time) return time < other.time;
             return channel < other.channel;
             }
+
+            bool operator==(const CoordReadout& other) const {
+                return apa == other.apa && time == other.time && channel == other.channel;
+            }
+        };
+
+        struct CoordReadoutHash {
+            size_t operator()(const CoordReadout& k) const {
+                size_t h = std::hash<int>{}(k.apa);
+                h ^= std::hash<int>{}(k.time)    + 0x9e3779b9 + (h << 6) + (h >> 2);
+                h ^= std::hash<int>{}(k.channel) + 0x9e3779b9 + (h << 6) + (h >> 2);
+                return h;
+            }
         };
 
 
@@ -281,18 +343,45 @@ namespace WireCell::Clus {
         struct ChargeMeasurement {
             double charge, charge_err;
             int flag;
-            
-            ChargeMeasurement(double q = 0.0, double qe = 0.0, int f = 0) 
+
+            ChargeMeasurement(double q = 0.0, double qe = 0.0, int f = 0)
                 : charge(q), charge_err(qe), flag(f) {}
         };
 
+        /// Fitted 2D charge result: measured + predicted + cluster association
+        struct FittedCharge2D {
+            double charge;        // original measurement charge
+            double charge_err;    // original measurement uncertainty
+            double pred_charge;   // predicted charge (un-whitened, same units as charge)
+            int flag;             // 0=dead, 1=live, 2=bad
+            std::set<Facade::Cluster*> clusters;
+        };
 
+        using WireTime = std::pair<int, int>;            // (wire_index, time_slice)
+        using APAFacePlane = std::tuple<int, int, int>;   // (apa, face, plane);
+
+        // Fill fitted 2D charge results after dQ/dx fitting
+        void fill_fitted_charge_2d(
+            const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_U,
+            const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_V,
+            const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& map_W,
+            const Eigen::VectorXd& pred_u, const Eigen::VectorXd& pred_v, const Eigen::VectorXd& pred_w,
+            double rel_uncer_ind, double rel_uncer_col,
+            double add_uncer_ind, double add_uncer_col);
+
+        /// Merge every per-cluster snapshot captured inside fill_fitted_charge_2d
+        /// into m_fitted_charge_2d so the flat map covers every cluster fit this
+        /// event.  Call once per event after all do_multi_tracking() calls are done
+        /// (e.g. at the end of TaggerCheckNeutrino::visit, before set_track_fitting).
+        void assemble_fitted_charge_2d();
 
         // point associations
         void form_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, double dis_cut, int nlevel, double time_tick_cut );
 
         void examine_point_association(std::shared_ptr<PR::Segment> segment, WireCell::Point &p, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt, bool flag_end_point = false, double charge_cut = 2000);
-        void update_association(std::shared_ptr<PR::Segment> segment, PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
+        void update_association(std::shared_ptr<PR::Segment> segment,
+                                const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt);
 
         void form_map(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& ptss, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
         void form_map_graph(bool flag_exclusion, double end_point_factor=0.6, double mid_point_factor=0.9, int nlevel=3, double time_tick_cut=20, double charge_cut=2000);
@@ -331,15 +420,15 @@ namespace WireCell::Clus {
          *         Each pair contains (previous_neighbor_ratio, next_neighbor_ratio)
          */
         std::vector<std::pair<double, double>> calculate_compact_matrix(Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
-        std::vector<std::pair<double, double>> calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
+        std::vector<std::vector<double>> calculate_compact_matrix_multi(std::vector<std::vector<int> >& connected_vec,Eigen::SparseMatrix<double>& weight_matrix, const Eigen::SparseMatrix<double>& response_matrix_transpose, int n_2d_measurements, int n_3d_positions, double cut_position = 2.0);
 
         void dQ_dx_fill(double dis_end_point_ext=0.45*units::cm);
 
         void dQ_dx_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
         void dQ_dx_multi_fit(double dis_end_point_ext=0.45*units::cm, bool flag_dQ_dx_fit_reg=true);
 
-        void do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_hack = false);
-        void do_multi_tracking(bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_exclusion =false, bool flag_hack = false);
+        void do_single_tracking(std::shared_ptr<PR::Segment> segment, bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_hack = false, Facade::Cluster* cluster_filter = nullptr);
+        void do_multi_tracking(bool flag_dQ_dx_fit_reg= true, bool flag_dQ_dx_fit= true, bool flag_force_load_data = false, bool flag_exclusion =false, bool flag_hack = false, Facade::Cluster* cluster_filter = nullptr);
 
 
         
@@ -356,6 +445,12 @@ namespace WireCell::Clus {
          * @return Map of APA identifier to anode pointer
          */
         std::map<int, IAnodePlane::pointer> get_all_anodes() const;
+
+        /**
+         * Get the grouping associated with this TrackFitting instance
+         * @return Pointer to Grouping, or nullptr if not set
+         */
+        Facade::Grouping* grouping() const { return m_grouping; }
 
         /**
          * Get channel number for a specific wire location
@@ -376,6 +471,8 @@ namespace WireCell::Clus {
          */
         std::vector<std::tuple<int, int, int>> get_wires_for_channel(int apa, int channel_number) const;
 
+        // map_apa_ch_plane_wires: (apa,channel) -> vector of (face, plane, wire)
+        void collect_2D_charge(std::map<CoordReadout, ChargeMeasurement>& charge_2d_u, std::map<CoordReadout, ChargeMeasurement>& charge_2d_v, std::map<CoordReadout, ChargeMeasurement>& charge_2d_w, std::map<std::pair<int, int>, std::vector<std::tuple<int, int, int>>>& map_apa_ch_plane_wires);
         /**
          * Clear all caches (useful for memory management)
          */
@@ -395,6 +492,19 @@ namespace WireCell::Clus {
             }
         };
         CacheStats get_cache_stats() const;
+
+        /**
+         * Inherit pre-built geometry and cluster charge data from a parent fitter.
+         *
+         * Copies the wire-plane geometry, wire-channel cache, and the already-computed
+         * charge data for @p cluster from @p src into this fitter.  After this call:
+         *   - BuildGeometry() will NOT be called again (m_grouping is set)
+         *   - prepare_data() will skip @p cluster (it is pre-populated in m_loaded_clusters)
+         *
+         * Intended for lightweight child fitters (e.g. in compare_main_vertices_all_showers)
+         * that need to fit a single temporary segment without re-loading all cluster blobs.
+         */
+        void inherit_from(const TrackFitting& src, Facade::Cluster* cluster);
 
         /**
          * Set the detector volume for this TrackFitting instance
@@ -430,6 +540,24 @@ namespace WireCell::Clus {
         std::vector<std::pair<int,int>> get_paf() const {return paf;}
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
+        // Measured 2D charge data access
+        const std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash>& get_charge_data() const { return m_charge_data; }
+
+        // Fitted 2D charge data organized by (apa, face, plane) -> (wire, time)
+        const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& get_fitted_charge_2d() const { return m_fitted_charge_2d; }
+
+        /**
+         * Get geometry information for wire plane offsets
+         * @return Map of WirePlaneId to tuple (offset_t, offset_u, offset_v, offset_w)
+         */
+        const std::map<WirePlaneId, std::tuple<double, double, double, double>>& get_wpid_offsets() const { return wpid_offsets; }
+
+        /**
+         * Get geometry information for wire plane slopes
+         * @return Map of WirePlaneId to tuple (slope_t, slope_yu_zu, slope_yv_zv, slope_yw_zw)
+         */
+        const std::map<WirePlaneId, std::tuple<double, std::pair<double, double>, std::pair<double, double>, std::pair<double, double>>>& get_wpid_slopes() const { return wpid_slopes; }
+
     private:
          // Core parameters - centralized storage
         Parameters m_params;
@@ -439,6 +567,7 @@ namespace WireCell::Clus {
             return (param_value < 0) ? default_value : param_value;
         }
 
+        bool m_perf{false};  // if true, print per-step timing to stdout
         FittingType m_fitting_type;
         IDetectorVolumes::pointer m_dv{nullptr};  
         IPCTransformSet::pointer m_pcts{nullptr};          // PC Transform Set
@@ -446,14 +575,41 @@ namespace WireCell::Clus {
         // cluster and grouping, CTPC is from m_grouping ...
         Facade::Grouping* m_grouping{nullptr};
         std::set<Facade::Cluster*> m_clusters;
+        std::set<Facade::Cluster*> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
+        bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
+        Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
+
+        // Option 1: per-cluster edge descriptor cache to avoid full graph traversal
+        std::unordered_map<Facade::Cluster*, std::vector<PR::edge_descriptor>> m_cluster_edges;
+        std::vector<PR::edge_descriptor> m_all_edges;  ///< All segment edges in m_graph
+        std::vector<PR::node_descriptor> m_ordered_nodes_vec;  ///< Nodes sorted by index, cached by build_cluster_edges
+        void build_cluster_edges();                    ///< Rebuild m_cluster_edges, m_all_edges, and m_ordered_nodes_vec from m_graph
+        const std::vector<PR::edge_descriptor>& get_segment_edges() const; ///< Return edges for current filter
+
+        // Option 2: per-cluster charge data cache to avoid iterating full m_charge_data
+        std::unordered_map<Facade::Cluster*, std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash>> m_cluster_charge_data;
 
         std::set<Facade::Blob*> m_blobs;
 
         // input segment
         std::set<std::shared_ptr<PR::Segment> > m_segments;
 
-        // input graph 
+        // input graph
         std::shared_ptr<PR::Graph> m_graph{nullptr};
+
+        // Neutrino pattern-recognition results (set by TaggerCheckNeutrino)
+        PR::VertexPtr        m_main_vertex{nullptr};
+        PR::IndexedShowerSet m_showers;
+
+        // Pi0 identification results (set by TaggerCheckNeutrino via set_pi0_data)
+        PR::IndexedShowerSet                      m_pi0_showers;
+        PR::ShowerIntMap                          m_map_shower_pio_id;
+        std::map<int, std::vector<PR::ShowerPtr>> m_map_pio_id_showers;
+        std::map<int, std::pair<double, int>>     m_map_pio_id_mass;
+
+        // Kinematics and tagger features (set by TaggerCheckNeutrino)
+        PR::KineInfo   m_kine_info{};
+        PR::TaggerInfo m_tagger_info{};
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION
@@ -486,18 +642,31 @@ namespace WireCell::Clus {
         // ----------------------------------------
         // Internal Storage
         // ----------------------------------------
-        std::map<CoordReadout, ChargeMeasurement> m_charge_data;  ///< Internal charge data storage using ChargeMeasurement struct
-        std::map<CoordReadout, ChargeMeasurement> m_orig_charge_data; // saved original charge measurement, if modified
+        std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash> m_charge_data;  ///< Internal charge data storage using ChargeMeasurement struct
+        std::unordered_map<CoordReadout, ChargeMeasurement, CoordReadoutHash> m_orig_charge_data; // saved original charge measurement, if modified
 
         std::map<Coord2D, std::set<int>> m_2d_to_3d;  ///< Internal 2D→3D mapping
         std::map<int, Point3DInfo> m_3d_to_2d;               ///< Internal 3D→2D mapping
     
         // Global (apa, time, channel) to blobs
-        std::map<CoordReadout, std::set<Facade::Blob* > > global_rb_map;
+        std::unordered_map<CoordReadout, std::unordered_set<Facade::Blob*>, CoordReadoutHash> global_rb_map;
+
+        // Fitted 2D charge organized by (apa, face, plane) -> (wire, time)
+        std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> m_fitted_charge_2d;
+
+        /// Per-cluster snapshots of m_fitted_charge_2d captured at the end of
+        /// every fill_fitted_charge_2d() call when m_cluster_filter is set.
+        /// Overwriting the same key on each refill gives "latest fit wins per
+        /// cluster", correctly handling re-fits during pattern recognition.
+        /// Merged into m_fitted_charge_2d by assemble_fitted_charge_2d().
+        std::map<Facade::Cluster*,
+                 std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>>
+            m_cluster_fitted_charge_2d;
 
         // global geometry
 
         void BuildGeometry();
+        void sync_from_graph();
 
         std::map<WirePlaneId , std::tuple<WireCell::Point, double, double, double>> wpid_params;
         std::map<WirePlaneId, std::pair<WireCell::Point, double> > wpid_U_dir;

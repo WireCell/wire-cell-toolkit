@@ -120,7 +120,7 @@ local wcls_output = {
       //nticks: params.daq.nticks,
       // nticks: nsample,
       chanmaskmaps: [],
-      summary_tags: ['wiener'],  // retagger makes this tag
+      summary_tags: ['threshold'],  // retagger makes this tag
       //  just one threshold value
       summary_operator: { threshold: 'set' },
       nticks: -1,
@@ -168,14 +168,7 @@ local chndb = [{
 // ];
 // local nf_pipes = [g.pipeline([obnf[n]], name='nf%d' % n) for n in std.range(0, std.length(tools.anodes) - 1)];
 
-local sp_override = {
-  sparse: sigoutform == 'sparse',
-  // use_multi_plane_protection: true,
-  mp_tick_resolution: 10,
-  // use_roi_debug_mode: true,
-};
-local sp = sp_maker(params, tools, sp_override);
-// local sp = sp_maker(params, tools, { sparse: sigoutform == 'sparse' });
+local sp = sp_maker(params, tools, { sparse: sigoutform == 'sparse' });
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
 
 local chsel_pipes = [
@@ -228,7 +221,7 @@ local retagger = g.pnode({
       merge: {
         'gauss\\d': 'gauss',
         'wiener\\d': 'wiener',
-        'theshold\\d': 'theshold',
+        'threshold\\d': 'threshold',
       },
     }],
   },

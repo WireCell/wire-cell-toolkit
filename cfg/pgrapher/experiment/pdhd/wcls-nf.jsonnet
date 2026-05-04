@@ -33,6 +33,8 @@ local wcls = wcls_maker(params, tools);
 
 local sp_maker = import 'pgrapher/experiment/pdhd/sp.jsonnet';
 
+local use_resampler = (reality == 'data');
+
 // Collect the WC/LS input converters for use below.  Make sure the
 // "name" argument matches what is used in the FHiCL that loads this
 // file.  In particular if there is no ":" in the inputer then name
@@ -45,7 +47,8 @@ local wcls_input = {
       art_tag: raw_input_label,
       frame_tags: ['orig'],  // this is a WCT designator
       // nticks: params.daq.nticks,
-      tick: params.daq.tick,
+      // tick: params.daq.tick,
+      tick: 512*wc.ns, //Use 512ns here for input, we resample to 500ns later
     },
   }, nin=0, nout=1),
 
@@ -132,25 +135,29 @@ local chsel_pipes = [
   for n in std.range(0, std.length(tools.anodes) - 1)
 ];
 
+
+local resamplers_config = import 'pgrapher/common/resamplers.jsonnet';
+local load_resamplers = resamplers_config(g, wc, tools);
+local resamplers = load_resamplers.resamplers;
+
 local magoutput = 'protodunehd-data-check.root';
 local magnify = import 'pgrapher/experiment/pdhd/magnify-sinks.jsonnet';
 local magio = magnify(tools, magoutput);
 
 local nfsp_pipes = [
-  g.pipeline([
-               chsel_pipes[n],
-               // magio.orig_pipe[n],
-
-               nf_pipes[n],
-               // magio.raw_pipe[n],
-
-               // sp_pipes[n],
-               // magio.decon_pipe[n],
-               // magio.threshold_pipe[n],
-               // magio.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
-             ],
-             'nfsp_pipe_%d' % n)
-  for n in std.range(0, std.length(tools.anodes) - 1)
+  g.pipeline(
+    [chsel_pipes[n]] +
+    (if use_resampler then [resamplers[n]] else []) +
+    [// magio.orig_pipe[n],
+     nf_pipes[n],
+     // magio.raw_pipe[n],
+     // sp_pipes[n],
+     // magio.decon_pipe[n],
+     // magio.threshold_pipe[n],
+     // magio.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
+    ],
+    'nfsp_pipe_%d' % n)
+    for n in std.range(0, std.length(tools.anodes) - 1)
 ];
 
 //local f = import 'pgrapher/common/funcs.jsonnet';

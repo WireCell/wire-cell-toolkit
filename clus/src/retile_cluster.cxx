@@ -616,8 +616,7 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
         // Needed in hack_activity() but call it here to avoid call overhead.
         const auto& path_wcps = cluster_path_wcps(cluster);
 
-        auto wpids = cluster->wpids_blob();
-        std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
+        const auto wpid_set = cluster->wpids_blob_set();
         for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
             int apa = it->apa();
             int face = it->face();

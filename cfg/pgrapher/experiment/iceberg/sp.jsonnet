@@ -75,7 +75,6 @@ function(params, tools, override = {}) {
 
       // frame tags
       wiener_tag: 'wiener%d' % anode.data.ident,
-      wiener_threshold_tag: 'threshold%d' % anode.data.ident,
       gauss_tag: 'gauss%d' % anode.data.ident,
     } + override,
   }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resp] + pc.uses + spfilt),

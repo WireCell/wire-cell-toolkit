@@ -99,7 +99,7 @@ public:
     }
     
 private:
-    double use_ctpc_{true};
+    bool use_ctpc_{true};
     double length_cut_{0};
 };
 
@@ -115,7 +115,8 @@ private:
 #define LogDebug(x)
 #endif
 
-// This can handle entire APA (including all faces) data
+// This handles all faces within a single APA.
+// NOTE: multi-APA groupings are explicitly rejected (see apas.size() guard below).
 static void clustering_deghost(
     Grouping& live_grouping,
     IDetectorVolumes::pointer dv,
@@ -176,8 +177,8 @@ static void clustering_deghost(
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
 
-    // sort the clusters by length using a lambda function
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+    // sort the clusters by length using a lambda function (stable to avoid pointer-order tie-breaking)
+    std::stable_sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
         return cluster1->get_length() > cluster2->get_length();
     });
 
@@ -196,12 +197,32 @@ static void clustering_deghost(
     // std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
     cluster_connectivity_graph_t  g;
     std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-    std::map<const Cluster*, int> map_cluster_index;
+    // unordered_map: lookup-only (never iterated), no pointer-order dependency
+    std::unordered_map<const Cluster*, int> map_cluster_index;
     for (const Cluster* live : live_grouping.children()) {
         size_t ilive = map_cluster_index.size();
         map_cluster_index[live] = ilive;
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
     }
+
+    // Deterministic arg-max: tie-break by insertion index in map_cluster_index
+    // (which follows live_grouping.children() order — deterministic across runs).
+    // Using unordered_map for map_cluster_num avoids pointer-address iteration order.
+    auto find_max_cluster = [&](const std::unordered_map<const Cluster*, int>& m)
+        -> std::pair<const Cluster*, int> {
+        const Cluster* best = nullptr;
+        int best_val = 0;
+        int best_idx = INT_MAX;
+        for (const auto& [c, cnt] : m) {
+            int idx = map_cluster_index.at(c);
+            if (cnt > best_val || (cnt == best_val && idx < best_idx)) {
+                best_val = cnt;
+                best = c;
+                best_idx = idx;
+            }
+        }
+        return {best, best_val};
+    };
 
     bool flag_first = true;
     for (size_t i = 0; i != live_clusters.size(); i++) {
@@ -242,7 +263,8 @@ static void clustering_deghost(
                 const size_t num_total_points = cluster->npoints();  // total number of points
                 size_t num_dead[3] = {0, 0, 0};              // dead wires in each view
                 size_t num_unique[3] = {0, 0, 0};            // points that are unique (not agree with any other clusters)
-                std::map<const Cluster *, int> map_cluster_num[3];
+                // unordered_map: values will be iterated via find_max_cluster lambda (deterministic)
+                std::unordered_map<const Cluster *, int> map_cluster_num[3];
 
                 double dis_cut = 1.2 * units::cm;
 
@@ -457,27 +479,10 @@ static void clustering_deghost(
                     // LogDebug("pass the first cut " << num_total_points);
 
                     // now try to compare
-                    // find the maximal for each map
-                    const Cluster *max_cluster_u = 0, *max_cluster_v = 0, *max_cluster_w = 0;
-                    int max_value_u = 0, max_value_v = 0, max_value_w = 0;
-                    for (auto it = map_cluster_num[0].begin(); it != map_cluster_num[0].end(); it++) {
-                        if (it->second > max_value_u) {
-                            max_value_u = it->second;
-                            max_cluster_u = it->first;
-                        }
-                    }
-                    for (auto it = map_cluster_num[1].begin(); it != map_cluster_num[1].end(); it++) {
-                        if (it->second > max_value_v) {
-                            max_value_v = it->second;
-                            max_cluster_v = it->first;
-                        }
-                    }
-                    for (auto it = map_cluster_num[2].begin(); it != map_cluster_num[2].end(); it++) {
-                        if (it->second > max_value_w) {
-                            max_value_w = it->second;
-                            max_cluster_w = it->first;
-                        }
-                    }
+                    // find the maximal for each map — use deterministic lambda (tie-break by insertion index)
+                    auto [max_cluster_u, max_value_u] = find_max_cluster(map_cluster_num[0]);
+                    auto [max_cluster_v, max_value_v] = find_max_cluster(map_cluster_num[1]);
+                    auto [max_cluster_w, max_value_w] = find_max_cluster(map_cluster_num[2]);
                     bool flag_remove = true;
                     // LogDebug("max_value_u: " << max_value_u << ", max_value_v: " << max_value_v << ", max_value_w: " << max_value_w);
 
@@ -587,26 +592,9 @@ static void clustering_deghost(
                                  num_dead[2] + 1e-9) <
                             0.15 &&
                         cluster->get_length() < 25 * units::cm) {
-                        const Cluster *max_cluster_u = 0, *max_cluster_v = 0, *max_cluster_w = 0;
-                        int max_value_u = 0, max_value_v = 0, max_value_w = 0;
-                        for (auto it = map_cluster_num[0].begin(); it != map_cluster_num[0].end(); it++) {
-                            if (it->second > max_value_u) {
-                                max_value_u = it->second;
-                                max_cluster_u = it->first;
-                            }
-                        }
-                        for (auto it = map_cluster_num[1].begin(); it != map_cluster_num[1].end(); it++) {
-                            if (it->second > max_value_v) {
-                                max_value_v = it->second;
-                                max_cluster_v = it->first;
-                            }
-                        }
-                        for (auto it = map_cluster_num[2].begin(); it != map_cluster_num[2].end(); it++) {
-                            if (it->second > max_value_w) {
-                                max_value_w = it->second;
-                                max_cluster_w = it->first;
-                            }
-                        }
+                        auto [max_cluster_u, max_value_u] = find_max_cluster(map_cluster_num[0]);
+                        auto [max_cluster_v, max_value_v] = find_max_cluster(map_cluster_num[1]);
+                        auto [max_cluster_w, max_value_w] = find_max_cluster(map_cluster_num[2]);
 
                         /* std::cout << max_cluster_u << " " << max_value_u/(num_total_points-num_dead[0]+1e-9) << " "
                          */

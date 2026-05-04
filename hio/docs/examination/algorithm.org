@@ -1,0 +1,155 @@
+#+title: Algorithm Examination — wire-cell-toolkit/hio
+
+* Overview
+
+The ~hio~ module provides a single component, ~HDF5FrameTap~, which is a
+*pass-through IFrame filter* that serializes Wire-Cell Toolkit (WCT) frame
+data to HDF5 files using the HDF5 C API directly (not HighFive or h5py).
+
+It implements three WCT interfaces:
+- *IFrameFilter* -- receives an IFrame, writes it to HDF5, passes it through unchanged.
+- *IConfigurable* -- accepts Jsonnet/JSON configuration.
+- *ITerminal* -- provides a ~finalize()~ hook to close the HDF5 file.
+
+* Pipeline Role
+
+HDF5FrameTap sits in a WCT processing graph as a "tap" (non-destructive
+observer). A typical pipeline looks like:
+
+#+begin_example
+FrameFileSource --> HDF5FrameTap --> DumpFrames (or next processing stage)
+#+end_example
+
+The tap receives each frame, writes selected trace data to the HDF5 file, and
+passes the frame through to the next node unchanged. This design allows data
+to be persisted without disrupting downstream processing.
+
+* Configuration Parameters
+
+Configured via Jsonnet (see ~test/frame-npz-to-hio.jsonnet~ for an example):
+
+| Parameter    | Type           | Default            | Description                                            |
+|--------------+----------------+--------------------+--------------------------------------------------------|
+| ~filename~   | string         | ~"wct-frame.hdf5"~ | Output HDF5 file path (required)                       |
+| ~trace_tags~ | list of string | ~[]~ (all traces)  | Which tagged trace sets to save                        |
+| ~digitize~   | bool           | ~false~            | If true, cast samples to int16; otherwise float32      |
+| ~baseline~   | float          | ~0.0~              | Additive offset applied before scale                   |
+| ~scale~      | float          | ~1.0~              | Multiplicative factor                                  |
+| ~offset~     | float          | ~0.0~              | Additive offset applied after scale                    |
+| ~gzip~       | int [0-9]      | ~0~                | Gzip compression level (0 = none)                      |
+| ~chunk~      | int or [r,c]   | ~[256,256]~        | Chunk dimensions for HDF5 chunked storage              |
+| ~tick0~      | int            | (from traces)      | Override: force output array to start at this tick      |
+| ~nticks~     | int            | (from traces)      | Override: force output array to have this many columns  |
+
+The linear transform applied to samples before writing is:
+
+#+begin_example
+output = (sample + baseline) * scale + offset
+#+end_example
+
+* Data Flow (per frame, per tag)
+
+For each configured trace tag and each incoming frame, the algorithm performs:
+
+** Trace Selection
+
+#+begin_src cpp
+traces = Aux::tagged_traces(inframe, tag)
+#+end_src
+
+Uses the WCT ~FrameTools~ utility to find all traces matching the given tag.
+If no tags are configured, defaults to the empty-string tag (untagged traces).
+
+** Channel and Tick Range Determination
+
+#+begin_src cpp
+channels = Aux::channels(traces, true)     // sorted unique channel list
+tbinmm = Aux::tbin_range(traces)           // [min_tbin, max_tbin+size)
+tbin = config.tick0 or tbinmm.first
+ncols = config.nticks or (tbinmm.second - tbin)
+#+end_src
+
+The channel list determines the number of rows; the tick range determines the
+number of columns. Both can be overridden by configuration.
+
+** Array Construction
+
+#+begin_src cpp
+arr = Zero(nrows, ncols) + baseline        // initialize with baseline
+Aux::fill(arr, traces, channels, tbin)     // add trace charge data
+arr = arr * scale + offset                 // apply linear transform
+#+end_src
+
+The array is an Eigen3 ~Array<float, Dynamic, Dynamic>~ (column-major by
+default). Each row corresponds to one channel; each column to one tick.
+
+** HDF5 Serialization
+
+For each tag, three datasets are written under a group named by the frame's
+sequence identifier:
+
+*** =/<sequence>/frame_<tag>= -- 2D array (nchannels x nticks)
+
+- Data type: ~float32~ or ~int16~ (if ~digitize=true~)
+- Optional gzip compression with configurable chunking
+- *Row-major conversion*: Since HDF5 is row-major (C-order) but Eigen
+  defaults to column-major (Fortran-order), the code explicitly creates a
+  row-major copy before writing:
+  #+begin_src cpp
+  ROWF farr = arr;  // copies column-major to row-major
+  H5Dwrite(dset, dtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, farr.data());
+  #+end_src
+
+*** =/<sequence>/channels_<tag>= -- 1D array of channel IDs
+
+- Data type: ~int32~
+- Maps row index to detector channel ID
+
+*** =/<sequence>/tickinfo_<tag>= -- 1D array of 3 doubles
+
+- ~[frame_time, tick_period, tbin]~
+- Provides the timing reference needed to convert column indices back to
+  absolute times
+
+** HDF5 Output Structure Example
+
+For a frame with ~ident=100~ and tag ~"gauss0"~:
+
+#+begin_example
+/100/
+    frame_gauss0     [8256 x 6000] float32 or int16
+    channels_gauss0  [8256] int32
+    tickinfo_gauss0  [3] float64
+#+end_example
+
+* File Lifecycle
+
+1. *configure()*: Creates (or opens if creation fails) the HDF5 file with
+   ~H5F_ACC_TRUNC~. Validates gzip filter availability if compression is
+   requested.
+
+2. *operator()*: Called once per frame. Writes datasets for each configured
+   trace tag. The file remains open between calls, accumulating groups for
+   each frame sequence number.
+
+3. *finalize()*: Closes the HDF5 file handle via ~H5Fclose()~.
+
+* Test Infrastructure
+
+- *frame-npz-to-hio.jsonnet*: Jsonnet config that wires up a pipeline:
+  ~FrameFileSource -> HDF5FrameTap -> DumpFrames~. Parameterized for detector,
+  tags, digitization, gzip level, and chunk size.
+
+- *frame-npz-to-hio.sh*: Shell script that sweeps gzip levels (0, 9) and
+  chunk sizes (0, 32, 64, 128, 256, 512) to produce benchmark data.
+
+- *frame-npz-to-hio.py*: Python visualization script that reads HDF5 output,
+  performs median subtraction, and generates images.
+
+- *frame-npz-to-hio.org*: Org-mode document with benchmark results on
+  i7-4770K showing time/size trade-offs across compression/chunk configurations.
+
+- *test_hdf5.cxx*: Minimal HDF5 C API test (file create, dataset write).
+
+- *test_threading.cxx*: Basic mutex/thread test (not directly related to
+  HDF5FrameTap; likely an early exploration of thread safety).

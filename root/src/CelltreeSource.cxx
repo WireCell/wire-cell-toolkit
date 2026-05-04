@@ -63,16 +63,10 @@ WireCell::Configuration Root::CelltreeSource::default_configuration() const
 bool Root::CelltreeSource::read_traces(ITrace::vector& all_traces,
                                        std::unordered_map<IFrame::tag_t, IFrame::trace_list_t>& tagged_traces,
                                        std::unordered_map<IFrame::tag_t, IFrame::trace_summary_t>& tagged_threshold,
-                                       const std::string& fname, const std::string& br_name,
+                                       TTree* tree, const std::string& br_name,
                                        const std::string& br_name_threshold, const std::string& frametag,
                                        const unsigned int entry, const int time_scale) const
 {
-    TFile* tfile = TFile::Open(fname.c_str());
-    TTree* tree = (TTree*) tfile->Get("/Event/Sim");
-    if (!tree) {
-        THROW(IOError() << errmsg{"No tree: /Event/Sim in input file"});
-    }
-
     bool trace_has_threshold = false;
     if (tree->GetBranch(br_name_threshold.c_str()) != nullptr) trace_has_threshold = true;
 
@@ -137,25 +131,18 @@ bool Root::CelltreeSource::read_traces(ITrace::vector& all_traces,
             tagged_threshold[frametag].push_back(channel_threshold->at(ind)/time_scale);}
     }
 
-    tfile->Close();
+    delete channelid;
+    delete channel_threshold;
+    delete esignal;
     return true;
 }
 
-bool Root::CelltreeSource::read_cmm(WireCell::Waveform::ChannelMaskMap &cmm, std::string& fname, const unsigned int entry) const
+bool Root::CelltreeSource::read_cmm(WireCell::Waveform::ChannelMaskMap &cmm, TTree* tree, const unsigned int entry) const
 {
-    TFile* tfile = TFile::Open(fname.c_str());
-    TTree* tree = (TTree*) tfile->Get("/Event/Sim");
-    if (!tree) {
-        THROW(IOError() << errmsg{"No tree: /Event/Sim in input file"});
-    }
-
     std::vector<int>* badChannel = new std::vector<int>;
     std::vector<int>* badBegin = new std::vector<int>;
     std::vector<int>* badEnd = new std::vector<int>;
 
-    // tree->SetBranchStatus("badChannel", 1);
-    // tree->SetBranchStatus("badBegin", 1);
-    // tree->SetBranchStatus("badEnd", 1);
     tree->SetBranchAddress("badChannel", &badChannel);
     tree->SetBranchAddress("badBegin", &badBegin);
     tree->SetBranchAddress("badEnd", &badEnd);
@@ -178,7 +165,9 @@ bool Root::CelltreeSource::read_cmm(WireCell::Waveform::ChannelMaskMap &cmm, std
         cmm["bad"][chid].push_back(br);
     }
 
-    tfile->Close();
+    delete badChannel;
+    delete badBegin;
+    delete badEnd;
     return true;
 }
 
@@ -228,7 +217,6 @@ bool Root::CelltreeSource::operator()(IFrame::pointer& out)
     // some output using eventNo, runNo, subRunNO, ...
     log->debug("frame_ident:{} size:{} runNo:{}, subrunNo:{}, eventNo:{}, time_scale:{}, ent:{}",
                frame_ident, siz, run_no, subrun_no, event_no, time_scale, ent);
-    tfile->Close();
 
     ITrace::vector all_traces;
     std::unordered_map<IFrame::tag_t, IFrame::trace_list_t> tagged_traces;
@@ -242,11 +230,14 @@ bool Root::CelltreeSource::operator()(IFrame::pointer& out)
         auto branch_base_name = m_cfg["in_branch_base_names"][i].asString();
         auto frame_tag = m_cfg["out_trace_tags"][i].asString();
         auto branch_threshold = m_cfg["in_branch_thresholds"][i].asString();
-        read_traces(all_traces, tagged_traces, tagged_threshold, url, branch_base_name, branch_threshold, frame_tag, ent, time_scale);
+        read_traces(all_traces, tagged_traces, tagged_threshold, tree, branch_base_name, branch_threshold, frame_tag, ent, time_scale);
     }
-    
+
     WireCell::Waveform::ChannelMaskMap cmm;
-    read_cmm(cmm, url, ent);
+    read_cmm(cmm, tree, ent);
+
+    tfile->Close();
+    delete tfile;
 
     auto sframe = new Aux::SimpleFrame(frame_ident, frame_time, all_traces, 0.5 * units::microsecond, cmm);
     for (auto const& it : tagged_traces) {

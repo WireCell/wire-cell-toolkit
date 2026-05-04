@@ -1,0 +1,359 @@
+#+title: Examination: Frame Processing
+#+include: ../../../docs/include-topic.org
+
+* Purpose
+
+This document records code examination findings for frame manipulation,
+synchronization, tensor conversion, and related utility code in the
+=aux= package.  No code has been modified; findings are documented here
+for review before any changes are made.
+
+Examination date: 2026-04.
+
+* Files Examined
+
+| Source                         | Header                                    |
+|--------------------------------+-------------------------------------------|
+| src/FrameTools.cxx             | inc/WireCellAux/FrameTools.h              |
+| src/FrameSync.cxx              | inc/WireCellAux/FrameSync.h               |
+| src/FrameTensor.cxx            | inc/WireCellAux/FrameTensor.h             |
+| src/SliceTools.cxx             | inc/WireCellAux/SliceTools.h              |
+| src/PlaneTools.cxx             | inc/WireCellAux/PlaneTools.h              |
+| src/PlaneSelector.cxx          | inc/WireCellAux/PlaneSelector.h           |
+| src/TaggedFrameTensorSet.cxx   | inc/WireCellAux/TaggedFrameTensorSet.h    |
+| src/TaggedTensorSetFrame.cxx   | inc/WireCellAux/TaggedTensorSetFrame.h    |
+
+* Algorithm Overview
+
+** Frame Manipulation (FrameTools)
+
+=FrameTools= provides a library of operations on =IFrame= objects:
+
+- *Frame splitting*: Divides a frame into two at a given time.  For
+  each trace, if it spans the split time, its charge sequence is
+  bisected.  Traces entirely before or after the split are assigned
+  whole.
+
+- *2D rasterization*: Converts sparse traces (each with a channel,
+  tbin, and charge sequence) into a dense 2D Eigen array indexed by
+  (channel, tick).  Two variants: one with explicit channel range, one
+  auto-computed.  Overlapping traces are summed (+=).
+
+- *Frame summing*: Merges multiple frames with potentially different
+  reference times into one, aligning traces by computing time-bin
+  offsets from the earliest frame time.
+
+- *Trace filtering*: Separates tagged from untagged traces using set
+  difference operations on trace indices.
+
+- *Diagnostics*: =dump_frame()= computes per-trace statistics (mean,
+  RMS) and reports NaN/Inf values.
+
+** Frame Synchronization (FrameSync)
+
+=FrameSync= implements =IFrameMerge= to synchronize frames arriving on
+multiple input ports.  The algorithm:
+
+1. Buffer incoming frames per port.
+2. =flush()=: find the port with the smallest frame ident, output that
+   frame, and recurse.
+3. EOS synchronization: when all ports have EOS at the front, pop all
+   and forward a single EOS.
+
+The recursion terminates when no non-EOS frames can be flushed (all
+queues empty or blocked on a port that has EOS or is empty).
+
+** Frame-Tensor Conversion
+
+Two conversion directions are supported:
+
+- *Frame to TensorSet* (=TaggedFrameTensorSet=, =FrameTensor=):
+  Rasterizes sparse traces into dense 2D tensors (one per tag).
+  Supports optional digitization (float to int16 with configurable
+  baseline/scale/offset transform).  Also encodes channel IDs and
+  trace summaries as separate tensors.  Channel mask maps (CMM) are
+  converted to range+channel tensor pairs.
+
+- *TensorSet to Frame* (=TaggedTensorSetFrame=): Inverse conversion.
+  Reconstructs =SimpleTrace= objects from 2D waveform tensors and
+  channel ID tensors.  Restores trace summaries from summary tensors.
+
+** Plane Selection (PlaneSelector, PlaneTools)
+
+=PlaneSelector= filters a frame's traces to retain only those belonging
+to a specific wire plane.  At configuration time, it queries the
+=IAnodePlane= to build a set of channel IDs for the target plane.  At
+runtime, it iterates per-tag, keeping traces whose channel ID is in the
+set, and applies configurable tag transformation rules.
+
+=PlaneTools= extracts plane-specific information from the anode geometry
+(channel lists, wire index bounds).
+
+** Slice and Binning (SliceTools)
+
+=SliceTools= computes a =Binning= from a vector of =ISlice= pointers by
+finding the min/max slice starts and using the common span as bin width.
+
+* Critical Findings
+
+** CRIT-FRM-01: =FrameSync::flush()= uses unbounded recursion
+
+- *File*: =src/FrameSync.cxx:25-72=
+- *Severity*: Critical
+- *Category*: Bug (potential stack overflow)
+- *Description*:
+
+  The =flush()= method outputs one frame per call and then recurses:
+
+  #+begin_src c++
+  // Line 54-60 of src/FrameSync.cxx
+  if (nmin > 0) {
+      auto frame = iqs[min_index].front();
+      iqs[min_index].pop_front();
+      std::get<0>(oqs).push_back(frame);
+      return flush(iqs, oqs);   // recursive tail call
+  }
+  #+end_src
+
+  If a large number of frames are buffered (e.g., one port delivers
+  many frames before others start), the recursion depth equals the
+  total number of buffered frames.  C++ does not guarantee tail-call
+  optimization, so this can overflow the stack.
+
+  The same recursive pattern appears again at line 71 for post-EOS
+  flushing.
+
+- *Impact*: Stack overflow / crash with large frame backlogs.
+- *Suggested Remediation*: Convert to iterative loop:
+  =while (nmin > 0) { ... }=
+- *Testing*: Stress test with asymmetric port delivery (one port
+  receives 10000+ frames before others).
+
+* Moderate Findings
+
+** MOD-FRM-01: =FrameSync= does not handle equal idents across ports
+
+- *File*: =src/FrameSync.cxx:45-50=
+- *Severity*: Moderate
+- *Category*: Logic gap
+- *Description*:
+
+  #+begin_src c++
+  // Line 45 of src/FrameSync.cxx
+  /// FIXME: how about equal?
+  if (min_ident > frame->ident()) {
+      min_ident = frame->ident();
+      min_index = ind;
+      ++nmin;
+  }
+  #+end_src
+
+  The =FIXME= comment acknowledges the gap.  When multiple ports have
+  frames with the same ident, only one port (the last one encountered
+  in the iteration) gets flushed per recursion.  The others are flushed
+  on subsequent recursive calls, which works correctly but:
+
+  1. The output order among same-ident frames depends on port
+     iteration order, which may not be deterministic or documented.
+  2. The =nmin= counter counts minimum-updates (not frames with that
+     minimum), making the variable name misleading.
+
+- *Impact*: Non-deterministic output ordering for same-ident frames.
+- *Suggested Remediation*: Flush all ports with the minimum ident in
+  a single pass.  Rename =nmin= to =found_min= (boolean).
+
+** MOD-FRM-02: =PlaneSelector= dereferences iterators from potentially empty set
+
+- *File*: =src/PlaneSelector.cxx:71-74=
+- *Severity*: Moderate
+- *Category*: Undefined behavior
+- *Description*:
+
+  #+begin_src c++
+  // Lines 71-74 of src/PlaneSelector.cxx
+  auto chmm = std::minmax_element(m_chids.begin(), m_chids.end());
+  log->debug("anode={} plane={} nchans={} in=[{},{}]",
+             anode_tn, wire_plane_index, m_chids.size(),
+             *chmm.first, *chmm.second);
+  #+end_src
+
+  If the wire plane has no channels (=m_chids= is empty),
+  =std::minmax_element= returns =(begin(), begin())= and dereferencing
+  is undefined behavior.  This would occur for a misconfigured anode
+  or a plane index out of range.
+
+- *Impact*: Crash on misconfigured anode geometry.
+- *Suggested Remediation*: Guard with =if (!m_chids.empty())=.
+
+** MOD-FRM-03: =PlaneSelector= uses raw =new= without RAII
+
+- *File*: =src/PlaneSelector.cxx:136=
+- *Severity*: Moderate
+- *Category*: Memory safety
+- *Description*:
+
+  #+begin_src c++
+  auto sf = new SimpleFrame(in->ident(), in->time(), out_traces, in->tick());
+  // ... tag_traces, tag_frame calls ...
+  out = IFrame::pointer(sf);  // wrapped on line 152
+  #+end_src
+
+  Between the raw =new= (line 136) and the =IFrame::pointer= wrapping
+  (line 152), if any exception is thrown (e.g., in =tag_traces()=),
+  the =SimpleFrame= leaks.
+
+- *Impact*: Memory leak on exception path.
+- *Suggested Remediation*: Use =std::make_shared<SimpleFrame>(...)=
+  directly, or wrap immediately after =new=.
+
+** MOD-FRM-04: =TaggedTensorSetFrame= accesses tensor shape without bounds check
+
+- *File*: =src/TaggedTensorSetFrame.cxx:86-88=
+- *Severity*: Moderate
+- *Category*: Robustness
+- *Description*:
+
+  #+begin_src c++
+  auto wf_shape = wf_ten->shape();
+  size_t nchans = wf_shape[0];
+  size_t nticks = wf_shape[1];
+  #+end_src
+
+  The code assumes the waveform tensor is 2D (=shape.size() >= 2=).
+  No validation is performed.  A 1D or 0D tensor would cause
+  out-of-bounds access on the shape vector.  Similarly, the summary
+  tensor (line 113) is assumed to have exactly =nchans= elements
+  without verifying its shape.
+
+- *Impact*: Crash on malformed tensor input.
+- *Suggested Remediation*: Validate =wf_shape.size() == 2= and
+  =sum_ten->shape()[0] == nchans= before use.
+
+** MOD-FRM-05: =TaggedTensorSetFrame= uses raw =new= for =SimpleFrame=
+
+- *File*: =src/TaggedTensorSetFrame.cxx:123-124=
+- *Severity*: Moderate
+- *Category*: Memory safety
+- *Description*:
+
+  Same pattern as MOD-FRM-03:
+
+  #+begin_src c++
+  SimpleFrame* frame = new SimpleFrame(ident, get(set_md, "time", 0.0),
+                                       ITrace::shared_vector(traces),
+                                       get(set_md, "tick", 0.5 * units::microsecond));
+  #+end_src
+
+  Raw =new= followed by operations (=tag_traces= loop at lines
+  126-128) before the pointer is wrapped.
+
+- *Impact*: Memory leak on exception path.
+- *Suggested Remediation*: Use =std::make_shared=.
+
+* Minor Findings
+
+** MIN-FRM-01: =dump_frame()= divides by =ntraces= without zero check
+
+- *File*: =src/FrameTools.cxx:309=
+- *Severity*: Minor
+- *Category*: Robustness
+- *Description*:
+
+  #+begin_src c++
+  double meanmean = Waveform::sum(means) / ntraces;
+  #+end_src
+
+  If the frame has zero traces, =ntraces= is 0 and this produces
+  NaN/Inf.  The function is diagnostic-only, so the impact is limited
+  to confusing log output.
+
+- *Impact*: NaN in diagnostic output for empty frames.
+- *Suggested Remediation*: Guard with =if (ntraces > 0)=.
+
+** MIN-FRM-02: Frame split loses tags and masks
+
+- *File*: =src/FrameTools.cxx:97=
+- *Severity*: Minor
+- *Category*: Incomplete feature
+- *Description*:
+
+  #+begin_src c++
+  // fixme: what about ident, cmm, tags....
+  #+end_src
+
+  The =split()= function creates new =SimpleFrame= objects but does
+  not transfer frame tags, trace tags, or channel mask maps from the
+  input frame.  The FIXME is acknowledged in code.
+
+- *Impact*: Metadata loss when splitting frames.
+- *Suggested Remediation*: Propagate tags and masks, splitting trace
+  tag indices appropriately.
+
+** MIN-FRM-03: =raster()= allocates unnecessary temporary array per trace
+
+- *File*: =src/FrameTools.cxx:353-358=
+- *Severity*: Minor
+- *Category*: Performance
+- *Description*:
+
+  #+begin_src c++
+  WireCell::Array::array_xf tofill(ncols - tbin);
+  const size_t maxbin = std::min(nsamples, ncols - tbin);
+  for (size_t bin = 0; bin < maxbin; ++bin) {
+      tofill[bin] = samples[bin];
+  }
+  block.block(irow, tbin, 1, ncols - tbin).row(0) += tofill;
+  #+end_src
+
+  Each trace allocates a temporary 1D array, copies charge data into
+  it, then adds it to the output block.  The temporary array is sized
+  =ncols - tbin= but only =maxbin= elements are filled; the rest
+  are zero (from initialization) and add nothing.
+
+- *Impact*: Unnecessary allocation and copy per trace.
+- *Suggested Remediation*: Use
+  =block.block(irow, tbin, 1, maxbin).row(0) += Eigen::Map<...>(...)=
+  to add directly from the trace data without a temporary.
+
+** MIN-FRM-04: =SliceTools= binning template uses floating-point round
+
+- *File*: =inc/WireCellAux/SliceTools.h:28=
+- *Severity*: Minor
+- *Category*: Robustness
+- *Description*:
+
+  #+begin_src c++
+  const int nbins = 1 + round((*l-*f)/span);
+  #+end_src
+
+  The bin count depends on =round()= of a floating-point division.
+  Accumulated FP error across many slices could produce an off-by-one
+  bin count.
+
+- *Impact*: Possible off-by-one in bin count for edge cases.
+- *Suggested Remediation*: Use integer arithmetic if slice starts and
+  spans are guaranteed to be tick-aligned.
+
+* Efficiency Observations
+
+** EFF-FRM-01: =untagged_traces()= uses O(n log n) set operations
+
+=src/FrameTools.cxx:103-130=: Collects all tagged trace indices into a
+sorted set, then iterates all traces to find those not in the set.
+For frames with many tags, the set construction involves sorting and
+set-union operations.  A simpler approach would be a boolean vector
+indexed by trace position.
+
+** EFF-FRM-02: =sum()= stores raw pointers to charge data
+
+=src/FrameTools.cxx:392=: The =index= map stores =const vector<float>*=
+pointers to trace charge data.  This is safe because =ITrace::pointer=
+keeps the traces alive via shared_ptr.  However, the indirection through
+a map of vectors-of-pairs adds overhead compared to direct iteration.
+
+** EFF-FRM-03: =TaggedFrameTensorSet= iterates per-tag instead of vectorizing
+
+Each tag is processed independently with its own tensor allocation,
+trace iteration, and rasterization loop.  For frames with many tags
+sharing the same traces, this repeats work.  A single-pass approach
+could process all tags simultaneously.

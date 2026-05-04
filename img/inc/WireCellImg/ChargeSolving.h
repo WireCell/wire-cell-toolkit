@@ -95,6 +95,11 @@ namespace WireCell {
             // "whitened" via Cholesky decomposition.
             bool m_whiten{true};
 
+            // Config: minimum blob charge for connectivity-based weighting.
+            // Blobs below this threshold are ignored when determining
+            // prev/next slice connections in the uboone weighting strategy.
+            double m_good_blob_charge_th{300.};
+
             int m_count{0};
         };
 

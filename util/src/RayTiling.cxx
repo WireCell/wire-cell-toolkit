@@ -88,10 +88,60 @@ strips_t Activity::make_strips() const
     return ret;
 }
 
+// Activity::ranges_t Activity::active_ranges() const
+// {
+//     ranges_t ret;
+//     range_t current{end(), end()};
+
+//     for (auto it = begin(); it != end(); ++it) {
+//         // entering active range
+//         if (current.first == end() and *it > m_threshold) {
+//             current.first = it;
+//             continue;
+//         }
+//         // exiting active range
+//         if (current.first != end() and *it <= 0.0) {
+//             current.second = it;
+//             ret.push_back(current);
+//             current.first = end();
+//         }
+//     }
+//     if (current.first != end()) {
+//         current.second = end();
+//         ret.push_back(current);
+//     }
+//     return ret;
+// }
 Activity::ranges_t Activity::active_ranges() const
 {
     ranges_t ret;
     range_t current{end(), end()};
+
+        // Helper lambda to split and add ranges
+    // auto add_range = [&](const range_t& range) {
+    //     int range_length = range.second - range.first;
+    //     if (range_length > 15) {
+    //         // Calculate how many sub-ranges we need
+    //         int num_subranges = (range_length + 14) / 15; // Ceiling division
+    //         int subrange_size = range_length / num_subranges;
+    //         int remainder = range_length % num_subranges;
+            
+    //         auto start_it = range.first;
+    //         for (int i = 0; i < num_subranges; ++i) {
+    //             auto end_it = start_it + subrange_size;
+    //             // Distribute remainder across first few subranges
+    //             if (i < remainder) {
+    //                 ++end_it;
+    //             }
+                
+    //             ret.push_back({start_it, end_it});
+    //             start_it = end_it;
+    //         }
+    //     } else {
+    //         // Range is <= 15, add as-is
+    //         ret.push_back(range);
+    //     }
+    // };
 
     for (auto it = begin(); it != end(); ++it) {
         // entering active range
@@ -103,11 +153,13 @@ Activity::ranges_t Activity::active_ranges() const
         if (current.first != end() and *it <= 0.0) {
             current.second = it;
             ret.push_back(current);
+            // add_range(current);
             current.first = end();
         }
     }
     if (current.first != end()) {
         current.second = end();
+        // add_range(current);
         ret.push_back(current);
     }
     return ret;
@@ -392,7 +444,6 @@ void WireCell::RayGrid::prune(const Coordinates& coords, blobs_t& blobs, double 
     for (auto& blob : blobs) {
         auto& strips = blob.strips();
         const int nlayers = strips.size();
-
         // Collect corners projected into each layer.  Represent this
         // projection as the absolute pitch in units of pitch bin
         // index.
@@ -449,6 +500,7 @@ blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords,
 {
     Tiling rc(coords, nudge);
     blobs_t blobs;
+    const size_t nlayers = activities.size();
 
     for (const auto& activity : activities) {
         if (blobs.empty()) {
@@ -465,6 +517,23 @@ blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords,
     }
     prune(coords, blobs, nudge);
     drop_invalid(blobs);
+        // remove malformed blobs that don't have all layers
+    for (size_t ib = 0; ib < blobs.size(); ++ib) {
+        const auto& b = blobs[ib];
+        if (b.strips().size() != nlayers) {
+            std::cerr << "make_blobs: MALFORMED blob[" << ib << "] nstrips="
+                      << b.strips().size() << " expected=" << nlayers;
+            for (size_t s = 0; s < b.strips().size(); ++s) {
+                std::cerr << " L" << b.strips()[s].layer
+                          << "=[" << b.strips()[s].bounds.first
+                          << "," << b.strips()[s].bounds.second << ")";
+            }
+            std::cerr << std::endl;
+        }
+    }
+    const auto end = std::partition(blobs.begin(), blobs.end(),
+                                    [&](const Blob& b) { return b.strips().size() == nlayers; });
+    blobs.resize(end - blobs.begin());
 
     return blobs;
 }

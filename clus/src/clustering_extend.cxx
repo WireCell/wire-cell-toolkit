@@ -6,6 +6,9 @@
 
 #include "WireCellUtil/NamedFactory.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 class ClusteringExtend;
 class ClusteringExtendLoop;
 WIRECELL_FACTORY(ClusteringExtend, ClusteringExtend,
@@ -564,37 +567,28 @@ static void clustering_extend(
   // Get all the wire plane IDs from the grouping
 	const auto& wpids = live_grouping.wpids();
 
-	// Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
-	std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
 	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_U_dir;
 	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_V_dir;
 	std::map<WirePlaneId, std::pair<geo_point_t, double> > wpid_W_dir;
-	std::set<int> apas;
 	for (const auto& wpid : wpids) {
 		int apa = wpid.apa();
 		int face = wpid.face();
-		apas.insert(apa);
-  
+
 		// Create wpids for all three planes with this APA and face
 		WirePlaneId wpid_u(kUlayer, face, apa);
 		WirePlaneId wpid_v(kVlayer, face, apa);
 		WirePlaneId wpid_w(kWlayer, face, apa);
-	 
-		// Get drift direction based on face orientation
-		int face_dirx = dv->face_dirx(wpid_u);
-		geo_point_t drift_dir(face_dirx, 0, 0);
-		
+
 		// Get wire directions for all planes
 		Vector wire_dir_u = dv->wire_direction(wpid_u);
 		Vector wire_dir_v = dv->wire_direction(wpid_v);
 		Vector wire_dir_w = dv->wire_direction(wpid_w);
-  
+
 		// Calculate angles
 		double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
 		double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
 		double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
-  
-		wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+
 		wpid_U_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_u), sin(angle_u)), angle_u);
 		wpid_V_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_v), sin(angle_v)), angle_v);
 		wpid_W_dir[wpid] = std::make_pair(geo_point_t(0, cos(angle_w), sin(angle_w)), angle_w);
@@ -602,16 +596,17 @@ static void clustering_extend(
 
 
   geo_point_t drift_dir_abs(1,0,0);
-  cluster_set_t used_clusters;
+  std::unordered_set<const Cluster*> used_clusters;
 
 
   // prepare graph ...
   typedef cluster_connectivity_graph_t Graph;
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-  std::map<const Cluster*, int> map_cluster_index;
-  const auto& live_clusters = live_grouping.children();
-  
+  std::unordered_map<const Cluster*, int> map_cluster_index;
+  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
+  sort_clusters(live_clusters);
+
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;
@@ -754,13 +749,15 @@ static void clustering_extend(
 	   for (size_t j=0;j!=live_clusters.size();j++){
 	     auto cluster_2 = live_clusters.at(j);
        if (!cluster_2->get_scope_filter(scope)) continue;
+	     if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	     if (cluster_2==cluster_1) continue;
 	     if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),lowest_p,dir_lowp,length_cut)){
 	       // to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
 	       boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
 			       ilive2desc[map_cluster_index[cluster_2]], g);
 
-
+	       if (cluster_2->get_length()<15*units::cm)
+		 used_clusters.insert(cluster_2);
 	     }
 	   }
 	   
@@ -861,86 +858,43 @@ static void clustering_extend(
 
 
 std::vector<std::pair<geo_point_t, const Blob*>> WireCell::Clus::Facade::get_strategic_points(const Cluster& cluster) {
-    // Store unique points and their corresponding blobs
-    std::set<std::pair<geo_point_t, const Blob*>> unique_points;
+    // Collect candidate starting points; deduplicated by geo_point_t below.
+    std::vector<std::pair<geo_point_t, const Blob*>> points;
 
     // 1. Get extreme points along main axes
     {
         // Y-axis (highest/lowest)
         auto [high_y, low_y] = cluster.get_highest_lowest_points(1);
-        unique_points.emplace(high_y, cluster.blob_with_point(cluster.get_closest_point_index(high_y)));
-        unique_points.emplace(low_y, cluster.blob_with_point(cluster.get_closest_point_index(low_y)));
-        
+        points.emplace_back(high_y, cluster.blob_with_point(cluster.get_closest_point_index(high_y)));
+        points.emplace_back(low_y, cluster.blob_with_point(cluster.get_closest_point_index(low_y)));
+
         // Z-axis (front/back)
         auto [front, back] = cluster.get_front_back_points();
-        unique_points.emplace(front, cluster.blob_with_point(cluster.get_closest_point_index(front)));
-        unique_points.emplace(back, cluster.blob_with_point(cluster.get_closest_point_index(back)));
-        
+        points.emplace_back(front, cluster.blob_with_point(cluster.get_closest_point_index(front)));
+        points.emplace_back(back, cluster.blob_with_point(cluster.get_closest_point_index(back)));
+
         // X-axis (earliest/latest)
         auto [early, late] = cluster.get_earliest_latest_points();
-        unique_points.emplace(early, cluster.blob_with_point(cluster.get_closest_point_index(early)));
-        unique_points.emplace(late, cluster.blob_with_point(cluster.get_closest_point_index(late)));
+        points.emplace_back(early, cluster.blob_with_point(cluster.get_closest_point_index(early)));
+        points.emplace_back(late, cluster.blob_with_point(cluster.get_closest_point_index(late)));
     }
 
-    // // 2. Add points based on PCA
-    // {
-    //     auto center = cluster.get_pca().center);
-    //     unique_points.emplace(center, cluster.blob_with_point(cluster.get_closest_point_index(center)));
-
-    //     // Add points along principal axes
-    //     for (int i = 0; i < 3; ++i) {
-    //         auto dir = cluster.get_pca().axis.at(i);
-    //         auto value = sqrt(cluster.get_pca().values.at(i));  // Use eigenvalue for scale
-            
-    //         // Add points in both directions along each principal axis
-    //         geo_point_t p1 = center + dir * value;
-    //         geo_point_t p2 = center - dir * value;
-            
-    //         auto [closest_p1, blob1] = cluster.get_closest_point_blob(p1);
-    //         auto [closest_p2, blob2] = cluster.get_closest_point_blob(p2);
-            
-    //         unique_points.emplace(closest_p1, blob1);
-    //         unique_points.emplace(closest_p2, blob2);
-    //     }
-    // }
-
-    // // 3. Add endpoints from trajectory if available
-    // {
-    //     const auto& path_wcps = cluster.get_path_wcps();
-    //     if (!path_wcps.empty()) {
-    //         auto first_idx = path_wcps.front();
-    //         auto last_idx = path_wcps.back();
-            
-    //         auto first_point = cluster.point3d(first_idx);
-    //         auto last_point = cluster.point3d(last_idx);
-            
-    //         unique_points.emplace(first_point, cluster.blob_with_point(first_idx));
-    //         unique_points.emplace(last_point, cluster.blob_with_point(last_idx));
-    //     }
-    // }
-
-    // 4. Add points from convex hull vertices 
+    // 4. Add points from convex hull vertices
     {
         auto hull_points = cluster.get_hull();
         for (const auto& p : hull_points) {
             auto [closest_p, blob] = cluster.get_closest_point_blob(p);
-            unique_points.emplace(closest_p, blob);
+            points.emplace_back(closest_p, blob);
         }
     }
 
-    // // 5. Add first and last blobs center positions
-    // {
-    //     if (auto first_blob = cluster.get_first_blob()) {
-    //         unique_points.emplace(first_blob->center_pos(), first_blob);
-    //     }
-    //     if (auto last_blob = cluster.get_last_blob()) {
-    //         unique_points.emplace(last_blob->center_pos(), last_blob);
-    //     }
-    // }
-
-    // Convert set to vector for return
-    std::vector<std::pair<geo_point_t, const Blob*>> points;
-    points.insert(points.end(), unique_points.begin(), unique_points.end());
+    // Sort by geo_point_t only (deterministic, no pointer dependency) then deduplicate
+    std::sort(points.begin(), points.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+    points.erase(std::unique(points.begin(), points.end(),
+        [](const auto& a, const auto& b) {
+            return !(a.first < b.first) && !(b.first < a.first);
+        }), points.end());
 
     return points;
 }
@@ -972,10 +926,10 @@ double WireCell::Clus::Facade::Find_Closest_Points(
   }
 
   double dis_save = 1e9;
-  
+
   // Early exit threshold - could be made configurable
-  const double early_exit_threshold = 0.5 * units::cm;  
-  
+  const double early_exit_threshold = 0.5 * units::cm;
+
   // Get strategic starting points from both clusters
   auto start_points1 = get_strategic_points(*cluster1);
   //auto start_points2 = get_strategic_points(*cluster2);
@@ -1039,101 +993,6 @@ double WireCell::Clus::Facade::Find_Closest_Points(
     }
 
     return dis_save;
-
-  // double dis_save = 1e9;
-  
-  // const Blob* prev_mcell1 = 0;
-  // const Blob* prev_mcell2 = 0;
-  // const Blob* mcell1 = 0;
-  // geo_point_t p1;
-  // const Blob* mcell2 = 0;
-  // geo_point_t p2;
-  // double dis;
-
-  // const Cluster* cluster1 = &cluster1ref;
-  // const Cluster* cluster2 = &cluster2ref;
-
-  // // Previously the two branches of the following if/else were identical except
-  // // for 1<-->2.  For sanity, we simply swap the order.  The output of the
-  // // remaining lone block is p1_save/p2_save and if we swap here, we swap them
-  // // before returning.
-  // bool swapped = false;
-  // if (length_1 >= length_2) {
-  //   swapped = true;
-  //   std::swap(cluster1, cluster2);
-  //   std::swap(length_1, length_2);
-  // }
-
-  // if (! cluster1->nchildren() || ! cluster2->nchildren()) {
-  //   raise<ValueError>("Find_Closest_Points: given empty cluster");
-  // }
-      
-  // mcell1 = cluster1->get_first_blob();
-  // p1 = mcell1->center_pos();
-
-  // if (flag_print) std::cout << "a: " << p1 << std::endl;
-
-  // while (mcell1 != prev_mcell1 || mcell2 != prev_mcell2){
-  //   prev_mcell1 = mcell1;
-  //   prev_mcell2 = mcell2;
-
-  //   auto temp_results = cluster2->get_closest_point_blob(p1);
-  //   p2 = temp_results.first;
-  //   mcell2 = temp_results.second;
-
-  //   temp_results = cluster1->get_closest_point_blob(p2);
-  //   p1 = temp_results.first;
-  //   mcell1 = temp_results.second;
-
-  //   if (flag_print) std::cout << "a: " << p1 << " " << p2 << std::endl;
-  // }
-  // geo_point_t diff = p1 - p2;
-  // dis = diff.magnitude();
-
-  // if (dis < dis_save){
-  //   dis_save = dis;
-  //   p1_save = p1;
-  //   p2_save = p2;
-  // }
-
-  // prev_mcell1 = 0;
-  // prev_mcell2 = 0;
-
-  // mcell1 = cluster1->get_last_blob();
-  // p1 = mcell1->center_pos();
-
-  // if (flag_print) std::cout << "b: " << p1 << std::endl;
-
-  // while(mcell1!=prev_mcell1 || mcell2!=prev_mcell2){
-  //   prev_mcell1 = mcell1;
-  //   prev_mcell2 = mcell2;
-      
-  //   // find the closest point and merged cell in cluster2
-  //   auto temp_results = cluster2->get_closest_point_blob(p1);
-  //   p2 = temp_results.first;
-  //   mcell2 = temp_results.second;
-    
-  //   // find the closest point and merged cell in cluster1
-  //   temp_results = cluster1->get_closest_point_blob(p2);
-  //   p1 = temp_results.first;
-  //   mcell1 = temp_results.second;
-  
-  //   if (flag_print) std::cout << "b: " << p1 << " " << p2 << std::endl;
-  // }
-  // diff = p1 - p2;
-  // dis = diff.magnitude();
-
-  // if (dis < dis_save){
-  //   dis_save = dis;
-  //   p1_save = p1;
-  //   p2_save = p2;
-  // }
-    
-  // if (swapped) {
-  //   std::swap(p1_save, p2_save);
-  // }
-
-  // return dis_save;
 }
 
 

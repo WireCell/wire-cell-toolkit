@@ -68,11 +68,52 @@ void test_arithmetic()
     scale(cv2, cv);
 }
 
+// Regression test for Waveform::merge(BinRangeList) — sorting input by
+// .first does not order .second, so an earlier-but-wider range followed by
+// a narrower overlapping one previously shrank the merged range.  The fix
+// in util/src/Waveform.cxx takes max(.second).
+void test_merge_binranges()
+{
+    using BR = Waveform::BinRange;
+
+    // Wide range followed by a narrower one whose .first lies inside it but
+    // whose .second is *less* than the wide range's .second.  Expected: a
+    // single merged range equal to the wide one.
+    Waveform::BinRangeList in1{ BR{0, 100}, BR{10, 50} };
+    auto out1 = Waveform::merge(in1);
+    Assert(out1.size() == 1);
+    Assert(out1[0].first  == 0);
+    Assert(out1[0].second == 100);
+
+    // Two genuinely overlapping ranges where the second extends past the
+    // first.  Expected: union.
+    Waveform::BinRangeList in2{ BR{0, 50}, BR{30, 80} };
+    auto out2 = Waveform::merge(in2);
+    Assert(out2.size() == 1);
+    Assert(out2[0].first  == 0);
+    Assert(out2[0].second == 80);
+
+    // Disjoint ranges stay separate.
+    Waveform::BinRangeList in3{ BR{0, 10}, BR{20, 30} };
+    auto out3 = Waveform::merge(in3);
+    Assert(out3.size() == 2);
+    Assert(out3[0].first == 0  && out3[0].second == 10);
+    Assert(out3[1].first == 20 && out3[1].second == 30);
+
+    // Unsorted input with the wide-then-narrow pattern hidden by ordering.
+    Waveform::BinRangeList in4{ BR{10, 50}, BR{0, 100} };
+    auto out4 = Waveform::merge(in4);
+    Assert(out4.size() == 1);
+    Assert(out4[0].first  == 0);
+    Assert(out4[0].second == 100);
+}
+
 int main(int argc, char* argv[])
 {
     test_transform();
     test_mean_rms();
     test_arithmetic();
+    test_merge_binranges();
 
     cerr << "bye." << endl;
     return 0;

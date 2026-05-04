@@ -40,6 +40,7 @@ local sp_maker = import 'pgrapher/experiment/pdhd/sp.jsonnet';
 //local chndbm = chndb_maker(params, tools);
 //local chndb = if epoch == "dynamic" then chndbm.wcls_multi(name="") else chndbm.wct(epoch);
 
+local use_resampler = (reality == 'data');
 
 // Collect the WC/LS input converters for use below.  Make sure the
 // "name" argument matches what is used in the FHiCL that loads this
@@ -52,6 +53,7 @@ local wcls_input = {
     data: {
       art_tag: raw_input_label,
       frame_tags: ['orig'],  // this is a WCT designator
+      tick: 512*wc.ns,
       // nticks: params.daq.nticks,
     },
   }, nin=0, nout=1),
@@ -136,25 +138,42 @@ local chsel_pipes = [
   for n in std.range(0, std.length(tools.anodes) - 1)
 ];
 
+
+local resamplers_config = import 'pgrapher/common/resamplers.jsonnet';
+local load_resamplers = resamplers_config(g, wc, tools);
+local resamplers = load_resamplers.resamplers;
+
+// local resamplers = [
+//   g.pnode({
+//     type: 'Resampler',
+//     name: 'resmp%d' %n,
+//     data: {
+//       period: 500*wc.ns,
+//       time_pad: "linear",
+//     }
+//   }, nin=1, nout=1)
+//   for n in std.range(0, std.length(tools.anodes) - 1)
+// ];
+
 local magoutput = 'protodunehd-data-check.root';
 local magnify = import 'pgrapher/experiment/pdhd/magnify-sinks.jsonnet';
 local magio = magnify(tools, magoutput);
 
 local nfsp_pipes = [
-  g.pipeline([
-               chsel_pipes[n],
-               // magio.orig_pipe[n],
-
-               nf_pipes[n],
-               // magio.raw_pipe[n],
-
-               sp_pipes[n],
-               // magio.decon_pipe[n],
-               // magio.threshold_pipe[n],
-               // magio.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
-             ],
-             'nfsp_pipe_%d' % n)
-  for n in std.range(0, std.length(tools.anodes) - 1)
+  g.pipeline(
+    [chsel_pipes[n]] + 
+    (if use_resampler then [resamplers[n]] else []) +
+    [
+      // magio.orig_pipe[n],
+      nf_pipes[n],
+      // magio.raw_pipe[n],
+      sp_pipes[n],
+      // magio.decon_pipe[n],
+      // magio.threshold_pipe[n],
+      // magio.debug_pipe[n], // use_roi_debug_mode=true in sp.jsonnet
+    ],
+    'nfsp_pipe_%d' % n)
+    for n in std.range(0, std.length(tools.anodes) - 1)
 ];
 
 //local f = import 'pgrapher/common/funcs.jsonnet';

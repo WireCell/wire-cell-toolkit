@@ -107,15 +107,20 @@ bool FrameFileSource::read()
         return false;
     }
     auto parts = split(m_cur.fname, "_");
-    if (parts.size() != 3) {
+    if (parts.size() < 3) {
         // log->warn("read parse file name failed got {} parts from {}", parts.size(), m_cur.fname);
         return false;
     }
-    auto rparts = split(parts[2], ".");
+    // Filename format: <type>_<tag>_<ident>.<ext>.  The tag may itself contain
+    // underscores (e.g. "lf_noisy"), so any extra middle parts join into the tag.
+    auto rparts = split(parts.back(), ".");
     m_cur.ident = std::atoi(rparts[0].c_str());
     m_cur.okay = true;
     m_cur.type = parts[0];
     m_cur.tag = parts[1];
+    for (size_t i = 2; i + 1 < parts.size(); ++i) {
+        m_cur.tag += "_" + parts[i];
+    }
     m_cur.ext = rparts[1];
     log->debug("read type={} tag={} ident={} ext={} at call={}",
                m_cur.type, m_cur.tag, m_cur.ident, m_cur.ext, m_count);

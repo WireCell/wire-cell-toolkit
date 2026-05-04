@@ -42,7 +42,7 @@ function(params, anode, field, n, rms_cuts=[])
       // wish to change them.
       {
         //channels: std.range(n * 2560, (n + 1) * 2560 - 1),
-        channels: std.range(n * 5632, n * 5632 + 5631)
+        channels: std.range(n * 5632, n * 5632 + 5631),
         nominal_baseline: 2001.0,  // adc count [879.5 mV]
         gain_correction: 1.0,  // unitless
         response_offset: 0.0,  // ticks?
@@ -110,6 +110,11 @@ function(params, anode, field, n, rms_cuts=[])
         roi_min_max_ratio: 1.5,
       },
 
+      // When re-enabling these notches, prefer wc.freqmasks_phys([freqs], delta)
+      // from wirecell.jsonnet — it resolves bins at runtime against the live
+      // tick × nsamples and auto-mirrors conjugate-frequency bins.  The
+      // freqbinner.freqmasks helper below bakes bin indices at jsonnet eval
+      // time and does not auto-mirror.
       local freqbinner = wc.freqbinner(params.daq.tick, params.nf.nsamples);
       local harmonic_freqs = [
         //f*wc.kilohertz for f in

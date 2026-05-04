@@ -21,7 +21,7 @@ namespace WireCell::Clus::PR {
     /// The point must be withing max_dist of the segment.
     ///
     /// Returns true if the graph was modified.
-    bool break_segment(Graph& graph, SegmentPtr seg, Point point,
+    std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv,
                        double max_dist=1e9*units::cm);
     // patter recognition
     std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm );
@@ -61,7 +61,7 @@ namespace WireCell::Clus::PR {
     ///
     /// @param seg The segment containing fit data
     /// @return Median dQ/dx value (0 if no valid fits)
-    double segment_median_dQ_dx(SegmentPtr seg);
+    double segment_median_dQ_dx(SegmentPtr seg, int n1 = -1, int n2 = -1);
     double segment_rms_dQ_dx(SegmentPtr seg);
     
     
@@ -74,23 +74,30 @@ namespace WireCell::Clus::PR {
     void create_segment_point_cloud(SegmentPtr segment,
                                     const std::vector<geo_point_t>& path_points,
                                     const IDetectorVolumes::pointer& dv,
-                                    const std::string& cloud_name = "main");
+                                    const std::string& cloud_name = "main",
+                                    const std::vector<size_t>& global_indices = {});
 
     void create_segment_fit_point_cloud(SegmentPtr segment,
                                     const IDetectorVolumes::pointer& dv,
                                     const std::string& cloud_name = "fit");
 
-    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit");
+    std::pair<double, WireCell::Point> segment_get_closest_point(SegmentPtr seg, const WireCell::Point& point, const std::string& cloud_name = "fit", const std::string& base_cloud_name = "main");
     std::tuple<double, double, double> segment_get_closest_2d_distances(SegmentPtr seg, const WireCell::Point& point, int apa, int face, const std::string& cloud_name = "fit");
+    double segment_get_closest_2d_distance(SegmentPtr seg, const WireCell::Point& point, int apa, int face, int plane, const std::string& cloud_name = "fit");
 
 
     // PID related 
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
     std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
     // success, flag_dir, pdg_code, particle_score
-    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range , double offset_length, bool flag_force, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range=35*units::cm, double offset_length = 0*units::cm, bool flag_force = false,  double MIP_dQdx = 50000/units::cm);
 
     // direction calculation ...
+    /// Returns true if the segment's direction is weakly determined.
+    ///
+    /// Mirrors prototype ProtoSegment::is_dir_weak(): checks particle-type-based
+    /// score thresholds (muon, proton) and the static dir_weak flag.
+    bool segment_is_dir_weak(SegmentPtr seg);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start);
@@ -104,7 +111,7 @@ namespace WireCell::Clus::PR {
     WireCell::D4Vector<double> segment_cal_4mom(SegmentPtr segment, int pdg_code, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 50000/units::cm);
 
     // EMshower PID
-    void clustering_points_segments(std::set<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
+    void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
 
     bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm);
     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false);

@@ -39,6 +39,8 @@ using spdlog::debug;
 
 
 
+static WireCell::Log::logptr_t s_log = WireCell::Log::logger("clus.Cluster");
+
 std::ostream& Facade::operator<<(std::ostream& os, const Facade::Cluster& cluster)
 {
     const auto uvwt_min = cluster.get_uvwt_min();
@@ -197,33 +199,47 @@ std::vector<int> Cluster::add_corrected_points(
 
     // std::cout << "T0: " << t0 << " " << this->get_flash().time() << std::endl;
 
-    std::vector<int> blob_passed;
-    blob_passed.resize(children().size(), 0); // not passed by default
-    if (correction_name == "T0Correction") {
-        const auto& pct = pcts->pc_transform("T0Correction");
-        for (size_t iblob = 0; iblob < this->children().size(); ++iblob) {
-            Blob* blob = this->children().at(iblob);
-            auto &lpc_3d = blob->local_pcs().at("3d");
-            auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"},
-                                                 {"x_t0cor","y_t0cor","z_t0cor"}, t0,
-                                                 blob->wpid().face(), blob->wpid().apa());
-            lpc_3d.add("x_t0cor", *corrected_points.get("x_t0cor")); // only add x_t0cor
-            auto filter_result = pct->filter(corrected_points,
-                                             {"x_t0cor", "y_t0cor", "z_t0cor"},
-                                             t0, blob->wpid().face(), blob->wpid().apa());
-            auto arr_filter = filter_result.get("filter")->elements<int>();
-            for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
-                if (arr_filter[ipt] == 1) {
-                    blob_passed[iblob] = 1;
-                    break; // only one point pass is enough
-                }
-            }
-        }
-        // the new scope should have the same name as the correction name. This is how the code can find corrections in the code ...
-        m_scopes["T0Correction"] = {"3d", {"x_t0cor", "y", "z"}}; // add the new scope
-    } else {
+    const auto& pct = pcts->pc_transform(correction_name);
+    if (!pct) {
         raise<RuntimeError>("Cluster::add_corrected_points: no such correction: %s", correction_name);
     }
+
+    // Ask the transform what scope it produces and which arrays to persist.
+    const auto out_scope = pct->output_scope();
+    const auto store_names = pct->stored_array_names();
+
+    const auto blobs = this->children();
+    std::vector<int> blob_passed(blobs.size(), 0); // not passed by default
+
+    for (size_t iblob = 0; iblob < blobs.size(); ++iblob) {
+        Blob* blob = blobs[iblob];
+        auto& lpc_3d = blob->local_pcs().at("3d");
+
+        // Apply the correction. The transform reads {"x","y","z"} and produces
+        // the arrays named by out_scope.coords.
+        auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"},
+                                             out_scope.coords, t0,
+                                             blob->wpid().face(), blob->wpid().apa());
+
+        // Persist only the arrays that actually changed (per the transform).
+        for (const auto& name : store_names) {
+            lpc_3d.add(name, *corrected_points.get(name));
+        }
+
+        // Filter: did any corrected point fall inside the active detector volume?
+        auto filter_result = pct->filter(corrected_points, out_scope.coords,
+                                         t0, blob->wpid().face(), blob->wpid().apa());
+        auto arr_filter = filter_result.get("filter")->elements<int>();
+        for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
+            if (arr_filter[ipt] == 1) {
+                blob_passed[iblob] = 1;
+                break; // one passing point is enough
+            }
+        }
+    }
+
+    // Register the output scope so callers can retrieve it via get_scope(correction_name).
+    m_scopes[correction_name] = out_scope;
     return blob_passed;
 }
 
@@ -246,6 +262,12 @@ std::vector<WireCell::WirePlaneId> Cluster::wpids_blob() const
         }
     }
     return wpids;
+}
+
+std::set<WireCell::WirePlaneId> Cluster::wpids_blob_set() const
+{
+    const auto& vec = wpids_blob();
+    return std::set<WireCell::WirePlaneId>(vec.begin(), vec.end());
 }
 
 WirePlaneId Cluster::wpid(const geo_point_t& point) const
@@ -829,6 +851,60 @@ WirePlaneId Cluster::wire_plane_id(size_t point_index) const {
     return WirePlaneId(wpids[point_index]);
 }
 
+std::vector<int> Cluster::segment_ids() const {
+    auto& seg_ids = cache().point_segment_ids;
+    if (seg_ids.empty()) {
+        auto& lpcs = const_cast<Cluster*>(this)->local_pcs();
+        auto it = lpcs.find("3d");
+        if (it != lpcs.end()) {
+            auto arr = it->second.get("point_segment_id");
+            if (arr) {
+                auto span = arr->elements<int>();
+                seg_ids.assign(span.begin(), span.end());
+            }
+        }
+        if (seg_ids.empty()) {
+            seg_ids.resize(npoints(), -1);
+        }
+    }
+    return seg_ids;
+}
+
+std::vector<int> Cluster::shower_flags() const {
+    auto& flags = cache().point_shower_flags;
+    if (flags.empty()) {
+        auto& lpcs = const_cast<Cluster*>(this)->local_pcs();
+        auto it = lpcs.find("3d");
+        if (it != lpcs.end()) {
+            auto arr = it->second.get("point_flag_shower");
+            if (arr) {
+                auto span = arr->elements<int>();
+                flags.assign(span.begin(), span.end());
+            }
+        }
+        if (flags.empty()) {
+            flags.resize(npoints(), 0);
+        }
+    }
+    return flags;
+}
+
+int Cluster::segment_id(size_t point_index) const {
+    const auto& seg_ids = segment_ids();
+    if (point_index < seg_ids.size()) {
+        return seg_ids[point_index];
+    }
+    return -1;
+}
+
+int Cluster::shower_flag(size_t point_index) const {
+    const auto& flags = shower_flags();
+    if (point_index < flags.size()) {
+        return flags[point_index];
+    }
+    return 0;
+}
+
 int Cluster::wire_index(size_t point_index, int plane) const {
     auto& cache_ref = cache();
     
@@ -859,24 +935,32 @@ int Cluster::wire_index(size_t point_index, int plane) const {
 
 double Cluster::charge_value(size_t point_index, int plane) const {
     auto& cache_ref = cache();
-    
+
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_charges.empty()) {
                 cache_ref.point_u_charges = points_property<double>("ucharge_val");
-                //std::cout << "Xin4: " << cache_ref.point_u_charges.empty() << std::endl;
+                if (cache_ref.point_u_charges.empty()) {
+                    raise<ValueError>("'ucharge_val' missing from 3d point cloud — add '.*charge_val' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_u_charges[point_index];
         }
         case 1: {
             if (cache_ref.point_v_charges.empty()) {
                 cache_ref.point_v_charges = points_property<double>("vcharge_val");
+                if (cache_ref.point_v_charges.empty()) {
+                    raise<ValueError>("'vcharge_val' missing from 3d point cloud — add '.*charge_val' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_v_charges[point_index];
         }
         case 2: {
             if (cache_ref.point_w_charges.empty()) {
                 cache_ref.point_w_charges = points_property<double>("wcharge_val");
+                if (cache_ref.point_w_charges.empty()) {
+                    raise<ValueError>("'wcharge_val' missing from 3d point cloud — add '.*charge_val' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_w_charges[point_index];
         }
@@ -888,23 +972,32 @@ double Cluster::charge_value(size_t point_index, int plane) const {
 
 double Cluster::charge_uncertainty(size_t point_index, int plane) const {
     auto& cache_ref = cache();
-    
+
     switch(plane) {
         case 0: {
             if (cache_ref.point_u_charge_uncs.empty()) {
                 cache_ref.point_u_charge_uncs = points_property<double>("ucharge_unc");
+                if (cache_ref.point_u_charge_uncs.empty()) {
+                    raise<ValueError>("'ucharge_unc' missing from 3d point cloud — add '.*charge_unc' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_u_charge_uncs[point_index];
         }
         case 1: {
             if (cache_ref.point_v_charge_uncs.empty()) {
                 cache_ref.point_v_charge_uncs = points_property<double>("vcharge_unc");
+                if (cache_ref.point_v_charge_uncs.empty()) {
+                    raise<ValueError>("'vcharge_unc' missing from 3d point cloud — add '.*charge_unc' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_v_charge_uncs[point_index];
         }
         case 2: {
             if (cache_ref.point_w_charge_uncs.empty()) {
                 cache_ref.point_w_charge_uncs = points_property<double>("wcharge_unc");
+                if (cache_ref.point_w_charge_uncs.empty()) {
+                    raise<ValueError>("'wcharge_unc' missing from 3d point cloud — add '.*charge_unc' to BlobSampler extra config");
+                }
             }
             return cache_ref.point_w_charge_uncs[point_index];
         }
@@ -1739,17 +1832,17 @@ std::map<WirePlaneId, std::tuple<int, int, int, int> > Facade::get_uvwt_range(co
     for (size_t i = 0; i != b2id.size(); i++) {
         if (b2id.at(i) != id) continue;
         const auto* blob = cluster->children().at(i);
-        for (int i = blob->u_wire_index_min(); i < blob->u_wire_index_max(); ++i) {
-            map_wpid_u_set[blob->wpid()].insert(i);
+        for (int wi = blob->u_wire_index_min(); wi < blob->u_wire_index_max(); ++wi) {
+            map_wpid_u_set[blob->wpid()].insert(wi);
         }
-        for (int i = blob->v_wire_index_min(); i < blob->v_wire_index_max(); ++i) {
-            map_wpid_v_set[blob->wpid()].insert(i);
+        for (int wi = blob->v_wire_index_min(); wi < blob->v_wire_index_max(); ++wi) {
+            map_wpid_v_set[blob->wpid()].insert(wi);
         }
-        for (int i = blob->w_wire_index_min(); i < blob->w_wire_index_max(); ++i) {
-            map_wpid_w_set[blob->wpid()].insert(i);
+        for (int wi = blob->w_wire_index_min(); wi < blob->w_wire_index_max(); ++wi) {
+            map_wpid_w_set[blob->wpid()].insert(wi);
         }
-        for (int i = blob->slice_index_min(); i < blob->slice_index_max(); ++i) {
-            map_wpid_t_set[blob->wpid()].insert(i);
+        for (int ti = blob->slice_index_min(); ti < blob->slice_index_max(); ++ti) {
+            map_wpid_t_set[blob->wpid()].insert(ti);
         }
     }
 
@@ -1931,22 +2024,22 @@ bool Cluster::sanity(Log::logptr_t log) const
     {
         const auto* svptr = m_node->value.get_scoped(m_default_scope);
         if (!svptr) {
-            if (log) log->debug("cluster sanity: note, not yet a scoped view {}", m_default_scope);
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: note, not yet a scoped view {}", m_default_scope);
         }
     }
     if (!nchildren()) {
-        if (log) log->debug("cluster sanity: no children blobs");
+        SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: no children blobs");
         return false;
     }
 
     const auto& sv = m_node->value.scoped_view(m_default_scope);
     const auto& snodes = sv.nodes();
     if (snodes.empty()) {
-        if (log) log->debug("cluster sanity: no scoped nodes");
+        SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: no scoped nodes");
         return false;
     }
     if (sv.npoints() == 0) {  // triggers a scoped view cache fill
-        if (log) log->debug("cluster sanity: no scoped points");
+        SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: no scoped points");
         return false;
     }
     // sv.force_invalid();
@@ -1959,12 +2052,12 @@ bool Cluster::sanity(Log::logptr_t log) const
     }
 
     if (skd.nblocks() != snodes.size()) {
-        if (log) log->debug("cluster sanity: k-d blocks={} scoped nodes={}", skd.nblocks(), fblobs.size());
+        SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: k-d blocks={} scoped nodes={}", skd.nblocks(), fblobs.size());
         return false;
     }
 
     if (skd.nblocks() != fblobs.size()) {
-        if (log) log->debug("cluster sanity: k-d blocks={} cluster blobs={}", skd.nblocks(), fblobs.size());
+        SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: k-d blocks={} cluster blobs={}", skd.nblocks(), fblobs.size());
         return false;
     }
 
@@ -1979,11 +2072,9 @@ bool Cluster::sanity(Log::logptr_t log) const
         const auto* fblob = fblobs[ind];
         const auto* sblob = snodes[ind]->value.facade<Blob>();
         if (fblob != sblob) {
-            if (log) {
-                log->debug("cluster sanity: scoped node facade Blob differs from cluster child at {}", ind);
-                log->debug("cluster sanity: \tscoped blob: {}", *fblob);
-                log->debug("cluster sanity: \tfacade blob: {}", *sblob);
-            }
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: scoped node facade Blob differs from cluster child at {}", ind);
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: \tscoped blob: {}", *fblob);
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: \tfacade blob: {}", *sblob);
             // return false;
         }
     }
@@ -2005,7 +2096,7 @@ bool Cluster::sanity(Log::logptr_t log) const
         // scoped consistency
         const node_t* tnode = sv.node_with_point(ind);
         if (!tnode) {
-            if (log) log->debug("cluster sanity: scoped node facade not a Blob at majind={}", majind);
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: scoped node facade not a Blob at majind={}", majind);
             return false;
         }
         const auto* tblob = tnode->value.facade<Blob>();
@@ -2015,15 +2106,13 @@ bool Cluster::sanity(Log::logptr_t log) const
         }
 
         if (minind >= spoints.size()) {
-            if (log)
-                log->debug("cluster sanity: minind={} is beyond scoped blob npts={} majind={}, blob is: {}", minind,
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: minind={} is beyond scoped blob npts={} majind={}, blob is: {}", minind,
                            spoints.size(), majind, *sblob);
             return false;
         }
         auto spt = spoints[minind];
         if (spt != kdpt) {
-            if (log)
-                log->debug("cluster sanity: scoped point mismatch at minind={} majind={} spt={} kdpt={}, blob is: {}",
+            SPDLOG_LOGGER_TRACE(s_log,"cluster sanity: scoped point mismatch at minind={} majind={} spt={} kdpt={}, blob is: {}",
                            minind, majind, spt, kdpt, *sblob);
             return false;
         }
@@ -2153,8 +2242,7 @@ std::vector<geo_point_t> Cluster::get_hull() const
     }
 
     if (npoints() > WireCell::Clus::Facade::Constants::MaxHullPoints) {
-        auto log = Log::logger("clus");
-        log->warn("Cluster::get_hull number of points is too large: {} return cached points", npoints());
+        SPDLOG_LOGGER_WARN(s_log,"Cluster::get_hull number of points is too large: {} return cached points", npoints());
         return hull_points;
     }
 
@@ -2504,11 +2592,11 @@ bool Facade::cluster_less(const Cluster* a, const Cluster* b)
         auto ac = a->get_pca().center;
         auto bc = b->get_pca().center;
         if (ac[0] < bc[0]) return true;
-        if (bc[0] < bc[0]) return false;
+        if (bc[0] < ac[0]) return false;
         if (ac[1] < bc[1]) return true;
-        if (bc[1] < bc[1]) return false;
+        if (bc[1] < ac[1]) return false;
         if (ac[2] < bc[2]) return true;
-        if (bc[2] < bc[2]) return false;
+        if (bc[2] < ac[2]) return false;
     }
 
     // After exhausting all "content" comparison, we are left with the question,
@@ -2657,6 +2745,9 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     if (flavor == "relaxed") {
         return this->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
     }
+    if (flavor == "relaxed_pid") {
+        return this->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
+    }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
@@ -2692,6 +2783,9 @@ Facade::Cluster::graph_type& Facade::Cluster::find_graph(
     }
     if (flavor == "relaxed") {
         return this->give_graph(flavor, make_graph_relaxed(*this, dv, pcts));
+    }
+    if (flavor == "relaxed_pid") {
+        return this->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
     }
 
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
@@ -2796,6 +2890,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         return got.first->second;
     }
 
+    if (flavor == "relaxed_pid") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
     return graph_algorithms(flavor);
@@ -2831,6 +2931,12 @@ const GraphAlgorithms& Facade::Cluster::graph_algorithms(const std::string& flav
         return got.first->second;
     }
 
+    if (flavor == "relaxed_pid") {
+        auto& gr = const_cast<Cluster*>(this)->give_graph(flavor, make_graph_relaxed_pid(*this, dv, pcts));
+        auto got = m_galgs.emplace(flavor, GraphAlgorithms(gr));
+        return got.first->second;
+    }
+
     // Do a hail mary, maybe user made a mistake by passing dv/pcts and really
     // wants a flavor that we can make implicitly.
     return graph_algorithms(flavor);
@@ -2844,8 +2950,7 @@ void Facade::Cluster::clear_graph_algorithms_cache(const std::string& graph_name
     auto it = m_galgs.find(graph_name);
     if (it != m_galgs.end()) {
         it->second.clear_cache();
-        auto log = Log::logger("clus");
-        log->debug("Cleared cache for GraphAlgorithms '{}'", graph_name);
+        SPDLOG_LOGGER_TRACE(s_log,"Cleared cache for GraphAlgorithms '{}'", graph_name);
     }
 }
 
@@ -2854,8 +2959,7 @@ void Facade::Cluster::remove_graph_algorithms(const std::string& graph_name)
     auto it = m_galgs.find(graph_name);
     if (it != m_galgs.end()) {
         m_galgs.erase(it);
-        auto log = Log::logger("clus");
-        log->debug("Removed GraphAlgorithms '{}'", graph_name);
+        SPDLOG_LOGGER_TRACE(s_log,"Removed GraphAlgorithms '{}'", graph_name);
     }
 }
 
@@ -2864,8 +2968,7 @@ void Facade::Cluster::clear_all_graph_algorithms_caches()
     for (auto& [name, ga] : m_galgs) {
         ga.clear_cache();
     }
-    auto log = Log::logger("clus");
-    log->debug("Cleared all GraphAlgorithms caches");
+    SPDLOG_LOGGER_TRACE(s_log,"Cleared all GraphAlgorithms caches");
 }
 
 std::vector<std::string> Facade::Cluster::get_cached_graph_algorithms() const
@@ -2880,9 +2983,9 @@ std::vector<std::string> Facade::Cluster::get_cached_graph_algorithms() const
 
 
 // ne' examine_graph
-std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts) const 
+std::vector<int> Cluster::connected_blobs(IDetectorVolumes::pointer dv, IPCTransformSet::pointer pcts, const std::string& flavor) const 
 {
-    const auto& ga = graph_algorithms("relaxed", dv, pcts);
+    const auto& ga = graph_algorithms(flavor, dv, pcts);
     const auto& component = ga.connected_components();
 
     // Create mapping from blob indices to component groups
@@ -3185,98 +3288,68 @@ bool Cluster::check_wire_ranges_match(size_t point_index, const Blob* ref_blob) 
 
 
 std::pair<int, int> Cluster::get_two_boundary_steiner_graph_idx(const std::string& steiner_graph_name, const std::string& steiner_pc_name, bool flag_cosmic) const{
-    // run the reugular two boundary points ...
-    auto pair_points = get_two_boundary_wcps(flag_cosmic);
-    
-    
     if (!has_pc(steiner_pc_name)) {
         throw std::runtime_error("Steiner point cloud not found");
     }
     auto& steiner_pc = get_pc(steiner_pc_name);
-
-    // 1. Form vector from pair_points
-    geo_vector_t boundary_vector = pair_points.second - pair_points.first;
-    
-
-    // std::cout << pair_points.first << " " << pair_points.second << std::endl;
-
-    // Normalize the vector to ensure consistent projection calculations
-    if (boundary_vector.magnitude() > 0) {
-        boundary_vector = boundary_vector.norm();
-    } else {
-        // If points are identical, return first two points or handle error
-        return std::make_pair(0, std::min(1, (int)steiner_pc.size() - 1));
-    }
-
-    // 2. Loop over all points in steiner_pc and find the two points 
-    //    that are furthest along the boundary vector
-    double max_projection = -std::numeric_limits<double>::infinity();
-    double min_projection = std::numeric_limits<double>::infinity();
-    int max_idx = -1;
-    int min_idx = -1;
-
     const auto& coords = get_default_scope().coords;
-
-    // Get coordinate arrays from the point cloud
     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>(); 
+    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
     const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
+    const auto& flag_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
 
-
-    for (size_t i = 0; i < x_coords.size(); ++i) {
-        // Create point from steiner point cloud
-        geo_point_t steiner_point(x_coords[i], y_coords[i], z_coords[i]);
-        
-        // Project point onto the boundary vector direction
-        // Use first boundary point as reference origin
-        geo_vector_t point_vector = steiner_point - pair_points.first;
-        double projection = point_vector.dot(boundary_vector);
-        
-        // Track extremes
-        if (projection > max_projection) {
-            max_projection = projection;
-            max_idx = static_cast<int>(i);
-        }
-        if (projection < min_projection) {
-            min_projection = projection;
-            min_idx = static_cast<int>(i);
-        }
+    const size_t npts = x_coords.size();
+    if (npts == 0) {
+        throw std::runtime_error("Empty Steiner point cloud");
+    }
+    if (npts == 1) {
+        return std::make_pair(0, 0);
     }
 
-    // 3. Return indices of the two extreme points
-    if (max_idx == -1 || min_idx == -1) {
-        throw std::runtime_error("Could not find valid points in Steiner point cloud");
+    // Step 1: use the existing physics-based boundary scoring (regular PC) to find
+    // the two best boundary positions.  This replicates the prototype's scoring:
+    //   score = |x_diff|/(2.22 mm) + ncount_live_U + ncount_live_V + ncount_live_W
+    // which accounts for drift separation and dead-wire regions — information that
+    // is not available per Steiner-PC point.
+    auto pair_points = get_two_boundary_wcps(flag_cosmic);
+
+    // Step 2: snap each physics-scored boundary position to the nearest Steiner
+    // terminal.  Terminals are the original cluster data points (mcell != null in
+    // the prototype); intermediate Steiner nodes are auxiliary connectivity points
+    // that should not be used as track endpoints.
+    // We scan all Steiner points once; the Steiner PC is typically small (O(100)).
+    auto nearest_terminal_idx = [&](const geo_point_t& target) -> int {
+        double best_d2 = std::numeric_limits<double>::max();
+        int best_idx = -1;
+        for (size_t i = 0; i < npts; ++i) {
+            if (!flag_terminal[i]) continue;
+            double dx = x_coords[i] - target.x();
+            double dy = y_coords[i] - target.y();
+            double dz = z_coords[i] - target.z();
+            double d2 = dx*dx + dy*dy + dz*dz;
+            if (d2 < best_d2) { best_d2 = d2; best_idx = static_cast<int>(i); }
+        }
+        if (best_idx >= 0) return best_idx;
+        // Fallback: no terminals found — return nearest Steiner point of any kind
+        for (size_t i = 0; i < npts; ++i) {
+            double dx = x_coords[i] - target.x();
+            double dy = y_coords[i] - target.y();
+            double dz = z_coords[i] - target.z();
+            double d2 = dx*dx + dy*dy + dz*dz;
+            if (d2 < best_d2) { best_d2 = d2; best_idx = static_cast<int>(i); }
+        }
+        return (best_idx >= 0) ? best_idx : 0;
+    };
+
+    int idx1 = nearest_terminal_idx(pair_points.first);
+    int idx2 = nearest_terminal_idx(pair_points.second);
+
+    // If both snapped to the same terminal (degenerate cluster), return 0 and 1
+    if (idx1 == idx2 && npts > 1) {
+        idx2 = (idx1 == 0) ? 1 : 0;
     }
 
-    return std::make_pair(min_idx, max_idx);
-
-
-    // if (!has_graph(steiner_graph_name)) {
-    //     throw std::runtime_error("Steiner graph not found");
-    // }
-    // auto& graph_steiner = get_graph(steiner_graph_name);
-
-    // // Create a MultiQuery from the dataset - this builds the k-d tree internally
-    // // Note: const_cast is needed because MultiQuery constructor requires non-const reference
-    // // but query operations don't modify the dataset
-    // KDTree::MultiQuery steiner_kd(const_cast<PointCloud::Dataset&>(steiner_pc));
-
-    // // Get a 3D query object for x,y,z coordinates
-    // auto query3d = steiner_kd.get<double>({"x", "y", "z"});
-    
-    // // Convert geo_point_t to std::vector<double> for the query
-    // std::vector<double> query_point1 = {pair_points.first.x(), pair_points.first.y(), pair_points.first.z()};
-    // std::vector<double> query_point2 = {pair_points.second.x(), pair_points.second.y(), pair_points.second.z()};
-    
-    // auto p1 = query3d->knn(1, query_point1);
-    // auto p2 = query3d->knn(1, query_point2);
-    
-    // // Map boundary points to their indices
-    // std::map<int, int> boundary_indices;
-    // boundary_indices[0] = steiner_pc->add_point(pair_points.first);
-    // boundary_indices[1] = steiner_pc->add_point(pair_points.second);
-
-    // return boundary_indices;
+    return std::make_pair(idx1, idx2);
 }
 
 

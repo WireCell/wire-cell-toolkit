@@ -80,7 +80,7 @@ void FrameQualityTagging::configure(const WireCell::Configuration& cfg)
     m_n_cover_cut1 = get<int>(cfg, "n_cover_cut1", m_n_cover_cut1);
     m_n_fire_cut1 = get<int>(cfg, "n_fire_cut1", m_n_fire_cut1);
     m_n_cover_cut2 = get<int>(cfg, "n_cover_cut2", m_n_cover_cut2);
-    m_n_fire_cut2 = get<int>(cfg, "n_fire_cut2", m_n_cover_cut2);
+    m_n_fire_cut2 = get<int>(cfg, "n_fire_cut2", m_n_fire_cut2);
     m_fire_threshold = get<float>(cfg,"fire_threshold", m_fire_threshold);
 
     if (cfg.isMember("n_cover_cut3")){

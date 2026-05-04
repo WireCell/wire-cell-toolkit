@@ -121,6 +121,13 @@ void ParticleInfo::validate_inputs() {
     if (m_mass < 0.0) {
         raise<ValueError>("ParticleInfo: mass cannot be negative");
     }
+    // Allow zero 4-momentum as a placeholder (energy not yet computed)
+    // if (m_four_momentum.e() == 0.0 &&
+    //     m_four_momentum.px() == 0.0 &&
+    //     m_four_momentum.py() == 0.0 &&
+    //     m_four_momentum.pz() == 0.0) {
+    //     return;
+    // }
     if (m_four_momentum.e() < m_mass) {
         raise<ValueError>("ParticleInfo: total energy cannot be less than rest mass");
     }
@@ -128,9 +135,28 @@ void ParticleInfo::validate_inputs() {
         raise<ValueError>("ParticleInfo: kinetic energy cannot be negative");
     }
     
+    // When spatial momentum is zero the stored 4-vector is a placeholder used for
+    // particles whose direction is undetermined: (E=KE+m, p=0).  This convention
+    // matches the prototype (ProtoSegment stores [px,py,pz,E]=[0,0,0,KE+m] for
+    // flag_dir==0) and is intentional — energy is known, direction is not.
+    // In that case E²-p²=m² cannot hold (unless KE=0), so we skip the check.
+    if (m_four_momentum.p2() < 1e-20) return;
+
     // Check energy-momentum relation using D4Vector's mass calculation
     double calculated_mass = m_four_momentum.mass();
     if (std::abs(calculated_mass - m_mass) > 1e-6 * m_mass) {
+        // std::cout << "ParticleInfo E-p violation: pdg=" << m_pdg_code
+        //           << " mass=" << m_mass
+        //           << " E=" << m_four_momentum.e()
+        //           << " KE=" << m_kinetic_energy
+        //           << " px=" << m_four_momentum.px()
+        //           << " py=" << m_four_momentum.py()
+        //           << " pz=" << m_four_momentum.pz()
+        //           << " p2=" << m_four_momentum.p2()
+        //           << " calc_mass=" << calculated_mass
+        //           << " delta=" << std::abs(calculated_mass - m_mass)
+        //           << " tol=" << 1e-6 * m_mass
+        //           << std::endl;
         raise<ValueError>("ParticleInfo: energy-momentum relation violated");
     }
 }

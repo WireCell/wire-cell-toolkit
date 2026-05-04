@@ -9,6 +9,7 @@
 
 #include "retile_cluster.h"  // Include the RetileCluster header
 
+#include "WireCellAux/Logger.h"
 #include "WireCellUtil/NamedFactory.h"
 
 #include <vector>
@@ -20,7 +21,7 @@ namespace WireCell::Clus {
     using namespace WireCell::Clus::Facade;
     using namespace WireCell::PointCloud::Tree;
 
-    class ImproveCluster_1 : public RetileCluster {
+    class ImproveCluster_1 : public RetileCluster, public Aux::Logger {
 
     public:
 
@@ -42,7 +43,7 @@ namespace WireCell::Clus {
        std::vector<WireCell::IBlob::pointer> make_iblobs_improved(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
 
-       std::set<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
+       std::vector<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
 
     private:
  

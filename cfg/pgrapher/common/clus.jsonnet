@@ -73,14 +73,16 @@ local wc = import "wirecell.jsonnet";
             },
         },
 
-        clustering_recovering_bundle(name="") :: {
+clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             type: "ClusteringRecoveringBundle",
             name: prefix + name,
-            data: {
+            data: dv_cfg + pcts_cfg + scope_cfg + {
                 grouping: "live",           // Which grouping to process
-                array_name: "isolated",     // Array name for pcarray lookup  
+                array_name: "isolated",     // Array name for pcarray lookup
                 pcarray_name: "perblob",    // PCArray name for blob separation
+                graph_name: graph_name,     // Graph flavor for connected_blobs examine step
             },
+            uses: [detector_volumes, pc_transforms],
         },
 
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
@@ -92,6 +94,138 @@ local wc = import "wirecell.jsonnet";
                 particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
             } + dv_cfg + pcts_cfg
+        },
+
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0) :: {
+            type: "TaggerCheckNeutrino",
+            name: prefix + name,
+            data: {
+                grouping: "live",           // Which grouping to process
+                trackfitting_config_file: trackfitting_config_file,
+                particle_dataset: particle_dataset,
+                recombination_model: recombination_model,
+                perf: perf,
+                dl_weights: dl_weights,     // path to SCN vertex .pth file (empty = DL disabled)
+                dQdx_scale: dQdx_scale,     // scale factor for dQ passed to SCN network
+                dQdx_offset: dQdx_offset,   // offset for dQ passed to SCN network
+                clus_geom_helper: clus_geom_helper, // type/name of SimpleClusGeomHelper; empty = no SCE
+                dl_vtx_rerank: dl_vtx_rerank,           // true → top-K + soft re-rank; false → legacy single argmax
+                dl_vtx_top_k: dl_vtx_top_k,             // number of top DL voxels to re-rank (only when dl_vtx_rerank==true)
+                dl_vtx_min_accept_score: dl_vtx_min_accept_score,  // min composite score to accept re-ranked DL vertex
+                dl_vtx_score_scale: dl_vtx_score_scale, // scale factor on raw DL score (1.0=unscaled; ~1000 for typical ~0.005 scores)
+            } + dv_cfg + pcts_cfg
+        },
+
+        // Run pattern recognition (find_proto_vertex) on the main cluster.
+        // mode is passed for future use (e.g. "multiple" for multi-track mode).
+        do_tracking(name="", mode="", perf=false, clus_geom_helper="") :: $.tagger_check_neutrino(name=name, perf=perf, clus_geom_helper=clus_geom_helper),
+
+        // Run numu CC BDT scoring (TMVA/xgboost).
+        // Must run AFTER tagger_check_neutrino in the visitor list.
+        // XML weight files should be resolved from wire-cell-data uboone/weights/.
+        // Pass empty strings to disable (scorer will skip booking and EvaluateMVA).
+        numu_bdt_scorer(name="",
+                        numu1_weights_xml="",
+                        numu2_weights_xml="",
+                        numu3_weights_xml="",
+                        cosmict10_weights_xml="",
+                        numu_xgboost_xml="") :: {
+            type: "UbooneNumuBDTScorer",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                numu1_weights_xml:    numu1_weights_xml,
+                numu2_weights_xml:    numu2_weights_xml,
+                numu3_weights_xml:    numu3_weights_xml,
+                cosmict10_weights_xml: cosmict10_weights_xml,
+                numu_xgboost_xml:     numu_xgboost_xml,
+            }
+        },
+
+        // Run nueCC BDT scoring (TMVA/xgboost).
+        // Must run AFTER tagger_check_neutrino (and after numu_bdt_scorer) in the visitor list.
+        // All 30 sub-BDT XML files plus the top-level XGB combiner must be resolved from
+        // wire-cell-data uboone/weights/.  Pass empty strings to disable individual sub-BDTs.
+        nue_bdt_scorer(name="",
+                       mipid_weights_xml="",
+                       gap_weights_xml="",
+                       hol_lol_weights_xml="",
+                       cme_anc_weights_xml="",
+                       mgo_mgt_weights_xml="",
+                       br1_weights_xml="",
+                       br3_weights_xml="",
+                       br3_3_weights_xml="",
+                       br3_5_weights_xml="",
+                       br3_6_weights_xml="",
+                       stemdir_br2_weights_xml="",
+                       trimuon_weights_xml="",
+                       br4_tro_weights_xml="",
+                       mipquality_weights_xml="",
+                       pio_1_weights_xml="",
+                       pio_2_weights_xml="",
+                       stw_spt_weights_xml="",
+                       vis_1_weights_xml="",
+                       vis_2_weights_xml="",
+                       stw_2_weights_xml="",
+                       stw_3_weights_xml="",
+                       stw_4_weights_xml="",
+                       sig_1_weights_xml="",
+                       sig_2_weights_xml="",
+                       lol_1_weights_xml="",
+                       lol_2_weights_xml="",
+                       tro_1_weights_xml="",
+                       tro_2_weights_xml="",
+                       tro_4_weights_xml="",
+                       tro_5_weights_xml="",
+                       nue_xgboost_xml="") :: {
+            type: "UbooneNueBDTScorer",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                mipid_weights_xml:       mipid_weights_xml,
+                gap_weights_xml:         gap_weights_xml,
+                hol_lol_weights_xml:     hol_lol_weights_xml,
+                cme_anc_weights_xml:     cme_anc_weights_xml,
+                mgo_mgt_weights_xml:     mgo_mgt_weights_xml,
+                br1_weights_xml:         br1_weights_xml,
+                br3_weights_xml:         br3_weights_xml,
+                br3_3_weights_xml:       br3_3_weights_xml,
+                br3_5_weights_xml:       br3_5_weights_xml,
+                br3_6_weights_xml:       br3_6_weights_xml,
+                stemdir_br2_weights_xml: stemdir_br2_weights_xml,
+                trimuon_weights_xml:     trimuon_weights_xml,
+                br4_tro_weights_xml:     br4_tro_weights_xml,
+                mipquality_weights_xml:  mipquality_weights_xml,
+                pio_1_weights_xml:       pio_1_weights_xml,
+                pio_2_weights_xml:       pio_2_weights_xml,
+                stw_spt_weights_xml:     stw_spt_weights_xml,
+                vis_1_weights_xml:       vis_1_weights_xml,
+                vis_2_weights_xml:       vis_2_weights_xml,
+                stw_2_weights_xml:       stw_2_weights_xml,
+                stw_3_weights_xml:       stw_3_weights_xml,
+                stw_4_weights_xml:       stw_4_weights_xml,
+                sig_1_weights_xml:       sig_1_weights_xml,
+                sig_2_weights_xml:       sig_2_weights_xml,
+                lol_1_weights_xml:       lol_1_weights_xml,
+                lol_2_weights_xml:       lol_2_weights_xml,
+                tro_1_weights_xml:       tro_1_weights_xml,
+                tro_2_weights_xml:       tro_2_weights_xml,
+                tro_4_weights_xml:       tro_4_weights_xml,
+                tro_5_weights_xml:       tro_5_weights_xml,
+                nue_xgboost_xml:         nue_xgboost_xml,
+            }
+        },
+
+        // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
+        // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
+        // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
+        tagger_output(name="", output_filename="tracking_proj.root") :: {
+            type: "UbooneTaggerOutputVisitor",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                output_filename: output_filename,
+            }
         },
 
         pointed(name="", groupings=["live"]) :: {
@@ -207,10 +341,10 @@ local wc = import "wirecell.jsonnet";
             data: dv_cfg + scope_cfg,
         },
 
-        examine_bundles(name="") :: {
+        examine_bundles(name="", graph_name="relaxed") :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
-            data: dv_cfg + pcts_cfg + scope_cfg,
+            data: dv_cfg + pcts_cfg + scope_cfg + {graph_name: graph_name},
             uses: [detector_volumes, pc_transforms],
         },
 
@@ -292,7 +426,7 @@ local wc = import "wirecell.jsonnet";
 
         // This configures ImproveCluster_2, which inherits from ImproveCluster_1
         // and adds advanced Steiner tree improvements.
-        improve_cluster_2(name="", anodes=[], samplers=[], verbose=false) :: {
+        improve_cluster_2(name="", anodes=[], samplers=[], verbose=true) :: {
             local sampler_objs = [s.sobj for s in samplers],
             local sampler_cfgs = [{name:wc.tn(s.sobj), apa:s.apa, face:s.face} for s in samplers],
             type: "ImproveCluster_2",
@@ -327,13 +461,14 @@ local wc = import "wirecell.jsonnet";
         },
 
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
-        steiner(name="", retiler={}, grouping="live", graph="steiner") :: {
+        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
                 grouping: grouping,
                 graph: graph,
                 retiler: wc.tn(retiler),
+                perf: perf,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms, retiler]
         },

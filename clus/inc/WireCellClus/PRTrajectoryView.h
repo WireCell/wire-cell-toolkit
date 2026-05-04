@@ -7,7 +7,9 @@
 
 #include "WireCellClus/PRGraphType.h"
 
+#include <algorithm>
 #include <unordered_set>
+#include <vector>
 
 
 namespace WireCell::Clus::PR {
@@ -104,11 +106,60 @@ namespace WireCell::Clus::PR {
          */
         bool remove_segment(SegmentPtr seg);
 
+        /** Get the set of node descriptors in this view. */
+        const node_unordered_set& nodes() const { return m_nodes; }
+
+        /** Get the set of edge descriptors in this view. */
+        const edge_unordered_set& edges() const { return m_edges; }
+
     private:
         view_graph_type m_graph;
         node_unordered_set m_nodes;
         edge_unordered_set m_edges;
     };
+
+    /** Return view nodes sorted by NodeBundle::index for deterministic iteration.
+     *
+     * Use this instead of iterating view.nodes() directly whenever the
+     * order of processing may affect results (e.g. picking a "best" element).
+     */
+    inline node_vector ordered_nodes(const TrajectoryView& view, const Graph& g) {
+        node_vector result(view.nodes().begin(), view.nodes().end());
+        std::sort(result.begin(), result.end(),
+                  [&g](const node_descriptor& a, const node_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
+
+    /** Return view edges sorted by EdgeBundle::index for deterministic iteration.
+     *
+     * Use this instead of iterating view.edges() directly whenever the
+     * order of processing may affect results.
+     */
+    inline std::vector<edge_descriptor> ordered_edges(const TrajectoryView& view, const Graph& g) {
+        std::vector<edge_descriptor> result(view.edges().begin(), view.edges().end());
+        std::sort(result.begin(), result.end(),
+                  [&g](const edge_descriptor& a, const edge_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
+
+    /** Return out-edges of a vertex sorted by EdgeBundle::index for deterministic iteration.
+     *
+     * boost::out_edges() with setS iterates in pointer order.  Use this
+     * instead wherever out-edge order may affect which segment is selected.
+     */
+    inline std::vector<edge_descriptor> sorted_out_edges(node_descriptor vdesc, const Graph& g) {
+        auto [begin, end] = boost::out_edges(vdesc, g);
+        std::vector<edge_descriptor> result(begin, end);
+        std::sort(result.begin(), result.end(),
+                  [&g](const edge_descriptor& a, const edge_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
 
     /** Make a view of a particular type as a shared pointer.
      *

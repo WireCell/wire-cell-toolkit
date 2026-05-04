@@ -48,7 +48,8 @@ bool BlobDeclustering::operator()(const input_pointer& cluster, output_pointer& 
     }
 
     log->debug("declustered {} blobs at call {}", blobs.size(), m_count++);
-    blobset = std::make_shared<SimpleBlobSet>(cluster->ident(), nullptr, blobs);
+    ISlice::pointer islice = blobs.empty() ? nullptr : blobs.front()->slice();
+    blobset = std::make_shared<SimpleBlobSet>(cluster->ident(), islice, blobs);
 
     return true;
 }

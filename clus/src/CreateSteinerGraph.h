@@ -32,6 +32,7 @@ namespace WireCell::Clus::Steiner {
         std::string m_grouping_name{"live"};
         std::string m_graph_name{"steiner"};
         bool m_replace{true};
+        bool m_perf{false};
 
         Grapher::Config m_grapher_config;
 

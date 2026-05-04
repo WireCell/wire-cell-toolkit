@@ -6,6 +6,7 @@
 #include "WireCellUtil/Flagged.h"
 #include "WireCellAux/ParticleInfo.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include <limits>
 #include <memory>
 
 
@@ -67,6 +68,8 @@ namespace WireCell::Clus::PR {
         // Getters
         const std::shared_ptr<Aux::ParticleInfo>& particle_info() const { return m_particle_info; }
         std::shared_ptr<Aux::ParticleInfo>& particle_info() { return m_particle_info; }
+        double particle_score() const { return m_particle_score; }
+        void particle_score(double score) { m_particle_score = score; }
 
         // Chainable setter
         Segment& particle_info(std::shared_ptr<Aux::ParticleInfo> pinfo) {
@@ -110,15 +113,44 @@ namespace WireCell::Clus::PR {
 
         // reset fit properties ...
         void reset_fit_prop(); 
+        void clear_fit(const IDetectorVolumes::pointer& dv, const std::string& cloud_name="fit");
+
         int fit_index(int i);
         void fit_index(int i, int idx);
         bool fit_flag_skip(int i);
         void fit_flag_skip(int i, bool flag);
 
-        void set_fit_associate_vec(std::vector<WireCell::Point >& tmp_fit_pt_vec, std::vector<int>& tmp_fit_index, std::vector<bool>& tmp_fit_skip, const IDetectorVolumes::pointer& dv,const std::string& cloud_name="fit");
+        void set_fit_associate_vec(std::vector<PR::Fit> tmp_fit_vec, const IDetectorVolumes::pointer& dv, const std::string& cloud_name="fit");
         
+        // Global indices management for point clouds
+        void set_global_indices(const std::string& cloud_name, std::vector<size_t> indices) {
+            m_pc_global_indices[cloud_name] = std::move(indices);
+        }
         
+        const std::vector<size_t>& global_indices(const std::string& cloud_name) const {
+            static const std::vector<size_t> empty_vec;
+            auto it = m_pc_global_indices.find(cloud_name);
+            return (it != m_pc_global_indices.end()) ? it->second : empty_vec;
+        }
+        
+        bool has_global_indices(const std::string& cloud_name) const {
+            return m_pc_global_indices.find(cloud_name) != m_pc_global_indices.end();
+        }
+
+        bool reset_global_indices();
+        bool reset_global_indices(const std::string& cloud_name);
+
+        // Add public accessor:
+        int id() const { return m_id; }
+        void set_id(int id) { m_id = id; }
+
+        size_t get_graph_index() const { return m_graph_index; }
+        void set_graph_index(size_t idx) { m_graph_index = idx; }
+
     private:
+        // Add to PRSegment.h private section:
+        int m_id{-1};
+        size_t m_graph_index{std::numeric_limits<size_t>::max()};
 
         std::vector<WCPoint> m_wcpts;
         std::vector<Fit> m_fits;
@@ -127,6 +159,10 @@ namespace WireCell::Clus::PR {
         bool m_dir_weak{false};
 
         std::shared_ptr<Aux::ParticleInfo> m_particle_info{nullptr};
+        double m_particle_score{100};
+        
+        // Mapping from local DPC index to global cluster point index
+        std::map<std::string, std::vector<size_t>> m_pc_global_indices;
 
 
 

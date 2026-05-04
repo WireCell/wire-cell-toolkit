@@ -56,6 +56,8 @@ namespace WireCell::Clus::Facade {
         const std::unordered_map<size_t, size_t> &kd2d_l2g(const int plane, const int face, const int apa) const;
         const std::unordered_map<size_t, std::vector<size_t>> &kd2d_g2l(const int plane, const int face, const int apa) const;
 
+        geo_point_t get_center_point_radius(const geo_point_t &p_test, const double radius) const;
+
         /// @brief: kd2d().radius(radius)
         /// @return: [dist, Cluster, global point_index]
         std::vector<std::tuple<double, const Cluster *, size_t>> get_2d_points_info(const geo_point_t &p,
@@ -66,6 +68,30 @@ namespace WireCell::Clus::Facade {
         /// @brief: dist, Cluster, global point_index
         std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info(const geo_point_t &p, const int plane,
                                                                               const int face, const int apa) const;
+
+        /// @brief Like get_closest_2d_point_info but takes pre-projected (drift, wire_perp) coordinates
+        /// directly from Grouping::convert_time_wire_2Dpoint(), bypassing the internal angle projection.
+        /// Use this when the 2D coordinates are already in the wire-perpendicular space.
+        std::tuple<double, const Cluster *, size_t> get_closest_2d_point_info_direct(
+            double drift, double wire_perp, const int plane, const int face, const int apa) const;
+
+        /// @brief Return (angle_u, angle_v, angle_w) for the given face/apa from the stored wpid_params.
+        /// Returns {0,0,0} if the face/apa combination is not found.
+        std::array<double, 3> get_angles(int face, int apa) const;
+
+        /// @brief Read-only access to the full wpid_params map.
+        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>>& get_wpid_params() const {
+            return m_wpid_params;
+        }
+
+        /// @brief Merge in any wpid_params entries from @p other not already present.
+        /// Used when building a shower DPC that spans segments from multiple APAs/faces.
+        void merge_wpid_params(const DynamicPointCloud& other) {
+            for (const auto& [wpid, params] : other.m_wpid_params) {
+                m_wpid_params.emplace(wpid, params);  // no-op if key already present
+            }
+        }
+        
 
         std::pair<double, double> hough_transform(const geo_point_t &origin, const double dis) const;
         geo_point_t vhough_transform(const geo_point_t &origin, const double dis) const;
@@ -87,6 +113,10 @@ namespace WireCell::Clus::Facade {
 
     std::vector<DynamicPointCloud::DPCPoint>
     make_points_cluster(const Cluster *cluster,
+                        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false);
+
+    std::vector<DynamicPointCloud::DPCPoint>
+    make_points_cluster_steiner(const Cluster *cluster,
                         const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap = false);
 
     std::vector<DynamicPointCloud::DPCPoint> make_points_cluster_skeleton(

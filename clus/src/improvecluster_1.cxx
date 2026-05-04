@@ -1,8 +1,9 @@
 
 #include "improvecluster_1.h"
+#include <chrono>
 
 WIRECELL_FACTORY(ImproveCluster_1, WireCell::Clus::ImproveCluster_1,
-                 WireCell::IConfigurable, WireCell::IPCTreeMutate)
+                 WireCell::INamed, WireCell::IConfigurable, WireCell::IPCTreeMutate)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -17,7 +18,8 @@ namespace WRG = WireCell::RayGrid;
 
 namespace WireCell::Clus {
 
-    ImproveCluster_1::ImproveCluster_1() 
+    ImproveCluster_1::ImproveCluster_1()
+        : Aux::Logger("ImproveCluster_1", "clus")
     {
     }
 
@@ -27,49 +29,8 @@ namespace WireCell::Clus {
 
     void ImproveCluster_1::configure(const WireCell::Configuration& cfg)
     {
-        // Configure base class first
+        // Base class configure() handles NeedDV, NeedPCTS, samplers, and anodes.
         RetileCluster::configure(cfg);
-        
-        NeedDV::configure(cfg);
-        NeedPCTS::configure(cfg);
-
-        if (cfg.isMember("samplers") && cfg["samplers"].isArray()) {
-            // Process array of samplers
-            for (const auto& sampler_cfg : cfg["samplers"]) {
-                int apa = sampler_cfg["apa"].asInt();
-                int face = sampler_cfg["face"].asInt();
-                std::string sampler_name = sampler_cfg["name"].asString();
-                
-                if (sampler_name.empty()) {
-                    raise<ValueError>("RetileCluster requires an IBlobSampler name for APA %d face %d", apa, face);
-                }
-                // std::cout << "Test: " << apa << " " << face << " " << sampler_name << std::endl;
-                auto sampler_ptr = Factory::find_tn<IBlobSampler>(sampler_name);
-                m_samplers[apa][face] = sampler_ptr;
-            }
-        }
-
-        std::vector<IAnodePlane::pointer> anodes_tn;
-        for (const auto& aname : cfg["anodes"]) {
-            auto anode = Factory::find_tn<IAnodePlane>(aname.asString());
-            anodes_tn.push_back(anode);
-            for (const auto& face1 : anode->faces()) {
-                int apa = anode->ident();
-                int face = face1->which();
-                m_face[apa][face] = face1;
-                const auto& coords = face1->raygrid();
-                if (coords.nlayers() != 5) {
-                    raise<ValueError>("unexpected number of ray grid layers: %d", coords.nlayers());
-                }
-                // std::cout <<"Test: " << apa << " " << face << " " << coords.nlayers() << std::endl;
-                // Get wire info for each plane
-                m_plane_infos[apa][face].clear();
-                m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kUlayer));
-                m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kVlayer));
-                m_plane_infos[apa][face].push_back(Aux::get_wire_plane_info(face1, kWlayer));
-
-            }
-        }
     }
 
     Configuration ImproveCluster_1::default_configuration() const
@@ -84,14 +45,19 @@ namespace WireCell::Clus {
 
     std::unique_ptr<ImproveCluster_1::node_t> ImproveCluster_1::mutate(node_t& node) const
     {
+        using Clock = std::chrono::steady_clock;
+        using MS = std::chrono::duration<double, std::milli>;
+        auto t_mutate_start = Clock::now();
+        auto t0 = Clock::now();
+
         // get the original cluster
         auto* orig_cluster = reinitialize(node);
+        SPDLOG_LOGGER_TRACE(log, "timing: reinitialize took {} ms", MS(Clock::now()-t0).count());
         
 
         // std::cout << m_grouping->get_name() << " " << m_wpid_angles.size() << std::endl;
 
-        auto wpids = orig_cluster->wpids_blob();
-        std::set<WirePlaneId> wpid_set(wpids.begin(), wpids.end());
+        const auto wpid_set = orig_cluster->wpids_blob_set();
 
         // // Needed in hack_activity() but call it here to avoid call overhead.
         // // find the highest and lowest points
@@ -123,10 +89,14 @@ namespace WireCell::Clus {
             // std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures_orig;
             // get_activity(*orig_cluster, map_slices_measures_orig, apa, face);
 
+            t0 = Clock::now();
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
+            SPDLOG_LOGGER_TRACE(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
-            // Step 2.
-            // hack_activity_improved(*orig_cluster, map_slices_measures, path_wcps, apa, face); // may need more args
+            // Step 2 (hack_activity_improved) is intentionally NOT called here.
+            // The prototype's Improve_PR3DCluster_1 adds dead/good channels only — it
+            // has no path-tube logic.  Path-tube hacking is performed exclusively by
+            // ImproveCluster_2::mutate, which calls hack_activity_improved twice.
 
             // test ...
             // std::cout << "Test: Improved: " << map_slices_measures.size() << " " << orig_cluster->children().size() << std::endl;
@@ -159,14 +129,16 @@ namespace WireCell::Clus {
 
 
             // Step 3.
+            t0 = Clock::now();
             auto iblobs = make_iblobs_improved(map_slices_measures, apa, face);
-
-            if (m_verbose) std::cout << "ImproveCluster_1: " << orig_cluster->nchildren() << " " << iblobs.size() << " iblobs for apa " << apa << " face " << face << std::endl;
+            SPDLOG_LOGGER_TRACE(log, "timing: make_iblobs_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_TRACE(log, "{} blobs -> {} iblobs for apa {} face {}", orig_cluster->nchildren(), iblobs.size(), apa, face);
 
             auto niblobs = iblobs.size();
             
             // start to sampling points 
             int npoints = 0;
+            t0 = Clock::now();
             for (size_t bind=0; bind<niblobs; ++bind) {
           
                 const IBlob::pointer iblob = iblobs[bind];
@@ -201,30 +173,36 @@ namespace WireCell::Clus {
                 new_cluster.node()->insert(Tree::Points(std::move(pcs)));
 
             }
-            if (m_verbose) std::cout << "ImproveCluster_1: " << npoints << " points sampled for apa " << apa << " face " << face << " Blobs " << niblobs << std::endl;
+            SPDLOG_LOGGER_TRACE(log, "timing: sample_live loop (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_TRACE(log, "{} points sampled for apa {} face {} Blobs {}", npoints, apa, face, niblobs);
 
 
             // remove bad blobs ...
+            t0 = Clock::now();
+            if (map_slices_measures.empty()) continue; // no tiled blobs for this face
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
             auto blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
             for (const Blob* blob : blobs_to_remove) {
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
-            if (m_verbose) std::cout << "ImproveCluster_1: " << blobs_to_remove.size() << " blobs removed for apa " << apa << " face " << face << " " << new_cluster.children().size() << std::endl;
+            SPDLOG_LOGGER_TRACE(log, "timing: remove_bad_blobs (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+            SPDLOG_LOGGER_TRACE(log, "{} blobs removed for apa {} face {} remaining {}", blobs_to_remove.size(), apa, face, new_cluster.children().size());
         }
 
 
         auto& default_scope = orig_cluster->get_default_scope();
         auto& raw_scope = orig_cluster->get_raw_scope();
 
-        if (m_verbose) std::cout << "ImproveCluster_1: Scope: " << default_scope.hash() << " " << raw_scope.hash() << std::endl;
+        SPDLOG_LOGGER_TRACE(log, "Scope: {} {}", default_scope.hash(), raw_scope.hash());
         if (default_scope.hash()!=raw_scope.hash()){
+            t0 = Clock::now();
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
             // std::vector<int> filter_results = c
             new_cluster.add_corrected_points(m_pcts, correction_name);
             // Set this as the default scope for viewing
             new_cluster.from(*orig_cluster); // copy state from original cluster
+            SPDLOG_LOGGER_TRACE(log, "timing: add_corrected_points took {} ms", MS(Clock::now()-t0).count());
             // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
@@ -233,6 +211,7 @@ namespace WireCell::Clus {
 
         // std::cout << m_grouping->get_name() << " " << m_grouping->children().size() << std::endl;
 
+        SPDLOG_LOGGER_TRACE(log, "timing: mutate() TOTAL took {} ms", MS(Clock::now()-t_mutate_start).count());
         return m_grouping->remove_child(new_cluster);
     }
 
@@ -307,18 +286,25 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     std::map<int, std::set<int>> v_time_chs; // V plane time-channel map  
     std::map<int, std::set<int>> w_time_chs; // W plane time-channel map
 
-    int tick_span = 1;
+    // Derive tick_span from face metadata rather than blob geometry so that it
+    // is stable even if no blobs exist yet for this face, and to avoid the
+    // "last-blob wins" bug that occurred before Bug #3 was fixed.
+    const int tick_span = m_grouping->get_nticks_per_slice().at(apa).at(face);
 
-    // Step 1: Fill maps according to existing blobs in cluster
+    // Step 1: Fill maps according to existing blobs in cluster (this face only).
     auto children = cluster.children();
     for (auto child : children) {
         auto blob = child->value().facade<Blob>();
         if (!blob) continue;
-        
+
+        // Skip blobs belonging to a different (apa, face) — wire indices are
+        // face-local and must not be mixed across faces.
+        auto blob_wpid = blob->wpid();
+        if (blob_wpid.apa() != apa || blob_wpid.face() != face) continue;
+
         // Get the time slice bounds for this blob
         int time_slice_min = blob->slice_index_min();
         int time_slice_max = blob->slice_index_max();
-        tick_span = time_slice_max - time_slice_min;
         
         // Process each time slice in the blob
         for (int time_slice = time_slice_min; time_slice < time_slice_max; time_slice = time_slice + tick_span) {
@@ -357,161 +343,73 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
 
     // Distance cut for dead channel inclusion (20 cm as in original code)
     const double dis_cut = 20 * units::cm;
-         
-    // Step 2: Handle dead channels from CTPC (using grouping interface)
-    for (const auto& [start, end]: dead_uchs_range) {
-        for (int ch = start; ch < end; ++ch) {
-            for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 0);
-                std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-                const auto& skd = cluster.kd2d(apa, face, 0);
-                auto ret_matches = skd.knn(1, query_point);
-                // std::cout << ret_matches[0].first << " " << sqrt(ret_matches[0].second) / units::cm << " " << dis_cut / units::cm << std::endl;
-                if (sqrt(ret_matches[0].second) < dis_cut) u_time_chs[time_slice].insert(ch);
+
+    // NOTE: ch values here are wire indices, not channel IDs.  On MicroBooNE
+    // they coincide; on detectors with non-trivial wire→channel mappings (e.g.
+    // wrapped wires) the dead/good-channel fill will be incorrect until
+    // get_overlap_dead_chs / get_overlap_good_ch_charge are updated to accept
+    // wire indices natively.  See §6.5 of the port review.
+
+    // Convenience aliases indexed by plane (0=U, 1=V, 2=W).
+    const std::vector<std::pair<int,int>>* dead_ch_ranges[3] = {
+        &dead_uchs_range, &dead_vchs_range, &dead_wchs_range
+    };
+    std::map<int, std::set<int>>* time_chs[3] = {
+        &u_time_chs, &v_time_chs, &w_time_chs
+    };
+    const std::map<std::pair<int,int>, std::pair<double,double>>* tcc_maps[3] = {
+        &map_u_tcc, &map_v_tcc, &map_w_tcc
+    };
+
+    // Step 2: Handle dead channels — one loop over planes replaces three identical blocks.
+    for (int pl = 0; pl < 3; ++pl) {
+        for (const auto& [start, end] : *dead_ch_ranges[pl]) {
+            for (int ch = start; ch < end; ++ch) {
+                for (int time_slice = min_time; time_slice < max_time; time_slice += tick_span) {
+                    auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, pl);
+                    std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
+                    auto ret_matches = cluster.kd2d(apa, face, pl).knn(1, query_point);
+                    if (sqrt(ret_matches[0].second) < dis_cut) (*time_chs[pl])[time_slice].insert(ch);
+                }
             }
         }
     }
-    for (const auto& [start, end]: dead_vchs_range) {
-        for (int ch = start; ch < end; ++ch) {
-            for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 1);
-                std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-                const auto& skd = cluster.kd2d(apa, face, 1);
-                auto ret_matches = skd.knn(1, query_point);
-                if (sqrt(ret_matches[0].second) < dis_cut) v_time_chs[time_slice].insert(ch);
+
+    // Step 3: Handle good channels from CTPC — one loop over planes.
+    for (int pl = 0; pl < 3; ++pl) {
+        for (const auto& [time_ch, charge_info] : *tcc_maps[pl]) {
+            int time_slice = time_ch.first;
+            int ch = time_ch.second;
+            auto [x_pos, y_pos] = grouping->convert_time_wire_2Dpoint(time_slice, ch, apa, face, pl);
+            std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
+            auto ret_matches = cluster.kd2d(apa, face, pl).knn(1, query_point);
+            if (sqrt(ret_matches[0].second) > dis_cut) continue;
+            (*time_chs[pl])[time_slice].insert(ch);
+        }
+    }
+
+    // Step 4: Convert to toolkit activity format (RayGrid measures).
+    // Layers 0 and 1 are the geometric (non-wire) ray layers in the RayGrid
+    // scheme; layers 2, 3, 4 carry U, V, W wire activity respectively.
+    const int nlayers = 2 + 3;
+    for (int pl = 0; pl < 3; ++pl) {
+        for (const auto& [time_slice, ch_set] : *time_chs[pl]) {
+            auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
+            auto& measures = map_slices_measures[slice_key];
+            if (measures.empty()) {
+                measures.resize(nlayers);
+                measures[0].push_back(1);
+                measures[1].push_back(1);
+                for (int i = 0; i < 3; ++i)
+                    measures[2+i].resize(m_plane_infos.at(apa).at(face)[i].total_wires, 0);
             }
-        }
-    }
-    for (const auto& [start, end]: dead_wchs_range) {
-        for (int ch = start; ch < end; ++ch) {
-            for (int time_slice = min_time; time_slice < max_time; time_slice+=tick_span) {
-                auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 2);
-                std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-                const auto& skd = cluster.kd2d(apa, face, 2);
-                auto ret_matches = skd.knn(1, query_point);
-                if (sqrt(ret_matches[0].second) < dis_cut) w_time_chs[time_slice].insert(ch);
+            WRG::measure_t& m = measures[2 + pl];
+            for (int ch : ch_set) {
+                double charge = 1e-3; // sentinel: dead/forced channel, converted to (0, large_err) in make_iblobs_improved
+                auto it = tcc_maps[pl]->find(std::make_pair(time_slice, ch));
+                if (it != tcc_maps[pl]->end()) charge = it->second.first;
+                m[ch] = charge;
             }
-        }
-    }
-   
-   
-    
-    // Step 3: Deal with good channels from CTPC
-    std::map<std::pair<int, int>, double> time_ch_charge_map;
-
-    // Process U plane good channels
-    for (const auto& [time_ch, charge_info] : map_u_tcc) {
-        int time_slice = time_ch.first;
-        int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 0);
-        std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-        const auto& skd = cluster.kd2d(apa, face, 0);
-        auto ret_matches = skd.knn(1, query_point);
-        double temp_min_dis = sqrt(ret_matches[0].second);
-        if (temp_min_dis > dis_cut) continue;
-        u_time_chs[time_slice].insert(ch);
-    }
-    // Process V plane good channels
-    for (const auto& [time_ch, charge_info] : map_v_tcc) {
-        int time_slice = time_ch.first;
-        int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 1);
-        std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-        const auto& skd = cluster.kd2d(apa, face, 1);
-        auto ret_matches = skd.knn(1, query_point);
-        double temp_min_dis = sqrt(ret_matches[0].second); 
-        if (temp_min_dis > dis_cut) continue;
-        v_time_chs[time_slice].insert(ch);
-    }
-    // Process W plane good channels
-    for (const auto& [time_ch, charge_info] : map_w_tcc) {
-        int time_slice = time_ch.first;
-        int ch = time_ch.second;
-        auto [x_pos, y_pos] = grouping->convert_time_ch_2Dpoint(time_slice, ch, apa, face, 2);
-        std::vector<float_t> query_point = {static_cast<float_t>(x_pos), static_cast<float_t>(y_pos)};
-        const auto& skd = cluster.kd2d(apa, face, 2);
-        auto ret_matches = skd.knn(1, query_point);
-        double temp_min_dis = sqrt(ret_matches[0].second);
-        if (temp_min_dis > dis_cut) continue;
-        w_time_chs[time_slice].insert(ch);
-    }
-
-    // Step 4: Convert to toolkit activity format (RayGrid measures)
-    const int nlayers = 2+3;
-    for (const auto& [time_slice, ch_set] : u_time_chs) {
-        auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
-
-        auto& measures = map_slices_measures[slice_key];
-         if (measures.size()==0){
-            measures.resize(nlayers);
-            // what to do the first two views???
-            measures[0].push_back(1);
-            measures[1].push_back(1);
-            measures[2].resize(m_plane_infos.at(apa).at(face)[0].total_wires, 0);
-            measures[3].resize(m_plane_infos.at(apa).at(face)[1].total_wires, 0);
-            measures[4].resize(m_plane_infos.at(apa).at(face)[2].total_wires, 0);
-            
-            // std::cout << "Test2: " << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
-        }
-
-        WRG::measure_t& m = measures[2+0]; // U plane is layer 2
-        for (int ch : ch_set) {
-            double charge = 1e-3; // Default charge value
-            auto it = map_u_tcc.find(std::make_pair(time_slice, ch));
-            if (it != map_u_tcc.end()) {
-                charge = it->second.first; // Use the charge from the map
-            }
-            m[ch] = charge;
-        }
-    }
-    for (const auto& [time_slice, ch_set] : v_time_chs) {
-        auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
-
-        auto& measures = map_slices_measures[slice_key];
-         if (measures.size()==0){
-            measures.resize(nlayers);
-            // what to do the first two views???
-            measures[0].push_back(1);
-            measures[1].push_back(1);
-            measures[2].resize(m_plane_infos.at(apa).at(face)[0].total_wires, 0);
-            measures[3].resize(m_plane_infos.at(apa).at(face)[1].total_wires, 0);
-            measures[4].resize(m_plane_infos.at(apa).at(face)[2].total_wires, 0);
-            
-            // std::cout << "Test3: " << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
-        }
-
-        WRG::measure_t& m = measures[2+1]; // V plane is layer 3
-        for (int ch : ch_set) {
-            double charge = 1e-3; // Default charge value
-            auto it = map_v_tcc.find(std::make_pair(time_slice, ch));
-            if (it != map_v_tcc.end()) {
-                charge = it->second.first; // Use the charge from the map
-            }
-            m[ch] = charge;
-        }
-    }
-    for (const auto& [time_slice, ch_set] : w_time_chs) {
-        auto slice_key = std::make_pair(time_slice, time_slice + tick_span);
-        auto& measures = map_slices_measures[slice_key];
-         if (measures.size()==0){
-            measures.resize(nlayers);
-            // what to do the first two views???
-            measures[0].push_back(1);
-            measures[1].push_back(1);
-            measures[2].resize(m_plane_infos.at(apa).at(face)[0].total_wires, 0);
-            measures[3].resize(m_plane_infos.at(apa).at(face)[1].total_wires, 0);
-            measures[4].resize(m_plane_infos.at(apa).at(face)[2].total_wires, 0);
-            
-            // std::cout << "Test4: " << measures[2].size() << " " << measures[3].size() << " " << measures[4].size() << std::endl;
-        }
-        WRG::measure_t& m = measures[2+2]; // W plane is layer 4
-        for (int ch : ch_set) {
-            double charge = 1e-3; // Default charge value
-            auto it = map_w_tcc.find(std::make_pair(time_slice, ch));
-            if (it != map_w_tcc.end()) {
-                charge = it->second.first; // Use the charge from the map
-            }
-            m[ch] = charge;
         }
     }
 
@@ -559,6 +457,9 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
         // std::cout << "Test: " << apa << " " << face << " " << wire_limits[i].first << " " << wire_limits[i].second << std::endl;
     }
 
+    // Guard: if activity is empty there is nothing to hack.
+    if (map_slices_measures.empty()) return;
+
     // this is to get the end of the time tick range = start_tick + tick_span
     const int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
 
@@ -591,7 +492,7 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
                 int layer = plane + 2;
                 if (map_slices_measures.find(tick_range) != map_slices_measures.end()) {
                     if (map_slices_measures[tick_range][layer][wire] > 0) {
-                        wire_hits[plane] += (delta == 0) ? 1 : (delta == -1) ? 2 : 1;
+                        wire_hits[plane] += (delta == 0) ? 2 : 1;
                     }
                 }
             }
@@ -691,31 +592,42 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
 }
 
 
-std::set<const WireCell::Clus::Facade::Blob*> 
+std::vector<const WireCell::Clus::Facade::Blob*>
 ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
 {
-     // Get time-organized maps of original and new blobs
+    // Get time-organized maps of original and new blobs
     const auto& orig_time_blob_map = cluster.time_blob_map().at(apa).at(face);
     const auto& new_time_blob_map = shad_cluster.time_blob_map().at(apa).at(face);
-    
-    // Build index mappings for new blobs (similar to prototype's mcell indexing)
+
+    // Build index mappings for new blobs.  Sort by (time_slice, blob->ident())
+    // so vertex IDs are deterministic across runs regardless of heap layout.
     std::map<int, const Blob*> map_index_blob;
     std::map<const Blob*, int> map_blob_index;
     std::vector<const Blob*> all_new_blobs;
-    
+
     int index = 0;
     for (const auto& [time_slice, new_blobs] : new_time_blob_map) {
-        for (const Blob* blob : new_blobs) {
+        // Sort within each time slice by blob ident for determinism.
+        std::vector<const Blob*> sorted_blobs(new_blobs.begin(), new_blobs.end());
+        // Sort by wire-range corners for a deterministic, geometry-based order that
+        // is independent of heap-allocated pointer values.
+        std::sort(sorted_blobs.begin(), sorted_blobs.end(),
+                  [](const Blob* a, const Blob* b) {
+                      if (a->u_wire_index_min() != b->u_wire_index_min()) return a->u_wire_index_min() < b->u_wire_index_min();
+                      if (a->v_wire_index_min() != b->v_wire_index_min()) return a->v_wire_index_min() < b->v_wire_index_min();
+                      return a->w_wire_index_min() < b->w_wire_index_min();
+                  });
+        for (const Blob* blob : sorted_blobs) {
             map_index_blob[index] = blob;
-            map_blob_index[blob] = index;
+            map_blob_index[blob]  = index;
             all_new_blobs.push_back(blob);
             index++;
         }
     }
     
-    // If no new blobs or only one blob, return empty set (no graph needed)
+    // If no new blobs or only one blob, nothing to filter.
     if (all_new_blobs.size() <= 1) {
-        return std::set<const Blob*>();
+        return {};
     }
     
     // Create graph for new blobs - establish connectivity between adjacent time slices
@@ -747,8 +659,8 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     std::vector<int> component(num_vertices(temp_graph));
     const int num_components = connected_components(temp_graph, &component[0]);
     
-    std::set<const Blob*> blobs_to_remove;
-    
+    std::vector<const Blob*> blobs_to_remove;
+
     // If we have multiple disconnected components, validate each component
     if (num_components > 1) {
         std::set<int> good_components;
@@ -811,17 +723,17 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
             }
         }
         
-        // Collect blobs from bad components for removal
+        // Collect blobs from bad components for removal.
+        // Iterate in deterministic vertex-ID order (assigned from sorted blobs above).
         for (int i = 0; i < static_cast<int>(component.size()); ++i) {
             int comp_id = component[i];
             if (good_components.find(comp_id) == good_components.end()) {
-                // This component is not good, mark its blobs for removal
                 const Blob* blob = map_index_blob[i];
-                blobs_to_remove.insert(blob);
+                blobs_to_remove.push_back(blob);
             }
         }
     }
-    
+
     return blobs_to_remove;
 }
 

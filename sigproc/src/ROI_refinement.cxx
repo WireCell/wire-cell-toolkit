@@ -136,7 +136,7 @@ void ROI_refinement::apply_roi(int plane, Array::array_xxf &r_data)
                 for (int i = start_bin; i < end_bin + 1; i++) {
                     int content =
                         r_data(irow, i) -
-                        ((end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content);
+                        ((end_bin != start_bin) ? (end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content : start_content);
                     signal.at(i) = content;
                     //	  htemp_signal->SetBinContent(i+1,content);
                 }
@@ -165,7 +165,7 @@ void ROI_refinement::apply_roi(int plane, Array::array_xxf &r_data)
                 for (int i = start_bin; i < end_bin + 1; i++) {
                     int content =
                         r_data(irow, i) -
-                        ((end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content);
+                        ((end_bin != start_bin) ? (end_content - start_content) * (i - start_bin) / (end_bin - start_bin) + start_content : start_content);
                     signal.at(i) = content;
                     // htemp_signal->SetBinContent(i+1,content);
                 }
@@ -288,12 +288,14 @@ void ROI_refinement::load_data(int plane, const Array::array_xxf &r_data, ROI_fo
     // load data ...
     for (int irow = 0; irow != r_data.rows(); irow++) {
         Waveform::realseq_t signal(r_data.cols());
-        if (bad_ch_map.find(irow + offset) != bad_ch_map.end()) {
+        auto bad_it = bad_ch_map.find(irow + offset);
+        if (bad_it != bad_ch_map.end()) {
+            const auto& bad_ranges = bad_it->second;
             for (int icol = 0; icol != r_data.cols(); icol++) {
                 bool flag = true;
-                for (size_t i = 0; i != bad_ch_map[irow + offset].size(); i++) {
-                    if (icol >= bad_ch_map[irow + offset].at(i).first &&
-                        icol <= bad_ch_map[irow + offset].at(i).second) {
+                for (size_t i = 0; i != bad_ranges.size(); i++) {
+                    if (icol >= bad_ranges.at(i).first &&
+                        icol <= bad_ranges.at(i).second) {
                         flag = false;
                         break;
                     }
@@ -428,7 +430,7 @@ void ROI_refinement::load_data(int plane, const Array::array_xxf &r_data, ROI_fo
                     // form connectivity map
                     // [Hongzhao] should avoid fake adjacency in Collection Plane for wrapped configuration
                     // CHANGE(S): Hongzhao added protection to skip fake adjacency
-                    if (chid != nwire_u + nwire_v + nwire_w / 2. ||
+                    if (chid != nwire_u + nwire_v + nwire_w / 2 ||
                         !isWrapped) {  // additional judgement to skip fake adjacency
                         for (auto it = rois_w_tight[chid - nwire_u - nwire_v - 1].begin();
                              it != rois_w_tight[chid - nwire_u - nwire_v - 1].end(); it++) {
@@ -2152,9 +2154,10 @@ void ROI_refinement::BreakROI(SignalROI *roi, float rms)
                     }
                     else {
                         for (int k = start_pos; k != end_pos + 1; k++) {
-                            double temp_content = temp1_signal.at(k - start_bin) -
-                                                  (start_content + (end_content - start_content) * (k - start_pos) /
-                                                                       (end_pos - start_pos));
+                            double baseline = (end_pos != start_pos)
+                                ? start_content + (end_content - start_content) * (k - start_pos) / (end_pos - start_pos)
+                                : start_content;
+                            double temp_content = temp1_signal.at(k - start_bin) - baseline;
                             temp_signal.at(k - start_bin) = temp_content;
                         }
                     }
@@ -2262,7 +2265,7 @@ void ROI_refinement::BreakROI(SignalROI *roi, float rms)
             // multi-plane protection
             std::vector<bool> section_protected;
             section_protected.resize(saved_b.size(), false);
-            for (unsigned int j = 0; j < saved_b.size() - 1; ++j) {
+            for (int j = 0; j < (int)saved_b.size() - 1; ++j) {
                 auto section_sta = saved_b[j] + start_bin;
                 auto section_end = saved_b[j + 1] + start_bin;
                 auto section_mid = 0.5 * (section_sta + section_end);
@@ -2309,9 +2312,10 @@ void ROI_refinement::BreakROI(SignalROI *roi, float rms)
                 }
                 else {
                     for (int k = start_pos; k != end_pos + 1; k++) {
-                        double temp_content =
-                            temp1_signal.at(k) -
-                            (start_content + (end_content - start_content) * (k - start_pos) / (end_pos - start_pos));
+                        double baseline = (end_pos != start_pos)
+                            ? start_content + (end_content - start_content) * (k - start_pos) / (end_pos - start_pos)
+                            : start_content;
+                        double temp_content = temp1_signal.at(k) - baseline;
                         temp_signal.at(k) = temp_content;
                     }
                 }

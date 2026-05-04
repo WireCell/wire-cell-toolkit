@@ -23,12 +23,17 @@ local sim = sim_maker(params, tools);
 local nanodes = std.length(tools.anodes);
 local anode_iota = std.range(0, nanodes-1);
 
+local thetaXZ = 0*wc.deg;
+local singletrk_apa1 = {
+ tail: wc.point(-100, 100, 100, wc.cm),
+ head: wc.point(-100*(1 + std.tan(thetaXZ)), 100, 100*(1+1), wc.cm),
+};
 local tracklist = [
 
   {
     time: 0 * wc.us,
     charge: -500, // negative means # electrons per step (see below configuration) 
-    ray: params.det.bounds,
+    ray: singletrk_apa1, // params.det.bounds,
   },
 
 ];
@@ -62,8 +67,31 @@ local nf_maker = import 'pgrapher/experiment/pdhd/nf.jsonnet';
 local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n) for n in anode_iota];
 
 local sp_maker = import 'pgrapher/experiment/pdhd/sp.jsonnet';
+local sp_override = { // assume all tages sets in base sp.jsonnet
+    sparse: true, // sigoutform == 'sparse',
+    // wiener_tag: "",
+    // gauss_tag: "",
+    use_roi_refinement: true,
+    use_roi_debug_mode: true,
+    save_negtive_charge: false, // no negative charge in gauss
+    tight_lf_tag: "",
+    loose_lf_tag: "",
+    // cleanup_roi_tag: "",
+    break_roi_loop1_tag: "",
+    break_roi_loop2_tag: "",
+    shrink_roi_tag: "",
+    // extend_roi_tag: "",
+    // decon_charge_tag: "",
+    use_multi_plane_protection: true,
+    do_not_mp_protect_traditional: true, // do_not_mp_protect_traditional to
+                                         // make a clear ref, defualt is false
+    mp_tick_resolution: 10,
+    MP_feature_val_method: 1,
+};
+
 // local sp = sp_maker(params, tools, { sparse: true, });
-local sp = sp_maker(params, tools, { sparse: true, use_roi_debug_mode: true, use_multi_plane_protection: true, mp_tick_resolution: 4, });
+// local sp = sp_maker(params, tools, { sparse: true, use_roi_debug_mode: true, use_multi_plane_protection: true, mp_tick_resolution: 4, });
+local sp = sp_maker(params, tools, sp_override);
 local sp_pipes = [sp.make_sigproc(a) for a in tools.anodes];
 
 // local deposplats = [sim.make_ductor('splat%d'%n, tools.anodes[n], tools.pirs[0], 'DepoSplat', 'ductor%d'%n) for n in anode_iota] ;
@@ -184,8 +212,7 @@ local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        // model: "ts-model/unet-l23-cosmic500-e50.ts",
-        model: "ts-model/CP49.ts",
+        model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
         device: "cpu", // "gpucpu",
         concurrency: 1,
     },
@@ -203,12 +230,12 @@ local reco_fork = [
               // rio_nf[n],
               sp_pipes[n],
               hio_sp[n],
-              // magnifyio.debug_pipe[n],
+              magnifyio.debug_pipe[n],
               magnifyio.decon_pipe[n],
 
               dnnroi(tools.anodes[n], ts, output_scale=1.2),
 
-              magnifyio.dnnroi_pipe[n],
+              magnifyio.dnnsp_pipe[n],
               // hio_dnn[n],
               // rio_sp[n],
               g.pnode({ type: 'DumpFrames', name: 'reco_fork%d'%n }, nin=1, nout=0),

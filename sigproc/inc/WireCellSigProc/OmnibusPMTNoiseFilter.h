@@ -6,8 +6,12 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellUtil/Waveform.h"
 
+#include <vector>
+
 namespace WireCell {
     namespace SigProc {
+
+        class PMTNoiseROI;  // forward declaration
 
         class OmnibusPMTNoiseFilter : public WireCell::IFrameFilter, public WireCell::IConfigurable {
            public:
@@ -46,6 +50,8 @@ namespace WireCell {
             float m_ind_th1;
             float m_ind_th2;
             int m_nwire_pmt_col_th;
+
+            std::vector<PMTNoiseROI*> m_pmt_rois;
         };
     }  // namespace SigProc
 }  // namespace WireCell

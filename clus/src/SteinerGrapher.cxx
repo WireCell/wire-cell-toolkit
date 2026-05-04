@@ -7,7 +7,9 @@
 #include "WireCellClus/DynamicPointCloud.h"
 #include <algorithm>
 #include <set>
+#include <unordered_set>
 #include <map>
+#include <chrono>
 #include <boost/graph/copy.hpp>
 
 using namespace WireCell;
@@ -23,17 +25,18 @@ void Steiner::Grapher::create_steiner_tree(
     bool disable_dead_mix_cell,
     const std::string& steiner_pc_name)
 {
-    log->debug("create_steiner_tree: starting with reference_cluster={}, path_size={}", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: starting with reference_cluster={}, path_size={}",
                (reference_cluster ? "provided" : "null"), path_point_indices.size());
 
     // Phase 1: Find initial steiner terminals
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
-    log->debug("create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
 
-    std::cout << "Test1: " << steiner_terminals.size() << std::endl;
+    // std::cout << "Test1: " << steiner_terminals.size() << std::endl;
 
-    if (steiner_terminals.empty()) {
-        log->warn("create_steiner_tree: no steiner terminals found, returning empty graph");
+    if (steiner_terminals.size() < 2) {
+        SPDLOG_LOGGER_WARN(log, "create_steiner_tree: only {} steiner terminal(s) found (need >=2), returning empty graph",
+                           steiner_terminals.size());
         return;
     }
 
@@ -41,35 +44,36 @@ void Steiner::Grapher::create_steiner_tree(
     if (reference_cluster) {
         vertex_set original_size = steiner_terminals;
         steiner_terminals = filter_by_reference_cluster(steiner_terminals, reference_cluster);
-        log->debug("create_steiner_tree: reference cluster filtering: {} -> {} terminals", 
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: reference cluster filtering: {} -> {} terminals",
                    original_size.size(), steiner_terminals.size());
     }
 
-    std::cout << "Test2: " << steiner_terminals.size() << std::endl;
+    // std::cout << "Test2: " << steiner_terminals.size() << std::endl;
 
 
     // Phase 3: Apply path-based filtering if path is provided
     if (!path_point_indices.empty()) {
         vertex_set pre_path_size = steiner_terminals;
         steiner_terminals = filter_by_path_constraints(steiner_terminals, path_point_indices);
-        log->debug("create_steiner_tree: path filtering: {} -> {} terminals", 
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: path filtering: {} -> {} terminals",
                    pre_path_size.size(), steiner_terminals.size());
     }
 
-    std::cout << "Test3: " << steiner_terminals.size() << std::endl;
+    // std::cout << "Test3: " << steiner_terminals.size() << std::endl;
 
 
     // Phase 4: Add extreme points
     vertex_set extreme_points = get_extreme_points_for_reference(reference_cluster);
     steiner_terminals.insert(extreme_points.begin(), extreme_points.end());
-    log->debug("create_steiner_tree: added {} extreme points, total terminals: {}", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: added {} extreme points, total terminals: {}",
                extreme_points.size(), steiner_terminals.size());
 
-    std::cout << "Test4: " << steiner_terminals.size() << std::endl;
+    // std::cout << "Test4: " << steiner_terminals.size() << std::endl;
 
 
-    if (steiner_terminals.empty()) {
-        log->warn("create_steiner_tree: no terminals remain after filtering, returning empty graph");
+    if (steiner_terminals.size() < 2) {
+        SPDLOG_LOGGER_WARN(log, "create_steiner_tree: only {} terminal(s) remain after filtering (need >=2), returning empty graph",
+                           steiner_terminals.size());
         return;
     }
 
@@ -103,17 +107,16 @@ void Steiner::Grapher::create_steiner_tree(
     // Store the subset point cloud
     if (!steiner_pc_name.empty()) {
         put_point_cloud(std::move(steiner_result.point_cloud), steiner_pc_name);
-        log->debug("create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
+        SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: created steiner subset point cloud '{}'", steiner_pc_name);
     }
 
     // can I do this to store the graph ???
     m_cluster.give_graph(steiner_graph_name, std::move(steiner_result.graph));
 
     
-    log->debug("create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges", 
+    SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: created reduced steiner graph with {} vertices (was {}), {} edges",
                boost::num_vertices(steiner_result.graph), boost::num_vertices(base_graph),
                boost::num_edges(steiner_result.graph));
-
 
     // return steiner_result.graph;
 
@@ -137,7 +140,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_reference_cluster(
     const auto& ref_time_blob_map = reference_cluster->time_blob_map(); // this one has the time blob map ...
     
     if (ref_time_blob_map.empty()) {
-        log->debug("filter_by_reference_cluster: reference cluster has empty time_blob_map");
+        SPDLOG_LOGGER_TRACE(log, "filter_by_reference_cluster: reference cluster has empty time_blob_map");
         return terminals;
     }
 
@@ -160,8 +163,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
         return terminals;
     }
 
-    std::vector<WireCell::WirePlaneId> wpids_vec = m_cluster.wpids_blob();
-    std::set<WireCell::WirePlaneId> wpids_set(wpids_vec.begin(), wpids_vec.end());
+    const auto wpids_set = m_cluster.wpids_blob_set();
     std::vector<WireCell::WirePlaneId> wpids(wpids_set.begin(), wpids_set.end());
 
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
@@ -270,7 +272,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::get_extreme_points_for_reference(
             }
         }
     } catch (const std::exception& e) {
-        log->warn("get_extreme_points_for_reference: failed to get extreme points: {}", e.what());
+        SPDLOG_LOGGER_WARN(log, "get_extreme_points_for_reference: failed to get extreme points: {}", e.what());
     }
 
     return extreme_points;
@@ -307,31 +309,43 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
     const std::vector<const Facade::Blob*>& target_blobs, const std::string& graph_name,
     bool disable_dead_mix_cell, int nlevel)
 {
-    vertex_set peak_points;
-    
     if (target_blobs.empty()) {
-        return peak_points;
+        return {};
     }
-    
-    // Get the blob-to-points mapping
+
+    // Build a reverse lookup: Blob* -> node index, so we can query the
+    // node-index-keyed cell_points_map using a Blob* from the caller.
+    const auto& sv = m_cluster.sv3d();
+    const auto& nodes = sv.nodes();
+    std::map<const Facade::Blob*, size_t> blob_to_node_idx;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        const auto* b = nodes[i]->value.facade<Blob>();
+        if (b) blob_to_node_idx[b] = i;
+    }
+
     auto cell_points_map = form_cell_points_map();
-    
-    // Collect indices only from target blobs
     vertex_set all_indices;
     for (const auto* blob : target_blobs) {
-        auto it = cell_points_map.find(blob);
+        auto rev_it = blob_to_node_idx.find(blob);
+        if (rev_it == blob_to_node_idx.end()) continue;
+        auto it = cell_points_map.find(rev_it->second);
         if (it != cell_points_map.end()) {
             all_indices.insert(it->second.begin(), it->second.end());
         }
     }
-    
+    return find_peak_point_indices(all_indices, graph_name, disable_dead_mix_cell, nlevel);
+}
+
+Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
+    const vertex_set& all_indices, const std::string& graph_name,
+    bool disable_dead_mix_cell, int nlevel)
+{
+    vertex_set peak_points;
+
     if (all_indices.empty()) {
         return peak_points;
     }
-    
-    // Rest of the implementation is similar to the above version
-    // but only operates on the filtered point indices
-    
+
     // Calculate charges and find candidates
     std::map<size_t, double> map_index_charge;
     std::set<std::pair<double, size_t>, std::greater<std::pair<double, size_t>>> candidates_set;
@@ -445,15 +459,12 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
             boost::no_property, boost::property<boost::edge_weight_t, double>>
             temp_graph(N);
         
-        // Check connectivity in original graph and replicate in temp graph
+        // Check connectivity in original graph and replicate in temp graph.
+        // Use k = j+1 to visit each undirected pair once (halves boost::edge() calls).
         for (size_t j = 0; j < N; ++j) {
-            for (size_t k = 0; k < N; ++k) {
-                size_t index1 = j;
-                size_t index2 = k;
-                
-                // Check if corresponding vertices are connected in original graph
-                if (boost::edge(vec_peak_indices[index1], vec_peak_indices[index2], graph).second) {
-                    boost::add_edge(index1, index2, temp_graph);
+            for (size_t k = j + 1; k < N; ++k) {
+                if (boost::edge(vec_peak_indices[j], vec_peak_indices[k], graph).second) {
+                    boost::add_edge(j, k, temp_graph);
                 }
             }
         }
@@ -508,27 +519,26 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_peak_point_indices(
 
 Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell)
 {
-    vertex_set steiner_terminals;
-    
-    // Get the blob-to-points mapping 
     auto cell_points_map = form_cell_points_map();
+    return find_steiner_terminals(graph_name, disable_dead_mix_cell, cell_points_map);
+}
+
+Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell, const blob_vertex_map& cell_points_map)
+{
+    vertex_set steiner_terminals;
     
     if (cell_points_map.empty()) {
         return steiner_terminals;
     }
     
-    // Process each blob individually (following prototype pattern)
-    for (const auto& [blob, point_indices] : cell_points_map) {
-        // Create a single-blob vector for processing
-        std::vector<const Blob*> single_blob = {blob};
-        
-        // Find peak points for this specific blob
-        auto blob_peaks = find_peak_point_indices(single_blob, graph_name, disable_dead_mix_cell);
-        
-        // Add to overall steiner terminals set
+    // Process each blob individually (following prototype pattern).
+    // Iterating by blob node index (size_t key) gives deterministic order.
+    for (const auto& [blob_node_idx, point_indices] : cell_points_map) {
+        (void)blob_node_idx;  // key used only for ordering; value suffices here
+        auto blob_peaks = find_peak_point_indices(point_indices, graph_name, disable_dead_mix_cell);
         steiner_terminals.insert(blob_peaks.begin(), blob_peaks.end());
     }
-    
+
     return steiner_terminals;
 }
 
@@ -537,140 +547,158 @@ Steiner::Grapher::vertex_set Steiner::Grapher::find_steiner_terminals(const std:
 Steiner::Grapher::blob_vertex_map Steiner::Grapher::form_cell_points_map()
 {
     blob_vertex_map cell_points;
-    
+
     // Get the 3D scoped view with x,y,z coordinates
-    const auto& sv = m_cluster.sv3d();   // This is default scoped view with 3D coordinates ...  based on index, can connect to raw then 2D ...
+    const auto& sv = m_cluster.sv3d();
     const auto& nodes = sv.nodes();   // These are the blob nodes
     const auto& skd = sv.kd();        // K-d tree with point data
-    
+
     // Check if we have valid data
     if (nodes.empty() || skd.npoints() == 0) {
-        return cell_points;  // Return empty map if no data
+        return cell_points;
     }
-    
-    // The major indices tell you which blob each point belongs to
-    const auto& majs = skd.major_indices();  // blob index for each point
-    
-    // Iterate through all points and assign them to their respective blobs
+
+    // The major indices tell you which blob (node index) each point belongs to.
+    // We key the map on the node index (a stable size_t from the traversal-ordered
+    // nodes vector) rather than the Blob* address to guarantee deterministic
+    // iteration order across runs.
+    const auto& majs = skd.major_indices();
+
     for (size_t point_idx = 0; point_idx < skd.npoints(); ++point_idx) {
-        size_t blob_idx = majs[point_idx];
-        
-        // Bounds check
-        if (blob_idx >= nodes.size()) {
-            continue;  // Skip invalid blob indices
-        }
-        
-        // Get the blob facade from the node
-        const auto* blob = nodes[blob_idx]->value.facade<Blob>();
-        if (!blob) {
-            continue;  // Skip if facade creation failed
-        }
-        
-        // Initialize the set for this blob if it doesn't exist
-        if (cell_points.find(blob) == cell_points.end()) {
-            cell_points[blob] = vertex_set();
-        }
-        
-        // Add this point index to the blob's set
-        cell_points[blob].insert(point_idx);
+        size_t blob_node_idx = majs[point_idx];
+        if (blob_node_idx >= nodes.size()) continue;
+
+        // Verify the facade is valid (guards downstream null dereferences)
+        const auto* blob = nodes[blob_node_idx]->value.facade<Blob>();
+        if (!blob) continue;
+
+        // operator[] default-constructs the vertex_set on first access;
+        // no need for a separate find() guard.
+        cell_points[blob_node_idx].insert(point_idx);
     }
-    
+
     return cell_points;
 }
 
 void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& graph_name, 
                                                         bool disable_dead_mix_cell)
 {
+    using Clock = std::chrono::steady_clock;
+    // using MS = std::chrono::duration<double, std::milli>;
+    auto t0 = Clock::now();
+
     if (!m_cluster.has_graph(graph_name)) {
-        log->error("Graph '{}' does not exist in cluster", graph_name);
+        SPDLOG_LOGGER_ERROR(log, "Graph '{}' does not exist in cluster", graph_name);
         return;
     }
 
     auto& graph = m_cluster.get_graph(graph_name);
-    edge_set added_edges;
+    std::vector<edge_type> added_edges;
 
-    // Step 1: Find Steiner terminals using the existing implementation
-    vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
-    
-    log->debug("Found {} Steiner terminals for same-blob edge establishment", steiner_terminals.size());
-
-    // Step 2: Get the blob-to-points mapping (equivalent to map_mcell_all_indices in prototype)
+    // Compute blob->points map once and reuse it for both terminal finding and edge adding
     auto cell_points_map = form_cell_points_map();
-    
+    // if (m_perf) std::cout << "establish_same_blob_steiner_edges[" << graph_name << "] timing: form_cell_points_map took " << MS(Clock::now()-t0).count() << " ms  blobs=" << cell_points_map.size() << std::endl;
+
     if (cell_points_map.empty()) {
-        log->warn("No blob-to-points mapping available for Steiner edge establishment");
+        SPDLOG_LOGGER_WARN(log, "No blob-to-points mapping available for Steiner edge establishment");
         return;
     }
 
-    log->debug("Processing {} blobs for same-blob edges", cell_points_map.size());
+    // Step 1: Find Steiner terminals, passing the already-computed map to avoid
+    // calling form_cell_points_map() a second time inside find_steiner_terminals().
+    t0 = Clock::now();
+    vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell, cell_points_map);
+    // if (m_perf) std::cout << "establish_same_blob_steiner_edges[" << graph_name << "] timing: find_steiner_terminals took " << MS(Clock::now()-t0).count() << " ms  terminals=" << steiner_terminals.size() << std::endl;
+    
+    SPDLOG_LOGGER_TRACE(log, "Found {} Steiner terminals for same-blob edge establishment", steiner_terminals.size());
+    // SPDLOG_LOGGER_TRACE(log, "Processing {} blobs for same-blob edges", cell_points_map.size());
 
-    // std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
+    // Build an O(1)-lookup set from the terminals (std::set lookup is O(log N)).
+    std::unordered_set<vertex_type> terminal_set(steiner_terminals.begin(), steiner_terminals.end());
 
+    // Step 2: For each blob, add edges between all pairs of points that include
+    // at least one Steiner terminal.  Cache 3D coordinates per blob to avoid
+    // repeated point3d() lookups inside the O(M^2) inner loop.
+    t0 = Clock::now();
+    // Iterate blobs in node-index order (deterministic) and add intra-blob edges.
+    for (const auto& [blob_node_idx, point_indices] : cell_points_map) {
+        (void)blob_node_idx;
+        if (point_indices.size() < 2) continue;
 
-    // Step 3: For each blob, add edges between all pairs of points (following prototype logic)
-    for (const auto& [blob, point_indices] : cell_points_map) {
-        if (point_indices.size() < 2) {
-            continue; // Need at least 2 points to make edges
+        // Convert set to vector for O(1) index access
+        std::vector<vertex_type> points_vec(point_indices.begin(), point_indices.end());
+        const size_t M = points_vec.size();
+
+        // --- Early-exit: skip blobs with zero terminals (avoids O(M²) loop entirely) ---
+        size_t n_terminals = 0;
+        size_t sole_term_k = M;  // index of the single terminal if n_terminals==1
+        for (size_t k = 0; k < M; ++k) {
+            if (terminal_set.count(points_vec[k])) {
+                ++n_terminals;
+                sole_term_k = k;
+                if (n_terminals > 1) break;
+            }
+        }
+        if (n_terminals == 0) continue;
+
+        // Cache 3D coordinates — avoids 2 × M² point3d() calls in the loop below
+        std::vector<Point> pts(M);
+        for (size_t k = 0; k < M; ++k) {
+            pts[k] = m_cluster.point3d(points_vec[k]);
         }
 
-        log->debug("Processing blob with {} points", point_indices.size());
-
-        // Convert set to vector for easier iteration
-        std::vector<vertex_type> points_vec(point_indices.begin(), point_indices.end());
-
-        // Add edges between all pairs of points in the same blob (following prototype)
-        for (size_t i = 0; i < points_vec.size(); ++i) {
-            vertex_type index1 = points_vec[i];
-            bool flag_index1 = (steiner_terminals.find(index1) != steiner_terminals.end());
-            
-            for (size_t j = i + 1; j < points_vec.size(); ++j) {
-                vertex_type index2 = points_vec[j];
-                bool flag_index2 = (steiner_terminals.find(index2) != steiner_terminals.end());
-
-                // Calculate base distance between points
-                double distance = calculate_distance(index1, index2);
-                
-                // Determine edge weight based on terminal status (following prototype logic)
-                double edge_weight = 0.0;
-                bool add_edge = false;
-                
-                if (flag_index1 && flag_index2) {
-                    // Both are steiner terminals: weight = distance * 0.8
-                    edge_weight = distance * 0.8;
-                    add_edge = true;
-                } else if (flag_index1 || flag_index2) {
-                    // One is steiner terminal: weight = distance * 0.9  
-                    edge_weight = distance * 0.9;
-                    add_edge = true;
+        // --- Single-terminal fast path: only M-1 pairs possible ---
+        if (n_terminals == 1) {
+            vertex_type term_v = points_vec[sole_term_k];
+            const auto& p_term = pts[sole_term_k];
+            for (size_t j = 0; j < M; ++j) {
+                if (j == sole_term_k) continue;
+                vertex_type other_v = points_vec[j];
+                if (!boost::edge(term_v, other_v, graph).second) {
+                    const auto& p_other = pts[j];
+                    double dx = p_other.x()-p_term.x(), dy = p_other.y()-p_term.y(), dz = p_other.z()-p_term.z();
+                    double w = 0.9 * std::sqrt(dx*dx + dy*dy + dz*dz);
+                    auto [e, ok] = boost::add_edge(term_v, other_v, w, graph);
+                    if (ok) added_edges.push_back(e);
                 }
-                // If neither is a steiner terminal, don't add edge (add_edge stays false)
+            }
+            continue;
+        }
 
-                if (add_edge) {
-                    // Add edge with calculated weight
-                    if (!boost::edge(index1, index2, graph).second) {
-                        auto [edge, success] = boost::add_edge(index1, index2, edge_weight, graph);
-                        if (success) {
-                            added_edges.insert(edge);
-                            log->debug("Added same-blob edge: {} -- {} (distance: {:.3f} cm, weight: {:.3f}, terminals: {}/{})", 
-                                    index1, index2, distance / units::cm, edge_weight / units::cm,
-                                    flag_index1 ? "T" : "N", flag_index2 ? "T" : "N");
-                        }
-                    }
+        // --- General path: multiple terminals, O(M²) pairs ---
+        for (size_t i = 0; i < M; ++i) {
+            vertex_type index1 = points_vec[i];
+            bool flag_index1 = (terminal_set.count(index1) > 0);
+
+            for (size_t j = i + 1; j < M; ++j) {
+                vertex_type index2 = points_vec[j];
+                bool flag_index2 = (terminal_set.count(index2) > 0);
+
+                double factor;
+                if (flag_index1 && flag_index2)       factor = 0.8;
+                else if (flag_index1 || flag_index2)  factor = 0.9;
+                else continue;  // neither is a terminal — skip
+
+                if (!boost::edge(index1, index2, graph).second) {
+                    const auto& p1 = pts[i];
+                    const auto& p2 = pts[j];
+                    double dx = p2.x()-p1.x(), dy = p2.y()-p1.y(), dz = p2.z()-p1.z();
+                    double w = factor * std::sqrt(dx*dx + dy*dy + dz*dz);
+                    auto [e, ok] = boost::add_edge(index1, index2, w, graph);
+                    if (ok) added_edges.push_back(e);
                 }
             }
         }
     }
-
-    // std::cout << "Xin3: " << " Graph vertices: " << boost::num_vertices(graph) << ", edges: " << boost::num_edges(graph) << std::endl;
-
+    // if (m_perf) std::cout << "establish_same_blob_steiner_edges[" << graph_name << "] timing: edge loop took " << MS(Clock::now()-t0).count() << " ms  pairs_checked=" << total_pairs_checked << "  edges_added=" << total_edges_added << std::endl;
 
     // Store the added edges for later removal
+    t0 = Clock::now();
     store_added_edges(graph_name, added_edges);
-
-    // Invalidate any cached GraphAlgorithms that use this graph
     invalidate_graph_algorithms_cache(graph_name);
+    // if (m_perf) std::cout << "establish_same_blob_steiner_edges[" << graph_name << "] timing: store+invalidate took " << MS(Clock::now()-t0).count() << " ms" << std::endl;
 
-    // log->info("Added {} same-blob edges to graph '{}' from {} total points ({} steiner terminals)", 
+    // SPDLOG_LOGGER_INFO(log, "Added {} same-blob edges to graph '{}' from {} total points ({} steiner terminals)", 
     //          added_edges.size(), graph_name, 
     //          std::accumulate(cell_points_map.begin(), cell_points_map.end(), 0,
     //                        [](int sum, const auto& pair) { return sum + pair.second.size(); }),
@@ -681,13 +709,13 @@ void Steiner::Grapher::establish_same_blob_steiner_edges(const std::string& grap
 void Steiner::Grapher::remove_same_blob_steiner_edges(const std::string& graph_name)
 {
     if (!m_cluster.has_graph(graph_name)) {
-        log->warn("Graph '{}' does not exist, cannot remove edges", graph_name);
+        SPDLOG_LOGGER_WARN(log, "Graph '{}' does not exist, cannot remove edges", graph_name);
         return;
     }
 
     auto it = m_added_edges_by_graph.find(graph_name);
     if (it == m_added_edges_by_graph.end() || it->second.empty()) {
-        log->debug("No edges to remove for graph '{}'", graph_name);
+        SPDLOG_LOGGER_TRACE(log, "No edges to remove for graph '{}'", graph_name);
         return;
     }
 
@@ -708,7 +736,7 @@ void Steiner::Grapher::remove_same_blob_steiner_edges(const std::string& graph_n
     invalidate_graph_algorithms_cache(graph_name);
 
     (void)removed_count;
-    // log->info("Removed {} same-blob Steiner edges from graph '{}'", removed_count, graph_name);
+    // SPDLOG_LOGGER_INFO(log, "Removed {} same-blob Steiner edges from graph '{}'", removed_count, graph_name);
 }
 
 void Steiner::Grapher::invalidate_graph_algorithms_cache(const std::string& graph_name)
@@ -717,11 +745,10 @@ void Steiner::Grapher::invalidate_graph_algorithms_cache(const std::string& grap
     m_cluster.clear_graph_algorithms_cache(graph_name);
 }
 
-void Steiner::Grapher::store_added_edges(const std::string& graph_name, const edge_set& edges)
+void Steiner::Grapher::store_added_edges(const std::string& graph_name, const std::vector<edge_type>& edges)
 {
-    // Add to existing set if graph already has tracked edges
     auto& tracked_edges = m_added_edges_by_graph[graph_name];
-    tracked_edges.insert(edges.begin(), edges.end());
+    tracked_edges.insert(tracked_edges.end(), edges.begin(), edges.end());
 }
 
 bool Steiner::Grapher::same_blob(vertex_type v1, vertex_type v2) const
@@ -815,49 +842,42 @@ std::map<Weighted::vertex_type, double> calculate_vertex_charges(
 }
 
 void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& result, const WireCell::Clus::Facade::Cluster& cluster) {
-    using blob_vertex_map = std::map<const Facade::Blob*, std::set<size_t>>;
+    // Key by blob node index (size_t, traversal-ordered) for deterministic iteration.
+    using blob_vertex_map = std::map<size_t, std::set<size_t>>;
     blob_vertex_map cell_points_map;
-    
-    // Get the 3D scoped view to access blob information
+
     const auto& sv = cluster.sv3d();
     const auto& nodes = sv.nodes();
     const auto& skd = sv.kd();
     const auto& majs = skd.major_indices();
-    
-    // Loop over all (old_index, new_index) pairs in the mapping
+
     for (const auto& [old_index, new_index] : result.old_to_new_index) {
-        // Get the blob for this vertex using the same logic as get_blob_for_vertex
-        size_t blob_idx = majs[old_index];
-        const auto* blob = nodes[blob_idx]->value.facade<Facade::Blob>();
-        cell_points_map[blob].insert(new_index);
+        size_t blob_node_idx = majs[old_index];
+        if (blob_node_idx >= nodes.size()) continue;
+        // Null guard: skip if blob facade is invalid
+        const auto* blob = nodes[blob_node_idx]->value.facade<Facade::Blob>();
+        if (!blob) continue;
+        cell_points_map[blob_node_idx].insert(new_index);
     }
 
     const auto& coords = cluster.get_default_scope().coords;
-
-    // std::cout << coords.at(0) << " " << coords.at(1) << " " << coords.at(2) << std::endl;
-
-    // Get 3D coordinates from the subset point cloud
     const auto& x_arr = result.point_cloud.get(coords.at(0))->elements<double>();
     const auto& y_arr = result.point_cloud.get(coords.at(1))->elements<double>();
     const auto& z_arr = result.point_cloud.get(coords.at(2))->elements<double>();
 
-    for (const auto& [blob, point_indices] : cell_points_map) {
-        // Convert set to vector for easier iteration
+    for (const auto& [blob_node_idx, point_indices] : cell_points_map) {
+        (void)blob_node_idx;
         std::vector<vertex_type> points_vec(point_indices.begin(), point_indices.end());
 
-        // Add edges between all pairs of points in the same blob
         for (size_t i = 0; i < points_vec.size(); ++i) {
             vertex_type index1 = points_vec[i];
             Point point1(x_arr[index1], y_arr[index1], z_arr[index1]);
             for (size_t j = i + 1; j < points_vec.size(); ++j) {
                 vertex_type index2 = points_vec[j];
                 Point point2(x_arr[index2], y_arr[index2], z_arr[index2]);
-                
-                if (result.flag_steiner_terminal[index1] || result.flag_steiner_terminal[index2]){
-                    // Calculate base distance between points
+
+                if (result.flag_steiner_terminal[index1] || result.flag_steiner_terminal[index2]) {
                     double distance = (point1-point2).magnitude();
-                
-                    // Add edge with calculated weight
                     if (!boost::edge(index1, index2, result.graph).second) {
                         boost::add_edge(index1, index2, distance, result.graph);
                     }
@@ -937,39 +957,41 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
     
     // std::cout << "Terminal connecting edges: " << total.size() << std::endl;
     
-    // Step 4: Build complete edge set by including all paths (matches prototype unique_edges logic)
+    // Step 4: Build complete edge set by including all paths (matches prototype unique_edges logic).
+    // Store as (vertex_pair, edge_type) so we can deduplicate and sort by stable vertex-index
+    // values rather than by edge_type (which embeds a pointer — non-deterministic across runs).
     vertex_set selected_vertices;
-    std::vector<edge_type> tree_edges;
-    
-    // For each terminal connecting edge, include it and all edges on paths back to terminals
+    std::vector<std::pair<vertex_pair, edge_type>> tree_edge_pairs;
+
     for (auto edge : all_terminal_connecting_edges) {
-        // Add the direct connecting edge
-        tree_edges.push_back(edge);
-        
-        // Add all edges on paths from edge endpoints back to their terminals
-        // This matches the prototype's vpred walking logic exactly
-        for (auto endpoint : {boost::source(edge, base_graph), boost::target(edge, base_graph)}) {
+        auto vs = boost::source(edge, base_graph);
+        auto vt = boost::target(edge, base_graph);
+        tree_edge_pairs.push_back({make_vertex_pair(vs, vt), edge});
+
+        for (auto endpoint : {vs, vt}) {
             vertex_type current_vtx = endpoint;
-            
-            // Walk back to terminal, adding all edges on the path
             while (vor.terminal[current_vtx] != current_vtx) {
                 auto path_edge = vor.last_edge[current_vtx];
-                tree_edges.push_back(path_edge);
-                current_vtx = boost::source(path_edge, base_graph);
+                auto ps = boost::source(path_edge, base_graph);
+                auto pt = boost::target(path_edge, base_graph);
+                tree_edge_pairs.push_back({make_vertex_pair(ps, pt), path_edge});
+                current_vtx = ps;
             }
         }
     }
-    
-    // Step 5: Remove duplicates and collect all vertices (matches prototype boost::unique logic)
-    std::sort(tree_edges.begin(), tree_edges.end());
-    tree_edges.erase(std::unique(tree_edges.begin(), tree_edges.end()), tree_edges.end());
-    
-    // std::cout << "Total unique edges in tree: " << tree_edges.size() << std::endl;
-    
+
+    // Step 5: Sort by vertex_pair (deterministic size_t comparison) and deduplicate.
+    std::sort(tree_edge_pairs.begin(), tree_edge_pairs.end(),
+        [](const auto& a, const auto& b){ return a.first < b.first; });
+    tree_edge_pairs.erase(
+        std::unique(tree_edge_pairs.begin(), tree_edge_pairs.end(),
+            [](const auto& a, const auto& b){ return a.first == b.first; }),
+        tree_edge_pairs.end());
+
     // Collect all vertices from the unique edges
-    for (auto edge : tree_edges) {
-        selected_vertices.insert(boost::source(edge, base_graph));
-        selected_vertices.insert(boost::target(edge, base_graph));
+    for (const auto& [vp, edge] : tree_edge_pairs) {
+        selected_vertices.insert(vp.first);
+        selected_vertices.insert(vp.second);
     }
     
     // Step 6: Create index mappings (same as before)
@@ -1003,51 +1025,43 @@ EnhancedSteinerResult create_enhanced_steiner_graph(
         result.point_cloud = original_pc.subset(subset_indices);
 
         // Add the flag_steiner_terminal boolean array to point cloud
-        // Convert std::vector<bool> to std::vector<uint8_t> to avoid std::vector<bool> specialization issues
-        std::vector<int> steiner_flags_uint8(result.flag_steiner_terminal.begin(), result.flag_steiner_terminal.end());
-        PointCloud::Array steiner_flag_array(steiner_flags_uint8);
+        // Store as int to match all read sites that use elements<int>()
+        std::vector<int> steiner_flags_int(result.flag_steiner_terminal.begin(), result.flag_steiner_terminal.end());
+        PointCloud::Array steiner_flag_array(steiner_flags_int);
         result.point_cloud.add("flag_steiner_terminal", std::move(steiner_flag_array));
     }
     
-    // Step 10: Create reduced graph with ALL unique edges (this is the key fix)
+    // Step 10: Create reduced graph with ALL unique edges.
+    // Iterate tree_edge_pairs (sorted by vertex_pair) so edge insertion order is deterministic.
     result.graph = graph_type(selected_vector.size());
-    
-    // Add ALL edges from tree_edges, not just the terminal connecting ones
-    for (auto edge : tree_edges) {
-        vertex_type old_source = boost::source(edge, base_graph);
-        vertex_type old_target = boost::target(edge, base_graph);
-        
-        // These should all be in selected set by construction, but check anyway
+
+    for (const auto& [vp, edge] : tree_edge_pairs) {
+        vertex_type old_source = vp.first;
+        vertex_type old_target = vp.second;
+
         if (result.old_to_new_index.find(old_source) == result.old_to_new_index.end() ||
             result.old_to_new_index.find(old_target) == result.old_to_new_index.end()) {
             continue;
         }
-        
+
         vertex_type new_source = result.old_to_new_index[old_source];
         vertex_type new_target = result.old_to_new_index[old_target];
-        
+
         double geometric_distance = edge_weight[edge];
-        
-        // Apply charge weighting if enabled (exact prototype formula)
+
         double final_distance = geometric_distance;
         if (charge_config.enable_weighting && !result.vertex_charges.empty()) {
-            double charge_source = result.vertex_charges.count(old_source) ? 
+            double charge_source = result.vertex_charges.count(old_source) ?
                                   result.vertex_charges[old_source] : 0.0;
-            double charge_target = result.vertex_charges.count(old_target) ? 
+            double charge_target = result.vertex_charges.count(old_target) ?
                                   result.vertex_charges[old_target] : 0.0;
-            
             // Prototype formula: dis * (factor1 + factor2 * (0.5*Q0/(Qs+Q0) + 0.5*Q0/(Qt+Q0)))
-            double Q0 = charge_config.Q0;
-            double factor1 = charge_config.factor1;
-            double factor2 = charge_config.factor2;
-            
-            double weight_factor = factor1 + factor2 * 
-                (0.5 * Q0 / (charge_source + Q0) + 0.5 * Q0 / (charge_target + Q0));
-            
+            double weight_factor = charge_config.factor1 + charge_config.factor2 *
+                (0.5 * charge_config.Q0 / (charge_source + charge_config.Q0) +
+                 0.5 * charge_config.Q0 / (charge_target + charge_config.Q0));
             final_distance = geometric_distance * weight_factor;
         }
         if (!boost::edge(new_source, new_target, result.graph).second) {
-            // Add the edge with the final weighted distance
             boost::add_edge(new_source, new_target, final_distance, result.graph);
         }
     }

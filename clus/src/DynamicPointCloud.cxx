@@ -186,6 +186,32 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     }
 }
 
+geo_point_t DynamicPointCloud::get_center_point_radius(const geo_point_t &p_test, const double radius) const{
+    auto &kd3d = this->kd3d();
+    
+    // Create query point
+    std::vector<double> query = {p_test.x(), p_test.y(), p_test.z()};
+    
+    // Perform radius search (NFKDVec uses squared distance)
+    auto results = kd3d.radius(radius * radius, query);
+    
+    // Calculate center point
+    geo_point_t center(0, 0, 0);
+    int ncount = 0;
+    
+    for (const auto &[idx, _] : results) {
+        const auto &pt = m_points[idx];
+        center.set(center.x() + pt.x, center.y() + pt.y, center.z() + pt.z);
+        ncount++;
+    }
+    
+    if (ncount > 0) {
+        center.set(center.x() / ncount, center.y() / ncount, center.z() / ncount);
+    }
+    
+    return center;
+}
+
 
 
 
@@ -242,6 +268,17 @@ DynamicPointCloud::get_2d_points_info(const geo_point_t &p, const double radius,
 
 
 
+std::array<double, 3> DynamicPointCloud::get_angles(int face, int apa) const
+{
+    WirePlaneId wpid_volume(kAllLayers, face, apa);
+    auto it = m_wpid_params.find(wpid_volume);
+    if (it == m_wpid_params.end()) {
+        return {0.0, 0.0, 0.0};
+    }
+    const auto& [_, angle_u, angle_v, angle_w] = it->second;
+    return {angle_u, angle_v, angle_w};
+}
+
 std::tuple<double, const Cluster *, size_t>
 DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int plane, const int face, const int apa) const
 {
@@ -282,6 +319,32 @@ DynamicPointCloud::get_closest_2d_point_info(const geo_point_t &p, const int pla
     
     return std::make_tuple(distance, pt.cluster, global_idx);
 }
+
+std::tuple<double, const Cluster *, size_t>
+DynamicPointCloud::get_closest_2d_point_info_direct(
+    double drift, double wire_perp, const int plane, const int face, const int apa) const
+{
+    auto &kd2d = this->kd2d(plane, face, apa);
+    auto &l2g  = this->kd2d_l2g(plane, face, apa);
+
+    // Query directly with (drift, wire_perp) — no angle projection needed because
+    // convert_time_wire_2Dpoint already returns coordinates in the wire-perpendicular space
+    // that matches the KD2D tree's storage format.
+    const std::vector<double> query = {drift, wire_perp};
+    auto results = kd2d.knn(1, query);
+
+    if (results.empty()) {
+        return std::make_tuple(-1.0, nullptr, static_cast<size_t>(-1));
+    }
+
+    const size_t local_idx  = results[0].first;
+    const double distance   = sqrt(results[0].second);
+    const size_t global_idx = l2g.at(local_idx);
+    const auto  &pt         = m_points[global_idx];
+
+    return std::make_tuple(distance, pt.cluster, global_idx);
+}
+
 
 std::pair<double, double> DynamicPointCloud::hough_transform(const geo_point_t &origin, const double dis) const
 {
@@ -452,6 +515,91 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster(
     return dpc_points;
 }
 
+std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_cluster_steiner(const Cluster *cluster, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, bool flag_wrap){
+    if (!cluster) {
+        SPDLOG_WARN("make_points_cluster_steiner: null cluster return empty points");
+        return {};
+    }
+
+    // Check if steiner point cloud exists
+    if (!cluster->has_pc("steiner_pc")) {
+        SPDLOG_WARN("make_points_cluster_steiner: cluster has no steiner_pc");
+        return {};
+    }
+
+    const auto& steiner_pc = cluster->get_pc("steiner_pc");
+    const auto& coords = cluster->get_default_scope().coords;
+    auto x_ptr = steiner_pc.get(coords.at(0));
+    auto y_ptr = steiner_pc.get(coords.at(1));
+    auto z_ptr = steiner_pc.get(coords.at(2));
+    auto wpid_ptr = steiner_pc.get("wpid");
+    if (!x_ptr || !y_ptr || !z_ptr || !wpid_ptr) {
+        SPDLOG_WARN("make_points_cluster_steiner: steiner_pc missing coordinate arrays, returning empty");
+        return {};
+    }
+    const auto& x_coords = x_ptr->elements<double>();
+    const auto& y_coords = y_ptr->elements<double>();
+    const auto& z_coords = z_ptr->elements<double>();
+    const auto& wpid_array = wpid_ptr->elements<WirePlaneId>();
+    
+    const size_t num_points = x_coords.size();
+    std::vector<DynamicPointCloud::DPCPoint> dpc_points;
+    dpc_points.reserve(num_points);
+
+    // Cache commonly referenced WPIDs and their params to avoid map lookups
+    std::unordered_map<int, std::tuple<geo_point_t, double, double, double>> cached_params;
+    
+    for (size_t ipt = 0; ipt < num_points; ++ipt) {
+        geo_point_t pt(x_coords[ipt], y_coords[ipt], z_coords[ipt]);
+        const auto wpid = wpid_array[ipt];
+        int wpid_ident = wpid.ident();
+        
+        // Check cache first, then populate if needed
+        auto param_it = cached_params.find(wpid_ident);
+        if (param_it == cached_params.end()) {
+            auto wpid_it = wpid_params.find(wpid);
+            if (wpid_it == wpid_params.end()) {
+                raise<RuntimeError>("make_points_cluster_steiner: missing wpid params for wpid %s", wpid.name());
+            }
+            param_it = cached_params.emplace(wpid_ident, wpid_it->second).first;
+        }
+        
+        const auto &[drift_dir, angle_u, angle_v, angle_w] = param_it->second;
+        const double angle_uvw[3] = {angle_u, angle_v, angle_w};
+
+        DynamicPointCloud::DPCPoint point;
+        point.x = pt.x();
+        point.y = pt.y();
+        point.z = pt.z();
+        point.wpid = wpid.ident();
+        point.cluster = cluster;
+        point.blob = nullptr;  // Steiner points don't have blob associations
+        
+        // Pre-allocate vectors with correct size
+        point.x_2d.resize(3);
+        point.y_2d.resize(3);
+        point.wpid_2d.resize(3);
+        
+        if (flag_wrap){
+            fill_wrap_points(cluster, pt, wpid, point.x_2d, point.y_2d, point.wpid_2d);
+        }else{
+            for (size_t pindex = 0; pindex < 3; ++pindex) {
+                point.x_2d[pindex].push_back(point.x);
+                point.y_2d[pindex].push_back(cos(angle_uvw[pindex]) * point.z - sin(angle_uvw[pindex]) * point.y);
+                point.wpid_2d[pindex].push_back(wpid.ident());
+            }
+        }
+
+        // Steiner points don't have wire indices, use bogus values
+        point.wind = wind_bogus;
+        point.dist_cut = dist_cut_bogus;
+
+        dpc_points.push_back(std::move(point));
+    }
+
+    return dpc_points;
+}
+
 
 std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const Cluster *cluster, const IDetectorVolumes::pointer dv, const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params, std::vector<std::pair<geo_point_t,WirePlaneId>>& points_info, bool flag_wrap){
      std::vector<DynamicPointCloud::DPCPoint> dpc_points;
@@ -467,6 +615,8 @@ std::vector<DynamicPointCloud::DPCPoint>  Clus::Facade::make_points_direct(const
     
     for (auto& [test_point, wpid_test_point] : points_info) {
         // std::cout << test_point << " " <<  wpid_test_point << std::endl;
+        // Skip points outside the detector volume (apa=-1) or with unknown wpid
+        if (wpid_test_point.apa() == -1) continue;
         if (wpid_params.find(wpid_test_point) == wpid_params.end()) {
             raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid_test_point.name());
         }

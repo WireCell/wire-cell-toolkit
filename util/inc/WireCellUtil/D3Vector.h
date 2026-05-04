@@ -167,10 +167,11 @@ namespace WireCell {
 
         bool operator<(const D3Vector& rhs) const
         {
-            if (z() < rhs.z()) return true;
-            if (y() < rhs.y()) return true;
             if (x() < rhs.x()) return true;
-            return false;
+            else if (x() > rhs.x()) return false;
+            else if (y() < rhs.y()) return true;
+            else if (y() > rhs.y()) return false;
+            else return z() < rhs.z();
         }
 
         D3Vector& operator+=(const D3Vector& other)

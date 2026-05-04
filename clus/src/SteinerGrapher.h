@@ -37,6 +37,8 @@ namespace WireCell::Clus::Steiner {
             IPCTreeMutate::pointer retile;
             /// do we even need samplers?
             // std::map<int, std::map<int, WireCell::IBlobSampler::pointer>> samplers;
+            /// Enable per-step timing printouts (set via grapher_config.perf = true)
+            bool perf{false};
         };
         Log::logptr_t log;
 
@@ -61,8 +63,11 @@ namespace WireCell::Clus::Steiner {
         using edge_set = WireCell::Clus::Graphs::Weighted::edge_set;
         using edge_weight_type = WireCell::Clus::Graphs::Weighted::edge_weight_type;
 
-        /// A type that maps blobs to graph vertices
-        using blob_vertex_map = std::map<const Facade::Blob*, vertex_set>;
+        /// A type that maps blob node indices (from sv.nodes()) to graph vertices.
+        /// Using a node-index key (size_t, deterministic traversal order) instead of
+        /// Blob* (heap-address-ordered, non-deterministic) ensures stable iteration
+        /// order across runs.
+        using blob_vertex_map = std::map<size_t, vertex_set>;
 
 
         ///
@@ -132,9 +137,14 @@ namespace WireCell::Clus::Steiner {
 
         vertex_set find_peak_point_indices(const std::vector<const Facade::Blob*>& target_blobs, const std::string& graph_name,
                                    bool disable_dead_mix_cell = true, int nlevel = 1);
+        /// Overload that accepts a precomputed point set for the target blobs, avoiding a rebuild of form_cell_points_map().
+        vertex_set find_peak_point_indices(const vertex_set& blob_point_indices, const std::string& graph_name,
+                                   bool disable_dead_mix_cell = true, int nlevel = 1);
 
         blob_vertex_map form_cell_points_map();
         vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell=true);
+        /// Overload that accepts a precomputed blob->points map to avoid calling form_cell_points_map() twice.
+        vertex_set find_steiner_terminals(const std::string& graph_name, bool disable_dead_mix_cell, const blob_vertex_map& cell_points_map);
 
         /// Establish edges between points in the same blob (mcell) with weighted connectivity
         /// This modifies the given graph and tracks added edges for later removal
@@ -212,17 +222,21 @@ namespace WireCell::Clus::Steiner {
         // This holds various "global" info sources
         const Config& m_config;
 
+        // Enable per-step timing printouts inside hot functions
+        bool m_perf{false};
+
 
         // XIN: add any more data and methods you need here.  
-         /// Track edges added by each graph modification operation
-        /// Maps graph name to set of edges added to that graph
-        std::map<std::string, edge_set> m_added_edges_by_graph;
+         /// Track edges added by each graph modification operation.
+        /// Stored as a vector (not a set) because edge_type ordering is pointer-based
+        /// (non-deterministic) and removal is order-insensitive.
+        std::map<std::string, std::vector<edge_type>> m_added_edges_by_graph;
 
         /// Helper to invalidate GraphAlgorithms cache for a specific graph
         void invalidate_graph_algorithms_cache(const std::string& graph_name);
 
         /// Helper to store added edges for later removal
-        void store_added_edges(const std::string& graph_name, const edge_set& edges);
+        void store_added_edges(const std::string& graph_name, const std::vector<edge_type>& edges);
 
         /// Helper to check if two vertices (points) belong to the same blob
         bool same_blob(vertex_type v1, vertex_type v2) const;
@@ -282,8 +296,8 @@ namespace WireCell::Clus::Steiner {
         /// (matches prototype map_new_old_indices)
         std::map<vertex_type, vertex_type> m_new_to_old_index;
         
-        /// Set of vertices that are steiner graph terminals (for edge creation logic)
-        vertex_set m_steiner_graph_terminal_indices;
+        // m_steiner_graph_terminal_indices removed — not populated; reserved for
+        // recover_steiner_graph() if that function is ported in the future.
     };
 
 
