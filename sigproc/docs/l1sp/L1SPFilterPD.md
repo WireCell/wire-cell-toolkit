@@ -58,10 +58,11 @@ Builds an `nrow × 2·ncol` response matrix:
 
 `row_offset = (W_first_tick − β_first_tick)` decouples the W tick range
 from the β tick range so the W vector can be **padded** by pad_L=30 ticks
-before / pad_R=20 ticks after the β-coverage span (matching the
-`(−15 µs, +10 µs)` response window). Without that padding, the boundary
-β coefficients see only one half of the kernel and can be inflated
-arbitrarily by the LASSO to soak up unexplained ADC residuals.
+before / pad_R=20 (positive) or 30 (negative) ticks after the β-coverage
+span (matching the `(−15 µs, +10/+15 µs)` response window — see `t_hi`
+below). Without that padding, the boundary β coefficients see only one
+half of the kernel and can be inflated arbitrarily by the LASSO to soak
+up unexplained ADC residuals.
 
 `overall_offset` is the global LASSO frame origin (kernel-file metadata
 `frame_origin_us`, in WCT time units): the kernel native time at which
@@ -75,7 +76,12 @@ difference is already encoded in each plane's kernel shape.
 (`unipolar_time_offset_us = zero_crossing − W_peak`).  Subtracting it puts
 the W kernel peak at LASSO `dt = zero_crossing` (= bipolar zero-crossing),
 i.e. inside the response window.  Negative-polarity case has
-`basis1_offset = 0` (no shift).
+`basis1_offset = 0` (no shift): the `negative.unipolar` basis is
+neg-half(bipolar), whose trough sits at native time +12 µs (PDVD V) /
++10 µs (PDHD V).  The caller widens `t_hi` to +15 µs for negative ROIs
+so the trough is well inside the window; β then fires a few ticks
+before the trough, recovering the physical "source signal arrives
+before the ADC dip" timing.
 
 The caller passes whichever `{basis0, basis1}` pair is appropriate for the
 detected polarity (see `l1_fit` below).
@@ -223,11 +229,14 @@ and passed in via the `polarity` argument.  Sequence:
 2. **Pass-through guard** — if the matching unipolar basis is null
    (config keys empty), early-return without modifying `newtrace`.
 3. **Segmented LASSO solve** — segments of `l1_seg_length` ticks; for each
-   segment call `build_G` then `lasso_solve`.  The W vector for each
-   segment is loaded with pad_L=30 / pad_R=20 ticks of raw-ADC context
-   around the segment's β span (clipped to the trace bounds) so boundary
-   β coefficients have full kernel support; the padded raw ADC is fit
-   context only and never written back. Combine the two basis
+   segment call `build_G` then `lasso_solve`.  The `build_G` window is
+   `(−15 µs, +10 µs)` for positive polarity and `(−15 µs, +15 µs)` for
+   negative polarity (the wider upper edge admits the neg-half-bipolar
+   trough at native +12 µs).  The W vector for each segment is loaded
+   with pad_L=30 / pad_R=20 (positive) or 30 (negative) ticks of raw-ADC
+   context around the segment's β span (clipped to the trace bounds) so
+   boundary β coefficients have full kernel support; the padded raw ADC
+   is fit context only and never written back. Combine the two basis
    coefficients and rescale to electron units in one step:
    `l1_signal[t] = (β₀ * basis0_scale + β₁ * basis1_scale) * scaling_factor`.
 4. **Post-processing** — apply Gaussian smearing on `l1_signal` (which is

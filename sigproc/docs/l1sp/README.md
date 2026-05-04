@@ -113,12 +113,15 @@ Called per ROI. Signature: `int L1_fit(newtrace, adctrace, start_tick, end_tick,
 
 - Divide ROI into sections of ≤ `l1_seg_length` ticks.
 - For each section: build `G (M×2N)` from `lin_W` (collection columns) and
-  `lin_V` (induction columns), windowed to [−15 µs, +10 µs] around each tick.
-  M ≥ N: the W vector is padded by 30 ticks before / 20 ticks after the
-  segment's β span (clipped to the trace bounds) so boundary β
-  coefficients see the full kernel response and cannot grow to fit
-  imaginary out-of-window signal. The padded raw ADC is fit context
-  only — β positions and writeback range stay strictly inside the ROI.
+  `lin_V` (induction columns), windowed to [−15 µs, +10 µs] for positive
+  polarity or [−15 µs, +15 µs] for negative polarity (the wider upper
+  edge admits the neg-half-bipolar trough at native +12 µs).
+  M ≥ N: the W vector is padded by 30 ticks before / 20 (positive) or 30
+  (negative) ticks after the segment's β span (clipped to the trace
+  bounds) so boundary β coefficients see the full kernel response and
+  cannot grow to fit imaginary out-of-window signal. The padded raw ADC
+  is fit context only — β positions and writeback range stay strictly
+  inside the ROI.
 - Run LASSO: `LassoModel(l1_lambda, l1_niteration, l1_epsilon)`.
 
 **Post-processing** (cxx:850-905):

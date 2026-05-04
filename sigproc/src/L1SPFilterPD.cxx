@@ -842,8 +842,8 @@ void L1SPFilterPD::init_resp()
 
         log->debug("loaded plane {} kernels from {}: n={} period={} ns t0={:.3f} us "
                    "W-shift(pos)={:+.3f} us frame_origin={:+.3f} us kernels_scale={:.4f}",
-                   plane, m_kernels_file, n_samples, period_ns, t0_us, toff_pos_us,
-                   m_frame_origin / units::us, m_kernels_scale);
+                   plane, m_kernels_file, n_samples, period_ns, t0_us,
+                   toff_pos_us, m_frame_origin / units::us, m_kernels_scale);
     }
 }
 
@@ -862,14 +862,14 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
     // β coefficients see the full kernel response in W; without this padding
     // the rightmost / leftmost β can grow arbitrarily to fit signal that
     // would have appeared in the missing kernel half outside the ROI.
-    // pad_L / pad_R match the build_G window (dt ∈ (−15 µs, +10 µs) at
-    // 0.5 µs/tick = 30 / 20 ticks). The padded raw ADC is fit context only —
+    // pad_L / pad_R match the build_G window (dt ∈ (−15 µs, +10/+15 µs) at
+    // 0.5 µs/tick = 30 / 20 or 30 ticks; negative ROIs use +15 µs). The padded raw ADC is fit context only —
     // β positions and the writeback range stay strictly within the original
     // ROI, so the final replaced waveform is unaffected outside [start_tick,
     // end_tick).
     const double tick_us = 0.5;
-    const int pad_L = (int)std::ceil(15.0 / tick_us);   // 30 ticks
-    const int pad_R = (int)std::ceil(10.0 / tick_us);   // 20 ticks
+    const int pad_L = (int)std::ceil(15.0 / tick_us);                              // 30 ticks
+    const int pad_R = (int)std::ceil((flag_l1 < 0 ? 15.0 : 10.0) / tick_us);      // 30 / 20 ticks
     const int trace_lo = newtrace->tbin();
     const int trace_hi = trace_lo + (int)adctrace->charge().size();
     const int W_start  = std::max(trace_lo, start_tick - pad_L);
@@ -890,7 +890,7 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
     }
     linterp<double>* lin_bipolar  = bip_it->second.get();
     linterp<double>* lin_unipolar = nullptr;
-    double basis1_toff = 0.0;     // negative case: no shift
+    double basis1_toff = 0.0;
     if (flag_l1 > 0) {
         auto it = m_lin_pos_unipolar.find(plane);
         if (it != m_lin_pos_unipolar.end()) lin_unipolar = it->second.get();
@@ -900,6 +900,8 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
     else if (flag_l1 < 0) {
         auto it = m_lin_neg_unipolar.find(plane);
         if (it != m_lin_neg_unipolar.end()) lin_unipolar = it->second.get();
+        // basis1_toff stays 0.0: the trough sits at +12 µs native time
+        // and must be inside the widened window below (not shifted to β).
     }
 
     if ((flag_l1 == 1 || flag_l1 == -1) && lin_unipolar == nullptr) {
@@ -942,9 +944,12 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
             // overall_time_offset = global LASSO frame origin (from kernel
             // file meta.frame_origin_us) + cfg additive override (default 0).
             const double overall_toff = m_frame_origin + m_overall_time_offset;
+            // Negative-polarity window widened to +15 µs so the trough at
+            // ~+12 µs native time (basis1_toff = 0) is well inside the window.
+            const double t_hi_us = (flag_l1 < 0) ? 15.0 : 10.0;
             MatrixXd G = build_G(sn_W, sn, row_offset_seg,
                                  -15 * units::us - overall_toff,
-                                  10 * units::us - overall_toff,
+                                 t_hi_us * units::us - overall_toff,
                                  overall_toff,
                                  basis1_toff,
                                  m_l1_scaling_factor, m_l1_resp_scale,
@@ -962,7 +967,12 @@ int L1SPFilterPD::l1_fit(std::shared_ptr<Aux::SimpleTrace>& newtrace,
         double sum_beta = 0;
         for (int i = 0; i < nbin_fit * 2; i++) sum_beta += final_beta(i);
 
-        if (sum_beta > m_adc_l1_threshold) {
+        if (sum_beta <= m_adc_l1_threshold) {
+            // LASSO declined: zero the ROI so no decon passes through.
+            for (int t = start_tick; t < end_tick; t++)
+                newtrace->charge().at(t - newtrace->tbin()) = 0.0;
+        }
+        else {
             // Combine basis components and undo the LASSO numerical conditioning
             // (× m_l1_scaling_factor) so l1_signal is already in electron units
             // before smearing.  The smearing kernel is sum-normalized to 1, so
@@ -1502,6 +1512,10 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                                             roi.first, roi.second + 1, feats[i].plane,
                                             m_wf_dump_path.empty() ? nullptr : &lasso_unsmeared_buf,
                                             polarity_in);
+                // Dump every tagged ROI (polarity != 0).  lasso_unsmeared may be empty
+                // when sum_beta did not pass the admit threshold; that is a legitimate
+                // "tagger fired but LASSO declined" outcome, visible in the viewer for
+                // hand-scan reconciliation.
                 if (!m_wf_dump_path.empty() && polarity != 0) {
                     dump_roi_waveforms(in->ident(), ch, feats[i].plane,
                                        roi.first, roi.second + 1, polarity,

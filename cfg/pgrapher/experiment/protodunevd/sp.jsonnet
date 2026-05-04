@@ -141,7 +141,13 @@ function(params, tools, override = {}) {
       } + override,
     }, nin=1, nout=1, uses=[anode, tools.dft, tools.field, tools.elec_resps[0], tools.elec_resps[1] ] + pc.uses + spfilt);
 
-    if l1sp_pd_mode == '' then sp_node
+    // PDVD top electronics not yet validated for the L1SP fit; cap 'process'
+    // to 'dump' on top anodes (ident >= 4) so callers can request process
+    // mode globally without accidentally enabling LASSO writeback on top.
+    local _eff_mode = if anode.data.ident >= 4 && l1sp_pd_mode == 'process'
+                      then 'dump'
+                      else l1sp_pd_mode;
+    if _eff_mode == '' then sp_node
     else
       local n = anode.data.ident;
       // Per-region (top vs bottom) L1SP parameters.  Bottom = anodes 0..3
@@ -199,7 +205,7 @@ function(params, tools, override = {}) {
           // PDHD's "very-long" arm (l1_len_very_long=140, l1_asym_very_long=0.35)
           // is left at the C++ default (OFF) here; revisit after PDVD tagger
           // validation if long-but-moderate-asym artifacts are observed.
-          dump_mode: l1sp_pd_mode == 'dump',
+          dump_mode: _eff_mode == 'dump',
           dump_path: l1sp_pd_dump_path,
           dump_tag: 'apa%d' % n,
           waveform_dump_path: l1sp_pd_wf_dump_path,
@@ -233,6 +239,8 @@ function(params, tools, override = {}) {
           l1_pdvd_track_med_cl:      100,
           l1_pdvd_track_med_fill:    0.40,
           l1_pdvd_track_med_fwhm:    0.40,
+          peak_threshold: 1000,
+          mean_threshold: 500,
         } else {}),
       }, nin=1, nout=1, uses=[tools.dft, anode]);
       // L1SPFilterPD needs both raw{n} and gauss{n} in the same frame.

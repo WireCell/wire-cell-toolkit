@@ -109,12 +109,15 @@ namespace WireCell {
             //                               (zero_crossing − W_peak); subtracting
             //                               it puts W_peak at LASSO dt =
             //                               zero_crossing.
-            //   m_lin_neg_unipolar[plane] — neg-half(bipolar); queried at t (no shift).
+            //   m_lin_neg_unipolar[plane] — neg-half(bipolar); queried at
+            //                               dt_adj directly (no time shift;
+            //                               trough at +12 µs stays outside the
+            //                               original window and inside the
+            //                               widened negative window).
             std::map<int, std::unique_ptr<linterp<double>>> m_lin_bipolar;
             std::map<int, std::unique_ptr<linterp<double>>> m_lin_pos_unipolar;
             std::map<int, std::unique_ptr<linterp<double>>> m_lin_neg_unipolar;
-            // Per-plane W-shift in WCT time units (positive case).  Negative
-            // case has no shift (always 0) — handled inline in l1_fit().
+            // Per-plane shift in WCT time units: value = (zero_crossing − W_peak).
             std::map<int, double> m_unipolar_toff_pos;
             // Amplitude multiplier applied to every loaded kernel sample at
             // init_resp() time.  Kernels in ``kernels_file`` are in ADC/electron
