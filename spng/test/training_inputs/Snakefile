@@ -1,12 +1,54 @@
 #!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores all --snakefile
 # -*- snakemake -*-
 
+
+# In the sgpu machine (use the following binding in the shebang above)
+#--apptainer-args=" -B /cvmfs,/home,/gpfs/mnt/gpfs01/lbne,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid"
+
 import os 
 SRC_DIR = workflow.basedir
 
 config.setdefault('nevents', '2')
 config.setdefault('detname', 'pdhd')
-# container="/nfs/data/1/calcuttj/dunesw.sif"
+
+WCGPU_DUNESW_CONTAINER = "/nfs/data/1/calcuttj/dunesw.sif"
+SGPU_DUNESW_CONTAINER = "/gpfs/mnt/gpfs01/lbne/users/spng/abashyal/wct-env/wire-cell-dev/container/dunesw.sif"
+SGPU_CORSIKA_DIR = "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard"
+
+# Keep the shebang bind list limited to paths common enough to be safe.
+# Machine-specific paths are selected below only when they exist on the host.
+def first_existing_path(paths, fallback):
+    for path in paths:
+        if path and os.path.exists(path):
+            return path
+    return fallback
+
+config.setdefault(
+    'dunesw_container',
+    os.environ.get(
+        'DUNESW_CONTAINER',
+        first_existing_path(
+            [SGPU_DUNESW_CONTAINER, WCGPU_DUNESW_CONTAINER],
+            WCGPU_DUNESW_CONTAINER,
+        ),
+    ),
+)
+
+config.setdefault(
+    'cosmics_fcl',
+    os.environ.get(
+        'COSMICS_FCL',
+        first_existing_path(
+            [
+                os.path.join(SRC_DIR, "prod_cosmics_protodunehd_local.fcl")
+                if os.path.isdir(SGPU_CORSIKA_DIR)
+                else None
+            ],
+            "prod_cosmics_protodunehd.fcl",
+        ),
+    ),
+)
+
 all_theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 )
 all_planes = [0,1,2]
 
@@ -94,7 +136,7 @@ rule linedepos_xzu_xzv:
 
 rule test_container:
     container:
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
     output:
         'lartest.txt'
     shell:
@@ -116,7 +158,9 @@ rule gen_cosmics:
     #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
     container:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
+    params:
+        fcl=config['cosmics_fcl'],
     output:
         "cosmics_{sample}_gen.root"
     shell:
@@ -126,14 +170,14 @@ rule gen_cosmics:
         # setup dunesw v10_14_00d00 -q e26:prof
         # set -euo pipefail  # Reenable Snakemake's strict mode
 
-        lar --no-timing --no-memcheck -n {config[nevents]} -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
+        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fcl} -o {output} -T hist_{output}
         rm hist_{output}
         """
 
 rule g4:
     container:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
     input:
         file="cosmics_{sample}_gen.root",
         fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
@@ -154,7 +198,7 @@ rule g4:
 rule save_depos:
     container:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
     input:
         inputfile="cosmics_{sample}_g4.root",
         fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
