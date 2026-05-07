@@ -1403,17 +1403,28 @@ void OmnibusSigProc::decon_2D_looseROI(int plane)
     const int n_lfn_nn = 2;
     const int n_bad_nn = plane ? 1 : 2;
 
+    // Fill all rows with the default filter first, matching the pattern in
+    // decon_2D_tightROI / decon_2D_ROI_refine / decon_2D_charge.  Without
+    // this initial pass, rows of c_data_afterfilter beyond och.wire (the
+    // FFT-padding rows m_nwires..m_fft_nwires-1) remain UNINITIALIZED;
+    // their inv_c2r output is then garbage and gets selected by the
+    // m_pad_nwires-offset .block() extract into the LAST m_pad_nwires rows of
+    // m_r_data (OSP wires m_nwires-m_pad_nwires..m_nwires-1), corrupting
+    // those wires' values non-deterministically across runs (ASLR-dependent
+    // heap garbage).  Per-channel filter overrides for bad / lf_noisy
+    // neighbors are applied as a second pass below.
     Array::array_xxc c_data_afterfilter(m_c_data[plane].rows(), m_c_data[plane].cols());
-    for (auto och : m_channel_range[plane]) {
-        const int irow = och.wire;
-
-        roi_hf_filter_wf2 = roi_hf_filter_wf;
-        if (masked_neighbors("bad", och, n_bad_nn) or masked_neighbors("lf_noisy", och, n_lfn_nn)) {
-            roi_hf_filter_wf2 = roi_hf_filter_wf1;
-        }
-
+    for (int irow = 0; irow < m_c_data[plane].rows(); ++irow) {
         for (int icol = 0; icol < m_c_data[plane].cols(); ++icol) {
-            c_data_afterfilter(irow, icol) = m_c_data[plane](irow, icol) * roi_hf_filter_wf2.at(icol);
+            c_data_afterfilter(irow, icol) = m_c_data[plane](irow, icol) * roi_hf_filter_wf.at(icol);
+        }
+    }
+    for (auto och : m_channel_range[plane]) {
+        if (masked_neighbors("bad", och, n_bad_nn) or masked_neighbors("lf_noisy", och, n_lfn_nn)) {
+            const int irow = och.wire;
+            for (int icol = 0; icol < m_c_data[plane].cols(); ++icol) {
+                c_data_afterfilter(irow, icol) = m_c_data[plane](irow, icol) * roi_hf_filter_wf1.at(icol);
+            }
         }
     }
 
