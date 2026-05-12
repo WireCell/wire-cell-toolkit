@@ -199,18 +199,48 @@ std::vector<int> Cluster::add_corrected_points(
 
     std::vector<int> blob_passed;
     blob_passed.resize(children().size(), 0); // not passed by default
-    if (correction_name == "T0Correction") {
-        const auto& pct = pcts->pc_transform("T0Correction");
+    if (correction_name == "T0Correction" || correction_name == "SCECorrection" || correction_name == "T0SCECorrection") {
+
+        const auto& pct = pcts->pc_transform(correction_name);
+
+        std::vector<std::string> out_coords;
+        std::vector<std::string> scope_coords;
+
+        if (correction_name == "T0Correction") {
+            // Preserve historical behavior: only x is replaced by the T0-corrected coordinate.
+            out_coords = {"x_t0cor", "y_t0cor", "z_t0cor"};
+            scope_coords = {"x_t0cor", "y", "z"};
+        }
+        else if (correction_name == "SCECorrection") {
+            // SCE is a full 3D spatial correction.
+            out_coords = {"x_scecor", "y_scecor", "z_scecor"};
+            scope_coords = out_coords;
+        }
+        else { // T0SCECorrection
+            // Combined correction: T0 first, then full 3D SCE correction.
+            out_coords = {"x_t0scecor", "y_t0scecor", "z_t0scecor"};
+            scope_coords = out_coords;
+        }
+
         for (size_t iblob = 0; iblob < this->children().size(); ++iblob) {
             Blob* blob = this->children().at(iblob);
             auto &lpc_3d = blob->local_pcs().at("3d");
+
             auto corrected_points = pct->forward(lpc_3d, {"x", "y", "z"},
-                                                 {"x_t0cor","y_t0cor","z_t0cor"}, t0,
+                                                 out_coords, t0,
                                                  blob->wpid().face(), blob->wpid().apa());
-            lpc_3d.add("x_t0cor", *corrected_points.get("x_t0cor")); // only add x_t0cor
+
+            // Add only the arrays that will actually be used by the new scope.
+            for (const auto& coord : scope_coords) {
+                if (coord != "x" && coord != "y" && coord != "z") {
+                    lpc_3d.add(coord, *corrected_points.get(coord));
+                }
+            }
+
             auto filter_result = pct->filter(corrected_points,
-                                             {"x_t0cor", "y_t0cor", "z_t0cor"},
+                                             out_coords,
                                              t0, blob->wpid().face(), blob->wpid().apa());
+
             auto arr_filter = filter_result.get("filter")->elements<int>();
             for (size_t ipt = 0; ipt < arr_filter.size(); ++ipt) {
                 if (arr_filter[ipt] == 1) {
@@ -219,8 +249,9 @@ std::vector<int> Cluster::add_corrected_points(
                 }
             }
         }
-        // the new scope should have the same name as the correction name. This is how the code can find corrections in the code ...
-        m_scopes["T0Correction"] = {"3d", {"x_t0cor", "y", "z"}}; // add the new scope
+
+        // The new scope should have the same name as the correction name.
+        m_scopes[correction_name] = {"3d", scope_coords};
     } else {
         raise<RuntimeError>("Cluster::add_corrected_points: no such correction: %s", correction_name);
     }
