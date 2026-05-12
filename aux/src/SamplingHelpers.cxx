@@ -127,7 +127,7 @@ void Aux::fill_scalar_center(PointCloud::Dataset& scalar, const PointCloud::Data
 void Aux::fill_scalar_aux(PointCloud::Dataset& scalar, const PointCloud::Dataset& aux)
 {
     if (aux.empty()) {
-        raise<ValueError>("empty 'aux' PC.  you probably fell victim to issue #426");
+        return;  // Skip scalar aux fill if aux point cloud is empty
     }
     const std::vector<std::string> auxnames = {
         "max_wire_interval", "min_wire_interval", "max_wire_type", "min_wire_type",
