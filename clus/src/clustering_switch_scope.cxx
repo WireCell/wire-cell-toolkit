@@ -74,7 +74,7 @@ static void clustering_switch_scope(
     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
         Cluster* cluster = live_clusters.at(iclus);
                 
-        if (correction_name == "T0Correction") {
+        if (correction_name == "T0Correction" || correction_name == "SCECorrection" || correction_name == "T0SCECorrection") {
             // Get original bounds before correction
             // info("Cluster {} original bounds:", iclus);
             // const auto [earliest_orig, latest_orig] = cluster->get_earliest_latest_points();
