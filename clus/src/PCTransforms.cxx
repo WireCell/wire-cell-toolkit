@@ -308,7 +308,27 @@ private:
   {
     // SCE map axes are in cm; WCT internal length is mm. Convert.
     const double mm_per_cm = 10.0;
-    double xx = pin[0] / mm_per_cm;
+
+    // === apa1 SCE fix: transform local-frame pin[0] back to global X ===
+    // Use bounding-box check to detect local-frame points and reflect them
+    // around the anode plane.
+    WirePlaneId wpid_q(kAllLayers, face, apa);
+    const auto bb_q = m_dv->inner_bounds(wpid_q);
+    const auto bbmin = bb_q.bounds().first;
+    const auto bbmax = bb_q.bounds().second;
+    const double bb_x_min = bbmin.x();
+    const double bb_x_max = bbmax.x();
+
+    double pin_x_mm = pin[0];
+    if (pin_x_mm < bb_x_min - 50.0 || pin_x_mm > bb_x_max + 50.0) {
+      // pin[0] is outside the apa's sensitive volume X range (with 5cm tolerance).
+      // It is in a mirrored local frame; reflect around the appropriate anode plane.
+      const auto dirx_q = m_dv->face_dirx(wpid_q);
+      const double anode_x_mm = (dirx_q < 0) ? bb_x_max : bb_x_min;
+      pin_x_mm = 2.0 * anode_x_mm - pin_x_mm;
+    }
+
+    double xx = pin_x_mm / mm_per_cm;
     double yy = pin[1] / mm_per_cm;
     double zz = pin[2] / mm_per_cm;
 
@@ -329,9 +349,15 @@ private:
     TH3F** hs = (xx < 0.0) ? const_cast<TH3F**>(m_bkwd_e)
       : const_cast<TH3F**>(m_bkwd_w);
 
-    return Point(hs[0]->Interpolate(xx, yy, zz) * mm_per_cm,
-		 hs[1]->Interpolate(xx, yy, zz) * mm_per_cm,
-		 hs[2]->Interpolate(xx, yy, zz) * mm_per_cm);
+    double dx_mm = hs[0]->Interpolate(xx, yy, zz) * mm_per_cm;
+    const double dy_mm = hs[1]->Interpolate(xx, yy, zz) * mm_per_cm;
+    const double dz_mm = hs[2]->Interpolate(xx, yy, zz) * mm_per_cm;
+
+    if (pin_x_mm != pin[0]) {
+      dx_mm = -dx_mm;
+    }
+
+    return Point(dx_mm, dy_mm, dz_mm);
   }
 };
 
