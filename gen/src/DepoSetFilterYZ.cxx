@@ -42,6 +42,11 @@ void DepoSetFilterYZ::configure(const WireCell::Configuration& cfg)
   if (anode == nullptr) {
     THROW(ValueError() << errmsg{"DepoSetFilterYZ: anode is a nullptr"});
   }
+  // Idempotent under repeated configure() (defensive: each instance is
+  // currently configured only once in normal usage, but a shared instance
+  // across multiple Main::initialize() calls would otherwise accumulate
+  // duplicate boxes).
+  m_boxes.clear();
   for (auto face : anode->faces()) {
     m_boxes.push_back(face->sensitive());
   }

@@ -139,7 +139,7 @@ namespace WireCell {
 
 
     /// Follow a dot.separated.path and return the branch there.
-    Configuration branch(Configuration cfg, const std::string& dotpath);
+    Configuration branch(const Configuration& cfg, const std::string& dotpath);
 
     /// Merge dictionary b into a, return a
     Configuration update(Configuration& a, Configuration& b);
@@ -150,9 +150,9 @@ namespace WireCell {
 
     /// Return dictionary in given list if it value at dotpath matches
     template <typename T>
-    Configuration find(Configuration& lst, const std::string& dotpath, const T& val)
+    Configuration find(const Configuration& lst, const std::string& dotpath, const T& val)
     {
-        for (auto ent : lst) {
+        for (const auto& ent : lst) {
             auto maybe = branch(ent, dotpath);
             if (maybe.isNull()) {
                 continue;
@@ -166,7 +166,7 @@ namespace WireCell {
 
     /// Get value in configuration at the dotted path from or return default.
     template <typename T>
-    T get(Configuration cfg, const std::string& dotpath, const T& def = T())
+    T get(const Configuration& cfg, const std::string& dotpath, const T& def = T())
     {
         return convert(branch(cfg, dotpath), def);
     }

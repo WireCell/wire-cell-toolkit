@@ -26,4 +26,4 @@ ROOTSYS=$(root-config --prefix) \
 --with-triton-include="$TRITON_INC" \
 --with-triton-lib="$TRITON_LIB" \
 --with-libtorch="$LIBTORCH_FQ_DIR/" --with-libtorch-libs torch,torch_cpu,c10 \
---prefix=/exp/dune/app/users/$USER/opt
+--prefix=/exp/$CURRENT_EXPERIMENT/app/users/$USER/opt

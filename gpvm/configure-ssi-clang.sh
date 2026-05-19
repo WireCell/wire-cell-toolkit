@@ -25,4 +25,4 @@ ROOTSYS=$(root-config --prefix) \
 --with-grpc-lib="$GRPC_LIB" \
 --with-triton-include="$TRITON_INC" \
 --with-triton-lib="$TRITON_LIB" \
---prefix=/exp/dune/app/users/$USER/opt
+--prefix=/exp/$CURRENT_EXPERIMENT/app/users/$USER/opt

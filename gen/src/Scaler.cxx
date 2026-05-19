@@ -48,6 +48,8 @@ void Gen::Scaler::configure(const WireCell::Configuration& cfg)
   if (anode == nullptr) {
     THROW(ValueError() << errmsg{"Scaler: anode is a nullptr"});
   }
+  // Idempotent under repeated configure() (defensive).
+  m_boxes.clear();
   for (auto face : anode->faces()) {
     m_boxes.push_back(face->sensitive());
   }
