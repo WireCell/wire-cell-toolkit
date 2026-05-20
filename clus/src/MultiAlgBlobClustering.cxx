@@ -1687,9 +1687,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }    
 
     if (m_save_deadarea) {
-        auto gs = ensemble.with_name("live");
+        // Fill patches from the dead grouping (not "live" — that was a
+        // regression from the ensemble-facade refactor; the result was
+        // empty Bee::Patches and no channel-deadarea-*.json in the
+        // mabc-*.zip output).
+        auto gs = ensemble.with_name("dead");
         if (gs.size()) {
-            // Fill patches from the dead grouping
             fill_bee_patches_from_grouping(*gs[0]);
             perf("dump dead regions to bee");
         }
