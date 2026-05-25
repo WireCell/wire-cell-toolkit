@@ -217,6 +217,27 @@ grep "^GEOM:"  dump.log > sbnd_geom.txt
 
 ## Notes / gotchas
 
+- **Coexistence with legacy `WireCellQLMatch` (larwirecell)**: both libs
+  register a WCT factory under the *same* name `"QLMatching"` but for
+  *different* C++ types — `WireCell::Match::QLMatching` (this lib) and
+  `WireCell::QLMatch::QLMatching` (legacy in larwirecell). Loading both
+  in the same `wire-cell` process would have the second `set_classname`
+  call shadow the first in the per-interface singleton lookup, with
+  undefined-ish behavior. In practice the standalone `wire-cell` jsonnet
+  only loads `WireCellMatch`, and the `lar`/WCLS job only loads
+  `WireCellQLMatch`, so they never coexist. If you ever need to load
+  both, rename one of the WIRECELL_FACTORY first arguments (e.g.
+  `QLMatchingV2` here) to disambiguate.
+- **Install layout in `/opt`**: WCT installs to
+  `/opt/lib/libWireCellMatch.so`; the larwirecell-side legacy lives at
+  `/opt/larwirecell/v10_01_28/slf7.x86_64.e26.prof/lib/libWireCellQLMatch.so`.
+  Different paths, different lib names — `setup-local-opt.sh` puts the
+  larwirecell tree on `CET_PLUGIN_PATH` only when its dir is present, so
+  the legacy `lar -c wct-clus-matching.fcl` runs entirely off `/opt`
+  when both halves are installed there. To regenerate the larwirecell
+  side, rebuild in the `larsoft-wct036` mrb area (which has WCT 0.36.0
+  on `CMAKE_PREFIX_PATH`, matching the runtime install) then
+  `cp -a localProducts_.../larwirecell/v10_01_28/* /opt/larwirecell/v10_01_28/`.
 - **`vuv_absorption_length`**: this is *not* a guess. Take it from
   `lar::providerFrom<detinfo::LArPropertiesService>()->AbsLengthSpectrum()`
   interpolated at 9.7 eV (Ar VUV peak). For SBND `v10_14_02_03` /
