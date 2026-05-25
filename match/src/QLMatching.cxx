@@ -64,6 +64,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
 
     m_QtoL = get(cfg, "QtoL", m_QtoL);
+    m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
 
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
@@ -131,6 +132,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["beam_mintime"]    = m_beam_mintime;
     cfg["beam_maxtime"]    = m_beam_maxtime;
     cfg["QtoL"]            = m_QtoL;
+    cfg["strength_cutoff"] = m_strength_cutoff;
     return cfg;
 }
 
@@ -365,6 +367,48 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         flash_cluster_bundles_map[std::make_pair(flash, cluster)] = bundle;
     }
 
+    // Deterministic iteration order over flashes/clusters/bundles.
+    //
+    // Without these, the LASSO matrix column / row order depends on heap
+    // allocator ordering of Opflash* / Cluster* / shared_ptr addresses,
+    // because std::map<Pointer*, ...> and std::set<shared_ptr> sort by
+    // pointer value. Two runs with identical inputs then permute matrix
+    // columns and produce slightly different solution() vectors --- enough
+    // to flip bundles across the m_strength_cutoff threshold and lose
+    // run-to-run reproducibility.
+    //
+    // Outer order: flashes by flash_id (set from the input tensor row index,
+    // stable). Clusters by their global index (set from the length-sorted
+    // 'clusters' vector, stable). Inner: bundles within a flash sorted by
+    // cluster_index_id, again the global index from the sorted vector.
+    auto sort_inner_by_cluster_idx = [](FlashBundlesMap& m) {
+        for (auto& kv : m) {
+            std::sort(kv.second.begin(), kv.second.end(),
+                      [](const TimingTPCBundle::pointer& a,
+                         const TimingTPCBundle::pointer& b) {
+                          return a->get_cluster_index_id() < b->get_cluster_index_id();
+                      });
+        }
+    };
+    auto flash_iter_order = [](const FlashBundlesMap& m) {
+        std::vector<Opflash*> v;
+        v.reserve(m.size());
+        for (auto& kv : m) v.push_back(kv.first);
+        std::sort(v.begin(), v.end(),
+                  [](Opflash* a, Opflash* b) { return a->get_flash_id() < b->get_flash_id(); });
+        return v;
+    };
+    auto cluster_iter_order = [&global_cluster_idx_map](const ClusterBundlesMap& m) {
+        std::vector<Cluster*> v;
+        v.reserve(m.size());
+        for (auto& kv : m) v.push_back(kv.first);
+        std::sort(v.begin(), v.end(), [&](Cluster* a, Cluster* b) {
+            return global_cluster_idx_map.at(a) < global_cluster_idx_map.at(b);
+        });
+        return v;
+    };
+    sort_inner_by_cluster_idx(flash_bundles_map);
+
     TimingTPCBundleSelection to_be_removed;
     for (auto good_bundle : consistent_bundles) {
         auto cluster = good_bundle->get_main_cluster();
@@ -400,12 +444,14 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         const unsigned int nflash   = flash_bundles_map.size();
         const unsigned int ncluster = cluster_bundles_map.size();
 
+        auto flashes_ordered  = flash_iter_order(flash_bundles_map);
+        auto clusters_ordered = cluster_iter_order(cluster_bundles_map);
         std::map<Opflash*, int> flash_idx_map;
         std::map<Cluster*, int> cluster_idx_map;
         int idx = 0;
-        for (auto& kv : cluster_bundles_map) cluster_idx_map[kv.first] = idx++;
+        for (auto* c : clusters_ordered) cluster_idx_map[c] = idx++;
         idx = 0;
-        for (auto& kv : flash_bundles_map) flash_idx_map[kv.first] = idx++;
+        for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
 
         Ress::vector_t M = Ress::vector_t::Zero(nopdet * nflash);
         Ress::matrix_t P = Ress::matrix_t::Zero(nopdet * nflash, nbundle + nflash);
@@ -415,9 +461,8 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
 
         std::vector<std::pair<Opflash*, Cluster*>> pairs;
         std::size_t i = 0, ik = 0;
-        for (auto& kv : flash_bundles_map) {
-            auto flash   = kv.first;
-            auto& bundles = kv.second;
+        for (auto* flash : flashes_ordered) {
+            auto& bundles = flash_bundles_map[flash];
             for (unsigned int j = 0; j < nopdet; ++j) {
                 const int opdet_idx = opdet_idx_v.at(j);
                 const double pe = flash->get_PE(opdet_idx);
@@ -464,9 +509,9 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
 
         int n = 0;
-        for (auto& kv : flash_bundles_map) {
-            for (auto bundle : kv.second) {
-                if (solution(n) <= 0.05 && !m_beamonly) to_be_removed.push_back(bundle);
+        for (auto* flash : flashes_ordered) {
+            for (auto bundle : flash_bundles_map[flash]) {
+                if (solution(n) <= m_strength_cutoff && !m_beamonly) to_be_removed.push_back(bundle);
                 ++n;
             }
         }
@@ -482,12 +527,15 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         const unsigned int nflash   = flash_bundles_map.size();
         const unsigned int ncluster = cluster_bundles_map.size();
 
+        // Rebuild ordered iteration (rd-1 may have removed bundles/flashes/clusters).
+        auto flashes_ordered  = flash_iter_order(flash_bundles_map);
+        auto clusters_ordered = cluster_iter_order(cluster_bundles_map);
         std::map<Cluster*, int> cluster_idx_map;
         std::map<Opflash*, int> flash_idx_map;
         int idx = 0;
-        for (auto& kv : cluster_bundles_map) cluster_idx_map[kv.first] = idx++;
+        for (auto* c : clusters_ordered) cluster_idx_map[c] = idx++;
         idx = 0;
-        for (auto& kv : flash_bundles_map) flash_idx_map[kv.first] = idx++;
+        for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
 
         Ress::vector_t M = Ress::vector_t::Zero(nopdet * nflash);
         Ress::matrix_t P = Ress::matrix_t::Zero(nopdet * nflash, nbundle);
@@ -497,9 +545,8 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         std::vector<std::pair<Opflash*, Cluster*>> pairs;
 
         std::size_t i = 0, ik = 0;
-        for (auto& kv : flash_bundles_map) {
-            auto flash   = kv.first;
-            auto& bundles = kv.second;
+        for (auto* flash : flashes_ordered) {
+            auto& bundles = flash_bundles_map[flash];
             for (unsigned int j = 0; j < nopdet; ++j) {
                 const int opdet_idx = opdet_idx_v.at(j);
                 const double pe = flash->get_PE(opdet_idx);
@@ -545,10 +592,10 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
 
         int n = 0;
-        for (auto& kv : flash_bundles_map) {
-            for (auto bundle : kv.second) {
+        for (auto* flash : flashes_ordered) {
+            for (auto bundle : flash_bundles_map[flash]) {
                 bundle->set_strength(solution(n));
-                if (!(solution(n) > 0.05 || m_beamonly)) to_be_removed.push_back(bundle);
+                if (!(solution(n) > m_strength_cutoff || m_beamonly)) to_be_removed.push_back(bundle);
                 ++n;
             }
         }
@@ -560,7 +607,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         // Keep best match per cluster.
         std::map<int, std::pair<Opflash*, double>> matched_pairs;
         for (std::size_t k = 0; k < pairs.size(); ++k) {
-            if (solution(k) <= 0.05) continue;
+            if (solution(k) <= m_strength_cutoff) continue;
             const int cidx = cluster_idx_map[pairs.at(k).second];
             auto flash = pairs.at(k).first;
             auto it = matched_pairs.find(cidx);
@@ -607,9 +654,8 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     }
 
     // Apply matched t0s.
-    for (auto& kv : flash_bundles_map) {
-        auto flash = kv.first;
-        for (auto bundle : kv.second) {
+    for (auto* flash : flash_iter_order(flash_bundles_map)) {
+        for (auto bundle : flash_bundles_map[flash]) {
             bundle->get_main_cluster()->set_cluster_t0(flash->get_time() * units::ns);
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",

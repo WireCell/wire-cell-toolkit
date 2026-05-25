@@ -57,6 +57,10 @@ namespace WireCell::Match {
         double m_beam_mintime{-5e3};
         double m_beam_maxtime{5e3};
         double m_QtoL{0.5};
+        // LASSO solution threshold below which a (flash, cluster) bundle is
+        // dropped after each matching round. Was hard-coded 0.05 inline; pulled
+        // out so it can be widened/narrowed from the jsonnet without rebuild.
+        double m_strength_cutoff{0.05};
 
         // Default SBND VUV/VIS efficiency arrays, indexed by OpDet (312 entries).
         // Configuration "VUVEfficiency"/"VISEfficiency" arrays override these.
