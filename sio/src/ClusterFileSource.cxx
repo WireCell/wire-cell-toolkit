@@ -307,8 +307,15 @@ void ClusterFileSource::clear_load()
 ICluster::pointer ClusterFileSource::load()
 {
     while (true) {
-        if (! load_filename()) {
-            return nullptr;
+        // load_numpy() breaks (without clearing) when the file it just peeked
+        // at belongs to the next ident; m_cur is then already populated and
+        // calling load_filename() here would overwrite that header and leave
+        // the next file's contents undecoded in the stream. Skip the read on
+        // this case.
+        if (! m_cur.fsize) {
+            if (! load_filename()) {
+                return nullptr;
+            }
         }
         auto ret = dispatch();
         if (ret) return ret;
