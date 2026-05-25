@@ -206,9 +206,25 @@ grep "^GEOM:"  dump.log > sbnd_geom.txt
   `wcp-porting-img/sbnd/standalone-sample/`, produced
   `data-sep/0/0-{img,op}-apa{0,1}.json`, packaged with `bee-upload.sh`
   and uploaded to BEE for visual inspection.
+- **Numerical agreement with legacy `lar` job**: per-(flash, cluster)
+  predicted PE agrees to ~0.01 PE / ~5e-5 relative on every common
+  bundle (APA1: bit-perfect on all 6 commons; APA0: 10/10 commons
+  match, one bundle off by 5% downstream of `add_bundle` merge
+  logic). Which marginal bundles survive the LASSO 0.05 threshold
+  differs slightly because the threshold is just above the smallest
+  pred-PE rows, so any 1e-5 jitter flips inclusion — that's pre-
+  existing in the algorithm, not introduced by the port.
 
 ## Notes / gotchas
 
+- **`vuv_absorption_length`**: this is *not* a guess. Take it from
+  `lar::providerFrom<detinfo::LArPropertiesService>()->AbsLengthSpectrum()`
+  interpolated at 9.7 eV (Ar VUV peak). For SBND `v10_14_02_03` /
+  `standard_properties` the value is **2000 cm**. The first pass of
+  this port used a 85 cm placeholder and shipped half the predicted
+  light — visible only when comparing to the legacy `lar` job. The
+  `SBNDOpDetDumper` analyzer now emits the correct value into
+  `sbnd_geom.txt` so it can't drift.
 - **Boost 1.82 + gcc 12 + `-Werror=deprecated-declarations`**: the
   ellint / multi_array headers transitively include
   `boost/functional.hpp` which uses the deprecated
