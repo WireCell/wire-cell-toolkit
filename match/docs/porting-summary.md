@@ -21,7 +21,7 @@ New subpackage **`wire-cell-toolkit/match/`** (`WireCellMatch`):
 | `Opflash.{h,cxx}` | Moved from larwirecell, interface unchanged. |
 | `TimingTPCBundle.{h,cxx}` | Moved from larwirecell, interface unchanged. |
 | `QLMatching.{h,cxx}` | `ITensorSetFanin` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. |
-| `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d` / `dump_bee_bundle`). |
+| `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d`, `dump_bee_bundle`, `dump_light`). |
 | `wscript_build` | `bld.smplpkg('WireCellMatch', use='WireCellClus WireCellAux WireCellIface WireCellUtil')` |
 
 Key larsoft→WCT substitutions: `geo::Point_t`→`WireCell::Point`;
@@ -102,6 +102,7 @@ Inputs for SBND are produced once from an artROOT file by
 | `b2352c39` | `sio/ClusterFileSource`: don't re-`load_filename()` over a header that `load_numpy()` already peeked at the ident boundary — fixed EOS-after-one-event when a single npz holds many events (multi-event dumps). |
 | `2fa2e5b3` | `aux/ClusterArrays::to_cluster`: pass `nudge=1e-3` (matching `Img::GridTiling`) to `RayGrid::Blob::add` so deserialized blob corners match imaging. Fixes dead-region polygons collapsing (quad→triangle) and a dropped boundary strip at the z≈501 cm edge. |
 | `58dad76b` | `match/SemiAnalyticalModel`: finite-safe `angle_bin()` clamp on the VUV `j`, VIS `k`, and dome-model `j` indices — guards the unchecked `[bin]` table reads against `theta==90°` / NaN points (latent segfault). Defensive only; results unchanged. |
+| `f8b91803` | `match/Util`: new `dump_light()` — dump **every** flash to `*-op.json`, not just matched ones. Matched flashes keep `cluster_id`/`op_pes_pred` (same filter as `dump_bee_bundle`); unmatched flashes are emitted with an empty `cluster_id` so they still show in the BEE light display. `QLMatching` now calls this instead of `dump_bee_bundle`. Mirrored in larwirecell `qlmatch` (commit `d634638` on `dev-v10_14_02_02`). |
 
 ## Verification status (10 SBND events, ids 2,9,11,12,14,18,31,35,41,42)
 
@@ -115,6 +116,13 @@ Inputs for SBND are produced once from an artROOT file by
   mismatches before).
 - All three paths run all 10 events to completion and were uploaded to BEE for
   visual inspection.
+- **`dump_light` cross-check** (10 events, both APAs, all three paths): `op_t`,
+  `op_pes`, `op_peTotal`, and **`cluster_id` are identical everywhere** — the
+  matching outcome (incl. the new empty-`cluster_id` unmatched flashes) agrees
+  bit-for-bit. The legacy `lar` and full-pipeline `op_pes_pred` are byte-equal
+  (both use larsim's model); the standalone differs only by ≤1.3% on tiny
+  per-channel predicted PE (~1–8 PE) — the expected ported-model float drift,
+  changing no match.
 
 ## Known caveats / not done
 
