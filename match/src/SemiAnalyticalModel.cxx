@@ -73,13 +73,28 @@ namespace {
         return yL + dydx * (x - xL);
     }
 
+    // Angular off-set bin index for the correction tables. theta is in
+    // degrees and should land in [0, nbins). Guards against a non-finite or
+    // negative theta (which would yield a garbage size_t) and against the
+    // theta == nbins*delta edge case (e.g. exactly 90 deg) that would index
+    // one past the last bin. Upstream the tables are read with unchecked
+    // operator[], so an out-of-range bin is a hard crash, not a soft error.
+    inline std::size_t angle_bin(double theta, double delta, std::size_t nbins)
+    {
+        if (!std::isfinite(theta) || theta <= 0.0 || nbins == 0) return 0;
+        const std::size_t j = static_cast<std::size_t>(theta / delta);
+        return j < nbins ? j : nbins - 1;
+    }
+
     double interpolate2(const std::vector<double>& xDistances,
                         const std::vector<double>& rDistances,
                         const std::vector<std::vector<std::vector<double>>>& parameters,
                         const double x,
                         const double r,
-                        const std::size_t k)
+                        std::size_t k)
     {
+        if (parameters.empty()) return 0.0;
+        if (k >= parameters.size()) k = parameters.size() - 1;  // guard angle bin
         const std::size_t nbins_r = parameters[k].size();
         std::vector<double> interp_vals(nbins_r, 0.);
 
@@ -250,8 +265,6 @@ double SemiAnalyticalModel::VUVVisibility(const WireCell::Point& scintPoint,
     const double visibility_geo = std::exp(-distance / m_geom.vuv_absorption_length) *
                                   (solid_angle / (4. * kPi));
 
-    const std::size_t j = static_cast<std::size_t>(theta / m_delta_angulo_vuv);
-
     // border radius in cathode-plane coordinates (orientation 0).
     const double r = std::hypot(scintPoint.y() - m_geom.active_center_y,
                                 scintPoint.z() - m_geom.active_center_z);
@@ -259,6 +272,7 @@ double SemiAnalyticalModel::VUVVisibility(const WireCell::Point& scintPoint,
     double pars_ini[4] = {0., 0., 0., 0.};
     double s1 = 0., s2 = 0., s3 = 0.;
     if (opDet.type == 0 && m_isFlatPDCorr) {
+        const std::size_t j = angle_bin(theta, m_delta_angulo_vuv, m_GHvuvpars_flat[0].size());
         pars_ini[0] = m_GHvuvpars_flat[0][j];
         pars_ini[1] = m_GHvuvpars_flat[1][j];
         pars_ini[2] = m_GHvuvpars_flat[2][j];
@@ -268,6 +282,7 @@ double SemiAnalyticalModel::VUVVisibility(const WireCell::Point& scintPoint,
         s3 = interpolate(m_border_corr_angulo_flat, m_border_corr_flat[2], theta, true);
     }
     else if (opDet.type == 1 && m_isDomePDCorr) {
+        const std::size_t j = angle_bin(theta, m_delta_angulo_vuv, m_GHvuvpars_dome[0].size());
         pars_ini[0] = m_GHvuvpars_dome[0][j];
         pars_ini[1] = m_GHvuvpars_dome[1][j];
         pars_ini[2] = m_GHvuvpars_dome[2][j];
@@ -370,7 +385,10 @@ double SemiAnalyticalModel::VISVisibility(const WireCell::Point& scintPoint,
 
     const double visibility_geo = (solid_angle_detector / (2. * kPi)) * cathode_visibility;
 
-    const std::size_t k = static_cast<std::size_t>(theta_vis / m_delta_angulo_vis);
+    // angle bin; finite-safe (interpolate2 also re-clamps to the table width).
+    const std::size_t k = angle_bin(theta_vis, m_delta_angulo_vis,
+                                    m_vispars_flat.empty() ? m_vispars_dome.size()
+                                                           : m_vispars_flat.size());
     const double rxy = std::hypot(scintPoint.y() - m_geom.active_center_y,
                                   scintPoint.z() - m_geom.active_center_z);
     const double d_c = std::abs(scintPoint.x() - plane_depth);
@@ -518,7 +536,8 @@ double SemiAnalyticalModel::Omega_Dome_Model(double distance, double theta) cons
     constexpr double par0[9] = {0., 0., 0., 0., 0., 0.597542, 1.00872, 1.46993, 2.04221};
     constexpr double par1[9] = {0., 0., 0.19569, 0.300449, 0.555598, 0.854939, 1.39166, 2.19141, 2.57732};
     constexpr double delta_theta = 10.;
-    const int j = static_cast<int>(theta / delta_theta);
+    // finite-safe bin into the fixed 9-element par arrays (theta in [0,90]).
+    const int j = static_cast<int>(angle_bin(theta, delta_theta, 9));
     const double b = m_pmt_radius;
     const double d_break = 5. * b;
 
