@@ -22,7 +22,8 @@ function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=10
         data: {
             // where is htis one?
             // model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
-            model: "unet-l23-cosmic500-e50.ts",
+            #model: "/nfs/data/1/calcuttj/spng_merging2/toolkit/spng/test/unet-l23-cosmic500-e50.ts",
+            model: "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
             device: "cpu", // "gpucpu",
             concurrency: 1,
         },

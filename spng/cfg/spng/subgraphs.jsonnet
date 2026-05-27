@@ -996,7 +996,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
         
         local pre_ops = [
             { operation: "noop" },
-            { operation: "unsqueeze", dims: [0,1]}
+            { operation: "unsqueeze", dims: [0]}
         ] + (
             if do_transpose
             then [{ operation: "transpose", dims: [-2,-1] }] else []
