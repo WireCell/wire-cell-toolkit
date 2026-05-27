@@ -645,8 +645,8 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
             Match::dump_bee_3d(
                 *root_live.get(),
                 String::format("%s/%d-img-apa%d.json", sub_dir, m_bee_index, m_anode->ident()));
-            Match::dump_bee_bundle(
-                flash_bundles_map, global_cluster_idx_map,
+            Match::dump_light(
+                flashes, flash_bundles_map, global_cluster_idx_map,
                 String::format("%s/%d-op-apa%d.json", sub_dir, m_bee_index, m_anode->ident()));
             ++m_bee_index;
         }

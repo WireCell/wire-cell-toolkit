@@ -184,3 +184,71 @@ void WireCell::Match::dump_bee_bundle(const FlashBundlesMap& f2bundle,
     std::unique_ptr<Json::StreamWriter> jw(writer.newStreamWriter());
     jw->write(data, &file);
 }
+
+void WireCell::Match::dump_light(const std::vector<Opflash::pointer>& flashes,
+                                 const FlashBundlesMap& f2bundle,
+                                 const std::map<Cluster*, int>& cluster_idx_map,
+                                 const std::string& fn)
+{
+    Json::Value data;
+    data["runNo"] = 0;
+    data["subRunNo"] = 0;
+    data["eventNo"] = 0;
+    data["geom"] = "sbnd";
+    data["op_t"] = Json::Value(Json::arrayValue);
+    data["op_pes"] = Json::Value(Json::arrayValue);
+    data["op_pes_pred"] = Json::Value(Json::arrayValue);
+    data["op_peTotal"] = Json::Value(Json::arrayValue);
+    data["cluster_id"] = Json::Value(Json::arrayValue);
+    data["op_nomatching_cluster_ids"] = Json::Value(Json::arrayValue);
+
+    for (const auto& flash : flashes) {
+        auto op_pes = Json::Value(Json::arrayValue);
+        double op_peTotal = 0;
+        for (auto pe : flash->get_PEs()) {
+            op_pes.append(pe);
+            op_peTotal += pe;
+        }
+
+        // Collect matched bundles for this flash (same filter as dump_bee_bundle).
+        auto it = f2bundle.find(flash.get());
+        bool emitted = false;
+        if (it != f2bundle.end()) {
+            for (const auto& bundle : it->second) {
+                const auto pred_pe_tot = bundle->get_total_pred_light();
+                if (pred_pe_tot < 100) continue;
+                auto cluster = bundle->get_main_cluster();
+                auto cit = cluster_idx_map.find(cluster);
+                if (cit == cluster_idx_map.end()) continue;
+                auto op_cluster_id = Json::Value(Json::arrayValue);
+                op_cluster_id.append(cit->second);
+                auto op_pes_pred = Json::Value(Json::arrayValue);
+                for (auto pe : bundle->get_pred_flash()) op_pes_pred.append(pe);
+                data["op_t"].append(flash->get_time() * 1e-3); // ns -> us
+                data["op_pes"].append(op_pes);
+                data["op_peTotal"].append(op_peTotal);
+                data["cluster_id"].append(op_cluster_id);
+                data["op_pes_pred"].append(op_pes_pred);
+                emitted = true;
+            }
+        }
+
+        // No match (or no qualifying bundle): still emit the flash with an
+        // empty cluster_id / op_pes_pred so it shows up in the light display.
+        if (!emitted) {
+            data["op_t"].append(flash->get_time() * 1e-3); // ns -> us
+            data["op_pes"].append(op_pes);
+            data["op_peTotal"].append(op_peTotal);
+            data["cluster_id"].append(Json::Value(Json::arrayValue));
+            data["op_pes_pred"].append(Json::Value(Json::arrayValue));
+        }
+    }
+
+    std::ofstream file(fn);
+    if (!file.is_open()) raise<ValueError>("Failed to open file: " + fn);
+    Json::StreamWriterBuilder writer;
+    writer["indentation"] = "    ";
+    writer["precision"] = 6;
+    std::unique_ptr<Json::StreamWriter> jw(writer.newStreamWriter());
+    jw->write(data, &file);
+}
