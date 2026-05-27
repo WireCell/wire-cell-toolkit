@@ -95,10 +95,21 @@ namespace WireCell::Aux::ClusterArrays {
 
     // Return cluster given array sets.  The anodes must provide the
     // faces referenced by the blobs.
+    //
+    // The blob shapes (and thus their corner point clouds) are
+    // reconstructed from the stored wire-strip bounds via RayGrid.  The
+    // "nudge" enlarges strips by this fraction of a pitch for the corner
+    // inclusion test, exactly as the imaging tiler (Img::GridTiling, default
+    // 1e-3) does.  The default here matches that so a serialize/deserialize
+    // round trip reproduces the same boundary corners the imaging produced;
+    // a nudge of 0 (the bare RayGrid::Blob::add default) drops corners that
+    // fall on a strip edge and collapses dead-region polygons at the
+    // detector boundary.
     using anodes_t = std::vector<IAnodePlane::pointer>;
     cluster_graph_t to_cluster(const node_array_set_t& nas,
                                const edge_array_set_t& eas,
-                               const anodes_t& anodes);
+                               const anodes_t& anodes,
+                               double nudge = 1e-3);
 
 
     /// See TensorDM for conversion between ICluster and ITensor.

@@ -538,7 +538,8 @@ void ClusterArrays::to_arrays(const cluster_graph_t& cin_graph,
 
 cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
                                           const edge_array_set_t& eas,
-                                          const anodes_t& anodes)
+                                          const anodes_t& anodes,
+                                          double nudge)
 {
     std::unordered_map<int, IAnodeFace::pointer> known_faces;
     for (const auto& anode : anodes) {
@@ -807,7 +808,7 @@ cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
             const RayGrid::Coordinates& coords = iface->raygrid();
             RayGrid::Blob bshape;
             for (const auto& [layer, strip] : strips) {
-                bshape.add(coords, strip);
+                bshape.add(coords, strip, nudge);
             }
 
             IBlob::pointer iblob = std::make_shared<SimpleBlob>(ident, val, unc, bshape, islice, iface);
