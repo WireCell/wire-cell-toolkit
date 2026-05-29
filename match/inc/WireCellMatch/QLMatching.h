@@ -26,7 +26,7 @@ namespace WireCell::Match {
     /// Input (ITensorSetFilter): pctree tensor set holding clusters, with the
     /// per-event optical flashes attached as the canonical "flash"/"light"/
     /// "flashlight" point clouds on the live root node (see
-    /// Match::OpflashToFlashPCs, the same schema as root/UbooneClusterSource).
+    /// Aux::OpflashToFlashPCs, the same schema as root/UbooneClusterSource).
     /// Output: cluster tensor set with per-cluster t0 AND a per-cluster
     /// "flash" scalar (matched flash row index) set from the matched flash, so
     /// Clus::Facade::Cluster::get_flash() reflects the match.

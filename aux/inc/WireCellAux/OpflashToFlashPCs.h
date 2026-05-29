@@ -18,10 +18,14 @@
     multiplied by units::us) because the SBND opflash dump is already in ns
     (WCT ns == 1), whereas Uboone's tree is in us and is scaled. Same canonical
     units, different native input unit. "error" is 0 (the SBND dump carries no
-    per-channel error; the PE_err convention stays inside Match::Opflash).
+    per-channel error; any PE_err convention is applied downstream by the matcher).
+
+    This converter is detector-agnostic (no SBND physics): it only reshapes a
+    [nflash, 1+nchan] matrix into the canonical PCs, so it lives in aux alongside
+    the generic Aux::AttachPointCloudToTree.
 */
-#ifndef WIRECELLMATCH_OPFLASHTOFLASHPCS
-#define WIRECELLMATCH_OPFLASHTOFLASHPCS
+#ifndef WIRECELLAUX_OPFLASHTOFLASHPCS
+#define WIRECELLAUX_OPFLASHTOFLASHPCS
 
 #include "WireCellAux/Logger.h"
 
@@ -31,7 +35,7 @@
 #include <string>
 #include <vector>
 
-namespace WireCell::Match {
+namespace WireCell::Aux {
 
     class OpflashToFlashPCs : public Aux::Logger,
                               public ITensorSetFanin,
@@ -58,6 +62,6 @@ namespace WireCell::Match {
         std::size_t m_count{0};
     };
 
-} // namespace WireCell::Match
+} // namespace WireCell::Aux
 
 #endif

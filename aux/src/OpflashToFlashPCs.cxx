@@ -1,4 +1,4 @@
-#include "WireCellMatch/OpflashToFlashPCs.h"
+#include "WireCellAux/OpflashToFlashPCs.h"
 
 #include "WireCellAux/TensorDMcommon.h"    // as_tensorset
 #include "WireCellAux/TensorDMpointtree.h" // as_pctree, as_tensors
@@ -10,28 +10,28 @@
 #include "WireCellUtil/String.h"
 
 WIRECELL_FACTORY(OpflashToFlashPCs,
-                 WireCell::Match::OpflashToFlashPCs,
+                 WireCell::Aux::OpflashToFlashPCs,
                  WireCell::INamed,
                  WireCell::ITensorSetFanin,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
 
-Match::OpflashToFlashPCs::OpflashToFlashPCs()
-    : Aux::Logger("OpflashToFlashPCs", "match")
+Aux::OpflashToFlashPCs::OpflashToFlashPCs()
+    : Aux::Logger("OpflashToFlashPCs", "aux")
 {
 }
 
-Match::OpflashToFlashPCs::~OpflashToFlashPCs() = default;
+Aux::OpflashToFlashPCs::~OpflashToFlashPCs() = default;
 
-void Match::OpflashToFlashPCs::configure(const WireCell::Configuration& cfg)
+void Aux::OpflashToFlashPCs::configure(const WireCell::Configuration& cfg)
 {
     m_inpath = get(cfg, "inpath", m_inpath);
     m_nchan  = get(cfg, "nchan", m_nchan);
     log->debug("OpflashToFlashPCs: inpath={} nchan={}", m_inpath, m_nchan);
 }
 
-WireCell::Configuration Match::OpflashToFlashPCs::default_configuration() const
+WireCell::Configuration Aux::OpflashToFlashPCs::default_configuration() const
 {
     Configuration cfg;
     cfg["inpath"] = m_inpath;
@@ -39,13 +39,13 @@ WireCell::Configuration Match::OpflashToFlashPCs::default_configuration() const
     return cfg;
 }
 
-std::vector<std::string> Match::OpflashToFlashPCs::input_types()
+std::vector<std::string> Aux::OpflashToFlashPCs::input_types()
 {
     const std::string tname = std::string(typeid(input_type).name());
     return std::vector<std::string>(m_multiplicity, tname);
 }
 
-bool Match::OpflashToFlashPCs::operator()(const input_vector& invec, output_pointer& out)
+bool Aux::OpflashToFlashPCs::operator()(const input_vector& invec, output_pointer& out)
 {
     out = nullptr;
 

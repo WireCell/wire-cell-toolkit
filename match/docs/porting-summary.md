@@ -20,10 +20,23 @@ New subpackage **`wire-cell-toolkit/match/`** (`WireCellMatch`):
 | `SemiAnalyticalModel.{h,cxx}` | Port of larsim's `phot::SemiAnalyticalModel` (SBND scope: dome PMTs + flat (X)Arapucas at anode/cathode orientation; VUV direct + VIS reflected). No larsoft deps. |
 | `Opflash.{h,cxx}` | Moved from larwirecell. Two ctors: from a tensor row and from `(time, pe, threshold, nchan)` (canonical-PC path). |
 | `TimingTPCBundle.{h,cxx}` | Moved from larwirecell, interface unchanged. No canonical-schema equivalent — algorithm working object only. |
-| `OpflashToFlashPCs.{h,cxx}` | `ITensorSetFanin` (2→1): expands the SBND opflash matrix into the canonical `flash`/`light`/`flashlight` PCs on the cluster tree's live root node (same schema as `root/UbooneClusterSource`). |
-| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via the canonical `flash`/`light`/`flashlight` PCs on the live root node (written by `Match::OpflashToFlashPCs`), not a 2nd input port; writes back a per-cluster matched-flash scalar. |
+| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via the canonical `flash`/`light`/`flashlight` PCs on the live root node (written by `Aux::OpflashToFlashPCs`), not a 2nd input port; writes back a per-cluster matched-flash scalar. |
 | `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d`, `dump_bee_bundle`, `dump_light`). |
 | `wscript_build` | `bld.smplpkg('WireCellMatch', use='WireCellClus WireCellAux WireCellIface WireCellUtil')` |
+
+The opflash-matrix → canonical-flash-PC converter, originally `Match::OpflashToFlashPCs`,
+now lives in **`aux/` as `Aux::OpflashToFlashPCs`** (`aux/{inc/WireCellAux,src}/OpflashToFlashPCs.{h,cxx}`,
+plugin `WireCellAux`). It carries no detector physics — it only reshapes a `[nflash, 1+nchan]`
+matrix into the canonical PCs — so it belongs with the generic tensor/pctree plumbing next to
+`Aux::AttachPointCloudToTree`, not in the SBND-specific matcher. The WCT factory **type string
+is unchanged** (`"OpflashToFlashPCs"`), so configs are untouched; only its package moved.
+
+The standalone matching graph nodes (opflash reader → converter → `QLMatching`) plus the
+SBND matching constants (`nchan`, `ch_mask`) are built by a canonical config helper
+**`cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet`** (a factory `function(params)` mirroring
+`clus.jsonnet`/`img.jsonnet`), re-exported by the standalone via a thin
+`sbnd_xin/qlmatching.jsonnet` shim. `drift_speed` flows from the caller's `params` (the common
+SBND `1.563 mm/us`).
 
 Key larsoft→WCT substitutions: `geo::Point_t`→`WireCell::Point`;
 `fhicl::ParameterSet`→`WireCell::Configuration` (Json) loaded via
@@ -107,6 +120,8 @@ Inputs for SBND are produced once from an artROOT file by
 | `985ec8fb` | **Flash representation consolidated onto the toolkit's canonical schema.** SBND flashes now ride the cluster pctree root node as the same `flash`/`light`/`flashlight` PCs the MicroBooNE `root/UbooneClusterSource` writes (not a bespoke `[nflash,1+nchan]` matrix). New `match/OpflashToFlashPCs` expands the SBND opflash matrix into those PCs; `QLMatching` rebuilds its `Opflash` objects from them (new `Opflash(time,pe,thr,nchan)` ctor; `nchan` config, default 312) and writes back a per-cluster `flash` scalar so `Clus::Facade::Cluster::get_flash()` reflects the match. Deliberate divergences from Uboone `load_optical`: flash/light time stored **raw** (no `units::us`, to keep matching identical); per-channel `error`=0 (the `PE_err` 0.3 rule stays in `Opflash`). `TimingTPCBundle` has no canonical equivalent — unchanged. Output bit-identical: mc 40/40 byte-identical to baseline; data runs all 10 events. |
 | `3ba2698a` | `match/QLMatching`: drift speed for the per-flash X correction is now the configurable `drift_speed` (WCT units), defaulting to the historical `1.563e-3`; the standalone jsonnet wires `params.lar.drift_speed` (the common SBND `1.563 mm/us`) instead of the previous hard-coded literal and a separate `driftSpeed` run-script override. Output unchanged (40/40 byte-identical) since the common value equals the old hard-coded one. |
 | `5ef34045` | `match/TimingTPCBundle`: null-safe ctor. An unmatched cluster is a bundle with a null flash (`QLMatching:629`); the ctor used to deref `flash->get_num_channels()` and segfault. MC never hit it (all clusters match); `data` mode does (cosmics with no flash). Now `m_nchan = flash ? flash->get_num_channels() : 0;`. MC output unchanged (40/40 byte-identical); `data` runs all 10 events. |
+| _(this round)_ | **`OpflashToFlashPCs` relocated `match/` → `aux/`** as `Aux::OpflashToFlashPCs` (plugin `WireCellAux`). It has no detector physics — only reshapes the `[nflash,1+nchan]` matrix into the canonical PCs — so it sits with the generic tensor/pctree plumbing next to `Aux::AttachPointCloudToTree`. Factory type string `"OpflashToFlashPCs"` unchanged ⇒ configs untouched. Verified: factory registers once (in `libWireCellAux`, 0 refs left in `libWireCellMatch`); resolved config byte-identical; mc 40/40 byte-identical. |
+| _(this round)_ | **SBND matching config hoisted** into `cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet` (factory `function(params)` → `opflash_source`/`flash_attach`/`matching`, mirroring `clus.jsonnet`), holding the matching-only constants `nchan`/`ch_mask` and sourcing `drift_speed` from `params.lar.drift_speed`. The standalone `wct-clus-matching-standalone.jsonnet` now builds its nodes via this helper (re-exported by a thin `sbnd_xin/qlmatching.jsonnet` shim), dropping ~60 inline lines. Pure jsonnet refactor: resolved config byte-identical (`wcsonnet` diff), mc 40/40 byte-identical. |
 
 ## Verification status (10 SBND events, ids 2,9,11,12,14,18,31,35,41,42)
 
@@ -142,6 +157,60 @@ Inputs for SBND are produced once from an artROOT file by
   disk PMTs are **not** ported. Add the corresponding larsim branches if a
   future detector needs them.
 - The `match` branch is local only (nothing pushed to any remote).
+
+## Making matching generic for other detectors (consolidation roadmap)
+
+`QLMatching` today runs SBND only, but other detectors (ProtoDUNE-HD/VD) will want the
+same matcher with a different light system + photon library. The **idiomatic toolkit
+pattern** (confirmed by `FieldResponse`/`Drifter`) is **one configurable C++ class fed
+detector-specific data files + a per-detector jsonnet helper**, *not* detector subclasses.
+This round created the SBND helper (`cfg/.../sbnd/qlmatching.jsonnet`); a sibling per
+detector + a per-detector `semi-analytical-<det>.json` is the extension point.
+
+What is still SBND-locked in the C++, and the path to consolidate — **keeping results
+byte-identical first** (defaults equal to today's literals, re-gate, *then* switch the
+source):
+
+1. **Fiducial / geometry bounds — top priority; reuse the existing clustering tools.**
+   `QLMatching` hardcodes the active-volume cuts (X ±2000 mm, Y ±2000 mm, Z [0,5000] mm).
+   It **already holds an `IDetectorVolumes` (`m_dv`)** but uses it only for name/volume
+   lookup. The official detector-volume machinery clustering already uses is the
+   `DetectorVolumes` pnode + the `dvm` fiducial-volume structure in `clus.jsonnet`
+   (`FV_xmin/xmax/ymin/ymax/zmin/zmax` with margins) + `PCTransformSet`. The standalone
+   **already passes** `clus_maker.detector_volumes([anode])` into `QLMatching`, so the
+   wiring exists — the consolidation is to **source the matching FV cuts from `m_dv`**
+   instead of the literals. ⚠ These feed the matching cuts, so this is its own
+   incremental, separately bit-identical-gated change — do not bundle with config-only work.
+2. **OpDet → TPC assignment.** The even/odd-OpDet → TPC-0/1 (drift-X-sign) rule is hardcoded;
+   derive it from the OpDet X positions already present in the `semimodel_file` JSON.
+3. **Efficiency-array defaults.** The 312-entry VUV/VIS efficiency defaults are baked into the
+   header (already config-overridable); move the SBND defaults out into the per-detector
+   semimodel JSON.
+4. **Per-detector config.** Add a `qlmatching.jsonnet` per detector (SBND done) + a
+   per-detector `semi-analytical-<det>.json` (Geometry + OpDets + VUVHits/VISHits).
+5. **`SemiAnalyticalModel` porting-completeness gap (separate from architecture).** Lateral
+   PDs, anode reflections, Xe absorption, field-cage transparency, and disk PMTs are **not**
+   ported (see *Known caveats* above) — a physics-coverage TODO, not a config decision.
+
+**Where the converter belongs (resolved):** `OpflashToFlashPCs` was relocated to `aux/` this
+round because it is detector-agnostic. A future polish (not now) is a config-driven column
+mapping (time column / PE columns) so non-SBND opflash dumps with a different matrix layout can
+reuse it without a code change.
+
+**Why `Opflash` stays in `match/` (and the real consolidation target).** Unlike the converter,
+`Match::Opflash` is **algorithm-internal state**, not generic plumbing: used only by `QLMatching`
++ `TimingTPCBundle`, it synthesizes `PE_err` (the 0.3 rule), tracks `fired_channels` (threshold),
+and carries the `OpFlashCompare` ordering that makes the LASSO solve deterministic — all matching
+conventions. So it belongs with the algorithm, exactly like `TimingTPCBundle` (the
+reusable-infrastructure → `aux`, algorithm-state → algorithm-package split). Moving it to `aux`
+would push matching conventions into the generic layer with no external consumer. The genuinely
+better long-term move is **consolidation, not relocation**: the toolkit already has a canonical
+read-side flash type, `Clus::Facade::Cluster::Flash` (`get_flash()`), over the same
+`flash`/`light`/`flashlight` PCs (`time()/value()/ident()/type()` + per-OpDet
+`times()/values()/errors()`). `Opflash` largely duplicates it and only adds the matcher extras.
+Future cleanup: build the matcher on `Facade::Flash` and keep just a thin matching-side adapter
+for `PE_err`/`fired`/comparator, instead of a full parallel `Opflash`. Behavior-touching → its
+own bit-identical-gated step.
 
 ## Where things live
 
