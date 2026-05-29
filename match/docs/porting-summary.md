@@ -20,7 +20,7 @@ New subpackage **`wire-cell-toolkit/match/`** (`WireCellMatch`):
 | `SemiAnalyticalModel.{h,cxx}` | Port of larsim's `phot::SemiAnalyticalModel` (SBND scope: dome PMTs + flat (X)Arapucas at anode/cathode orientation; VUV direct + VIS reflected). No larsoft deps. |
 | `Opflash.{h,cxx}` | Moved from larwirecell, interface unchanged. |
 | `TimingTPCBundle.{h,cxx}` | Moved from larwirecell, interface unchanged. |
-| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via a `flash` point cloud on the cluster tree's live root node (attached upstream by `Sio::TensorFileToPCTree`), not a 2nd input port. |
+| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via a `flash` point cloud on the cluster tree's live root node (attached upstream by `Aux::AttachPointCloudToTree`), not a 2nd input port. |
 | `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d`, `dump_bee_bundle`, `dump_light`). |
 | `wscript_build` | `bld.smplpkg('WireCellMatch', use='WireCellClus WireCellAux WireCellIface WireCellUtil')` |
 

@@ -182,7 +182,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     log->debug(em("got live pctree"));
 
     // Flashes come from the "flash" point cloud attached to the live root node
-    // by Sio::TensorFileToPCTree (a 2D "value" array [nflash, 1+nchan]). Reconstruct the
+    // by Aux::AttachPointCloudToTree (a 2D "value" array [nflash, 1+nchan]). Reconstruct the
     // tensor and build Opflash objects exactly as the prior direct-tensor path.
     std::vector<Opflash::pointer> flashes;
     {
