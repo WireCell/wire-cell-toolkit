@@ -16,6 +16,7 @@
 #include "WireCellIface/IDetectorVolumes.h"
 
 #include "WireCellClus/Facade_Mixins.h"
+#include "WireCellClus/Facade_Flash.h"
 #include "WireCellClus/Facade_Util.h"
 
 // Include PRGraphType for PR::Graph (it's a type alias, not a class, so can't forward declare)
@@ -128,6 +129,16 @@ namespace WireCell::Clus::Facade {
         std::map<int, std::map<int, double> > get_drift_speed() const { return cache().map_drift_speed;}
         std::map<int, std::map<int, int> > get_drift_dir() const { return cache().map_drift_dir;}
         std::map<int, std::map<int, int> > get_nticks_per_slice() const { return cache().map_nticks_per_slice;}
+
+        /// Build the Facade::Flash for a given row of the grouping-level "flash"
+        /// PC (owns the flashlight-join walk).  Returns an invalid Flash
+        /// (operator bool() == false) if there is no "flash" PC or the index is
+        /// out of range.  Cluster::get_flash() delegates here.
+        ::WireCell::Clus::Facade::Flash flash_at(int flash_index) const;
+
+        /// Enumerate ALL flashes from the grouping-level optical PCs (the
+        /// pre-match read path).  Empty if there is no "flash" PC.
+        std::vector<::WireCell::Clus::Facade::Flash> flashes() const;
         IChannel::vector get_plane_channels(const int apa, const int face, const WirePlaneLayer_t layer) const{return cache().map_plane_channels.at(apa).at(face).at(layer);}
         std::shared_ptr<const WireCell::IChannel> get_plane_channel_wind(const int apa, const int face, const WirePlaneLayer_t layer, const int wind) const{ return cache().map_plane_channels.at(apa).at(face).at(layer).at(wind);}
 

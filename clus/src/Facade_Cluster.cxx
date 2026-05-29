@@ -2620,56 +2620,16 @@ void Facade::sort_clusters(std::vector<Cluster*>& clusters)
 
 Facade::Cluster::Flash Facade::Cluster::get_flash() const
 {
-    Flash flash;                // starts invalid
-
+    // The flashlight-join walk lives in Grouping::flash_at() (shared with
+    // Grouping::flashes()); here we only resolve this cluster's matched flash
+    // index (the per-cluster "flash" scalar) and delegate.
     const auto* p = this->node()->parent;
-    if (!p)  return flash;
+    if (!p)  return Flash{};
     const auto* g = p->value.facade<Grouping>();
-    if (!g)  return flash;
+    if (!g)  return Flash{};
 
     const int flash_index = this->get_scalar("flash", -1);
-
-    //std::cout << "Test3 " << flash_index << std::endl;
-    
-    if (flash_index < 0) {
-        return flash;
-    }
-    if (! g->has_pc("flash")) {
-        return flash;
-    }
-    flash.m_valid = true;
-        
-    // These are kind of inefficient as we get the "flash" PC each time.
-    flash.m_time = g->get_element<double>("flash", "time", flash_index, 0);
-    flash.m_value = g->get_element<double>("flash", "value", flash_index, 0);
-    flash.m_ident = g->get_element<int>("flash", "ident", flash_index, -1);
-    flash.m_type = g->get_element<int>("flash", "type", flash_index, -1);
-
-    // std::cout << "Test3: " << g->has_pc("flash") << " " << g->has_pc("light") << " " << g->has_pc("flashlight") << " " << flash_index << " " << flash.m_time << std::endl;
-
-    if (!(g->has_pc("light") && g->has_pc("flashlight"))) {
-        return flash;           // valid, but no vector info.
-    }
-    
-    // These are spans.  We walk the fl to look up in the l.
-    const auto fl_flash = g->get_pcarray<int>("flash", "flashlight");
-    const auto fl_light = g->get_pcarray<int>("light", "flashlight");
-    const auto l_times = g->get_pcarray<double>("time", "light");
-    const auto l_values = g->get_pcarray<double>("value", "light");
-    const auto l_errors = g->get_pcarray<double>("error", "light");
-
-    // std::cout << "Test3: " << fl_flash.size() << " " << fl_light.size() << std::endl;
-
-    const size_t nfl = fl_light.size();
-    for (size_t ifl = 0; ifl < nfl; ++ifl) {
-        if (fl_flash[ifl] != flash_index) continue;
-        const int light_index = fl_light[ifl];
-        
-        flash.m_times.push_back(l_times[light_index]);
-        flash.m_values.push_back(l_values[light_index]);
-        flash.m_errors.push_back(l_errors[light_index]);
-    }
-    return flash;
+    return g->flash_at(flash_index);
 }
 
 

@@ -864,6 +864,63 @@ bool Grouping::is_blob_plane_bad(const Blob* blob, int plane, double cut_ratio) 
 }
 
 
+Facade::Flash Facade::Grouping::flash_at(int flash_index) const
+{
+    Flash flash;                // starts invalid
+    if (flash_index < 0) {
+        return flash;
+    }
+    if (! this->has_pc("flash")) {
+        return flash;
+    }
+    flash.m_valid = true;
+
+    flash.m_time  = this->get_element<double>("flash", "time", flash_index, 0);
+    flash.m_value = this->get_element<double>("flash", "value", flash_index, 0);
+    flash.m_ident = this->get_element<int>("flash", "ident", flash_index, -1);
+    flash.m_type  = this->get_element<int>("flash", "type", flash_index, -1);
+
+    if (!(this->has_pc("light") && this->has_pc("flashlight"))) {
+        return flash;           // valid, but no per-OpDet info.
+    }
+
+    // Spans.  Walk the flashlight join to look up rows in the light PC.
+    const auto fl_flash = this->get_pcarray<int>("flash", "flashlight");
+    const auto fl_light = this->get_pcarray<int>("light", "flashlight");
+    const auto l_idents = this->get_pcarray<int>("ident", "light");
+    const auto l_times  = this->get_pcarray<double>("time", "light");
+    const auto l_values = this->get_pcarray<double>("value", "light");
+    const auto l_errors = this->get_pcarray<double>("error", "light");
+
+    const size_t nfl = fl_light.size();
+    for (size_t ifl = 0; ifl < nfl; ++ifl) {
+        if (fl_flash[ifl] != flash_index) continue;
+        const int light_index = fl_light[ifl];
+
+        flash.m_idents.push_back(l_idents[light_index]);
+        flash.m_times.push_back(l_times[light_index]);
+        flash.m_values.push_back(l_values[light_index]);
+        flash.m_errors.push_back(l_errors[light_index]);
+    }
+    return flash;
+}
+
+std::vector<Facade::Flash> Facade::Grouping::flashes() const
+{
+    std::vector<Flash> out;
+    if (! this->has_pc("flash")) {
+        return out;
+    }
+    const auto ftime = this->get_pcarray<double>("time", "flash");
+    const size_t nflash = ftime.size();
+    out.reserve(nflash);
+    for (size_t i = 0; i < nflash; ++i) {
+        out.push_back(flash_at((int)i));
+    }
+    return out;
+}
+
+
 // Local Variables:
 // mode: c++
 // c-basic-offset: 4
