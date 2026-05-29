@@ -20,7 +20,8 @@ New subpackage **`wire-cell-toolkit/match/`** (`WireCellMatch`):
 | `SemiAnalyticalModel.{h,cxx}` | Port of larsim's `phot::SemiAnalyticalModel` (SBND scope: dome PMTs + flat (X)Arapucas at anode/cathode orientation; VUV direct + VIS reflected). No larsoft deps. |
 | `Opflash.{h,cxx}` | Moved from larwirecell, interface unchanged. |
 | `TimingTPCBundle.{h,cxx}` | Moved from larwirecell, interface unchanged. |
-| `QLMatching.{h,cxx}` | `ITensorSetFanin` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. |
+| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash now arrives via a `flash` point cloud on the cluster tree's live root node (see `FlashToPCTree`), not a 2nd input port. |
+| `FlashToPCTree.{h,cxx}` | Dedicated SBND light I/O: reads the opflash tensor archive (composing a `Sio::TensorFileSource`) and attaches the per-event flash matrix as a `flash` PC on the live root node — mirroring MicroBooNE's `UbooneClusterSource`. See `qlmatching-code.md` §1a. |
 | `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d`, `dump_bee_bundle`, `dump_light`). |
 | `wscript_build` | `bld.smplpkg('WireCellMatch', use='WireCellClus WireCellAux WireCellIface WireCellUtil')` |
 

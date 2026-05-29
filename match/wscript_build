@@ -1,1 +1,1 @@
-bld.smplpkg('WireCellMatch', use='WireCellClus WireCellAux WireCellIface WireCellUtil')
+bld.smplpkg('WireCellMatch', use='WireCellSio WireCellClus WireCellAux WireCellIface WireCellUtil')

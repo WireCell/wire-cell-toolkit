@@ -15,22 +15,45 @@ etc., as of the `apply-pointcloud` branch.
 
 ## 1. Component shape
 
-`WireCell::Match::QLMatching` is an `ITensorSetFanin` + `IConfigurable`
+`WireCell::Match::QLMatching` is an `ITensorSetFilter` (1→1) + `IConfigurable`
 (`QLMatching.h:30`). It is registered as factory `"QLMatching"`.
 
 ```
-operator()(const input_vector& invec, output_pointer& out)   // QLMatching.cxx:139
+operator()(const input_pointer& in, output_pointer& out)   // QLMatching.cxx
 ```
 
 | Port | Direction | Contents |
 |------|-----------|----------|
-| in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA |
-| in 1 | opflash tensorset | a single 2-D tensor `[nflash, 1+nchan]`: column 0 = flash time, columns 1..nchan = PE per optical channel |
-| out 0 | cluster tensorset | **the input cluster tensorset passed through**, with only each matched cluster's `cluster_t0` mutated to the matched flash time (`:656-680`) |
+| in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA, **with the per-event optical flashes attached as a `flash` point cloud on the live root node** (placed there by `FlashToPCTree`, §1a) |
+| out 0 | cluster tensorset | **the input cluster tensorset passed through**, with only each matched cluster's `cluster_t0` mutated to the matched flash time |
 
-It is a *fanin* (2→1): charge in port 0, light in port 1, charge-with-t0 out.
-The matching result for the event display is written as a **side effect** to BEE
-JSON files (§5), not into the output tensorset.
+It is a *filter* (1→1): charge+light in, charge-with-t0 out. The light is no
+longer a separate input port — it rides on the cluster tree's live root node
+(mirroring the MicroBooNE `UbooneClusterSource` design, where optical data is
+placed on the root node and the matcher reads it from there). The matching
+result for the event display is written as a **side effect** to BEE JSON files
+(§5), not into the output tensorset.
+
+## 1a. Light I/O — `FlashToPCTree` (`match/src/FlashToPCTree.cxx`)
+
+`WireCell::Match::FlashToPCTree` is the dedicated SBND light reader: an
+`ITensorSetFilter` + `IConfigurable` (factory `"FlashToPCTree"`) inserted
+**between clustering and QLMatching** in the chain. Per event it:
+
+1. reads the next flash tensor set from the opflash archive (config `input`,
+   e.g. `opflash_apa0.tar.gz`, with `prefix`), via a **composed
+   `Sio::TensorFileSource`** so the parsed bytes are identical to the old
+   direct-tensor path;
+2. deserializes the live tree (`as_pctree(in, inpath+"/live")`) and attaches the
+   raw flash matrix `[nflash, 1+nchan]` verbatim as a 2-D `value` array in a
+   point cloud named `pcname` (default `flash`) on the **live root node**
+   (`root_live->value.local_pcs()["flash"]`);
+3. re-serializes live (now carrying the flash PC) and passes `/dead` through
+   unchanged.
+
+Config keys: `input` (required), `prefix` (`"opflash_"`), `inpath`
+(`"pointtrees/%d"`), `pcname` (`"flash"`). The opflash archive is event-aligned
+with the cluster stream (one flash set per incoming pctree).
 
 ---
 
@@ -41,6 +64,7 @@ JSON files (§5), not into the output tensorset.
 | `anode` | (req) | `m_anode` | `IAnodePlane` — TPC id / drift sign |
 | `detector_volumes` | (req) | `m_dv` | `IDetectorVolumes` — drift & Y/Z bounds |
 | `inpath` / `outpath` | `pointtrees/%d` | `m_inpath`/`m_outpath` | pctree path template |
+| `flash_pcname` | `flash` | `m_flash_pcname` | name of the live-root PC holding the flash matrix (must match `FlashToPCTree.pcname`) |
 | `bee_dir` | `data` | `m_bee_dir` | BEE-dump output dir (empty ⇒ no dump) |
 | `semimodel_file` | `sbnd/photodet/semi-analytical-sbnd.json` | `m_semimodel_file` | photon model JSON (`Persist::load`) |
 | `pmts` | `true` | `m_pmts` | use the SBND 312-OpDet PMT mask |
@@ -64,21 +88,23 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 
 ---
 
-## 3. Input parsing (`operator()` `:144-220`)
+## 3. Input parsing (`operator()`)
 
-- **Multiplicity / EOS** guards first (`:144-158`).
-- **OpDet mask** (`:165-180`): start from the hardcoded SBND PMT mask if
-  `m_pmts`, then zero out `m_ch_mask` entries; later reduced per-TPC (even/odd
-  OpDets, `:245-248`) and, for MC, saturated channels (`total_PE>5000 && PE==0`,
-  `:255-260`).
-- **Flashes** (`:198-212`): the port-1 tensor's rows become `Opflash` objects
-  (`std::make_shared<Opflash>(ten, iflash, 0.0, nchan)`); each is dropped unless
-  its time is in `[flash_mintime, flash_maxtime]` **and** `total_PE >=
-  flash_minPE`.
-- **Clusters** (`:183-220`): the port-0 tensorset is read as a pctree
+- **EOS** guard first: a null `in` returns immediately (single input now).
+- **OpDet mask**: start from the hardcoded SBND PMT mask if `m_pmts`, then zero
+  out `m_ch_mask` entries; later reduced per-TPC (even/odd OpDets) and, for MC,
+  saturated channels (`total_PE>5000 && PE==0`).
+- **Clusters**: the input tensorset is read as a pctree
   (`as_pctree(charge_tens, inpath + "/live")`), wrapped as a `Facade::Grouping`,
   anode + detector-volumes attached, and its `children()` taken as the
-  `Cluster*` list, **sorted by length descending** (`:217-219`).
+  `Cluster*` list, **sorted by length descending**.
+- **Flashes**: read the `flash_pcname` (`flash`) point cloud from the live root
+  node (`root_live->value.local_pcs()`), take its 2-D `value` array
+  `[nflash, 1+nchan]`, rebuild an `Aux::SimpleTensor` over it, and construct
+  `Opflash` objects per row exactly as before
+  (`std::make_shared<Opflash>(ten, iflash, 0.0, nchan)`); each is dropped unless
+  its time is in `[flash_mintime, flash_maxtime]` **and** `total_PE >=
+  flash_minPE`. (Empty/absent flash PC ⇒ 0 flashes for that event.)
 
 ---
 

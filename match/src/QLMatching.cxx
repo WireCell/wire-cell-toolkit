@@ -2,6 +2,7 @@
 #include "WireCellMatch/Util.h"
 #include "WireCellMatch/Opflash.h"
 
+#include "WireCellAux/SimpleTensor.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMpointtree.h"
@@ -17,7 +18,7 @@
 WIRECELL_FACTORY(QLMatching,
                  WireCell::Match::QLMatching,
                  WireCell::INamed,
-                 WireCell::ITensorSetFanin,
+                 WireCell::ITensorSetFilter,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -27,12 +28,6 @@ using namespace WireCell::Clus::Facade;
 QLMatching::QLMatching() : Aux::Logger("QLMatching", "match") {}
 QLMatching::~QLMatching() = default;
 
-std::vector<std::string> QLMatching::input_types()
-{
-    const std::string tname = std::string(typeid(input_type).name());
-    return std::vector<std::string>(m_multiplicity, tname);
-}
-
 void QLMatching::configure(const WireCell::Configuration& cfg)
 {
     m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
@@ -41,6 +36,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_inpath        = get(cfg, "inpath", m_inpath);
     m_outpath       = get(cfg, "outpath", m_outpath);
     m_bee_dir       = get(cfg, "bee_dir", m_bee_dir);
+    m_flash_pcname  = get(cfg, "flash_pcname", m_flash_pcname);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
 
@@ -121,6 +117,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["inpath"]          = m_inpath;
     cfg["outpath"]         = m_outpath;
     cfg["bee_dir"]         = m_bee_dir;
+    cfg["flash_pcname"]    = m_flash_pcname;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
     cfg["data"]            = m_data;
@@ -136,25 +133,14 @@ WireCell::Configuration QLMatching::default_configuration() const
     return cfg;
 }
 
-bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
+bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 {
     out = nullptr;
     using WireCell::Clus::Facade::float_t;
 
-    if (invec.size() != m_multiplicity) {
-        raise<ValueError>("unexpected multiplicity got %d want %d", invec.size(), m_multiplicity);
-        return true;
-    }
-
-    std::size_t neos = 0;
-    for (const auto& in : invec) if (!in) ++neos;
-    if (neos == invec.size()) {
+    if (!in) {
         log->debug("EOS at call {}", m_count++);
         return true;
-    }
-    if (neos) {
-        log->debug("port0 {} port1 {}", (invec[0] ? "valid" : "EOS"), (invec[1] ? "valid" : "EOS"));
-        raise<ValueError>("missing %d input tensors ", neos);
     }
 
     ExecMon em("starting QLMatching");
@@ -180,7 +166,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     for (std::size_t i = 0; i < m_ch_mask.size(); ++i) opdet_mask[m_ch_mask[i]] = 0;
 
     // ---- Read inputs ----
-    const auto& charge_ts = invec[0];
+    const auto& charge_ts = in;
     const int charge_ident = charge_ts->ident();
     std::string inpath = m_inpath;
     if (inpath.find("%") != std::string::npos) inpath = String::format(inpath, charge_ident);
@@ -195,20 +181,34 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     log->debug("Got live pctree with {} children", root_live->nchildren());
     log->debug(em("got live pctree"));
 
+    // Flashes come from the "flash" point cloud attached to the live root node
+    // by FlashToPCTree (a 2D "value" array [nflash, 1+nchan]). Reconstruct the
+    // tensor and build Opflash objects exactly as the prior direct-tensor path.
     std::vector<Opflash::pointer> flashes;
-    const auto& tens = invec[1]->tensors();
-    if (tens->size() != 1) raise<ValueError>("Expected 1 tensor, got %d", tens->size());
-    const auto& ten = tens->at(0);
-    if (ten->shape().size() != 2) raise<ValueError>("input tensor dim %d != 2", ten->shape().size());
-    const int nrow = ten->shape()[0];
-    const int ncol = ten->shape()[1];
-    log->debug("nrow {} ncol {}", nrow, ncol);
-    const int nchan = ncol - 1;
-    for (int iflash = 0; iflash < nrow; ++iflash) {
-        Opflash::pointer flash = std::make_shared<Opflash>(ten, iflash, 0.0, nchan);
-        if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
-        if (flash->get_total_PE() < m_flash_minPE) continue;
-        flashes.push_back(flash);
+    {
+        const auto& lpcs = root_live->value.local_pcs();
+        auto it = lpcs.find(m_flash_pcname);
+        if (it == lpcs.end()) {
+            log->warn("no flash point cloud \"{}\" on live root; 0 flashes", m_flash_pcname);
+        }
+        else {
+            auto arr = it->second.get("value");
+            if (arr && arr->shape().size() == 2 && arr->shape()[0] > 0) {
+                const size_t nrow = arr->shape()[0];
+                const size_t ncol = arr->shape()[1];
+                log->debug("nrow {} ncol {}", nrow, ncol);
+                const int nchan = (int) ncol - 1;
+                auto span = arr->elements<double>();
+                auto ten = std::make_shared<Aux::SimpleTensor>(
+                    ITensor::shape_t{nrow, ncol}, span.data());
+                for (size_t iflash = 0; iflash < nrow; ++iflash) {
+                    Opflash::pointer flash = std::make_shared<Opflash>(ten, iflash, 0.0, nchan);
+                    if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
+                    if (flash->get_total_PE() < m_flash_minPE) continue;
+                    flashes.push_back(flash);
+                }
+            }
+        }
     }
 
     auto grouping = root_live->value.facade<Grouping>();

@@ -5,7 +5,7 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IDetectorVolumes.h"
-#include "WireCellIface/ITensorSetFanin.h"
+#include "WireCellIface/ITensorSetFilter.h"
 
 #include "WireCellMatch/SemiAnalyticalModel.h"
 #include "WireCellMatch/TimingTPCBundle.h"
@@ -23,19 +23,19 @@ namespace WireCell::Match {
     /// model is loaded from a JSON file at configure time (see
     /// cfg/sbnd/semi-analytical-sbnd.json or equivalent).
     ///
-    /// Inputs (ITensorSetFanin, multiplicity=2):
-    ///   - port 0: pctree tensor set holding clusters
-    ///   - port 1: 2D tensor of flashes (row = flash, col 0 = time, cols 1..nchan = PE)
+    /// Input (ITensorSetFilter): pctree tensor set holding clusters, with the
+    /// per-event optical flashes attached as a "flash" point cloud on the live
+    /// root node (see FlashToPCTree). The flash PC holds a 2D "value" array
+    /// [nflash, 1+nchan] (col 0 = time, cols 1..nchan = PE).
     /// Output: cluster tensor set with per-cluster t0 set from matched flash.
     class QLMatching : public Aux::Logger,
-                       public ITensorSetFanin,
+                       public ITensorSetFilter,
                        public IConfigurable {
     public:
         QLMatching();
         virtual ~QLMatching();
 
-        std::vector<std::string> input_types() override;
-        bool operator()(const input_vector& invec, output_pointer& out) override;
+        bool operator()(const input_pointer& in, output_pointer& out) override;
 
         void configure(const WireCell::Configuration& cfg) override;
         WireCell::Configuration default_configuration() const override;
@@ -43,7 +43,10 @@ namespace WireCell::Match {
     private:
         std::size_t m_count{0};
         int m_bee_index{0};
-        std::size_t m_multiplicity{2};
+
+        // Name of the point cloud (on the live root node) carrying the flash
+        // matrix; must match FlashToPCTree's "pcname".
+        std::string m_flash_pcname{"flash"};
 
         // PMTs on vs off (default true => use SBND PMTs); see ch_mask for the
         // disabled channels.
