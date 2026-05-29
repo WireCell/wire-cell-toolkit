@@ -79,6 +79,13 @@ auto live_clusters = live_grouping.children();  // sorted copy for deterministic
 sort_clusters(live_clusters);
 ```
 
+> **⚠ Correction (2026-05-28):** building the graph vertex index from this *sorted*
+> `live_clusters` was a bug — `merge_clusters` dereferences vertex indices against the
+> *unsorted* `grouping.children()`, so the wrong clusters were merged. Fixed by building
+> `map_cluster_index`/vertices in `children()` order and calling `sort_clusters` only
+> afterward (for iteration determinism). See
+> [clustering-6func-review.md §0](clustering-6func-review.md).
+
 **Note:** As in `clustering_regular`, the all-pairs inner loop (`j=i+1`) visits every
 pair regardless of order. The sort ensures consistent vertex numbering in the boost
 graph and consistent `map_cluster_index` assignments across runs.

@@ -276,12 +276,12 @@ local hio_dnn = [g.pnode({
     ];
 
 
-local dnnroi = import 'pgrapher/experiment/pdhd/dnnroi.jsonnet';
+local dnnroi = import 'pgrapher/experiment/pdhd/dnnroi_pp.jsonnet';
 local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
+        model: "dnnroi/pdhd/pipe_distill_transformer_6ch.ts",
         device: "cpu", // "gpucpu",
         concurrency: 1,
     },

@@ -176,9 +176,11 @@ static void clustering_close(
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
-  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
-  sort_clusters(live_clusters);
-
+  auto live_clusters = live_grouping.children();
+  // Build the graph vertex index in children() order: merge_clusters() dereferences
+  // these vertex indices against grouping.children(), so the index order here MUST match
+  // children(), not the sorted order.  sort_clusters() is applied only afterwards, to make
+  // the edge-building iteration order below deterministic across runs.
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     const auto& live = live_clusters.at(ilive);
     if (live->get_default_scope().hash() != scope.hash()) {
@@ -187,6 +189,7 @@ static void clustering_close(
     map_cluster_index[live] = ilive;
     ilive2desc[ilive] = boost::add_vertex(ilive, g);
   }
+  sort_clusters(live_clusters);
 
   for (size_t i=0;i!=live_clusters.size();i++){
     auto cluster_1 = live_clusters.at(i);

@@ -213,7 +213,15 @@ local img = {
     }.ret,
 
     // in: IBlobSet out: ICluster
-    solving :: function(anode, aname) {
+    //
+    // full_deghost (bool, default=false):
+    //   false → "simple-solving" — historical SBND default: one ChargeSolving
+    //           triple + one InSliceDeghosting round + GlobalGeomClustering.
+    //   true  → "uboone-solving" — matches uBooNE production: two
+    //           ProjectionDeghosting passes, three ChargeSolving triples,
+    //           three InSliceDeghosting rounds. See sbnd_xin/docs/imaging.md
+    //           "Comparison with the uBooNE imaging chain" for derivation.
+    solving :: function(anode, aname, full_deghost=false) {
 
         local bc = g.pnode({
             type: "BlobClustering",
@@ -296,8 +304,9 @@ local img = {
         local cs3 = self.solving("3rd"),
         local ld3 = self.local_deghosting(3,"3rd"),
 
-        // ret: g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc],"uboone-solving"),
-        ret: g.pipeline([bc, cs1, ld1, gc],"simple-solving"),
+        ret: if full_deghost
+             then g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc], "uboone-solving")
+             else g.pipeline([bc, cs1, ld1, gc], "simple-solving"),
     }.ret,
 
     dump :: function(anode, aname, drift_speed) {
@@ -314,21 +323,21 @@ local img = {
 };
 
 function() {
-    local imgpipe (anode, multi_slicing, add_dump = true) =
+    local imgpipe (anode, multi_slicing, add_dump = true, full_deghost = false) =
     if multi_slicing == "single"
     then g.pipeline([
             // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             // img.slicing(anode, anode.name, 1916, active_planes=[], masked_planes=[0,1],dummy_planes=[2]), // 109*22*4
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             img.tiling(anode, anode.name),
-            img.solving(anode, anode.name),
+            img.solving(anode, anode.name, full_deghost=full_deghost),
             // img.clustering(anode, anode.name),
             ] + if add_dump then [
             img.dump(anode, anode.name, params.lar.drift_speed),] else [])
     else if multi_slicing == "active"
     then g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
-            img.solving(anode, anode.name+"-ms-active"),
+            img.solving(anode, anode.name+"-ms-active", full_deghost=full_deghost),
             // img.clustering(anode, anode.name+"-ms-active"),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else [])
@@ -346,7 +355,7 @@ function() {
             img.tiling(anode, anode.name),]),
         local active_fork = g.pipeline([
             st,
-            img.solving(anode, anode.name+"-ms-active"),
+            img.solving(anode, anode.name+"-ms-active", full_deghost=full_deghost),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
         local masked_fork = g.pipeline([
@@ -358,8 +367,8 @@ function() {
     }.ret,
 
 
-    per_anode(anode, multi_slicing = "single", add_dump = true) :: g.pipeline([
+    per_anode(anode, multi_slicing = "single", add_dump = true, full_deghost = false) :: g.pipeline([
         img.pre_proc(anode, anode.name),
-        imgpipe(anode, multi_slicing, add_dump),
+        imgpipe(anode, multi_slicing, add_dump, full_deghost),
         ], "per_anode"),
 }

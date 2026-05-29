@@ -166,8 +166,7 @@ local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        // model: "ts-model/unet-l23-cosmic500-e50.ts",
-        model: "ts-model/CP49.ts",
+        model: "dnnroi/pdvd/pipe_distill_nestedunet_6ch.ts",
         device: "cpu", // "gpucpu",
         concurrency: 1,
     },
@@ -178,8 +177,7 @@ local magoutput = 'protodunevd-sim-check-dnnsp.root';
 local magnify = import 'pgrapher/experiment/protodunevd/magnify-sinks.jsonnet';
 local magnifyio = magnify(tools, magoutput);
 
-// Note: better switch to layers
-local dnnroi = import 'pgrapher/experiment/protodunevd/dnnroi.jsonnet';
+local dnnroi = import 'pgrapher/experiment/protodunevd/dnnroi_pp.jsonnet';
 
 // local dnn_retaggers = [ g.pnode({
 //     type: 'Retagger',
@@ -312,8 +310,7 @@ local parallel_graph = f.fanpipe('DepoSetFanout', parallel_pipes, 'FrameFanin', 
 //   for n in std.range(0, std.length(tools.anodes) - 1)
 // ];
 // 
-// // Note: better switch to layers
-// local dnnroi = import 'pgrapher/experiment/protodunevd/dnnroi.jsonnet';
+// local dnnroi = import 'pgrapher/experiment/protodunevd/dnnroi_pp.jsonnet';
 // 
 // local pipelines = [
 //     g.pipeline([

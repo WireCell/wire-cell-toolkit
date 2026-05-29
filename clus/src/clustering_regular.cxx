@@ -469,9 +469,11 @@ static void clustering_regular(
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
-  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
-  sort_clusters(live_clusters);
-
+  auto live_clusters = live_grouping.children();
+  // Build the graph vertex index in children() order: merge_clusters() dereferences
+  // these vertex indices against grouping.children(), so the index order here MUST match
+  // children(), not the sorted order.  sort_clusters() is applied only afterwards, to make
+  // the edge-building iteration order below deterministic across runs.
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;
@@ -481,6 +483,7 @@ static void clustering_regular(
       // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
    }
   }
+  sort_clusters(live_clusters);
 
   // original algorithm ... (establish edges ... )
 

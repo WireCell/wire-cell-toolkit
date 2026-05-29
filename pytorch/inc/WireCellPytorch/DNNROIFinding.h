@@ -79,6 +79,14 @@ namespace WireCell {
             // The model downsamples/rebins in time by a number of ticks.
             int tick_per_slice{10};
 
+            // Round model_ticks up to a multiple of this value before
+            // running inference.  Use tick_per_slice (the default when
+            // unset, i.e. 0) when the model can absorb any post-rebin
+            // width.  Set larger (e.g. 128 for PDVD's MobileNetV3 UNet,
+            // whose 5 stride-2 levels post-rebin need width divisible
+            // by 32).
+            int tick_pad_multiple{0};
+
             // An output file used for special debugging.
             std::string debugfile{""};
 

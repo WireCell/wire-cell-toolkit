@@ -29,24 +29,6 @@ convert input ~IFrame~ ultimately to torch tensors, and vice versa on output.
 This node also supports a chunked processing pattern and down/up sampling as
 attempts to limit (CPU) memory usage.
 
-** DNNROIFindingMultiPlane
-
-A multi-plane variant of ~DNNROIFinding~ for models trained on more than one
-wire plane stacked along the channel axis (eg, a model trained on PDHD APA
-U+V with input shape ~(1, 3, 1600, 1500)~).  The single-plane ~DNNROIFinding~
-takes one ~plane: N~ at a time; ~DNNROIFindingMultiPlane~ takes a list of plane
-indices via ~planes: [N0, N1, ...]~ and concatenates their per-plane Eigen
-arrays along the channel axis before feeding the model.
-
-Two extra config keys vs the single-plane node:
-
-- ~planes: [int]~ — input planes to stack (channel axis).
-- ~output_planes: [int]~ — indices into ~planes~ whose model output should be
-  emitted as a tagged trace set.  Empty means "all".  Useful for suppressing
-  a plane's DNN output while still feeding the model the data it expects
-  (eg, on PDHD APA0 the user may want only the U-plane DNN-ROI while still
-  giving the model the real V data it was trained on).
-
 An optional ~debugfile~ config writes a per-call ~{debugfile}_callN.pt~
 containing the model's ~(input, output, meta)~ tuple via ~torch::pickle_save~,
 loadable in Python with ~torch.load~ for offline validation against the same

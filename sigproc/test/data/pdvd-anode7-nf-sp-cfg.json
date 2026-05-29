@@ -19,7 +19,8 @@
          "inname": "protodune-orig-frames-anode7.tar.bz2",
          "tags": [
             "orig"
-         ]
+         ],
+         "tick": 500
       },
       "name": "origframesrc7",
       "type": "FrameFileSource"
@@ -278,7 +279,100 @@
             8123,
             8124,
             8414,
-            8507
+            8507,
+            928,
+            929,
+            964,
+            3072,
+            3073,
+            3074,
+            4001,
+            4707,
+            4791,
+            6604,
+            6620,
+            6621,
+            6622,
+            6623,
+            6624,
+            6625,
+            6626,
+            6628,
+            6629,
+            6724,
+            6725,
+            6744,
+            6771,
+            6776,
+            6961,
+            7094,
+            7341,
+            7346,
+            7442,
+            7572,
+            7573,
+            7574,
+            7817,
+            7952,
+            7954,
+            7955,
+            7956,
+            7957,
+            7958,
+            7959,
+            7960,
+            7961,
+            7962,
+            7963,
+            8316,
+            8772,
+            8899,
+            8914,
+            9081,
+            9121,
+            9122,
+            9132,
+            9163,
+            9262,
+            9724,
+            9725,
+            9784,
+            9785,
+            9786,
+            9787,
+            10066,
+            10705,
+            10922,
+            11044,
+            11045,
+            11046,
+            11047,
+            11048,
+            11049,
+            11050,
+            11051,
+            11054,
+            11055,
+            11056,
+            11057,
+            11410,
+            11411,
+            11458,
+            11463,
+            11464,
+            11467,
+            11468,
+            11556,
+            11558,
+            11652,
+            11727,
+            11730,
+            11731,
+            11773,
+            11848,
+            12210,
+            12216,
+            12217
          ],
          "channel_info": [
             {
@@ -4046,10 +4140,6 @@
                ]
             },
             {
-               "channels": [ ],
-               "freqmasks": [ ]
-            },
-            {
                "channels": [
                   9692,
                   9693,
@@ -7622,8 +7712,24 @@
                   10166,
                   10167
                ],
-               "max_rms_cut": 30,
-               "min_rms_cut": 8
+               "max_rms_cut": 50,
+               "min_rms_cut": {
+                  "points": [
+                     {
+                        "l": 0,
+                        "v": 9
+                     },
+                     {
+                        "l": 120,
+                        "v": 9
+                     },
+                     {
+                        "l": 172,
+                        "v": 10
+                     }
+                  ],
+                  "type": "piecewise_linear_in_wirelength"
+               }
             },
             {
                "channels": [
@@ -8105,7 +8211,23 @@
                   11119
                ],
                "max_rms_cut": 30,
-               "min_rms_cut": 8
+               "min_rms_cut": {
+                  "points": [
+                     {
+                        "l": 0,
+                        "v": 9.0999999999999996
+                     },
+                     {
+                        "l": 120,
+                        "v": 9.0999999999999996
+                     },
+                     {
+                        "l": 172,
+                        "v": 11
+                     }
+                  ],
+                  "type": "piecewise_linear_in_wirelength"
+               }
             },
             {
                "channels": [
@@ -8695,7 +8817,7 @@
                   12287
                ],
                "max_rms_cut": 30,
-               "min_rms_cut": 8
+               "min_rms_cut": 10
             }
          ],
          "dft": "FftwDFT",
@@ -23850,9 +23972,7 @@
          "grouped_filters": [ ],
          "intraces": "orig",
          "maskmap": {
-            "ledge": "bad",
-            "noisy": "bad",
-            "sticky": "bad"
+            "noisy": "bad"
          },
          "multigroup_chanfilters": [
             {
@@ -38842,8 +38962,7 @@
          "troi_ind_th_factor": 3,
          "use_multi_plane_protection": true,
          "use_roi_debug_mode": false,
-         "wiener_tag": "wiener7",
-         "wiener_threshold_tag": "threshold7"
+         "wiener_tag": "wiener7"
       },
       "name": "anode7sigproc7",
       "type": "OmnibusSigProc"

@@ -18,6 +18,9 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/FFTBestLength.h"
 #include "WireCellUtil/Waveform.h"
+#include "WireCellUtil/NumpyHelper.h"
+
+#include <cmath>
 
 #include "WireCellUtil/NamedFactory.h"
 
@@ -174,6 +177,8 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     m_frame_tag = get(config, "frame_tag", m_frame_tag);
 
     m_use_roi_debug_mode = get(config, "use_roi_debug_mode", m_use_roi_debug_mode);
+    m_dump_2d_spectra = get(config, "dump_2d_spectra", m_dump_2d_spectra);
+    m_dump_2d_prefix = get(config, "dump_2d_prefix", m_dump_2d_prefix);
     m_save_negative_charge = get(config, "save_negative_charge", m_save_negative_charge);
     m_use_roi_refinement = get(config, "use_roi_refinement", m_use_roi_refinement);
     m_tight_lf_tag = get(config, "tight_lf_tag", m_tight_lf_tag);
@@ -835,7 +840,22 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
     }
 
     // since we only do FFT along time, no need to change dimension for wire ...
-    const size_t fine_nticks = fft_best_length(fravg.planes[0].paths[0].current.size());
+    //
+    // Linear-conv fix: the FFT-based FR × ER multiply below is a CIRCULAR
+    // convolution on this window.  Without padding, the linear-conv length
+    // (FR_len + ER_len - 1, e.g. 1325 + ~200 - 1 = 1524 for PDVD V plane on
+    // the top CRP) can exceed the window length (= fft_best_length(FR_len) =
+    // 1331 for PDVD), so the tail of the linear conv wraps around to the
+    // start of the window.  For ERs with a sharp cutoff (the PD-VD top JSON
+    // ER ends abruptly at 20 µs) the wraparound destructively interferes at
+    // the V crosshair (k_wire ≈ -0.16, f_time ≈ 0.0019 MHz) and creates a
+    // spurious ~28× deepening of the response notch there.  Doubling the
+    // FFT length gives a comfortable margin for the linear conv: the FR + ER
+    // tail fits without wrapping.  For PDVD this gives fine_nticks ≈ 2662.
+    // Cost: 2× memory + ~2× FFT cost for this build-once response array.
+    // See DNN_ROI_SP/docs/vplane_low_freq_pole.md ("Identification — Fix 2").
+    const size_t fine_nticks_orig = fft_best_length(fravg.planes[0].paths[0].current.size());
+    const size_t fine_nticks = fft_best_length(2 * fine_nticks_orig);
     int fine_nwires = fravg.planes[0].paths.size();
     m_avg_response_nwires = fine_nwires;
 
@@ -910,32 +930,46 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
             // arr.block(0,ncols-fine_time_shift,nrows,fine_time_shift) = arr1;
         }
 
-        // redigitize ...
+        // Redigitize from the fine (FR period) grid onto the SP tick grid via
+        // textbook linear interpolation.  This restores the original toolkit
+        // author's intent (a linear-interp recipe whose two weights had been
+        // accidentally swapped, producing the picked-sample pattern
+        // arr[1, 4, 9, 14, ...] at integer ratio 5 which collapsed the V-plane
+        // response at the crosshair).  Now that the FR × ER multiply above is
+        // a true LINEAR convolution (fine_nticks padded to 2× orig), the
+        // decimation method matters only ~0.03% at the V crosshair (verified
+        // in DNN_ROI_SP/simulation/test_decim_choice.py: orig / corrected /
+        // offset_0 / boxcar all agree to 4 digits under linear_conv=True).
+        //
+        // At integer ratio R = m_period / fravg.period (= 5 for PDVD), this
+        // reduces to wfs[i] = arr(irow, i*R) -- direct subsample at the start
+        // of each SP tick.  At non-integer ratios it linearly interpolates
+        // between the two surrounding fine-grid samples.
+        //
+        // TIME-ORIGIN NOTE: the previous boxcar fix at this site was a
+        // (1/R) * Σ arr[i*R : (i+1)*R] -- equivalent to a 5-tap moving-average
+        // FIR with linear-phase delay of (R-1)/2 = 2 fine ticks = +200 ns
+        // (PDVD).  The textbook linear-interp below has no delay (wfs[0] =
+        // arr(irow, 0) sits at t = 0 ns, matching the FR's own time origin).
+        // This is a -200 ns shift in c_resp relative to the prior boxcar
+        // commit; equivalently the deconvolved waveform shifts +200 ns later.
+        // Any downstream tick-alignment calibration that was tuned against
+        // the boxcar's effective +200 ns delay may need to be revisited.
         for (int irow = 0; irow < fine_nwires; ++irow) {
-            // gtemp = new TGraph();
-
-            size_t fcount = 1;
-            for (int i = 0; i != m_fft_nticks; i++) {
-                double ctime = ctbins.at(i);
-
-                if (fcount < fine_nticks)
-                    while (ctime > ftbins.at(fcount)) {
-                        fcount++;
-                        if (fcount >= fine_nticks) break;
-                    }
-
-                if (fcount < fine_nticks) {
-                    wfs.at(i) = ((ctime - ftbins.at(fcount - 1)) / fravg.period * arr(irow, fcount - 1) +
-                                 (ftbins.at(fcount) - ctime) / fravg.period * arr(irow, fcount));  // / (-1);
-                }
-                else {
-                    wfs.at(i) = 0;
-                }
+            for (int i = 0; i != m_fft_nticks; ++i) {
+                const double ctime = i * m_period;
+                const double fidx = ctime / fravg.period;
+                const int j_lo = (int)std::floor(fidx);
+                const double frac = fidx - j_lo;             // [0, 1)
+                const int j_hi = j_lo + 1;
+                const double v_lo = (j_lo >= 0 && j_lo < (int)fine_nticks)
+                                    ? arr(irow, j_lo) : 0.0;
+                const double v_hi = (j_hi >= 0 && j_hi < (int)fine_nticks)
+                                    ? arr(irow, j_hi) : 0.0;
+                wfs.at(i) = (1.0 - frac) * v_lo + frac * v_hi;
             }
 
             overall_resp[iplane].push_back(wfs);
-
-            // wfs.clear();
         }  // loop inside wire ...
 
         // calculated the wire shift ...
@@ -1096,8 +1130,30 @@ void OmnibusSigProc::decon_2D_init(int plane)
     // do second round FFT on the response on wire
     fwd_inplace(m_dft, c_resp, 0);
 
+    // Diagnostic dump (off in production): write the input, response and
+    // output 2D spectra to a NPZ.  Saved BEFORE the division so we capture
+    // the un-deconvolved input spectrum next to the response and decon.
+    Array::array_xxc c_input_dump;
+    if (m_dump_2d_spectra) {
+        c_input_dump = m_c_data[plane];   // copy before in-place division
+    }
+
     // make ratio to the response and apply wire filter
     m_c_data[plane] = m_c_data[plane] / c_resp;
+
+    if (m_dump_2d_spectra) {
+        const char* pn = (plane == 0) ? "U" : ((plane == 1) ? "V" : "W");
+        std::string fname = m_dump_2d_prefix + "_anode"
+                          + std::to_string(m_anode->ident()) + "_plane"
+                          + pn + ".npz";
+        Array::array_xxc c_resp_dump = c_resp;
+        Array::array_xxc c_decon_dump = m_c_data[plane];
+        WireCell::Numpy::save2d(c_input_dump, "input",    fname, "w");
+        WireCell::Numpy::save2d(c_resp_dump,  "response", fname, "a");
+        WireCell::Numpy::save2d(c_decon_dump, "decon",    fname, "a");
+        log->info("call={} dumped 2D spectra to {} (shape {}x{})",
+                  m_count, fname, c_input_dump.rows(), c_input_dump.cols());
+    }
 
     // Special debug-mode tap: capture the deconvolved spectrum before any
     // software filter (Wire / Wiener / LF) and before any ROI mask.

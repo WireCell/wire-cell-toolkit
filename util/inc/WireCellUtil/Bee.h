@@ -122,6 +122,7 @@ namespace WireCell::Bee {
         std::vector<double> m_y, m_z; // a buffered patch in the making
         double m_tolerance{0};
         size_t m_minpts{3};        // at least a triangle
+        int m_tpc{-1};             // -1 = legacy bare-array JSON; >=0 = {version:2, tpc, polygons}
     public:
 
         /// Create a named patches.  A point is ignored if it is withing
@@ -129,8 +130,12 @@ namespace WireCell::Bee {
         /// Tolerance must be provided in WCT system of units.  For a patch to
         /// be considered it must have at least minpts number of points after
         /// tolerance filtering is applied.
+        /// If tpc >= 0, the serialized JSON is the wire-cell-bee3 v2 wrapper
+        /// {"version":2, "tpc":tpc, "polygons":[...]} (see wire-cell-bee3
+        /// docs/dead-area.md).  Default (tpc=-1) keeps the legacy bare-array
+        /// JSON format.
         explicit Patches(const std::string& name, double tolerance=0*units::mm,
-                         size_t minpts=3);
+                         size_t minpts=3, int tpc=-1);
         
         /// Append a single point to the current patch.
         void append(double y, double z);

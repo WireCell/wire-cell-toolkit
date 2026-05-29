@@ -44,7 +44,26 @@ function(anode, sp_pipe, dnnroi_pipe, tools, params,
          l1sp_pd_dump_mode='process',
          l1sp_pd_dump_path='',
          l1sp_pd_wf_dump_path='',
-         l1sp_pd_dump_all_rois=false)
+         l1sp_pd_dump_all_rois=false,
+         // ── DNN-mode opts (l1sp_pd_dump_mode == 'dnn') ────────────────
+         // ``l1sp_pd_torch_service`` is the pre-constructed TorchService
+         // jsonnet object that L1SPFilterPD will call via ITensorForward.
+         // Must be non-null when l1sp_pd_dump_mode == 'dnn'.
+         l1sp_pd_torch_service=null,
+         l1sp_pd_dnn_threshold=0.9945,
+         // When true, the DNN also vetoes adjacency-promoted ROIs
+         // (i.e. ROIs whose heuristic flag_l1 == 0 but flag_l1_adj == 1).
+         // Default true since 2026-05-25 — set to false to recover the
+         // original behaviour where adj-promoted ROIs bypassed the DNN.
+         l1sp_pd_adj_dnn_veto=true,
+         l1sp_pd_dnn_window_ticks=256,
+         l1sp_pd_dnn_debug_path='',
+         // ── Loose-heur overrides (DNN-chain only) ─────────────────────
+         // Defaults match the C++ defaults (trad-chain values); loosen
+         // when running heuristic on DNN ROIs.
+         l1sp_pd_gmax_min=1500.0,
+         l1sp_pd_min_length=30,
+         l1sp_pd_energy_frac_thr=0.66)
 
   local n = anode.data.ident;
   local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
@@ -117,13 +136,37 @@ function(anode, sp_pipe, dnnroi_pipe, tools, params,
       l1_asym_very_long: 0.35,
       l1_adj_enable: l1sp_pd_adj_enable,
       l1_adj_max_hops: l1sp_pd_adj_max_hops,
+      // Phase-C loose-heur overrides: DNN ROIs are typically shorter than
+      // trad ROIs for the same signal, so default pre-filters (gmax>=1500,
+      // min_length>=30, energy_frac>=0.66) reject many candidates that the
+      // trad chain catches. Since the DNN L1SP refines downstream, the
+      // heuristic here can be intentionally loose -- false positives at
+      // this stage are vetoed by DNN.
+      l1_gmax_min:           l1sp_pd_gmax_min,
+      l1_min_length:         l1sp_pd_min_length,
+      l1_energy_frac_thr:    l1sp_pd_energy_frac_thr,
+      mode: l1sp_pd_dump_mode,   // 'process' | 'dump' | 'dnn' | 'hybrid'
       dump_mode: l1sp_pd_dump_mode == 'dump',
       dump_path: l1sp_pd_dump_path,
       dump_tag: 'apa%d' % n,
       waveform_dump_path: l1sp_pd_wf_dump_path,
       dump_all_rois: l1sp_pd_dump_all_rois,
+      // DNN-mode plumbing — required for mode='dnn' and mode='hybrid'.
+      // Ignored by L1SPFilterPD when mode is process/dump.
+      forward: if (l1sp_pd_dump_mode == 'dnn' || l1sp_pd_dump_mode == 'hybrid')
+                  && l1sp_pd_torch_service != null
+               then wc.tn(l1sp_pd_torch_service)
+               else '',
+      dnn_threshold:    l1sp_pd_dnn_threshold,
+      l1_adj_dnn_veto:  l1sp_pd_adj_dnn_veto,
+      dnn_window_ticks: l1sp_pd_dnn_window_ticks,
+      dnn_debug_path:   l1sp_pd_dnn_debug_path,
     },
-  }, nin=1, nout=1, uses=[tools.dft, anode]);
+  }, nin=1, nout=1,
+     uses=[tools.dft, anode] +
+          (if (l1sp_pd_dump_mode == 'dnn' || l1sp_pd_dump_mode == 'hybrid')
+              && l1sp_pd_torch_service != null
+           then [l1sp_pd_torch_service] else []));
 
   // Final merger: L1SP-modified gauss replaces gauss AND wiener;
   // raw passes through from the rawsigmerge.

@@ -1,24 +1,33 @@
-// Per-anode per-plane DNN-ROI subgraph for PDHD.
+// Per-anode per-plane DNN-ROI subgraph for ProtoDUNE-VD.
 //
-// Uses two stock single-plane DNNROIFinding nodes (U, V) sharing the
-// same CP43.ts (via TorchService).  Each call feeds the model an
-// (1, 3, 800, 1500) tensor; the two calls are serialized by the
-// TorchService semaphore so peak activation memory is for one plane
-// at a time — roughly half the stacked (1, 3, 1600, 1500) peak.
+// Uses two single-plane DNNROIFinding nodes (U, V) sharing the same
+// TorchService.  Each call feeds the model an (1, 6, ~476, 1600) tensor;
+// the two calls are serialized by the TorchService semaphore so peak
+// activation memory is for one plane at a time.
 //
-// The training shape was (1, 3, 1600, 1500) (U+V stacked) but the
-// MobileNetV3-Large UNet is fully convolutional on the channel axis,
-// so the same .ts is shape-flexible.  Empirically verified by
-// DNN_ROI_SP/scripts/test_per_plane_ts.py.
+// The PDVD .ts was trained on stacked U+V at (1, 6, ~952, 1600).  The
+// MobileNetV3-large UNet is fully convolutional on the channel axis, so
+// per-plane inference is structurally compatible — analogous to PDHD's
+// per-plane mode which has been validated by
+// DNN_ROI_SP/scripts/test_per_plane_ts.py.  An equivalent per-plane vs
+// stacked side-by-side validation for PDVD is still pending; treat
+// per-plane PDVD output as scientifically un-cross-checked until that
+// comparison lands.
 //
-// Per-anode policy:
-//   APA0:    U via model; V and W from standard SP gauss (passthrough).
-//   APA1-3:  U and V via model; W from standard SP gauss.
+// Per-anode policy: U and V via model, W from standard SP gauss
+// passthrough.  PDVD has no APA0 special case — all 8 anodes use the
+// same model for both U and V.
+//
+// PDVD's traced UNet has 5 stride-2 levels post-rebin and needs the
+// post-rebin tick width divisible by 32, i.e. input ticks divisible by
+// 128.  Default tick_pad_multiple=128 so the C++ node zero-pads any
+// input length to the next 128-multiple before inference (output is
+// cropped back to input_ticks).
 //
 // Output frame trace tags per APA N:
 //   - dnnspNu : DNN-ROI on U  (model output)
-//   - dnnspNv : DNN-ROI on V  (model on APA1-3; gauss passthrough on APA0)
-//   - dnnspNw : standard SP gauss on W  (always)
+//   - dnnspNv : DNN-ROI on V  (model output)
+//   - dnnspNw : standard SP gauss on W  (always passthrough)
 // Unified frame tag "dnnspN" via the final Retagger.
 
 local pg = import 'pgraph.jsonnet';
@@ -31,15 +40,16 @@ function(anode, ts, prefix='dnnroi',
          nchunks=1,
          mask_thresh=0.2,
          nchan=6,
-         debugfile='')
+         debugfile='',
+         tick_pad_multiple=128)
 
   local apaid = anode.data.ident;
   local prename = prefix + std.toString(apaid);
 
   // Input trace tags fed to the model, in the order the model expects.
-  // The 3-ch model (CP43.ts) uses the first three; the 6-ch KD/QAT models
-  // add tight_lf/decon_charge/gauss.  Order must match the training im_tags.
-  assert nchan == 3 || nchan == 6 : 'dnnroi nchan must be 3 or 6, got %d' % nchan;
+  // PDVD ships 6-channel models (DAGMan 287); order must match the
+  // training im_tags exactly.
+  assert nchan == 6 : 'pdvd dnnroi nchan must be 6, got %d' % nchan;
   local apa_intags = [
     'loose_lf%d' % apaid,
     'mp2_roi%d' % apaid,
@@ -47,9 +57,7 @@ function(anode, ts, prefix='dnnroi',
     'tight_lf%d' % apaid,
     'decon_charge%d' % apaid,
     'gauss%d' % apaid,
-  ][0:nchan];
-
-  local emit_v_from_model = (apaid != 0);
+  ];
 
   // Per-anode per-call debug filename suffix so U / V calls don't collide.
   local _dbg(suffix) =
@@ -67,25 +75,26 @@ function(anode, ts, prefix='dnnroi',
       // Propagate the per-channel Wiener threshold (carried as the
       // trace_summary of wiener%d in OmnibusSigProc output) onto the
       // output dnnsp%d* trace tag so the downstream Magnify pipeline
-      // can build hu/hv/hw_threshold0 TH1F.
+      // can build hu/hv/hw_threshold{N} TH1F.
       summary_tag: 'wiener%d' % apaid,
-      // 6-ch models bake per-channel z-scale normalization into the .ts,
-      // so they run with input_scale 1.0; the 3-ch model needs 1/4000.
-      input_scale: if nchan == 6 then 1.0 else 1.0 / 4000,
+      // PDVD 6-ch models bake per-channel z-scale normalization into
+      // the .ts, so they run with input_scale 1.0.
+      input_scale: 1.0,
       output_scale: output_scale,
       mask_thresh: mask_thresh,
       forward: wc.tn(ts),
       nticks: nticks,
       tick_per_slice: tick_per_slice,
+      tick_pad_multiple: tick_pad_multiple,
       nchunks: nchunks,
       debugfile: _dbg(dbg_suffix),
     },
   }, nin=1, nout=1, uses=[ts, anode]);
 
-  // Gauss passthrough for a non-DNN plane: re-tag gauss%d → outtag.
-  // summary_tags pulls the wiener%d trace_summary (= per-channel
-  // threshold) alongside the gauss waveforms so the threshold survives
-  // into the downstream Magnify TH1F.
+  // Gauss passthrough for W: re-tag gauss%d → outtag.  summary_tags
+  // pulls the wiener%d trace_summary (= per-channel threshold) alongside
+  // the gauss waveforms so the threshold survives into the downstream
+  // Magnify TH1F.
   local pass_through(plane, outtag, name_suffix) = pg.pnode({
     type: 'PlaneSelector',
     name: prename + name_suffix,
@@ -102,10 +111,7 @@ function(anode, ts, prefix='dnnroi',
   }, nin=1, nout=1, uses=[anode]);
 
   local u_node = dnn_node(0, 'dnnsp%du' % apaid, 'u', 'u');
-  local v_node =
-    if emit_v_from_model
-    then dnn_node(1, 'dnnsp%dv' % apaid, 'v', 'v')
-    else pass_through(1, 'dnnsp%dv' % apaid, '_vpass');
+  local v_node = dnn_node(1, 'dnnsp%dv' % apaid, 'v', 'v');
   local w_node = pass_through(2, 'dnnsp%dw' % apaid, '_wpass');
 
   local sub_nodes = [u_node, v_node, w_node];

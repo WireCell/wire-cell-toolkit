@@ -173,6 +173,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
+    m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
@@ -283,7 +284,11 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             for (size_t face_index = 0; face_index < anode->faces().size(); ++face_index) {
                 int face = anode->faces()[face_index]->which();
                 std::string name = String::format("channel-deadarea-apa%d-face%d", apa, face);
-                m_bee_dead_patches[apa].insert({face,Bee::Patches(name, 1*units::mm, 3)}); // Same parameters as the global one
+                // dead_area_version=2 emits the wire-cell-bee3 v2 wrapper with
+                // tpc=apa so the slab lands on the correct anode face.  Use -1
+                // for v1 (legacy bare-array JSON, default).
+                int tpc = (m_dead_area_version >= 2) ? apa : -1;
+                m_bee_dead_patches[apa].insert({face,Bee::Patches(name, 1*units::mm, 3, tpc)}); // Same parameters as the global one
             }
         }
     }

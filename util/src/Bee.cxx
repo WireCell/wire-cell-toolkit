@@ -148,14 +148,30 @@ int Bee::Points::back_cluster_id() const
 // array of patches
 // each patch is array of pairs
 // each pair gives (x,y).
-Bee::Patches::Patches(const std::string& name, double tolerance, size_t minpts)
-    : Object(name, Json::arrayValue)
+//
+// When m_tpc >= 0, m_data is instead a wrapper object
+// {"version":2, "tpc":m_tpc, "polygons":<triple-nested array>}
+// matching the wire-cell-bee3 v2 dead-area schema.
+namespace {
+    Json::Value init_patches_data(int tpc) {
+        if (tpc < 0) return Json::Value(Json::arrayValue);
+        Json::Value v(Json::objectValue);
+        v["version"] = 2;
+        v["tpc"] = tpc;
+        v["polygons"] = Json::arrayValue;
+        return v;
+    }
+}
+
+Bee::Patches::Patches(const std::string& name, double tolerance, size_t minpts, int tpc)
+    : Object(name, init_patches_data(tpc))
     , m_tolerance(tolerance)
     , m_minpts(minpts)
+    , m_tpc(tpc)
 {
 
 }
-        
+
 void Bee::Patches::append(double y, double z)
 {
     m_y.push_back(y);
@@ -166,7 +182,11 @@ void Bee::Patches::clear()
 {
     m_y.clear();
     m_z.clear();
-    m_data = Json::arrayValue;
+    if (m_tpc < 0) {
+        m_data = Json::arrayValue;
+    } else {
+        m_data["polygons"] = Json::arrayValue;
+    }
 }
 
 void Bee::Patches::flush()
@@ -225,14 +245,22 @@ void Bee::Patches::flush()
         jpt.append(m_z[ind] / units::cm);
         jpatch.append(jpt);
     }
-    m_data.append(jpatch);
+    if (m_tpc < 0) {
+        m_data.append(jpatch);
+    } else {
+        m_data["polygons"].append(jpatch);
+    }
 
     m_y.clear();
     m_z.clear();
 }
 
-size_t Bee::Patches::size() const { return m_data.size(); }
-bool Bee::Patches::empty() const { return m_data.empty(); }
+size_t Bee::Patches::size() const {
+    return m_tpc < 0 ? m_data.size() : m_data["polygons"].size();
+}
+bool Bee::Patches::empty() const {
+    return m_tpc < 0 ? m_data.empty() : m_data["polygons"].empty();
+}
 
 ///// Sink
 

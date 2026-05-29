@@ -266,6 +266,12 @@ namespace WireCell {
 
             bool m_isWrapped{false};
 
+            // Diagnostic: dump the 2D (wire x time-freq) input, response and
+            // deconvolved spectra inside decon_2D_init() to NPZ files named
+            // <m_dump_2d_prefix>_anode<N>_plane{U,V,W}.npz.  Off by default.
+            bool m_dump_2d_spectra{false};
+            std::string m_dump_2d_prefix{"sp_dump"};
+
             // If true, safe output as a sparse frame.  Traces will only
             // cover segments of waveforms which have non-zero signal
             // samples.

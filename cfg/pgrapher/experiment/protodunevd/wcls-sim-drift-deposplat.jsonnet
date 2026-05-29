@@ -374,14 +374,12 @@ local rio_sp = [g.pnode({
 //     for n in std.range(0, std.length(tools.anodes) - 1)
 //     ];
 
-// Note: better switch to layers
-local dnnroi = import 'pgrapher/experiment/protodunevd/dnnroi.jsonnet';
+local dnnroi = import 'pgrapher/experiment/protodunevd/dnnroi_pp.jsonnet';
 local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        // model: "ts-model/unet-l23-cosmic500-e50.ts",
-        model: "ts-model/CP49.ts",
+        model: "dnnroi/pdvd/pipe_distill_nestedunet_6ch.ts",
         device: "cpu", // "gpucpu",
         concurrency: 1,
     },

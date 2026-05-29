@@ -6,7 +6,8 @@ local sp_filters = import 'pgrapher/experiment/protodunevd/sp-filters.jsonnet';
 
 function(params, anode, chndbobj, n, name='',
          debug_dump_path='', debug_dump_groups=[],
-         maskmap=null, shield_dump_path='')
+         maskmap=null, shield_dump_path='',
+         intraces='orig')
   {
     local single = {
       type: 'PDVDOneChannelNoise',
@@ -91,7 +92,7 @@ function(params, anode, chndbobj, n, name='',
         channel_status_filters: [
         ],
         noisedb: wc.tn(chndbobj),
-        intraces: 'orig',  // frame tag get all traces
+        intraces: intraces,  // frame tag get all traces ('' = wildcard)
         outtraces: 'raw%d' % anode.data.ident,
       },
     }, uses=[chndbobj, anode, single, grouped,shieldcoupling_grouped], nin=1, nout=1),

@@ -129,6 +129,14 @@ namespace WireCell::Clus {
         void flush(WireCell::Bee::Points& bpts, int ident);
 
         bool m_save_deadarea{false};
+        // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for
+        //     single-TPC viewers like the original Bee).  2 = wire-cell-bee3 v2
+        //     wrapper {"version":2,"tpc":<apa>,"polygons":[...]} that places the
+        //     dead-area slab on the per-TPC anode face.  See wire-cell-bee3
+        //     docs/dead-area.md.  Currently we use the WCT anode ident as the
+        //     bee TPC index, which is correct for single-face anode detectors
+        //     (e.g. SBND) and may need a mapping table for multi-face anodes.
+        int m_dead_area_version{1};
 
 
         // Count how many times we are called

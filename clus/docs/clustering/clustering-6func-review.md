@@ -13,19 +13,93 @@
 
 ## Overall Status
 
-All 6 functions are functionally correct and have had all major prior fixes
-applied. One minor code fix was made in this session; one stale doc was updated.
-
 | Function | Logic | Bugs | Efficiency | Determinism | Multi-APA | Net |
 |---|---|---|---|---|---|---|
 | `Clustering_live_dead` | ✓ | ✓ | ✓ | ✓ | ✓ | Pass |
-| `Clustering_extend` | ✓ | Fixed* | ✓ | ✓ | ✓ | Pass |
-| `Clustering_regular` | ✓ | ✓ | ✓ | ✓ | ✓ | Pass |
-| `Clustering_parallel_prolong` | ✓ | ✓ | ✓ | ✓ | ✓ | Pass |
-| `Clustering_close` | ✓ | ✓ | ✓ | ✓ | N/A | Pass |
-| `ClusteringExtendLoop` | ✓ | ✓ | ✓ | ✓ | ✓ | Pass |
+| `Clustering_extend` | ✓ | Fixed*‡ | ✓ | ✓ | ✓ | Pass |
+| `Clustering_regular` | ✓ | Fixed‡ | ✓ | ✓ | ✓ | Pass |
+| `Clustering_parallel_prolong` | ✓ | Fixed‡ | ✓ | ✓ | ✓ | Pass |
+| `Clustering_close` | ✓ | Fixed‡ | ✓ | ✓ | N/A | Pass |
+| `ClusteringExtendLoop` | ✓ | Fixed‡ | ✓ | ✓ | ✓ | Pass |
 
-\* One minor fix applied in this session (see §2.2 below).
+\* Minor flag=2 `used_clusters` fix, 2026-04 (see §2.2 below).
+‡ **Critical merge-index bug fixed 2026-05-28 — see §0 below.** It affected all
+four sorting functions (`extend`, `regular`, `parallel_prolong`, `close`) and was
+the root cause of severe over-merging; the 2026-04 review missed it because the
+sorted-index pattern *looks* deterministic and correct in isolation.
+
+---
+
+## 0. Critical bug fixed (2026-05-28): sorted index vs. `merge_clusters` mismatch
+
+**Files:** `clustering_extend.cxx`, `clustering_regular.cxx`,
+`clustering_parallel_prolong.cxx`, `clustering_close.cxx`.
+
+**Symptom.** Severe over-merging: in an SBND per-APA event, the whole APA
+(16 358 points, multiple distinct tracks + out-of-anode cosmic charge) collapsed
+into a single cluster. Individual merges joined clusters that were ~150 cm apart
+and had no business merging. A clean, fully-contained track (x ∈ [−145,−104]) was
+swallowed into out-of-anode charge at x ≈ −234.
+
+**Root cause.** These four functions build a Boost connectivity graph whose vertex
+property is an index into a cluster vector, then call
+`merge_clusters(g, live_grouping)`. They built that index from a **`sort_clusters`-sorted**
+copy:
+
+```cpp
+auto live_clusters = live_grouping.children();
+sort_clusters(live_clusters);                 // reorders by length
+... map_cluster_index[live_clusters[ilive]] = ilive;   // index = SORTED position
+... boost::add_edge(ilive_of(c1), ilive_of(c2), g);
+merge_clusters(g, live_grouping);
+```
+
+But `merge_clusters` (`ClusteringFuncs.cxx`) dereferences the vertex index against a
+**fresh, unsorted** `grouping.children()`:
+
+```cpp
+auto orig_clusters = grouping.children();      // insertion order
+const int idx = g[desc];                       // a SORTED index
+auto live = orig_clusters[idx];                // ← sorted index into UNSORTED vector
+```
+
+So each edge correctly *identified* a cluster pair, but `merge_clusters` then merged
+**whichever clusters happened to occupy those positions in insertion order** — almost
+always the wrong ones. Empirically the two orders disagreed in 20 of 23 clusters on
+the first pass. The result was deterministic but wrong.
+
+**Why it hid since 2026-04-09.** The sort was added for cross-run determinism
+(commit `1676e22f`), without updating `merge_clusters` (which re-fetches unsorted
+`children()`). Only a handful of edges are added per pass, so only a few clusters get
+scrambled each step — output stayed plausible (mostly tracks) and no one traced a
+specific bad merge. It also produced the long-unexplained "`close` merged clusters
+158 cm apart, violating its own <2 cm gate" anomaly: `close` *picked* nearby clusters
+correctly; `merge_clusters` *executed* on scrambled distant ones. One bug, several
+symptoms.
+
+**Fix.** Build the vertex index in `children()` order — i.e. construct
+`map_cluster_index` / vertices **before** `sort_clusters`, and sort only afterward to
+keep the edge-building iteration order deterministic:
+
+```cpp
+auto live_clusters = live_grouping.children();
+for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {   // children() order
+    map_cluster_index[live_clusters[ilive]] = ilive;
+    ilive2desc[ilive] = boost::add_vertex(ilive, g);
+}
+sort_clusters(live_clusters);                                      // iteration only
+```
+
+This matches the index/iteration ordering that `live_dead`, `deghost`, `connect`,
+`isolated`, and `neutrino` already use (they build vertex indices straight from
+`grouping.children()` and were never affected — `isolated`/`neutrino` even carry the
+comment *"Use the deterministically-ordered children() vector for vertex indices"*).
+
+**Verification.** SBND evt2 APA0: the over-merge disappears — the pre-`separate`
+pipeline goes from one 16 358-point blob to 18 distinct clusters, and the formerly
+swallowed track stays contained at x ∈ [−145,−51.8]. Result is deterministic across
+runs. **This changes production clustering output (not bit-identical) and needs
+revalidation.**
 
 ---
 
@@ -319,7 +393,7 @@ was applied. Summary table updated from `BUG` to `Fixed`.
 |---|---|---|
 | `sort_clusters` | `Facade_Cluster.cxx` | Full tie-breaking; pointer is last resort |
 | `cluster_less` | `Facade_Cluster.cxx` | PCA-center self-comparison bug fixed (prior session) |
-| `merge_clusters` | `ClusteringFuncs.cxx` | Boost connected components; deterministic |
+| `merge_clusters` | `ClusteringFuncs.cxx` | Boost connected components. **Contract:** dereferences each graph vertex index against a fresh, unsorted `grouping.children()`, so callers MUST build their vertex indices in `children()` order, not sorted order (see §0). |
 | `compute_wireplane_params` | `Clustering_Util.cxx` | Builds per-wpid maps; deterministic |
 | `get_wireplaneid` (2-pt) | `Facade_Util.cxx:732` | Ray–bbox intersection; safe for cross-APA |
 | `Find_Closest_Points` | `clustering_extend.cxx` | Sorted strategic points; early exit |

@@ -3,6 +3,8 @@
 #include "WireCellAux/DftTools.h"
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/SimpleFrame.h"
+#include "WireCellAux/SimpleTensor.h"
+#include "WireCellAux/SimpleTensorSet.h"
 
 #include "WireCellIface/IFilterWaveform.h"
 
@@ -478,6 +480,150 @@ int decide_trigger(const std::vector<SubInfo>& subs,
     return 0;
 }
 
+// ── DNN-mode helpers (Mode::dnn) ──────────────────────────────────────
+// These mirror code/data/consolidate_training_data.py exactly so the
+// C++ feature vector matches the one the round-2 model was trained on
+// to bit-precision: scale = max(|raw|.max, |dec|.max, amp_floor) over
+// the FULL ROI, window = full ROI right-padded when nraw <= nbin, OR
+// ±nbin/2 ticks centered on argmax(|dec|) clamped to ROI bounds.
+
+// Compute the (lo, hi) window used by the VAE encoder.  ``nraw`` is
+// the ROI length; ``dec_off`` is the offset of the first ROI sample
+// within ``dec``.  Logic must match consolidate_training_data._window.
+static std::pair<int, int>
+dnn_window(const WireCell::ITrace::ChargeSequence& dec, int dec_off,
+           int nraw, int nbin)
+{
+    if (nraw <= nbin) return {0, nraw};
+    int center = 0;
+    double best = -1.0;
+    for (int i = 0; i < nraw; ++i) {
+        const double v = std::fabs(dec.at(dec_off + i));
+        if (v > best) { best = v; center = i; }
+    }
+    const int half = nbin / 2;
+    int lo = center - half;
+    int hi = lo + nbin;
+    if (lo < 0)         { lo = 0; hi = nbin; }
+    else if (hi > nraw) { hi = nraw; lo = hi - nbin; }
+    return {lo, hi};
+}
+
+// Fill a (2*nbin) buffer: channel 0 = raw[lo:hi]/scale (right-padded),
+// channel 1 = dec[lo:hi]/scale (right-padded).  Matches the training
+// pipeline (consolidate_training_data._pad on raw/scale and dec/scale).
+static void dnn_build_waveform(
+    const WireCell::ITrace::ChargeSequence& raw, int raw_off,
+    const WireCell::ITrace::ChargeSequence& dec, int dec_off,
+    int lo, int hi, int nbin, double scale,
+    std::vector<float>& out_2xN)
+{
+    out_2xN.assign(2 * nbin, 0.0f);
+    const float invs = (scale > 0) ? (float)(1.0 / scale) : 1.0f;
+    const int n = hi - lo;
+    for (int i = 0; i < n; ++i) {
+        out_2xN[0 * nbin + i] = (float)raw.at(raw_off + lo + i) * invs;
+        out_2xN[1 * nbin + i] = (float)dec.at(dec_off + lo + i) * invs;
+    }
+}
+
+// Compute the normalisation scale over the FULL ROI (not the window).
+static double dnn_amplitude_scale(
+    const WireCell::ITrace::ChargeSequence& raw, int raw_off,
+    const WireCell::ITrace::ChargeSequence& dec, int dec_off,
+    int nraw, double amp_floor)
+{
+    double mr = amp_floor, md = amp_floor;
+    for (int i = 0; i < nraw; ++i) {
+        const double r = std::fabs(raw.at(raw_off + i));
+        const double d = std::fabs(dec.at(dec_off + i));
+        if (r > mr) mr = r;
+        if (d > md) md = d;
+    }
+    return std::max(mr, md);
+}
+
+// Pack the 29 ROI scalars in the round-2 scaler.json order EXCLUDING
+// vae_kl (which the wrapper computes internally).  Must agree with
+// l1sp_dnn_pdhd_v1.meta.json's scalar_feature_order field.
+static void dnn_fill_scalars_29(const AsymRecord& rec,
+                                int prev_gap, int next_gap,
+                                int legacy_flag, double legacy_ratio,
+                                std::vector<float>& out)
+{
+    out.assign(29, 0.0f);
+    out[ 0] = (float)rec.nbin_fit;
+    out[ 1] = (float)rec.temp_sum;
+    out[ 2] = (float)rec.temp1_sum;
+    out[ 3] = (float)rec.temp2_sum;
+    out[ 4] = (float)rec.max_val;
+    out[ 5] = (float)rec.min_val;
+    out[ 6] = (float)prev_gap;
+    out[ 7] = (float)next_gap;
+    out[ 8] = (float)legacy_flag;
+    out[ 9] = (float)legacy_ratio;
+    out[10] = (float)rec.temp_sum_pos;
+    out[11] = (float)rec.temp_sum_neg;
+    out[12] = (float)rec.n_above_pos;
+    out[13] = (float)rec.n_above_neg;
+    out[14] = (float)rec.argmax_tick;
+    out[15] = (float)rec.argmin_tick;
+    out[16] = (float)rec.sig_peak;
+    out[17] = (float)rec.sig_integral;
+    out[18] = (float)rec.gmax;
+    out[19] = (float)rec.gauss_fill;
+    out[20] = (float)rec.gauss_fwhm_frac;
+    out[21] = (float)rec.roi_energy_frac;
+    out[22] = (float)rec.raw_asym_wide;
+    out[23] = (float)rec.core_lo;
+    out[24] = (float)rec.core_hi;
+    out[25] = (float)rec.core_length;
+    out[26] = (float)rec.core_fill;
+    out[27] = (float)rec.core_fwhm_frac;
+    out[28] = (float)rec.core_raw_asym_wide;
+}
+
+// Run the TorchScript model on one ROI.  Returns the sigmoid score in
+// [0, 1], or -1.0 on error (caller treats <0 as "do not fire").
+// ``wave_2xN`` and ``scalars29`` are the inputs prepared by the helpers
+// above; ``nbin`` is the model's expected tick count (256 for round-2).
+static double dnn_call_forward(const WireCell::ITensorForward::pointer& fwd,
+                               const std::vector<float>& wave_2xN,
+                               const std::vector<float>& scalars29,
+                               int nbin, int seqno)
+{
+    if (!fwd) return -1.0;
+    if ((int)wave_2xN.size() != 2 * nbin) return -1.0;
+    if (scalars29.size() != 29u) return -1.0;
+    using WireCell::Aux::SimpleTensor;
+    using WireCell::Aux::SimpleTensorSet;
+    using WireCell::ITensor;
+
+    // 4-D shapes are mandated by WireCellPytorch::from_itensor /
+    // to_itensor (Util.cxx:29, :56).  The export script
+    // (l1sp_dl_tagger/code/inference/export_torchscript.py) defines the
+    // wrapper module to squeeze the dummy dims internally.
+    auto wf = std::make_shared<SimpleTensor>(
+        std::vector<size_t>{1, 1, 2, (size_t)nbin}, wave_2xN.data());
+    auto sc = std::make_shared<SimpleTensor>(
+        std::vector<size_t>{1, 1, 1, 29}, scalars29.data());
+
+    auto vec = std::make_shared<ITensor::vector>();
+    vec->push_back(wf);
+    vec->push_back(sc);
+    auto in_set = std::make_shared<SimpleTensorSet>(
+        seqno, WireCell::Configuration{}, vec);
+
+    auto out_set = fwd->forward(in_set);
+    if (!out_set) return -1.0;
+    auto out_tensors = out_set->tensors();
+    if (!out_tensors || out_tensors->empty()) return -1.0;
+    auto out0 = (*out_tensors)[0];
+    if (!out0 || out0->element_size() != sizeof(float)) return -1.0;
+    const float* p = reinterpret_cast<const float*>(out0->data());
+    return (double)p[0];
+}
+
 // Per-ROI NPZ writer: raw/decon/lasso/smeared waveforms plus the calibration
 // scalar features and trigger flags, in one file per ROI.  Used by both the
 // triggered-only path (legacy) and the all-ROI path (m_dump_all_rois).  Lives
@@ -686,6 +832,7 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     cfg["l1_adj_loose_gmax"]     = m_l1_adj_loose_gmax;
     cfg["l1_adj_loose_core_len"] = m_l1_adj_loose_core_len;
     cfg["l1_adj_loose_asym_abs"] = m_l1_adj_loose_asym_abs;
+    cfg["l1_adj_dnn_veto"]       = m_l1_adj_dnn_veto;
 
     cfg["l1_seg_length"] = 120;
     cfg["l1_scaling_factor"] = 500;  // numerical conditioning only; cancels in linear algebra
@@ -724,6 +871,32 @@ WireCell::Configuration L1SPFilterPD::default_configuration() const
     // (including non-triggered).  Required for ML training datasets with
     // negative examples.  Default false = legacy "triggered-only" behaviour.
     cfg["dump_all_rois"] = false;
+
+    // ── Operating mode + DNN-mode knobs ─────────────────────────────
+    // mode: "process" (default; 5-arm heuristic), "dump" (per-ROI NPZ
+    // calibration), or "dnn" (TorchScript model decides fire; polarity
+    // still from sign(raw_asym_wide)).  Leave empty to honour the
+    // legacy ``dump_mode`` flag above.
+    cfg["mode"] = "";
+    // Typed name of the TorchService implementing ITensorForward.
+    // Required when mode == "dnn".  Example: "TorchService:l1sp_dnn_pdhd".
+    cfg["forward"] = "";
+    // Sigmoid-score cut on the model output.  Default 0.94 = p99.9 of
+    // the round-2 data-corpus score distribution; set to 0.0 in
+    // validation runs to capture every score in the debug NPZ.
+    cfg["dnn_threshold"] = 0.94;
+    // VAE window size (ticks).  MUST match the trained model (256 for
+    // l1sp_dnn_pdhd_v1.ts; tracked in the .ts sidecar
+    // l1sp_dnn_pdhd_v1.meta.json).
+    cfg["dnn_window_ticks"] = 256;
+    // Amplitude floor for the per-ROI normalisation scale.  Matches
+    // the training pipeline's AMP_FLOOR.
+    cfg["dnn_amp_floor"] = 1.0;
+    // When non-empty, write one NPZ per operator() call under this
+    // directory containing per-ROI inputs (waveform + scalars) and
+    // outputs (score, polarity, fired).  Consumed by
+    // l1sp_dl_tagger/code/inference/validate_deployment.py.
+    cfg["dnn_debug_path"] = "";
 
     return cfg;
 }
@@ -786,6 +959,7 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_l1_adj_loose_gmax     = get(cfg, "l1_adj_loose_gmax",     m_l1_adj_loose_gmax);
     m_l1_adj_loose_core_len = get(cfg, "l1_adj_loose_core_len", m_l1_adj_loose_core_len);
     m_l1_adj_loose_asym_abs = get(cfg, "l1_adj_loose_asym_abs", m_l1_adj_loose_asym_abs);
+    m_l1_adj_dnn_veto       = get(cfg, "l1_adj_dnn_veto",       m_l1_adj_dnn_veto);
 
     m_l1_seg_length = get(cfg, "l1_seg_length", m_l1_seg_length);
     m_l1_scaling_factor = get(cfg, "l1_scaling_factor", m_l1_scaling_factor);
@@ -872,6 +1046,57 @@ void L1SPFilterPD::configure(const WireCell::Configuration& cfg)
     m_dump_tag    = get<std::string>(cfg, "dump_tag", m_dump_tag);
     m_wf_dump_path = get<std::string>(cfg, "waveform_dump_path", m_wf_dump_path);
     m_dump_all_rois = get(cfg, "dump_all_rois", m_dump_all_rois);
+
+    // ── Mode dispatch (process / dump / dnn).  The legacy
+    // ``dump_mode: true`` cfg key is honoured as an alias for
+    // ``mode: "dump"`` so pre-DNN configs continue to work.
+    {
+        const std::string mode_str = get<std::string>(cfg, "mode", "");
+        if (mode_str.empty()) {
+            m_mode = m_dump_mode ? Mode::dump : Mode::process;
+        } else if (mode_str == "process") {
+            m_mode = Mode::process;
+        } else if (mode_str == "dump") {
+            m_mode = Mode::dump;
+            m_dump_mode = true;
+        } else if (mode_str == "dnn") {
+            m_mode = Mode::dnn;
+        } else if (mode_str == "hybrid") {
+            m_mode = Mode::hybrid;
+        } else {
+            THROW(ValueError() << errmsg{
+                "L1SPFilterPD: invalid mode '" + mode_str +
+                "'; valid: process, dump, dnn, hybrid"});
+        }
+        if ((m_mode == Mode::dnn || m_mode == Mode::hybrid) && m_dump_mode) {
+            THROW(ValueError() << errmsg{
+                "L1SPFilterPD: mode='" + mode_str + "' is incompatible "
+                "with dump_mode=true; pick one"});
+        }
+    }
+
+    // DNN-mode knobs.  The TorchService is resolved by typed name
+    // (e.g. "TorchService:l1sp_dnn_pdhd"), matching the pattern
+    // DNNROIFinding uses for its ``forward`` cfg key.  No-op for
+    // non-DNN modes so existing cfg snippets are unaffected.
+    m_dnn_threshold    = get<double>(cfg, "dnn_threshold", m_dnn_threshold);
+    m_dnn_window_ticks = get<int>(cfg, "dnn_window_ticks", m_dnn_window_ticks);
+    m_dnn_amp_floor    = get<double>(cfg, "dnn_amp_floor", m_dnn_amp_floor);
+    m_dnn_debug_path   = get<std::string>(cfg, "dnn_debug_path", m_dnn_debug_path);
+    if (m_mode == Mode::dnn || m_mode == Mode::hybrid) {
+        const std::string fwd_tn = get<std::string>(cfg, "forward", "");
+        if (fwd_tn.empty()) {
+            const std::string ms = (m_mode == Mode::dnn) ? "dnn" : "hybrid";
+            THROW(ValueError() << errmsg{
+                "L1SPFilterPD: mode='" + ms + "' requires 'forward' "
+                "(typed name of the TorchService)"});
+        }
+        m_forward = Factory::find_tn<ITensorForward>(fwd_tn);
+        log->info("L1SPFilterPD: {} mode active "
+                  "(forward={}, threshold={:.4f}, window_ticks={})",
+                  (m_mode == Mode::dnn) ? "DNN" : "hybrid",
+                  fwd_tn, m_dnn_threshold, m_dnn_window_ticks);
+    }
 
     // Reset interpolators so init_resp() reloads them on next operator() call.
     m_lin_bipolar.clear();
@@ -1307,8 +1532,24 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         int donor_ch{-1};       // adjacency donor channel, or -1 if none
         int hop{-1};            // BFS layer: 0 = original trigger, k>0 = promoted at hop k, -1 = not promoted
         int plane{0};
+        // DNN-mode only: sigmoid score from the TorchScript model.
+        // NaN in non-DNN modes. Negative on inference error.
+        double dnn_score{std::numeric_limits<double>::quiet_NaN()};
     };
     std::map<int, std::vector<RoiFeat>> map_ch_feat;
+
+    // DNN-mode debug buffers (only filled when m_mode == Mode::dnn AND
+    // m_dnn_debug_path is non-empty).  Used by
+    // l1sp_dl_tagger/code/inference/validate_deployment.py to assert
+    // per-ROI score parity between C++ and Python.  Declared here (before
+    // the per-channel scoring loop populates them) and flushed to NPZ
+    // near the end of operator() alongside the calibration dump.
+    std::vector<int32_t> ddnn_channel, ddnn_plane, ddnn_roi_start, ddnn_roi_end;
+    std::vector<int32_t> ddnn_polarity, ddnn_fired, ddnn_is_adj;
+    std::vector<float>   ddnn_score;
+    // Flat arrays:  ddnn_wave    length = N * 2 * nbin_window  (interleaved)
+    //               ddnn_scalars length = N * 29
+    std::vector<float>   ddnn_wave, ddnn_scalars;
 
     const TriggerCfg tcfg{
         m_l1_min_length, m_l1_gmax_min, m_l1_energy_frac_thr,
@@ -1340,14 +1581,16 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
 
         std::vector<RoiFeat> feats;
         feats.reserve(rois.size());
-        for (const auto& roi : rois) {
+        const bool dnn = (m_mode == Mode::dnn);
+        const bool hybrid = (m_mode == Mode::hybrid);
+        // Dump fields are required in DNN mode (and hybrid) too -- the
+        // 29-scalar feature vector reads them off AsymRecord.
+        const bool fill_dump = m_dump_mode || !m_wf_dump_path.empty()
+                               || dnn || hybrid;
+        for (size_t i = 0; i < rois.size(); ++i) {
+            const auto& roi = rois[i];
             RoiFeat f;
             f.plane = plane;
-            // Fill the dump-only AsymRecord fields whenever any consumer
-            // wants them: calibration NPZ (m_dump_mode) OR the per-ROI
-            // waveform NPZ (m_wf_dump_path non-empty, the merged-dump path
-            // used by the ML training set).
-            const bool fill_dump = m_dump_mode || !m_wf_dump_path.empty();
             f.rec = compute_asym(adctrace->charge(), sigtrace->charge(),
                                  sigtrace->tbin(),
                                  roi.first, roi.second + 1,
@@ -1357,12 +1600,101 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                                  m_l1_raw_asym_eps,
                                  m_l1_core_g_thr,
                                  fill_dump);
-            f.polarity = decide_trigger(f.rec.sub_windows,
-                                        sigtrace->charge(),
-                                        sigtrace->tbin(),
-                                        roi.first,
-                                        f.rec.gmax, tcfg,
-                                        m_l1_energy_pad_ticks);
+            // Heuristic decision first (needed by process/dump and as the
+            // hybrid-mode gate). In dnn-only mode we skip this -- the
+            // existing dnn block sets polarity directly from the model
+            // output (matches pre-hybrid behaviour bit-for-bit).
+            int heur_polarity = 0;
+            if (!dnn) {
+                heur_polarity = decide_trigger(f.rec.sub_windows,
+                                                sigtrace->charge(),
+                                                sigtrace->tbin(),
+                                                roi.first,
+                                                f.rec.gmax, tcfg,
+                                                m_l1_energy_pad_ticks);
+            }
+            // In hybrid mode, only call the DNN if the heuristic fires.
+            // This is the speedup vs full-dnn (~99% of ROIs short-circuit
+            // here, since the heur-positive rate is ~1% in production).
+            const bool call_dnn = dnn || (hybrid && heur_polarity != 0);
+            if (call_dnn) {
+                // 1. Compute prev/next gap and legacy uBooNE flag/ratio
+                //    inline (same recipe as the dump path's NPZ writer).
+                const int32_t prev_end = (i > 0) ? rois[i - 1].second : -1;
+                const int32_t next_start = (i + 1 < rois.size())
+                                          ? rois[i + 1].first : -1;
+                const int prev_gap = prev_end >= 0
+                                   ? (int)(roi.first - prev_end) : -1;
+                const int next_gap = next_start >= 0
+                                   ? (int)(next_start - roi.second) : -1;
+                const double ratio = (f.rec.temp1_sum > 0)
+                    ? f.rec.temp_sum
+                       / (f.rec.temp1_sum * m_adc_sum_rescaling / f.rec.nbin_fit)
+                    : 0.0;
+                int legacy_flag = 0;
+                if (f.rec.temp1_sum > m_adc_sum_threshold) {
+                    if      (ratio >  m_adc_ratio_threshold) legacy_flag = +1;
+                    else if (ratio < -m_adc_ratio_threshold) legacy_flag = -1;
+                }
+                // 2. Build the (2, nbin) windowed + normalised waveform.
+                const auto& raw_seq = adctrace->charge();
+                const auto& dec_seq = sigtrace->charge();
+                const int raw_off = roi.first - adctrace->tbin();
+                const int dec_off = roi.first - sigtrace->tbin();
+                const int nraw = (int)(roi.second - roi.first + 1);
+                const double scale = dnn_amplitude_scale(
+                    raw_seq, raw_off, dec_seq, dec_off, nraw, m_dnn_amp_floor);
+                const auto win = dnn_window(dec_seq, dec_off, nraw,
+                                            m_dnn_window_ticks);
+                std::vector<float> wave_buf;
+                dnn_build_waveform(raw_seq, raw_off, dec_seq, dec_off,
+                                   win.first, win.second,
+                                   m_dnn_window_ticks, scale, wave_buf);
+                // 3. Pack 29-vec scalars in scaler.json order.
+                std::vector<float> scalar_buf;
+                dnn_fill_scalars_29(f.rec, prev_gap, next_gap,
+                                     legacy_flag, ratio, scalar_buf);
+                // 4. Forward + threshold.  Polarity reuses the
+                //    heuristic sign(raw_asym_wide) only when the
+                //    model fires.
+                const double score = dnn_call_forward(
+                    m_forward, wave_buf, scalar_buf,
+                    m_dnn_window_ticks, (int)m_count);
+                f.dnn_score = score;
+                const bool fire = (score >= 0.0) &&
+                                  (score >= m_dnn_threshold);
+                if (hybrid) {
+                    // Hybrid: heuristic already decided polarity (non-zero
+                    // since call_dnn requires heur_polarity != 0). DNN
+                    // either confirms (fire) or vetoes (no fire).
+                    f.polarity = fire ? heur_polarity : 0;
+                } else {
+                    // dnn-only: polarity from sign(asym) on DNN fire.
+                    f.polarity = fire
+                        ? ((f.rec.raw_asym_wide > 0.0) ? +1 : -1)
+                        : 0;
+                }
+                if (!m_dnn_debug_path.empty()) {
+                    ddnn_channel.push_back(ch);
+                    ddnn_plane.push_back(plane);
+                    ddnn_roi_start.push_back(roi.first);
+                    ddnn_roi_end.push_back(roi.second);
+                    ddnn_polarity.push_back(f.polarity);
+                    ddnn_fired.push_back(fire ? 1 : 0);
+                    ddnn_is_adj.push_back(0);
+                    ddnn_score.push_back((float)score);
+                    ddnn_wave.insert(ddnn_wave.end(),
+                                     wave_buf.begin(), wave_buf.end());
+                    ddnn_scalars.insert(ddnn_scalars.end(),
+                                        scalar_buf.begin(), scalar_buf.end());
+                }
+            } else {
+                // Heuristic-only path (process/dump or hybrid-veto). The
+                // heuristic was already computed above; in hybrid-veto we
+                // explicitly emit polarity=0 (heur_polarity is already 0
+                // for that case, so a plain copy is fine).
+                f.polarity = heur_polarity;
+            }
             f.polarity_final = f.polarity;
             f.hop = (f.polarity != 0) ? 0 : -1;
             feats.push_back(std::move(f));
@@ -1460,8 +1792,104 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
             }
 
             if (to_promote.empty()) break;
+            // When m_l1_adj_dnn_veto is on (hybrid mode only), each adj
+            // candidate must also pass the DNN threshold before being
+            // promoted.  Mirrors the Pass-2 DNN call site at the top of
+            // this function so the same TorchScript inputs (29-vec
+            // scalars + (2,nbin) wave) are used.  A vetoed candidate
+            // simply isn't promoted, which naturally collapses any
+            // dependent hop>1 promotions in subsequent BFS layers since
+            // they look up polarity_final on the donor.
+            const bool adj_dnn_veto =
+                m_l1_adj_dnn_veto && (m_mode == Mode::hybrid);
             for (const auto& t : to_promote) {
-                auto& f = map_ch_feat[std::get<0>(t)][std::get<1>(t)];
+                const int    ch_p = std::get<0>(t);
+                const size_t i_p  = std::get<1>(t);
+                auto& f = map_ch_feat[ch_p][i_p];
+                if (adj_dnn_veto) {
+                    auto adcit = adctrace_ch_map.find(ch_p);
+                    auto sigit = sigtrace_ch_map.find(ch_p);
+                    if (adcit == adctrace_ch_map.end() ||
+                        sigit == sigtrace_ch_map.end()) {
+                        continue;  // no traces -> can't DNN-check -> skip
+                    }
+                    const auto& adctrace_p = adcit->second;
+                    const auto& sigtrace_p = sigit->second;
+                    const auto& rois_p     = map_ch_rois.at(ch_p);
+                    const auto& roi_p      = rois_p[i_p];
+                    const int32_t prev_end =
+                        (i_p > 0) ? rois_p[i_p - 1].second : -1;
+                    const int32_t next_start =
+                        (i_p + 1 < rois_p.size())
+                          ? rois_p[i_p + 1].first : -1;
+                    const int prev_gap = prev_end >= 0
+                        ? (int)(roi_p.first - prev_end) : -1;
+                    const int next_gap = next_start >= 0
+                        ? (int)(next_start - roi_p.second) : -1;
+                    const double ratio = (f.rec.temp1_sum > 0)
+                        ? f.rec.temp_sum
+                          / (f.rec.temp1_sum * m_adc_sum_rescaling
+                             / f.rec.nbin_fit)
+                        : 0.0;
+                    int legacy_flag = 0;
+                    if (f.rec.temp1_sum > m_adc_sum_threshold) {
+                        if      (ratio >  m_adc_ratio_threshold) legacy_flag = +1;
+                        else if (ratio < -m_adc_ratio_threshold) legacy_flag = -1;
+                    }
+                    const auto& raw_seq = adctrace_p->charge();
+                    const auto& dec_seq = sigtrace_p->charge();
+                    const int raw_off = roi_p.first - adctrace_p->tbin();
+                    const int dec_off = roi_p.first - sigtrace_p->tbin();
+                    const int nraw = (int)(roi_p.second - roi_p.first + 1);
+                    const double scale = dnn_amplitude_scale(
+                        raw_seq, raw_off, dec_seq, dec_off, nraw,
+                        m_dnn_amp_floor);
+                    const auto win = dnn_window(dec_seq, dec_off, nraw,
+                                                m_dnn_window_ticks);
+                    std::vector<float> wave_buf;
+                    dnn_build_waveform(raw_seq, raw_off,
+                                        dec_seq, dec_off,
+                                        win.first, win.second,
+                                        m_dnn_window_ticks,
+                                        scale, wave_buf);
+                    std::vector<float> scalar_buf;
+                    dnn_fill_scalars_29(f.rec, prev_gap, next_gap,
+                                         legacy_flag, ratio, scalar_buf);
+                    const double score = dnn_call_forward(
+                        m_forward, wave_buf, scalar_buf,
+                        m_dnn_window_ticks, (int)m_count);
+                    f.dnn_score = score;
+                    const bool fire =
+                        (score >= 0.0) && (score >= m_dnn_threshold);
+                    // Record adj-veto DNN calls into the debug NPZ so
+                    // we can verify the path actually fires per ROI.
+                    // The 'fired' column reflects the adj-veto decision:
+                    // 1 = adj promotion allowed, 0 = adj promotion vetoed.
+                    if (!m_dnn_debug_path.empty()) {
+                        auto plane_it_p = ch_to_plane.find(ch_p);
+                        const int plane_p =
+                            (plane_it_p != ch_to_plane.end()
+                             && plane_it_p->second >= 0)
+                                ? plane_it_p->second : 0;
+                        ddnn_channel.push_back(ch_p);
+                        ddnn_plane.push_back(plane_p);
+                        ddnn_roi_start.push_back(roi_p.first);
+                        ddnn_roi_end.push_back(roi_p.second);
+                        ddnn_polarity.push_back(std::get<3>(t));
+                        ddnn_fired.push_back(fire ? 1 : 0);
+                        ddnn_is_adj.push_back(1);
+                        ddnn_score.push_back((float)score);
+                        ddnn_wave.insert(ddnn_wave.end(),
+                                         wave_buf.begin(), wave_buf.end());
+                        ddnn_scalars.insert(ddnn_scalars.end(),
+                                            scalar_buf.begin(),
+                                            scalar_buf.end());
+                    }
+                    if (!fire) {
+                        // DNN vetoes the adjacency promotion.
+                        continue;
+                    }
+                }
                 f.polarity_final = std::get<3>(t);
                 f.donor_ch       = std::get<2>(t);
                 f.hop            = hop;
@@ -1594,6 +2022,26 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
                 //     empty for non-triggered or admit-rejected ROIs; that is
                 //     a legitimate "tagger fired but LASSO declined" outcome.
                 if (!m_wf_dump_path.empty() && (polarity != 0 || m_dump_all_rois)) {
+                    // Skip ROIs whose decon (sigtrace) carries no signal in
+                    // the ROI window — they are raw-noise-seeded candidates
+                    // that both classical WCT-SP and the L1SP-after-DNN
+                    // gauss tag have zero-suppressed (e.g. FEMB saturation).
+                    // Mirrors the consolidator's per-row filter in
+                    // l1sp_dl_tagger/code/data/consolidate_training_data.py.
+                    // Triggered ROIs (polarity != 0) pass decide_trigger
+                    // which requires gmax >= gmax_min, so this guard is a
+                    // no-op for them; it fires only on the
+                    // dump_all_rois=true (training-dump) path.
+                    bool decon_nonzero = false;
+                    const auto& sig_charges = trace->charge();
+                    const int sig_tbin = trace->tbin();
+                    for (int t = roi.first; t <= roi.second; t++) {
+                        if (sig_charges.at(t - sig_tbin) != 0.0f) {
+                            decon_nonzero = true;
+                            break;
+                        }
+                    }
+                    if (!decon_nonzero) continue;
                     const AsymRecord& rec = feats[i].rec;
                     // Mirror the dump-mode legacy uBooNE asym-ratio computation
                     // (operator() above:1517-1525) so the merged dump exposes
@@ -1705,6 +2153,52 @@ bool L1SPFilterPD::operator()(const input_pointer& in, output_pointer& out)
         save_i32("adj_donor_ch",    d_adj_donor_ch);
 
         log->debug("call={} dump_mode: {} ROIs -> {}", m_count, d_channel.size(), fname);
+    }
+
+    // DNN-mode debug dump: one NPZ per operator() call with the inputs
+    // and outputs of every per-ROI model invocation.  Consumed by the
+    // Python validator.  In hybrid mode the dump only covers ROIs
+    // where the DNN was actually called (i.e. heuristic fired); ROIs
+    // vetoed by the heuristic are not represented here.
+    if ((m_mode == Mode::dnn || m_mode == Mode::hybrid)
+        && !m_dnn_debug_path.empty() && !ddnn_channel.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(m_dnn_debug_path, ec);
+        const std::string dnn_fname = fmt::format(
+            "{}/dnn_{}_{:04d}_{}.npz", m_dnn_debug_path,
+            m_dump_tag.empty() ? "frame" : m_dump_tag,
+            m_count, in->ident());
+        std::filesystem::remove(dnn_fname, ec);
+
+        auto save_i32 = [&](const std::string& key,
+                            const std::vector<int32_t>& v) {
+            cnpy::npz_save(dnn_fname, key, v.data(), {v.size()}, "a");
+        };
+        auto save_f32 = [&](const std::string& key,
+                            const std::vector<float>& v,
+                            std::vector<size_t> shape) {
+            cnpy::npz_save(dnn_fname, key, v.data(), shape, "a");
+        };
+        const size_t N = ddnn_channel.size();
+        save_i32("channel",   ddnn_channel);
+        save_i32("plane",     ddnn_plane);
+        save_i32("roi_start", ddnn_roi_start);
+        save_i32("roi_end",   ddnn_roi_end);
+        save_i32("polarity",  ddnn_polarity);
+        save_i32("fired",     ddnn_fired);
+        save_i32("is_adj",    ddnn_is_adj);
+        save_f32("score",     ddnn_score, {N});
+        save_f32("wave",      ddnn_wave,
+                 {N, 2, (size_t)m_dnn_window_ticks});
+        save_f32("scalars",   ddnn_scalars, {N, 29});
+        // Record the threshold and window used for this NPZ so the
+        // Python validator can reproduce the fire-decision exactly.
+        std::vector<float> thr{(float)m_dnn_threshold};
+        std::vector<int32_t> wsz{m_dnn_window_ticks};
+        save_f32("threshold", thr, {1});
+        save_i32("window_ticks", wsz);
+        log->debug("call={} dnn debug: {} ROIs -> {}",
+                   m_count, N, dnn_fname);
     }
 
     // Layer 4 cross-channel cleaning is intentionally omitted.

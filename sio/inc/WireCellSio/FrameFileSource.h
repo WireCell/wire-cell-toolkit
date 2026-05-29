@@ -66,7 +66,16 @@ namespace WireCell::Sio {
 
             Apply these tags to the produced frame.
         */
-        std::vector<std::string> m_frame_tags;        
+        std::vector<std::string> m_frame_tags;
+
+        /** Config: "tick".
+
+            Optional override of the sampling period (tick) of the
+            produced frames.  When greater than zero, this value is used
+            instead of the period stored in the input file's tickinfo
+            array.  The default of 0.0 leaves the file's period unchanged.
+        */
+        double m_tick{0.0};
 
         // The output stream
         boost::iostreams::filtering_istream m_in;

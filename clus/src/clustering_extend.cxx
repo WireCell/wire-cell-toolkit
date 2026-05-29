@@ -604,9 +604,11 @@ static void clustering_extend(
   Graph g;
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
-  auto live_clusters = live_grouping.children();  // sorted copy for deterministic order
-  sort_clusters(live_clusters);
-
+  auto live_clusters = live_grouping.children();
+  // Build the graph vertex index in children() order: merge_clusters() dereferences
+  // these vertex indices against grouping.children(), so the index order here MUST match
+  // children(), not the sorted order.  We sort_clusters() only afterwards, to make the
+  // edge-building iteration order below deterministic across runs.
   for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
     auto& live = live_clusters.at(ilive);
     map_cluster_index[live] = ilive;
@@ -616,6 +618,7 @@ static void clustering_extend(
       live->set_default_scope(scope);
     }
   }
+  sort_clusters(live_clusters);
 
   // original algorithm ... (establish edges ... )
 

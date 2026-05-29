@@ -14,7 +14,10 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/TimeKeeper.h"
 
+#include <torch/csrc/jit/serialization/pickle.h>
+
 #include <algorithm>
+#include <fstream>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -99,6 +102,7 @@ void Pytorch::DNNROIFinding::configure(const WireCell::Configuration& cfg)
     }
     m_cfg.summary_tag = get(cfg, "summary_tag", m_cfg.summary_tag);
     m_cfg.tick_per_slice = get(cfg, "tick_per_slice", m_cfg.tick_per_slice);
+    m_cfg.tick_pad_multiple = get(cfg, "tick_pad_multiple", m_cfg.tick_pad_multiple);
     m_cfg.decon_charge_tag = get(cfg, "decon_charge_tag", m_cfg.decon_charge_tag);
     m_cfg.outtag = get(cfg, "outtag", m_cfg.outtag);
     m_cfg.debugfile = get(cfg, "debugfile", m_cfg.debugfile);
@@ -168,6 +172,7 @@ WireCell::Configuration Pytorch::DNNROIFinding::default_configuration() const
         cfg["intags"].append(one);
     }
     cfg["tick_per_slice"] = m_cfg.tick_per_slice;
+    cfg["tick_pad_multiple"] = m_cfg.tick_pad_multiple;
     cfg["decon_charge_tag"] = m_cfg.decon_charge_tag;
     cfg["outtag"] = m_cfg.outtag;
     cfg["debugfile"] = m_cfg.debugfile;
@@ -317,9 +322,10 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         }
     }
     const int tps = m_cfg.tick_per_slice;
-    const int model_ticks = ((input_ticks + tps - 1) / tps) * tps;
-    log->debug("call={} input_ticks={} model_ticks={} cfg.nticks={}",
-               m_save_count, input_ticks, model_ticks, m_cfg.nticks);
+    const int pad_mult = m_cfg.tick_pad_multiple > 0 ? m_cfg.tick_pad_multiple : tps;
+    const int model_ticks = ((input_ticks + pad_mult - 1) / pad_mult) * pad_mult;
+    log->debug("call={} input_ticks={} model_ticks={} pad_mult={} cfg.nticks={}",
+               m_save_count, input_ticks, model_ticks, pad_mult, m_cfg.nticks);
     if (input_ticks > m_cfg.nticks && m_save_count == 0) {
         log->info("input_ticks={} exceeds configured nticks={}, using input-driven size",
                   input_ticks, m_cfg.nticks);
@@ -369,6 +375,35 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     }
     torch::Tensor output = torch::cat(outputs, 2);
     log->debug(tk(fmt::format("call={} inference done", m_save_count)));
+
+    // Optional .pt dump for offline validation against the model.
+    // Format matches DNNROIFindingMultiPlane so the same
+    // DNN_ROI_SP/scripts/verify_wirecell_dnn.py works on both.
+    if (!m_cfg.debugfile.empty()) {
+        torch::Tensor inp_save = batch.contiguous().to(torch::kCPU);
+        torch::Tensor out_save = output.contiguous().to(torch::kCPU);
+
+        c10::impl::GenericDict meta(c10::StringType::get(), c10::AnyType::get());
+        meta.insert(c10::IValue("plane"), c10::IValue(static_cast<int64_t>(m_cfg.plane)));
+        meta.insert(c10::IValue("tick_per_slice"), c10::IValue(static_cast<int64_t>(m_cfg.tick_per_slice)));
+        meta.insert(c10::IValue("input_scale"), c10::IValue(static_cast<double>(m_cfg.input_scale)));
+        meta.insert(c10::IValue("mask_thresh"), c10::IValue(static_cast<double>(m_cfg.mask_thresh)));
+        auto anode_for_dump = Factory::find_tn<IAnodePlane>(m_cfg.anode);
+        meta.insert(c10::IValue("anode_ident"), c10::IValue(static_cast<int64_t>(anode_for_dump->ident())));
+        std::vector<int64_t> ch64(m_chlist.begin(), m_chlist.end());
+        meta.insert(c10::IValue("chlist"), c10::IValue(torch::tensor(ch64, torch::kInt64)));
+
+        auto tup = c10::ivalue::Tuple::create({
+            c10::IValue(inp_save),
+            c10::IValue(out_save),
+            c10::IValue(meta),
+        });
+        std::vector<char> bytes = torch::jit::pickle_save(tup);
+        std::string filename = m_cfg.debugfile + "_call" + std::to_string(m_save_count) + ".pt";
+        std::ofstream ofs(filename, std::ios::binary);
+        ofs.write(bytes.data(), bytes.size());
+        log->debug("call={} debug dump -> {}", m_save_count, filename);
+    }
 
     // tensor to eigen
     Eigen::Map<Eigen::ArrayXXf> out_e(output[0][0].data_ptr<float>(), output.size(3), output.size(2));

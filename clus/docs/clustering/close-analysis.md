@@ -105,6 +105,13 @@ auto live_clusters = live_grouping.children();  // sorted copy for deterministic
 sort_clusters(live_clusters);
 ```
 
+> **⚠ Correction (2026-05-28):** building the graph vertex index from this *sorted*
+> `live_clusters` was a bug — `merge_clusters` dereferences vertex indices against the
+> *unsorted* `grouping.children()`, so the wrong clusters were merged. Fixed by building
+> `map_cluster_index`/vertices in `children()` order and calling `sort_clusters` only
+> afterward (for iteration determinism). See
+> [clustering-6func-review.md §0](clustering-6func-review.md).
+
 **Impact:** The outer-loop order controls which short cluster (< 5 cm) gets absorbed
 first into `used_clusters`. Sorting ensures consistent behavior across runs.
 
