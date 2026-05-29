@@ -115,15 +115,15 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
   (`as_pctree(charge_tens, inpath + "/live")`), wrapped as a `Facade::Grouping`,
   anode + detector-volumes attached, and its `children()` taken as the
   `Cluster*` list, **sorted by length descending**.
-- **Flashes**: read the canonical `flash`/`light`/`flashlight` point clouds from
-  the live root node (`root_live->value.local_pcs()`). Per flash row `f`,
-  zero-fill a `pe` vector of length `m_nchan` and populate it from the `light`
-  entries via the `flashlight` join (`pe[light.ident] = light.value` for join
-  rows with `flash == f`); build `Opflash(flash.time, pe, 0.0, m_nchan)` with
-  `flash_id = f`. Each is dropped unless its time is in `[flash_mintime,
-  flash_maxtime]` **and** `total_PE >= flash_minPE`. (Absent flash PC ⇒ 0
-  flashes.) `flash_id == f ==` the canonical flash row index, used for the
-  per-cluster `flash` scalar writeback.
+- **Flashes**: enumerated through the shared facade — `grouping->flashes()`
+  (`Clus::Facade::Grouping`) returns one `Facade::Flash` per row of the canonical
+  `flash`/`light`/`flashlight` PCs, owning the `flashlight`-join walk. Each is
+  wrapped in an `Opflash` matching-adapter (`Opflash(const Facade::Flash&, 0.0,
+  m_nchan)` pulls `time()` + the dense `pes(m_nchan)` and the flash `ident()`).
+  Dropped unless its time is in `[flash_mintime, flash_maxtime]` **and**
+  `total_PE >= flash_minPE`. `flash_id == ident() ==` the canonical flash row
+  index, used for the per-cluster `flash` scalar writeback. (`Opflash` adds only
+  the matching conventions: `PE_err` 0.3 rule, `fired_channels`, `OpFlashCompare`.)
 
 ---
 
@@ -259,13 +259,14 @@ naming + fields above.
 
 ## 6. Helper classes
 
-- **`Opflash`** (`Opflash.{h,cxx}`) — one optical flash. Holds per-channel `PE`
-  (+ `PE_err`), `total_PE`, `time` (ns), `m_nchan`, `flash_id`, fired-channel
-  list. Two ctors: from a 2-D tensor row, and from `(time, pe vector, threshold,
-  nchan)` (the canonical-PC path; the tensor ctor delegates to it). `PE_err` is
-  synthesized in-class (the 0.3 rule) so the canonical schema's `error` stays
-  honest 0. Key accessors: `get_PEs()`, `get_PE(ch)`, `get_total_PE()`,
-  `get_time()`, `get_num_channels()`, `get_flash_id()`.
+- **`Opflash`** (`Opflash.{h,cxx}`) — the matcher's per-flash **adapter over
+  `Clus::Facade::Flash`**. Holds per-channel `PE` (+ `PE_err`), `total_PE`, `time`
+  (ns), `m_nchan`, `flash_id`, fired-channel list. Two ctors: from a `Facade::Flash`
+  (pulls `time()` + `pes(nchan)` + `ident()`) and from `(time, pe vector, threshold,
+  nchan)` (the facade ctor delegates to it). `PE_err` is synthesized in-class (the
+  0.3 rule) — a matching convention kept out of the generic facade/canonical data.
+  No tensor/PC knowledge of its own. Key accessors: `get_PEs()`, `get_PE(ch)`,
+  `get_total_PE()`, `get_time()`, `get_num_channels()`, `get_flash_id()`.
 - **`Aux::FlashTensorToOpticalPCs`** (`aux/.../FlashTensorToOpticalPCs.{h,cxx}`, plugin
   `WireCellAux`) — `ITensorSetFanin` (2→1) that expands the SBND opflash matrix into
   the canonical `flash`/`light`/`flashlight` PCs on the live root node (§1a). The SBND

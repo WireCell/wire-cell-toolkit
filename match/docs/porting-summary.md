@@ -18,7 +18,7 @@ New subpackage **`wire-cell-toolkit/match/`** (`WireCellMatch`):
 | File | Role |
 |------|------|
 | `SemiAnalyticalModel.{h,cxx}` | Port of larsim's `phot::SemiAnalyticalModel` (SBND scope: dome PMTs + flat (X)Arapucas at anode/cathode orientation; VUV direct + VIS reflected). No larsoft deps. |
-| `Opflash.{h,cxx}` | Moved from larwirecell. Two ctors: from a tensor row and from `(time, pe, threshold, nchan)` (canonical-PC path). |
+| `Opflash.{h,cxx}` | The matcher's per-flash adapter over `Clus::Facade::Flash`. Two ctors: from a `Facade::Flash` (pulls `time()`+`pes(nchan)`) and from `(time, pe, threshold, nchan)`. Adds the matching-only `PE_err` (0.3 rule), `fired_channels`, and `OpFlashCompare`. No tensor/PC knowledge. |
 | `TimingTPCBundle.{h,cxx}` | Moved from larwirecell, interface unchanged. No canonical-schema equivalent — algorithm working object only. |
 | `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via the canonical `flash`/`light`/`flashlight` PCs on the live root node (written by `Aux::FlashTensorToOpticalPCs`), not a 2nd input port; writes back a per-cluster matched-flash scalar. |
 | `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d`, `dump_bee_bundle`, `dump_light`). |
@@ -124,8 +124,10 @@ Inputs for SBND are produced once from an artROOT file by
 | `985ec8fb` | **Flash representation consolidated onto the toolkit's canonical schema.** SBND flashes now ride the cluster pctree root node as the same `flash`/`light`/`flashlight` PCs the MicroBooNE `root/UbooneClusterSource` writes (not a bespoke `[nflash,1+nchan]` matrix). New `match/FlashTensorToOpticalPCs` expands the SBND opflash matrix into those PCs; `QLMatching` rebuilds its `Opflash` objects from them (new `Opflash(time,pe,thr,nchan)` ctor; `nchan` config, default 312) and writes back a per-cluster `flash` scalar so `Clus::Facade::Cluster::get_flash()` reflects the match. Deliberate divergences from Uboone `load_optical`: flash/light time stored **raw** (no `units::us`, to keep matching identical); per-channel `error`=0 (the `PE_err` 0.3 rule stays in `Opflash`). `TimingTPCBundle` has no canonical equivalent — unchanged. Output bit-identical: mc 40/40 byte-identical to baseline; data runs all 10 events. |
 | `3ba2698a` | `match/QLMatching`: drift speed for the per-flash X correction is now the configurable `drift_speed` (WCT units), defaulting to the historical `1.563e-3`; the standalone jsonnet wires `params.lar.drift_speed` (the common SBND `1.563 mm/us`) instead of the previous hard-coded literal and a separate `driftSpeed` run-script override. Output unchanged (40/40 byte-identical) since the common value equals the old hard-coded one. |
 | `5ef34045` | `match/TimingTPCBundle`: null-safe ctor. An unmatched cluster is a bundle with a null flash (`QLMatching:629`); the ctor used to deref `flash->get_num_channels()` and segfault. MC never hit it (all clusters match); `data` mode does (cosmics with no flash). Now `m_nchan = flash ? flash->get_num_channels() : 0;`. MC output unchanged (40/40 byte-identical); `data` runs all 10 events. |
-| _(this round)_ | **`FlashTensorToOpticalPCs` relocated `match/` → `aux/`** as `Aux::FlashTensorToOpticalPCs` (plugin `WireCellAux`). It has no detector physics — only reshapes the `[nflash,1+nchan]` matrix into the canonical PCs — so it sits with the generic tensor/pctree plumbing next to `Aux::AttachPointCloudToTree`. Factory type string `"FlashTensorToOpticalPCs"` unchanged ⇒ configs untouched. Verified: factory registers once (in `libWireCellAux`, 0 refs left in `libWireCellMatch`); resolved config byte-identical; mc 40/40 byte-identical. |
-| _(this round)_ | **SBND matching config hoisted** into `cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet` (factory `function(params)` → `opflash_source`/`flash_attach`/`matching`, mirroring `clus.jsonnet`), holding the matching-only constants `nchan`/`ch_mask` and sourcing `drift_speed` from `params.lar.drift_speed`. The standalone `wct-clus-matching-standalone.jsonnet` now builds its nodes via this helper (re-exported by a thin `sbnd_xin/qlmatching.jsonnet` shim), dropping ~60 inline lines. Pure jsonnet refactor: resolved config byte-identical (`wcsonnet` diff), mc 40/40 byte-identical. |
+| _relocate_ | **`OpflashToFlashPCs` relocated `match/` → `aux/`** as `Aux::OpflashToFlashPCs` (plugin `WireCellAux`). It has no detector physics — only reshapes the `[nflash,1+nchan]` matrix into the canonical PCs — so it sits with the generic tensor/pctree plumbing next to `Aux::AttachPointCloudToTree`. Factory type string unchanged at this step ⇒ configs untouched. Verified: factory registers once (in `libWireCellAux`, 0 refs left in `libWireCellMatch`); resolved config byte-identical; mc 40/40 byte-identical. |
+| _config_ | **SBND matching config hoisted** into `cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet` (factory `function(params)` → `opflash_source`/`flash_attach`/`matching`, mirroring `clus.jsonnet`), holding the matching-only constants `nchan`/`ch_mask` and sourcing `drift_speed` from `params.lar.drift_speed`. The standalone `wct-clus-matching-standalone.jsonnet` now builds its nodes via this helper (re-exported by a thin `sbnd_xin/qlmatching.jsonnet` shim), dropping ~60 inline lines. Pure jsonnet refactor: resolved config byte-identical (`wcsonnet` diff), mc 40/40 byte-identical. |
+| _rename_ | **`OpflashToFlashPCs` → `FlashTensorToOpticalPCs`** (class + `WIRECELL_FACTORY` type string + the one config that names it). Drops the confusing `Opflash→Flash` echo; the name now reads input (flash *tensor*) → output (canonical *optical* PCs). Resolved-config type string changes (by design); mc 40/40 byte-identical; factory registers once under the new name. |
+| _facade_ | **Canonical flash facade expanded + matcher consolidated onto it.** Promoted the nested `Cluster::Flash` to a standalone `Clus::Facade::Flash` (additive: `idents()`/`pes(nchan)` accessors); added `Grouping::flashes()` enumerating all flashes via the single shared flashlight-join walk (also used by `Cluster::get_flash()`). `QLMatching` now reads flashes via `grouping->flashes()` and `Opflash` became a thin adapter over `Facade::Flash` (new facade ctor; dropped the dead tensor ctor + its `ITensor`/boost deps). uboone & SBND now share one flash representation. Backward-compatible (existing `get_flash()` consumers untouched); mc 40/40 byte-identical, data all 10 events. |
 
 ## Verification status (10 SBND events, ids 2,9,11,12,14,18,31,35,41,42)
 
@@ -201,20 +203,30 @@ round because it is detector-agnostic. A future polish (not now) is a config-dri
 mapping (time column / PE columns) so non-SBND opflash dumps with a different matrix layout can
 reuse it without a code change.
 
-**Why `Opflash` stays in `match/` (and the real consolidation target).** Unlike the converter,
-`Match::Opflash` is **algorithm-internal state**, not generic plumbing: used only by `QLMatching`
-+ `TimingTPCBundle`, it synthesizes `PE_err` (the 0.3 rule), tracks `fired_channels` (threshold),
-and carries the `OpFlashCompare` ordering that makes the LASSO solve deterministic — all matching
-conventions. So it belongs with the algorithm, exactly like `TimingTPCBundle` (the
-reusable-infrastructure → `aux`, algorithm-state → algorithm-package split). Moving it to `aux`
-would push matching conventions into the generic layer with no external consumer. The genuinely
-better long-term move is **consolidation, not relocation**: the toolkit already has a canonical
-read-side flash type, `Clus::Facade::Cluster::Flash` (`get_flash()`), over the same
-`flash`/`light`/`flashlight` PCs (`time()/value()/ident()/type()` + per-OpDet
-`times()/values()/errors()`). `Opflash` largely duplicates it and only adds the matcher extras.
-Future cleanup: build the matcher on `Facade::Flash` and keep just a thin matching-side adapter
-for `PE_err`/`fired`/comparator, instead of a full parallel `Opflash`. Behavior-touching → its
-own bit-identical-gated step.
+**`Opflash` is now a thin adapter over `Clus::Facade::Flash` (consolidation done).** `Opflash`
+stays in `match/` because it is **algorithm-internal state** (used only by `QLMatching` +
+`TimingTPCBundle`) — but it no longer duplicates the flash-reading. The canonical flash facade
+was promoted to a standalone `Clus::Facade::Flash` and given a Grouping-level enumerator
+`Grouping::flashes()` (one shared flashlight-join walk, also used by `Cluster::get_flash()`).
+`QLMatching` now reads its flashes via `grouping->flashes()` and wraps each `Facade::Flash` in an
+`Opflash` (new `Opflash(const Facade::Flash&, threshold, nchan)` ctor pulling `time()` +
+`pes(nchan)`); `Opflash` keeps only the matching-specific conventions — the `PE_err` 0.3 rule,
+`fired_channels`, and the `OpFlashCompare` LASSO ordering — and dropped its old tensor-parsing ctor
+(now detector/tensor-agnostic). uboone and SBND share the one `Facade::Flash` representation; the
+matcher adds its conventions on top. Output unchanged: mc 40/40 byte-identical; data all 10 events.
+`TimingTPCBundle` remains transient and unchanged (see below).
+
+**`TimingTPCBundle` stays transient — matches the uboone pctree pattern (record only).** There
+is **no** Facade/clus equivalent of a flash↔cluster *bundle*, and there is no precedent for
+persisting one: `root/UbooneClusterSource` writes the optical PCs + a per-cluster `flash` index
+scalar (the *association*) and nothing else — no bundle, predicted light, chi²/KS, or strength.
+SBND already matches this exactly (`QLMatching` writes `cluster_t0` + the per-cluster `flash`
+scalar; the bundle objects, `pred_flash`, and match-quality stay in-memory and go only to the BEE
+JSON). So `TimingTPCBundle` correctly stays a transient algorithm working object. Persisting match
+quality (`pred_flash`/`chi2`/`strength`) into the pctree would be a **new feature beyond uboone
+parity, with no current consumer** — deliberately out of scope. If a downstream consumer ever
+needs it, the idiomatic slot is per-cluster scalars/arrays (the `set_scalar`/`tagger_info`
+pattern), not a new persistent bundle type.
 
 ## Where things live
 

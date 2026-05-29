@@ -1,7 +1,7 @@
 #ifndef WIRECELL_MATCH_OPFLASH
 #define WIRECELL_MATCH_OPFLASH
 
-#include "WireCellIface/ITensorSet.h"
+#include "WireCellClus/Facade_Flash.h"
 
 #include <memory>
 #include <set>
@@ -9,19 +9,24 @@
 
 namespace WireCell::Match {
 
+    /// The matcher's per-flash working object: a thin adapter over the canonical
+    /// optical flash (Clus::Facade::Flash) that adds the matching-specific
+    /// conventions — synthesized per-channel PE_err (the 0.3 rule), the
+    /// fired-channel list, and the time-ordering comparator used to keep the
+    /// LASSO solve deterministic. It holds no tensor/PC knowledge of its own.
     class Opflash {
     public:
         using pointer = std::shared_ptr<Opflash>;
 
-        /// Construct an Opflash from a 2D ITensor of doubles. ncol must be
-        /// at least nchan+1. Column 0 is the flash time, columns 1..nchan
-        /// hold per-channel PE.
-        Opflash(const ITensor::pointer ten, int idx, double threshold, int nchan = 32);
+        /// Construct from the canonical flash facade: pulls time + the dense
+        /// per-channel PE vector (pes(nchan)) and the flash ident, then
+        /// synthesizes PE_err/fired via the matching convention below.
+        Opflash(const WireCell::Clus::Facade::Flash& flash, double threshold, int nchan);
 
-        /// Construct an Opflash from a flash time and a per-channel PE vector
-        /// (resized/zero-filled to nchan). This is the canonical-PC path; the
-        /// tensor ctor above delegates to it. PE_err is synthesized here (the
-        /// 0.3 rule), keeping that convention in one place.
+        /// Construct from a flash time and a per-channel PE vector
+        /// (resized/zero-filled to nchan). The facade ctor delegates to this.
+        /// PE_err is synthesized here (the 0.3 rule), keeping that convention
+        /// in one place.
         Opflash(double time, std::vector<double> pe, double threshold, int nchan);
 
         ~Opflash();

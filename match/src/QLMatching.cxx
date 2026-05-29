@@ -182,55 +182,22 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     log->debug("Got live pctree with {} children", root_live->nchildren());
     log->debug(em("got live pctree"));
 
-    // Flashes come from the canonical optical point clouds on the live root
-    // node (written by Aux::FlashTensorToOpticalPCs, the same schema as
-    // root/UbooneClusterSource): "flash"(time,value,ident,type,...),
-    // "light"(ident,time,value,error), "flashlight"(flash,light) join.
-    // Rebuild one Opflash per flash row, zero-filling the per-channel PE vector
-    // from the light entries via the join.
+    auto grouping = root_live->value.facade<Grouping>();
+
+    // Flashes come from the canonical optical point clouds on the live root node
+    // (written by Aux::FlashTensorToOpticalPCs, the same schema as
+    // root/UbooneClusterSource) via the shared facade enumerator
+    // Grouping::flashes() — which owns the flashlight-join walk. Each flash is
+    // wrapped in an Opflash matching-adapter (time + dense per-channel PE, with
+    // the matching-specific PE_err/fired synthesized in Opflash).
     std::vector<Opflash::pointer> flashes;
-    {
-        const auto& lpcs = root_live->value.local_pcs();
-        auto fit = lpcs.find("flash");
-        if (fit == lpcs.end()) {
-            log->warn("no \"flash\" point cloud on live root; 0 flashes");
-        }
-        else {
-            auto ftime_arr = fit->second.get("time");
-            const size_t nflash = ftime_arr ? ftime_arr->elements<double>().size() : 0;
-            auto ftime = ftime_arr ? ftime_arr->elements<double>()
-                                   : PointCloud::Array::span_t<double>{};
-
-            // light + join (absent => flashes carry no per-channel PE).
-            PointCloud::Array::span_t<int>    fl_flash{}, fl_light{}, l_ident{};
-            PointCloud::Array::span_t<double> l_value{};
-            auto jit = lpcs.find("flashlight");
-            auto lit = lpcs.find("light");
-            if (jit != lpcs.end() && lit != lpcs.end()) {
-                if (auto a = jit->second.get("flash"))  fl_flash = a->elements<int>();
-                if (auto a = jit->second.get("light"))  fl_light = a->elements<int>();
-                if (auto a = lit->second.get("ident"))  l_ident = a->elements<int>();
-                if (auto a = lit->second.get("value"))  l_value = a->elements<double>();
-            }
-
-            for (size_t f = 0; f < nflash; ++f) {
-                std::vector<double> pe(m_nchan, 0.0);
-                for (size_t ifl = 0; ifl < fl_flash.size(); ++ifl) {
-                    if (fl_flash[ifl] != (int) f) continue;
-                    const int li = fl_light[ifl];
-                    pe[l_ident[li]] = l_value[li];
-                }
-                Opflash::pointer flash =
-                    std::make_shared<Opflash>(ftime[f], std::move(pe), 0.0, m_nchan);
-                flash->set_flash_id((int) f);
-                if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
-                if (flash->get_total_PE() < m_flash_minPE) continue;
-                flashes.push_back(flash);
-            }
-        }
+    for (const auto& ff : grouping->flashes()) {
+        auto flash = std::make_shared<Opflash>(ff, 0.0, m_nchan);
+        if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
+        if (flash->get_total_PE() < m_flash_minPE) continue;
+        flashes.push_back(flash);
     }
 
-    auto grouping = root_live->value.facade<Grouping>();
     grouping->set_anodes({m_anode});
     grouping->set_detector_volumes(m_dv);
     std::vector<Cluster*> clusters = grouping->children();
