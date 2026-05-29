@@ -47,7 +47,10 @@ TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
     , ndf(0)
     , strength(0)
 {
-    m_nchan = flash->get_num_channels();
+    // An unmatched cluster is represented by a bundle with a null flash (see
+    // QLMatching: the "no matched flash" branch). Such a bundle carries no
+    // predicted light, so there is no channel count to take from the flash.
+    m_nchan = flash ? flash->get_num_channels() : 0;
     pred_flash.resize(m_nchan, 0);
     opdet_mask.resize(m_nchan, 0);
 }

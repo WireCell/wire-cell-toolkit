@@ -163,11 +163,13 @@ independent solves.
 bundle, **or** — for an unmatched cluster — a placeholder
 `std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx)` (`:629`).
 
-> ⚠️ **Known crash (data mode):** that `nullptr` flash hits the
-> `TimingTPCBundle` ctor, which does `flash->get_num_channels()`
-> (`TimingTPCBundle.cxx:50`) → null-deref. MC didn't exercise it (no unmatched
-> clusters on that path); `data` mode does. Fix needs a null-safe ctor or to
-> avoid the null-flash placeholder.
+> **Null-flash bundle (fixed):** that `nullptr` flash used to crash the
+> `TimingTPCBundle` ctor, which did `flash->get_num_channels()`
+> (`TimingTPCBundle.cxx:50`) → null-deref. MC never exercised it (every cluster
+> matched a flash); `data` mode does (cosmic clusters with no flash). The ctor
+> now guards: `m_nchan = flash ? flash->get_num_channels() : 0;` — a null-flash
+> bundle carries no predicted light and its `pred_flash` is never read
+> (`organize_bundles` already skips null-flash bundles).
 
 `organize_bundles()` (`:735-806`) then merges compatible bundles per flash and
 applies a beam-window quality filter (drop out-of-beam bundles with `ks>0.2`,
@@ -249,9 +251,9 @@ naming + fields above.
   candidate. Holds `flash`, `main_cluster`, `pred_flash` (predicted PE/ch),
   `ks_dis`/`chi2`/`ndf`, `strength`, opdet mask, and flags
   (`close_to_PMT`, `at_x_boundary`, `potential_bad_match`, `high_consistent`).
-  `examine_bundle()` (`:148-192`) fills the KS/chi² metrics. **Ctor
-  (`:33-53`) dereferences `flash->get_num_channels()`** — see the null-flash
-  crash in §4.4.
+  `examine_bundle()` (`:148-192`) fills the KS/chi² metrics. Ctor
+  (`:33-56`) takes `m_nchan` from the flash but guards a null flash
+  (unmatched cluster) — see §4.4.
 - **`SemiAnalyticalModel`** (`SemiAnalyticalModel.{h,cxx}`) — point → per-OpDet
   direct (VUV) + reflected (VIS) visibilities. SBND-minimal scope (dome PMTs +
   flat (X)Arapucas; no lateral PDs / anode reflections / Xe). Details in
@@ -263,8 +265,6 @@ naming + fields above.
 
 - **Hardcoded drift speed** `1.563e-3` in the per-point X correction
   (`:252,289`) — not tied to the jsonnet `driftSpeed`. Thread it through config.
-- **Null-flash bundle** (`:629`) crashes the ctor in `data` mode — make the
-  unmatched-cluster path null-safe.
 - **No `tagger_info` PC written.** Downstream all-APA tagging
   (`ClusteringTaggerFlagTransfer`) expects a per-cluster `tagger_info` PC
   (`has_beam_flash`, …) to set the `beam_flash` flag; QLMatching writes none, so
