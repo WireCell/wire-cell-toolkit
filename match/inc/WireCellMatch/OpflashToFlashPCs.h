@@ -13,10 +13,12 @@
       - "light"      : ident(=channel), time, value(=PE), error
       - "flashlight" : flash(=flash row), light(=light row)  (the join table)
 
-    Deliberate divergence from UbooneTTrees::load_optical: the time is stored RAW
-    (no units::us scaling) because the SBND opflash matrix time is already what
-    QLMatching consumes; "error" is 0 (the SBND dump carries no per-channel error;
-    the PE_err convention stays inside Match::Opflash).
+    Units: the stored flash/light "time" is in WCT time units (ns) just like
+    UbooneTTrees::load_optical, but it is taken from the matrix verbatim (NOT
+    multiplied by units::us) because the SBND opflash dump is already in ns
+    (WCT ns == 1), whereas Uboone's tree is in us and is scaled. Same canonical
+    units, different native input unit. "error" is 0 (the SBND dump carries no
+    per-channel error; the PE_err convention stays inside Match::Opflash).
 */
 #ifndef WIRECELLMATCH_OPFLASHTOFLASHPCS
 #define WIRECELLMATCH_OPFLASHTOFLASHPCS

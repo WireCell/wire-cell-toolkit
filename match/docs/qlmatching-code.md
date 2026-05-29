@@ -58,10 +58,12 @@ SBND flashes interoperate with all `clus` tooling (`get_flash()`,
   `value`(=PE), `error`(=0)
 - `flashlight`: `flash`(=flash row), `light`(=light row) — the join table
 
-**Deliberate divergence from Uboone `load_optical`:** time is stored **raw** (no
-`units::us`), because the SBND matrix time is already what QLMatching consumes;
-per-channel `error` is `0` (the SBND dump carries none — the `PE_err` 0.3 rule
-stays inside `Match::Opflash`).
+**Units:** the stored `time` is in WCT units (ns) — the **same** as Uboone
+`load_optical` — but taken from the matrix verbatim (no `units::us` scaling)
+because the SBND dump is already ns (`ns == 1`) whereas Uboone's tree is µs and
+gets scaled. Same canonical units, different native input unit. Per-channel
+`error` is `0` (the SBND dump carries none — the `PE_err` 0.3 rule stays inside
+`Match::Opflash`).
 
 (`Aux::AttachPointCloudToTree` — the earlier generic "park a matrix as one PC"
 node — remains in `aux/` as a generic primitive but is no longer used by this
