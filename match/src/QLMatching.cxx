@@ -2,7 +2,6 @@
 #include "WireCellMatch/Util.h"
 #include "WireCellMatch/Opflash.h"
 
-#include "WireCellAux/SimpleTensor.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMpointtree.h"
@@ -36,7 +35,6 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_inpath        = get(cfg, "inpath", m_inpath);
     m_outpath       = get(cfg, "outpath", m_outpath);
     m_bee_dir       = get(cfg, "bee_dir", m_bee_dir);
-    m_flash_pcname  = get(cfg, "flash_pcname", m_flash_pcname);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
 
@@ -62,6 +60,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_QtoL = get(cfg, "QtoL", m_QtoL);
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
+    m_nchan = get(cfg, "nchan", m_nchan);
 
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
@@ -118,7 +117,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["inpath"]          = m_inpath;
     cfg["outpath"]         = m_outpath;
     cfg["bee_dir"]         = m_bee_dir;
-    cfg["flash_pcname"]    = m_flash_pcname;
+    cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
     cfg["data"]            = m_data;
@@ -183,32 +182,50 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     log->debug("Got live pctree with {} children", root_live->nchildren());
     log->debug(em("got live pctree"));
 
-    // Flashes come from the "flash" point cloud attached to the live root node
-    // by Aux::AttachPointCloudToTree (a 2D "value" array [nflash, 1+nchan]). Reconstruct the
-    // tensor and build Opflash objects exactly as the prior direct-tensor path.
+    // Flashes come from the canonical optical point clouds on the live root
+    // node (written by Match::OpflashToFlashPCs, the same schema as
+    // root/UbooneClusterSource): "flash"(time,value,ident,type,...),
+    // "light"(ident,time,value,error), "flashlight"(flash,light) join.
+    // Rebuild one Opflash per flash row, zero-filling the per-channel PE vector
+    // from the light entries via the join.
     std::vector<Opflash::pointer> flashes;
     {
         const auto& lpcs = root_live->value.local_pcs();
-        auto it = lpcs.find(m_flash_pcname);
-        if (it == lpcs.end()) {
-            log->warn("no flash point cloud \"{}\" on live root; 0 flashes", m_flash_pcname);
+        auto fit = lpcs.find("flash");
+        if (fit == lpcs.end()) {
+            log->warn("no \"flash\" point cloud on live root; 0 flashes");
         }
         else {
-            auto arr = it->second.get("value");
-            if (arr && arr->shape().size() == 2 && arr->shape()[0] > 0) {
-                const size_t nrow = arr->shape()[0];
-                const size_t ncol = arr->shape()[1];
-                log->debug("nrow {} ncol {}", nrow, ncol);
-                const int nchan = (int) ncol - 1;
-                auto span = arr->elements<double>();
-                auto ten = std::make_shared<Aux::SimpleTensor>(
-                    ITensor::shape_t{nrow, ncol}, span.data());
-                for (size_t iflash = 0; iflash < nrow; ++iflash) {
-                    Opflash::pointer flash = std::make_shared<Opflash>(ten, iflash, 0.0, nchan);
-                    if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
-                    if (flash->get_total_PE() < m_flash_minPE) continue;
-                    flashes.push_back(flash);
+            auto ftime_arr = fit->second.get("time");
+            const size_t nflash = ftime_arr ? ftime_arr->elements<double>().size() : 0;
+            auto ftime = ftime_arr ? ftime_arr->elements<double>()
+                                   : PointCloud::Array::span_t<double>{};
+
+            // light + join (absent => flashes carry no per-channel PE).
+            PointCloud::Array::span_t<int>    fl_flash{}, fl_light{}, l_ident{};
+            PointCloud::Array::span_t<double> l_value{};
+            auto jit = lpcs.find("flashlight");
+            auto lit = lpcs.find("light");
+            if (jit != lpcs.end() && lit != lpcs.end()) {
+                if (auto a = jit->second.get("flash"))  fl_flash = a->elements<int>();
+                if (auto a = jit->second.get("light"))  fl_light = a->elements<int>();
+                if (auto a = lit->second.get("ident"))  l_ident = a->elements<int>();
+                if (auto a = lit->second.get("value"))  l_value = a->elements<double>();
+            }
+
+            for (size_t f = 0; f < nflash; ++f) {
+                std::vector<double> pe(m_nchan, 0.0);
+                for (size_t ifl = 0; ifl < fl_flash.size(); ++ifl) {
+                    if (fl_flash[ifl] != (int) f) continue;
+                    const int li = fl_light[ifl];
+                    pe[l_ident[li]] = l_value[li];
                 }
+                Opflash::pointer flash =
+                    std::make_shared<Opflash>(ftime[f], std::move(pe), 0.0, m_nchan);
+                flash->set_flash_id((int) f);
+                if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
+                if (flash->get_total_PE() < m_flash_minPE) continue;
+                flashes.push_back(flash);
             }
         }
     }
@@ -228,7 +245,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     }
 
     std::for_each(clusters.begin(), clusters.end(),
-                  [this](Cluster* c) { c->set_cluster_t0(-1e12); });
+                  [](Cluster* c) { c->set_cluster_t0(-1e12); c->set_scalar<int>("flash", -1); });
 
     std::map<Opflash*, int>  global_flash_idx_map;
     std::map<Cluster*, int>  global_cluster_idx_map;
@@ -658,7 +675,11 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     // Apply matched t0s.
     for (auto* flash : flash_iter_order(flash_bundles_map)) {
         for (auto bundle : flash_bundles_map[flash]) {
-            bundle->get_main_cluster()->set_cluster_t0(flash->get_time() * units::ns);
+            auto* cluster = bundle->get_main_cluster();
+            cluster->set_cluster_t0(flash->get_time() * units::ns);
+            // Record the matched flash row index so Cluster::get_flash() reflects
+            // the match (flash_id == canonical "flash" PC row index).
+            cluster->set_scalar<int>("flash", flash->get_flash_id());
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",
                        flash->get_flash_id(), flash->get_time(),

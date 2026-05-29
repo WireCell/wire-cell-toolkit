@@ -24,10 +24,12 @@ namespace WireCell::Match {
     /// cfg/sbnd/semi-analytical-sbnd.json or equivalent).
     ///
     /// Input (ITensorSetFilter): pctree tensor set holding clusters, with the
-    /// per-event optical flashes attached as a "flash" point cloud on the live
-    /// root node (see Aux::AttachPointCloudToTree). The flash PC holds a 2D "value" array
-    /// [nflash, 1+nchan] (col 0 = time, cols 1..nchan = PE).
-    /// Output: cluster tensor set with per-cluster t0 set from matched flash.
+    /// per-event optical flashes attached as the canonical "flash"/"light"/
+    /// "flashlight" point clouds on the live root node (see
+    /// Match::OpflashToFlashPCs, the same schema as root/UbooneClusterSource).
+    /// Output: cluster tensor set with per-cluster t0 AND a per-cluster
+    /// "flash" scalar (matched flash row index) set from the matched flash, so
+    /// Clus::Facade::Cluster::get_flash() reflects the match.
     class QLMatching : public Aux::Logger,
                        public ITensorSetFilter,
                        public IConfigurable {
@@ -44,9 +46,10 @@ namespace WireCell::Match {
         std::size_t m_count{0};
         int m_bee_index{0};
 
-        // Name of the point cloud (on the live root node) carrying the flash
-        // matrix; must match AttachPointCloudToTree's "pcname".
-        std::string m_flash_pcname{"flash"};
+        // Number of optical-detector channels (per-flash PE vector length).
+        // The only bit-safe source of nchan now that flashes arrive via the
+        // canonical PCs (do NOT derive from max channel ident).
+        int m_nchan{312};
 
         // PMTs on vs off (default true => use SBND PMTs); see ch_mask for the
         // disabled channels.

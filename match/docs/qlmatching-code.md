@@ -24,42 +24,48 @@ operator()(const input_pointer& in, output_pointer& out)   // QLMatching.cxx
 
 | Port | Direction | Contents |
 |------|-----------|----------|
-| in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA, **with the per-event optical flashes attached as a `flash` point cloud on the live root node** (placed there by `Aux::AttachPointCloudToTree`, §1a) |
-| out 0 | cluster tensorset | **the input cluster tensorset passed through**, with only each matched cluster's `cluster_t0` mutated to the matched flash time |
+| in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA, **with the per-event optical flashes attached as the canonical `flash`/`light`/`flashlight` point clouds on the live root node** (placed there by `Match::OpflashToFlashPCs`, §1a) |
+| out 0 | cluster tensorset | **the input cluster tensorset passed through**, with each matched cluster's `cluster_t0` set to the matched flash time **and a per-cluster `flash` scalar set to the matched flash row index** (so `Clus::Facade::Cluster::get_flash()` reflects the match); unmatched clusters get `flash = -1` |
 
 It is a *filter* (1→1): charge+light in, charge-with-t0 out. The light is no
-longer a separate input port — it rides on the cluster tree's live root node
-(mirroring the MicroBooNE `UbooneClusterSource` design, where optical data is
-placed on the root node and the matcher reads it from there). The matching
-result for the event display is written as a **side effect** to BEE JSON files
-(§5), not into the output tensorset.
+longer a separate input port — it rides on the cluster tree's live root node in
+the **same canonical schema as the MicroBooNE `UbooneClusterSource`** (optical
+data on the root node, per-cluster matched-flash scalar). The matching result
+for the event display is also written as a side effect to BEE JSON files (§5).
 
-## 1a. Light I/O — two standard nodes (read + attach)
+## 1a. Light I/O — two standard nodes (read + expand to canonical PCs)
 
-The light path is **two reused graph nodes**, inserted between clustering and
-QLMatching:
+The light path is **two graph nodes**, inserted between clustering and QLMatching:
 
 1. **`Sio::TensorFileSource`** (existing, plugin `WireCellSio`) — reads the
    opflash tensor archive (`inname: "opflash_apa<n>.tar.gz"`, `prefix:
-   "opflash_"`) → an opflash tensor set on its output port.
-2. **`Aux::AttachPointCloudToTree`** (`aux/src/AttachPointCloudToTree.cxx`,
-   plugin `WireCellAux`) — a generic `ITensorSetFanin` (2→1): port 0 = the
-   cluster pctree tensor set, port 1 = the opflash tensor set. It deserializes
-   the live tree (`as_pctree(.../live)`), stores port-1's first tensor verbatim
-   as a 2-D `value` array in a point cloud named `pcname` on the **live root
-   node** (`root_live->value.local_pcs()[pcname]`), re-serializes live, and
-   passes `/dead` through. Config: `pcname` (required), `inpath` (default
-   `"pointtrees/%d"`).
+   "opflash_"`) → an opflash *matrix* tensor set `[nflash, 1+nchan]` (col 0 =
+   time, cols 1..nchan = per-channel PE) on its output port.
+2. **`Match::OpflashToFlashPCs`** (`match/src/OpflashToFlashPCs.cxx`, plugin
+   `WireCellMatch`) — an `ITensorSetFanin` (2→1): port 0 = the cluster pctree
+   tensor set, port 1 = the opflash matrix. It deserializes the live tree
+   (`as_pctree(.../live)`) and **expands the matrix into the canonical
+   `flash`/`light`/`flashlight` point clouds** on the **live root node**
+   (`root_live->value.local_pcs()`), re-serializes live, passes `/dead` through.
+   Config: `nchan` (default `312`; raises if `ncol-1 != nchan`), `inpath`
+   (default `"pointtrees/%d"`).
 
-`AttachPointCloudToTree` does **not** interpret the tensor — it just parks it on
-the root node for a downstream consumer. The SBND chain configures `pcname:
-"flash"` so it provides the `[nflash, 1+nchan]` matrix QLMatching expects
-(`flash_pcname` must match `pcname`).
+This is the **same schema** the MicroBooNE `root/UbooneClusterSource` writes, so
+SBND flashes interoperate with all `clus` tooling (`get_flash()`,
+`ClusterFlashDump`, `retile`, BEE):
+- `flash`: `time`, `tmin`, `tmax`, `value`(=ΣPE), `ident`(=row), `type`(=0)
+- `light` (sparse, one row per fired channel): `ident`(=channel), `time`,
+  `value`(=PE), `error`(=0)
+- `flashlight`: `flash`(=flash row), `light`(=light row) — the join table
 
-(This replaced an earlier single `Sio::TensorFileToPCTree` that *internally*
-constructed and pumped a `TensorFileSource` — the two-node split reuses
-`TensorFileSource` as-is via standard graph wiring, and the framework syncs the
-two input ports / manages the source's lifecycle.)
+**Deliberate divergence from Uboone `load_optical`:** time is stored **raw** (no
+`units::us`), because the SBND matrix time is already what QLMatching consumes;
+per-channel `error` is `0` (the SBND dump carries none — the `PE_err` 0.3 rule
+stays inside `Match::Opflash`).
+
+(`Aux::AttachPointCloudToTree` — the earlier generic "park a matrix as one PC"
+node — remains in `aux/` as a generic primitive but is no longer used by this
+chain; `OpflashToFlashPCs` supersedes it for flashes.)
 
 ---
 
@@ -70,7 +76,7 @@ two input ports / manages the source's lifecycle.)
 | `anode` | (req) | `m_anode` | `IAnodePlane` — TPC id / drift sign |
 | `detector_volumes` | (req) | `m_dv` | `IDetectorVolumes` — drift & Y/Z bounds |
 | `inpath` / `outpath` | `pointtrees/%d` | `m_inpath`/`m_outpath` | pctree path template |
-| `flash_pcname` | `flash` | `m_flash_pcname` | name of the live-root PC holding the flash matrix (must match `AttachPointCloudToTree.pcname`) |
+| `nchan` | `312` | `m_nchan` | optical-detector channel count (per-flash PE vector length); the bit-safe source of nchan now that flashes arrive via canonical PCs |
 | `bee_dir` | `data` | `m_bee_dir` | BEE-dump output dir (empty ⇒ no dump) |
 | `semimodel_file` | `sbnd/photodet/semi-analytical-sbnd.json` | `m_semimodel_file` | photon model JSON (`Persist::load`) |
 | `pmts` | `true` | `m_pmts` | use the SBND 312-OpDet PMT mask |
@@ -105,13 +111,15 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
   (`as_pctree(charge_tens, inpath + "/live")`), wrapped as a `Facade::Grouping`,
   anode + detector-volumes attached, and its `children()` taken as the
   `Cluster*` list, **sorted by length descending**.
-- **Flashes**: read the `flash_pcname` (`flash`) point cloud from the live root
-  node (`root_live->value.local_pcs()`), take its 2-D `value` array
-  `[nflash, 1+nchan]`, rebuild an `Aux::SimpleTensor` over it, and construct
-  `Opflash` objects per row exactly as before
-  (`std::make_shared<Opflash>(ten, iflash, 0.0, nchan)`); each is dropped unless
-  its time is in `[flash_mintime, flash_maxtime]` **and** `total_PE >=
-  flash_minPE`. (Empty/absent flash PC ⇒ 0 flashes for that event.)
+- **Flashes**: read the canonical `flash`/`light`/`flashlight` point clouds from
+  the live root node (`root_live->value.local_pcs()`). Per flash row `f`,
+  zero-fill a `pe` vector of length `m_nchan` and populate it from the `light`
+  entries via the `flashlight` join (`pe[light.ident] = light.value` for join
+  rows with `flash == f`); build `Opflash(flash.time, pe, 0.0, m_nchan)` with
+  `flash_id = f`. Each is dropped unless its time is in `[flash_mintime,
+  flash_maxtime]` **and** `total_PE >= flash_minPE`. (Absent flash PC ⇒ 0
+  flashes.) `flash_id == f ==` the canonical flash row index, used for the
+  per-cluster `flash` scalar writeback.
 
 ---
 
@@ -177,10 +185,13 @@ applies a beam-window quality filter (drop out-of-beam bundles with `ks>0.2`,
 `chi2/ndf>20`, or PE mismatch >50%).
 
 ### 4.5 t0 + output (`:656-680`)
-For every bundle in `flash_bundles_map`, set
-`main_cluster->set_cluster_t0(flash_time)` (`:659`). Then rebuild the output
-tensorset from the (now t0-stamped) live + dead pctrees and emit it under the
-same `charge_ident`.
+Clusters are pre-initialized with `set_scalar<int>("flash", -1)` (alongside the
+`set_cluster_t0(-1e12)` init pass). For every bundle in `flash_bundles_map`, set
+`main_cluster->set_cluster_t0(flash_time)` **and** `set_scalar<int>("flash",
+flash->get_flash_id())` (the canonical flash row index), so
+`Clus::Facade::Cluster::get_flash()` returns the matched flash downstream. Then
+rebuild the output tensorset from the (now t0- and flash-stamped) live + dead
+pctrees and emit it under the same `charge_ident`.
 
 ### Branch effects
 - `m_data == false` (MC): masks saturated PMTs (`:255-260`).
@@ -246,8 +257,15 @@ naming + fields above.
 
 - **`Opflash`** (`Opflash.{h,cxx}`) — one optical flash. Holds per-channel `PE`
   (+ `PE_err`), `total_PE`, `time` (ns), `m_nchan`, `flash_id`, fired-channel
-  list. Key accessors: `get_PEs()`, `get_PE(ch)`, `get_total_PE()`,
+  list. Two ctors: from a 2-D tensor row, and from `(time, pe vector, threshold,
+  nchan)` (the canonical-PC path; the tensor ctor delegates to it). `PE_err` is
+  synthesized in-class (the 0.3 rule) so the canonical schema's `error` stays
+  honest 0. Key accessors: `get_PEs()`, `get_PE(ch)`, `get_total_PE()`,
   `get_time()`, `get_num_channels()`, `get_flash_id()`.
+- **`OpflashToFlashPCs`** (`OpflashToFlashPCs.{h,cxx}`) — `ITensorSetFanin` (2→1)
+  that expands the SBND opflash matrix into the canonical `flash`/`light`/
+  `flashlight` PCs on the live root node (§1a). The SBND analog of
+  `root/UbooneClusterSource`'s optical loading.
 - **`TimingTPCBundle`** (`TimingTPCBundle.{h,cxx}`) — one (flash, cluster)
   candidate. Holds `flash`, `main_cluster`, `pred_flash` (predicted PE/ch),
   `ks_dis`/`chi2`/`ndf`, `strength`, opdet mask, and flags
@@ -275,6 +293,6 @@ naming + fields above.
   deterministic ordering (§4.2) if you touch either.
 - **`geom:"uboone"`** is hardcoded in the img dump (`Util.cxx:32`) while the op
   dump uses `"sbnd"`; harmless to BEE but worth normalizing.
-- **Output carries only `cluster_t0`** — if downstream needs match metadata
-  (matched flash id, strength, beam flag), it must be added to the output
-  tensorset / a `tagger_info` PC; today it lives only in the BEE JSON.
+- **Output carries `cluster_t0` + matched-flash scalar + canonical flash PCs** —
+  `get_flash()` works downstream. Other match metadata (strength, beam flag) is
+  still BEE-JSON-only; add it to a `tagger_info` PC if downstream needs it.

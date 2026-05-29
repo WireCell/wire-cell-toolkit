@@ -15,6 +15,33 @@
 using namespace WireCell;
 using namespace WireCell::Match;
 
+void Opflash::init(double time_, std::vector<double> pe, double threshold, int nchan)
+{
+    flash_id    = 0;
+    m_nchan     = nchan;
+    m_threshold = threshold;
+    type        = 0;
+    low_time    = 0;
+    high_time   = 0;
+    time        = time_;
+
+    PE = std::move(pe);
+    PE.resize(nchan, 0);
+    PE_err.resize(nchan, 1);
+
+    total_PE = 0;
+    for (int i = 0; i < nchan; ++i) {
+        PE_err[i] = (PE[i] < 1) ? 0.3 : 0.3 * PE[i];
+        total_PE += PE[i];
+        if (PE[i] > threshold) fired_channels.push_back(i);
+    }
+}
+
+Opflash::Opflash(double time_, std::vector<double> pe, double threshold, int nchan)
+{
+    init(time_, std::move(pe), threshold, nchan);
+}
+
 Opflash::Opflash(const ITensor::pointer ten, int idx, double threshold, int nchan)
 {
     if (ten->shape().size() != 2) {
@@ -25,28 +52,14 @@ Opflash::Opflash(const ITensor::pointer ten, int idx, double threshold, int ncha
     if (nrow < idx + 1) raise<ValueError>("Opflash: input tensor nrow %d < idx+1", nrow);
     if (ncol < nchan + 1) raise<ValueError>("Opflash: input tensor ncol %d < nchan+1", ncol);
 
-    flash_id    = idx;
-    m_nchan     = nchan;
-    m_threshold = threshold;
-    type        = 0;
-    low_time    = 0;
-    high_time   = 0;
-
     using MultiArray = boost::multi_array<double, 2>;
     boost::array<MultiArray::index, 2> shape = {nrow, ncol};
     boost::multi_array_ref<double, 2> ten_data((double*)ten->data(), shape);
 
-    time     = ten_data[idx][0];
-    total_PE = 0;
-    PE.resize(nchan, 0);
-    PE_err.resize(nchan, 1);
-
-    for (int i = 0; i < nchan; ++i) {
-        PE[i] = ten_data[idx][i + 1];
-        PE_err[i] = (PE[i] < 1) ? 0.3 : 0.3 * PE[i];
-        total_PE += PE[i];
-        if (PE[i] > threshold) fired_channels.push_back(i);
-    }
+    std::vector<double> pe(nchan, 0);
+    for (int i = 0; i < nchan; ++i) pe[i] = ten_data[idx][i + 1];
+    init(ten_data[idx][0], std::move(pe), threshold, nchan);
+    flash_id = idx;
 }
 
 Opflash::~Opflash() = default;

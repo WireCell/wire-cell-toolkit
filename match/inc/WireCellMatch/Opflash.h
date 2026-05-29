@@ -17,6 +17,13 @@ namespace WireCell::Match {
         /// at least nchan+1. Column 0 is the flash time, columns 1..nchan
         /// hold per-channel PE.
         Opflash(const ITensor::pointer ten, int idx, double threshold, int nchan = 32);
+
+        /// Construct an Opflash from a flash time and a per-channel PE vector
+        /// (resized/zero-filled to nchan). This is the canonical-PC path; the
+        /// tensor ctor above delegates to it. PE_err is synthesized here (the
+        /// 0.3 rule), keeping that convention in one place.
+        Opflash(double time, std::vector<double> pe, double threshold, int nchan);
+
         ~Opflash();
 
         void set_flash_id(int v) { flash_id = v; }
@@ -35,6 +42,11 @@ namespace WireCell::Match {
         double get_high_time()    const { return high_time; }
         int    get_num_channels() const { return m_nchan; }
         double get_threshold()    const { return m_threshold; }
+
+    private:
+        // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
+        // PE vector (resized to nchan). flash_id is left 0 for callers to set.
+        void init(double time, std::vector<double> pe, double threshold, int nchan);
 
     protected:
         int    m_nchan;
