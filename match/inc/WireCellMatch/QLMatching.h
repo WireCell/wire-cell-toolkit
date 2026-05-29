@@ -60,6 +60,11 @@ namespace WireCell::Match {
         double m_beam_mintime{-5e3};
         double m_beam_maxtime{5e3};
         double m_QtoL{0.5};
+        // Drift speed used for the per-flash X correction (flash_x_offset =
+        // sign * flash_time * drift_speed). In WCT internal units (length/time,
+        // i.e. mm/ns numerically). Default is the historical hard-coded value;
+        // configs should pass the common params.lar.drift_speed via jsonnet.
+        double m_drift_speed{1.563e-3};
         // LASSO solution threshold below which a (flash, cluster) bundle is
         // dropped after each matching round. Was hard-coded 0.05 inline; pulled
         // out so it can be widened/narrowed from the jsonnet without rebuild.

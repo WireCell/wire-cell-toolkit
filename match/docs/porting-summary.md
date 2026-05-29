@@ -68,7 +68,7 @@ in-gpvm-sl7.sh bash -c '
 source /exp/sbnd/app/users/yuhw/wcp-porting-img/sbnd/setup-local-opt.sh
 cd <dir with icluster-apa{0,1}-{active,masked}.npz and opflash_apa{0,1}.tar.gz>
 wire-cell -l stdout -L info \
-  -V reality=sim -V DL=6.2 -V DT=9.8 -V lifetime=6 -V driftSpeed=1.565 \
+  -V reality=sim -V DL=6.2 -V DT=9.8 -V lifetime=6 \
   -V input=. -V semimodel_file=sbnd/photodet/semi-analytical-sbnd.json \
   -c wct-clus-matching-standalone.jsonnet
 ```
@@ -103,6 +103,7 @@ Inputs for SBND are produced once from an artROOT file by
 | `2fa2e5b3` | `aux/ClusterArrays::to_cluster`: pass `nudge=1e-3` (matching `Img::GridTiling`) to `RayGrid::Blob::add` so deserialized blob corners match imaging. Fixes dead-region polygons collapsing (quad→triangle) and a dropped boundary strip at the z≈501 cm edge. |
 | `58dad76b` | `match/SemiAnalyticalModel`: finite-safe `angle_bin()` clamp on the VUV `j`, VIS `k`, and dome-model `j` indices — guards the unchecked `[bin]` table reads against `theta==90°` / NaN points (latent segfault). Defensive only; results unchanged. |
 | `f8b91803` | `match/Util`: new `dump_light()` — dump **every** flash to `*-op.json`, not just matched ones. Matched flashes keep `cluster_id`/`op_pes_pred` (same filter as `dump_bee_bundle`); unmatched flashes are emitted with an empty `cluster_id` so they still show in the BEE light display. `QLMatching` now calls this instead of `dump_bee_bundle`. Mirrored in larwirecell `qlmatch` (commit `d634638` on `dev-v10_14_02_02`). |
+| _(pending)_ | `match/QLMatching`: drift speed for the per-flash X correction is now the configurable `drift_speed` (WCT units), defaulting to the historical `1.563e-3`; the standalone jsonnet wires `params.lar.drift_speed` (the common SBND `1.563 mm/us`) instead of the previous hard-coded literal and a separate `driftSpeed` run-script override. Output unchanged (40/40 byte-identical) since the common value equals the old hard-coded one. |
 | `5ef34045` | `match/TimingTPCBundle`: null-safe ctor. An unmatched cluster is a bundle with a null flash (`QLMatching:629`); the ctor used to deref `flash->get_num_channels()` and segfault. MC never hit it (all clusters match); `data` mode does (cosmics with no flash). Now `m_nchan = flash ? flash->get_num_channels() : 0;`. MC output unchanged (40/40 byte-identical); `data` runs all 10 events. |
 
 ## Verification status (10 SBND events, ids 2,9,11,12,14,18,31,35,41,42)

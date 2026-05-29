@@ -82,6 +82,7 @@ two input ports / manages the source's lifecycle.)
 | `beam_min/maxtime` | ∓5 ms | … | beam window |
 | `QtoL` | `0.5` | `m_QtoL` | charge→light scale in the prediction (`:317`) |
 | `strength_cutoff` | `0.05` | `m_strength_cutoff` | LASSO solution threshold to keep a bundle |
+| `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
@@ -119,9 +120,9 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 ### 4.1 Build candidate bundles (`:231-352`)
 For every (flash × cluster) pair create a `TimingTPCBundle(flash, cluster,
 flash_id, cluster_idx)` (`:269`). For each 3-D point in the cluster:
-- drift-correct the X by the flash time: `x += sign * flash_time * 1.563e-3`
-  (`:252,289`) — **note the drift speed is hardcoded `1.563e-3`**, independent of
-  the jsonnet `driftSpeed`; a refactor target.
+- drift-correct the X by the flash time: `x += sign * flash_time * m_drift_speed`
+  (`:252,289`); `m_drift_speed` is the configurable `drift_speed` (WCT units,
+  default `1.563e-3` = the common SBND value), wired from `params.lar.drift_speed`.
 - drop points outside the drift / Y / Z bounds; set `close_to_PMT` /
   `at_x_boundary` flags (`:293-299`).
 - predict light: convert point to cm, call
@@ -263,8 +264,6 @@ naming + fields above.
 
 ## 7. Refactor-relevant notes
 
-- **Hardcoded drift speed** `1.563e-3` in the per-point X correction
-  (`:252,289`) — not tied to the jsonnet `driftSpeed`. Thread it through config.
 - **No `tagger_info` PC written.** Downstream all-APA tagging
   (`ClusteringTaggerFlagTransfer`) expects a per-cluster `tagger_info` PC
   (`has_beam_flash`, …) to set the `beam_flash` flag; QLMatching writes none, so

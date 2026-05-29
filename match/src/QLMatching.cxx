@@ -61,6 +61,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_QtoL = get(cfg, "QtoL", m_QtoL);
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
+    m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
 
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
@@ -130,6 +131,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["beam_maxtime"]    = m_beam_maxtime;
     cfg["QtoL"]            = m_QtoL;
     cfg["strength_cutoff"] = m_strength_cutoff;
+    cfg["drift_speed"]     = m_drift_speed;
     return cfg;
 }
 
@@ -249,7 +251,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     for (auto flash : flashes) {
         const auto flash_time = flash->get_time();
-        const double flash_x_offset = sign_offset * flash_time * 1.563e-3;
+        const double flash_x_offset = sign_offset * flash_time * m_drift_speed;
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
         std::vector<unsigned int> flash_opdet_mask = opdet_mask;
