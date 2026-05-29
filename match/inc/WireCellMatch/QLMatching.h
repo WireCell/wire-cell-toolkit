@@ -25,7 +25,7 @@ namespace WireCell::Match {
     ///
     /// Input (ITensorSetFilter): pctree tensor set holding clusters, with the
     /// per-event optical flashes attached as a "flash" point cloud on the live
-    /// root node (see FlashToPCTree). The flash PC holds a 2D "value" array
+    /// root node (see Sio::TensorFileToPCTree). The flash PC holds a 2D "value" array
     /// [nflash, 1+nchan] (col 0 = time, cols 1..nchan = PE).
     /// Output: cluster tensor set with per-cluster t0 set from matched flash.
     class QLMatching : public Aux::Logger,
@@ -45,7 +45,7 @@ namespace WireCell::Match {
         int m_bee_index{0};
 
         // Name of the point cloud (on the live root node) carrying the flash
-        // matrix; must match FlashToPCTree's "pcname".
+        // matrix; must match TensorFileToPCTree's "pcname".
         std::string m_flash_pcname{"flash"};
 
         // PMTs on vs off (default true => use SBND PMTs); see ch_mask for the
