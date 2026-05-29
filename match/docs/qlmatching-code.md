@@ -24,7 +24,7 @@ operator()(const input_pointer& in, output_pointer& out)   // QLMatching.cxx
 
 | Port | Direction | Contents |
 |------|-----------|----------|
-| in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA, **with the per-event optical flashes attached as the canonical `flash`/`light`/`flashlight` point clouds on the live root node** (placed there by `Aux::OpflashToFlashPCs`, §1a) |
+| in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA, **with the per-event optical flashes attached as the canonical `flash`/`light`/`flashlight` point clouds on the live root node** (placed there by `Aux::FlashTensorToOpticalPCs`, §1a) |
 | out 0 | cluster tensorset | **the input cluster tensorset passed through**, with each matched cluster's `cluster_t0` set to the matched flash time **and a per-cluster `flash` scalar set to the matched flash row index** (so `Clus::Facade::Cluster::get_flash()` reflects the match); unmatched clusters get `flash = -1` |
 
 It is a *filter* (1→1): charge+light in, charge-with-t0 out. The light is no
@@ -41,7 +41,7 @@ The light path is **two graph nodes**, inserted between clustering and QLMatchin
    opflash tensor archive (`inname: "opflash_apa<n>.tar.gz"`, `prefix:
    "opflash_"`) → an opflash *matrix* tensor set `[nflash, 1+nchan]` (col 0 =
    time, cols 1..nchan = per-channel PE) on its output port.
-2. **`Aux::OpflashToFlashPCs`** (`aux/src/OpflashToFlashPCs.cxx`, plugin
+2. **`Aux::FlashTensorToOpticalPCs`** (`aux/src/FlashTensorToOpticalPCs.cxx`, plugin
    `WireCellAux`) — an `ITensorSetFanin` (2→1): port 0 = the cluster pctree
    tensor set, port 1 = the opflash matrix. It deserializes the live tree
    (`as_pctree(.../live)`) and **expands the matrix into the canonical
@@ -65,11 +65,11 @@ gets scaled. Same canonical units, different native input unit. Per-channel
 `error` is `0` (the SBND dump carries none — the `PE_err` 0.3 rule stays inside
 `Match::Opflash`).
 
-`OpflashToFlashPCs` carries no detector physics (it only reshapes the matrix), so
+`FlashTensorToOpticalPCs` carries no detector physics (it only reshapes the matrix), so
 it lives in **`aux/` alongside `Aux::AttachPointCloudToTree`** — the earlier generic
 "park a matrix as one PC" node, which remains in `aux/` as a generic primitive but is
-no longer used by this chain (`OpflashToFlashPCs` supersedes it for flashes). The WCT
-factory type string is `"OpflashToFlashPCs"` (unchanged by the package move).
+no longer used by this chain (`FlashTensorToOpticalPCs` supersedes it for flashes). The WCT
+factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package move).
 
 ---
 
@@ -266,7 +266,7 @@ naming + fields above.
   synthesized in-class (the 0.3 rule) so the canonical schema's `error` stays
   honest 0. Key accessors: `get_PEs()`, `get_PE(ch)`, `get_total_PE()`,
   `get_time()`, `get_num_channels()`, `get_flash_id()`.
-- **`Aux::OpflashToFlashPCs`** (`aux/.../OpflashToFlashPCs.{h,cxx}`, plugin
+- **`Aux::FlashTensorToOpticalPCs`** (`aux/.../FlashTensorToOpticalPCs.{h,cxx}`, plugin
   `WireCellAux`) — `ITensorSetFanin` (2→1) that expands the SBND opflash matrix into
   the canonical `flash`/`light`/`flashlight` PCs on the live root node (§1a). The SBND
   analog of `root/UbooneClusterSource`'s optical loading. **Lives in `aux/`** (not

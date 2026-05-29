@@ -20,16 +20,20 @@ New subpackage **`wire-cell-toolkit/match/`** (`WireCellMatch`):
 | `SemiAnalyticalModel.{h,cxx}` | Port of larsim's `phot::SemiAnalyticalModel` (SBND scope: dome PMTs + flat (X)Arapucas at anode/cathode orientation; VUV direct + VIS reflected). No larsoft deps. |
 | `Opflash.{h,cxx}` | Moved from larwirecell. Two ctors: from a tensor row and from `(time, pe, threshold, nchan)` (canonical-PC path). |
 | `TimingTPCBundle.{h,cxx}` | Moved from larwirecell, interface unchanged. No canonical-schema equivalent — algorithm working object only. |
-| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via the canonical `flash`/`light`/`flashlight` PCs on the live root node (written by `Aux::OpflashToFlashPCs`), not a 2nd input port; writes back a per-cluster matched-flash scalar. |
+| `QLMatching.{h,cxx}` | `ITensorSetFilter` + `IConfigurable` component. Reads a JSON model file at `configure()` via `Persist::load`. Flash arrives via the canonical `flash`/`light`/`flashlight` PCs on the live root node (written by `Aux::FlashTensorToOpticalPCs`), not a 2nd input port; writes back a per-cluster matched-flash scalar. |
 | `Util.{h,cxx}` | BEE-JSON dump helpers (`dump_bee_3d`, `dump_bee_bundle`, `dump_light`). |
 | `wscript_build` | `bld.smplpkg('WireCellMatch', use='WireCellClus WireCellAux WireCellIface WireCellUtil')` |
 
-The opflash-matrix → canonical-flash-PC converter, originally `Match::OpflashToFlashPCs`,
-now lives in **`aux/` as `Aux::OpflashToFlashPCs`** (`aux/{inc/WireCellAux,src}/OpflashToFlashPCs.{h,cxx}`,
-plugin `WireCellAux`). It carries no detector physics — it only reshapes a `[nflash, 1+nchan]`
-matrix into the canonical PCs — so it belongs with the generic tensor/pctree plumbing next to
-`Aux::AttachPointCloudToTree`, not in the SBND-specific matcher. The WCT factory **type string
-is unchanged** (`"OpflashToFlashPCs"`), so configs are untouched; only its package moved.
+The opflash-matrix → canonical-optical-PC converter started life as
+`Match::OpflashToFlashPCs`, was relocated to `aux/` as `Aux::OpflashToFlashPCs` (no detector
+physics — it only reshapes a `[nflash, 1+nchan]` matrix into the canonical PCs, so it belongs
+with the generic tensor/pctree plumbing next to `Aux::AttachPointCloudToTree`), and was then
+**renamed to `Aux::FlashTensorToOpticalPCs`** (`aux/{inc/WireCellAux,src}/FlashTensorToOpticalPCs.{h,cxx}`,
+plugin `WireCellAux`) to drop the confusing `Opflash→Flash` echo — its name now reflects
+input (a flash *tensor*) → output (the canonical *optical* PCs). The rename changed the WCT
+factory type string to `"FlashTensorToOpticalPCs"`, so the one config that names it
+(`cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet`) was updated in lock-step; matching output
+is unchanged (mc 40/40 byte-identical).
 
 The standalone matching graph nodes (opflash reader → converter → `QLMatching`) plus the
 SBND matching constants (`nchan`, `ch_mask`) are built by a canonical config helper
@@ -117,10 +121,10 @@ Inputs for SBND are produced once from an artROOT file by
 | `2fa2e5b3` | `aux/ClusterArrays::to_cluster`: pass `nudge=1e-3` (matching `Img::GridTiling`) to `RayGrid::Blob::add` so deserialized blob corners match imaging. Fixes dead-region polygons collapsing (quad→triangle) and a dropped boundary strip at the z≈501 cm edge. |
 | `58dad76b` | `match/SemiAnalyticalModel`: finite-safe `angle_bin()` clamp on the VUV `j`, VIS `k`, and dome-model `j` indices — guards the unchecked `[bin]` table reads against `theta==90°` / NaN points (latent segfault). Defensive only; results unchanged. |
 | `f8b91803` | `match/Util`: new `dump_light()` — dump **every** flash to `*-op.json`, not just matched ones. Matched flashes keep `cluster_id`/`op_pes_pred` (same filter as `dump_bee_bundle`); unmatched flashes are emitted with an empty `cluster_id` so they still show in the BEE light display. `QLMatching` now calls this instead of `dump_bee_bundle`. Mirrored in larwirecell `qlmatch` (commit `d634638` on `dev-v10_14_02_02`). |
-| `985ec8fb` | **Flash representation consolidated onto the toolkit's canonical schema.** SBND flashes now ride the cluster pctree root node as the same `flash`/`light`/`flashlight` PCs the MicroBooNE `root/UbooneClusterSource` writes (not a bespoke `[nflash,1+nchan]` matrix). New `match/OpflashToFlashPCs` expands the SBND opflash matrix into those PCs; `QLMatching` rebuilds its `Opflash` objects from them (new `Opflash(time,pe,thr,nchan)` ctor; `nchan` config, default 312) and writes back a per-cluster `flash` scalar so `Clus::Facade::Cluster::get_flash()` reflects the match. Deliberate divergences from Uboone `load_optical`: flash/light time stored **raw** (no `units::us`, to keep matching identical); per-channel `error`=0 (the `PE_err` 0.3 rule stays in `Opflash`). `TimingTPCBundle` has no canonical equivalent — unchanged. Output bit-identical: mc 40/40 byte-identical to baseline; data runs all 10 events. |
+| `985ec8fb` | **Flash representation consolidated onto the toolkit's canonical schema.** SBND flashes now ride the cluster pctree root node as the same `flash`/`light`/`flashlight` PCs the MicroBooNE `root/UbooneClusterSource` writes (not a bespoke `[nflash,1+nchan]` matrix). New `match/FlashTensorToOpticalPCs` expands the SBND opflash matrix into those PCs; `QLMatching` rebuilds its `Opflash` objects from them (new `Opflash(time,pe,thr,nchan)` ctor; `nchan` config, default 312) and writes back a per-cluster `flash` scalar so `Clus::Facade::Cluster::get_flash()` reflects the match. Deliberate divergences from Uboone `load_optical`: flash/light time stored **raw** (no `units::us`, to keep matching identical); per-channel `error`=0 (the `PE_err` 0.3 rule stays in `Opflash`). `TimingTPCBundle` has no canonical equivalent — unchanged. Output bit-identical: mc 40/40 byte-identical to baseline; data runs all 10 events. |
 | `3ba2698a` | `match/QLMatching`: drift speed for the per-flash X correction is now the configurable `drift_speed` (WCT units), defaulting to the historical `1.563e-3`; the standalone jsonnet wires `params.lar.drift_speed` (the common SBND `1.563 mm/us`) instead of the previous hard-coded literal and a separate `driftSpeed` run-script override. Output unchanged (40/40 byte-identical) since the common value equals the old hard-coded one. |
 | `5ef34045` | `match/TimingTPCBundle`: null-safe ctor. An unmatched cluster is a bundle with a null flash (`QLMatching:629`); the ctor used to deref `flash->get_num_channels()` and segfault. MC never hit it (all clusters match); `data` mode does (cosmics with no flash). Now `m_nchan = flash ? flash->get_num_channels() : 0;`. MC output unchanged (40/40 byte-identical); `data` runs all 10 events. |
-| _(this round)_ | **`OpflashToFlashPCs` relocated `match/` → `aux/`** as `Aux::OpflashToFlashPCs` (plugin `WireCellAux`). It has no detector physics — only reshapes the `[nflash,1+nchan]` matrix into the canonical PCs — so it sits with the generic tensor/pctree plumbing next to `Aux::AttachPointCloudToTree`. Factory type string `"OpflashToFlashPCs"` unchanged ⇒ configs untouched. Verified: factory registers once (in `libWireCellAux`, 0 refs left in `libWireCellMatch`); resolved config byte-identical; mc 40/40 byte-identical. |
+| _(this round)_ | **`FlashTensorToOpticalPCs` relocated `match/` → `aux/`** as `Aux::FlashTensorToOpticalPCs` (plugin `WireCellAux`). It has no detector physics — only reshapes the `[nflash,1+nchan]` matrix into the canonical PCs — so it sits with the generic tensor/pctree plumbing next to `Aux::AttachPointCloudToTree`. Factory type string `"FlashTensorToOpticalPCs"` unchanged ⇒ configs untouched. Verified: factory registers once (in `libWireCellAux`, 0 refs left in `libWireCellMatch`); resolved config byte-identical; mc 40/40 byte-identical. |
 | _(this round)_ | **SBND matching config hoisted** into `cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet` (factory `function(params)` → `opflash_source`/`flash_attach`/`matching`, mirroring `clus.jsonnet`), holding the matching-only constants `nchan`/`ch_mask` and sourcing `drift_speed` from `params.lar.drift_speed`. The standalone `wct-clus-matching-standalone.jsonnet` now builds its nodes via this helper (re-exported by a thin `sbnd_xin/qlmatching.jsonnet` shim), dropping ~60 inline lines. Pure jsonnet refactor: resolved config byte-identical (`wcsonnet` diff), mc 40/40 byte-identical. |
 
 ## Verification status (10 SBND events, ids 2,9,11,12,14,18,31,35,41,42)
@@ -192,7 +196,7 @@ source):
    PDs, anode reflections, Xe absorption, field-cage transparency, and disk PMTs are **not**
    ported (see *Known caveats* above) — a physics-coverage TODO, not a config decision.
 
-**Where the converter belongs (resolved):** `OpflashToFlashPCs` was relocated to `aux/` this
+**Where the converter belongs (resolved):** `FlashTensorToOpticalPCs` was relocated to `aux/` this
 round because it is detector-agnostic. A future polish (not now) is a config-driven column
 mapping (time column / PE columns) so non-SBND opflash dumps with a different matrix layout can
 reuse it without a code change.

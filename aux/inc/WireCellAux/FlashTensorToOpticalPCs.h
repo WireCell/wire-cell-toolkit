@@ -1,5 +1,5 @@
-/** Convert an SBND opflash matrix into the toolkit's canonical optical-flash
-    point clouds and attach them to a cluster point-cloud tree's live root node.
+/** Convert a flash tensor (the SBND opflash matrix) into the toolkit's canonical
+    optical point clouds and attach them to a cluster point-cloud tree's live root node.
 
     A 2-to-1 fan-in: port 0 carries a point-cloud-tree tensor set (live + dead);
     port 1 carries a tensor set whose first 2-D tensor is the SBND opflash matrix
@@ -24,8 +24,8 @@
     [nflash, 1+nchan] matrix into the canonical PCs, so it lives in aux alongside
     the generic Aux::AttachPointCloudToTree.
 */
-#ifndef WIRECELLAUX_OPFLASHTOFLASHPCS
-#define WIRECELLAUX_OPFLASHTOFLASHPCS
+#ifndef WIRECELLAUX_FLASHTENSORTOOPTICALPCS
+#define WIRECELLAUX_FLASHTENSORTOOPTICALPCS
 
 #include "WireCellAux/Logger.h"
 
@@ -37,12 +37,12 @@
 
 namespace WireCell::Aux {
 
-    class OpflashToFlashPCs : public Aux::Logger,
-                              public ITensorSetFanin,
-                              public IConfigurable {
+    class FlashTensorToOpticalPCs : public Aux::Logger,
+                                    public ITensorSetFanin,
+                                    public IConfigurable {
     public:
-        OpflashToFlashPCs();
-        virtual ~OpflashToFlashPCs();
+        FlashTensorToOpticalPCs();
+        virtual ~FlashTensorToOpticalPCs();
 
         // IConfigurable
         virtual void configure(const WireCell::Configuration& cfg);

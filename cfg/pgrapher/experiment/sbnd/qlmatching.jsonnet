@@ -5,9 +5,9 @@
 // methods build typed pnodes.  Re-exported by the standalone dev chain via a thin
 // sbnd_xin/qlmatching.jsonnet shim (like sbnd_xin/clus.jsonnet).
 //
-// Pipeline per APA:  TensorFileSource -> OpflashToFlashPCs -> QLMatching
+// Pipeline per APA:  TensorFileSource -> FlashTensorToOpticalPCs -> QLMatching
 //   - TensorFileSource   reads the opflash archive into an opflash matrix tensor set.
-//   - OpflashToFlashPCs   (Aux fan-in) expands that matrix into the canonical
+//   - FlashTensorToOpticalPCs   (Aux fan-in) expands that matrix into the canonical
 //                         "flash"/"light"/"flashlight" point clouds on the live root.
 //   - QLMatching          reads the canonical flash PCs and writes back a per-cluster
 //                         matched-flash scalar (so Cluster::get_flash() works).
@@ -39,7 +39,7 @@ function(params) {
     // Opflash matrix -> canonical flash/light/flashlight PCs (2->1 fan-in).
     // port 0 = cluster pctree, port 1 = opflash matrix.
     flash_attach(n):: g.pnode({
-        type: 'OpflashToFlashPCs',
+        type: 'FlashTensorToOpticalPCs',
         name: 'flash_attach_apa%d' % n,
         data: {
             nchan: nchan,
@@ -60,7 +60,7 @@ function(params) {
             data: if reality == 'data' then true else false,
             QtoL: 1.0,
             drift_speed: params.lar.drift_speed,
-            nchan: nchan,  // must match OpflashToFlashPCs.nchan (writer/reader coupling)
+            nchan: nchan,  // must match FlashTensorToOpticalPCs.nchan (writer/reader coupling)
             ch_mask: ch_mask,
             flash_minPE: 50,
             semimodel_file: semimodel_file,

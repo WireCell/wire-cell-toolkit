@@ -1,4 +1,4 @@
-#include "WireCellAux/OpflashToFlashPCs.h"
+#include "WireCellAux/FlashTensorToOpticalPCs.h"
 
 #include "WireCellAux/TensorDMcommon.h"    // as_tensorset
 #include "WireCellAux/TensorDMpointtree.h" // as_pctree, as_tensors
@@ -9,29 +9,29 @@
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/String.h"
 
-WIRECELL_FACTORY(OpflashToFlashPCs,
-                 WireCell::Aux::OpflashToFlashPCs,
+WIRECELL_FACTORY(FlashTensorToOpticalPCs,
+                 WireCell::Aux::FlashTensorToOpticalPCs,
                  WireCell::INamed,
                  WireCell::ITensorSetFanin,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
 
-Aux::OpflashToFlashPCs::OpflashToFlashPCs()
-    : Aux::Logger("OpflashToFlashPCs", "aux")
+Aux::FlashTensorToOpticalPCs::FlashTensorToOpticalPCs()
+    : Aux::Logger("FlashTensorToOpticalPCs", "aux")
 {
 }
 
-Aux::OpflashToFlashPCs::~OpflashToFlashPCs() = default;
+Aux::FlashTensorToOpticalPCs::~FlashTensorToOpticalPCs() = default;
 
-void Aux::OpflashToFlashPCs::configure(const WireCell::Configuration& cfg)
+void Aux::FlashTensorToOpticalPCs::configure(const WireCell::Configuration& cfg)
 {
     m_inpath = get(cfg, "inpath", m_inpath);
     m_nchan  = get(cfg, "nchan", m_nchan);
-    log->debug("OpflashToFlashPCs: inpath={} nchan={}", m_inpath, m_nchan);
+    log->debug("FlashTensorToOpticalPCs: inpath={} nchan={}", m_inpath, m_nchan);
 }
 
-WireCell::Configuration Aux::OpflashToFlashPCs::default_configuration() const
+WireCell::Configuration Aux::FlashTensorToOpticalPCs::default_configuration() const
 {
     Configuration cfg;
     cfg["inpath"] = m_inpath;
@@ -39,13 +39,13 @@ WireCell::Configuration Aux::OpflashToFlashPCs::default_configuration() const
     return cfg;
 }
 
-std::vector<std::string> Aux::OpflashToFlashPCs::input_types()
+std::vector<std::string> Aux::FlashTensorToOpticalPCs::input_types()
 {
     const std::string tname = std::string(typeid(input_type).name());
     return std::vector<std::string>(m_multiplicity, tname);
 }
 
-bool Aux::OpflashToFlashPCs::operator()(const input_vector& invec, output_pointer& out)
+bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_pointer& out)
 {
     out = nullptr;
 
@@ -67,7 +67,7 @@ bool Aux::OpflashToFlashPCs::operator()(const input_vector& invec, output_pointe
     const auto& tree_tens = *tree_ts->tensors();
     auto root_live = Aux::TensorDM::as_pctree(tree_tens, inpath + "/live");
     if (!root_live) {
-        raise<ValueError>("OpflashToFlashPCs: no live pctree at '%s'", inpath);
+        raise<ValueError>("FlashTensorToOpticalPCs: no live pctree at '%s'", inpath);
     }
 
     // Canonical optical PCs (same schema as root/UbooneClusterSource).
@@ -81,12 +81,12 @@ bool Aux::OpflashToFlashPCs::operator()(const input_vector& invec, output_pointe
     if (data_tens && !data_tens->empty()) {
         const auto& ten = data_tens->at(0);
         if (ten->shape().size() != 2) {
-            raise<ValueError>("OpflashToFlashPCs: tensor dim %d != 2", ten->shape().size());
+            raise<ValueError>("FlashTensorToOpticalPCs: tensor dim %d != 2", ten->shape().size());
         }
         const size_t nflash = ten->shape()[0];
         const size_t ncol   = ten->shape()[1];
         if ((int)ncol != m_nchan + 1) {
-            raise<ValueError>("OpflashToFlashPCs: ncol %d != nchan+1 (%d)", (int)ncol, m_nchan + 1);
+            raise<ValueError>("FlashTensorToOpticalPCs: ncol %d != nchan+1 (%d)", (int)ncol, m_nchan + 1);
         }
         const double* M = (const double*) ten->data(); // row-major [nflash][ncol]
 
@@ -113,11 +113,11 @@ bool Aux::OpflashToFlashPCs::operator()(const input_vector& invec, output_pointe
             fident.push_back((int)r);
             ftype.push_back(0);
         }
-        log->debug("OpflashToFlashPCs: ident {} {} flashes, {} light entries",
+        log->debug("FlashTensorToOpticalPCs: ident {} {} flashes, {} light entries",
                    ident, nflash, lid.size());
     }
     else {
-        log->warn("OpflashToFlashPCs: ident {} no tensor on port 1; attaching empty flash PCs", ident);
+        log->warn("FlashTensorToOpticalPCs: ident {} no tensor on port 1; attaching empty flash PCs", ident);
     }
 
     PointCloud::Dataset flash_ds;

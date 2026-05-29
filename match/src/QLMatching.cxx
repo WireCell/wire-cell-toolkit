@@ -183,7 +183,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     log->debug(em("got live pctree"));
 
     // Flashes come from the canonical optical point clouds on the live root
-    // node (written by Aux::OpflashToFlashPCs, the same schema as
+    // node (written by Aux::FlashTensorToOpticalPCs, the same schema as
     // root/UbooneClusterSource): "flash"(time,value,ident,type,...),
     // "light"(ident,time,value,error), "flashlight"(flash,light) join.
     // Rebuild one Opflash per flash row, zero-filling the per-channel PE vector
