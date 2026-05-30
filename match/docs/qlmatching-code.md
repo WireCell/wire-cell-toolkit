@@ -25,7 +25,7 @@ operator()(const input_pointer& in, output_pointer& out)   // QLMatching.cxx
 | Port | Direction | Contents |
 |------|-----------|----------|
 | in 0 | cluster tensorset | a point-cloud tree at `inpath` (`pointtrees/<id>`) with `/live` and `/dead` groupings — the imaging/clustering result for this APA, **with the per-event optical flashes attached as the canonical `flash`/`light`/`flashlight` point clouds on the live root node** (placed there by `Aux::FlashTensorToOpticalPCs`, §1a) |
-| out 0 | cluster tensorset | **the input cluster tensorset passed through**, with each matched cluster's `cluster_t0` set to the matched flash time **and a per-cluster `flash` scalar set to the matched flash row index** (so `Clus::Facade::Cluster::get_flash()` reflects the match); unmatched clusters get `flash = -1` |
+| out 0 | cluster tensorset | **the input cluster tensorset passed through**, with each matched cluster's `cluster_t0` set to the matched flash time **and a per-cluster `flash` scalar set to the matched flash row index** (so `Clus::Facade::Cluster::get_flash()` reflects the match); unmatched clusters get `flash = -1`. **Additionally persisted for the downstream Bee op/flash display** (see §5): a per-cluster `matched_flash_gid` scalar (a globally-unique flash id `anode·1e6 + per-APA-flash-index`, surviving the per-APA→all-APA merge; `-1` if unmatched), a per-cluster `flashpred` PC holding the matched bundle's predicted per-channel PE (`op_pes_pred`), and a self-contained per-root `opflash` PC (one row per `(flash, channel)`: `gid`, `time`, `ch`, `pe`) carrying every flash's measured light |
 
 It is a *filter* (1→1): charge+light in, charge-with-t0 out. The light is no
 longer a separate input port — it rides on the cluster tree's live root node in
@@ -205,6 +205,28 @@ pctrees and emit it under the same `charge_ident`.
 ---
 
 ## 5. BEE output — how the event-display JSON is dumped
+
+> **Relocated to the all-APA MABC.** The Bee output below (QLMatching writing
+> per-APA `data-sep/*-{img,op}-apa<n>.json`, later stitched by `bee-upload.sh` /
+> `merge-apa.py`) is **superseded** by a dump inside the all-APA
+> `Clus::MultiAlgBlobClustering`, which now writes the `op` (light/flash) layer
+> directly into the same `mabc-all-apa.zip` as the charge `img`/`clustering` and
+> the dead-area patches — no separate combine step. QLMatching's job is now to
+> **persist** the match into the pctree (the `matched_flash_gid` / `flashpred` /
+> root `opflash` PCs of the out-port table above); the MABC reads those at its
+> pre-clustering `img` dump point (where the live clusters are still the per-APA
+> matched clusters and their ids equal the `img` enumeration) and emits the `op`
+> JSON via the new `WireCell::Bee::Flashes` object (`save_opflash: true`).
+> The legacy `dump_*` helpers described here are retired (see porting-summary).
+>
+> **Known degeneracy (to fix with later matching-algorithm tuning):** the pctree
+> match is **one flash per cluster** (the MicroBooNE model: a single `cluster_t0`
+> / `flash` scalar). The legacy `dump_light` emitted a row per *bundle*, so it
+> could show the same cluster under two flashes, or a duplicate `(flash,cluster)`
+> bundle. Those LASSO degeneracies collapse to the single persisted match in the
+> MABC dump (last-wins, identical to the existing `cluster_t0`/`flash` scalar).
+> Observed on the 10-event mc sample as ~5 display rows across 4 events; the
+> measured-light flashes and the one-flash→many-clusters case are unaffected.
 
 When `bee_dir` is non-empty, after matching (`:642-652`):
 

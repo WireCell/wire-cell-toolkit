@@ -210,6 +210,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
             multiplicity: nanodes,
             inpath: 'pointtrees/%d',
             outpath: 'pointtrees/%d',
+            // Carry the per-APA self-contained optical flash display PC
+            // (written by QLMatching, keyed by global flash id) into the merged
+            // all-APA grouping so the all-APA MABC can dump the op/flash Bee
+            // display. Other per-anode root PCs are intentionally not merged.
+            root_pcs_to_merge: ['opflash'],
         },
     }, nin=nanodes, nout=1),
     local dv = detector_volumes(anodes),
@@ -248,6 +253,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
             eventNo: eventNo,
             save_deadarea: true,
             dead_area_version: 2,
+            // Dump the optical flash / charge-light "op" display into this same
+            // mabc-all-apa.zip (reads the merged-root "opflash" PC + per-cluster
+            // matched-flash association written by QLMatching). bee_detector
+            // above supplies the Bee geom.
+            save_opflash: true,
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             // Renumber cluster idents (insertion order, 1..N) after every step;

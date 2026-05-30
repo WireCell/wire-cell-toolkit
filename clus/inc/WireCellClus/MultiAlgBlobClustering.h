@@ -116,8 +116,21 @@ namespace WireCell::Clus {
 
         void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
 
-        std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
+        std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...
+
+        // ---- Optical flash / charge-light "op" Bee dump ----
+        // When m_save_opflash is set, the merged-grouping root carries a
+        // self-contained per-flash "opflash" point cloud (gid, time, ch, pe)
+        // written by the upstream QLMatching, and matched clusters carry a
+        // "matched_flash_gid" scalar + a "flashpred" PC (predicted per-channel
+        // PE).  At the pre-pipeline "img" dump point we read these and emit the
+        // "op" display so the flash/QL-matching result lands in the same zip
+        // as the charge clusters.  Default OFF (no flash dump for detectors
+        // that don't attach an "opflash" PC, e.g. uboone).
+        bool m_save_opflash{false};
+        Bee::Flashes m_bee_flash;
+        void fill_bee_flashes(const Facade::Grouping& grouping);
 
         // Add new member variables for run/subrun/event
         int m_runNo{0};

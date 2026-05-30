@@ -189,6 +189,45 @@ namespace WireCell::Bee {
     };
 
 
+    /// A Bee "op" object holds the optical flash / charge-light matching
+    /// display: per flash, the measured per-channel PE, total PE and time, plus
+    /// (for matched flashes) the matched charge cluster id(s) and the model's
+    /// predicted per-channel PE.  It maps to one Bee JSON file (conventionally
+    /// named "op").  Schema (arrays are parallel, one entry per display row):
+    ///   { runNo, subRunNo, eventNo, geom,
+    ///     op_t:[t_us], op_peTotal:[sumPE], op_pes:[[pe_ch]],
+    ///     op_pes_pred:[[pred_ch]], cluster_id:[[clid]],
+    ///     op_nomatching_cluster_ids:[] }
+    /// An unmatched flash is one row with empty cluster_id / op_pes_pred.
+    class Flashes : public Object {
+    public:
+        Flashes();
+        /// Construct with metadata.  "name" is the Bee file name (default "op").
+        Flashes(const std::string& geom, const std::string& name = "op",
+                int run = 0, int sub = 0, int evt = 0);
+
+        void detector(const std::string& geom);
+
+        /// Set the run/subrun/event numbers.
+        void rse(int run, int sub, int evt);
+
+        /// Drop arrays and (re)set the e/s/r numbers.  If sub or run are
+        /// negative, any previous value is kept.
+        void reset(int evt, int sub = -1, int run = -1);
+
+        /// Append one display row: a flash with time t (in microseconds), the
+        /// measured per-channel PE vector and its total, the matched cluster
+        /// id(s) (empty for an unmatched flash) and the predicted per-channel
+        /// PE (empty for an unmatched flash).
+        void append(double t, const std::vector<double>& pes, double peTotal,
+                    const std::vector<int>& cluster_ids,
+                    const std::vector<double>& pes_pred);
+
+        size_t size() const;
+        bool empty() const;
+    };
+
+
     // todo: source
 
     /// A Bee Sink persists Objects to some store.
