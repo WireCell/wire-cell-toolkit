@@ -8,6 +8,7 @@
 #include "WireCellAux/TensorDMcommon.h"
 
 #include <map>
+#include <set>
 
 WIRECELL_FACTORY(PointTreeMerging, WireCell::Clus::PointTreeMerging,
                  WireCell::INamed,
@@ -41,6 +42,12 @@ void Clus::PointTreeMerging::configure(const WireCell::Configuration& cfg)
     m_outpath = get(cfg, "outpath", m_outpath);
     m_multiplicity = get<int>(cfg, "multiplicity", m_multiplicity);
     m_tolerate_missing = get<bool>(cfg, "tolerate_missing", m_tolerate_missing);
+    if (cfg.isMember("root_pcs_to_merge")) {
+        m_root_pcs_to_merge.clear();
+        for (const auto& jname : cfg["root_pcs_to_merge"]) {
+            m_root_pcs_to_merge.insert(jname.asString());
+        }
+    }
     SPDLOG_LOGGER_TRACE(log, "{}", cfg);
     SPDLOG_LOGGER_TRACE(log, "m_multiplicity {}", m_multiplicity);
 }
@@ -98,21 +105,29 @@ static size_t normalize_pctree_local_pcs(Points::node_t* root)
     return nadded;
 }
 
-static void merge_pct(Points::node_t* tgt, Points::node_t* src)
+static void merge_pct(Points::node_t* tgt, Points::node_t* src,
+                      const std::set<std::string>& root_pcs_to_merge)
 {
     if (!src) {
         return;
     }
 
-    // merge local pcs for root node
-    auto tgt_pc = tgt->value.local_pcs();
+    // Merge selected root-node local PCs (concatenate across inputs). NOTE the
+    // reference: local_pcs() returns a reference, so this must bind by
+    // reference or the merge is silently a no-op. Only names explicitly opted
+    // in via root_pcs_to_merge are merged; everything else (per-anode ctpc_a*,
+    // dead_winds_a*, flash/light/flashlight, ...) keeps the historical behavior
+    // of being dropped from the source roots, so existing chains are unchanged.
+    auto& tgt_pc = tgt->value.local_pcs();
     for (const auto& src_pc : src->value.local_pcs()) {
-        auto name = src_pc.first;
+        const auto& name = src_pc.first;
+        if (root_pcs_to_merge.find(name) == root_pcs_to_merge.end()) {
+            continue;
+        }
         if (tgt_pc.find(name) == tgt_pc.end()) {
             tgt_pc.emplace(name, src_pc.second);
         } else {
-            auto& tgt_pcds = tgt_pc[name];
-            tgt_pcds.append(src_pc.second);
+            tgt_pc[name].append(src_pc.second);
         }
     }
 
@@ -203,8 +218,8 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
         SPDLOG_LOGGER_DEBUG(log, "input[{}] ident={} path='{}' live children={}",
                             i, invec[i]->ident(), inpath_for(invec[i]),
                             src_live ? src_live->nchildren() : 0);
-        merge_pct(root_live.get(), src_live.get());
-        merge_pct(root_dead.get(), src_dead.get());
+        merge_pct(root_live.get(), src_live.get(), m_root_pcs_to_merge);
+        merge_pct(root_dead.get(), src_dead.get(), m_root_pcs_to_merge);
     }
 
 
