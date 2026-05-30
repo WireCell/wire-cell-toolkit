@@ -24,6 +24,12 @@ using namespace WireCell;
 using namespace WireCell::Match;
 using namespace WireCell::Clus::Facade;
 
+// Stride used to build a globally-unique flash id (gid = anode_ident*stride +
+// per-APA flash row) so the matched flash association survives the per-APA ->
+// all-APA pctree merge and stays unambiguous across APAs. Far larger than any
+// realistic per-APA flash count.
+namespace { constexpr int kFlashGidStride = 1000000; }
+
 QLMatching::QLMatching() : Aux::Logger("QLMatching", "match") {}
 QLMatching::~QLMatching() = default;
 
@@ -212,7 +218,11 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     }
 
     std::for_each(clusters.begin(), clusters.end(),
-                  [](Cluster* c) { c->set_cluster_t0(-1e12); c->set_scalar<int>("flash", -1); });
+                  [](Cluster* c) {
+                      c->set_cluster_t0(-1e12);
+                      c->set_scalar<int>("flash", -1);
+                      c->set_scalar<int>("matched_flash_gid", -1);
+                  });
 
     std::map<Opflash*, int>  global_flash_idx_map;
     std::map<Cluster*, int>  global_cluster_idx_map;
@@ -647,6 +657,14 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             // Record the matched flash row index so Cluster::get_flash() reflects
             // the match (flash_id == canonical "flash" PC row index).
             cluster->set_scalar<int>("flash", flash->get_flash_id());
+            // Persist the match for the downstream (all-APA) MABC op/flash Bee
+            // dump: a globally-unique flash id (survives the per-APA -> all-APA
+            // merge) and this bundle's predicted per-channel PE (op_pes_pred).
+            // The gid is keyed on the flash's index within `flashes` (unique
+            // per APA), NOT get_flash_id() (the stored ident, which can repeat).
+            cluster->set_scalar<int>("matched_flash_gid",
+                                     m_anode->ident() * kFlashGidStride + global_flash_idx_map.at(flash));
+            cluster->put_pcarray<double>(bundle->get_pred_flash(), "pe", "flashpred");
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",
                        flash->get_flash_id(), flash->get_time(),
@@ -654,6 +672,34 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                        bundle->get_total_pred_light(),
                        bundle->get_main_cluster()->get_cluster_t0());
         }
+    }
+
+    // Persist the per-flash measured light into a merge-safe, self-contained
+    // per-root "opflash" PC, so the all-APA MABC can dump the op/flash Bee
+    // display after the per-APA trees are merged (the canonical flash/light
+    // /flashlight join uses per-APA row indices that collide across APAs; this
+    // table is keyed by the global flash id instead). One row per (flash,
+    // channel): gid, time (raw ns), ch, pe. Holds ALL flashes considered for
+    // matching (incl. unmatched), as the op display shows every flash.
+    {
+        std::vector<int> op_gid, op_ch;
+        std::vector<double> op_time, op_pe;
+        for (std::size_t fi = 0; fi < flashes.size(); ++fi) {
+            const auto& flash = flashes[fi];
+            // gid keyed on the per-APA flash index (unique), matching the
+            // matched_flash_gid stamped on clusters above.
+            const int gid = m_anode->ident() * kFlashGidStride + static_cast<int>(fi);
+            for (int ch = 0; ch < m_nchan; ++ch) {
+                op_gid.push_back(gid);
+                op_time.push_back(flash->get_time());
+                op_ch.push_back(ch);
+                op_pe.push_back(flash->get_PE(ch));
+            }
+        }
+        grouping->put_pcarray<int>(op_gid, "gid", "opflash");
+        grouping->put_pcarray<double>(op_time, "time", "opflash");
+        grouping->put_pcarray<int>(op_ch, "ch", "opflash");
+        grouping->put_pcarray<double>(op_pe, "pe", "opflash");
     }
 
     // ---- Build outputs ----
