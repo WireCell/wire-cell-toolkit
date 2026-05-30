@@ -55,7 +55,6 @@ function(params) {
         data: {
             anode: wc.tn(anode),
             detector_volumes: wc.tn(dv),
-            bee_dir: 'data-sep',
             beamonly: false,
             data: if reality == 'data' then true else false,
             QtoL: 1.0,

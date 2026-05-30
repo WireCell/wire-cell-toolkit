@@ -1,5 +1,4 @@
 #include "WireCellMatch/QLMatching.h"
-#include "WireCellMatch/Util.h"
 #include "WireCellMatch/Opflash.h"
 
 #include "WireCellAux/TensorDMcommon.h"
@@ -40,7 +39,6 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_inpath        = get(cfg, "inpath", m_inpath);
     m_outpath       = get(cfg, "outpath", m_outpath);
-    m_bee_dir       = get(cfg, "bee_dir", m_bee_dir);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
 
@@ -122,7 +120,6 @@ WireCell::Configuration QLMatching::default_configuration() const
     Configuration cfg;
     cfg["inpath"]          = m_inpath;
     cfg["outpath"]         = m_outpath;
-    cfg["bee_dir"]         = m_bee_dir;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
@@ -635,18 +632,6 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
         }
 
         log->debug("done with matching");
-        if (!m_bee_dir.empty()) {
-            const std::string sub_dir = String::format("%s/%d", m_bee_dir, m_bee_index);
-            Persist::assuredir(sub_dir);
-            Match::dump_bee_3d(
-                *root_live.get(),
-                String::format("%s/%d-img-apa%d.json", sub_dir, m_bee_index, m_anode->ident()));
-            Match::dump_light(
-                flashes, flash_bundles_map, global_cluster_idx_map,
-                String::format("%s/%d-op-apa%d.json", sub_dir, m_bee_index, m_anode->ident()));
-            ++m_bee_index;
-        }
-        log->debug(em("dump bee"));
     }
 
     // Apply matched t0s.

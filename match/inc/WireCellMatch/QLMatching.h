@@ -44,7 +44,6 @@ namespace WireCell::Match {
 
     private:
         std::size_t m_count{0};
-        int m_bee_index{0};
 
         // Number of optical-detector channels (per-flash PE vector length).
         // The only bit-safe source of nchan now that flashes arrive via the
@@ -87,7 +86,6 @@ namespace WireCell::Match {
 
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
-        std::string m_bee_dir{"data"};
         float m_cluster_t0{-1e12};
 
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
