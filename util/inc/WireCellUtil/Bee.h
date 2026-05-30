@@ -217,11 +217,12 @@ namespace WireCell::Bee {
 
         /// Append one display row: a flash with time t (in microseconds), the
         /// measured per-channel PE vector and its total, the matched cluster
-        /// id(s) (empty for an unmatched flash) and the predicted per-channel
-        /// PE (empty for an unmatched flash).
+        /// id(s) (empty for an unmatched flash), the predicted per-channel PE
+        /// (empty for an unmatched flash) and the flash's APA (anode) number.
         void append(double t, const std::vector<double>& pes, double peTotal,
                     const std::vector<int>& cluster_ids,
-                    const std::vector<double>& pes_pred);
+                    const std::vector<double>& pes_pred,
+                    int apa);
 
         size_t size() const;
         bool empty() const;

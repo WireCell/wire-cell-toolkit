@@ -271,8 +271,8 @@ namespace {
         d["op_peTotal"] = Json::arrayValue;
         d["op_pes"] = Json::arrayValue;
         d["op_pes_pred"] = Json::arrayValue;
-        d["cluster_id"] = Json::arrayValue;
-        d["op_nomatching_cluster_ids"] = Json::arrayValue;
+        d["op_cluster_ids"] = Json::arrayValue;
+        d["apa"] = Json::arrayValue;
     }
 }
 
@@ -313,7 +313,8 @@ void Bee::Flashes::reset(int evt, int sub, int run)
 
 void Bee::Flashes::append(double t, const std::vector<double>& pes, double peTotal,
                           const std::vector<int>& cluster_ids,
-                          const std::vector<double>& pes_pred)
+                          const std::vector<double>& pes_pred,
+                          int apa)
 {
     m_data["op_t"].append(t);
     m_data["op_peTotal"].append(peTotal);
@@ -328,7 +329,10 @@ void Bee::Flashes::append(double t, const std::vector<double>& pes, double peTot
 
     Json::Value jcid(Json::arrayValue);
     for (auto c : cluster_ids) jcid.append(c);
-    m_data["cluster_id"].append(jcid);
+    m_data["op_cluster_ids"].append(jcid);
+
+    // Legacy dump_light stored the per-flash APA as a string ("0"/"1").
+    m_data["apa"].append(std::to_string(apa));
 }
 
 size_t Bee::Flashes::size() const

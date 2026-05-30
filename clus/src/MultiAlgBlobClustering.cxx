@@ -1620,7 +1620,11 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
 
     // Emit ALL flashes (matched + unmatched). A matched flash emits one row per
     // matched cluster; an unmatched flash emits one row with empty cluster_id.
+    // The global flash id encodes the APA as gid = anode_ident*kFlashGidStride +
+    // idx (see QLMatching.cxx), so apa = gid / kFlashGidStride.
+    constexpr int kFlashGidStride = 1000000;
     for (const int g : flash_order) {
+        const int apa = g / kFlashGidStride;
         int maxch = -1;
         for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;
         std::vector<double> pes(maxch + 1, 0.0);
@@ -1631,10 +1635,10 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         auto mit = matched.find(g);
         if (mit != matched.end() && !mit->second.empty()) {
             for (const auto& cp : mit->second) {
-                m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second);
+                m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
             }
         } else {
-            m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{});
+            m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
         }
     }
 }
