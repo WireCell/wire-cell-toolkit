@@ -42,17 +42,42 @@ another detector or the geometry shifts.
 |---|-----------|---------|-------|-----------------------|----|
 | # | Literal | Means | Resolution | St |
 |---|---------|-------|------------|----|
-| A1 | `lo_x_bound = (tpc==0) ? -2000 : 0` | drift-volume low X edge (mm) | `-m_x_bound` / `0`; key `x_bound` (`2000*wc.mm`) | ☑ |
-| A2 | `hi_x_bound = (tpc==0) ? 0 : 2000` | drift-volume high X edge (mm); `0` = cathode | `0` / `m_x_bound`; key `x_bound`. Cathode seam stays literal `0` | ☑ |
-| A3 | `std::abs(y) > 2000` | active-volume half-height in Y (mm) | `m_y_bound`; key `y_bound` (`2000*wc.mm`) | ☑ |
-| A4 | `z < 0 \|\| z > 5000` | active-volume Z span (mm) | `m_z_min`/`m_z_max`; keys `z_min` (`0`), `z_max` (`5000*wc.mm`) | ☑ |
-| A5 | `std::abs(x) > 1950` | "close to PMT/anode" distance (mm) | `m_pmt_dist`; key `pmt_dist` (`1950*wc.mm`) | ☑ |
+| A1 | `lo_x_bound = (tpc==0) ? -2000 : 0` | drift-volume low X edge (mm) | **Pass 2:** from `m_dv->inner_bounds` (anode/cathode corners), not a literal | ☑ |
+| A2 | `hi_x_bound = (tpc==0) ? 0 : 2000` | drift-volume high X edge (mm); `0` = cathode | **Pass 2:** cathode = bbox corner nearest `m_cathode_x`; anode = far corner | ☑ |
+| A3 | `std::abs(y) > 2000` | active-volume half-height in Y (mm) | **Pass 2:** `bray.first/second.y()` ± `m_y_cushion`; key `y_cushion` | ☑ |
+| A4 | `z < 0 \|\| z > 5000` | active-volume Z span (mm) | **Pass 2:** `bray.first/second.z()` ± `m_z_cushion`; key `z_cushion` | ☑ |
+| A5 | `std::abs(x) > 1950` | "close to PMT/anode" distance (mm) | **Pass 2:** removed; "close to PMT" = anode-flag-window membership (`anode_ext2`) | ☑ |
 | A6 | `x / 10., y / 10., z / 10.` | mm → cm for `SemiAnalyticalModel` | now `/ units::cm` (pure units, no key) | ☑ |
 
-Note A2 also encodes the **cathode plane at X = 0** — the same `0` is reused as
-both the high edge of TPC 0 and the low edge of TPC 1. It is deliberately kept a
-literal `0` (the true origin). When the two-TPC joint match is built, this shared
-seam is the value that has to become real geometry.
+**Pass 2 (geometry from `IDetectorVolumes` + flags filled).** A1–A5 no longer
+carry SBND literals. The raw active-volume bounds come from
+`m_dv->inner_bounds(wpid)` (the per-face sensitive bbox); the per-TPC anode/cathode
+are picked by distance to the cathode seam `m_cathode_x`. The matcher works in a
+per-TPC drift coordinate `u = s·(x − anode_x)` (u=0 at the anode/PMT plane,
+u=u_cathode at the cathode), so the MicroBooNE-prototype inequalities port directly
+and SBND's two reversed-drift APAs share one cushion set. The literal-replacement
+knobs are now signed **cushions** (`anode_ext1/ext2`, `cathode_ext1/ext2`,
+`y_cushion`, `z_cushion`), defaulting to the MicroBooNE convention
+(`ToyMatching.cxx ~158-164`). This **shifts output slightly** vs the old
+±2000/0–5000 literals (the inclusion window widens by the cushions); validated
+physics-neutral first (below), then shipped at the MicroBooNE defaults.
+
+The three boundary flags (`flag_close_to_PMT`, `flag_at_x_boundary`,
+`flag_spec_end`) are now **filled** by `compute_endpoint_flags()` — a faithful port
+of the prototype end-trimming walk over `time_blob_map()` — replacing the §D6 buggy
+block. They are still dormant (no consumer reads them) so filling them is
+output-neutral; they are ready for the downstream consistency-ladder / Lasso
+down-weighting logic when that is ported. The cathode seam `x = 0` is now real
+geometry (`m_cathode_x`), not a baked literal.
+
+**Validation.** With cushions set to compensate the `m_dv` bbox back to the old
+windows (`anode_ext1=1.45cm, cathode_ext1=0.45cm, y_cushion=−0.03cm, z_cushion=0`),
+the per-bundle `initial eval` (pred PE / ks / chi2 for all 192 SBND-mc-evt2
+bundles) is **bit-identical** to pre-refactor HEAD — confirming the `u`-transform
+and per-TPC orientation reproduce the old gate exactly. Note: the
+`flash_bundles_map` *listing* is NOT a valid cross-build diff target — QL matching
+has pre-existing pointer-keyed-map ordering non-determinism (a single extra log
+line flips it). Validate at the `initial eval` / `best bundle strength` level.
 
 ---
 
@@ -101,7 +126,7 @@ and the shape penalty — i.e. they tune the matching — yet none is configurab
 | D3 | `get_total_pred_light() < 10` | min predicted PE to keep bundle | key `min_pred_pe` | ☑ |
 | D4 | `get_ks_dis() == 1` | KS==1 ⇒ uncomputable ⇒ reject | left: sentinel (KS default value), not tuning | ☐ |
 | D5 | `chi2/ndf > 1e4` | pre-select χ²/ndf ceiling | key `preselect_chi2ndf_max` | ☑ |
-| D6 | `if (std::abs(x) && ...)` | **suspected porting bug**: `std::abs(x)` is truthy for ~all points, so `flag_close_to_PMT` is set almost always. | left **unchanged** — preserving behavior; logic fix is a separate later task | ☐ |
+| D6 | `if (std::abs(x) && ...)` | porting bug: `std::abs(x)` truthy for ~all points, so `flag_close_to_PMT` set almost always | **Pass 2:** block deleted; flags now filled by `compute_endpoint_flags()` (faithful prototype port). Output-neutral (flags dormant). | ☑ |
 
 ---
 
@@ -166,18 +191,23 @@ them for tunable parameters. **Do not touch.**
 
 ---
 
-## Remaining work (after Pass 1)
+## Remaining work (after Pass 2)
 
-- **§D6 porting bug** — confirm/repair the `std::abs(x)` boundary test (it makes
-  `flag_close_to_PMT` true for almost all points). This is a *behavior* change, so
-  it needs its own validation, separate from the units/config pass.
-- **§A geometry sourcing** — Pass 1 made the X/Y/Z bounds configurable literals; a
-  follow-up could source them from `m_dv`/`m_anode` so they track the real geometry
-  (and the cathode seam `0`) instead of SBND-specific defaults. Prerequisite for
-  cross-detector / two-TPC reuse.
+- **Done in Pass 2:** §A geometry sourced from `m_dv->inner_bounds` with
+  configurable cushions (no SBND literals); cathode seam is real geometry
+  (`m_cathode_x`); §D6 buggy flag block replaced by the faithful
+  `compute_endpoint_flags()` port; all three boundary flags filled (still dormant).
+- **Consume the boundary flags** — `flag_close_to_PMT` / `flag_at_x_boundary` /
+  `flag_spec_end` are filled but not yet read. Porting the prototype's
+  consistency-ladder relaxation, Lasso down-weighting (0.2/0.5 seeds), and
+  `spec_end` preference (`ToyMatching.cxx` §4–§5) is the next behavior step.
 - **§H** — H1 (opdet mask) and H2 (TPC split) are now derived from the injected
   `OpDets` metadata (see table above); the remaining SBND-specific item is H4
   (VUV/VIS efficiency tables), to revisit when generalizing beyond SBND.
+- **Pointer-order non-determinism** — QL matching iterates pointer-keyed maps, so
+  the `flash_bundles_map` listing (which secondary cluster joins a flash's bundle)
+  is build-layout dependent. Not fixed here; flagged so future validation diffs at
+  the `initial eval` level, not the bundle listing.
 - Minor leftovers kept as named constants by design: §B7, §C8, §D4, §G2.
 
 Any behavior change must land behind a config knob whose default reproduces today's

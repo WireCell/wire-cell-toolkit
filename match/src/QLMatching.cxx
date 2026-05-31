@@ -73,13 +73,16 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
     m_nchan = get(cfg, "nchan", m_nchan);
 
-    // Tuning constants (see match/docs/improve_progress.md). Defaults equal the
-    // historical hard-coded literals, so omitting these keys is bit-identical.
-    m_x_bound   = get(cfg, "x_bound",   m_x_bound);
-    m_y_bound   = get(cfg, "y_bound",   m_y_bound);
-    m_z_min     = get(cfg, "z_min",     m_z_min);
-    m_z_max     = get(cfg, "z_max",     m_z_max);
-    m_pmt_dist  = get(cfg, "pmt_dist",  m_pmt_dist);
+    // §A active-volume cushions (see match/docs/improve_progress.md). The raw
+    // bounds come from m_dv->inner_bounds; these adjust the effective windows.
+    // Defaults are the MicroBooNE-convention values (NOT bit-identical to the old
+    // SBND literals); override to recover the old bounds.
+    m_anode_ext1   = get(cfg, "anode_ext1",   m_anode_ext1);
+    m_anode_ext2   = get(cfg, "anode_ext2",   m_anode_ext2);
+    m_cathode_ext1 = get(cfg, "cathode_ext1", m_cathode_ext1);
+    m_cathode_ext2 = get(cfg, "cathode_ext2", m_cathode_ext2);
+    m_y_cushion    = get(cfg, "y_cushion",    m_y_cushion);
+    m_z_cushion    = get(cfg, "z_cushion",    m_z_cushion);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
     m_drift_out_frac        = get(cfg, "drift_out_frac",        m_drift_out_frac);
@@ -182,11 +185,12 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["strength_cutoff"] = m_strength_cutoff;
     cfg["drift_speed"]     = m_drift_speed;
 
-    cfg["x_bound"]   = m_x_bound;
-    cfg["y_bound"]   = m_y_bound;
-    cfg["z_min"]     = m_z_min;
-    cfg["z_max"]     = m_z_max;
-    cfg["pmt_dist"]  = m_pmt_dist;
+    cfg["anode_ext1"]   = m_anode_ext1;
+    cfg["anode_ext2"]   = m_anode_ext2;
+    cfg["cathode_ext1"] = m_cathode_ext1;
+    cfg["cathode_ext2"] = m_cathode_ext2;
+    cfg["y_cushion"]    = m_y_cushion;
+    cfg["z_cushion"]    = m_z_cushion;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
     cfg["drift_out_frac"]        = m_drift_out_frac;
@@ -309,8 +313,38 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     const unsigned int tpc = m_anode->ident();
     const int sign_offset  = (tpc == 0) ? -1 : 1;
-    const double lo_x_bound = (tpc == 0) ? -m_x_bound : 0;
-    const double hi_x_bound = (tpc == 0) ? 0 : m_x_bound;
+
+    // Active-volume geometry from the IDetectorVolumes service (replaces the old
+    // SBND-specific x/y/z literals). inner_bounds() is the per-face sensitive
+    // bounding box. The cathode is the bbox X corner nearest the cathode seam
+    // (m_cathode_x, the same x=0 reference the OpDet split uses); the anode/PMT
+    // plane is the far corner. We work in a per-TPC drift coordinate
+    //   u = s * (x - anode_x)   with   u=0 at the anode, u=u_cathode (>0) at the
+    // cathode, so the prototype's single-TPC inequalities port directly and the
+    // two reversed-drift SBND APAs share one set of cushions.
+    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, 0, static_cast<int>(tpc));
+    const BoundingBox bb = m_dv->inner_bounds(wpid);
+    if (bb.empty()) {
+        raise<ValueError>("QLMatching: empty detector-volume bounds for anode %d", tpc);
+    }
+    const Ray bray = bb.bounds();
+    const double x_lo = bray.first.x(), x_hi = bray.second.x();
+    const bool lo_is_cathode = std::abs(x_lo - m_cathode_x) < std::abs(x_hi - m_cathode_x);
+    const double cathode_x = lo_is_cathode ? x_lo : x_hi;
+    const double anode_x   = lo_is_cathode ? x_hi : x_lo;
+    const double s         = (anode_x < cathode_x) ? +1.0 : -1.0;
+    const double u_cathode = s * (cathode_x - anode_x);   // > 0
+    // Y/Z active bounds from the same bbox, shrunk(+)/grown(-) by the cushions.
+    const double y_lo = bray.first.y()  + m_y_cushion;
+    const double y_hi = bray.second.y() - m_y_cushion;
+    const double z_lo = bray.first.z()  + m_z_cushion;
+    const double z_hi = bray.second.z() - m_z_cushion;
+    log->debug("anode {} bbox x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
+               "anode_x {:.2f} cathode_x {:.2f} u_cathode {:.2f} cm s {}",
+               tpc, x_lo / units::cm, x_hi / units::cm,
+               bray.first.y() / units::cm, bray.second.y() / units::cm,
+               bray.first.z() / units::cm, bray.second.z() / units::cm,
+               anode_x / units::cm, cathode_x / units::cm, u_cathode / units::cm, s);
 
     // Bundle-quality thresholds forwarded to every TimingTPCBundle below.
     const BundleQualityParams qp{
@@ -354,6 +388,10 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             all_bundles.push_back(bundle);
             bundle->set_opdet_mask(flash_opdet_mask);
 
+            // Fill the boundary flags (close-to-PMT / at-x-boundary / spec-end)
+            // for this (flash, cluster) pair from the cluster's drift endpoints.
+            compute_endpoint_flags(bundle.get(), cluster, flash_x_offset, s, anode_x, u_cathode);
+
             const std::size_t nopdets = flash->get_num_channels();
             std::vector<double> pred_flash(nopdets, 0.0);
 
@@ -373,13 +411,13 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                     const double y = points.at(i).y();
                     const double z = points.at(i).z();
 
-                    if (x < lo_x_bound || x > hi_x_bound) { ++npt_outside_drift; continue; }
-                    if (std::abs(y) > m_y_bound || z < m_z_min || z > m_z_max) { ++npt_outside_bounds; continue; }
+                    // PE-inclusion gate in the per-TPC drift coordinate u. The
+                    // window runs from just below the anode to just beyond the
+                    // cathode (prototype low_x_cut+ext1 .. high_x_cut+ext1).
+                    const double u = s * (x - anode_x);
+                    if (u < m_anode_ext1 || u > u_cathode + m_cathode_ext1) { ++npt_outside_drift; continue; }
+                    if (y < y_lo || y > y_hi || z < z_lo || z > z_hi) { ++npt_outside_bounds; continue; }
 
-                    if (std::abs(x) && bundle->get_flag_at_x_boundary() == false)
-                        bundle->set_flag_close_to_PMT(true);
-                    if (std::abs(x) > m_pmt_dist && bundle->get_flag_close_to_PMT() == false)
-                        bundle->set_flag_close_to_PMT(true);
                     if (npt_outside_drift > m_drift_out_frac * npt) { drifted_outside = true; break; }
 
                     // SemiAnalyticalModel expects positions in cm. Blob points
@@ -804,6 +842,115 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     ++m_count;
     return true;
+}
+
+// ----- boundary-flag filling (port of ToyMatching.cxx::calculate_pred_pe ~176-290) -----
+void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
+                                        Cluster* cluster,
+                                        double flash_x_offset,
+                                        double s, double anode_x, double u_cathode) const
+{
+    // Collect the per-time-slice representative drift coordinate u and blob
+    // count. The toolkit's time_blob_map is nested apa->face->time->BlobSet; the
+    // matched anode has a single active face for SBND but we iterate all faces
+    // under the apa for robustness. We then walk in u-order from each drift end
+    // (anode = min u, cathode = max u). Walking by u rather than the prototype's
+    // strict time order is a faithful adaptation: for a normally drifting track
+    // time and u are monotonic, and the boundary tests are themselves in u.
+    const auto& tbm = cluster->time_blob_map();
+    auto ait = tbm.find(static_cast<int>(m_anode->ident()));
+    if (ait == tbm.end()) return;
+
+    struct SliceU { double u; int nblobs; };
+    std::vector<SliceU> sv;
+    for (const auto& [face, slices] : ait->second) {
+        for (const auto& [t, bset] : slices) {
+            if (bset.empty()) continue;
+            const Blob* b0 = *bset.begin();
+            auto pts = b0->points("3d", {"x", "y", "z"});
+            if (pts.empty()) continue;
+            const double x = pts.at(0).x() + flash_x_offset;
+            sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()) });
+        }
+    }
+    if (sv.empty()) return;
+
+    std::sort(sv.begin(), sv.end(),
+              [](const SliceU& a, const SliceU& b) { return a.u < b.u; });
+
+    const double N = static_cast<double>(cluster->nchildren());
+    double first_u = sv.front().u;   // anode-end sampling u  (prototype first_pos_x - offset)
+    double last_u  = sv.back().u;    // cathode-end sampling u (prototype last_pos_x  - offset)
+    bool flag_spec_end = false;
+
+    const double anode_in   = m_anode_ext1;                // low_x_cut  + low_x_cut_ext1
+    const double cathode_in = u_cathode + m_cathode_ext1;  // high_x_cut + high_x_cut_ext1
+
+    // ---- anode-end trim: walk inward (increasing u) ----
+    if (first_u <= anode_in && first_u > -120 * units::cm) {
+        int n_slices_out = 0, n_blobs_out = 0, n_blobs_def_out = 0;
+        double prev_u = first_u, cur_u = first_u;
+        for (const auto& sl : sv) {
+            cur_u = sl.u;
+            if (cur_u > anode_in && (cur_u - prev_u) > 0.75 * units::cm) break;
+            if (n_slices_out > 60) break;
+            if (cur_u < anode_in) n_blobs_def_out += sl.nblobs;
+            n_slices_out += 1;
+            n_blobs_out  += sl.nblobs;
+            prev_u = cur_u;
+        }
+        if (n_slices_out <= 36 && n_blobs_out < 0.05 * N) {
+            first_u = cur_u;
+            if (n_slices_out > 10 && std::abs(cur_u - prev_u) < 10 * units::cm) flag_spec_end = true;
+        } else if (n_slices_out <= 60 && n_blobs_out < 0.06 * N && std::abs(cur_u - prev_u) > 10 * units::cm) {
+            first_u = cur_u;
+        } else if (n_slices_out <= 25 && n_blobs_out < 0.12 * N && std::abs(cur_u - prev_u) > 20 * units::cm) {
+            first_u = cur_u;
+        }
+        if (n_blobs_def_out < 0.0015 * N && n_blobs_def_out > 0) first_u = 0.0;  // snap to anode
+    }
+
+    // ---- cathode-end trim: walk inward (decreasing u) ----
+    if (last_u >= cathode_in && last_u < u_cathode + 120 * units::cm) {
+        int n_slices_out = 0, n_blobs_out = 0, n_blobs_def_out = 0;
+        double prev_u = last_u, cur_u = last_u;
+        for (auto it = sv.rbegin(); it != sv.rend(); ++it) {
+            cur_u = it->u;
+            if (cur_u < cathode_in && std::abs(cur_u - prev_u) > 0.75 * units::cm) break;
+            if (n_slices_out > 60) break;
+            if (cur_u > cathode_in) n_blobs_def_out += it->nblobs;
+            n_slices_out += 1;
+            n_blobs_out  += it->nblobs;
+            prev_u = cur_u;
+        }
+        if (n_slices_out <= 36 && n_blobs_out < 0.05 * N) {
+            last_u = cur_u;
+            if (n_slices_out > 10 && std::abs(cur_u - prev_u) < 10 * units::cm) flag_spec_end = true;
+        } else if (n_slices_out <= 60 && n_blobs_out < 0.06 * N && std::abs(cur_u - prev_u) > 10 * units::cm) {
+            last_u = cur_u;
+        } else if (n_slices_out <= 25 && n_blobs_out < 0.12 * N && std::abs(cur_u - prev_u) > 20 * units::cm) {
+            last_u = cur_u;
+        }
+        if (n_blobs_def_out < 0.0015 * N && n_blobs_def_out > 0) last_u = u_cathode;  // snap to cathode
+    }
+
+    // ---- flag block (prototype 272-290), guarded by the in-window check ----
+    if (first_u > anode_in - 1.0 * units::cm &&
+        last_u  > 0.0 &&
+        last_u  < cathode_in &&
+        first_u < u_cathode) {
+        bundle->set_spec_end_flag(flag_spec_end);
+        // Anode end inside the flag window => close to the PMTs (which sit at the
+        // anode plane) and at the x-boundary.
+        if (first_u <= m_anode_ext2 && first_u > anode_in - 1.0 * units::cm) {
+            bundle->set_flag_close_to_PMT(true);
+            bundle->set_flag_at_x_boundary(true);
+        }
+        // Cathode end inside the flag window => at the x-boundary (no PMTs there).
+        if (last_u >= u_cathode + m_cathode_ext2 && last_u < cathode_in) {
+            bundle->set_flag_at_x_boundary(true);
+        }
+    }
 }
 
 // ----- bundle map maintenance -----

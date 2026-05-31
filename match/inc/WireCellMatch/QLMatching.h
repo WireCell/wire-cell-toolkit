@@ -82,16 +82,29 @@ namespace WireCell::Match {
         double m_strength_cutoff{0.05};
 
         // ---- Tuning constants pulled out of the inline code (see
-        // match/docs/improve_progress.md). Every default equals the historical
-        // hard-coded literal, so configs that omit these are bit-identical. ----
+        // match/docs/improve_progress.md). The §B-§G defaults equal the historical
+        // hard-coded literals (bit-identical if omitted); the §A cushions below
+        // default to the MicroBooNE convention and intentionally differ. ----
 
-        // §A spatial bounds. Active volume / drift extents. The cathode seam is
-        // the true origin x=0 and stays a literal; m_x_bound is the |x| extent.
-        double m_x_bound{2000 * units::mm};   // drift extent in |x|
-        double m_y_bound{2000 * units::mm};   // active half-height in |y|
-        double m_z_min{0.0 * units::mm};      // active-volume Z lower edge
-        double m_z_max{5000 * units::mm};     // active-volume Z upper edge
-        double m_pmt_dist{1950 * units::mm};  // |x| beyond which a point is "close to PMT"
+        // §A active-volume cushions. The raw active-volume bounds (anode/cathode
+        // X, Y span, Z span) now come from the IDetectorVolumes service
+        // (m_dv->inner_bounds) so the code is detector-agnostic. These signed
+        // cushions adjust the effective PE-inclusion and boundary-flag windows
+        // relative to the true geometry, in the per-TPC anode->cathode drift
+        // coordinate u (u=0 at the anode/PMT plane, u=u_cathode at the cathode
+        // seam), so a single set serves both reversed-drift SBND APAs.
+        //
+        // Defaults follow the MicroBooNE prototype convention
+        // (ToyMatching.cxx::calculate_pred_pe ~158-164): outward-positive in u.
+        // They shift the inclusion window slightly vs the old SBND literals
+        // (intended); overriding them from jsonnet can reproduce the old bounds
+        // bit-identically. See match/docs/improve_progress.md §A.
+        double m_anode_ext1{-2.0 * units::cm};    // PE-inclusion window edge, below the anode (low_x_cut_ext1)
+        double m_anode_ext2{4.0 * units::cm};     // anode flag-window outer edge (low_x_cut_ext2)
+        double m_cathode_ext1{1.2 * units::cm};   // PE-inclusion window edge, beyond the cathode (high_x_cut_ext1)
+        double m_cathode_ext2{-2.0 * units::cm};  // cathode flag-window inner edge (high_x_cut_ext2)
+        double m_y_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each |y| edge
+        double m_z_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each z edge
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)
@@ -154,6 +167,16 @@ namespace WireCell::Match {
         // per-channel on/off mask and the per-TPC OpDet split.
         std::vector<SemiAnalyticalModel::OpticalDetector> m_opdets;
         double m_cathode_x{0.0};  // cathode-plane x; OpDets on its low/high side belong to TPC 0/1
+
+        // Fill the per-bundle boundary flags (flag_close_to_PMT,
+        // flag_at_x_boundary, flag_spec_end) for one (flash, cluster) bundle.
+        // Ports the MicroBooNE prototype end-trimming walk (ToyMatching.cxx
+        // ~176-290) into the per-TPC drift coordinate u. s/anode_x/u_cathode are
+        // the geometry scalars computed once per anode in operator().
+        void compute_endpoint_flags(TimingTPCBundle* bundle,
+                                    WireCell::Clus::Facade::Cluster* cluster,
+                                    double flash_x_offset,
+                                    double s, double anode_x, double u_cathode) const;
 
         void remove_bundle_selection(TimingTPCBundleSelection to_be_removed,
                                      TimingTPCBundleSet& bundle_set);

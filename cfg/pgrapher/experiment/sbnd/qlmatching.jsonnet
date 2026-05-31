@@ -68,12 +68,23 @@ function(params) {
             // These were inline literals in QLMatching; surfaced here as the single
             // source of truth.  Values equal the C++ defaults, so behavior is
             // unchanged unless deliberately retuned. ---
-            // §A active-volume / drift bounds (cathode seam stays the origin x=0).
-            x_bound: 2000*wc.mm,
-            y_bound: 2000*wc.mm,
-            z_min: 0*wc.mm,
-            z_max: 5000*wc.mm,
-            pmt_dist: 1950*wc.mm,
+            // §A active-volume cushions.  The raw active-volume bounds now come
+            // from the DetectorVolumes service (m_dv->inner_bounds) rather than
+            // hard-coded SBND literals; these signed cushions adjust the
+            // effective PE-inclusion / boundary-flag windows in the per-TPC
+            // anode->cathode drift coordinate u (outward-positive).  Defaults
+            // follow the MicroBooNE prototype convention and shift the inclusion
+            // window slightly vs the old ±2000/0-5000 literals (intended);
+            // override them to recover the old bounds bit-identically.
+            // (Validation: anode_ext1=1.45, cathode_ext1=0.45, y_cushion=-0.03,
+            // z_cushion=0 reproduce the old [-200,0]/[0,200], |y|<=200, z[0,500]
+            // gate bit-for-bit — used to confirm this refactor is physics-neutral.)
+            anode_ext1: -2.0*wc.cm,
+            anode_ext2: 4.0*wc.cm,
+            cathode_ext1: 1.2*wc.cm,
+            cathode_ext2: -2.0*wc.cm,
+            y_cushion: 0.0*wc.cm,
+            z_cushion: 0.0*wc.cm,
             // §D pre-selection / bad-match gates.
             mc_saturation_pe: 5000,
             drift_out_frac: 0.25,
