@@ -288,6 +288,12 @@ the beam window (`time < beam_mintime` or `> beam_maxtime`), reject if
 
 ### 7.2 Hard‑coded inside the algorithm
 
+> **Update (Pass 1):** most of the constants below — and the bare-unit literals — have since
+> been given proper Wire-Cell units and pulled up to `QLMatching` jsonnet config keys (defaults
+> bit-identical to these values). See `match/docs/improve_progress.md` for the per-constant
+> status and the config key names. The table is kept as the historical map of where each
+> literal lived.
+
 | Constant | Value | Where | Meaning |
 |---|---|---|---|
 | `lambda` (λ) | 0.1 | `QLMatching.cxx:419` | LASSO L1 strength |
@@ -357,6 +363,12 @@ light is shared between the two PMT sets but whose charge is currently split and
 ---
 
 ## 9. Hard‑coded numbers to make configurable (for later code work)
+
+> **Update (Pass 1 — DONE):** the tuning-relevant numbers here are now Wire-Cell-unit literals
+> exposed as `QLMatching` jsonnet config keys (cross-class ones forwarded via `Match::PEErr` and
+> `Match::BundleQualityParams`), with defaults bit-identical to the values below. The remaining
+> items (the §D6 `std::abs(x)` logic bug, sentinels, and the SBND layout tables / even-odd mask)
+> are intentionally deferred. See `match/docs/improve_progress.md` for the authoritative status.
 
 These should later be exposed through jsonnet so they can be tuned without rebuilding. Per the
 project convention, any new toggle must **default to the current behaviour** so existing SBND
