@@ -286,8 +286,16 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     grouping->set_anodes({m_anode});
     grouping->set_detector_volumes(m_dv);
     std::vector<Cluster*> clusters = grouping->children();
+    // Sort by length (desc) with a stable tie-break on the persisted cluster
+    // ident: std::sort is not stable, so equal lengths would otherwise order by
+    // container/pointer order, making the cluster indices below (and everything
+    // derived from them) build-dependent. get_cluster_id() is the unique,
+    // serialization-stable ident assigned upstream by MultiAlgBlobClustering.
     std::sort(clusters.begin(), clusters.end(),
-              [](const Cluster* a, const Cluster* b) { return a->get_length() > b->get_length(); });
+              [](const Cluster* a, const Cluster* b) {
+                  if (a->get_length() != b->get_length()) return a->get_length() > b->get_length();
+                  return a->get_cluster_id() < b->get_cluster_id();
+              });
 
     double total_charge_blob = 0.0;
     double total_charge_point = 0.0;
@@ -511,6 +519,19 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                       });
         }
     };
+    // Same, for the cluster-keyed map: within one cluster the bundles differ by
+    // flash, so order them by flash_index_id (== get_flash_id(), the same stable
+    // key flash_iter_order uses). Without this, cluster_bundles_map[cluster]
+    // vectors stay in pre_bundles (pointer-set) order when iterated directly.
+    auto sort_inner_by_flash_idx = [](ClusterBundlesMap& m) {
+        for (auto& kv : m) {
+            std::sort(kv.second.begin(), kv.second.end(),
+                      [](const TimingTPCBundle::pointer& a,
+                         const TimingTPCBundle::pointer& b) {
+                          return a->get_flash_index_id() < b->get_flash_index_id();
+                      });
+        }
+    };
     auto flash_iter_order = [](const FlashBundlesMap& m) {
         std::vector<Opflash*> v;
         v.reserve(m.size());
@@ -529,6 +550,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
         return v;
     };
     sort_inner_by_cluster_idx(flash_bundles_map);
+    sort_inner_by_flash_idx(cluster_bundles_map);
 
     TimingTPCBundleSelection to_be_removed;
     for (auto good_bundle : consistent_bundles) {
@@ -1003,9 +1025,24 @@ void QLMatching::organize_bundles(
         eval_flash_bundles_map[flash].push_back(bundle);
     }
 
-    for (auto& kv : eval_flash_bundles_map) {
-        auto flash = kv.first;
-        auto& orig_bundles = kv.second;
+    // Deterministic outer order: process flashes by get_flash_id() (mirrors
+    // flash_iter_order in operator()). Iterating eval_flash_bundles_map directly
+    // is pointer-address order; since the per-flash best-bundle pick and the
+    // add_bundle merges mutate bundle state, that order would otherwise change
+    // the final bundle membership build-to-build.
+    std::vector<Opflash*> eval_flash_order;
+    eval_flash_order.reserve(eval_flash_bundles_map.size());
+    for (auto& kv : eval_flash_bundles_map) eval_flash_order.push_back(kv.first);
+    std::sort(eval_flash_order.begin(), eval_flash_order.end(),
+              [](Opflash* a, Opflash* b) { return a->get_flash_id() < b->get_flash_id(); });
+    for (auto* flash : eval_flash_order) {
+        auto& orig_bundles = eval_flash_bundles_map[flash];
+        // Inner order: by cluster_index_id, so the best-bundle tie-break and the
+        // merge-candidate sequence are data-derived, not insertion/pointer order.
+        std::sort(orig_bundles.begin(), orig_bundles.end(),
+                  [](const TimingTPCBundle::pointer& a, const TimingTPCBundle::pointer& b) {
+                      return a->get_cluster_index_id() < b->get_cluster_index_id();
+                  });
         TimingTPCBundleSelection to_be_removed;
         TimingTPCBundle* best_bundle = nullptr;
         double best_strength = 0;
