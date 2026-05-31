@@ -412,10 +412,10 @@ this is exactly the part the planned improvements need to restore. Concretely:
 
 | Prototype mechanism | Where (prototype) | Status in current SBND port |
 |---|---|---|
-| End-trimming walk (clip cluster ends that poke past anode/cathode) | `ToyMatching.cxx:176-264` | **Absent.** Out-of-bounds points are simply dropped; >25% out kills the bundle (`QLMatching.cxx:286-293`). |
-| `flag_spec_end` (prefer truncated-end bundles) | `ToyMatching.cxx:207-251`, `790-804` | **Dead.** Setter/getter exist (`TimingTPCBundle.h:64-65`) but the flag is never set or read. |
-| `flag_at_x_boundary` down-weight to 0.2 in Lasso + suspend auto-reject | `ToyMatching.cxx:1437,1603`; `FlashTPCBundle.cxx:577-600` | **Dead.** Never set true anywhere; never used in a gate or weight. |
-| `flag_close_to_PMT` → χ² error inflation + loosest cut ladders | `FlashTPCBundle.cxx:480-485`; `ToyMatching.cxx:518,597,702` | **Dead + buggy.** Set at `QLMatching.cxx:289-292`, but line 289 (`if (std::abs(x) && ...)`) is truthy for nearly every point, and the flag is never read downstream. |
+| End-trimming walk (clip cluster ends that poke past anode/cathode) | `ToyMatching.cxx:176-264` | **Ported, for flags only.** `compute_endpoint_flags()` (`QLMatching.cxx:889-935`) does the inward walk to set the boundary flags, but the PE-prediction path still drops out-of-bounds points and >25% out kills the bundle (`QLMatching.cxx:418`) — the trim does not yet rescue charge. |
+| `flag_spec_end` (prefer truncated-end bundles) | `ToyMatching.cxx:207-251`, `790-804` | **Filled, inert.** Now set by `compute_endpoint_flags()` (`QLMatching.cxx:904,928,942`); still never read (the prototype `:790-804` preference is not ported). See `prototype_algorithm.md` §5.4. |
+| `flag_at_x_boundary` down-weight to 0.2 in Lasso + suspend auto-reject | `ToyMatching.cxx:1437,1603`; `FlashTPCBundle.cxx:577-600` | **Filled, inert.** Now set by `compute_endpoint_flags()` (`QLMatching.cxx:947,951`) and propagated on merge (`TimingTPCBundle.cxx:144`); never used in a gate or weight. |
+| `flag_close_to_PMT` → χ² error inflation + loosest cut ladders | `FlashTPCBundle.cxx:480-485`; `ToyMatching.cxx:518,597,702` | **Filled, inert.** The old buggy block is replaced; now set correctly by `compute_endpoint_flags()` (`QLMatching.cxx:946`) and propagated on merge (`TimingTPCBundle.cxx:143`); still never read downstream. |
 | Fired-PMT test (`nfired/ntot`) fallback when not high-consistent | `FlashTPCBundle.cxx:550-600` | **Absent.** `Opflash` tracks `fired_channels` (`Opflash.cxx:26`) but the matcher never uses the fraction. |
 | Cosmic-discriminator masking (`cos_pe_low/mid`) | `FlashTPCBundle.cxx:461-464` | **Absent** (different trigger/electronics; would need an SBND equivalent). |
 | Long staged consistency/competition ladders (7 passes) | `ToyMatching.cxx:470-1358` | **Collapsed.** The port keeps a single pre-selection + the two Lasso rounds + a light `organize_bundles` merge. |

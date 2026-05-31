@@ -259,6 +259,130 @@ its predicted light — is incomplete. Three mechanisms cope with this:
    charge legitimately under-predicts the light, so such matches deserve the
    benefit of the doubt.
 
+### 5.3 How the SBND port computes the three flags, and how faithful it is
+
+The port fills all three flags in `QLMatching::compute_endpoint_flags()`
+(`QLMatching.cxx:849-954`), called once per `(flash, cluster)` bundle
+(`QLMatching.cxx:393`). It is a faithful port of the prototype block
+(`ToyMatching.cxx:176-290`), translated into the per-TPC drift coordinate
+`u = s·(x + flash_x_offset − anode_x)` (u=0 at the anode/PMT plane, u=u_cathode at
+the cathode). The prototype's signed cuts map one-to-one onto the SBND cushions:
+
+| prototype | SBND port | value |
+|---|---|---|
+| `low_x_cut + low_x_cut_ext1` | `anode_in = m_anode_ext1` | −2 cm |
+| `low_x_cut + low_x_cut_ext2` | `m_anode_ext2` | +4 cm |
+| `high_x_cut + high_x_cut_ext1` | `cathode_in = u_cathode + m_cathode_ext1` | +1.2 cm |
+| `high_x_cut + high_x_cut_ext2` | `u_cathode + m_cathode_ext2` | −2 cm |
+
+**All three flags are judged after the T0 (flash-time) correction — yes.** `u`
+includes `flash_x_offset = sign·t_flash·v_drift`, exactly the prototype's
+`first_pos_x − offset_x`. So the test is on the *reconstructed drift position after
+time correction*, and it is a property of the **(flash, cluster) pairing**, not of
+the cluster alone: the same cluster paired with a different flash gets a different
+offset and can flag differently.
+
+- **`flag_close_to_PMT`** ⇔ the anode end, after T0 correction, lands in
+  `(anode_in − 1 cm, m_anode_ext2]` i.e. within ~4 cm of the anode plane where the
+  PMTs sit (`QLMatching.cxx:945-948`).
+- **`flag_at_x_boundary`** ⇔ either the anode end is in that same window (set
+  together with `close_to_PMT`) **or** the cathode end lands in
+  `[u_cathode + m_cathode_ext2, cathode_in)`, within ~2 cm of the cathode
+  (`QLMatching.cxx:945-952`). So it means "an endpoint sits at a drift boundary,"
+  anode or cathode.
+
+**The "allow a small part outside the cut" recollection is correct** — that is the
+end-trimming walk (`QLMatching.cxx:889-935`, prototype `:176-264`). When an endpoint
+pokes past the boundary, the code walks inward over the leading/trailing slices,
+counting slices and blobs that lie outside, and **trims the endpoint inward** if
+only a small fraction is outside, with three acceptance tiers identical to the
+prototype: `≤36` slices & `<5%` blobs; or `≤60` slices & `<6%` blobs with a `>10 cm`
+final jump; or `≤25` slices & `<12%` blobs with a `>20 cm` jump. A tiny definite
+protrusion (`<0.15%` of blobs) snaps the endpoint exactly to the boundary. So a
+short spurious tail past the cut is tolerated, not rejected.
+
+**Functional fidelity: identical except one deliberate adaptation.** The constants,
+the three acceptance tiers, the snap-to-boundary rule, and the final flag-window
+inequalities (`QLMatching.cxx:938-952` vs prototype `:272-290`) are
+byte-for-byte equivalent in the `u`-frame. The one substantive difference is the
+**walk order**: the prototype iterates `time_cells_set_map` in *time-slice order*,
+while the port sorts the slices by `u` first (`QLMatching.cxx:878-879`). For a
+normally-drifting track time and `u` are monotonic, so the two coincide. For a
+**non-monotonic** cluster (charge that doubles back in `x`) they differ: the
+break test `(cur_u − prev_u) > 0.75 cm` can never see a *backward* step in the
+`u`-sorted walk (the difference is ≥ 0 by construction), whereas the time-order walk
+can, so the inward walk may stop at a different slice. Two minor notes: the slice's
+representative point is the first blob's first 3-D point (vs the prototype's first
+mcell's front sampling point), and the cluster size `N` is `cluster->nchildren()`
+(vs `get_num_mcells()`) — both analogous for SBND's single active face.
+
+### 5.4 `flag_spec_end`: what it is, and why it is *not* a T0-free window-edge flag
+
+`flag_spec_end` is set **inside** the same end-trimming walk
+(`QLMatching.cxx:904, 928`; prototype `:207-208, 250-251`). It is best read as a
+gate plus a condition:
+
+- **Gate (T0-dependent):** the trim block runs only when the endpoint, *after T0
+  correction*, already pokes past the drift boundary (`first_u ≤ anode_in` /
+  `last_u ≥ cathode_in`). Because this uses `flash_x_offset`, `spec_end` is a
+  per-bundle quantity — it can be true for one flash pairing and false for another
+  of the same cluster.
+- **Condition (offset-free):** *given* the block runs, `spec_end` is set when the
+  trimmed tail is **long and smooth** — `n_slices_out > 10` and the final inward
+  step `|cur_u − prev_u| < 10 cm`. The offset cancels in that difference, so the
+  condition itself is about the *shape* of the trimmed tail, not absolute position.
+
+So the assumption that `flag_spec_end` "does not rely on T0 and only reads whether
+the cluster is at the start/end of the readout window" is **half right**. The
+physical motivation is exactly that — a cluster truncated at a drift/window edge
+(see §5.2: after the t0 shift the readout-window edges *are* the `[0, u_cathode]`
+limits). But the implementation evaluates it in the **T0-corrected frame, per
+(flash, cluster) bundle**, not on the raw cluster, and it additionally requires the
+long-smooth-tail condition. It is a "this matched end was trimmed at a boundary"
+marker, not a standalone readout-window detector.
+
+**Current status (all three flags): filled but inert.** `compute_endpoint_flags`
+*sets* them, and `flag_close_to_PMT`/`flag_at_x_boundary` are propagated when
+bundles merge (`TimingTPCBundle.cxx:143-144`), but **no consumer reads any of them**
+in the SBND matcher yet. The prototype's downstream uses — χ² error inflation and
+the loosest consistency ladders for `close_to_PMT`, the Lasso down-weight to 0.2 and
+suspended auto-rejection for `at_x_boundary`, and the "prefer `spec_end` bundles"
+tie-break (`ToyMatching.cxx:790-804`) — are **not ported**. Filling the flags is
+therefore output-neutral today; they are scaffolding for that future logic
+(see `improve_progress.md` §A and `QL_algorithm.md` §11).
+
+### 5.5 Is there a prototype flag for raw readout-window-edge truncation? No — and SBND needs one
+
+There is **no** prototype flag that detects, independently of T0, that a cluster's
+leading/trailing activity sits against the *raw* readout-window edge. The closest is
+`flag_spec_end`, but as §5.4 shows it is evaluated in the T0-corrected frame and
+fires only on a long-smooth trimmed tail at a drift boundary. The prototype did not
+need a dedicated one: MicroBooNE's readout window is long relative to the drift, so
+window-edge truncation was rare, and for a *correct* match the window edge maps onto
+the drift boundary anyway, where `spec_end` already fires.
+
+**SBND is different.** Its readout window is short relative to the drift, so charge
+that drifted in *before* readout began (or after it ended) is common — many clusters
+are genuinely clipped by the window, and their predicted light is then
+systematically *low* through no fault of the match. A short tail trimmed at the
+boundary (`spec_end`) is not the same observable as "this cluster is truncated by
+the window": the latter can involve a large fraction of the cluster, can occur for
+either drift sense, and is fundamentally a **raw-time** property (which slices fall
+within N ticks of the window edge), independent of any flash pairing.
+
+**Recommendation (no code yet):** introduce a dedicated, T0-independent
+window-truncation flag — e.g. `flag_window_truncated` — set when the cluster's
+leading/trailing slice lies within N ticks of the readout-window boundary, computed
+once per cluster from the raw slice indices (not from `u`). This is exactly the
+explicit window-edge detection already sketched in `QL_algorithm.md` §11.1: when set,
+**suspend the under-prediction penalties** (relax or one-side the χ²/total-PE gates
+so under-prediction from clipped charge is forgiven while over-prediction is still
+penalized). Keep it jsonnet-togglable and default-off so existing SBND production
+stays bit-identical until validated. This is complementary to the three boundary
+flags above, not a replacement: `close_to_PMT`/`at_x_boundary`/`spec_end` describe
+where the *drift-corrected* endpoints sit; `flag_window_truncated` would describe
+whether the *raw readout window itself* cut the cluster off.
+
 ---
 
 ## 6. Other things worth noting
