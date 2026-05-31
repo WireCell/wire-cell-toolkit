@@ -149,8 +149,8 @@ config/geometry.
 
 | # | What | Issue / fix direction | St |
 |---|------|-----------------------|----|
-| H1 | 312-entry `opdet_mask` PMT on/off pattern | SBND-specific; could move to JSON/geometry | ☐ |
-| H2 | even/odd `idet % 2` TPC split | bakes TPC identity into PMT index parity; blocker for two-TPC joint match | ☐ |
+| H1 | 312-entry `opdet_mask` PMT on/off pattern | **DONE** — mask now derived per-channel from the injected `OpDets` table: on iff `type ∈ active_opdet_types` (config, default `[1]` = PMTs only). The hard-coded 312-array is gone; the derived mask is byte-identical to the old one on the SBND geometry. | ☑ |
+| H2 | even/odd `idet % 2` TPC split | **DONE** — TPC membership now from OpDet position (`center.x` vs `cathode_x`), the same same-TPC test the optical model uses. Reproduces the old split for SBND PMTs bit-identically (the 6 channels where parity≠position-sign are all Arapucas, masked off anyway) and is correct for any layout. | ☑ |
 | H3 | `m_nchan{312}` OpDet count default | configurable; OK | ☑ |
 | H4 | 312-entry `m_VUVEfficiency` / `m_VISEfficiency` | SBND efficiency tables; overridable via config | ☐ |
 | H5 | `kFlashGidStride = 1000000` global-flash-id stride | deliberate, well-documented; leave as-is | ☑ |
@@ -175,8 +175,9 @@ them for tunable parameters. **Do not touch.**
   follow-up could source them from `m_dv`/`m_anode` so they track the real geometry
   (and the cathode seam `0`) instead of SBND-specific defaults. Prerequisite for
   cross-detector / two-TPC reuse.
-- **§H** — opdet mask, even/odd TPC split, and the VUV/VIS tables: only if/when
-  generalizing beyond SBND. §H2 (even/odd split) is also a two-TPC-join blocker.
+- **§H** — H1 (opdet mask) and H2 (TPC split) are now derived from the injected
+  `OpDets` metadata (see table above); the remaining SBND-specific item is H4
+  (VUV/VIS efficiency tables), to revisit when generalizing beyond SBND.
 - Minor leftovers kept as named constants by design: §B7, §C8, §D4, §G2.
 
 Any behavior change must land behind a config knob whose default reproduces today's

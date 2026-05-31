@@ -215,10 +215,17 @@ Filtering happens at several stages, progressively narrowing the candidate set:
 - keep flash only if `flash_mintime ≤ time ≤ flash_maxtime`;
 - keep flash only if `total_PE ≥ flash_minPE`.
 
-**OpDet masking:**
-- a static channel mask `ch_mask` disables known‑bad channels (config; 19 channels for SBND);
-- a **per‑TPC even/odd PMT split** — TPC0 keeps even‑indexed OpDets, TPC1 keeps odd
-  (`QLMatching.cxx:238-240`);
+SBND has **312 OpDets: 120 PMTs** (`type=1`, 60/TPC) **+ 192 X‑Arapucas** (`type=0`,
+96/TPC). The matching uses **PMTs only**.
+
+- a per‑channel type mask, derived from the injected `OpDets` table: channel on iff
+  its `type` is in `active_opdet_types` (config, default `[1]` = dome PMTs only) — this
+  selects the 120 PMTs and drops all 192 Arapucas;
+- a static channel mask `ch_mask` disables known‑bad channels (config). For SBND this is
+  19 channels, **all PMTs**, leaving **101 of 120 PMTs active**;
+- a **per‑TPC split by OpDet position** — an OpDet belongs to TPC0/TPC1 if `center.x`
+  is on the low/high side of `cathode_x` (reproduces the old even/odd index split for
+  the SBND PMTs);
 - a per‑flash MC saturation mask — if `total_PE > 5000` and a channel reads exactly 0 PE in MC
   (`data == false`), that channel is masked (`:249-253`).
 
@@ -337,11 +344,12 @@ are the structural obstacles, roughly in order of how deep they cut.
    match presupposes either clusters that may legitimately span `x = 0`, or an explicit pairing
    of a TPC0 cluster with its TPC1 counterpart.
 
-3. **The OpDet space encodes TPC identity.** The even/odd PMT split (`:238-240`) makes "which
-   PMTs are visible" a function of which TPC is being processed, and the mask is applied
-   **per flash**, not per bundle. A joint fit would need a *unified* OpDet/PE space (drop the
-   even/odd split, use the full PMT set) — or per‑bundle masks, which would mean restructuring
-   the LASSO design matrix so different bundles can illuminate different PMT subsets.
+3. **The OpDet space encodes TPC identity.** The per‑TPC split (now by `center.x` vs
+   `cathode_x`) makes "which PMTs are visible" a function of which TPC is being processed,
+   and the mask is applied **per flash**, not per bundle. A joint fit would need a *unified*
+   OpDet/PE space (drop the per‑TPC split, use the full PMT set) — or per‑bundle masks, which
+   would mean restructuring the LASSO design matrix so different bundles can illuminate
+   different PMT subsets.
 
 4. **Flashes are physically per‑APA.** Separate `opflash_apa<n>.tar.gz` archives, per‑APA row
    indexing, and the `gid = anode*1e6 + idx` workaround (`:26-30`) all exist precisely because

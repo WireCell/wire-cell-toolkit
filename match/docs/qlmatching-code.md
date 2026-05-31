@@ -83,7 +83,8 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `nchan` | `312` | `m_nchan` | optical-detector channel count (per-flash PE vector length); the bit-safe source of nchan now that flashes arrive via canonical PCs |
 | `bee_dir` | `data` | `m_bee_dir` | BEE-dump output dir (empty ⇒ no dump) |
 | `semimodel_file` | `sbnd/photodet/semi-analytical-sbnd.json` | `m_semimodel_file` | photon model JSON (`Persist::load`) |
-| `pmts` | `true` | `m_pmts` | use the SBND 312-OpDet PMT mask |
+| `pmts` | `true` | `m_pmts` | apply the OpDet type mask (gate) |
+| `active_opdet_types` | `[1]` | `m_active_opdet_types` | OpDet `type`s kept by the mask (1=PMT, 0=(X)Arapuca); derived from the injected `OpDets` table |
 | `data` | `true` | `m_data` | data vs MC; MC masks saturated PMTs (`:258`) |
 | `beamonly` | `false` | `m_beamonly` | force beam window + skip strength cut |
 | `ch_mask` | `[]` | `m_ch_mask` | OpDet indices to disable |
@@ -108,9 +109,10 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 ## 3. Input parsing (`operator()`)
 
 - **EOS** guard first: a null `in` returns immediately (single input now).
-- **OpDet mask**: start from the hardcoded SBND PMT mask if `m_pmts`, then zero
-  out `m_ch_mask` entries; later reduced per-TPC (even/odd OpDets) and, for MC,
-  saturated channels (`total_PE>5000 && PE==0`).
+- **OpDet mask**: if `m_pmts`, build per-channel from the injected `OpDets` table
+  (on iff `type ∈ active_opdet_types`, default `[1]` = PMTs), then zero out
+  `m_ch_mask` entries; later reduced per-TPC (by OpDet `center.x` vs `cathode_x`)
+  and, for MC, saturated channels (`total_PE>5000 && PE==0`).
 - **Clusters**: the input tensorset is read as a pctree
   (`as_pctree(charge_tens, inpath + "/live")`), wrapped as a `Facade::Grouping`,
   anode + detector-volumes attached, and its `children()` taken as the

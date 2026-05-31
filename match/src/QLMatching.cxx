@@ -13,6 +13,8 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Units.h"
 
+#include <algorithm>
+
 WIRECELL_FACTORY(QLMatching,
                  WireCell::Match::QLMatching,
                  WireCell::INamed,
@@ -45,6 +47,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
     m_beamonly = get(cfg, "beamonly", m_beamonly);
+
+    if (cfg.isMember("active_opdet_types") && cfg["active_opdet_types"].isArray()) {
+        m_active_opdet_types.clear();
+        for (const auto& jt : cfg["active_opdet_types"]) m_active_opdet_types.push_back(jt.asInt());
+    }
 
     if (cfg.isMember("ch_mask") && cfg["ch_mask"].isArray()) {
         m_ch_mask.clear();
@@ -132,9 +139,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     geom.active_size_z         = get<double>(geom_cfg, "active_size_z",   0.0);
     geom.cathode_x             = get<double>(geom_cfg, "cathode_x",       0.0);
     geom.vuv_absorption_length = get<double>(geom_cfg, "vuv_absorption_length", 85.0);
+    m_cathode_x = geom.cathode_x;
 
-    std::vector<SemiAnalyticalModel::OpticalDetector> opdets;
-    opdets.reserve(opdets_cfg.size());
+    m_opdets.clear();
+    m_opdets.reserve(opdets_cfg.size());
     for (const auto& od : opdets_cfg) {
         SemiAnalyticalModel::OpticalDetector o;
         o.h           = get<double>(od, "h", -1.0);
@@ -142,14 +150,14 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         o.center      = WireCell::Point(od["x"].asDouble(), od["y"].asDouble(), od["z"].asDouble());
         o.type        = od.get("type", 1).asInt();
         o.orientation = od.get("orientation", 0).asInt();
-        opdets.push_back(o);
+        m_opdets.push_back(o);
     }
 
     m_semi_model = std::make_unique<SemiAnalyticalModel>(
-        vuv_cfg, vis_cfg, geom, opdets, /*doReflectedLight=*/true);
+        vuv_cfg, vis_cfg, geom, m_opdets, /*doReflectedLight=*/true);
 
     log->debug("QLMatching configured: nopdets={}, semimodel_file={}",
-               opdets.size(), m_semimodel_file);
+               m_opdets.size(), m_semimodel_file);
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -160,6 +168,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
+    cfg["active_opdet_types"] = Json::arrayValue;
+    for (int t : m_active_opdet_types) cfg["active_opdet_types"].append(t);
     cfg["data"]            = m_data;
     cfg["beamonly"]        = m_beamonly;
     cfg["ch_mask"]         = Json::arrayValue;
@@ -221,23 +231,18 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     ExecMon em("starting QLMatching");
 
-    // SBND OpDet on/off mask. Default pattern (PMTs only on PMT slots) is
-    // hard-coded for SBND's 312-OpDet layout; m_ch_mask further disables
-    // specific channels.
-    std::vector<unsigned int> opdet_mask;
+    // Per-channel OpDet on/off mask, derived from the injected OpDet table
+    // (SemiAnalyticalModel::OpticalDetector::type; 1 = dome PMT, 0 = (X)Arapuca)
+    // rather than a hard-coded SBND layout: channel i is on iff its type is in
+    // m_active_opdet_types (default {1} => PMTs only, reproducing the historical
+    // SBND mask). m_ch_mask then disables specific channels.
+    std::vector<unsigned int> opdet_mask(m_opdets.size(), 0);
     if (m_pmts) {
-        opdet_mask = {0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0};
+        for (std::size_t i = 0; i < m_opdets.size(); ++i) {
+            if (std::find(m_active_opdet_types.begin(), m_active_opdet_types.end(),
+                          m_opdets[i].type) != m_active_opdet_types.end())
+                opdet_mask[i] = 1;
+        }
     }
     for (std::size_t i = 0; i < m_ch_mask.size(); ++i) opdet_mask[m_ch_mask[i]] = 0;
 
@@ -312,10 +317,16 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
         m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee};
 
-    // Reduce mask to OpDets on this TPC.
+    // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
+    // sits on the low / high side of the cathode plane. Position-based, matching
+    // the same-TPC test the optical model itself uses (center.x sign vs cathode);
+    // reproduces the historical even/odd index split for the SBND PMTs and
+    // generalizes via cathode_x. (The enclosing two-TPC-around-x=0 drift bounds
+    // above are still SBND-specific; see improve_progress.md §A.)
     for (std::size_t idet = 0; idet < opdet_mask.size(); ++idet) {
-        if ((tpc == 0) && (idet % 2 == 1)) opdet_mask[idet] = 0;
-        if ((tpc == 1) && (idet % 2 == 0)) opdet_mask[idet] = 0;
+        const bool low_side = m_opdets[idet].center.x() < m_cathode_x;
+        if ((tpc == 0) && !low_side) opdet_mask[idet] = 0;
+        if ((tpc == 1) &&  low_side) opdet_mask[idet] = 0;
     }
 
     for (auto flash : flashes) {

@@ -52,9 +52,16 @@ namespace WireCell::Match {
         // canonical PCs (do NOT derive from max channel ident).
         int m_nchan{312};
 
-        // PMTs on vs off (default true => use SBND PMTs); see ch_mask for the
-        // disabled channels.
+        // PMTs on vs off (default true => apply the OpDet type mask); see
+        // ch_mask for further per-channel disables.
         bool m_pmts{true};
+        // OpDet types kept by the matching mask, matched against
+        // SemiAnalyticalModel::OpticalDetector::type (1 = dome PMT,
+        // 0 = (X)Arapuca). Default {1} = PMTs only, reproducing the historical
+        // SBND selection. The mask is derived per-channel from the injected
+        // OpDet table rather than a hard-coded SBND layout, so it generalizes to
+        // other detectors via config.
+        std::vector<int> m_active_opdet_types{1};
         bool m_data{true};
         std::vector<int> m_ch_mask;
         bool m_beamonly{false};
@@ -141,6 +148,12 @@ namespace WireCell::Match {
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
 
         std::unique_ptr<SemiAnalyticalModel> m_semi_model;
+
+        // Per-OpDet table (type + position) loaded from semimodel_file. Used to
+        // build the SemiAnalyticalModel and, at execute() time, to derive the
+        // per-channel on/off mask and the per-TPC OpDet split.
+        std::vector<SemiAnalyticalModel::OpticalDetector> m_opdets;
+        double m_cathode_x{0.0};  // cathode-plane x; OpDets on its low/high side belong to TPC 0/1
 
         void remove_bundle_selection(TimingTPCBundleSelection to_be_removed,
                                      TimingTPCBundleSet& bundle_set);
