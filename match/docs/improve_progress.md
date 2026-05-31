@@ -243,14 +243,42 @@ length-sort tie-break on `get_cluster_id()`; sort `cluster_bundles_map` inner
 vectors by `get_flash_index_id()`; iterate `organize_bundles` by `get_flash_id()`.
 **Run-to-run is now fully reproducible.**
 
-**Residual (compiler-level FP, not pointer-order).** A rare near-threshold bundle
-can still flip across **recompiles**. Localized: pred_flash, round-1 solution, and
-round-2 inputs are all bit-identical across builds, but the round-2 LASSO
-`solution` differs — because the dense matrix algebra `X = P.transpose()*P` is
-compiled *in QLMatching.cxx*, so recompiling changes the Eigen reduction codegen at
-the ULP level, and a bundle within ~1e-13 of `m_strength_cutoff` flips. The solver
-itself (`LassoModel`, in `libWireCellUtil`) is deterministic given inputs. This is
-inherent to recompiling FP threshold code (not a bug, not run-to-run); a full fix
-would need FP-codegen pinning or rounding every threshold decision (a behavior
-change). **Validate QL changes at the `initial eval` level, and rely on run-to-run
-reproducibility for a fixed build.**
+**Residual (compiler-level FP tie-sensitivity, characterized).** A handful of
+near-threshold bundles (~7 across sbnd-mc evt 2..42) can still flip across
+**recompiles**. A controlled perturbation experiment (rebuild base vs base+one
+throwaway `log->debug` line; metric = sorted `flash_bundles_map` tuples, with a
+same-binary rerun establishing a **0-tuple noise floor**) pinned down what it is and
+is *not*:
+
+- **Not pointer-order.** Dumping the P-column assembly order (`pairs` as intrinsic
+  `(flash_id, cluster_id)`) shows it is **bit-identical across recompiles** — the
+  Pass-3 ordering fixes hold; this is not a missed pointer-keyed iteration.
+- **Not FMA contraction.** Compiling the match package with `-ffp-contract=off`
+  (the only FP freedom GCC has under `-O2` without `-ffast-math`) did **not** stop
+  the flip — it shifted the matched set by one bundle once and then kept flipping on
+  the next perturbation. FMA is one ULP-variation source among several, not the
+  cause.
+- **Not an uninitialized read.** `P`, `M`, `X`, `weights` are all `::Zero`-built and
+  filled deterministically; the solver (`LassoModel`, in `libWireCellUtil`) is a
+  deterministic function of its inputs.
+- **It is layout-fragile.** Of three independent recompile pairs, two flipped ~7
+  bundles and one (the build carrying a diagnostic dump loop) flipped none. A
+  bundle whose LASSO `solution` sits ~1e-13 from `m_strength_cutoff` (0.05) lands
+  above or below the cutoff depending on sub-ULP bits of the matrix algebra
+  (`X = PᵀP + …`, compiled *in QLMatching.cxx*), and those bits move with
+  unrelated codegen changes. Run-to-run (same binary, ASLR off) is exact.
+
+**Why it's accepted, not "fixed".** The affected cases are genuine numerical ties
+the algorithm has no principled preference about. Rounding the threshold does **not**
+help: a binary cut on a value wobbling by `w` has a flip-zone of width `2w` wherever
+the edge sits, so rounding only *relocates* the edge. The only real pin is an
+`-O0`-class measure on the whole translation unit (or hand-written fixed-order
+reductions) — a real perf hit, and worse, **unverifiable**: because instrumentation
+itself can suppress the flip, a "no flip after applying the pin" result cannot be
+distinguished from an incidental layout shift without unbounded multi-perturbation
+testing. A pin can be *refuted* cheaply (as `-ffp-contract=off` was) but never
+*confirmed* cheaply. **So: validate QL changes at the deterministic `initial eval`
+level, and rely on run-to-run reproducibility for any fixed build — which already
+covers production.** If byte-stable-across-recompiles is ever required, the
+`-O0`-on-`QLMatching.cxx` hammer is available as an explicit, perf-costing,
+hard-to-verify opt-in.
