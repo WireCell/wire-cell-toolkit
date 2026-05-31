@@ -569,7 +569,102 @@ topology-aware assignment.
 
 ---
 
-## 13. Source map
+## 13. Performance: memory and runtime (measured)
+
+Measured on the standalone SBND chain (`sbnd_xin/run_ql_evt.sh mc <idx>`,
+`wct-clus-matching-perevt.jsonnet`; `DL=6.2, DT=9.8, lifetime=6, driftSpeed=1.563`) on a
+64-core / 251 GB host, single-threaded per component. Numbers come from `QLMatching`'s built-in
+`ExecMon` (`QLMatching.cxx:150,186`) and the debug-log timestamps; "matching time" brackets
+`got live pctree` → `done with matching` (i.e. the component's own work, excluding upstream
+clustering/imaging and downstream MABC/BEE).
+
+### 13.1 What was measured (3 MC events, both APAs)
+
+| Event | APA | flashes | preselected bundles | Σ cluster-points (logged) | matching time |
+|---|---|---|---|---|---|
+| EVT2  | 1 | 14 | 53  | —       | 0.59 s |
+| EVT2  | 0 | 19 | 139 | 102,898 | 3.26 s |
+| EVT9  | 1 | 13 | 41  | —       | 0.17 s |
+| EVT9  | 0 | 15 | 230 | 6,557   | 0.19 s |
+| EVT11 | 1 | 25 | 324 | —       | 2.18 s |
+| EVT11 | 0 | 27 | 490 | 71,422  | 2.37 s |
+
+Per-event matching total (both APAs): **EVT9 ≈ 0.36 s, EVT2 ≈ 3.8 s, EVT11 ≈ 4.6 s**. For
+context, the whole per-event job wall (config load + clustering + matching + MABC + BEE zip) was
+**1.3 s (EVT9)** and **6.6 s (EVT11)** — so on dense events the **matcher dominates the job**.
+
+Memory: process RSS at the matcher's `ExecMon` checkpoints was **150–192 MB**, peaking at
+**~215 MB** across the whole job; `QLMatching`'s own RSS *increment* is **≈ 0** (`Memory: MEM …
+increment: res=0K`). The pctree load (`got live pctree` TICK) is **11–30 ms**.
+
+### 13.2 The runtime is dominated by the per-point light prediction, not the fit
+
+The matching time does **not** track the number of bundles — EVT9-APA0 has 230 bundles yet runs
+in 0.19 s, while EVT2-APA0 has 139 bundles yet takes 3.26 s. It tracks the **total number of
+cluster 3-D points** pushed through the predicted-light loop, at a near-constant
+**≈ 30 µs per (flash × cluster-point)**:
+
+```
+EVT2-APA0:  3257 ms / 102,898 pts = 31.7 µs/pt
+EVT9-APA0:   192 ms /   6,557 pts = 29.3 µs/pt
+EVT11-APA0: 2372 ms /  71,422 pts = 33.2 µs/pt
+```
+
+So, to first order:
+
+```
+matching_time  ≈  30 µs  ×  Σ_(flash × cluster) N_points
+              ≈  C · N_flash · N_points_total · (cost of the SemiAnalyticalModel call)
+```
+
+The cost is the **`SemiAnalyticalModel` visibility evaluation** (`QLMatching.cxx:299-301`):
+for every cluster point, under every flash hypothesis, it computes the direct (VUV) and
+reflected (VIS) visibility for all 312 OpDets. By contrast the **two LASSO solves are negligible
+— 1–4 ms** even at 490 bundles (`solving (round 1)` → `done with matching` spans ≤ 4 ms in every
+case). Loading the pctree is ~11–30 ms. The matcher is firmly **CPU-bound in the light model**,
+not memory-bound and not solver-bound.
+
+### 13.3 Two avoidable costs in the current loop
+
+1. **The masked OpDets are still computed.** `detectedDirectVisibilities` /
+   `detectedReflectedVisibilities` fill all 312 channels (`:299-301`), and the even/odd TPC mask
+   is applied only at accumulation (`:304`). A per-TPC run therefore spends ~half its visibility
+   math on channels it discards.
+2. **The same point's visibility is recomputed for every flash.** The loop nests
+   flash → cluster → point → model-call (`:243,260,280,299`), so a point is evaluated `N_flash`
+   times. Only the drift offset `flash_x_offset` differs per flash; the model is re-run from
+   scratch each time. This is the `N_flash` factor in the scaling above.
+
+### 13.4 Optimization opportunities (no behaviour change intended)
+
+- **Replace per-point analytic evaluation with a voxel/library lookup.** The MicroBooNE
+  prototype used a voxelized photon library (`convert_xyz_voxel_id`, O(1) per point); the SBND
+  port swapped that for an on-the-fly semi-analytical computation, which is the root cost.
+  A precomputed per-voxel visibility table (built once from the same model) would turn the
+  ~30 µs/point analytic call into a table lookup.
+- **Compute only the masked-in OpDets** (push the even/odd mask into the model call) — roughly a
+  2× win per TPC for free.
+- **Downsample / aggregate charge points** before prediction (e.g. predict per blob centroid or
+  per voxel rather than per point) — the predicted PE is a linear sum, so coarse-graining trades
+  a controlled accuracy loss for a large speed-up on dense clusters (the EVT2/EVT11 case).
+- **Hoist the flash loop**: compute each point's per-OpDet visibility once and reuse it across
+  flashes (only the drift x-shift changes), instead of recomputing `N_flash` times.
+- **Parallelize the flash (or APA) loop** — the bundle predictions are independent.
+
+### 13.5 Implication for the two-TPC improvement
+
+A joint two-TPC fit (§8, §11.3) does *not* materially change the dominant cost: the light
+prediction is already per-point-per-flash, and a joint fit predicts the same points against a
+similar set of flashes — the LASSO that grows (more columns) is the cheap part. The main new cost
+is dropping the even/odd mask so a cathode-crossing cluster predicts onto the **full** 312-OpDet
+set, which roughly doubles the inner OpDet loop for the linked bundles. Given §13.3/§13.4, the
+right sequencing is to **fix the light-prediction cost first** (voxel lookup + mask-aware
+evaluation), which both speeds up today's matcher and removes the only real performance objection
+to the joint formulation.
+
+---
+
+## 14. Source map
 
 | Component | Files |
 |---|---|
