@@ -63,6 +63,46 @@ function(params) {
             ch_mask: ch_mask,
             flash_minPE: 50,
             semimodel_file: semimodel_file,
+
+            // --- Matching tuning constants (see match/docs/improve_progress.md).
+            // These were inline literals in QLMatching; surfaced here as the single
+            // source of truth.  Values equal the C++ defaults, so behavior is
+            // unchanged unless deliberately retuned. ---
+            // §A active-volume / drift bounds (cathode seam stays the origin x=0).
+            x_bound: 2000*wc.mm,
+            y_bound: 2000*wc.mm,
+            z_min: 0*wc.mm,
+            z_max: 5000*wc.mm,
+            pmt_dist: 1950*wc.mm,
+            // §D pre-selection / bad-match gates.
+            mc_saturation_pe: 5000,
+            drift_out_frac: 0.25,
+            min_pred_pe: 10,
+            preselect_chi2ndf_max: 1e4,
+            // §E out-of-beam QA cuts.
+            outbeam_ks_max: 0.2,
+            outbeam_chi2ndf_max: 20,
+            outbeam_pe_frac: 0.5,
+            // §C LASSO weights.
+            lasso_lambda: 0.1,
+            delta_charge: 0.01,
+            delta_light: 0.025,
+            delta_shape: 0.01,
+            bkg_weight: 0.5,
+            pe_mismatch_knee: 0.3,
+            pe_mismatch_floor: 0.3,
+            // §G flash PE-error model.
+            pe_err_floor: 0.3,
+            pe_err_frac: 0.3,
+            pe_err_knee: 1.0,
+            flash_pe_threshold: 0.0,
+            // §F bundle-quality thresholds.
+            bundle_ks_merge_max: 0.2,
+            bundle_chi2ndf_merge_max: 20,
+            bundle_addmerge_exponent: 0.8,
+            highconsist_ks_max: 0.06,
+            highconsist_min_ndf: 3,
+            bundle_pe_ndf_knee: 1.0,
         },
     }, nin=1, nout=1),
 }

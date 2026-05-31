@@ -13,6 +13,19 @@ namespace WireCell::Match {
 
     using ClusterSelection = std::vector<WireCell::Clus::Facade::Cluster*>;
 
+    /// Bundle-quality thresholds used by examine_bundle()/add_bundle(). Defaults
+    /// reproduce the historical hard-coded values; QLMatching pushes its
+    /// configured values via set_quality_params() so they are tunable without a
+    /// rebuild.
+    struct BundleQualityParams {
+        double ks_merge_max     = 0.2;   // max KS to accept a merge candidate
+        double chi2ndf_merge_max = 20.0;  // max chi2/ndf to accept a merge candidate
+        double addmerge_exponent = 0.8;   // exponent in the add_bundle tie-break
+        double highconsist_ks_max = 0.06; // max KS for the "high-consistent" flag
+        int    highconsist_min_ndf = 3;   // min ndf for the "high-consistent" flag
+        double pe_ndf_knee = 1.0;         // per-opdet PE level below which ndf is not counted
+    };
+
     class TimingTPCBundle {
     public:
         using pointer = std::shared_ptr<TimingTPCBundle>;
@@ -47,6 +60,9 @@ namespace WireCell::Match {
 
         std::vector<unsigned int>& get_opdet_mask() { return opdet_mask; }
         void set_opdet_mask(const std::vector<unsigned int>& m) { opdet_mask = m; }
+
+        void set_quality_params(const BundleQualityParams& qp) { m_qp = qp; }
+        const BundleQualityParams& get_quality_params() const { return m_qp; }
 
         bool examine_bundle();
         bool examine_bundle(TimingTPCBundle* candidate_bundle);
@@ -92,6 +108,7 @@ namespace WireCell::Match {
         double strength;
 
         int m_nchan;
+        BundleQualityParams m_qp;
         std::vector<double> pred_flash;
         std::vector<Cluster*> other_clusters;
         std::vector<Cluster*> more_clusters;

@@ -5,7 +5,8 @@
 using namespace WireCell;
 using namespace WireCell::Match;
 
-void Opflash::init(double time_, std::vector<double> pe, double threshold, int nchan)
+void Opflash::init(double time_, std::vector<double> pe, double threshold, int nchan,
+                   const PEErr& pe_err)
 {
     flash_id    = 0;
     m_nchan     = nchan;
@@ -21,20 +22,22 @@ void Opflash::init(double time_, std::vector<double> pe, double threshold, int n
 
     total_PE = 0;
     for (int i = 0; i < nchan; ++i) {
-        PE_err[i] = (PE[i] < 1) ? 0.3 : 0.3 * PE[i];
+        PE_err[i] = (PE[i] < pe_err.knee) ? pe_err.floor : pe_err.frac * PE[i];
         total_PE += PE[i];
         if (PE[i] > threshold) fired_channels.push_back(i);
     }
 }
 
-Opflash::Opflash(double time_, std::vector<double> pe, double threshold, int nchan)
+Opflash::Opflash(double time_, std::vector<double> pe, double threshold, int nchan,
+                 const PEErr& pe_err)
 {
-    init(time_, std::move(pe), threshold, nchan);
+    init(time_, std::move(pe), threshold, nchan, pe_err);
 }
 
-Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan)
+Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
+                 const PEErr& pe_err)
 {
-    init(flash.time(), flash.pes(nchan), threshold, nchan);
+    init(flash.time(), flash.pes(nchan), threshold, nchan, pe_err);
     flash_id = flash.ident();
 }
 

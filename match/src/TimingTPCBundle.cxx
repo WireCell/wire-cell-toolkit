@@ -100,13 +100,13 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
     ndf = 0;
     for (int j = 0; j < m_nchan; ++j) {
         if (opdet_mask[j] == 0) continue;
-        if (pe[j] < 1 && pred_pe[j] < 1) { /* no-op */ }
+        if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
         candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + std::pow(pe_err[j], 2));
     }
 
     if ((candidate_ks_dis < ks_dis || candidate_chi2 < chi2) &&
-        (candidate_ks_dis < 0.2) && (candidate_chi2 / ndf < 20)) {
+        (candidate_ks_dis < m_qp.ks_merge_max) && (candidate_chi2 / ndf < m_qp.chi2ndf_merge_max)) {
         return true;
     }
     return false;
@@ -114,9 +114,10 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
 
 void TimingTPCBundle::add_bundle(TimingTPCBundle* candidate_bundle)
 {
-    if (ks_dis * std::pow(chi2 / ndf, 0.8) <
+    if (ks_dis * std::pow(chi2 / ndf, m_qp.addmerge_exponent) <
         candidate_bundle->get_ks_dis() *
-            std::pow(candidate_bundle->get_chi2() / candidate_bundle->get_ndf(), 0.8)) {
+            std::pow(candidate_bundle->get_chi2() / candidate_bundle->get_ndf(),
+                     m_qp.addmerge_exponent)) {
         other_clusters.push_back(candidate_bundle->get_main_cluster());
         more_clusters.push_back(candidate_bundle->get_main_cluster());
 
@@ -184,12 +185,14 @@ bool TimingTPCBundle::examine_bundle()
     for (int j = 0; j < m_nchan; ++j) {
         if (opdet_mask[j] == 0) continue;
         ++nvalidopdets;
-        if (pe[j] < 1 && pred_pe[j] < 1) { /* no-op */ }
+        if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
         chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + std::pow(pe_err[j], 2));
     }
 
     flag_high_consistent = false;
-    if (ks_dis < 0.06 && ndf >= 3 && chi2 < ndf * nvalidopdets) flag_high_consistent = true;
+    if (ks_dis < m_qp.highconsist_ks_max && ndf >= m_qp.highconsist_min_ndf &&
+        chi2 < ndf * nvalidopdets)
+        flag_high_consistent = true;
     return flag_high_consistent;
 }

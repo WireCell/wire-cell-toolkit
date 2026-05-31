@@ -10,6 +10,8 @@
 #include "WireCellMatch/SemiAnalyticalModel.h"
 #include "WireCellMatch/TimingTPCBundle.h"
 
+#include "WireCellUtil/Units.h"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -57,20 +59,66 @@ namespace WireCell::Match {
         std::vector<int> m_ch_mask;
         bool m_beamonly{false};
         double m_flash_minPE{500};
-        double m_flash_mintime{-1500e3};
-        double m_flash_maxtime{1500e3};
-        double m_beam_mintime{-5e3};
-        double m_beam_maxtime{5e3};
+        double m_flash_mintime{-1.5 * units::ms};
+        double m_flash_maxtime{1.5 * units::ms};
+        double m_beam_mintime{-5 * units::us};
+        double m_beam_maxtime{5 * units::us};
         double m_QtoL{0.5};
         // Drift speed used for the per-flash X correction (flash_x_offset =
         // sign * flash_time * drift_speed). In WCT internal units (length/time,
         // i.e. mm/ns numerically). Default is the historical hard-coded value;
         // configs should pass the common params.lar.drift_speed via jsonnet.
-        double m_drift_speed{1.563e-3};
+        double m_drift_speed{1.563 * units::mm / units::us};
         // LASSO solution threshold below which a (flash, cluster) bundle is
         // dropped after each matching round. Was hard-coded 0.05 inline; pulled
         // out so it can be widened/narrowed from the jsonnet without rebuild.
         double m_strength_cutoff{0.05};
+
+        // ---- Tuning constants pulled out of the inline code (see
+        // match/docs/improve_progress.md). Every default equals the historical
+        // hard-coded literal, so configs that omit these are bit-identical. ----
+
+        // §A spatial bounds. Active volume / drift extents. The cathode seam is
+        // the true origin x=0 and stays a literal; m_x_bound is the |x| extent.
+        double m_x_bound{2000 * units::mm};   // drift extent in |x|
+        double m_y_bound{2000 * units::mm};   // active half-height in |y|
+        double m_z_min{0.0 * units::mm};      // active-volume Z lower edge
+        double m_z_max{5000 * units::mm};     // active-volume Z upper edge
+        double m_pmt_dist{1950 * units::mm};  // |x| beyond which a point is "close to PMT"
+
+        // §D pre-selection / bad-match gates.
+        double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)
+        double m_drift_out_frac{0.25};        // drop bundle if > this fraction of pts drift out
+        double m_min_pred_pe{10};             // min predicted PE to keep a bundle
+        double m_preselect_chi2ndf_max{1e4};  // pre-select chi2/ndf ceiling
+
+        // §E out-of-beam QA cuts.
+        double m_outbeam_ks_max{0.2};
+        double m_outbeam_chi2ndf_max{20};
+        double m_outbeam_pe_frac{0.5};        // out-of-beam total-PE mismatch fraction
+
+        // §C LASSO weights.
+        double m_lasso_lambda{0.1};
+        double m_delta_charge{0.01};
+        double m_delta_light{0.025};
+        double m_delta_shape{0.01};
+        double m_bkg_weight{0.5};              // background-column weight (round 1)
+        double m_pe_mismatch_knee{0.3};        // PE-mismatch weight knee (fraction of meas)
+        double m_pe_mismatch_floor{0.3};       // PE-mismatch weight floor
+
+        // §G flash PE-error model (forwarded to Opflash).
+        double m_pe_err_floor{0.3};
+        double m_pe_err_frac{0.3};
+        double m_pe_err_knee{1.0};
+        double m_flash_pe_threshold{0.0};      // Opflash "fired" threshold (PE)
+
+        // §F bundle-quality thresholds (forwarded to TimingTPCBundle).
+        double m_bundle_ks_merge_max{0.2};
+        double m_bundle_chi2ndf_merge_max{20};
+        double m_bundle_addmerge_exponent{0.8};
+        double m_highconsist_ks_max{0.06};
+        int    m_highconsist_min_ndf{3};
+        double m_bundle_pe_ndf_knee{1.0};
 
         // Default SBND VUV/VIS efficiency arrays, indexed by OpDet (312 entries).
         // Configuration "VUVEfficiency"/"VISEfficiency" arrays override these.

@@ -66,6 +66,43 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
     m_nchan = get(cfg, "nchan", m_nchan);
 
+    // Tuning constants (see match/docs/improve_progress.md). Defaults equal the
+    // historical hard-coded literals, so omitting these keys is bit-identical.
+    m_x_bound   = get(cfg, "x_bound",   m_x_bound);
+    m_y_bound   = get(cfg, "y_bound",   m_y_bound);
+    m_z_min     = get(cfg, "z_min",     m_z_min);
+    m_z_max     = get(cfg, "z_max",     m_z_max);
+    m_pmt_dist  = get(cfg, "pmt_dist",  m_pmt_dist);
+
+    m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
+    m_drift_out_frac        = get(cfg, "drift_out_frac",        m_drift_out_frac);
+    m_min_pred_pe           = get(cfg, "min_pred_pe",           m_min_pred_pe);
+    m_preselect_chi2ndf_max = get(cfg, "preselect_chi2ndf_max", m_preselect_chi2ndf_max);
+
+    m_outbeam_ks_max      = get(cfg, "outbeam_ks_max",      m_outbeam_ks_max);
+    m_outbeam_chi2ndf_max = get(cfg, "outbeam_chi2ndf_max", m_outbeam_chi2ndf_max);
+    m_outbeam_pe_frac     = get(cfg, "outbeam_pe_frac",     m_outbeam_pe_frac);
+
+    m_lasso_lambda     = get(cfg, "lasso_lambda",     m_lasso_lambda);
+    m_delta_charge     = get(cfg, "delta_charge",     m_delta_charge);
+    m_delta_light      = get(cfg, "delta_light",      m_delta_light);
+    m_delta_shape      = get(cfg, "delta_shape",      m_delta_shape);
+    m_bkg_weight       = get(cfg, "bkg_weight",       m_bkg_weight);
+    m_pe_mismatch_knee = get(cfg, "pe_mismatch_knee", m_pe_mismatch_knee);
+    m_pe_mismatch_floor = get(cfg, "pe_mismatch_floor", m_pe_mismatch_floor);
+
+    m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
+    m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
+    m_pe_err_knee       = get(cfg, "pe_err_knee",       m_pe_err_knee);
+    m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
+
+    m_bundle_ks_merge_max      = get(cfg, "bundle_ks_merge_max",      m_bundle_ks_merge_max);
+    m_bundle_chi2ndf_merge_max = get(cfg, "bundle_chi2ndf_merge_max", m_bundle_chi2ndf_merge_max);
+    m_bundle_addmerge_exponent = get(cfg, "bundle_addmerge_exponent", m_bundle_addmerge_exponent);
+    m_highconsist_ks_max       = get(cfg, "highconsist_ks_max",       m_highconsist_ks_max);
+    m_highconsist_min_ndf      = get(cfg, "highconsist_min_ndf",      m_highconsist_min_ndf);
+    m_bundle_pe_ndf_knee       = get(cfg, "bundle_pe_ndf_knee",       m_bundle_pe_ndf_knee);
+
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
         for (const auto& v : cfg["VUVEfficiency"]) m_VUVEfficiency.push_back(v.asDouble());
@@ -134,6 +171,41 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["QtoL"]            = m_QtoL;
     cfg["strength_cutoff"] = m_strength_cutoff;
     cfg["drift_speed"]     = m_drift_speed;
+
+    cfg["x_bound"]   = m_x_bound;
+    cfg["y_bound"]   = m_y_bound;
+    cfg["z_min"]     = m_z_min;
+    cfg["z_max"]     = m_z_max;
+    cfg["pmt_dist"]  = m_pmt_dist;
+
+    cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
+    cfg["drift_out_frac"]        = m_drift_out_frac;
+    cfg["min_pred_pe"]           = m_min_pred_pe;
+    cfg["preselect_chi2ndf_max"] = m_preselect_chi2ndf_max;
+
+    cfg["outbeam_ks_max"]      = m_outbeam_ks_max;
+    cfg["outbeam_chi2ndf_max"] = m_outbeam_chi2ndf_max;
+    cfg["outbeam_pe_frac"]     = m_outbeam_pe_frac;
+
+    cfg["lasso_lambda"]      = m_lasso_lambda;
+    cfg["delta_charge"]      = m_delta_charge;
+    cfg["delta_light"]       = m_delta_light;
+    cfg["delta_shape"]       = m_delta_shape;
+    cfg["bkg_weight"]        = m_bkg_weight;
+    cfg["pe_mismatch_knee"]  = m_pe_mismatch_knee;
+    cfg["pe_mismatch_floor"] = m_pe_mismatch_floor;
+
+    cfg["pe_err_floor"]       = m_pe_err_floor;
+    cfg["pe_err_frac"]        = m_pe_err_frac;
+    cfg["pe_err_knee"]        = m_pe_err_knee;
+    cfg["flash_pe_threshold"] = m_flash_pe_threshold;
+
+    cfg["bundle_ks_merge_max"]      = m_bundle_ks_merge_max;
+    cfg["bundle_chi2ndf_merge_max"] = m_bundle_chi2ndf_merge_max;
+    cfg["bundle_addmerge_exponent"] = m_bundle_addmerge_exponent;
+    cfg["highconsist_ks_max"]       = m_highconsist_ks_max;
+    cfg["highconsist_min_ndf"]      = m_highconsist_min_ndf;
+    cfg["bundle_pe_ndf_knee"]       = m_bundle_pe_ndf_knee;
     return cfg;
 }
 
@@ -193,9 +265,10 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     // Grouping::flashes() — which owns the flashlight-join walk. Each flash is
     // wrapped in an Opflash matching-adapter (time + dense per-channel PE, with
     // the matching-specific PE_err/fired synthesized in Opflash).
+    const PEErr pe_err_model{m_pe_err_floor, m_pe_err_frac, m_pe_err_knee};
     std::vector<Opflash::pointer> flashes;
     for (const auto& ff : grouping->flashes()) {
-        auto flash = std::make_shared<Opflash>(ff, 0.0, m_nchan);
+        auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
         flashes.push_back(flash);
@@ -231,8 +304,13 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     const unsigned int tpc = m_anode->ident();
     const int sign_offset  = (tpc == 0) ? -1 : 1;
-    const double lo_x_bound = (tpc == 0) ? -2000 : 0;
-    const double hi_x_bound = (tpc == 0) ? 0 : 2000;
+    const double lo_x_bound = (tpc == 0) ? -m_x_bound : 0;
+    const double hi_x_bound = (tpc == 0) ? 0 : m_x_bound;
+
+    // Bundle-quality thresholds forwarded to every TimingTPCBundle below.
+    const BundleQualityParams qp{
+        m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
+        m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee};
 
     // Reduce mask to OpDets on this TPC.
     for (std::size_t idet = 0; idet < opdet_mask.size(); ++idet) {
@@ -248,7 +326,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
         std::vector<unsigned int> flash_opdet_mask = opdet_mask;
         for (std::size_t idet = 0; idet < std::size_t(flash->get_num_channels()); ++idet) {
             auto pe_det = flash->get_PE(idet);
-            if ((flash->get_total_PE() > 5000) && (pe_det == 0) && (m_data == false))
+            if ((flash->get_total_PE() > m_mc_saturation_pe) && (pe_det == 0) && (m_data == false))
                 flash_opdet_mask[idet] = 0;
         }
 
@@ -261,6 +339,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             Cluster* cluster = clusters[icluster];
             auto bundle = std::make_shared<TimingTPCBundle>(
                 flash.get(), cluster, flash->get_flash_id(), icluster);
+            bundle->set_quality_params(qp);
             all_bundles.push_back(bundle);
             bundle->set_opdet_mask(flash_opdet_mask);
 
@@ -284,17 +363,17 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                     const double z = points.at(i).z();
 
                     if (x < lo_x_bound || x > hi_x_bound) { ++npt_outside_drift; continue; }
-                    if (std::abs(y) > 2000 || z < 0 || z > 5000) { ++npt_outside_bounds; continue; }
+                    if (std::abs(y) > m_y_bound || z < m_z_min || z > m_z_max) { ++npt_outside_bounds; continue; }
 
                     if (std::abs(x) && bundle->get_flag_at_x_boundary() == false)
                         bundle->set_flag_close_to_PMT(true);
-                    if (std::abs(x) > 1950 && bundle->get_flag_close_to_PMT() == false)
+                    if (std::abs(x) > m_pmt_dist && bundle->get_flag_close_to_PMT() == false)
                         bundle->set_flag_close_to_PMT(true);
-                    if (npt_outside_drift > 0.25 * npt) { drifted_outside = true; break; }
+                    if (npt_outside_drift > m_drift_out_frac * npt) { drifted_outside = true; break; }
 
                     // SemiAnalyticalModel expects positions in cm. Blob points
-                    // are in WCT units (mm); units::cm == 10.
-                    const WireCell::Point xyz_cm(x / 10., y / 10., z / 10.);
+                    // are in WCT units (mm).
+                    const WireCell::Point xyz_cm(x / units::cm, y / units::cm, z / units::cm);
                     std::vector<double> direct_visibilities;
                     m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm);
                     std::vector<double> reflected_visibilities;
@@ -318,13 +397,13 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                 continue;
             }
             bundle->set_pred_flash(pred_flash);
-            if (bundle->get_total_pred_light() < 10) continue;
+            if (bundle->get_total_pred_light() < m_min_pred_pe) continue;
             bundle->examine_bundle();
             if (bundle->get_ks_dis() == 1) {
                 bundle->set_potential_bad_match_flag(true);
                 continue;
             }
-            if (bundle->get_chi2() / bundle->get_ndf() > 1e4) {
+            if (bundle->get_chi2() / bundle->get_ndf() > m_preselect_chi2ndf_max) {
                 bundle->set_potential_bad_match_flag(true);
                 continue;
             }
@@ -416,10 +495,10 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     remove_bundle_selection(to_be_removed, pre_bundles);
     to_be_removed.clear();
 
-    const double lambda       = 0.1;
-    const double delta_charge = 0.01;
-    const double delta_light  = 0.025;
-    const double delta_shape  = 0.01;
+    const double lambda       = m_lasso_lambda;
+    const double delta_charge = m_delta_charge;
+    const double delta_light  = m_delta_light;
+    const double delta_shape  = m_delta_shape;
 
     unsigned int nopdet = 0;
     std::vector<int> opdet_idx_v;
@@ -474,15 +553,15 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                 pairs.emplace_back(flash, bundle->get_main_cluster());
                 const auto meas_pe_tot = flash->get_total_PE();
                 const auto pred_pe_tot = bundle->get_total_pred_light();
-                weights(ik++) = (std::abs(pred_pe_tot - meas_pe_tot) > 0.3 * meas_pe_tot)
+                weights(ik++) = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                   ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
-                                  : 0.3;
+                                  : m_pe_mismatch_floor;
             }
             PF(ncluster + i, nbundle + i) = 1. / delta_light;
             flash_idx_map[flash] = nbundle + i;
             ++i;
         }
-        for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = 0.5;
+        for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = m_bkg_weight;
         for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
         for (std::size_t n = 0; n < pairs.size(); ++n) {
             PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
@@ -559,9 +638,9 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
                 const auto meas_pe_tot = flash->get_total_PE();
                 const auto pred_pe_tot = bundle->get_total_pred_light();
-                const double base = (std::abs(pred_pe_tot - meas_pe_tot) > 0.3 * meas_pe_tot)
+                const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                         ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
-                                        : 0.3;
+                                        : m_pe_mismatch_floor;
                 weights(ik++) = base + delta_shape * nopdet * ks_dis / lambda;
             }
             ++i;
@@ -620,6 +699,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             }
             else {
                 auto bundle = std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx);
+                bundle->set_quality_params(qp);
                 bundle->set_strength(0);
                 results_bundles.push_back(bundle);
             }
@@ -809,12 +889,13 @@ void QLMatching::organize_bundles(
         auto flash = bundle->get_flash();
         if (!flash) continue;
         if (flash->get_time() < m_beam_mintime || flash->get_time() > m_beam_maxtime) {
-            if (bundle->get_ks_dis() > 0.2 || bundle->get_chi2() / bundle->get_ndf() > 20) {
+            if (bundle->get_ks_dis() > m_outbeam_ks_max ||
+                bundle->get_chi2() / bundle->get_ndf() > m_outbeam_chi2ndf_max) {
                 to_be_removed.push_back(bundle);
                 continue;
             }
             if (std::abs(flash->get_total_PE() - bundle->get_total_pred_light()) >
-                0.5 * flash->get_total_PE()) {
+                m_outbeam_pe_frac * flash->get_total_PE()) {
                 to_be_removed.push_back(bundle);
                 continue;
             }
