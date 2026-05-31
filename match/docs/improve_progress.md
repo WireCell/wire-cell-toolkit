@@ -209,11 +209,48 @@ them for tunable parameters. **Do not touch.**
 - **§H** — H1 (opdet mask) and H2 (TPC split) are now derived from the injected
   `OpDets` metadata (see table above); the remaining SBND-specific item is H4
   (VUV/VIS efficiency tables), to revisit when generalizing beyond SBND.
-- **Pointer-order non-determinism** — QL matching iterates pointer-keyed maps, so
-  the `flash_bundles_map` listing (which secondary cluster joins a flash's bundle)
-  is build-layout dependent. Not fixed here; flagged so future validation diffs at
-  the `initial eval` level, not the bundle listing.
+- **Pointer-order non-determinism** — fixed in Pass 3 (run-to-run reproducible);
+  see below for the remaining compiler-FP cross-recompile residual.
 - Minor leftovers kept as named constants by design: §B7, §C8, §D4, §G2.
 
 Any behavior change must land behind a config knob whose default reproduces today's
 number exactly (bit-identical production), validated by rerunning the Q/L events.
+
+---
+
+## Pass 3 — stale-`.so` audit + matching determinism
+
+**Build hygiene.** `./wcb build` only updates `build/<pkg>/lib*.so`; the running
+`wire-cell` loads from the install prefix `local/lib`. Always use **`wcbuild`**
+(`./wcb build -p && ./wcb install -p`) — a build without install silently runs the
+*old* binary, which can make a validation compare an unchanged binary to itself.
+
+**Audit (no earlier conclusion was compromised).** Re-ran the two recent commits
+that claimed bit-identical behavior, properly built+installed, comparing the
+deterministic per-bundle `initial eval` (pred PE / ks / chi2) across sbnd-mc
+evt 2/9/14:
+- `b5513447` (units + pull constants to config): `initial eval` **bit-identical** —
+  config defaults equal the old literals.
+- `dd775312` (OpDet mask / TPC split from metadata): `initial eval` **bit-identical**;
+  static cross-check confirms the only 6 opdets where `x<0` disagrees with `idet%2`
+  are inactive type-0 X-Arapucas, so zero active PMTs change TPC.
+
+**Determinism fixes** (commit *make QL matching cluster/flash ordering deterministic*).
+QLMatching iterated pointer-keyed containers, so the matched output varied
+build-to-build. Fixed the three remaining pointer-ordered iterations on stable,
+data-derived keys (matching the existing `flash_iter_order` convention): cluster
+length-sort tie-break on `get_cluster_id()`; sort `cluster_bundles_map` inner
+vectors by `get_flash_index_id()`; iterate `organize_bundles` by `get_flash_id()`.
+**Run-to-run is now fully reproducible.**
+
+**Residual (compiler-level FP, not pointer-order).** A rare near-threshold bundle
+can still flip across **recompiles**. Localized: pred_flash, round-1 solution, and
+round-2 inputs are all bit-identical across builds, but the round-2 LASSO
+`solution` differs — because the dense matrix algebra `X = P.transpose()*P` is
+compiled *in QLMatching.cxx*, so recompiling changes the Eigen reduction codegen at
+the ULP level, and a bundle within ~1e-13 of `m_strength_cutoff` flips. The solver
+itself (`LassoModel`, in `libWireCellUtil`) is deterministic given inputs. This is
+inherent to recompiling FP threshold code (not a bug, not run-to-run); a full fix
+would need FP-codegen pinning or rounding every threshold decision (a behavior
+change). **Validate QL changes at the `initial eval` level, and rely on run-to-run
+reproducibility for a fixed build.**
