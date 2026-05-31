@@ -113,6 +113,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_highconsist_min_ndf      = get(cfg, "highconsist_min_ndf",      m_highconsist_min_ndf);
     m_bundle_pe_ndf_knee       = get(cfg, "bundle_pe_ndf_knee",       m_bundle_pe_ndf_knee);
 
+    m_readout_window_ticks = get(cfg, "readout_window_ticks", m_readout_window_ticks);
+    m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
+
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
         for (const auto& v : cfg["VUVEfficiency"]) m_VUVEfficiency.push_back(v.asDouble());
@@ -220,6 +223,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["highconsist_ks_max"]       = m_highconsist_ks_max;
     cfg["highconsist_min_ndf"]      = m_highconsist_min_ndf;
     cfg["bundle_pe_ndf_knee"]       = m_bundle_pe_ndf_knee;
+
+    cfg["readout_window_ticks"] = m_readout_window_ticks;
+    cfg["window_edge_ticks"]    = m_window_edge_ticks;
     return cfg;
 }
 
@@ -882,6 +888,35 @@ void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     const auto& tbm = cluster->time_blob_map();
     auto ait = tbm.find(static_cast<int>(m_anode->ident()));
     if (ait == tbm.end()) return;
+
+    // Raw readout-window truncation flag (T0-independent, APA-agnostic). The
+    // blob slice indices are raw ticks (SamplingHelpers writes slice_index =
+    // islice->start()/tick), so a cluster is window-truncated if its leading
+    // slice sits within m_window_edge_ticks of tick 0, or its trailing slice
+    // within m_window_edge_ticks of the window end. No flash_x_offset enters:
+    // this is a property of the raw window, identical for both reversed-drift
+    // APAs. Computed independently of the u-walk below (which skips slices with
+    // no 3d points and can early-return on sv.empty()). Always filled; inert (no
+    // consumer reads it yet), so filling it leaves production output unchanged.
+    {
+        bool have = false;
+        int min_tick = 0, max_tick = 0;
+        for (const auto& [face, slices] : ait->second) {
+            for (const auto& [t, bset] : slices) {
+                if (bset.empty()) continue;
+                const int lo = t;                               // slice_index_min (raw tick)
+                const int hi = (*bset.begin())->slice_index_max();
+                if (!have) { min_tick = lo; max_tick = hi; have = true; }
+                else { if (lo < min_tick) min_tick = lo; if (hi > max_tick) max_tick = hi; }
+            }
+        }
+        if (have) {
+            const bool truncated =
+                (min_tick - 0 <= m_window_edge_ticks) ||
+                (m_readout_window_ticks - max_tick <= m_window_edge_ticks);
+            bundle->set_flag_window_truncated(truncated);
+        }
+    }
 
     struct SliceU { double u; int nblobs; };
     std::vector<SliceU> sv;

@@ -406,18 +406,32 @@ the window": the latter can involve a large fraction of the cluster, can occur f
 either drift sense, and is fundamentally a **raw-time** property (which slices fall
 within N ticks of the window edge), independent of any flash pairing.
 
-**Recommendation (no code yet):** introduce a dedicated, T0-independent
-window-truncation flag — e.g. `flag_window_truncated` — set when the cluster's
-leading/trailing slice lies within N ticks of the readout-window boundary, computed
-once per cluster from the raw slice indices (not from `u`). This is exactly the
-explicit window-edge detection already sketched in `QL_algorithm.md` §11.1: when set,
+**Implemented (flag only):** a dedicated, T0-independent `flag_window_truncated`
+now exists on `TimingTPCBundle`, set on every bundle by `compute_endpoint_flags()`.
+The test is purely on **raw ticks**: the blob slice indices are written as
+`slice_index = islice->start()/tick` (`aux/src/SamplingHelpers.cxx:89-90`), so they
+run over the raw readout window `[0, nticks]` (SBND: 0…3427). The flag fires when
+the cluster's leading slice is within `window_edge_ticks` of tick 0, or its trailing
+slice within `window_edge_ticks` of `readout_window_ticks`. No `flash_x_offset`
+enters — it is a property of the *raw window*, so it is **identical for both
+reversed-drift APAs** (tick-space truncation is symmetric; no per-APA branching). It
+is computed independently of the `u`-walk (which skips 3d-pointless slices and can
+early-return).
+
+The flag is **always computed** — there is no enable toggle, because nothing reads
+it yet, so filling it cannot change production output. Two C++ defaults control the
+test (`readout_window_ticks` = 3427 = SBND `daq.nticks`; `window_edge_ticks` ≈ one
+slice = `nticks_live_slice`); both are configurable from `qlmatching.jsonnet` if
+ever needed, but no knob is set there by default.
+
+This is exactly the explicit window-edge detection sketched in `QL_algorithm.md`
+§11.1. The **consumer is not yet ported**: once a downstream reader exists it should
 **suspend the under-prediction penalties** (relax or one-side the χ²/total-PE gates
 so under-prediction from clipped charge is forgiven while over-prediction is still
-penalized). Keep it jsonnet-togglable and default-off so existing SBND production
-stays bit-identical until validated. This is complementary to the three boundary
-flags above, not a replacement: `close_to_PMT`/`at_x_boundary`/`spec_end` describe
-where the *drift-corrected* endpoints sit; `flag_window_truncated` would describe
-whether the *raw readout window itself* cut the cluster off.
+penalized). This flag is complementary to the three boundary flags above, not a
+replacement: `close_to_PMT`/`at_x_boundary`/`spec_end` describe where the
+*drift-corrected* endpoints sit; `flag_window_truncated` describes whether the
+*raw readout window itself* cut the cluster off.
 
 ---
 

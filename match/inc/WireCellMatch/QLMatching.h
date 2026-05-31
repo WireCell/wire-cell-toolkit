@@ -140,6 +140,14 @@ namespace WireCell::Match {
         int    m_highconsist_min_ndf{3};
         double m_bundle_pe_ndf_knee{1.0};
 
+        // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
+        // always computed. Flags a bundle whose cluster's leading/trailing time
+        // slice sits within m_window_edge_ticks of the raw readout window
+        // [0, m_readout_window_ticks]. Inert (no consumer yet); since nothing
+        // reads it, always filling it leaves production output unchanged.
+        int m_readout_window_ticks{3427};  // window end in raw ticks (SBND daq.nticks)
+        int m_window_edge_ticks{4};        // edge-proximity threshold (~one slice = nticks_live_slice)
+
         // Default SBND VUV/VIS efficiency arrays, indexed by OpDet (312 entries).
         // Configuration "VUVEfficiency"/"VISEfficiency" arrays override these.
         std::vector<double> m_VUVEfficiency{

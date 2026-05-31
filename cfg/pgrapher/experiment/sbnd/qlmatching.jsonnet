@@ -114,6 +114,12 @@ function(params) {
             highconsist_ks_max: 0.06,
             highconsist_min_ndf: 3,
             bundle_pe_ndf_knee: 1.0,
+            // §H raw readout-window truncation flag is always computed by
+            // QLMatching (T0-independent, APA-agnostic) and is currently inert
+            // (no consumer), so it needs no knob here. Its window length
+            // (readout_window_ticks, default 3427 = SBND daq.nticks) and edge
+            // threshold (window_edge_ticks, ~one slice) are C++ defaults,
+            // overridable from jsonnet if ever needed.
         },
     }, nin=1, nout=1),
 }

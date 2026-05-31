@@ -79,6 +79,8 @@ namespace WireCell::Match {
         bool get_consistent_flag() const { return flag_high_consistent; }
         void set_spec_end_flag(bool v) { flag_spec_end = v; }
         bool get_spec_end_flag() const { return flag_spec_end; }
+        void set_flag_window_truncated(bool v) { flag_window_truncated = v; }
+        bool get_flag_window_truncated() const { return flag_window_truncated; }
         bool get_potential_bad_match_flag() const { return flag_potential_bad_match; }
         void set_potential_bad_match_flag(bool v) { flag_potential_bad_match = v; }
 
@@ -99,6 +101,7 @@ namespace WireCell::Match {
         bool flag_close_to_PMT;
         bool flag_at_x_boundary;
         bool flag_spec_end;
+        bool flag_window_truncated;
         bool flag_potential_bad_match;
         bool flag_high_consistent;
 

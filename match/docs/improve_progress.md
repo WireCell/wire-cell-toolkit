@@ -65,10 +65,15 @@ physics-neutral first (below), then shipped at the MicroBooNE defaults.
 The three boundary flags (`flag_close_to_PMT`, `flag_at_x_boundary`,
 `flag_spec_end`) are now **filled** by `compute_endpoint_flags()` — a faithful port
 of the prototype end-trimming walk over `time_blob_map()` — replacing the §D6 buggy
-block. They are still dormant (no consumer reads them) so filling them is
-output-neutral; they are ready for the downstream consistency-ladder / Lasso
-down-weighting logic when that is ported. The cathode seam `x = 0` is now real
-geometry (`m_cathode_x`), not a baked literal.
+block. A fourth flag with no prototype analogue, `flag_window_truncated`, is also
+filled there: a T0-independent raw-tick test (cluster's leading/trailing slice within
+`window_edge_ticks` of the raw readout window `[0, readout_window_ticks]`, default
+0…3427) for SBND's short window — see `prototype_algorithm.md` §5.5. All four are
+still dormant (no consumer reads them) so filling them is output-neutral; they are
+ready for the downstream consistency-ladder / Lasso down-weighting logic (and, for
+`flag_window_truncated`, the under-prediction-penalty relaxation of `QL_algorithm.md`
+§11.1) when that is ported. The cathode seam `x = 0` is now real geometry
+(`m_cathode_x`), not a baked literal.
 
 **Validation.** With cushions set to compensate the `m_dv` bbox back to the old
 windows (`anode_ext1=1.45cm, cathode_ext1=0.45cm, y_cushion=−0.03cm, z_cushion=0`),

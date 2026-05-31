@@ -40,6 +40,7 @@ TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
     , flag_close_to_PMT(false)
     , flag_at_x_boundary(false)
     , flag_spec_end(false)
+    , flag_window_truncated(false)
     , flag_potential_bad_match(false)
     , flag_high_consistent(false)
     , ks_dis(1)
@@ -142,6 +143,9 @@ void TimingTPCBundle::add_bundle(TimingTPCBundle* candidate_bundle)
 
         flag_close_to_PMT  = candidate_bundle->get_flag_close_to_PMT();
         flag_at_x_boundary = candidate_bundle->get_flag_at_x_boundary();
+        // Copy (not OR) to match the two flags above; revisit OR-vs-copy once a
+        // consumer reads flag_window_truncated.
+        flag_window_truncated = candidate_bundle->get_flag_window_truncated();
     }
 
     auto& pes = candidate_bundle->get_pred_flash();

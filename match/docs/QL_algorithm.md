@@ -416,6 +416,7 @@ this is exactly the part the planned improvements need to restore. Concretely:
 | `flag_spec_end` (demote truncated-end bundles when a clean match exists) | `ToyMatching.cxx:207-251`, `790-804` | **Filled, inert.** Now set by `compute_endpoint_flags()` (`QLMatching.cxx:904,928,942`); still never read (the prototype `:790-804` demotion is not ported). See `prototype_algorithm.md` §5.4. |
 | `flag_at_x_boundary` down-weight to 0.2 in Lasso + suspend auto-reject | `ToyMatching.cxx:1437,1603`; `FlashTPCBundle.cxx:577-600` | **Filled, inert.** Now set by `compute_endpoint_flags()` (`QLMatching.cxx:947,951`) and propagated on merge (`TimingTPCBundle.cxx:144`); never used in a gate or weight. |
 | `flag_close_to_PMT` → χ² error inflation + loosest cut ladders | `FlashTPCBundle.cxx:480-485`; `ToyMatching.cxx:518,597,702` | **Filled, inert.** The old buggy block is replaced; now set correctly by `compute_endpoint_flags()` (`QLMatching.cxx:946`) and propagated on merge (`TimingTPCBundle.cxx:143`); still never read downstream. |
+| `flag_window_truncated` (raw readout-window edge truncation — **new, no prototype analogue**) | — (SBND-only; see `prototype_algorithm.md` §5.5) | **Filled, inert.** T0-independent raw-tick test in `compute_endpoint_flags()`, always computed: cluster's leading/trailing slice within `window_edge_ticks` of `[0, readout_window_ticks]` (`QLMatching.cxx`). Propagated on merge (`TimingTPCBundle.cxx`); not yet read. Intended consumer: suspend the under-prediction penalties of §11.1. |
 | Fired-PMT test (`nfired/ntot`) fallback when not high-consistent | `FlashTPCBundle.cxx:550-600` | **Absent.** `Opflash` tracks `fired_channels` (`Opflash.cxx:26`) but the matcher never uses the fraction. |
 | Cosmic-discriminator masking (`cos_pe_low/mid`) | `FlashTPCBundle.cxx:461-464` | **Absent** (different trigger/electronics; would need an SBND equivalent). |
 | Long staged consistency/competition ladders (7 passes) | `ToyMatching.cxx:470-1358` | **Collapsed.** The port keeps a single pre-selection + the two Lasso rounds + a light `organize_bundles` merge. |
@@ -454,6 +455,10 @@ genuine, physically-truncated matches the prototype tries to rescue.
   truncated charge legitimately under-predicts light, so the magnitude term (χ², total-PE
   mismatch gate at `:816`, round-1/2 weight knees) should be relaxed or one-sided (penalize
   *over*-prediction, forgive *under*-prediction).
+  *Status:* the **detection half is now implemented** as `flag_window_truncated` — a
+  T0-independent raw-tick test in `compute_endpoint_flags()`, always computed and
+  currently inert. What remains is the **consumer**: reading the flag to relax/one-side
+  the magnitude penalties above. See `prototype_algorithm.md` §5.5.
 - Make the flash time window, and its relationship to the **TPC readout/drift window**,
   explicit and configurable (today `flash_mintime/maxtime` are decoupled from the drift window).
 
