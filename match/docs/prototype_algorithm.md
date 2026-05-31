@@ -157,10 +157,11 @@ one-to-one(ish) cluster↔flash assignment. In order:
    consistent" ones; remove `ndf==1` bundles when a flash has a unique
    consistent match elsewhere (`ToyMatching.cxx:563-780`).
 4. **spec_end & over-tight-boundary cleanup** — if a cluster has both
-   `spec_end` and non-`spec_end` consistent bundles, drop the non-`spec_end`
-   ones; also drop matches that are *suspiciously* tight at a boundary
-   (`ks<0.06 && chi2<3·ndf && at_x_boundary`), which are ambiguous
-   (`ToyMatching.cxx:783-826`).
+   `spec_end` and non-`spec_end` consistent bundles, demote the **`spec_end`**
+   ones (the clean non-`spec_end` match wins); if only `spec_end` consistent
+   bundles exist they are kept. Then drop matches that are *suspiciously* tight
+   at a boundary (`ks<0.06 && chi2<3·ndf && at_x_boundary`), which are ambiguous
+   (`ToyMatching.cxx:783-826`). See §5.4 for the exact logic.
 5. **Cross-cluster / cross-flash competition** — when a cluster could match
    several flashes (or vice versa), keep the best and remove the rest using
    `ks_dis` (with a small `+0.003·#bundles` penalty) and `chi2/ndf` comparison
@@ -246,10 +247,11 @@ its predicted light — is incomplete. Three mechanisms cope with this:
    `first_pos_x` / `last_pos_x` to the boundary — i.e. treats the small
    protrusion as a spurious tail and considers the cluster to *start/end at the
    edge*.
-2. **`flag_spec_end`** (`ToyMatching.cxx:207-208, 250-251`). Marks clusters
+2. **`flag_spec_end`** (`ToyMatching.cxx:207-208, 250-251`). Marks a bundle
    whose trimmed end is a "special end". Later, if a cluster has both
-   `spec_end` and non-`spec_end` consistent bundles, the algorithm **prefers the
-   `spec_end` ones** (`ToyMatching.cxx:790-804`).
+   `spec_end` and non-`spec_end` consistent bundles, the algorithm **demotes the
+   `spec_end` ones** in favour of the clean match (`ToyMatching.cxx:790-804`) —
+   see §5.4 for the exact logic and the direction.
 3. **`flag_at_x_boundary`** — for clusters touching either boundary. Two
    consequences: (a) the bundle is **down-weighted to 0.2 in the Lasso solve**
    (`ToyMatching.cxx:1437, 1603`); and (b) `examine_bundle` **suspends
@@ -341,13 +343,47 @@ limits). But the implementation evaluates it in the **T0-corrected frame, per
 long-smooth-tail condition. It is a "this matched end was trimmed at a boundary"
 marker, not a standalone readout-window detector.
 
+**Exactly how the prototype consumes `flag_spec_end`.** There is a single live
+read, in the per-cluster cleanup pass (`ToyMatching.cxx:790-804`; the identical
+block at `:2659` is in the disabled `tpc_light_match_ana` and is dead). The logic,
+verbatim, is a *prefer-clean-over-trimmed* rule:
+
+```cpp
+// for each cluster, over its candidate bundles:
+for (bundle : bundles) {
+  if (consistent && spec_end)      temp_bundles.push_back(bundle); // the trimmed-end matches
+  else if (consistent)             flag_remove = true;             // a clean consistent match exists
+}
+if (flag_remove)                                                   // i.e. a clean match exists
+  for (bundle : temp_bundles) bundle->set_consistent_flag(false);  // demote the spec_end ones
+```
+
+So the direction is the **opposite** of "prefer the truncated end":
+
+- If a cluster has **both** a clean (non-`spec_end`) consistent bundle **and**
+  `spec_end` consistent bundles, the **`spec_end` ones are demoted**
+  (`consistent_flag → false`) and the clean match wins.
+- If the cluster's *only* consistent bundles are `spec_end` (no clean alternative),
+  `flag_remove` stays false and they are **kept**.
+
+The demotion is not itself a deletion — `set_consistent_flag(false)` just strips the
+"consistent" status. The downstream cleanup (`ToyMatching.cxx:1185-1242`) is what
+removes bundles: once a cluster has any consistent bundle, its remaining
+`!consistent` bundles are erased **unless they are `flag_at_x_boundary`** (line
+`:1211`), in which case the demoted `spec_end` bundle survives but no longer counts
+as a consistent match. Net effect: a flash hypothesis that only fit the cluster by
+trimming a long tail off a drift end yields to a hypothesis that fit cleanly — the
+trimmed-end interpretation is the more speculative one. (`flag_spec_end` is also
+copied when two bundles are combined, `ExamineBundles.cxx:112`, like the other two
+flags' merge propagation.)
+
 **Current status (all three flags): filled but inert.** `compute_endpoint_flags`
 *sets* them, and `flag_close_to_PMT`/`flag_at_x_boundary` are propagated when
 bundles merge (`TimingTPCBundle.cxx:143-144`), but **no consumer reads any of them**
 in the SBND matcher yet. The prototype's downstream uses — χ² error inflation and
 the loosest consistency ladders for `close_to_PMT`, the Lasso down-weight to 0.2 and
-suspended auto-rejection for `at_x_boundary`, and the "prefer `spec_end` bundles"
-tie-break (`ToyMatching.cxx:790-804`) — are **not ported**. Filling the flags is
+suspended auto-rejection for `at_x_boundary`, and the prefer-clean-over-`spec_end`
+demotion above (`ToyMatching.cxx:790-804`) — are **not ported**. Filling the flags is
 therefore output-neutral today; they are scaffolding for that future logic
 (see `improve_progress.md` §A and `QL_algorithm.md` §11).
 
