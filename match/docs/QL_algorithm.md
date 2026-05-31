@@ -377,7 +377,199 @@ production configs stay bit‑identical.
 
 ---
 
-## 10. Source map
+## 10. Comparison with the MicroBooNE prototype (`prototype_algorithm.md`)
+
+The current SBND matcher is a **port of the MicroBooNE Wire-Cell prototype**
+(`prototype_base/2dtoy/src/ToyMatching.cxx`, written up in
+[`prototype_algorithm.md`](prototype_algorithm.md)). The core skeleton survived the port —
+predict light per (flash, cluster), score with a *shape* (KS) and a *magnitude* (χ²) metric,
+prune, then a **two-round non-negative L1 (Lasso) global solve** with a "track used at most
+once" charge constraint and a `ks·(chi2/ndf)^0.8` tie-break. The Lasso constants are even
+identical (`λ = 0.1`, `delta_track/charge = 0.01`, boundary seed `0.5`).
+
+But the port **dropped most of the prototype's physics-aware handling of the hard cases** — and
+this is exactly the part the planned improvements need to restore. Concretely:
+
+| Prototype mechanism | Where (prototype) | Status in current SBND port |
+|---|---|---|
+| End-trimming walk (clip cluster ends that poke past anode/cathode) | `ToyMatching.cxx:176-264` | **Absent.** Out-of-bounds points are simply dropped; >25% out kills the bundle (`QLMatching.cxx:286-293`). |
+| `flag_spec_end` (prefer truncated-end bundles) | `ToyMatching.cxx:207-251`, `790-804` | **Dead.** Setter/getter exist (`TimingTPCBundle.h:64-65`) but the flag is never set or read. |
+| `flag_at_x_boundary` down-weight to 0.2 in Lasso + suspend auto-reject | `ToyMatching.cxx:1437,1603`; `FlashTPCBundle.cxx:577-600` | **Dead.** Never set true anywhere; never used in a gate or weight. |
+| `flag_close_to_PMT` → χ² error inflation + loosest cut ladders | `FlashTPCBundle.cxx:480-485`; `ToyMatching.cxx:518,597,702` | **Dead + buggy.** Set at `QLMatching.cxx:289-292`, but line 289 (`if (std::abs(x) && ...)`) is truthy for nearly every point, and the flag is never read downstream. |
+| Fired-PMT test (`nfired/ntot`) fallback when not high-consistent | `FlashTPCBundle.cxx:550-600` | **Absent.** `Opflash` tracks `fired_channels` (`Opflash.cxx:26`) but the matcher never uses the fraction. |
+| Cosmic-discriminator masking (`cos_pe_low/mid`) | `FlashTPCBundle.cxx:461-464` | **Absent** (different trigger/electronics; would need an SBND equivalent). |
+| Long staged consistency/competition ladders (7 passes) | `ToyMatching.cxx:470-1358` | **Collapsed.** The port keeps a single pre-selection + the two Lasso rounds + a light `organize_bundles` merge. |
+| Run/timestamp light-yield scaling, single-PMT veto | `ToyMatching.cxx:341-354` | **Absent** (MicroBooNE-specific). |
+
+The net effect: the SBND matcher is **less tolerant precisely where the physics is hardest** —
+at the anode, near the PMTs, and at the readout-window edges — because the prototype's leniency
+machinery is present only as inert flags. The improvement program below is largely about
+*re-instating that machinery in a two-TPC-aware form*, plus exploiting the second TPC, which the
+single-TPC prototype never had.
+
+---
+
+## 11. Improvement opportunities
+
+Organized around the four considerations raised for the planned work, with the dropped-prototype
+features folded in. Per the project convention, anything that changes matching numerics should
+be **jsonnet-togglable and default to current behaviour** so existing SBND production stays
+bit-identical until validated.
+
+### 11.1 Readout-window truncation (charge/light that predate the window)
+
+**Problem.** `x` is reconstructed from drift time via `flash_x_offset = sign·t·v_drift`. A flash
+early or late in the (~±1.5 ms) window implies charge that partly drifted in *before* readout
+began (or after it ended): the cluster is **clipped**, so its predicted light is systematically
+*low*. The current code treats this as a *defect* — it drops the out-of-window points and, if
+>25% are lost, **kills the bundle** (`QLMatching.cxx:286-293`). That throws away exactly the
+genuine, physically-truncated matches the prototype tries to rescue.
+
+**Improvements (restore prototype behaviour, two-TPC aware):**
+- Re-introduce the **end-trimming walk** (`ToyMatching.cxx:176-264`): when a cluster end pokes
+  just past a drift edge, snap it to the edge and set `flag_spec_end` rather than discarding
+  points wholesale.
+- **Detect window-edge truncation explicitly** (cluster's leading/trailing slice within N ticks
+  of the readout window edge) and, when present, **suspend the under-prediction penalties**:
+  truncated charge legitimately under-predicts light, so the magnitude term (χ², total-PE
+  mismatch gate at `:816`, round-1/2 weight knees) should be relaxed or one-sided (penalize
+  *over*-prediction, forgive *under*-prediction).
+- Make the flash time window, and its relationship to the **TPC readout/drift window**,
+  explicit and configurable (today `flash_mintime/maxtime` are decoupled from the drift window).
+
+### 11.2 Track at the anode / active-volume boundary (missing charge)
+
+**Problem.** At the anode (`|x| ≈ 2000 mm`) a track may extend past the instrumented volume
+(into the field cage / un-wired region), so charge is missing and the predicted light is again
+too low — and this happens **right next to the PMTs**, where the semi-analytical model is least
+accurate. The prototype handles this with `flag_close_to_PMT` (error inflation + loosest cuts)
+and `flag_at_x_boundary` (Lasso down-weight + no auto-reject). In the port these flags are
+inert (§10).
+
+**Improvements:**
+- **Actually set and use `flag_at_x_boundary`** (cluster touching either drift edge) and
+  **down-weight those bundles in the Lasso** (prototype uses `0.2`), so a truncated track is not
+  out-competed by a fully-contained one.
+- **Re-instate the χ² error-inflation** near the PMTs (the prototype's `pe-pred>350 && pe>1.3·pred`
+  rule) so a few saturated/over-bright near-PMT channels don't dominate χ².
+- **Fix the dead/buggy `close_to_PMT` logic** at `QLMatching.cxx:289` (the `std::abs(x)` truthy
+  test) and wire the flag into the gates/weights, or remove it if not used.
+- Distinguish the two boundaries physically: in SBND **`x = 0` is the cathode** (shared between
+  the two TPCs, max drift, dim/reflected light) and **`|x| = 2000` is the anode** (near PMTs,
+  min drift). They deserve *different* treatment — the current single `flag` conflates them.
+
+### 11.3 Cross-TPC connectivity near the cathode (a new constraint)
+
+**Problem / opportunity.** SBND has two drift volumes sharing a **central cathode at `x = 0`**.
+A cosmic crossing the cathode deposits charge in *both* TPCs, and the two charge pieces are
+spatially continuous at `x ≈ 0` (same `y, z`, consistent drift-corrected time). The single-TPC
+prototype had no analogue of this; the current per-APA matcher matches the two halves
+*independently* and cannot use the link.
+
+**Improvements:**
+- **Pre-link cross-cathode cluster pairs**: a TPC0 cluster and a TPC1 cluster whose cathode-side
+  ends are proximate in `(y, z)` and consistent in drift-corrected `t0` are almost certainly one
+  physical track. (Reuse the clustering/proximity facilities in `clus/` for the `(y,z)`
+  adjacency test.)
+- **Tie linked pairs to a single flash** in the global solve: one shared "track used once"
+  charge-constraint row spanning both TPCs, so the combined charge predicts light on **both**
+  PMT sets simultaneously. This gives a far stronger lever arm than either half alone and
+  resolves ambiguities per-TPC matching cannot — it is the concrete physics payoff that
+  motivates the two-TPC redesign of §8.
+- Even short of full cross-TPC clusters, **connectivity proximity at the cathode can act as a
+  prior/penalty** linking the two per-APA matches to a common `t0`.
+
+### 11.4 Are the two TPCs' light signals separated or bound? (and how to bind them)
+
+**Current state — separated.** Light is delivered **per APA/TPC**: separate `opflash_apa0.tar.gz`
+/ `opflash_apa1.tar.gz` archives (`qlmatching.jsonnet:30-37`), and inside the matcher an
+**even/odd PMT split** restricts each TPC to half the OpDets (`QLMatching.cxx:238-240`). So the
+two TPCs' flashes are two *independent* objects with **no link** — they are neither naturally
+bound nor currently bindable.
+
+**Physics.** A scintillation flash is *one* event in time. In SBND each PMT mostly sees its own
+side's light (the cathode sits between the two arrays), so the two halves are "naturally
+separated *in PMT space*" but "naturally coincident *in time*". The right way to bind them is
+therefore **temporal coincidence + cathode connectivity**, not merging the PMT patterns.
+
+**Open question to confirm upstream:** does the SBND opflash producer write a near-cathode flash
+**once** (to one APA) or **duplicated** into both archives, and does a per-APA flash carry PE on
+all 312 channels or only its even/odd half? This determines whether binding means *merging two
+flash objects* or *adding a coincidence constraint between them*. This is upstream of `match/`
+(larsoft/opreco) and should be checked before coding.
+
+**Improvements (pick per the answer above):**
+- If flashes are per-TPC: introduce a **time-coincidence association** that pairs an APA0 flash
+  with an APA1 flash within a small `Δt`, forming a *global flash hypothesis* that the joint fit
+  can score across the **full** PMT set (drop the even/odd mask for linked, cathode-crossing
+  clusters).
+- Make the **even/odd OpDet split a configurable per-TPC OpDet mapping** rather than a hard-coded
+  parity (`:238-240`) — the single biggest structural blocker to a joint fit (§8).
+- Feed both APAs into one matching call (dual-anode component, or an upstream fan-in) so the
+  design matrix can carry both PMT sets and the shared cross-cathode charge constraint.
+
+### 11.5 Lower-hanging, detector-agnostic cleanups
+
+- Promote the §9 hard-coded constants to config (geometry bounds should come from
+  `IDetectorVolumes`, not literal `±2000/0/5000/1950`).
+- The pre-selection `chi2/ndf > 1e4` and pred-PE `< 10` gates, and the `0.3` weight knee, are
+  unmotivated round numbers — tune on truth-matched MC and expose them.
+- Add **per-bundle quality outputs** (KS, χ²/ndf, total-PE ratio, boundary flags) to the pctree
+  so matching performance can be monitored and the cuts re-tuned without a rebuild.
+
+---
+
+## 12. Machine-learning approaches (research directions)
+
+The hand-tuned cut ladders, the semi-analytical light model, and the greedy→Lasso assignment are
+all replaceable or augmentable with learned components. These are exploratory; all need
+**truth-matched MC** for training (the optical sim already provides per-flash truth), and all
+must respect the toolkit's **run-to-run determinism** requirement (fixed seeds, deterministic
+inference, no nondeterministic GPU reductions) and bounded inference cost. Roughly in increasing
+order of ambition:
+
+1. **Learned pair classifier / ranker (lowest risk).** Replace the `(ks, chi2/ndf, …)` cut
+   ladders with a gradient-boosted-tree or small MLP that scores each candidate (flash, cluster)
+   pair from engineered features — KS, χ²/ndf, total-PE ratio, per-PMT residuals, `Δt`,
+   boundary/window flags, drift fraction, cross-cathode-connectivity score. Trained on MC
+   truth, it subsumes the heuristic passes and is trivially deterministic at inference. The Lasso
+   global solve can stay, fed by learned per-pair scores instead of hand cuts.
+
+2. **Neural light-prediction surrogate (replaces/augments the semi-analytical model).** Train a
+   coordinate network (e.g. a SIREN/MLP "PhotonLib surrogate") to predict per-OpDet visibility
+   from `(x, y, z)` — and, importantly, a *calibrated uncertainty* — from full optical-sim or
+   data. This directly attacks the near-PMT and near-cathode regions where the analytical model
+   is weakest (§11.2), and a differentiable model enables gradient-based `t0`/assignment fits.
+
+3. **Graph / bipartite neural network for assignment.** Represent clusters and flashes as the two
+   sides of a bipartite graph; edges carry the pair features above plus the cross-TPC link.
+   A GNN (or an edge-classifier + differentiable matching layer) predicts match probabilities
+   with full global context and naturally handles many-to-one and the two-TPC topology — a clean
+   home for the §11.3 cathode-connectivity constraint as an edge/message feature.
+
+4. **Differentiable optimal-transport / Sinkhorn matching layer.** Replace (or initialize) the
+   Lasso assignment with a differentiable soft-permutation that encodes "one flash per cluster"
+   as a transport constraint and can be trained end-to-end against truth, with the cross-cathode
+   tie as a coupling between rows. Keeps the convex-assignment spirit of the current solve while
+   making it learnable.
+
+5. **End-to-end / amortized inference.** A network that ingests a cluster's points and the
+   candidate flashes and directly regresses `t0` (or the matched-flash posterior), trained
+   against truth — amortizing the per-event fit. Useful as a fast prior to seed the global solve.
+
+6. **Probabilistic (normalizing-flow / likelihood) matching.** Learn the full `p(PE | charge,
+   geometry)` so the match score is a proper likelihood with uncertainties, giving principled
+   handling of truncated charge (down-weight via the learned variance instead of ad-hoc rules).
+
+**Pragmatic staging.** (1) and (2) are the highest value-to-risk: a learned pair score and a
+learned light model with uncertainties would address the §11.1–11.2 boundary/window problems
+*and* improve the existing Lasso pipeline without discarding it. (3)/(4) become attractive once
+the two-TPC joint formulation (§8, §11.3) is in place, since their natural strength is global,
+topology-aware assignment.
+
+---
+
+## 13. Source map
 
 | Component | Files |
 |---|---|
