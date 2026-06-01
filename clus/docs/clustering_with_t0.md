@@ -1,8 +1,9 @@
 # Flash-time (T0) grouped clustering — design note
 
-**Status:** design / proposal. No code is changed by this document. It describes how to make the
-`cm.*` clustering visitors group clusters by matched-flash time before merging, so that clustering
-happens *within* a flash group instead of across the whole event.
+**Status:** implemented. This note describes how the `cm.*` clustering visitors group clusters by
+matched-flash time before merging, so that combined-stage clustering happens *within* a flash group
+instead of across the whole event. The flash-aware behavior is gated by `use_flash_t0` (default OFF,
+so per-APA / production output is bit-identical) and enabled in the SBND combined pipeline.
 
 All `file:line` references are against the tree at the time of writing (branch `apply-pointcloud`).
 
@@ -161,96 +162,63 @@ function is identical to today.
 
 ---
 
-## 6. `examine_bundles` with T0 — a new merge path
+## 6. `examine_bundles` with T0 — a merge pre-step (as implemented)
 
-Today `clustering_examine_bundles` only labels per-blob connected components via
-`Cluster::connected_blobs()` and stores `("isolated","perblob")` (`:98,168`); it reads no flash/T0
-and merges nothing.
+Today `clustering_examine_bundles` loops over each cluster *individually*, runs
+`Cluster::connected_blobs()` to partition that cluster's blobs, marks the main sub-component `-1`, and
+stores `("isolated","perblob")` (`clustering_examine_bundles.cxx:84-170`); it reads no flash/T0 and
+merges nothing.
 
-The new behavior (when `use_flash_t0` is on and flashes are present): form **cluster groups by T0
-coincidence** and **merge each group into one cluster**.
+The implemented T0 behavior (when `use_flash_t0` is on): **prepend a merge pre-step** that collapses
+each matched-flash-time group of clusters into a single cluster, then run the **existing per-cluster
+labeling loop unchanged**. The end state is one cluster per flash group carrying a fresh
+`("isolated","perblob")` array with the main sub-component `-1` — exactly the shape
+`clustering_isolated` produces, but grouped by flash time instead of geometry.
 
-### Mechanism (borrowed from `isolated`, criterion replaced)
+### Mechanism
 
-`clustering_isolated.cxx` is the template for the *mechanism*: build candidate pairs → union-find →
-add edges into a graph → `merge_clusters(g, live_grouping, "isolated")` (`:478`). But its grouping
-**criterion is purely geometric** (closest-distance and PCA cuts, `:228,251,314-359`). For T0 mode,
-**borrow the union-find + `merge_clusters` machinery, and replace the geometric criterion with T0
-coincidence**: add an edge between every pair of clusters that share a t0-group id, then call
+1. `assign_flash_t0_groups(live_clusters, flash_t0_window)` (in `ClusteringFuncs.cxx`) assigns each
+   cluster a flash-time group id; clusters with no valid flash get unique singleton ids.
+2. Add an edge between every pair of in-scope clusters that share a group id, then
+   `merge_clusters(g, live_grouping)` → one merged cluster per group. (No `savecc`/`perblob` is written
+   by this merge; the labeling loop in step 3 writes the final `perblob`.)
+3. Re-fetch `live_grouping.children()` and run the **existing** loop: `connected_blobs()` partitions
+   each merged cluster, the longest sub-component is marked `-1`, and `put_pcarray("isolated","perblob")`
+   records it.
 
-```cpp
-merge_clusters(g, live_grouping, "isolated", "perblob");
-```
+With `use_flash_t0=false` the pre-step is skipped and the function is byte-identical to today.
 
-so the merged cluster records, per blob, which source cluster it came from (`ClusteringFuncs.cxx:74,
-101-110`). Keep the legacy per-blob *labeling* path when `use_flash_t0` is off.
+### No split, no restore
 
-### The flash-bookkeeping conflict, and the merge → separate round-trip
+An earlier draft of this note proposed a merge → separate → restore round-trip. That was only needed
+if a **downstream** separator (the old `clustering_isolated` / `ClusteringRecoveringBundle`) re-split
+the merged cluster and had to restore each fragment's flash. **The combined SBND pipeline drops those
+downstream steps** (its tail is now just `examine_bundles`), so the merged cluster is terminal — there
+is no later separation and therefore **no per-fragment flash restore is required**. "Select the main
+cluster" is simply the `-1` main-marking inside `examine_bundles`; no separate node and no satellite
+deletion (satellites become sub-components of the one merged cluster, recorded in `perblob`).
 
-The requirement is stronger than just "pick a good representative". A merged cluster is not the end
-of the line — it can be **separated again** downstream (the `("isolated","perblob")` label written by
-`examine_bundles` is consumed by `ClusteringRecoveringBundle`, which calls
-`grouping.separate(cluster, cc_vec)` to split a beam-flash cluster back into its components,
-`ClusteringRecoveringBundle.cxx:106,148-149,163`). The flash information of each original piece must
-**survive the merge and be restored on the later separation** — it must not be lost when the clusters
-are combined.
+### Flash bookkeeping is fixed once, in `merge_clusters` (covers all clus call sites)
 
-Two facts make naive merging lossy:
+`Cluster::from` copies a scalar **only if the destination lacks it** (`Facade_Cluster.cxx:159-181`), so
+a naive `merge_clusters` keeps the **first-encountered** member's `cluster_t0`/`flash`/`matched_flash_gid`
+(arbitrary `std::set` order). This is a problem for **every** merging visitor, not just
+`examine_bundles`. The fix lives in the shared primitive `merge_clusters` (`ClusteringFuncs.cxx`):
+after each component is merged, if **any** contributing member has a valid `flash` (`>= 0`), set the
+merged cluster's `cluster_t0`/`flash`/`matched_flash_gid` to those of the **longest** contributing
+member. When no member carries a flash (the entire per-APA stage, where matching has not yet run) the
+block is a no-op, so per-APA output stays bit-identical. This single change makes `extend`, `regular`,
+`parallel_prolong`, `close`, `isolated`, `connect1`, `examine_bundles`, … all flash-correct.
 
-1. **Merge keeps only one flash.** `merge_clusters` iterates a component's members in
-   `std::set<descriptor>` order, calling `fresh_cluster.from(*live)` (`ClusteringFuncs.cxx:87-94`).
-   `Cluster::from` copies a scalar **only if the destination does not already have it**
-   (`Facade_Cluster.cxx:173-179`, the `if (arr && !arr1)` guard). So the merged cluster silently keeps
-   the **first-encountered** member's `cluster_t0` / `flash` / `matched_flash_gid` — "first" is
-   arbitrary `std::set` order, **not** the main/longest cluster. The other members' flash is dropped.
-2. **Separate re-stamps every child with the parent's flash.** `Grouping::separate` calls
-   `c->from(*cluster)` on every split child (`Facade_Grouping.cxx:160-163`). So after a separation each
-   piece *inherits the merged cluster's single flash* and its own original flash is gone — unless it
-   was stored somewhere blob-local and explicitly restored.
+This matters because `cluster_t0` is read downstream by `connect_graph_ctpc`/`connect_graph_relaxed`,
+`NeutrinoStructureExaminer`, `MyFCN`, `FiducialUtils`, `TrackFitting`, `NeutrinoVertexFinder`,
+`protect_overclustering` (`grep get_cluster_t0 clus/src/*.cxx`); the representative must be a real
+member's t0, never 0.
 
-This matters beyond the merged cluster itself: `cluster_t0` is read downstream by
-`connect_graph_ctpc` / `connect_graph_relaxed`, `NeutrinoStructureExaminer`, `MyFCN`, `FiducialUtils`,
-`TrackFitting`, `NeutrinoVertexFinder`, `protect_overclustering`
-(`grep get_cluster_t0 clus/src/*.cxx`).
-
-**Recommended solution — save the flash per blob, alongside `perblob`; restore on separate.**
-
-This reuses the established `("isolated","perblob")` idiom (`examine_bundles` writes it, `retile` and
-`RecoveringBundle` read it) and adds a *parallel* per-blob array carrying flash provenance:
-
-1. **At merge time** — when `merge_clusters` (savecc mode) walks the component members and fills the
-   per-blob component-id array `("isolated","perblob")` (`ClusteringFuncs.cxx:101-110`), also fill a
-   **parallel per-blob array `("flash_gid","perblob")`** (optionally `("flash_t0","perblob")`) with
-   each source cluster's `matched_flash_gid` (and `cluster_t0`), captured from `*live` *before* it is
-   destroyed (`:106`). Store the **gid** (globally unique), not the `flash` index (which can repeat
-   across APAs, §2). Both arrays are blob-indexed in the same order, so blob `j`'s component and its
-   original flash stay aligned even if connectivity is later recomputed.
-2. **Representative on the merged ("combined") cluster** — set its `cluster_t0` / `flash` /
-   `matched_flash_gid` to the **main cluster's** flash, where the main cluster is the component marked
-   `-1` in the `perblob` array (the max-overlap / longest component, exactly the `-1` convention
-   `examine_bundles` and `RecoveringBundle` already compute, `clustering_examine_bundles.cxx:103-166`,
-   `ClusteringRecoveringBundle.cxx:112-146`). This is what the user asked for: "the flash information
-   should be the main cluster's flash information when we created them." Set it explicitly after the
-   merge so it does not depend on `from()`'s arbitrary first-wins order.
-3. **On separate** — after `grouping.separate(cluster, cc_vec)`, each split child currently inherits
-   the merged flash via `from()` (fact 2 above). Add a restore step (the natural home is
-   `ClusteringRecoveringBundle::process_cluster`, right after the `separate` at
-   `ClusteringRecoveringBundle.cxx:163-171`, where it already re-idents and flags the pieces): for each
-   returned sub-cluster, look up the `("flash_gid","perblob")` value of the blobs that went into it and
-   **override** its `cluster_t0` / `flash` / `matched_flash_gid` with that original flash. The main
-   piece keeps the main flash; every other piece is restored to its own.
-
-This is lossless: the merged cluster reports the main flash, and any later separation faithfully
-restores each fragment's original flash from the per-blob record.
-
-**Alternatives (noted, not recommended):**
-
-- Blob-local scalar instead of a cluster-level `perblob` array: store the flash gid in each blob's own
-  local PC so it travels with the blob through *any* `separate()` automatically (no read-before-split
-  needed). More general, but departs from the existing `perblob` idiom; revisit only if a separation
-  path that bypasses the `perblob` array appears.
-- No tolerance: only merge clusters with *identical* `matched_flash_gid` (no 80 ns window) — sidesteps
-  the conflict but defeats the cross-APA coincidence goal (§2).
+`Grouping::separate()` needs no change: it already propagates the parent's (single) flash to each split
+child via `c->from(*cluster)` (`Facade_Grouping.cxx`), which is correct for the single-flash clusters
+that get separated in this pipeline (e.g. by `switch_scope`). A per-fragment restore would only be
+needed if a *multi-flash* merged cluster were later re-split — which this pipeline does not do.
 
 ---
 
@@ -273,16 +241,18 @@ chain is later wired into the per-APA stage.
 
 ## 8. Open items / risks
 
-- **Representative flash on the merged cluster** = the main component's (the `-1` blob group). Set it
-  explicitly after the merge; must never fall back to 0.
-- **Round-trip restore:** verify that merge → `RecoveringBundle` separate restores each fragment's
-  original flash from `("flash_gid","perblob")` (i.e. a piece does **not** keep the merged/main flash
-  it inherited via `from()`).
-- **Bit-identicality (toggle off):** verify the combined-stage output is byte-for-byte unchanged when
-  `use_flash_t0=false`, on a production SBND config.
-- **Correctness (toggle on):** verify no merged cluster spans two `matched_flash_gid` groups, and that
-  the parallel per-blob `("flash_gid","perblob")` array is populated after `examine_bundles` and stays
-  blob-index-aligned with `("isolated","perblob")`.
+- **Stale per-APA `perblob`** needs no wipe node: combined step 1 `switch_scope` loops every cluster
+  (`clustering_switch_scope.cxx:64`) and calls `separate(...,remove=true)` unconditionally (`:83`);
+  `NaryTree::separate` processes all non-negative group ids (`NaryTree.h:269`), so even a fully-in-FV
+  cluster is destroyed and recreated via `Cluster::from()`, which copies only `cluster_scalar`
+  (`Facade_Cluster.cxx:159-181`). The per-APA `("isolated","perblob")` array is therefore dropped at
+  step 1 and never reaches the combined `examine_bundles`, which writes a fresh one.
+- **Bit-identicality (toggle off):** verify the **per-APA** stage output is byte-for-byte unchanged
+  (all five pairwise functions + `merge_clusters` are no-ops without a flash). This is the regression
+  gate. The combined stage intentionally changes (its tail is replaced) and is not gated by the flag.
+- **Correctness (toggle on):** verify no merged cluster spans a `cluster_t0` range > `flash_t0_window`,
+  each flash group collapses to one cluster carrying `("isolated","perblob")` with exactly one main
+  sub-component (`-1`), and the merged cluster's `cluster_t0` equals the longest contributing member's.
 - **Greedy-chain edge case:** if real flashes were ever spaced < 80 ns apart, greedy chaining could
   link them into one group. In SBND practice matched clusters cluster tightly at discrete flash times,
   so this is not expected; the window is a tolerance for the same flash reconstructed slightly

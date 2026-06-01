@@ -113,12 +113,22 @@ namespace WireCell::Clus::Facade {
     // Pointers to the newly created cluster node facades are returned.  These
     // are loaned.  As usual, the cluster node owns the facade and these nodes
     // are in turn owned by the grouping node.
-    std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, // 
+    std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
                                          const std::string& pcname="perblob");
 
-    
+    // Assign each cluster an integer "flash-time group" id.  Clusters whose
+    // matched flash time (cluster_t0) differ by less than `window` share a group
+    // id.  A cluster without a valid matched flash (scalar "flash" < 0) gets a
+    // unique singleton id so it can never share a group with another cluster.
+    // Every cluster in `clusters` is present as a key in the returned map.  This
+    // is used by the combined-stage (post QL-matching) clustering functions to
+    // restrict merging to clusters coincident in flash time.
+    std::map<const Cluster*, int> assign_flash_t0_groups(
+        const std::vector<Cluster*>& clusters, double window);
+
+
 
     /**
      * Extract geometry information from a grouping

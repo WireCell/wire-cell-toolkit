@@ -242,17 +242,23 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
         prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_coords),
     local cm = clus.clustering_methods(
         prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_corr_coords),
+    // Combined (all-APA) clustering runs AFTER QL charge-light matching, so every
+    // cluster carries a matched flash time (cluster_t0).  switch_scope applies the
+    // per-cluster T0 correction (x_t0cor scope) and drops any stale per-APA
+    // "isolated"/"perblob" array (it destroys+recreates every cluster).  The
+    // merging steps below set use_flash_t0=true so they only merge clusters
+    // coincident in flash time, and examine_bundles collapses each flash group into
+    // one cluster carrying a fresh "isolated"/"perblob" array (main sub-component
+    // = -1), like clustering_isolated but grouped by flash time instead of geometry.
     local cm_pipeline = [
         cm_old.switch_scope(),
-        cm.extend(flag=4, length_cut=60 * wc.cm, num_try=0, length_2_cut=15 * wc.cm, num_dead_try=1),
-        cm.regular(name='1', length_cut=60 * wc.cm, flag_enable_extend=false),
-        cm.regular(name='2', length_cut=30 * wc.cm, flag_enable_extend=true),
-        cm.parallel_prolong(length_cut=35 * wc.cm),
-        cm.close(length_cut=1.2 * wc.cm),
-        cm.extend_loop(num_try=3),
-        cm.separate(use_ctpc=true),
-        cm.neutrino(),
-        cm.isolated(),
+        cm.extend(flag=4, length_cut=60 * wc.cm, num_try=0, length_2_cut=15 * wc.cm, num_dead_try=1, use_flash_t0=true),
+        cm.regular(name='1', length_cut=60 * wc.cm, flag_enable_extend=false, use_flash_t0=true),
+        cm.regular(name='2', length_cut=30 * wc.cm, flag_enable_extend=true, use_flash_t0=true),
+        cm.parallel_prolong(length_cut=35 * wc.cm, use_flash_t0=true),
+        cm.close(length_cut=1.2 * wc.cm, use_flash_t0=true),
+        cm.extend_loop(num_try=3, use_flash_t0=true),
+        cm.examine_bundles(use_flash_t0=true),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
     local mabc = g.pnode({

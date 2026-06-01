@@ -20,7 +20,9 @@ static void clustering_parallel_prolong(
 
     IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
-    const double length_cut = 35*units::cm);
+    const double length_cut = 35*units::cm,
+    bool use_flash_t0 = false,
+    double flash_t0_window = 80*units::ns);
 
 class ClusteringParallelProlong : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
@@ -32,20 +34,25 @@ public:
         NeedScope::configure(config);
         
         length_cut_ = get(config, "length_cut", 35*units::cm);
+        use_flash_t0_ = get(config, "use_flash_t0", false);
+        flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
         return cfg;
     }
-    
+
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_parallel_prolong(live, m_dv, m_scope, length_cut_);
+        clustering_parallel_prolong(live, m_dv, m_scope, length_cut_,
+                                    use_flash_t0_, flash_t0_window_);
     }
 
 private:
     double length_cut_{35*units::cm};
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
 };
 
 
@@ -260,7 +267,9 @@ static void clustering_parallel_prolong(
 
     const IDetectorVolumes::pointer dv,                // detector volumes
     const Tree::Scope& scope,
-    const double length_cut                    //
+    const double length_cut,                   //
+    bool use_flash_t0,
+    double flash_t0_window
 )
 {
 
@@ -313,6 +322,12 @@ static void clustering_parallel_prolong(
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
   auto live_clusters = live_grouping.children();
+  // When flash-aware, group clusters by matched flash time so we only merge
+  // clusters coincident in flash time (see assign_flash_t0_groups()).
+  std::map<const Cluster*, int> flash_t0_group;
+  if (use_flash_t0) {
+    flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window);
+  }
   // Build the graph vertex index in children() order: merge_clusters() dereferences
   // these vertex indices against grouping.children(), so the index order here MUST match
   // children(), not the sorted order.  sort_clusters() is applied only afterwards, to make
@@ -337,6 +352,7 @@ static void clustering_parallel_prolong(
     for (size_t j=i+1;j<live_clusters.size();j++){
       auto cluster_2 = live_clusters.at(j);
 	  if(!cluster_2->get_scope_filter(scope)) continue;
+	  if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
       if (Clustering_2nd_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut)){
 		boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
 			ilive2desc[map_cluster_index[cluster_2]], g);

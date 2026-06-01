@@ -28,7 +28,9 @@ void clustering_extend(Grouping& live_clusters,
                        const double length_cut = 150*units::cm,                       //
                        const int num_try = 0,                                         //
                        const double length_2_cut = 3*units::cm,                       //
-                       const int num_dead_try =3                                      //
+                       const int num_dead_try =3,                                     //
+                       bool use_flash_t0 = false,
+                       double flash_t0_window = 80*units::ns
   );
 
 class ClusteringExtend : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -45,6 +47,8 @@ public:
     num_try_ = get(config, "num_try", 0);
     length_2_cut_ = get(config, "length_2_cut", 3*units::cm);
     num_dead_try_ = get(config, "num_dead_try", 3);
+    use_flash_t0_ = get(config, "use_flash_t0", false);
+    flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
   }
 
   virtual Configuration default_configuration() const {
@@ -54,7 +58,8 @@ public:
 
   void visit(Ensemble& ensemble) const {
     auto& live = *ensemble.with_name("live").at(0);
-    clustering_extend(live, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_);
+    clustering_extend(live, m_dv, m_scope, flag_, length_cut_, num_try_, length_2_cut_, num_dead_try_,
+                      use_flash_t0_, flash_t0_window_);
   }
 
 private:
@@ -63,6 +68,8 @@ private:
   int num_try_{0};
   double length_2_cut_{3*units::cm};
   int num_dead_try_{3};
+  bool use_flash_t0_{false};
+  double flash_t0_window_{80*units::ns};
 };
     
 class ClusteringExtendLoop : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -73,8 +80,10 @@ public:
   void configure(const WireCell::Configuration& config) {
     NeedDV::configure(config);
     NeedScope::configure(config);
-    
+
     num_try_ = get(config, "num_try", 0);
+    use_flash_t0_ = get(config, "use_flash_t0", false);
+    flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
   }
 
   virtual Configuration default_configuration() const {
@@ -90,23 +99,25 @@ public:
     if (live.nchildren() > 1100) num_try = 1;
     for (int i = 0; i != num_try; i++) {
       // deal with prolong case
-      clustering_extend(live, m_dv, m_scope, 1, 150*units::cm, 0);
+      clustering_extend(live, m_dv, m_scope, 1, 150*units::cm, 0, 3*units::cm, 3, use_flash_t0_, flash_t0_window_);
       // deal with parallel case
-      clustering_extend(live, m_dv, m_scope, 2, 30*units::cm, 0);
+      clustering_extend(live, m_dv, m_scope, 2, 30*units::cm, 0, 3*units::cm, 3, use_flash_t0_, flash_t0_window_);
       // extension regular case
-      clustering_extend(live, m_dv, m_scope, 3, 15*units::cm, 0);
+      clustering_extend(live, m_dv, m_scope, 3, 15*units::cm, 0, 3*units::cm, 3, use_flash_t0_, flash_t0_window_);
       // extension ones connected to dead region ...
       if (i == 0) {
-        clustering_extend(live, m_dv, m_scope, 4, 60 * units::cm, i);
+        clustering_extend(live, m_dv, m_scope, 4, 60 * units::cm, i, 3*units::cm, 3, use_flash_t0_, flash_t0_window_);
       }
       else {
-        clustering_extend(live, m_dv, m_scope, 4, 35 * units::cm, i);
+        clustering_extend(live, m_dv, m_scope, 4, 35 * units::cm, i, 3*units::cm, 3, use_flash_t0_, flash_t0_window_);
       }
     }
   }
 
 private:
   int num_try_{0};
+  bool use_flash_t0_{false};
+  double flash_t0_window_{80*units::ns};
 };
 
 #pragma GCC diagnostic push
@@ -561,7 +572,9 @@ static void clustering_extend(
     const double length_cut,                                       //
     const int num_try,                                             //
     const double length_2_cut,                                     //
-    const int num_dead_try                                         //
+    const int num_dead_try,                                        //
+    bool use_flash_t0,
+    double flash_t0_window
 ){
 
   // Get all the wire plane IDs from the grouping
@@ -605,6 +618,12 @@ static void clustering_extend(
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
   auto live_clusters = live_grouping.children();
+  // When flash-aware, group clusters by matched flash time so we only merge
+  // clusters coincident in flash time (see assign_flash_t0_groups()).
+  std::map<const Cluster*, int> flash_t0_group;
+  if (use_flash_t0) {
+    flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window);
+  }
   // Build the graph vertex index in children() order: merge_clusters() dereferences
   // these vertex indices against grouping.children(), so the index order here MUST match
   // children(), not the sorted order.  We sort_clusters() only afterwards, to make the
@@ -683,6 +702,7 @@ static void clustering_extend(
 
             if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
             if (cluster_2==cluster_1) continue;
+            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),earliest_p,dir_earlp,length_cut)){
               //	      to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
               boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
@@ -704,6 +724,7 @@ static void clustering_extend(
             if (!cluster_2->get_scope_filter(scope)) continue;
             if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
             if (cluster_2==cluster_1) continue;
+            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (Clustering_4th_prol(*cluster_1,*cluster_2,cluster_2->get_length(),latest_p,dir_latep,length_cut)){
               //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
               boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
@@ -732,7 +753,7 @@ static void clustering_extend(
             if (!cluster_2->get_scope_filter(scope)) continue;
             if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
             if (cluster_2==cluster_1) continue;
-            
+            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),highest_p,dir_highp,length_cut)){
               //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
               boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
@@ -754,6 +775,7 @@ static void clustering_extend(
        if (!cluster_2->get_scope_filter(scope)) continue;
 	     if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
 	     if (cluster_2==cluster_1) continue;
+	     if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
 	     if (Clustering_4th_para(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),lowest_p,dir_lowp,length_cut)){
 	       // to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
 	       boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
@@ -786,7 +808,8 @@ static void clustering_extend(
 
           if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
           if (cluster_2==cluster_1) continue;
-          
+          if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
+
           if (Clustering_4th_reg(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),first_p,length_cut, wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
             //	    to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
             boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
@@ -819,6 +842,7 @@ static void clustering_extend(
 
             if (cluster_2->get_length() < length_2_cut) continue;
             if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
+            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (Clustering_4th_dead(*cluster_1,*cluster_2,cluster_1->get_length(),cluster_2->get_length(),length_cut,num_dead_try,  wpid_U_dir, wpid_V_dir, wpid_W_dir, dv)){
               //	      to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
               boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],

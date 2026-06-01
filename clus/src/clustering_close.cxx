@@ -16,10 +16,12 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 
-static void clustering_close(Grouping& live_clusters,           // 
+static void clustering_close(Grouping& live_clusters,           //
 
                              const Tree::Scope& scope,
-                             const double length_cut = 1*units::cm //
+                             const double length_cut = 1*units::cm, //
+                             bool use_flash_t0 = false,
+                             double flash_t0_window = 80*units::ns
   );
 
 class ClusteringClose : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
@@ -31,6 +33,8 @@ public:
     NeedScope::configure(config);
     
     length_cut_ = get(config, "length_cut", 1*units::cm);
+    use_flash_t0_ = get(config, "use_flash_t0", false);
+    flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
   }
   virtual Configuration default_configuration() const {
     Configuration cfg;
@@ -39,11 +43,13 @@ public:
 
   void visit(Ensemble& ensemble) const {
     auto& live = *ensemble.with_name("live").at(0);
-    clustering_close(live, m_scope, length_cut_);
+    clustering_close(live, m_scope, length_cut_, use_flash_t0_, flash_t0_window_);
   }
-  
+
 private:
   double length_cut_{1*units::cm};
+  bool use_flash_t0_{false};
+  double flash_t0_window_{80*units::ns};
 };
 
 
@@ -166,7 +172,9 @@ static void clustering_close(
     Grouping& live_grouping,
 
     const Tree::Scope& scope,
-    const double length_cut)
+    const double length_cut,
+    bool use_flash_t0,
+    double flash_t0_window)
 {
 
   std::unordered_set<const Cluster*> used_clusters;
@@ -177,6 +185,12 @@ static void clustering_close(
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
   auto live_clusters = live_grouping.children();
+  // When flash-aware, group clusters by matched flash time so we only merge
+  // clusters coincident in flash time (see assign_flash_t0_groups()).
+  std::map<const Cluster*, int> flash_t0_group;
+  if (use_flash_t0) {
+    flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window);
+  }
   // Build the graph vertex index in children() order: merge_clusters() dereferences
   // these vertex indices against grouping.children(), so the index order here MUST match
   // children(), not the sorted order.  sort_clusters() is applied only afterwards, to make
@@ -203,6 +217,7 @@ static void clustering_close(
       if (!cluster_2->get_scope_filter(scope)) continue;
       if (used_clusters.find(cluster_2)!=used_clusters.end()) continue;
       if (cluster_2->get_length() < 1.5*units::cm) continue;
+      if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
       if (Clustering_3rd_round(*cluster_1,*cluster_2,
                                cluster_1->get_length(), cluster_2->get_length(), length_cut)){
         //to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));

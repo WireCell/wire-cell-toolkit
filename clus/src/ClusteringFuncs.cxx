@@ -83,7 +83,20 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
 
         std::vector<int> cc;
         int parent_id = 0;
-        
+
+        // Flash bookkeeping: Cluster::from() copies the first-encountered
+        // member's cluster_t0/flash/matched_flash_gid (arbitrary std::set order).
+        // Track the longest contributing member that carries a valid matched
+        // flash so we can set a deterministic, physically-meaningful
+        // representative flash on the merged cluster after the merge.  When no
+        // member carries a flash (e.g. the entire per-APA stage, where flash
+        // matching has not yet run) this stays a no-op, preserving prior output.
+        bool have_flash = false;
+        double best_len = -1;
+        double best_t0 = 0;
+        int best_flash = -1;
+        int best_gid = -1;
+
         for (const auto& desc : descs) {
             const int idx = g[desc];
             if (idx < 0) {  // no need anymore ...
@@ -91,6 +104,19 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             }
 
             auto live = orig_clusters[idx];
+
+            const int live_flash = live->get_scalar<int>("flash", -1);
+            if (live_flash >= 0) {
+                const double live_len = live->get_length();
+                if (live_len > best_len) {
+                    best_len = live_len;
+                    best_t0 = live->get_cluster_t0();
+                    best_flash = live_flash;
+                    best_gid = live->get_scalar<int>("matched_flash_gid", -1);
+                    have_flash = true;
+                }
+            }
+
             fresh_cluster.from(*live);
             fresh_cluster.take_children(*live, true);
 
@@ -110,6 +136,15 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             fresh_cluster.put_pcarray(cc, aname, pcname);
         }
 
+        // Override from()'s arbitrary first-wins flash with the longest
+        // flash-bearing member's flash, so the merged cluster's cluster_t0 is a
+        // real, deterministic member value (never 0 by accident).
+        if (have_flash) {
+            fresh_cluster.set_cluster_t0(best_t0);
+            fresh_cluster.set_scalar<int>("flash", best_flash);
+            fresh_cluster.set_scalar<int>("matched_flash_gid", best_gid);
+        }
+
         // Normally, it would be weird/wrong to store an address of a reference.
         // But, we know the Cluster facade is held by the pc tree node that we
         // just added to the grouping node.
@@ -117,6 +152,54 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     }
 
     return fresh;
+}
+
+
+std::map<const Cluster*, int> WireCell::Clus::Facade::assign_flash_t0_groups(
+    const std::vector<Cluster*>& clusters, double window)
+{
+    std::map<const Cluster*, int> group_of;
+
+    // Collect the matched clusters (valid "flash" scalar) and remember the rest
+    // so they can be given unique singleton groups.
+    std::vector<const Cluster*> matched;
+    for (const Cluster* c : clusters) {
+        if (c->get_scalar<int>("flash", -1) >= 0) {
+            matched.push_back(c);
+        }
+    }
+
+    // Sort matched clusters by their matched flash time.  Break ties on ident to
+    // keep the assignment deterministic across rebuilds.
+    std::sort(matched.begin(), matched.end(), [](const Cluster* a, const Cluster* b) {
+        const double ta = a->get_cluster_t0();
+        const double tb = b->get_cluster_t0();
+        if (ta != tb) return ta < tb;
+        return a->ident() < b->ident();
+    });
+
+    // Greedily start a new group whenever the gap to the previous flash time
+    // exceeds the window.
+    int next_group = 0;
+    double prev_t0 = 0;
+    for (size_t i = 0; i < matched.size(); ++i) {
+        const double t0 = matched[i]->get_cluster_t0();
+        if (i == 0 || (t0 - prev_t0) > window) {
+            ++next_group;  // group ids for matched clusters are >= 1
+        }
+        group_of[matched[i]] = next_group;
+        prev_t0 = t0;
+    }
+
+    // Every remaining (unmatched) cluster gets a unique singleton id, distinct
+    // from all matched-group ids, so it can never share a group with anyone.
+    for (const Cluster* c : clusters) {
+        if (group_of.find(c) == group_of.end()) {
+            group_of[c] = ++next_group;
+        }
+    }
+
+    return group_of;
 }
 
 

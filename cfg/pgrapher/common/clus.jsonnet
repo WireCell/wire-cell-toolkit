@@ -259,7 +259,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes],
         },
 
-        extend(name="", flag=0, length_cut=150*wc.cm, num_try=0, length_2_cut=3*wc.cm, num_dead_try=3) :: {
+        extend(name="", flag=0, length_cut=150*wc.cm, num_try=0, length_2_cut=3*wc.cm, num_dead_try=3, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExtend",
             name: prefix+name,
             data: {
@@ -268,43 +268,53 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 num_try: num_try,
                 length_2_cut: length_2_cut,
                 num_dead_try: num_dead_try,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
-        
 
-        regular(name="",  length_cut=45*wc.cm, flag_enable_extend=true) :: {
+
+        regular(name="",  length_cut=45*wc.cm, flag_enable_extend=true, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringRegular",
             name: prefix+name,
             data: {
                 length_cut: length_cut,
                 flag_enable_extend: flag_enable_extend,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        parallel_prolong(name="", length_cut=35*wc.cm) :: {
+        parallel_prolong(name="", length_cut=35*wc.cm, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringParallelProlong",
             name: prefix+name,
             data: {
                 length_cut: length_cut,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        close(name="", length_cut=1*wc.cm) :: {
+        close(name="", length_cut=1*wc.cm, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringClose",
             name: prefix+name,
             data: {
                 length_cut: length_cut,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + scope_cfg,
         },
 
-        extend_loop(name="", num_try=0) :: {
+        extend_loop(name="", num_try=0, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExtendLoop",
             name: prefix+name,
             data: {
                 num_try: num_try,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
@@ -341,10 +351,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             data: dv_cfg + scope_cfg,
         },
 
-        examine_bundles(name="", graph_name="relaxed") :: {
+        examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
-            data: dv_cfg + pcts_cfg + scope_cfg + {graph_name: graph_name},
+            data: dv_cfg + pcts_cfg + scope_cfg + {
+                graph_name: graph_name,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
+            },
             uses: [detector_volumes, pc_transforms],
         },
 
