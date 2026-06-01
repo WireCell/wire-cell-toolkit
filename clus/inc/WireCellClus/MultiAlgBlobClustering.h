@@ -4,6 +4,7 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/IBeeSink.h"
 #include "WireCellClus/Facade.h"
 
 #include "WireCellAux/Logger.h"
@@ -43,6 +44,14 @@ namespace WireCell::Clus {
         Bee::Sink m_sink;
         int m_last_ident{-1};
         int m_initial_index{0};  // Default to 0 for backward compatibility
+
+        // Optional shared Bee sink (config "bee_sink").  When set, all Bee
+        // writes go to this shared single-zip sink (at an explicit per-event
+        // index) instead of the per-node m_sink above, so a multi-node chain
+        // produces one .zip.  Default: unset -> own m_sink (back-compat).
+        IBeeSink::pointer m_shared_sink{nullptr};
+        bool m_use_shared_sink{false};
+        size_t m_bee_event_index{0};
         
         // Replace the existing bee points structures with a more flexible approach
         struct BeePointsConfig {
@@ -140,6 +149,10 @@ namespace WireCell::Clus {
 
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);
+
+        // Write one Bee object: routes to the shared sink (at the current
+        // per-event index) when m_use_shared_sink, else to the per-node m_sink.
+        size_t write_obj(const WireCell::Bee::Object& obj);
 
         bool m_save_deadarea{false};
         // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for

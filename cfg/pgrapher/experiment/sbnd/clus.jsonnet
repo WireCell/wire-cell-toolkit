@@ -121,7 +121,7 @@ local bs_dead_face(apa, face) = {
 // standalone chain (pointed .. connect1).  The original cfg func_cfgs tail
 // (deghost -> examine_x_boundary -> isolated) is retained below as commented
 // lines so it can be re-enabled without re-deriving it.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null) = {
     local dv = detector_volumes([anode], face),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -180,13 +180,18 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo) = {
             perf: true,
             bee_dir: bee_dir,
             bee_zip: bee_zip_path,
+            // When a shared Bee sink is supplied, all Bee writes go to that one
+            // zip (bee_zip is then ignored) and the per-APA dead-area is dropped
+            // to avoid a duplicate channel-deadarea-* entry (the all-APA node
+            // writes byte-identical dead-area for both APAs into the same zip).
+            [if bee_sink != null then 'bee_sink']: wc.tn(bee_sink),
             bee_detector: 'sbnd',
             initial_index: 0,
             use_config_rse: true,
             runNo: runNo,
             subRunNo: subRunNo,
             eventNo: eventNo,
-            save_deadarea: true,
+            save_deadarea: bee_sink == null,
             dead_area_version: 2,
             anodes: [wc.tn(anode)],
             face: face,
@@ -206,7 +211,8 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo) = {
             }],
             pipeline: wc.tns(cm_pipeline),
         },
-    }, nin=1, nout=1, uses=[dv, anode, pcts] + cm_pipeline),
+    }, nin=1, nout=1, uses=[dv, anode, pcts] + cm_pipeline
+              + (if bee_sink != null then [bee_sink] else [])),
     local sink = g.pnode({
         type: 'TensorFileSink',
         name: 'clus_per_face-%s-%d' % [anode.name, face],
@@ -220,7 +226,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo) = {
     ret:: g.pipeline([cluster2pct, end], 'clus_per_face-%s-%d' % [anode.name, face]),
 }.ret;
 
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -270,6 +276,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
             perf: true,
             bee_dir: bee_dir,
             bee_zip: bee_zip_path,
+            // When a shared Bee sink is supplied, the all-APA views (img/
+            // clustering/op + dead-area for both APAs) are written into that one
+            // shared zip together with the per-APA views; bee_zip is ignored.
+            [if bee_sink != null then 'bee_sink']: wc.tn(bee_sink),
             bee_detector: 'sbnd',
             initial_index: 0,
             use_config_rse: true,
@@ -308,7 +318,8 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
             ],
             pipeline: wc.tns(cm_pipeline),
         },
-    }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline),
+    }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline
+              + (if bee_sink != null then [bee_sink] else [])),
     local sink = g.pnode({
         type: 'TensorFileSink',
         name: 'clus_all_apa',
@@ -328,18 +339,25 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo) = {
 }.ret;
 
 function(output_dir='.', runNo=0, subRunNo=0, eventNo=0) {
-    per_face(anode, face=0, dump=true)::
+    // bee_sink (default null): when set to a shared IBeeSink node, all Bee
+    // output for this node goes into that single shared zip instead of this
+    // node's own bee_zip.  Default null -> own zip (production byte-identical).
+    per_face(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
-                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    per_apa(anode, dump=true)::
+                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
+                      bee_sink=bee_sink),
+    per_apa(anode, dump=true, bee_sink=null)::
         clus_per_face(anode, face=0, dump=dump,
-                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
+                      bee_sink=bee_sink),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
-    per_volume(anode, face=0, dump=true)::
+    per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
-                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_apa(anodes, dump=true)::
+                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
+                      bee_sink=bee_sink),
+    all_apa(anodes, dump=true, bee_sink=null)::
         clus_all_apa(anodes, dump=dump,
-                     output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+                     output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
+                     bee_sink=bee_sink),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face),
 }

@@ -216,6 +216,47 @@ directly into the Bee web viewer.
 
 ---
 
+## Shared sink (one ZIP from multiple nodes)
+
+By default each `MultiAlgBlobClustering` (MABC) node owns its own `Bee::Sink`
+and writes its own `bee_zip`.  A multi-stage chain (e.g. SBND: per-APA MABCs
+*before* QL matching plus an all-APA MABC *after* the merge) therefore emits one
+ZIP per node.  The per-APA views are snapshots taken before QL matching splits
+clusters, so they cannot be reconstructed by the downstream all-APA node — to
+get a single ZIP they must be captured at the per-APA stage and merged.
+
+The `BeeSink` component (`clus/src/BeeSink.cxx`, interface
+`clus/inc/WireCellClus/IBeeSink.h`) is a standalone `IConfigurable` wrapping one
+`Bee::Sink`.  When an MABC's `bee_sink` config names a `BeeSink`, that MABC
+routes all Bee writes to the shared sink instead of its own `m_sink`, so every
+referencing node writes into one ZIP:
+
+```jsonnet
+local shared = { type: 'BeeSink', name: 'mabc_shared',
+                 data: { outname: 'mabc.zip', initial_index: 0 } };
+MultiAlgBlobClustering: { ..., bee_sink: wc.tn(shared) }   // for each node
+```
+
+Key points:
+
+- **Explicit per-event index.** Each MABC advances its own per-event counter
+  (one step per `flush(int)`) and writes at that explicit index via
+  `Bee::Sink::set_index`.  The default name-collision auto-increment is *not*
+  used — it desyncs across interleaved writers.  All nodes process the same
+  event stream, so node-k's k-th flush lands at the same Bee index.
+- **Reference-counted close.** Each MABC `acquire()`s in `configure()` and
+  `release()`s in `finalize()`; the shared ZIP is closed on the last release,
+  independent of node finalize ordering.
+- **Entry names must be unique per index.** Distinct algorithm labels keep
+  per-node JSON files from colliding.  In SBND the only clash is
+  `channel-deadarea-apaX-face0` (written by both a per-APA node and the all-APA
+  node), so `save_deadarea` is disabled on the per-APA nodes in shared mode (the
+  all-APA node already writes byte-identical dead-area for every APA).
+- **Opt-in.** `bee_sink` defaults empty → own `bee_zip` → all existing configs
+  unchanged.
+
+---
+
 ## RSE (Run/Subrun/Event) Numbering
 
 By default, the ident integer from the input tensor set is decoded as:

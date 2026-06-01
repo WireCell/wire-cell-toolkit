@@ -153,8 +153,21 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     // Add new configuration option for initial index
     m_initial_index = get<int>(cfg, "initial_index", m_initial_index);
 
-    //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
-    m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+    // Optional shared Bee sink: when "bee_sink" names an IBeeSink component, all
+    // Bee writes go to that single shared zip (at an explicit per-event index)
+    // and m_sink is left unused, so a multi-node chain emits one .zip.
+    std::string bee_sink_tn = get<std::string>(cfg, "bee_sink", "");
+    if (!bee_sink_tn.empty()) {
+        m_shared_sink = Factory::find_tn<IBeeSink>(bee_sink_tn);
+        m_shared_sink->acquire();
+        m_use_shared_sink = true;
+        m_bee_event_index = m_initial_index;
+        log->debug("using shared Bee sink {} (own bee_zip disabled)", bee_sink_tn);
+    }
+    else {
+        //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
+        m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+    }
 
     // Configure RSE numbers
     if (cfg.isMember("use_config_rse")) {
@@ -335,7 +348,22 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
 void MultiAlgBlobClustering::finalize()
 {
     flush();
-    m_sink.close();
+    if (m_use_shared_sink) {
+        // Shared zip is reference-counted: it is closed on the last release(),
+        // independent of which node finalizes last.
+        m_shared_sink->release();
+    }
+    else {
+        m_sink.close();
+    }
+}
+
+size_t MultiAlgBlobClustering::write_obj(const WireCell::Bee::Object& obj)
+{
+    if (m_use_shared_sink) {
+        return m_shared_sink->write(obj, m_bee_event_index, m_runNo, m_subRunNo, m_eventNo);
+    }
+    return m_sink.write(obj);
 }
 
 static void reset_bee(int ident, WireCell::Bee::Points& bpts)
@@ -352,7 +380,7 @@ void MultiAlgBlobClustering::flush(WireCell::Bee::Points& bpts, int ident)
 {
     if (bpts.empty()) return;
 
-    m_sink.write(bpts);
+    write_obj(bpts);
     reset_bee(ident, bpts);
 }
 
@@ -377,7 +405,7 @@ void MultiAlgBlobClustering::flush(int ident)
             for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
                 for (auto& [face, bpts] : face_map) {
                     if (!bpts.empty()) {
-                        m_sink.write(bpts);
+                        write_obj(bpts);
                         // Clear after writing
                         int run = 0, evt = 0;
                         if (ident > 0) {
@@ -391,7 +419,7 @@ void MultiAlgBlobClustering::flush(int ident)
         } else {
             // Write global bee points
             if (!apa_bpts.global.empty()) {
-                m_sink.write(apa_bpts.global);
+                write_obj(apa_bpts.global);
                 // Clear after writing
                 int run = 0, evt = 0;
                 if (ident > 0) {
@@ -416,7 +444,7 @@ void MultiAlgBlobClustering::flush(int ident)
             for (auto& [face, patches] : face_map) {
                 if (patches.size()) {
                     patches.flush();
-                    m_sink.write(patches);
+                    write_obj(patches);
                     patches.clear();
                 }
             }
@@ -425,7 +453,7 @@ void MultiAlgBlobClustering::flush(int ident)
 
     // Flush the optical flash / charge-light "op" display.
     if (m_save_opflash && !m_bee_flash.empty()) {
-        m_sink.write(m_bee_flash);
+        write_obj(m_bee_flash);
         int run = 0, evt = 0;
         if (ident > 0) {
             run = (ident >> 16) & 0x7fff;
@@ -437,9 +465,18 @@ void MultiAlgBlobClustering::flush(int ident)
     // Flush particle-flow mc trees
     for (auto& [name, tree] : m_bee_pf_trees) {
         if (!tree.empty()) {
-            m_sink.write(tree);
+            write_obj(tree);
             tree.reset();
         }
+    }
+
+    // One flush(int) call == one event boundary (or EOS).  In shared-sink mode
+    // advance the explicit per-event index so the next event's objects land at
+    // the next Bee index.  Incrementing unconditionally (not only when this
+    // node wrote something) keeps all nodes' indices aligned by event ordinal
+    // even when a given node has an empty event.
+    if (m_use_shared_sink) {
+        ++m_bee_event_index;
     }
 
     m_last_ident = ident;
@@ -1763,8 +1800,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     const int ident = ints->ident();
     SPDLOG_LOGGER_DEBUG(log, "loading tensor set ident={} (last={})", ident, m_last_ident);
     if (m_last_ident < 0) {     // first time.
-        if (m_use_config_rse) {
-            // Set RSE in the sink
+        if (m_use_config_rse && !m_use_shared_sink) {
+            // Set RSE in the sink (shared-sink mode passes RSE per write_obj).
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
         // Use default behavior
@@ -1777,8 +1814,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         if (m_use_config_rse) {
             // Update event number for next event
             m_eventNo++;
-            // Update RSE in sink
-            m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+            // Update RSE in sink (shared-sink mode passes RSE per write_obj).
+            if (!m_use_shared_sink) {
+                m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+            }
         }
     }
     // else do nothing when ident is unchanged.
