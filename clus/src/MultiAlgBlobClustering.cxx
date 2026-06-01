@@ -21,6 +21,7 @@
 #include "WireCellUtil/GraphTools.h"
 
 #include <chrono>
+#include <algorithm>
 #include <map>
 #include <set>
 #include <fstream>
@@ -193,6 +194,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         m_bee_flash = Bee::Flashes(get<std::string>(cfg, "bee_detector", "uboone"), "op");
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
+    m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
@@ -1610,6 +1612,58 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
 }
 
 
+// Group the root "opflash" flashes (both TPC sides) by their time with the
+// given window and stash a per-row "group" array (parallel to gid/time/ch/pe)
+// on the root opflash PC.  No-op when the window is non-positive or the opflash
+// arrays are missing, so it is off by default and adds nothing to the output.
+// Run pre-pipeline: the array then survives the whole pipeline and is read by
+// fill_bee_flashes (and is available to later steps for reuse).
+static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, double window)
+{
+    if (window <= 0) return;
+
+    auto& lpcs = grouping.local_pcs();
+    auto it = lpcs.find("opflash");
+    if (it == lpcs.end()) return;
+    auto& ds = it->second;
+    auto a_gid = ds.get("gid");
+    auto a_time = ds.get("time");
+    if (!a_gid || !a_time) return;
+    const auto gid = a_gid->elements<int>();
+    const auto time = a_time->elements<double>();
+    const size_t nrow = gid.size();
+    if (nrow == 0) return;
+
+    // Unique flashes: gid -> time (first occurrence).
+    std::map<int, double> flash_time;
+    for (size_t i = 0; i < nrow; ++i) {
+        if (flash_time.find(gid[i]) == flash_time.end()) flash_time[gid[i]] = time[i];
+    }
+
+    // Sort unique flashes by time (tie-break on gid) for deterministic grouping.
+    std::vector<std::pair<int, double>> flashes(flash_time.begin(), flash_time.end());
+    std::sort(flashes.begin(), flashes.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second < b.second;
+        return a.first < b.first;
+    });
+
+    // Greedily start a new group whenever the gap to the previous flash time
+    // exceeds the window (same logic as assign_flash_t0_groups, on flash times).
+    std::map<int, int> group_of;
+    int next_group = 0;
+    double prev_t = 0;
+    for (size_t i = 0; i < flashes.size(); ++i) {
+        if (i == 0 || (flashes[i].second - prev_t) > window) ++next_group;
+        group_of[flashes[i].first] = next_group;
+        prev_t = flashes[i].second;
+    }
+
+    // Per-row group array, aligned to the opflash rows.
+    std::vector<int> group(nrow);
+    for (size_t i = 0; i < nrow; ++i) group[i] = group_of[gid[i]];
+    grouping.put_pcarray<int>(group, "group", "opflash");
+}
+
 void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grouping& grouping)
 {
     // Run/sub/event numbers (same convention as the points/patches dumps).
@@ -1639,16 +1693,29 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     const auto pe = a_pe->elements<double>();
     const size_t nrow = gid.size();
 
+    // Optional ±80 ns flash-flash grouping across TPC sides, stored on the root
+    // by ClusteringSwitchScope (flash_group_window>0).  Absent => no grouping
+    // is emitted and the op JSON stays bit-identical to the ungrouped case.
+    auto a_group = ds.get("group");
+    const bool have_group = (a_group != nullptr);
+    std::vector<int> group_col;
+    if (have_group) {
+        auto gc = a_group->elements<int>();
+        group_col.assign(gc.begin(), gc.end());
+    }
+
     // Group rows by global flash id (first-seen order) into per-flash time +
     // dense per-channel measured PE.
     std::vector<int> flash_order;
     std::map<int, double> flash_time;
+    std::map<int, int> flash_group;                  // gid -> flash-group id
     std::map<int, std::map<int, double>> flash_pe;   // gid -> (ch -> pe)
     for (size_t i = 0; i < nrow; ++i) {
         const int g = gid[i];
         if (flash_pe.find(g) == flash_pe.end()) {
             flash_order.push_back(g);
             flash_time[g] = time[i];
+            if (have_group) flash_group[g] = group_col[i];
         }
         flash_pe[g][ch[i]] = pe[i];
     }
@@ -1676,8 +1743,10 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // The global flash id encodes the APA as gid = anode_ident*kFlashGidStride +
     // idx (see QLMatching.cxx), so apa = gid / kFlashGidStride.
     constexpr int kFlashGidStride = 1000000;
+    std::vector<int> appended_groups;   // one per appended row, same order
     for (const int g : flash_order) {
         const int apa = g / kFlashGidStride;
+        const int grp = have_group ? flash_group[g] : -1;
         int maxch = -1;
         for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;
         std::vector<double> pes(maxch + 1, 0.0);
@@ -1699,15 +1768,22 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                     for (size_t k = 0; k < cp.second.size(); ++k) pred_sum[k] += cp.second[k];
                 }
                 m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
+                appended_groups.push_back(grp);
             } else {
                 for (const auto& cp : mit->second) {
                     m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
+                    appended_groups.push_back(grp);
                 }
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
+            appended_groups.push_back(grp);
         }
     }
+
+    // Attach the per-row flash-group array only when grouping was computed, so
+    // the ungrouped output is unchanged.
+    if (have_group) m_bee_flash.set_groups(appended_groups);
 }
 
 struct Perf {
@@ -1896,6 +1972,9 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     if (m_save_opflash) {
         auto gs = ensemble.with_name("live");
         if (gs.size()) {
+            // Stash the ±window TPC0/TPC1 flash grouping on the root opflash PC
+            // first, so the op dump (and every later pipeline step) can read it.
+            store_flash_groups(*gs[0], m_flash_group_window);
             fill_bee_flashes(*gs[0]);
             perf("dump op flashes to bee");
         }

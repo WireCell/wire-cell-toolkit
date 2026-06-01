@@ -335,6 +335,13 @@ void Bee::Flashes::append(double t, const std::vector<double>& pes, double peTot
     m_data["apa"].append(std::to_string(apa));
 }
 
+void Bee::Flashes::set_groups(const std::vector<int>& groups)
+{
+    Json::Value jg(Json::arrayValue);
+    for (int g : groups) jg.append(g);
+    m_data["op_flash_group"] = jg;
+}
+
 size_t Bee::Flashes::size() const
 {
     return m_data["op_t"].size();

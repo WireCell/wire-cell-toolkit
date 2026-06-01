@@ -80,6 +80,15 @@ auto& futil = grouping.fiducial_utils();
 bool inside = futil.is_inside_fiducial(point);
 ```
 
+### Root (grouping-level) point clouds
+
+Besides per-cluster arrays, the grouping (root) node carries its own named local
+PCs (`grouping.local_pcs()` / `grouping.put_pcarray(...)`). The Q/L chain uses:
+
+| Name | Content | Set by |
+|---|---|---|
+| `"opflash"` | One row per (flash, channel): `gid` (global flash id = `anode_ident*1e6+idx`), `time` (ns), `ch`, `pe`. Optionally a parallel `group` array: a ±80 ns flash-flash coincidence id (one per flash, shared across TPC0/TPC1) written pre-pipeline by `MultiAlgBlobClustering` when `flash_group_window>0`, so the Bee op dump (and later steps) can show coincident flashes together. | `QLMatching` (carried across the per-APA → all-APA merge via `PointTreeMerging` `root_pcs_to_merge`); `group` by `MultiAlgBlobClustering` |
+
 ---
 
 ## Facade::Cluster

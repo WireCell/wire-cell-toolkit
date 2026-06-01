@@ -199,6 +199,8 @@ namespace WireCell::Bee {
     ///     op_pes_pred:[[pred_ch]], cluster_id:[[clid]],
     ///     op_nomatching_cluster_ids:[] }
     /// An unmatched flash is one row with empty cluster_id / op_pes_pred.
+    /// Optionally an op_flash_group:[gid] array (via set_groups) ties together
+    /// the rows of one ±80 ns TPC0/TPC1 flash coincidence for joint display.
     class Flashes : public Object {
     public:
         Flashes();
@@ -223,6 +225,12 @@ namespace WireCell::Bee {
                     const std::vector<int>& cluster_ids,
                     const std::vector<double>& pes_pred,
                     int apa);
+
+        /// Optionally attach a per-flash "op_flash_group" array (one entry per
+        /// appended row, same order).  Flashes sharing a group id are the ±80 ns
+        /// TPC0/TPC1 coincidence the Bee viewer shows together.  Not written
+        /// unless this is called, so existing op JSON stays bit-identical.
+        void set_groups(const std::vector<int>& groups);
 
         size_t size() const;
         bool empty() const;

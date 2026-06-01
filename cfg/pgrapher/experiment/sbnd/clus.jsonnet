@@ -297,6 +297,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // (op_cluster_ids array) with summed predicted PE, so a flash matched
             // to several clusters shows them together (MicroBooNE-style).
             bee_flash_per_flash: true,
+            // Group flashes from the two TPC sides by this ±time window and stash
+            // a per-flash "group" array on the root opflash PC (pre-pipeline, so
+            // the op dump and every later step can read it).  0 = off.
+            flash_group_window: 80 * wc.ns,
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             // Renumber cluster idents (insertion order, 1..N) after every step;
