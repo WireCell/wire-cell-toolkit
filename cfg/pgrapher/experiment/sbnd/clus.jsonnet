@@ -54,6 +54,19 @@ local dvm = {
         FV_xmax:   -2.5  * wc.cm,  // data CPA face (-1.5) - 1 cm toward TPC0 interior
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
+        // y/z fiducial bounds + margins are detector-wide (SBND TPCs span the full
+        // height/length), so the per-(APA,face) FV reuses the overall values; only
+        // the x-bounds above are genuinely per-TPC.  These complete the per-face FV
+        // so the scope-aware select_scope_fv (clustering_separate / clustering_neutrino)
+        // has y/z + dirs for a single-APA pass without falling back to "overall".
+        FV_ymin: $.overall.FV_ymin,
+        FV_ymax: $.overall.FV_ymax,
+        FV_zmin: $.overall.FV_zmin,
+        FV_zmax: $.overall.FV_zmax,
+        FV_ymin_margin: $.overall.FV_ymin_margin,
+        FV_ymax_margin: $.overall.FV_ymax_margin,
+        FV_zmin_margin: $.overall.FV_zmin_margin,
+        FV_zmax_margin: $.overall.FV_zmax_margin,
     },
     a1f0pA: $.a0f0pA + {
         FV_xmin:    2.5  * wc.cm,  // data CPA face (+1.5) + 1 cm toward TPC1 interior

@@ -29,6 +29,7 @@
 
 #include <string>
 #include <fstream>
+#include <set>
 
 namespace WireCell::Clus::Facade {
     using namespace WireCell::PointCloud::Tree;
@@ -148,6 +149,26 @@ namespace WireCell::Clus::Facade {
 
 
 
+    // Fiducial-volume bounds selected for the scope (set of drift volumes) that a
+    // clustering pass operates on.  Populated by select_scope_fv().  All values are
+    // in WireCell internal units.
+    struct ScopeFV {
+        double xmin{0}, xmax{0}, ymin{0}, ymax{0}, zmin{0}, zmax{0};
+        double xmin_margin{0}, xmax_margin{0}, ymin_margin{0}, ymax_margin{0}, zmin_margin{0}, zmax_margin{0};
+        geo_point_t vertical_dir{0, 1, 0}, beam_dir{0, 0, 1};
+    };
+
+    // Select the fiducial volume appropriate to the scope spanned by `wpids` (the
+    // face-level wire-plane ids present in a grouping, e.g. from Grouping::wpids()):
+    //   - wpids span >1 APA (or are empty) -> the global "overall" (cryostat) FV.
+    //     This reproduces the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit,
+    //     so all-APA stages are unchanged.
+    //   - wpids share a single APA         -> the union (outermost envelope) of that
+    //     APA's present per-(APA,face) FV blocks.
+    // Any FV field missing from a per-face block falls back to the "overall" value.
+    // vertical_dir / beam_dir are detector-global and are always read from "overall".
+    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, const std::set<WireCell::WirePlaneId>& wpids);
+
     // These Judge*() functions are used by multiple clustering methods.  They
     // are defined in clustering_separate.cxx.
 
@@ -156,9 +177,10 @@ namespace WireCell::Clus::Facade {
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
-    bool JudgeSeparateDec_2(const Cluster* cluster, IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
+    /// @param fv scope-appropriate fiducial volume (see select_scope_fv)
+    bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length);
+                               const double cluster_length, const ScopeFV& fv);
     
 
 

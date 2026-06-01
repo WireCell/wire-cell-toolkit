@@ -108,15 +108,18 @@ static void clustering_neutrino(
     for (const auto& wpid : wpids) {
         map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
     }
-    WirePlaneId wpid_all(0);
-    double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
-    double det_FV_xmax = dv->metadata(wpid_all)["FV_xmax"].asDouble();
-    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
-    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
-    double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
-    double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
-    double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
-    double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
+    // Scope-aware fiducial volume (see select_scope_fv): in a per-APA pass this is
+    // the FV of the drift volume being clustered; in an all-APA (multi-APA) pass it
+    // is the global cryostat envelope.
+    const ScopeFV fv = select_scope_fv(dv, wpids);
+    const double det_FV_xmin = fv.xmin;
+    const double det_FV_xmax = fv.xmax;
+    const double det_FV_ymin = fv.ymin;
+    const double det_FV_ymax = fv.ymax;
+    const double det_FV_zmin = fv.zmin;
+    const double det_FV_zmax = fv.zmax;
+    const double det_FV_xmin_margin = fv.xmin_margin;
+    const double det_FV_xmax_margin = fv.xmax_margin;
 
 
 
@@ -126,25 +129,8 @@ static void clustering_neutrino(
     // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
     geo_point_t drift_dir_abs(1,0,0);
 
-    geo_point_t vertical_dir(0, 1, 0);
-    geo_point_t beam_dir(0, 0, 1);
-    // Get vertical_dir from metadata
-    Json::Value vertical_dir_json = dv->metadata(wpid_all)["vertical_dir"];
-    Json::Value beam_dir_json = dv->metadata(wpid_all)["beam_dir"];
-    if (!vertical_dir_json.isNull() && vertical_dir_json.isArray() && vertical_dir_json.size() >= 3) {
-        vertical_dir = geo_point_t(
-            vertical_dir_json[0].asDouble(),
-            vertical_dir_json[1].asDouble(),
-            vertical_dir_json[2].asDouble()
-        );
-    } 
-    if (!beam_dir_json.isNull() && beam_dir_json.isArray() && beam_dir_json.size() >= 3) {
-        beam_dir = geo_point_t(
-            beam_dir_json[0].asDouble(),
-            beam_dir_json[1].asDouble(),
-            beam_dir_json[2].asDouble()
-        );
-    } 
+    const geo_point_t vertical_dir = fv.vertical_dir;
+    const geo_point_t beam_dir = fv.beam_dir;
 
     // find all the clusters that are inside the box ...
     std::vector<Cluster *> contained_clusters;
@@ -167,8 +153,8 @@ static void clustering_neutrino(
         // el_wcps.first.x()/units::cm << " " << el_wcps.second.x()/units::cm << std::endl;
 
         // if (el_wcps.first.x() < -1 * units::cm || el_wcps.second.x() > 257 * units::cm ||
-        // Use global detector-envelope bounds (wpid_all=0) to cover all TPCs, consistent
-        // with the clustering_separate convention (clustering_separate.cxx:360-380).
+        // Scope-aware bounds (select_scope_fv): the per-APA drift volume's FV in a
+        // per-APA pass, the cryostat envelope in an all-APA pass.
         if (el_wcps.first.x() < det_FV_xmin - det_FV_xmin_margin || el_wcps.second.x() > det_FV_xmax + det_FV_xmax_margin || cluster->get_length() < 6.0 * units::cm)
             continue;
 

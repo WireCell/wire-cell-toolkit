@@ -18,6 +18,74 @@ using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 
+// See declaration in ClusteringFuncs.h.  Chooses the fiducial volume matching the
+// scope a clustering pass runs in: per-APA stages get that drift volume's FV (union
+// of the present faces); multi-APA (all-APA) stages get the "overall" cryostat FV,
+// reproducing the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit.
+ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv,
+                                                const std::set<WirePlaneId>& wpids)
+{
+    const Configuration overall = dv->metadata(WirePlaneId(0));
+
+    // Read a double field from a per-face block, falling back to "overall" when the
+    // block does not define it (per-face blocks may define only x-bounds).
+    auto field = [&](const Configuration& blk, const char* key) -> double {
+        if (blk.isMember(key) && !blk[key].isNull()) return blk[key].asDouble();
+        return overall[key].asDouble();
+    };
+    auto read_dir = [&](const char* key, geo_point_t def) -> geo_point_t {
+        const Json::Value j = overall[key];
+        if (!j.isNull() && j.isArray() && j.size() >= 3)
+            return geo_point_t(j[0].asDouble(), j[1].asDouble(), j[2].asDouble());
+        return def;
+    };
+
+    ScopeFV fv;
+    // vertical_dir / beam_dir are detector-global physical constants.
+    fv.vertical_dir = read_dir("vertical_dir", geo_point_t(0, 1, 0));
+    fv.beam_dir = read_dir("beam_dir", geo_point_t(0, 0, 1));
+
+    std::set<int> apas;
+    for (const auto& wpid : wpids) apas.insert(wpid.apa());
+
+    // Multi-APA or empty -> cryostat envelope (legacy behavior, bit-identical).
+    if (wpids.empty() || apas.size() > 1) {
+        fv.xmin = field(overall, "FV_xmin");  fv.xmax = field(overall, "FV_xmax");
+        fv.ymin = field(overall, "FV_ymin");  fv.ymax = field(overall, "FV_ymax");
+        fv.zmin = field(overall, "FV_zmin");  fv.zmax = field(overall, "FV_zmax");
+        fv.xmin_margin = field(overall, "FV_xmin_margin");  fv.xmax_margin = field(overall, "FV_xmax_margin");
+        fv.ymin_margin = field(overall, "FV_ymin_margin");  fv.ymax_margin = field(overall, "FV_ymax_margin");
+        fv.zmin_margin = field(overall, "FV_zmin_margin");  fv.zmax_margin = field(overall, "FV_zmax_margin");
+        return fv;
+    }
+
+    // Single APA -> union (outermost envelope) over the present per-(APA,face) blocks.
+    // For a single-face APA (e.g. SBND) this is just that one block.  Each outward
+    // margin is carried from the face contributing that extreme.
+    bool first = true;
+    for (const auto& wpid : wpids) {
+        const Configuration blk = dv->metadata(wpid);
+        const double xmin = field(blk, "FV_xmin"), xmax = field(blk, "FV_xmax");
+        const double ymin = field(blk, "FV_ymin"), ymax = field(blk, "FV_ymax");
+        const double zmin = field(blk, "FV_zmin"), zmax = field(blk, "FV_zmax");
+        if (first) {
+            fv.xmin = xmin;  fv.xmax = xmax;  fv.ymin = ymin;  fv.ymax = ymax;  fv.zmin = zmin;  fv.zmax = zmax;
+            fv.xmin_margin = field(blk, "FV_xmin_margin");  fv.xmax_margin = field(blk, "FV_xmax_margin");
+            fv.ymin_margin = field(blk, "FV_ymin_margin");  fv.ymax_margin = field(blk, "FV_ymax_margin");
+            fv.zmin_margin = field(blk, "FV_zmin_margin");  fv.zmax_margin = field(blk, "FV_zmax_margin");
+            first = false;
+            continue;
+        }
+        if (xmin < fv.xmin) { fv.xmin = xmin; fv.xmin_margin = field(blk, "FV_xmin_margin"); }
+        if (xmax > fv.xmax) { fv.xmax = xmax; fv.xmax_margin = field(blk, "FV_xmax_margin"); }
+        if (ymin < fv.ymin) { fv.ymin = ymin; fv.ymin_margin = field(blk, "FV_ymin_margin"); }
+        if (ymax > fv.ymax) { fv.ymax = ymax; fv.ymax_margin = field(blk, "FV_ymax_margin"); }
+        if (zmin < fv.zmin) { fv.zmin = zmin; fv.zmin_margin = field(blk, "FV_zmin_margin"); }
+        if (zmax > fv.zmax) { fv.zmax = zmax; fv.zmax_margin = field(blk, "FV_zmax_margin"); }
+    }
+    return fv;
+}
+
 
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
@@ -76,31 +144,12 @@ static void clustering_separate(
 
     auto wpids = live_grouping.wpids();
 
-    WirePlaneId wpid_all(0);
-    // double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
-    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
-
-    geo_point_t beam_dir(0, 0, 1);
-    geo_point_t vertical_dir(0, 1, 0);
-    
-    // Get vertical_dir from metadata
-    Json::Value vertical_dir_json = dv->metadata(wpid_all)["vertical_dir"];
-    Json::Value beam_dir_json = dv->metadata(wpid_all)["beam_dir"];
-
-    if (!vertical_dir_json.isNull() && vertical_dir_json.isArray() && vertical_dir_json.size() >= 3) {
-        vertical_dir = geo_point_t(
-            vertical_dir_json[0].asDouble(),
-            vertical_dir_json[1].asDouble(),
-            vertical_dir_json[2].asDouble()
-        );
-    } 
-    if (!beam_dir_json.isNull() && beam_dir_json.isArray() && beam_dir_json.size() >= 3) {
-        beam_dir = geo_point_t(
-            beam_dir_json[0].asDouble(),
-            beam_dir_json[1].asDouble(),
-            beam_dir_json[2].asDouble()
-        );
-    } 
+    // Scope-aware fiducial volume: per-APA stages use that drift volume's FV;
+    // multi-APA (all-APA) stages use the cryostat envelope.  See select_scope_fv.
+    const ScopeFV fv = select_scope_fv(dv, wpids);
+    const double det_FV_ymax = fv.ymax;
+    const geo_point_t beam_dir = fv.beam_dir;
+    const geo_point_t vertical_dir = fv.vertical_dir;
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         Cluster *cluster = live_clusters.at(i);
@@ -120,7 +169,7 @@ static void clustering_separate(
             // JudgeSeparateDec_2 populates boundary_points / independent_points;
             // cache the return value so we don't re-run it below.
             bool flag_dec2 =
-                JudgeSeparateDec_2(cluster, dv, drift_dir_abs, boundary_points, independent_points, cluster_length);
+                JudgeSeparateDec_2(cluster, drift_dir_abs, boundary_points, independent_points, cluster_length, fv);
             // JudgeSeparateDec_1 is cheap compared to Dec_2 but still calls PCA —
             // cache for the second call inside flag_proceed block.
             bool flag_dec1 = JudgeSeparateDec_1(cluster, drift_dir_abs, cluster_length);
@@ -215,8 +264,8 @@ static void clustering_separate(
                             independent_points.clear();
 
                             if (JudgeSeparateDec_1(cluster2, drift_dir_abs, length_1) &&
-                                JudgeSeparateDec_2(cluster2, dv, drift_dir_abs, boundary_points, independent_points,
-                                                   length_1)) {
+                                JudgeSeparateDec_2(cluster2, drift_dir_abs, boundary_points, independent_points,
+                                                   length_1, fv)) {
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
 
@@ -229,8 +278,8 @@ static void clustering_separate(
                                         boundary_points.clear();
                                         independent_points.clear();
                                         if (JudgeSeparateDec_1(cluster4, drift_dir_abs, length_1) &&
-                                            JudgeSeparateDec_2(cluster4, dv, drift_dir_abs, boundary_points, independent_points,
-                                                               length_1)) {
+                                            JudgeSeparateDec_2(cluster4, drift_dir_abs, boundary_points, independent_points,
+                                                               length_1, fv)) {
                                             std::vector<Cluster *> sep_clusters = Separate_1(
                                                 use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
 
@@ -256,8 +305,8 @@ static void clustering_separate(
                                 boundary_points.clear();
                                 independent_points.clear();
                                 JudgeSeparateDec_1(final_sep_cluster, drift_dir_abs, length_1);
-                                JudgeSeparateDec_2(final_sep_cluster, dv, drift_dir_abs, boundary_points, independent_points,
-                                                   length_1);
+                                JudgeSeparateDec_2(final_sep_cluster, drift_dir_abs, boundary_points, independent_points,
+                                                   length_1, fv);
                                 if (independent_points.size() > 0) {
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
@@ -353,31 +402,26 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
     return false;
 }
 
-bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const IDetectorVolumes::pointer dv, const geo_point_t& drift_dir_abs,
+bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir_abs,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length)
+                               const double cluster_length, const ScopeFV& fv)
 {
-    // Use global detector-envelope bounds (wpid_all=0) throughout this function.
-    // Rationale: this function detects whether a cluster exits the *cryostat* — the
-    // outer physical boundary of the full detector.  Per-TPC (per-APA/face) FV bounds
-    // would be wrong here because a cosmic that traverses only one drift volume does
-    // NOT exit the cryostat.  The global envelope correctly captures exiting tracks
-    // regardless of how many APAs/faces they span.
-    // Note: FV_xmin/xmax etc. in the metadata are the *inner fiducial* values;
-    // FV_xmin_margin / FV_xmax_margin are added outward to reach the physical boundary.
-    WirePlaneId wpid_all(0);
-    double det_FV_xmin = dv->metadata(wpid_all)["FV_xmin"].asDouble();
-    double det_FV_xmax = dv->metadata(wpid_all)["FV_xmax"].asDouble();
-    double det_FV_ymin = dv->metadata(wpid_all)["FV_ymin"].asDouble();
-    double det_FV_ymax = dv->metadata(wpid_all)["FV_ymax"].asDouble();
-    double det_FV_zmin = dv->metadata(wpid_all)["FV_zmin"].asDouble();
-    double det_FV_zmax = dv->metadata(wpid_all)["FV_zmax"].asDouble();
-    double det_FV_xmin_margin = dv->metadata(wpid_all)["FV_xmin_margin"].asDouble();
-    double det_FV_xmax_margin = dv->metadata(wpid_all)["FV_xmax_margin"].asDouble();
-    // double det_FV_ymin_margin = dv->metadata(wpid_all)["FV_ymin_margin"].asDouble();
-    double det_FV_ymax_margin = dv->metadata(wpid_all)["FV_ymax_margin"].asDouble();
-    double det_FV_zmin_margin = dv->metadata(wpid_all)["FV_zmin_margin"].asDouble();
-    double det_FV_zmax_margin = dv->metadata(wpid_all)["FV_zmax_margin"].asDouble();
+    // Scope-aware fiducial volume (see select_scope_fv): in a per-APA pass this is
+    // the FV of the drift volume being clustered, so "exiting" means leaving that
+    // volume; in an all-APA pass it is the global cryostat envelope (multi-APA scope).
+    // Note: FV_xmin/xmax etc. are the *inner fiducial* values; the *_margin terms are
+    // added outward to reach the physical boundary.
+    const double det_FV_xmin = fv.xmin;
+    const double det_FV_xmax = fv.xmax;
+    const double det_FV_ymin = fv.ymin;
+    const double det_FV_ymax = fv.ymax;
+    const double det_FV_zmin = fv.zmin;
+    const double det_FV_zmax = fv.zmax;
+    const double det_FV_xmin_margin = fv.xmin_margin;
+    const double det_FV_xmax_margin = fv.xmax_margin;
+    const double det_FV_ymax_margin = fv.ymax_margin;
+    const double det_FV_zmin_margin = fv.zmin_margin;
+    const double det_FV_zmax_margin = fv.zmax_margin;
 
     boundary_points = cluster->get_hull();
 
