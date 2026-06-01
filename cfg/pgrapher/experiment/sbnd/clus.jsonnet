@@ -143,11 +143,17 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo) = {
         cm.extend_loop(num_try=3),
         cm.separate(use_ctpc=true),
         cm.connect1(),
-        // Original cfg func_cfgs tail — not in the sbnd_xin per-APA chain.
-        // Left commented to preserve current behavior; uncomment to test later.
-        // cm.deghost(),
-        // cm.examine_x_boundary(),
-        // cm.isolated(),
+        // MicroBooNE-style clustering tail: produce cluster groups (one main +
+        // associated small clusters) carried as the "isolated"/"perblob" per-blob
+        // array (main blobs tagged -1). examine_bundles MUST follow neutrino/isolated,
+        // which produce the perblob it consumes. Group-aware QLMatching downstream
+        // decomposes these groups into main+others for prototype-style bundle building.
+        cm.deghost(),
+        cm.examine_x_boundary(),
+        cm.protect_overclustering(),
+        cm.neutrino(),
+        cm.isolated(),
+        cm.examine_bundles(),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
                          + 'mabc-%s-face%d.zip' % [anode.name, face],

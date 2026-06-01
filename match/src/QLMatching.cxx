@@ -85,9 +85,6 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_z_cushion    = get(cfg, "z_cushion",    m_z_cushion);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
-    m_drift_out_frac        = get(cfg, "drift_out_frac",        m_drift_out_frac);
-    m_min_pred_pe           = get(cfg, "min_pred_pe",           m_min_pred_pe);
-    m_preselect_chi2ndf_max = get(cfg, "preselect_chi2ndf_max", m_preselect_chi2ndf_max);
 
     m_outbeam_ks_max      = get(cfg, "outbeam_ks_max",      m_outbeam_ks_max);
     m_outbeam_chi2ndf_max = get(cfg, "outbeam_chi2ndf_max", m_outbeam_chi2ndf_max);
@@ -196,9 +193,6 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["z_cushion"]    = m_z_cushion;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
-    cfg["drift_out_frac"]        = m_drift_out_frac;
-    cfg["min_pred_pe"]           = m_min_pred_pe;
-    cfg["preselect_chi2ndf_max"] = m_preselect_chi2ndf_max;
 
     cfg["outbeam_ks_max"]      = m_outbeam_ks_max;
     cfg["outbeam_chi2ndf_max"] = m_outbeam_chi2ndf_max;
@@ -291,17 +285,72 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     grouping->set_anodes({m_anode});
     grouping->set_detector_volumes(m_dv);
+
+    // ---- Cluster-group decomposition (MicroBooNE-style main + associated) ----
+    // Per-APA clustering (examine_bundles) merges a group into a single Facade
+    // Cluster carrying the "isolated"/"perblob" per-blob array: blobs tagged -1
+    // are the main cluster, other ids are sub-clusters. Split each such group
+    // back into separate Facade Clusters via Grouping::separate() (negative ids
+    // stay in the original = main; each non-negative id becomes a new sibling =
+    // associated). Bundle building below then anchors on the main and attaches
+    // the others (predicted light summed over the whole group), and the
+    // separated clusters carry the matched flash into the all-APA stage.
+    // Clusters with no perblob array (e.g. configs not running the per-APA
+    // clustering tail) are left untouched: one main, no others.
+    auto sort_by_length_then_id = [](const Cluster* a, const Cluster* b) {
+        if (a->get_length() != b->get_length()) return a->get_length() > b->get_length();
+        return a->get_cluster_id() < b->get_cluster_id();
+    };
+    // Snapshot the pre-split clusters (separate() appends new siblings; iterate a
+    // copy). Sub-cluster idents are drawn from a counter seeded above every
+    // existing ident, so they are unique and collision-free with the mains --- a
+    // main*100+sub scheme could collide with another main's ident and break the
+    // length-sort tie-break (get_cluster_id) into pointer order. The counter
+    // advances in children() (tree/serialization) order, so it is build-stable.
+    std::vector<Cluster*> original_clusters = grouping->children();
+    int next_sub_ident = 0;
+    for (auto* c : original_clusters) next_sub_ident = std::max(next_sub_ident, c->ident());
+    ++next_sub_ident;
+    std::vector<std::pair<Cluster*, std::vector<Cluster*>>> match_groups;
+    for (auto* cluster : original_clusters) {
+        if (!cluster->has_pcarray("isolated", "perblob")) {
+            match_groups.emplace_back(cluster, std::vector<Cluster*>{});
+            continue;
+        }
+        auto cc_span = cluster->get_pcarray("isolated", "perblob");
+        std::vector<int> cc(cc_span.begin(), cc_span.end());
+        const bool has_main = std::find(cc.begin(), cc.end(), -1) != cc.end();
+        std::set<int> subs;
+        for (int v : cc) if (v >= 0) subs.insert(v);
+        if (!has_main || subs.empty()) {   // single component -> nothing to split
+            match_groups.emplace_back(cluster, std::vector<Cluster*>{});
+            continue;
+        }
+        // separate(): groups with id<0 stay in `cluster` (the main), each id>=0
+        // becomes a new sibling cluster returned (ascending id -> deterministic).
+        auto splits = grouping->separate(cluster, cc);
+        cluster->set_flag("main_cluster");
+        std::vector<Cluster*> others;
+        for (auto& [gid, nc] : splits) {
+            (void)gid;
+            nc->set_ident(next_sub_ident++);
+            nc->set_flag("associated_cluster");
+            others.push_back(nc);
+        }
+        match_groups.emplace_back(cluster, std::move(others));
+    }
+    // Deterministic match-unit order: by main length (desc), ident tie-break.
+    std::sort(match_groups.begin(), match_groups.end(),
+              [&](const auto& a, const auto& b) { return sort_by_length_then_id(a.first, b.first); });
+
+    // All separated clusters (mains + associated): charge bookkeeping, scalar
+    // reset, and the global (debug/iteration) index. Sorted by length (desc)
+    // with a stable ident tie-break: std::sort is not stable, so equal lengths
+    // would otherwise order by container/pointer order, making the cluster
+    // indices below build-dependent. get_cluster_id() is the unique,
+    // serialization-stable ident assigned upstream / by the split above.
     std::vector<Cluster*> clusters = grouping->children();
-    // Sort by length (desc) with a stable tie-break on the persisted cluster
-    // ident: std::sort is not stable, so equal lengths would otherwise order by
-    // container/pointer order, making the cluster indices below (and everything
-    // derived from them) build-dependent. get_cluster_id() is the unique,
-    // serialization-stable ident assigned upstream by MultiAlgBlobClustering.
-    std::sort(clusters.begin(), clusters.end(),
-              [](const Cluster* a, const Cluster* b) {
-                  if (a->get_length() != b->get_length()) return a->get_length() > b->get_length();
-                  return a->get_cluster_id() < b->get_cluster_id();
-              });
+    std::sort(clusters.begin(), clusters.end(), sort_by_length_then_id);
 
     double total_charge_blob = 0.0;
     double total_charge_point = 0.0;
@@ -394,27 +443,35 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                    int(flash->get_total_PE() * 100) / 100.,
                    int(flash_x_offset * 100) / 100.);
 
-        for (std::size_t icluster = 0; icluster < clusters.size(); ++icluster) {
-            Cluster* cluster = clusters[icluster];
+        for (std::size_t ig = 0; ig < match_groups.size(); ++ig) {
+            Cluster* main_cluster = match_groups[ig].first;
+            const auto& others = match_groups[ig].second;
+            // Stable cluster index of the group anchor (the main cluster).
+            const int cidx = global_cluster_idx_map.at(main_cluster);
             auto bundle = std::make_shared<TimingTPCBundle>(
-                flash.get(), cluster, flash->get_flash_id(), icluster);
+                flash.get(), main_cluster, flash->get_flash_id(), cidx);
             bundle->set_quality_params(qp);
             all_bundles.push_back(bundle);
             bundle->set_opdet_mask(flash_opdet_mask);
+            // Attach the associated sub-clusters so the bundle carries the whole
+            // group (MicroBooNE-style main + others); predicted light below sums
+            // over all of them.
+            for (auto* oc : others) bundle->add_other_cluster(oc);
 
             // Fill the boundary flags (close-to-PMT / at-x-boundary / spec-end)
-            // for this (flash, cluster) pair from the cluster's drift endpoints.
-            compute_endpoint_flags(bundle.get(), cluster, flash_x_offset, s, anode_x, u_cathode);
+            // from the main cluster's drift endpoints (the group anchor).
+            compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, s, anode_x, u_cathode);
 
             const std::size_t nopdets = flash->get_num_channels();
             std::vector<double> pred_flash(nopdets, 0.0);
 
-            std::size_t npt = cluster->npoints();
-            int npt_outside_drift = 0;
-            int npt_outside_bounds = 0;
-            bool drifted_outside = false;
-
-            for (auto blob : cluster->children()) {
+            // Predicted light is summed over the whole group (main + associated).
+            std::vector<Cluster*> group_clusters{main_cluster};
+            group_clusters.insert(group_clusters.end(), others.begin(), others.end());
+            std::size_t npt = 0;
+            for (auto* gc : group_clusters) npt += gc->npoints();
+            for (auto* gc : group_clusters) {
+              for (auto blob : gc->children()) {
                 total_charge_blob += blob->charge();
                 const double q = blob->charge() / blob->npoints();
                 auto points = blob->points("3d", {"x", "y", "z"});
@@ -429,10 +486,8 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                     // window runs from just below the anode to just beyond the
                     // cathode (prototype low_x_cut+ext1 .. high_x_cut+ext1).
                     const double u = s * (x - anode_x);
-                    if (u < m_anode_ext1 || u > u_cathode + m_cathode_ext1) { ++npt_outside_drift; continue; }
-                    if (y < y_lo || y > y_hi || z < z_lo || z > z_hi) { ++npt_outside_bounds; continue; }
-
-                    if (npt_outside_drift > m_drift_out_frac * npt) { drifted_outside = true; break; }
+                    if (u < m_anode_ext1 || u > u_cathode + m_cathode_ext1) continue;
+                    if (y < y_lo || y > y_hi || z < z_lo || z > z_hi) continue;
 
                     // SemiAnalyticalModel expects positions in cm. Blob points
                     // are in WCT units (mm).
@@ -452,21 +507,17 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                             q * m_QtoL * dir_vis * dir_eff + q * m_QtoL * ref_vis * ref_eff;
                     }
                 }
-                if (drifted_outside) break;
+              }
             }
 
-            if (drifted_outside) {
-                bundle->set_potential_bad_match_flag(true);
-                continue;
-            }
+            // Cluster-group selection now drives matching, so the old per-bundle
+            // pre-selection cuts (min_pred_pe, drift_out_frac, preselect_chi2ndf)
+            // are removed: every (flash, group) pair becomes a candidate bundle
+            // and the LASSO competition / m_strength_cutoff decide. The KS==1
+            // guard below is kept (degenerate, no measured/predicted overlap).
             bundle->set_pred_flash(pred_flash);
-            if (bundle->get_total_pred_light() < m_min_pred_pe) continue;
             bundle->examine_bundle();
             if (bundle->get_ks_dis() == 1) {
-                bundle->set_potential_bad_match_flag(true);
-                continue;
-            }
-            if (bundle->get_chi2() / bundle->get_ndf() > m_preselect_chi2ndf_max) {
                 bundle->set_potential_bad_match_flag(true);
                 continue;
             }
@@ -474,7 +525,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             log->debug("initial eval: flash {} and cluster {}, meas PE {}, pred PE {}, npts {}, "
                        "ks_dis {}, chi2/ndf {}, ndf {}",
                        flash->get_flash_id(),
-                       global_cluster_idx_map[cluster],
+                       cidx,
                        int(flash->get_total_PE() * 100) / 100.,
                        int(bundle->get_total_pred_light() * 100) / 100.,
                        npt,
@@ -795,7 +846,9 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     for (auto* flash : flash_iter_order(flash_bundles_map)) {
         for (auto bundle : flash_bundles_map[flash]) {
             auto* cluster = bundle->get_main_cluster();
-            cluster->set_cluster_t0(flash->get_time() * units::ns);
+            const double t0 = flash->get_time() * units::ns;
+            const int flash_gid = m_anode->ident() * kFlashGidStride + global_flash_idx_map.at(flash);
+            cluster->set_cluster_t0(t0);
             // Record the matched flash row index so Cluster::get_flash() reflects
             // the match (flash_id == canonical "flash" PC row index).
             cluster->set_scalar<int>("flash", flash->get_flash_id());
@@ -804,9 +857,17 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             // merge) and this bundle's predicted per-channel PE (op_pes_pred).
             // The gid is keyed on the flash's index within `flashes` (unique
             // per APA), NOT get_flash_id() (the stored ident, which can repeat).
-            cluster->set_scalar<int>("matched_flash_gid",
-                                     m_anode->ident() * kFlashGidStride + global_flash_idx_map.at(flash));
+            cluster->set_scalar<int>("matched_flash_gid", flash_gid);
             cluster->put_pcarray<double>(bundle->get_pred_flash(), "pe", "flashpred");
+            // Propagate the group's matched flash/t0 to its associated sub-clusters
+            // (split off above), so every cluster of the group carries the flash
+            // association into the all-APA stage. The group-level predicted PE
+            // (flashpred) stays on the main anchor only.
+            for (auto* oc : bundle->get_other_clusters()) {
+                oc->set_cluster_t0(t0);
+                oc->set_scalar<int>("flash", flash->get_flash_id());
+                oc->set_scalar<int>("matched_flash_gid", flash_gid);
+            }
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",
                        flash->get_flash_id(), flash->get_time(),

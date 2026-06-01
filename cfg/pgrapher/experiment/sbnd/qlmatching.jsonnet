@@ -87,9 +87,6 @@ function(params) {
             z_cushion: 0.0*wc.cm,
             // §D pre-selection / bad-match gates.
             mc_saturation_pe: 5000,
-            drift_out_frac: 0.25,
-            min_pred_pe: 10,
-            preselect_chi2ndf_max: 1e4,
             // §E out-of-beam QA cuts.
             outbeam_ks_max: 0.2,
             outbeam_chi2ndf_max: 20,

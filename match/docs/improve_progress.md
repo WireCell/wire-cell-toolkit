@@ -304,3 +304,44 @@ index), and rely on run-to-run reproducibility for any fixed build — which alr
 covers production.** If byte-stable-across-recompiles is ever required, the
 `-O0`-on-`QLMatching.cxx` hammer is the explicit, perf-costing, hard-to-verify
 opt-in.
+
+## Pass 4 — cluster-group-aware matching (MicroBooNE-style main + associated)
+
+**Why.** The SBND per-APA clustering now runs the MicroBooNE tail
+(`deghost → examine_x_boundary → protect_overclustering → neutrino → isolated →
+examine_bundles`, in `cfg/.../sbnd/clus.jsonnet` `clus_per_face`). `examine_bundles`
+merges each group into a single Facade Cluster carrying the `"isolated"/"perblob"`
+per-blob array (blobs tagged `-1` = main, other ids = sub-clusters). The old matcher
+treated that whole merged cluster as one indivisible unit.
+
+**What changed in `QLMatching.cxx`.**
+1. **Decompose during matching.** At the top of `operator()`, each cluster carrying a
+   `perblob` array is split back into separate Facade Clusters via
+   `Grouping::separate()` (negative ids stay in the original = main; each non-negative
+   id becomes a new sibling = associated). The main is flagged `main_cluster`, the
+   subs `associated_cluster`. Clusters without `perblob` are untouched (one main, no
+   others), so configs not running the per-APA tail behave as before.
+2. **Group-anchored bundles.** Bundle building iterates groups, not raw clusters:
+   `main_cluster` = the main, `other_clusters` = the subs (`add_other_cluster`), and
+   predicted light is summed over the whole group. The LASSO/competition is unchanged
+   (it already keys on `get_main_cluster()`).
+3. **Pre-selection gates removed (the old §D).** `min_pred_pe`, `drift_out_frac`,
+   `preselect_chi2ndf_max` (members, `configure`, and the jsonnet keys) are gone —
+   group selection now drives matching; every `(flash, group)` is a candidate and the
+   `m_strength_cutoff` (0.05) decides. The degenerate `ks_dis == 1` guard is kept.
+4. **Separated, flash-tagged output.** The matched flash/t0/`matched_flash_gid` are
+   propagated to **every** cluster of the group (main + associated), so each separated
+   cluster carries its flash association (and t0, hence the `x_t0cor` coord) into the
+   all-APA stage; `flashpred` stays on the main anchor.
+
+**Determinism.** Sub-cluster idents are drawn from a counter seeded **above every
+existing ident** (not `main*100+sub`, which could collide with another main's ident
+and break the length-sort tie-break into pointer order). Verified run-to-run
+byte-identical on sbnd-mc evt 2/9/14/18 using a splice-robust `(flash_id,
+total_pred_light)` multiset (raw line diffs are fooled by concurrent-logger
+interleaving — compare atomic `total_pred_light <n>` tokens, not whole lines); a
+recompile-perturbation (throwaway `log->debug`) on evt2 was byte-identical too.
+
+**Not done (tune later).** Matching is group/main-anchored: a group that wrongly
+merged two different-t0 objects still matches as one unit. Per-sub-cluster
+accept/reject is the explicit follow-up.

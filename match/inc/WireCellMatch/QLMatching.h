@@ -108,9 +108,6 @@ namespace WireCell::Match {
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)
-        double m_drift_out_frac{0.25};        // drop bundle if > this fraction of pts drift out
-        double m_min_pred_pe{10};             // min predicted PE to keep a bundle
-        double m_preselect_chi2ndf_max{1e4};  // pre-select chi2/ndf ceiling
 
         // §E out-of-beam QA cuts.
         double m_outbeam_ks_max{0.2};
