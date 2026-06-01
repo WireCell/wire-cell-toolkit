@@ -250,11 +250,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        live_dead(name="", dead_live_overlap_offset=2) :: {
+        live_dead(name="", dead_live_overlap_offset=2, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringLiveDead",
             name: prefix+name,
             data: {
                 dead_live_overlap_offset: dead_live_overlap_offset,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
@@ -328,10 +330,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        connect1(name="") :: {
+        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringConnect1",
             name: prefix+name,
-            data: dv_cfg + scope_cfg,
+            data: {
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
+            } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
@@ -345,10 +350,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        isolated(name="") :: {
+        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
-            data: dv_cfg + scope_cfg,
+            data: {
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
+            } + dv_cfg + scope_cfg,
         },
 
         examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
@@ -376,11 +384,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        neutrino(name="", num_try=1) :: {
+        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringNeutrino",
             name: prefix+name,
             data: {
                 num_try: num_try,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },

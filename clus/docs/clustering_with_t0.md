@@ -36,7 +36,8 @@ The desired behavior:
 
 Functions in scope: `extend` (and `extend_loop`, which wraps it), `regular` (×2), `parallel_prolong`,
 `close`, and `examine_bundles`. The first five share one merge pattern; `examine_bundles` is a special
-case described in §6.
+case described in §6. The same `use_flash_t0` toggle is also wired into `connect1`, `live_dead`,
+`neutrino`, and `isolated` for completeness (default off, enabled nowhere today — see §7).
 
 ---
 
@@ -248,10 +249,22 @@ needed if a *multi-flash* merged cluster were later re-split — which this pipe
 | `parallel_prolong` | `parallel_prolong(...)` | `ClusteringParallelProlong` | `use_flash_t0`, `flash_t0_window` |
 | `close` | `close(...)` | `ClusteringClose` | `use_flash_t0`, `flash_t0_window` |
 | `examine_bundles` | `examine_bundles(...)` | `ClusteringExamineBundles` | `use_flash_t0`, `flash_t0_window` |
+| `connect1` | `connect1(...)` | `ClusteringConnect1` | `use_flash_t0`, `flash_t0_window` |
+| `live_dead` | `live_dead(...)` | `ClusteringLiveDead` | `use_flash_t0`, `flash_t0_window` |
+| `neutrino` | `neutrino(...)` | `ClusteringNeutrino` | `use_flash_t0`, `flash_t0_window` |
+| `isolated` | `isolated(...)` | `ClusteringIsolated` | `use_flash_t0`, `flash_t0_window` |
 
-All default `use_flash_t0=false`. Enable in the SBND combined `cm_pipeline`
-(`cfg/pgrapher/experiment/sbnd/clus.jsonnet`); per-APA stays off (no flash there today) unless a flash
-chain is later wired into the per-APA stage.
+All default `use_flash_t0=false`. Only the first six (`extend`, `extend_loop`, `regular`,
+`parallel_prolong`, `close`, `examine_bundles`) are enabled in the SBND combined `cm_pipeline`
+(`cfg/pgrapher/experiment/sbnd/clus.jsonnet`). The last four (`connect1`, `live_dead`, `neutrino`,
+`isolated`) gained the same toggle for completeness but are **enabled nowhere by default** — they live
+in the per-APA chain, and per-APA stays off (no flash there). For all of them the guard is the same:
+restrict each merge to clusters sharing a flash-time group.
+
+**Caveat:** `use_flash_t0` is only meaningful downstream of QL matching. Where clusters carry no flash
+(e.g. the per-APA stage), `assign_flash_t0_groups` gives every cluster a unique singleton group, so
+turning the toggle on there would suppress **all** merging in that function. Enable only on a grouping
+whose clusters have matched flash times.
 
 ---
 

@@ -19,10 +19,12 @@ using namespace WireCell::PointCloud::Tree;
 
 
 static void clustering_neutrino(
-    Grouping &live_grouping, 
-    int num_try, 
+    Grouping &live_grouping,
+    int num_try,
     IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope
+    const Tree::Scope& scope,
+    bool use_flash_t0 = false,
+    double flash_t0_window = 80*units::ns
     );
 
 class ClusteringNeutrino :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -33,19 +35,23 @@ public:
     void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedScope::configure(config);
-        
+
         num_try_ = get(config, "num_try", 1);
+        use_flash_t0_ = get(config, "use_flash_t0", false);
+        flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
-    
+
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         for (int i = 0; i != num_try_; i++) {
-            clustering_neutrino(live, i, m_dv, m_scope);
+            clustering_neutrino(live, i, m_dv, m_scope, use_flash_t0_, flash_t0_window_);
         }
     }
-    
+
 private:
     int num_try_{1};
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
 };
 
 // The original developers do not care.
@@ -55,9 +61,11 @@ private:
 // handle all APA/Face
 static void clustering_neutrino(
     Grouping &live_grouping,
-    int num_try, 
+    int num_try,
     IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope)
+    const Tree::Scope& scope,
+    bool use_flash_t0,
+    double flash_t0_window)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -951,6 +959,11 @@ static void clustering_neutrino(
     typedef cluster_connectivity_graph_t Graph;
     Graph g;
     const auto live_all = live_grouping.children();  // stable, deterministic order
+    // When flash-aware, only merge clusters coincident in matched flash time.
+    std::map<const Cluster*, int> flash_t0_group;
+    if (use_flash_t0) {
+        flash_t0_group = assign_flash_t0_groups(live_all, flash_t0_window);
+    }
     std::unordered_map<const Cluster*, int> map_cluster_index;
     map_cluster_index.reserve(live_all.size());
     for (size_t ilive = 0; ilive < live_all.size(); ++ilive) {
@@ -959,6 +972,7 @@ static void clustering_neutrino(
     }
     for (auto [cluster1, cluster2] : to_be_merged_pairs) {
         // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
+        if (use_flash_t0 && flash_t0_group.at(cluster1) != flash_t0_group.at(cluster2)) continue;
         boost::add_edge(map_cluster_index[cluster1], map_cluster_index[cluster2], g);
     }
 

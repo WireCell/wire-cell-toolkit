@@ -19,7 +19,9 @@ using namespace WireCell::PointCloud::Tree;
 static void clustering_isolated(
     Grouping& live_grouping,
     IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope
+    const Tree::Scope& scope,
+    bool use_flash_t0 = false,
+    double flash_t0_window = 80*units::ns
     );
 
 class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -30,13 +32,19 @@ public:
     void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedScope::configure(config);
+
+        use_flash_t0_ = get(config, "use_flash_t0", false);
+        flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
-    
+
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        return clustering_isolated(live, m_dv, m_scope);
+        return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_);
     }
-    
+
+private:
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
 };
 
 
@@ -59,7 +67,9 @@ public:
 static void clustering_isolated(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope
+    const Tree::Scope& scope,
+    bool use_flash_t0,
+    double flash_t0_window
 )
 {
     // Get all the wire plane IDs from the grouping
@@ -462,6 +472,13 @@ static void clustering_isolated(
         cluster_connectivity_graph_t g;
         // Use the deterministically-ordered children() vector for vertex indices.
         const auto live_all = live_grouping.children();
+        // When flash-aware, only merge clusters coincident in matched flash time.
+        // Edges here form a star per group (max_cluster -> each member), so a
+        // per-edge group guard suffices (no transitive bridging).
+        std::map<const Cluster*, int> flash_t0_group;
+        if (use_flash_t0) {
+            flash_t0_group = assign_flash_t0_groups(live_all, flash_t0_window);
+        }
         std::unordered_map<const Cluster*, int> map_cluster_index;
         map_cluster_index.reserve(live_all.size());
         for (size_t ilive = 0; ilive < live_all.size(); ++ilive) {
@@ -472,6 +489,7 @@ static void clustering_isolated(
             const Cluster* live = it->first;
             for (const auto& pair : it->second) {
                 const Cluster* live2 = pair.first;
+                if (use_flash_t0 && flash_t0_group.at(live) != flash_t0_group.at(live2)) continue;
                 add_edge(map_cluster_index[live], map_cluster_index[live2], g);
             }
         }

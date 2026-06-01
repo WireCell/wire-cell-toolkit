@@ -15,9 +15,11 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
-static void clustering_connect1(Grouping& live_grouping, 
+static void clustering_connect1(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
-                                const Tree::Scope& scope);
+                                const Tree::Scope& scope,
+                                bool use_flash_t0 = false,
+                                double flash_t0_window = 80*units::ns);
 
 class ClusteringConnect1 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
@@ -27,16 +29,23 @@ public:
     void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedScope::configure(config);
+
+        use_flash_t0_ = get(config, "use_flash_t0", false);
+        flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_connect1(live, m_dv, m_scope);
+        clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
         return cfg;
     }
+
+private:
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
 };
 
 
@@ -53,9 +62,11 @@ public:
 
 // This is for only one APA/face
 void clustering_connect1(
-    Grouping& live_grouping, 
+    Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope)
+    const Tree::Scope& scope,
+    bool use_flash_t0,
+    double flash_t0_window)
 {
     // Check that live_grouping has less than one wpid
     if (live_grouping.wpids().size() > 1) {
@@ -148,6 +159,12 @@ void clustering_connect1(
         size_t ilive = map_cluster_index.size();
         map_cluster_index[live] = ilive;
         ilive2desc[ilive] = boost::add_vertex(ilive, g);
+    }
+
+    // When flash-aware, only merge clusters coincident in matched flash time.
+    std::map<const Cluster*, int> flash_t0_group;
+    if (use_flash_t0) {
+        flash_t0_group = assign_flash_t0_groups(live_grouping.children(), flash_t0_window);
     }
 
     std::map<const Cluster *, geo_point_t, ClusterLess> map_cluster_dir1;
@@ -477,8 +494,15 @@ void clustering_connect1(
                     //     std::cout << "Check: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << " " << max_value[0] << " " << max_value[1] << " " << max_value[2] << " " << num_total_points << " " << num_unique[0] << " " << num_unique[1] << " " << num_unique[2] << " "  << std::endl;
                     // }
 
+                    // When flash-aware, do not connect `cluster` to a partner in a
+                    // different flash-time group: gate both merge blocks below.
+                    const bool flash_ok = !use_flash_t0 ||
+                        (max_cluster != nullptr &&
+                         flash_t0_group.at(cluster) == flash_t0_group.at(max_cluster));
+
                     // if overlap a lot merge
-                    if ((max_value[0] + max_value[1] + max_value[2]) >
+                    if (flash_ok &&
+                        (max_value[0] + max_value[1] + max_value[2]) >
                             0.75 * (num_total_points + num_total_points + num_total_points) &&
                         ((num_unique[1] + num_unique[0] + num_unique[2]) < 0.24 * num_total_points ||
                          ((num_unique[1] + num_unique[0] + num_unique[2]) < 0.45 * num_total_points &&
@@ -515,7 +539,7 @@ void clustering_connect1(
                         }
                     }
 
-                    if ((max_value[0] + max_value[1] + max_value[2]) > 300 && !flag_merge) {
+                    if (flash_ok && (max_value[0] + max_value[1] + max_value[2]) > 300 && !flag_merge) {
                         if (cluster->get_length() > 25 * units::cm ||
                             max_cluster->get_length() > 25 * units::cm) {
                             // if overlap significant, compare the PCA
@@ -648,6 +672,13 @@ void clustering_connect1(
         ilive2desc[ilive] = boost::add_vertex(ilive, g2);
     }
 
+    // Recompute the flash-time groups: the first merge above created new merged
+    // clusters (each carrying the longest contributing member's flash).
+    std::map<const Cluster*, int> flash_t0_group2;
+    if (use_flash_t0) {
+        flash_t0_group2 = assign_flash_t0_groups(live_grouping.children(), flash_t0_window);
+    }
+
     // to_be_merged_pairs.clear(); // clear it for other usage ...
     for (auto it = new_clusters.begin(); it != new_clusters.end(); it++) {
         const Cluster *cluster_1 = (*it);
@@ -661,6 +692,7 @@ void clustering_connect1(
             if (!cluster_2->get_scope_filter(scope)) continue;
             if (cluster_2->get_length() < 3 * units::cm) continue;
             if (cluster_2 == cluster_1) continue;
+            if (use_flash_t0 && flash_t0_group2.at(cluster_1) != flash_t0_group2.at(cluster_2)) continue;
 
             const auto& pca2 = cluster_2->get_pca();
             if (cluster_1->get_length() > 25 * units::cm || cluster_2->get_length() > 25 * units::cm ||
