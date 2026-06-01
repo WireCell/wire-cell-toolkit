@@ -88,6 +88,22 @@ matched clusters with a valid `cluster_t0`** — the mixed matched/unmatched cas
 arise. The design below still adds a defensive rule: a cluster without a valid flash gets its own
 singleton group and is never merged while flash-aware mode is active (see §5).
 
+### T0 survives the `switch_scope` split — observed
+
+`switch_scope` is a **divide** (it destroys each input cluster and recreates one or two sub-clusters
+via `Grouping::separate()`), and it runs *after* QL matching, so the matched-flash scalars are
+already on the clusters when it splits them. The scalars (`cluster_t0`, `flash`, `matched_flash_gid`)
+live in the `cluster_scalar` local PC, which `Cluster::from()` copies to every child inside
+`separate()` (`Facade_Grouping.cxx:163`, `Facade_Cluster.cxx:164-180`) — so both halves inherit the
+parent's flash association.
+
+This was verified empirically (not just by code reading): a temporary probe logging
+`parent → sub` `(cluster_t0, flash)` across the `separate()` in `clustering_switch_scope.cxx`, on
+SBND mc events idx 1–5, showed every sub-cluster carrying its parent's exact `cluster_t0` and `flash`
+(47/47 single-sub cases on evt2 matched with zero mismatches; genuine **two-way** splits on evts
+1/3/4/5 had *both* `id==0` and `id==1` halves carry the identical non-default values, e.g. evt4
+parent ident=4 `t0=-1350658.12 flash=5` → both subs identical). The probe was removed after the run.
+
 ---
 
 ## 4. The common merge pattern (the five pairwise functions)
