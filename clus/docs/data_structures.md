@@ -121,7 +121,7 @@ PointCloud::Dataset& local_pc(const std::string& name);
 | `"3d"` | Raw 3D blob positions | Upstream imaging |
 | `"tagger_info"` | Numeric flag arrays from upstream taggers | Tagger stages |
 | `"isolated"` | Points in "isolated" sub-cluster | Upstream clustering |
-| `"perblob"` | One point per blob | Upstream clustering |
+| `"perblob"` | Per-blob arrays on a merged cluster (`merge_clusters`). `parent_id` = sequential index of the contributing sub-cluster (`savecc`); `real_cluster_id` = original `ident()` of the sub-cluster each blob came from (written by `examine_bundles` under `use_flash_t0`, so the Bee writer can keep merged flash-group members' original ids/colors) | `merge_clusters` |
 | `"associate_points"` | Points from shower/delta-ray clustering | `clustering_points()` |
 | `"fit"` | Fitted 3D positions from TrackFitting | `TrackFitting` |
 

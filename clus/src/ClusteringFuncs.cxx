@@ -48,7 +48,8 @@ WireCell::Clus::Facade::extract_geometry_params(
 std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,
-    const std::string& aname, const std::string& pcname)
+    const std::string& aname, const std::string& pcname,
+    const std::string& orig_id_aname)
 {
     std::unordered_map<int, int> desc2id;
     std::map<int, std::set<int> > id2desc;
@@ -72,6 +73,7 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     auto orig_clusters = grouping.children();
 
     const bool savecc = aname.size() > 0 && pcname.size() > 0;
+    const bool save_origid = orig_id_aname.size() > 0 && pcname.size() > 0;
 
     for (const auto& [id, descs] : id2desc) {
         if (descs.size() < 2) {
@@ -83,6 +85,10 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
 
         std::vector<int> cc;
         int parent_id = 0;
+
+        // Per-blob original cluster ident (the pre-merge ident() of each
+        // sub-cluster), parallel to cc but keyed by the member's own ident.
+        std::vector<int> orig_id;
 
         // Flash bookkeeping: Cluster::from() copies the first-encountered
         // member's cluster_t0/flash/matched_flash_gid (arbitrary std::set order).
@@ -129,11 +135,18 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                 ++parent_id;
             }
 
+            if (save_origid) {
+                orig_id.resize(fresh_cluster.nchildren(), live->ident());
+            }
+
             grouping.destroy_child(live);
             assert(live == nullptr);
         }
         if (savecc) {
             fresh_cluster.put_pcarray(cc, aname, pcname);
+        }
+        if (save_origid) {
+            fresh_cluster.put_pcarray(orig_id, orig_id_aname, pcname);
         }
 
         // Override from()'s arbitrary first-wins flash with the longest

@@ -192,6 +192,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     if (m_save_opflash) {
         m_bee_flash = Bee::Flashes(get<std::string>(cfg, "bee_detector", "uboone"), "op");
     }
+    m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
@@ -1454,6 +1455,18 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
             const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
             const auto& spcs = sv.pcs();
 
+            // Original (pre-flash-merge) per-blob cluster ids, if present (written
+            // by examine_bundles' flash-time merge into "real_cluster_id"/"perblob").
+            // One id per blob, in the same blob order as spcs.  When absent (any
+            // non-flash-merged cluster / other layers / detectors) the Bee
+            // real_cluster_id stays == clid, so output is backward-compatible.
+            std::vector<int> orig_ids;
+            if (cluster.has_pcarray<int>("real_cluster_id", "perblob")) {
+                auto sp = cluster.get_pcarray<int>("real_cluster_id", "perblob");
+                orig_ids.assign(sp.begin(), sp.end());
+            }
+            const bool use_orig = (orig_ids.size() == spcs.size());
+
             // Dead-channel threshold: uncertainty > 1e10 flags a dead wire
             // (matches PointTreeBuilding m_dead_threshold and Facade_Cluster::is_wire_dead).
             const double dead_threshold = 1e10;
@@ -1468,6 +1481,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                 auto x = spc.get().get(coords[0])->elements<double>();
                 auto y = spc.get().get(coords[1])->elements<double>();
                 auto z = spc.get().get(coords[2])->elements<double>();
+
+                // Per-blob original cluster id (falls back to the merged clid).
+                const int real_clid = use_orig ? orig_ids[spc_idx] : clid;
 
                 const size_t size = x.size();
                 for (size_t ind = 0; ind < size; ++ind) {
@@ -1488,7 +1504,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                     }
                     const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
 
-                    bpts.append(pt, point_charge, clid, clid);
+                    bpts.append(pt, point_charge, clid, real_clid);
                 }
             }
 
@@ -1671,8 +1687,22 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
 
         auto mit = matched.find(g);
         if (mit != matched.end() && !mit->second.empty()) {
-            for (const auto& cp : mit->second) {
-                m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
+            if (m_bee_flash_per_flash) {
+                // One row per flash: all matched cluster ids together, and the
+                // predicted light is the element-wise sum over the matched
+                // clusters (each cluster contributes its own predicted PE).
+                std::vector<int> cids;
+                std::vector<double> pred_sum;
+                for (const auto& cp : mit->second) {
+                    cids.push_back(cp.first);
+                    if (pred_sum.size() < cp.second.size()) pred_sum.resize(cp.second.size(), 0.0);
+                    for (size_t k = 0; k < cp.second.size(); ++k) pred_sum[k] += cp.second[k];
+                }
+                m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
+            } else {
+                for (const auto& cp : mit->second) {
+                    m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
+                }
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);

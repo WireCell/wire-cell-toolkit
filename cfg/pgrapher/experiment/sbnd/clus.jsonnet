@@ -293,6 +293,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // matched-flash association written by QLMatching). bee_detector
             // above supplies the Bee geom.
             save_opflash: true,
+            // Emit one "op" row per flash carrying ALL matched cluster ids
+            // (op_cluster_ids array) with summed predicted PE, so a flash matched
+            // to several clusters shows them together (MicroBooNE-style).
+            bee_flash_per_flash: true,
             anodes: [wc.tn(a) for a in anodes],
             detector_volumes: wc.tn(dv),
             // Renumber cluster idents (insertion order, 1..N) after every step;

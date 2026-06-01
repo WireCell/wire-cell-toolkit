@@ -113,10 +113,16 @@ namespace WireCell::Clus::Facade {
     // Pointers to the newly created cluster node facades are returned.  These
     // are loaned.  As usual, the cluster node owns the facade and these nodes
     // are in turn owned by the grouping node.
+    // When orig_id_aname is non-empty, each merged cluster also gets a per-blob
+    // int array (stored under orig_id_aname in PC "pcname") holding the original
+    // ident() of the sub-cluster each blob came from, so a downstream consumer
+    // (e.g. the Bee writer) can recover the pre-merge cluster identity of every
+    // blob.  This is independent of the aname/parent_id ("perblob") array above.
     std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
-                                         const std::string& pcname="perblob");
+                                         const std::string& pcname="perblob",
+                                         const std::string& orig_id_aname="");
 
     // Assign each cluster an integer "flash-time group" id.  Clusters whose
     // matched flash time (cluster_t0) differ by less than `window` share a group

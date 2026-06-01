@@ -135,7 +135,12 @@ static void clustering_examine_bundles(
         log->debug("flash-t0 merge: {} in-scope matched clusters -> {} flash-time groups",
                    n_matched_inscope, matched_groups.size());
 
-        merge_clusters(g, live_grouping);
+        // Save, per blob, the original (pre-merge) cluster ident of each
+        // flash-group member into a "real_cluster_id" array in the "perblob" PC.
+        // The Bee writer reads this so the merged group's far-apart members keep
+        // their distinct original ids (colors).  Only here, under use_flash_t0
+        // (all-APA), so per-APA / other-detector output is bit-identical.
+        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id");
     }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();

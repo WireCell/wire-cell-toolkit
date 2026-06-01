@@ -138,6 +138,11 @@ namespace WireCell::Clus {
         // as the charge clusters.  Default OFF (no flash dump for detectors
         // that don't attach an "opflash" PC, e.g. uboone).
         bool m_save_opflash{false};
+        // When set, fill_bee_flashes emits one "op" row per flash carrying ALL
+        // matched cluster ids (op_cluster_ids array) with element-wise summed
+        // predicted PE, instead of one row per (flash, cluster).  Default OFF so
+        // existing output is bit-identical; enabled for the SBND all-APA match.
+        bool m_bee_flash_per_flash{false};
         Bee::Flashes m_bee_flash;
         void fill_bee_flashes(const Facade::Grouping& grouping);
 
