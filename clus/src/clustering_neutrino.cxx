@@ -111,7 +111,7 @@ static void clustering_neutrino(
     // Scope-aware fiducial volume (see select_scope_fv): in a per-APA pass this is
     // the FV of the drift volume being clustered; in an all-APA (multi-APA) pass it
     // is the global cryostat envelope.
-    const ScopeFV fv = select_scope_fv(dv, wpids);
+    const ScopeFV fv = select_scope_fv(dv);
     const double det_FV_xmin = fv.xmin;
     const double det_FV_xmax = fv.xmax;
     const double det_FV_ymin = fv.ymin;

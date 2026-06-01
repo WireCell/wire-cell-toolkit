@@ -19,11 +19,12 @@ using namespace WireCell::PointCloud::Tree;
 
 
 // See declaration in ClusteringFuncs.h.  Chooses the fiducial volume matching the
-// scope a clustering pass runs in: per-APA stages get that drift volume's FV (union
-// of the present faces); multi-APA (all-APA) stages get the "overall" cryostat FV,
-// reproducing the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit.
-ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv,
-                                                const std::set<WirePlaneId>& wpids)
+// scope `dv` was configured for: per-APA stages get that drift volume's FV (union of
+// the APA's configured faces); multi-APA (all-APA) stages get the "overall" cryostat
+// FV, reproducing the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit.  The
+// scope is read from dv->wpident_faces() (the configured drift volumes), NOT from the
+// live grouping, so all-APA stays "overall" even when only one TPC has activity.
+ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv)
 {
     const Configuration overall = dv->metadata(WirePlaneId(0));
 
@@ -45,11 +46,17 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv,
     fv.vertical_dir = read_dir("vertical_dir", geo_point_t(0, 1, 0));
     fv.beam_dir = read_dir("beam_dir", geo_point_t(0, 0, 1));
 
+    // Configured drift volumes (face-level wpids) this dv was built for.
+    std::vector<WirePlaneId> faces;
     std::set<int> apas;
-    for (const auto& wpid : wpids) apas.insert(wpid.apa());
+    for (const auto& kv : dv->wpident_faces()) {
+        const WirePlaneId wpid(kv.first);
+        faces.push_back(wpid);
+        apas.insert(wpid.apa());
+    }
 
     // Multi-APA or empty -> cryostat envelope (legacy behavior, bit-identical).
-    if (wpids.empty() || apas.size() > 1) {
+    if (faces.empty() || apas.size() > 1) {
         fv.xmin = field(overall, "FV_xmin");  fv.xmax = field(overall, "FV_xmax");
         fv.ymin = field(overall, "FV_ymin");  fv.ymax = field(overall, "FV_ymax");
         fv.zmin = field(overall, "FV_zmin");  fv.zmax = field(overall, "FV_zmax");
@@ -59,11 +66,11 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv,
         return fv;
     }
 
-    // Single APA -> union (outermost envelope) over the present per-(APA,face) blocks.
-    // For a single-face APA (e.g. SBND) this is just that one block.  Each outward
-    // margin is carried from the face contributing that extreme.
+    // Single APA -> union (outermost envelope) over the configured per-(APA,face)
+    // blocks.  For a single-face APA (e.g. SBND) this is just that one block.  Each
+    // outward margin is carried from the face contributing that extreme.
     bool first = true;
-    for (const auto& wpid : wpids) {
+    for (const auto& wpid : faces) {
         const Configuration blk = dv->metadata(wpid);
         const double xmin = field(blk, "FV_xmin"), xmax = field(blk, "FV_xmax");
         const double ymin = field(blk, "FV_ymin"), ymax = field(blk, "FV_ymax");
@@ -142,11 +149,9 @@ static void clustering_separate(
         return c1->ident() < c2->ident();
     });
 
-    auto wpids = live_grouping.wpids();
-
     // Scope-aware fiducial volume: per-APA stages use that drift volume's FV;
     // multi-APA (all-APA) stages use the cryostat envelope.  See select_scope_fv.
-    const ScopeFV fv = select_scope_fv(dv, wpids);
+    const ScopeFV fv = select_scope_fv(dv);
     const double det_FV_ymax = fv.ymax;
     const geo_point_t beam_dir = fv.beam_dir;
     const geo_point_t vertical_dir = fv.vertical_dir;

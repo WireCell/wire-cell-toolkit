@@ -158,16 +158,17 @@ namespace WireCell::Clus::Facade {
         geo_point_t vertical_dir{0, 1, 0}, beam_dir{0, 0, 1};
     };
 
-    // Select the fiducial volume appropriate to the scope spanned by `wpids` (the
-    // face-level wire-plane ids present in a grouping, e.g. from Grouping::wpids()):
-    //   - wpids span >1 APA (or are empty) -> the global "overall" (cryostat) FV.
-    //     This reproduces the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit,
-    //     so all-APA stages are unchanged.
-    //   - wpids share a single APA         -> the union (outermost envelope) of that
-    //     APA's present per-(APA,face) FV blocks.
+    // Select the fiducial volume appropriate to the scope `dv` was configured for.
+    // The scope is taken from the dv's configured drift volumes (dv->wpident_faces()),
+    // NOT from which TPCs happen to have live activity in a given event:
+    //   - dv spans >1 APA (or none)  -> the global "overall" (cryostat) FV.  This
+    //     reproduces the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit, so
+    //     all-APA stages are unchanged regardless of per-event activity.
+    //   - dv spans a single APA      -> the union (outermost envelope) of that APA's
+    //     configured per-(APA,face) FV blocks (full APA even if a face is quiet).
     // Any FV field missing from a per-face block falls back to the "overall" value.
     // vertical_dir / beam_dir are detector-global and are always read from "overall".
-    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, const std::set<WireCell::WirePlaneId>& wpids);
+    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv);
 
     // These Judge*() functions are used by multiple clustering methods.  They
     // are defined in clustering_separate.cxx.
