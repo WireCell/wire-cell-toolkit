@@ -121,6 +121,20 @@ static void clustering_examine_bundles(
                                 ilive2desc[map_cluster_index[c2]], g);
             }
         }
+
+        // Diagnostic: how many in-scope matched clusters fall into how many
+        // distinct flash-time groups (each multi-member group is merged into one).
+        std::set<int> matched_groups;
+        int n_matched_inscope = 0;
+        for (auto c : pre_clusters) {
+            if (c->get_scope_filter(scope) && c->get_scalar<int>("flash", -1) >= 0) {
+                ++n_matched_inscope;
+                matched_groups.insert(flash_t0_group.at(c));
+            }
+        }
+        log->debug("flash-t0 merge: {} in-scope matched clusters -> {} flash-time groups",
+                   n_matched_inscope, matched_groups.size());
+
         merge_clusters(g, live_grouping);
     }
 

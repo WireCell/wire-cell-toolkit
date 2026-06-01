@@ -364,6 +364,15 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                       c->set_cluster_t0(-1e12);
                       c->set_scalar<int>("flash", -1);
                       c->set_scalar<int>("matched_flash_gid", -1);
+                      // Materialize the main/associated flag scalars on EVERY
+                      // cluster so the cluster_scalar PC has uniform keys at
+                      // as_tensors() time (Dataset::append requires identical
+                      // keys across clusters).  The bundle-split loop above set
+                      // these to 1 on the chosen clusters; get_flag() returns
+                      // the current value (1) or 0 if unset, so this preserves
+                      // those and writes 0 on the rest -- no clobbering.
+                      c->set_flag("main_cluster", c->get_flag("main_cluster"));
+                      c->set_flag("associated_cluster", c->get_flag("associated_cluster"));
                   });
 
     std::map<Opflash*, int>  global_flash_idx_map;
