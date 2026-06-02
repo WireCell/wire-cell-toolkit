@@ -891,6 +891,41 @@ detector geometry (`QLMatching.cxx:497-540`, `SemiAnalyticalModel.cxx`):
    PMT-only. Turning Arapucas on adds rectangle-solid-angle channels to every prediction and hence to
    the χ²/KS — a deliberate, not automatic, extension.
 
+### 13.4 The two TPCs are assumed *completely* optically separated (a hard cathode cut)
+
+The SBND model treats the cathode (`x = 0`) as an **opaque optical wall**: a charge deposit in one
+TPC produces **exactly zero** predicted PE on every OpDet of the *other* TPC — not a small number, an
+identical zero, by an early `continue` before any solid-angle computation. Both visibility routines
+open with the same line (a port of larsim's `SBNDOpticalPath_tool`):
+
+```cpp
+// SemiAnalyticalModel.cxx:233 (direct/VUV) and :355 (reflected/VIS)
+// only OpDets on the same X-sign as the scintillation point are visible.
+if ((scintPoint.x() < 0.) != (od.center.x() < 0.)) continue;
+```
+
+`vis` is pre-zeroed, so opposite-side OpDets keep `0`. This holds for **both** light components:
+the reflected path places the cathode "hotspot" at `plane_depth` with the **same sign** as the
+deposit's `x` (`:317, :352`) and re-applies the same-side cut in the per-PD sum (`:355`), so reflected
+light never crosses the cathode either.
+
+- **Geometry confirming the split** (`wire-cell-data/sbnd/photodet/semi-analytical-sbnd.json`):
+  `cathode_x = 0`; **312 OpDets split 156 / 156** across it (x ≈ ±213.5 cm, behind each anode);
+  192 Arapucas (`type 0`) + 120 dome PMTs (`type 1`). So the x-sign *is* the TPC label.
+- **Redundant with the matcher mask.** Even without this cut, QLMatching's per-TPC mask
+  (`QLMatching.cxx:445-449`) zeros the opposite-side OpDets in each TPC hypothesis. Predicted far-side
+  PE is therefore doubly guaranteed to be 0.
+- **This is the physics behind the §12.4 KS masking.** The prediction is strictly one-sided, but a
+  reconstructed flash carries measured PE on **both** TPCs' PMTs (the opflash is not split per-TPC).
+  The opposite-TPC channels are thus `(measured > 0, predicted = 0)` and *must* be dropped from
+  χ²/LASSO/KS (the per-TPC mask + `bundle_mask_ks`), else a one-sided prediction is scored against a
+  two-sided measurement.
+- **Modeling caveat.** "No cross-cathode light" is a *hard* assumption inherited from
+  `SBNDOpticalPath_tool`, not a tunable. If SBND's TPB-coated reflective cathode actually leaks/reflects
+  a non-negligible fraction across, the model cannot represent it (it would under-predict the far side);
+  the only available remedy is masking, not modeling. The prototype (MicroBooNE, single TPC) has no
+  analogue — its photon library is a single-volume lookup with no inter-TPC question.
+
 ## 14. LASSO matrix architecture (the two-block normal-equation system)
 
 §6/§8 cover the *columns* and the *weights*; this section records the **row** structure — the soft
