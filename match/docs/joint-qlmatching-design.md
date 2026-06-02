@@ -72,9 +72,15 @@ configurable multiplicity = number of configured anodes.
   declares the all-anode DetectorVolumes as a `uses` dependency.
 - `cfg/.../sbnd/clus.jsonnet`: `all_apa(..., premerged=false)`; when true it skips
   the `PointTreeMerging` fanin and feeds the single pre-merged tree to MABC.
-- `sbnd_xin/wct-clus-matching-perevt.jsonnet` (in the wcp-porting-img repo): a
-  `joint=false` TLA toggle. Off = historical per-APA path; on = one
-  `matching_joint` node fed by both `flash_attach` outputs, then MABC directly.
+- `sbnd_xin/wct-clus-matching-{perevt,standalone}.jsonnet` (wcp-porting-img repo):
+  a `joint` toggle. Off = historical per-APA path (one matcher per APA ->
+  PointTreeMerging -> MABC); on = one `matching_joint` node fed by both
+  `flash_attach` outputs, merging in-node, then MABC directly (`all_apa
+  premerged=true`).
+- The sbnd_xin run scripts (`run_ql_evt.sh`, `run_clust_QL_evt.sh`) **default to
+  joint** (pass `joint=true`); `--per-apa` (or `SBND_JOINT=0`) selects the legacy
+  per-APA path. The joint node is the live home for the deferred joint algorithm;
+  defaulting to it now exercises the path while staying byte-identical.
 
 ### Verification (the bit-identical contract)
 On SBND mc evt 2 and evt 11 (both APAs), `work/ql_evt<id>/mabc-all-apa.zip`:
@@ -83,6 +89,9 @@ On SBND mc evt 2 and evt 11 (both APAs), `work/ql_evt<id>/mabc-all-apa.zip`:
   path. This proves the in-node merge reproduces `PointTreeMerging`, the per-APA
   matching matches the standalone matchers, the all-anode DV yields identical
   per-TPC geometry, and no cross-APA state leaks.
+- Both sbnd_xin chains in their default (joint) mode reproduce the per-APA result
+  byte-for-byte: `run_ql_evt.sh mc {1,3}` (mabc-all-apa.zip) and
+  `run_clust_QL_evt.sh mc` (the 10-event shared mabc.zip, 70 files).
 
 ---
 
