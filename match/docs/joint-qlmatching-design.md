@@ -142,14 +142,18 @@ bit-identical, the remaining work turns the per-APA loop into a true joint solve
 To study and hand-correct the matching ahead of the joint algorithm, `QLMatching`
 has an observation-only **`calib_dump`** mode (config string, default `""` ⇒ off,
 production bit-identical). When set, after all per-APA runs complete it writes one
-per-event JSON holding the **full candidate-bundle universe across both TPCs** —
-`run.all_bundles` (every (flash, cluster-group) pair ever created, with final
-per-bundle `pred_flash`/`ks`/`chi2`/`ndf`/`strength`/flags), plus the per-flash
-measured light, the cluster geometry, the per-TPC detector box, and a ±80 ns
-flash-coincidence `group` id (replicating `store_flash_groups`). `all_bundles` is
-only ever appended to and never pruned, so it is the right dump source: no
-mid-pipeline snapshot, no perturbation. `dump_calib()` reads finished state and
-writes via `WireCell::Persist::dump`; with the flag off it is never called.
+per-event JSON holding the **TPC-contained candidate bundles across both TPCs** —
+`run.all_bundles` filtered to `get_contained()` (every (flash, cluster-group) pair
+whose cluster stays in the box after the T0 x-shift, with final per-bundle
+`pred_flash`/`ks`/`chi2`/`ndf`/`strength`/flags), plus the per-flash measured light,
+the cluster geometry, the per-TPC detector box, and a ±80 ns flash-coincidence
+`group` id (replicating `store_flash_groups`). Uncontained bundles carry zeroed
+metrics / zero `pred_flash` and are never `auto_selected` (require_containment drops
+them before the fit), so skipping them in the dump loses no matcher decision and
+declutters the hand-scan (e.g. evt2 222→68 bundles). `all_bundles` is only ever
+appended to and never pruned, so it is the right dump source: no mid-pipeline
+snapshot, no perturbation. `dump_calib()` reads finished state and writes via
+`WireCell::Persist::dump`; with the flag off it is never called.
 
 This feeds the off-line Bokeh hand-scan event display
 (`sbnd_xin/ql_scan/`, doc `sbnd_xin/docs/ql-scan-display.md`), where a human picks

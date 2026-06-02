@@ -1217,8 +1217,13 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         for (const auto& kv : run.flash_bundles_map)
             for (const auto& b : kv.second) selected.insert(b.get());
 
-        // The full candidate universe: every bundle ever created for this APA.
+        // The candidate universe, restricted to TPC-contained bundles: an
+        // uncontained bundle (cluster outside the box after the T0 x-shift)
+        // carries zeroed metrics and a zero pred_flash, so it only clutters the
+        // hand-scan. None are ever auto_selected (require_containment drops them
+        // before the fit), so skipping them here loses no matcher decision.
         for (const auto& b : run.all_bundles) {
+            if (!b->get_contained()) continue;
             auto* fl = b->get_flash();
             Json::Value jb;
             jb["apa"]          = apa;
