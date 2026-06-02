@@ -122,6 +122,12 @@ function(params) {
             // (= 3428-24 .. window end).
             window_edge_ticks: 24,
             readout_window_ticks: 3428,
+            // Discard any (flash, cluster) bundle whose cluster is not contained
+            // in the TPC drift box once the flash T0 x-offset is applied — the
+            // prototype flag_good_bundle gate (ToyMatching.cxx 272-275). See the
+            // 4-part in-window guard in compute_endpoint_flags (match/docs
+            // qlmatching-code.md §4.1a). Default OFF in C++; enabled here for SBND.
+            require_containment: true,
         },
     }, nin=1, nout=1),
 }

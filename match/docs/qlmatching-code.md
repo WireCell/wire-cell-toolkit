@@ -101,6 +101,7 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `cathode_ext2` | `-2.0 cm` | `m_cathode_ext2` | cathode flag-window inner edge (x-boundary) |
 | `window_edge_ticks` | `4` (SBND: **24**) | `m_window_edge_ticks` | raw-tick edge band for `window_truncated`; SBND jsonnet sets 24 |
 | `readout_window_ticks` | `3427` (SBND: **3428**) | `m_readout_window_ticks` | exclusive readout end for the trailing-edge truncation test; SBND jsonnet sets 3428 (rebin-4 `slice_index_max`) |
+| `require_containment` | `false` (SBND: **true**) | `m_require_containment` | when true, discard bundles whose cluster fails the TPC-box containment guard (prototype `flag_good_bundle`); see §4.1a. Default OFF keeps non-SBND configs bit-identical |
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
 `flash_minPE: 50` (not 500), `QtoL: 1.0` (not 0.5), `data` from `reality`,
@@ -176,10 +177,18 @@ poking past the boundary, so the flag tests fire on the real track end. If almos
 no blobs lie strictly outside, the end **snaps** exactly to `0` (anode) /
 `u_cathode` (cathode).
 
-**Guard (`:1080-1083`).** Flags are only set if the trimmed endpoints sit
+**Guard / TPC-box containment.** Flags are only set if the trimmed endpoints sit
 sensibly inside the TPC: `first_u > anode_in − 1cm`, `0 < last_u < cathode_in`,
 `first_u < u_cathode`, where `anode_in = m_anode_ext1 = −2cm` and
-`cathode_in = u_cathode + m_cathode_ext1 = u_cathode + 1.2cm`.
+`cathode_in = u_cathode + m_cathode_ext1 = u_cathode + 1.2cm`. This 4-part test is
+exactly the prototype's `flag_good_bundle` / TPC-containment gate
+(`ToyMatching.cxx` 272-275); `compute_endpoint_flags` **returns** it. When
+`require_containment` is true (SBND default), the build loop **discards** any
+bundle for which it is false — i.e. the cluster, after the flash T0 x-offset, is
+not contained in the drift box — before the predicted-light loop, so the bundle
+never competes in matching. A cluster with no 3d points under this anode also
+returns false (it cannot be contained) and is discarded. Default OFF leaves
+non-SBND configs bit-identical (no `continue` is ever taken).
 
 - **`flag_close_to_PMT` — anode end only (`:1087-1090`).** Set true when the
   trimmed anode end `first_u ∈ (anode_in − 1cm, m_anode_ext2] = (−3cm, +4cm]`.

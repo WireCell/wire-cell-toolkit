@@ -113,6 +113,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_readout_window_ticks = get(cfg, "readout_window_ticks", m_readout_window_ticks);
     m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
 
+    m_require_containment  = get(cfg, "require_containment",  m_require_containment);
+
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
         for (const auto& v : cfg["VUVEfficiency"]) m_VUVEfficiency.push_back(v.asDouble());
@@ -220,6 +222,7 @@ WireCell::Configuration QLMatching::default_configuration() const
 
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
+    cfg["require_containment"]  = m_require_containment;
     return cfg;
 }
 
@@ -468,8 +471,15 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             for (auto* oc : others) bundle->add_other_cluster(oc);
 
             // Fill the boundary flags (close-to-PMT / at-x-boundary / spec-end)
-            // from the main cluster's drift endpoints (the group anchor).
-            compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, s, anode_x, u_cathode);
+            // from the main cluster's drift endpoints (the group anchor). The
+            // return is the prototype flag_good_bundle / TPC-containment verdict.
+            const bool contained =
+                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, s, anode_x, u_cathode);
+            // Discard bundles whose cluster is not contained in the TPC box once
+            // the flash T0 x-offset is applied (prototype: delete !flag_good_bundle).
+            // Skips the predicted-light loop / examine_bundle / pre_bundles below,
+            // so the bundle never competes in matching. Off by default.
+            if (m_require_containment && !contained) continue;
 
             const std::size_t nopdets = flash->get_num_channels();
             std::vector<double> pred_flash(nopdets, 0.0);
@@ -883,6 +893,21 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                        global_cluster_idx_map[bundle->get_main_cluster()],
                        bundle->get_total_pred_light(),
                        bundle->get_main_cluster()->get_cluster_t0());
+            // Bundle boundary/quality flags for the matched anchor (main) cluster.
+            // The boundary flags are evaluated under THIS flash's t0 hypothesis
+            // (compute_endpoint_flags uses flash_x_offset); window_truncated is
+            // T0-independent (raw readout window). Debug-only; no behavior change.
+            log->debug("bundle_flags: flash id {} cluster ident {} gidx {} | "
+                       "at_x_boundary {} close_to_PMT {} spec_end {} "
+                       "window_truncated {} high_consistent {}",
+                       flash->get_flash_id(),
+                       bundle->get_main_cluster()->ident(),
+                       global_cluster_idx_map[bundle->get_main_cluster()],
+                       bundle->get_flag_at_x_boundary(),
+                       bundle->get_flag_close_to_PMT(),
+                       bundle->get_spec_end_flag(),
+                       bundle->get_flag_window_truncated(),
+                       bundle->get_consistent_flag());
         }
     }
 
@@ -943,7 +968,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 }
 
 // ----- boundary-flag filling (port of ToyMatching.cxx::calculate_pred_pe ~176-290) -----
-void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
+bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                                         Cluster* cluster,
                                         double flash_x_offset,
                                         double s, double anode_x, double u_cathode) const
@@ -957,7 +982,7 @@ void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     // time and u are monotonic, and the boundary tests are themselves in u.
     const auto& tbm = cluster->time_blob_map();
     auto ait = tbm.find(static_cast<int>(m_anode->ident()));
-    if (ait == tbm.end()) return;
+    if (ait == tbm.end()) return false;  // no blobs under this anode: cannot be contained
 
     // Raw readout-window truncation flag (T0-independent, APA-agnostic). The
     // blob slice indices are raw ticks (SamplingHelpers writes slice_index =
@@ -1000,7 +1025,7 @@ void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
             sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()) });
         }
     }
-    if (sv.empty()) return;
+    if (sv.empty()) return false;  // no 3d points here: cannot be contained
 
     std::sort(sv.begin(), sv.end(),
               [](const SliceU& a, const SliceU& b) { return a.u < b.u; });
@@ -1062,10 +1087,16 @@ void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     }
 
     // ---- flag block (prototype 272-290), guarded by the in-window check ----
-    if (first_u > anode_in - 1.0 * units::cm &&
+    // This guard is the prototype's flag_good_bundle / TPC-containment gate
+    // (ToyMatching.cxx 272-275): the (post-trim) endpoints must lie inside the
+    // TPC drift box. Its value is returned so the caller can discard uncontained
+    // bundles when m_require_containment.
+    const bool contained =
+        first_u > anode_in - 1.0 * units::cm &&
         last_u  > 0.0 &&
         last_u  < cathode_in &&
-        first_u < u_cathode) {
+        first_u < u_cathode;
+    if (contained) {
         bundle->set_spec_end_flag(flag_spec_end);
         // Anode end inside the flag window => close to the PMTs (which sit at the
         // anode plane) and at the x-boundary.
@@ -1078,6 +1109,7 @@ void QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
             bundle->set_flag_at_x_boundary(true);
         }
     }
+    return contained;
 }
 
 // ----- bundle map maintenance -----

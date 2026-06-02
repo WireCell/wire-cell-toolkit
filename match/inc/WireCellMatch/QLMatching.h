@@ -145,6 +145,13 @@ namespace WireCell::Match {
         int m_readout_window_ticks{3427};  // window end in raw ticks (SBND daq.nticks)
         int m_window_edge_ticks{4};        // edge-proximity threshold (~one slice = nticks_live_slice)
 
+        // When true, discard any (flash, cluster) bundle whose cluster is not
+        // contained in the TPC drift box once the flash-derived T0 x-offset is
+        // applied (the prototype flag_good_bundle gate, ToyMatching.cxx 272-275).
+        // Default OFF so existing production configs stay bit-identical; SBND
+        // jsonnet sets require_containment: true.
+        bool m_require_containment{false};
+
         // Default SBND VUV/VIS efficiency arrays, indexed by OpDet (312 entries).
         // Configuration "VUVEfficiency"/"VISEfficiency" arrays override these.
         std::vector<double> m_VUVEfficiency{
@@ -178,7 +185,13 @@ namespace WireCell::Match {
         // Ports the MicroBooNE prototype end-trimming walk (ToyMatching.cxx
         // ~176-290) into the per-TPC drift coordinate u. s/anode_x/u_cathode are
         // the geometry scalars computed once per anode in operator().
-        void compute_endpoint_flags(TimingTPCBundle* bundle,
+        //
+        // Returns the prototype's flag_good_bundle / TPC-containment verdict: true
+        // iff the (post-trim) cluster endpoints fall inside the TPC drift box (the
+        // 4-part in-window guard, == ToyMatching.cxx 272-275). Returns false when
+        // the cluster has no 3d points under this anode (it cannot be contained).
+        // The caller discards uncontained bundles when m_require_containment.
+        bool compute_endpoint_flags(TimingTPCBundle* bundle,
                                     WireCell::Clus::Facade::Cluster* cluster,
                                     double flash_x_offset,
                                     double s, double anode_x, double u_cathode) const;
