@@ -6,7 +6,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/IFiducial.h"
-#include "WireCellIface/ITensorSetFilter.h"
+#include "WireCellIface/ITensorSetFanin.h"
 
 #include "WireCellMatch/SemiAnalyticalModel.h"
 #include "WireCellMatch/TimingTPCBundle.h"
@@ -35,13 +35,18 @@ namespace WireCell::Match {
     /// "flash" scalar (matched flash row index) set from the matched flash, so
     /// Clus::Facade::Cluster::get_flash() reflects the match.
     class QLMatching : public Aux::Logger,
-                       public ITensorSetFilter,
+                       public ITensorSetFanin,
                        public IConfigurable {
     public:
         QLMatching();
         virtual ~QLMatching();
 
-        bool operator()(const input_pointer& in, output_pointer& out) override;
+        // Fanin: one input port per anode (multiplicity = #anodes). The
+        // single-anode default (multiplicity 1) wires and behaves exactly as the
+        // historical single-input filter; a multi-anode list matches both APAs in
+        // one node and merges the results (see operator()).
+        std::vector<std::string> input_types() override;
+        bool operator()(const input_vector& invec, output_pointer& out) override;
 
         void configure(const WireCell::Configuration& cfg) override;
         WireCell::Configuration default_configuration() const override;
@@ -165,6 +170,17 @@ namespace WireCell::Match {
         };
 
         IAnodePlane::pointer m_anode{nullptr};
+        // Anodes this node matches. The single-anode path (config "anode") yields
+        // one entry and multiplicity 1, so the node has one input port and behaves
+        // exactly as the historical single-input matcher. A list (config "anodes")
+        // enables the joint multi-APA path: one input port per anode, each matched
+        // independently in its own ApaRun, then the trees are merged.
+        std::vector<IAnodePlane::pointer> m_anodes;
+        std::size_t m_multiplicity{1};
+        // Root-node local PCs concatenated across inputs when merging the per-APA
+        // trees (multi-APA path only); mirrors PointTreeMerging. ['opflash'] = the
+        // optical-flash display PC; everything else is dropped from non-primary roots.
+        std::set<std::string> m_root_pcs_to_merge{"opflash"};
         IDetectorVolumes::pointer m_dv;
 
         // Optional SBND CPA structure-exclusion fiducial volume. When set (the
@@ -212,7 +228,8 @@ namespace WireCell::Match {
         bool compute_endpoint_flags(TimingTPCBundle* bundle,
                                     WireCell::Clus::Facade::Cluster* cluster,
                                     double flash_x_offset,
-                                    double s, double anode_x, double u_cathode) const;
+                                    double s, double anode_x, double u_cathode,
+                                    int anode_ident) const;
 
         // Significant extreme points of a cluster (get_extreme_wcps, flattened),
         // memoized in m_extreme_cache. Used to locate the cathode endpoint.

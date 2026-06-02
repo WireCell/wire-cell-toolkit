@@ -51,14 +51,10 @@ function(params) {
         },
     }, nin=2, nout=1),
 
-    // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
-    // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
-    // graph, here we only reference it by type:name.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial=''):: g.pnode({
-        type: 'QLMatching',
-        name: 'matching%d' % n,
-        data: {
-            anode: wc.tn(anode),
+    // Common QLMatching `data` block (everything except the anode binding).
+    // Single source of truth so the per-APA matching() and the joint
+    // matching_joint() below cannot drift apart when these knobs are retuned.
+    local match_data(dv, reality, semimodel_file, cathode_fiducial) = {
             detector_volumes: wc.tn(dv),
             // CPA structure-exclusion fiducial tn (cfg/.../cathode_fiducial.jsonnet);
             // '' => disabled, cathode-end flag_at_x_boundary uses the flat-cathode
@@ -150,6 +146,35 @@ function(params) {
             // 4-part in-window guard in compute_endpoint_flags (match/docs
             // qlmatching-code.md §4.1a). Default OFF in C++; enabled here for SBND.
             require_containment: true,
-        },
+    },
+
+    // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
+    // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
+    // graph, here we only reference it by type:name.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial=''):: g.pnode({
+        type: 'QLMatching',
+        name: 'matching%d' % n,
+        data: { anode: wc.tn(anode) } + match_data(dv, reality, semimodel_file, cathode_fiducial),
     }, nin=1, nout=1),
+
+    // Joint multi-APA charge-light matching: ONE QLMatching node with one input
+    // port per anode (multiplicity = #anodes).  It matches each APA independently
+    // in its own isolated run (bit-identical to the per-APA matching() result) and
+    // then merges the per-APA cluster trees into one output, reproducing the
+    // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
+    // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
+    // matching(); adds the anodes list and the opflash root-PC concatenation.
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial=''):: g.pnode({
+        type: 'QLMatching',
+        name: 'matching_joint',
+        data: {
+            anodes: [wc.tn(a) for a in anodes],
+            // Concatenate the per-APA optical-flash display PC into the merged
+            // grouping (mirrors clus_all_apa PointTreeMerging.root_pcs_to_merge).
+            root_pcs_to_merge: ['opflash'],
+        } + match_data(dv, reality, semimodel_file, cathode_fiducial),
+        // The all-anode DetectorVolumes is referenced only here (the per-APA path's
+        // clustering pulls in the per-APA DVs; this all-anode one would otherwise be
+        // dangling), so declare it as a dependency to get it into the job config.
+    }, nin=std.length(anodes), nout=1, uses=[dv]),
 }

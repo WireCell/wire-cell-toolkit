@@ -226,7 +226,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
     ret:: g.pipeline([cluster2pct, end], 'clus_per_face-%s-%d' % [anode.name, face]),
 }.ret;
 
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null) = {
+// premerged=true: the upstream node (joint QLMatching) has already merged the
+// per-APA cluster trees into one, so skip the PointTreeMerging fanin and feed the
+// single pre-merged input straight to the all-APA MABC.  Default false = the
+// historical per-APA path (two QLMatching nodes -> PointTreeMerging -> MABC).
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -338,7 +342,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         },
     }, nin=1, nout=0),
     local end = if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
-    ret:: g.intern(
+    // premerged: input is already one merged tree (joint QLMatching) -> feed MABC
+    // directly, no PointTreeMerging.  Else: fan the per-APA inputs into pcmerging.
+    ret:: if premerged then end else g.intern(
         innodes=[pcmerging],
         centernodes=[],
         outnodes=[end],
@@ -363,9 +369,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0) {
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink),
-    all_apa(anodes, dump=true, bee_sink=null)::
+    all_apa(anodes, dump=true, bee_sink=null, premerged=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                     bee_sink=bee_sink),
+                     bee_sink=bee_sink, premerged=premerged),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face),
 }

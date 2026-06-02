@@ -9,16 +9,18 @@
 #include "WireCellUtil/ExecMon.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Persist.h"
+#include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Ress.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/Units.h"
 
 #include <algorithm>
+#include <set>
 
 WIRECELL_FACTORY(QLMatching,
                  WireCell::Match::QLMatching,
                  WireCell::INamed,
-                 WireCell::ITensorSetFilter,
+                 WireCell::ITensorSetFanin,
                  WireCell::IConfigurable)
 
 using namespace WireCell;
@@ -31,12 +33,88 @@ using namespace WireCell::Clus::Facade;
 // realistic per-APA flash count.
 namespace { constexpr int kFlashGidStride = 1000000; }
 
+// ---- Per-APA tree merge (multi-APA path) ----
+// Verbatim port of clus/src/PointTreeMerging.cxx so the joint (fanin) path
+// reproduces, byte-for-byte, the standalone PointTreeMerging it replaces: align
+// local-PC keys across all nodes of the merged tree, and concatenate the opted-in
+// root PCs + take the children of each source tree into the primary (input[0]).
+namespace {
+    using WireCell::PointCloud::Tree::Points;
+
+    size_t normalize_pctree_local_pcs(Points::node_t* root)
+    {
+        if (!root) return 0;
+        std::vector<Points::node_t*> nodes;
+        for (auto& noderef : root->depth()) nodes.push_back(&noderef);
+
+        std::map<std::string, std::map<std::string, WireCell::PointCloud::Array>> templates;
+        for (const auto* node : nodes) {
+            for (const auto& [pcname, ds] : node->value.local_pcs()) {
+                auto& pc_templates = templates[pcname];
+                for (const auto& key : ds.keys()) {
+                    if (pc_templates.count(key)) continue;
+                    pc_templates.emplace(key, *ds.get(key));
+                }
+            }
+        }
+        size_t nadded = 0;
+        for (auto* node : nodes) {
+            for (auto& [pcname, ds] : node->value.local_pcs()) {
+                const auto it = templates.find(pcname);
+                if (it == templates.end()) continue;
+                for (const auto& [key, arr_template] : it->second) {
+                    if (ds.has(key)) continue;
+                    ds.add(key, arr_template.zeros_like(ds.size_major()));
+                    ++nadded;
+                }
+            }
+        }
+        return nadded;
+    }
+
+    void merge_pct(Points::node_t* tgt, Points::node_t* src,
+                   const std::set<std::string>& root_pcs_to_merge)
+    {
+        if (!src) return;
+        // Merge selected root-node local PCs (concatenate across inputs). NOTE:
+        // local_pcs() returns a reference, so bind by reference or the merge is a
+        // silent no-op. Only names in root_pcs_to_merge are merged; everything else
+        // (flash/light/flashlight, per-anode ctpc_a*, ...) is dropped from the
+        // source roots, exactly as the standalone PointTreeMerging did.
+        auto& tgt_pc = tgt->value.local_pcs();
+        for (const auto& src_pc : src->value.local_pcs()) {
+            const auto& name = src_pc.first;
+            if (root_pcs_to_merge.find(name) == root_pcs_to_merge.end()) continue;
+            if (tgt_pc.find(name) == tgt_pc.end()) tgt_pc.emplace(name, src_pc.second);
+            else tgt_pc[name].append(src_pc.second);
+        }
+        bool notify_value = true;
+        tgt->take_children(*src, notify_value);
+    }
+}
+
 QLMatching::QLMatching() : Aux::Logger("QLMatching", "match") {}
 QLMatching::~QLMatching() = default;
 
 void QLMatching::configure(const WireCell::Configuration& cfg)
 {
-    m_anode = Factory::find_tn<IAnodePlane>(cfg["anode"].asString());
+    // Anodes: a list ("anodes") enables the joint multi-APA path (one input port
+    // per anode); the historical single "anode" yields one entry => multiplicity 1
+    // and the exact single-input behavior. m_anode keeps the first (back-compat).
+    m_anodes.clear();
+    if (cfg.isMember("anodes") && cfg["anodes"].isArray()) {
+        for (const auto& a : cfg["anodes"]) m_anodes.push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+    }
+    else {
+        m_anodes.push_back(Factory::find_tn<IAnodePlane>(cfg["anode"].asString()));
+    }
+    m_anode = m_anodes.front();
+    m_multiplicity = m_anodes.size();
+    if (cfg.isMember("root_pcs_to_merge") && cfg["root_pcs_to_merge"].isArray()) {
+        m_root_pcs_to_merge.clear();
+        for (const auto& jname : cfg["root_pcs_to_merge"]) m_root_pcs_to_merge.insert(jname.asString());
+    }
+
     m_dv    = Factory::find_tn<IDetectorVolumes>(cfg["detector_volumes"].asString());
 
     m_inpath        = get(cfg, "inpath", m_inpath);
@@ -236,71 +314,109 @@ WireCell::Configuration QLMatching::default_configuration() const
     return cfg;
 }
 
-bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
+std::vector<std::string> QLMatching::input_types()
+{
+    const std::string tname = std::string(typeid(input_type).name());
+    return std::vector<std::string>(m_multiplicity, tname);
+}
+
+bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
 {
     out = nullptr;
     using WireCell::Clus::Facade::float_t;
 
-    if (!in) {
+    if (invec.size() != m_multiplicity) {
+        raise<ValueError>("QLMatching: unexpected multiplicity got %d want %d",
+                          (int)invec.size(), (int)m_multiplicity);
+    }
+    // EOS: succeed when ALL inputs are EOS (nullptr); a partial EOS is an error.
+    std::size_t neos = 0;
+    for (const auto& in : invec) if (!in) ++neos;
+    if (neos == invec.size()) {
         log->debug("EOS at call {}", m_count++);
         return true;
     }
+    if (neos) raise<ValueError>("QLMatching: missing %d input tensors", (int)neos);
 
     ExecMon em("starting QLMatching");
 
     m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
 
-    // ---- Read inputs ----
-    const auto& charge_ts = in;
-    const int charge_ident = charge_ts->ident();
-    std::string inpath = m_inpath;
-    if (inpath.find("%") != std::string::npos) inpath = String::format(inpath, charge_ident);
+    // Match each APA's input independently in its own fresh, isolated ApaRun (one
+    // per input port). The per-APA masks, geometry and flash_gid stride are
+    // unchanged, and the isolation keeps the pointer-keyed map iteration
+    // deterministic across APAs. With multiplicity 1 this is exactly the
+    // historical single-input matcher.
+    std::vector<ApaRun> runs(invec.size());
+    for (std::size_t k = 0; k < invec.size(); ++k) {
+        ApaRun& run = runs[k];
+        run.anode        = m_anodes.at(k);
+        run.charge_ident = invec[k]->ident();
+        run.inpath       = m_inpath;
+        if (run.inpath.find("%") != std::string::npos)
+            run.inpath = String::format(run.inpath, run.charge_ident);
 
-    const auto& charge_tens = *charge_ts->tensors();
-    log->debug("charge_tens.size {}", charge_tens.size());
-    auto root_live = Aux::TensorDM::as_pctree(charge_tens, inpath + "/live");
-    if (!root_live) {
-        log->error("Failed to get point cloud tree from \"{}\"", inpath);
-        return false;
+        const auto& charge_tens = *invec[k]->tensors();
+        log->debug("charge_tens.size {}", charge_tens.size());
+        auto root_live = Aux::TensorDM::as_pctree(charge_tens, run.inpath + "/live");
+        if (!root_live) {
+            log->error("Failed to get point cloud tree from \"{}\"", run.inpath);
+            return false;
+        }
+        log->debug("Got live pctree with {} children", root_live->nchildren());
+        log->debug(em("got live pctree"));
+        run.root_live = std::move(root_live);
+        run.grouping  = run.root_live->value.facade<Grouping>();
+
+        run_one_apa(run);
+
+        if (!run.flashes.empty()) {
+            log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
+                       run.total_charge_blob / run.flashes.size(),
+                       run.total_charge_point / run.flashes.size(),
+                       run.total_charge_blob_all);
+        }
+        else {
+            log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
+                       0, 0, run.total_charge_blob_all);
+        }
     }
-    log->debug("Got live pctree with {} children", root_live->nchildren());
-    log->debug(em("got live pctree"));
 
-    // Per-APA run state. Each APA is processed in a fresh, isolated ApaRun so no
-    // cross-APA pointer ordering can perturb the pointer-keyed map iteration; the
-    // single-APA path here builds exactly one.
-    ApaRun run;
-    run.anode        = m_anode;
-    run.inpath       = inpath;
-    run.charge_ident = charge_ident;
-    run.root_live    = std::move(root_live);
-    run.grouping     = run.root_live->value.facade<Grouping>();
-
-    run_one_apa(run);
-
-    // ---- Build outputs ----
-    {
-        ITensor::vector outtens;
-        auto tens_live = Aux::TensorDM::as_tensors(*run.root_live, inpath + "/live");
+    // ---- Build / merge outputs ----
+    const int out_ident = runs.front().charge_ident;
+    ITensor::vector outtens;
+    if (runs.size() == 1) {
+        // Single-APA: the historical filter output verbatim (no merge/normalize).
+        ApaRun& run = runs.front();
+        auto tens_live = Aux::TensorDM::as_tensors(*run.root_live, run.inpath + "/live");
         outtens.insert(outtens.end(), tens_live.begin(), tens_live.end());
 
-        auto root_dead = Aux::TensorDM::as_pctree(charge_tens, inpath + "/dead");
-        auto tens_dead = Aux::TensorDM::as_tensors(*root_dead, inpath + "/dead");
+        auto root_dead = Aux::TensorDM::as_pctree(*invec[0]->tensors(), run.inpath + "/dead");
+        auto tens_dead = Aux::TensorDM::as_tensors(*root_dead, run.inpath + "/dead");
         outtens.insert(outtens.end(), tens_dead.begin(), tens_dead.end());
-
-        out = Aux::TensorDM::as_tensorset(outtens, charge_ident);
-    }
-
-    if (!run.flashes.empty()) {
-        log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
-                   run.total_charge_blob / run.flashes.size(),
-                   run.total_charge_point / run.flashes.size(),
-                   run.total_charge_blob_all);
     }
     else {
-        log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
-                   0, 0, run.total_charge_blob_all);
+        // Multi-APA: reproduce the standalone PointTreeMerging it replaces. Primary
+        // = input[0]; concatenate the opted-in root PCs (opflash), take_children
+        // from each source tree, then normalize the merged-tree local-PC keys.
+        auto* root_live = runs.front().root_live.get();
+        auto root_dead = Aux::TensorDM::as_pctree(*invec[0]->tensors(), runs.front().inpath + "/dead");
+        for (std::size_t k = 1; k < runs.size(); ++k) {
+            auto src_dead = Aux::TensorDM::as_pctree(*invec[k]->tensors(), runs[k].inpath + "/dead");
+            merge_pct(root_live, runs[k].root_live.get(), m_root_pcs_to_merge);
+            merge_pct(root_dead.get(), src_dead.get(), m_root_pcs_to_merge);
+        }
+        normalize_pctree_local_pcs(root_live);
+        normalize_pctree_local_pcs(root_dead.get());
+
+        std::string outpath = m_outpath;
+        if (outpath.find("%") != std::string::npos) outpath = String::format(outpath, out_ident);
+        auto tens_live = Aux::TensorDM::as_tensors(*root_live, outpath + "/live");
+        auto tens_dead = Aux::TensorDM::as_tensors(*root_dead, outpath + "/dead");
+        outtens.insert(outtens.end(), tens_live.begin(), tens_live.end());
+        outtens.insert(outtens.end(), tens_dead.begin(), tens_dead.end());
     }
+    out = Aux::TensorDM::as_tensorset(outtens, out_ident);
 
     ++m_count;
     return true;
@@ -544,7 +660,8 @@ void QLMatching::build_bundles(ApaRun& run)
             // from the main cluster's drift endpoints (the group anchor). The
             // return is the prototype flag_good_bundle / TPC-containment verdict.
             const bool contained =
-                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode);
+                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode,
+                                       static_cast<int>(run.anode->ident()));
             // Discard bundles whose cluster is not contained in the TPC box once
             // the flash T0 x-offset is applied. Off by default.
             if (m_require_containment && !contained) continue;
@@ -1000,7 +1117,8 @@ QLMatching::cluster_extreme_points(Cluster* cluster) const
 bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                                         Cluster* cluster,
                                         double flash_x_offset,
-                                        double s, double anode_x, double u_cathode) const
+                                        double s, double anode_x, double u_cathode,
+                                        int anode_ident) const
 {
     // Collect the per-time-slice representative drift coordinate u and blob
     // count. The toolkit's time_blob_map is nested apa->face->time->BlobSet; the
@@ -1010,7 +1128,7 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     // strict time order is a faithful adaptation: for a normally drifting track
     // time and u are monotonic, and the boundary tests are themselves in u.
     const auto& tbm = cluster->time_blob_map();
-    auto ait = tbm.find(static_cast<int>(m_anode->ident()));
+    auto ait = tbm.find(anode_ident);
     if (ait == tbm.end()) return false;  // no blobs under this anode: cannot be contained
 
     // Raw readout-window truncation flag (T0-independent, APA-agnostic). The
