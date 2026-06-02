@@ -786,9 +786,11 @@ recovery. The toolkit's `organize_bundles` only merges (§4.1) and then *removes
 
 Per-bundle quality (§3) is two numbers: the χ² and the KS shape distance. The channel **mask**
 (`opdet_mask` — built from opdet type, `ch_mask`, the opposite-TPC side, and the per-flash
-`mc_saturation` bit; §12.1) is applied consistently to the χ² and the LASSO fit, **but not to the
-KS**. This subsection records how masked detectors enter the KS in each codebase, and the small piece
-of KS arithmetic that makes the `mc_saturation` case harmless but the geometry/`ch_mask` case not.
+`mc_saturation` bit; §12.1) is applied consistently to the χ² and the LASSO fit, and **historically
+not to the KS** — an asymmetry now closed behind the `bundle_mask_ks` toggle (see **Fix** below). This
+subsection records how masked detectors enter the KS in each codebase, the small piece of KS
+arithmetic that makes the `mc_saturation` case harmless but the geometry/`ch_mask` case not, and the
+fix. The description below is of the **OFF** (legacy) behaviour.
 
 **Does a `(measured = 0, predicted = 0)` channel change the KS?** No — it is **identical to dropping
 it**. The KS here is the maximum absolute difference of the two normalised cumulative distributions
@@ -821,10 +823,16 @@ is done by **zeroing the prediction** — `norm_factor[17]=0` for the dead PMT (
 and the type-1 cosmic veto (`FlashTPCBundle.cxx:461-464`) — and the dead PMT's measured PE is ~0 too,
 so its bin is `(0, 0)` and drops out of the KS cleanly.
 
-**Port note.** If the SBND opposite-TPC channels carry appreciable measured light, the toolkit KS
-should gate on `opdet_mask` in the same loop as the χ² (skip masked channels before building
-`measured_dist`/`predicted_dist`). This is a behaviour change → jsonnet-togglable, default OFF, so
-existing outputs stay bit-identical until validated.
+**Fix (implemented).** The toolkit KS now gates on `opdet_mask`, matching the χ²/LASSO paths. In both
+`examine_bundle` overloads (`TimingTPCBundle.cxx:68-114`, `:156-202`) the loop that builds
+`measured_dist`/`predicted_dist` zeroes a masked channel's measured PE (the prediction is already 0
+there), so it becomes `(0, 0)` and — by the arithmetic above — drops out of the KS, exactly as if it
+had been skipped. Following the codebase convention this is a behaviour change behind a knob,
+`bundle_mask_ks` (struct `BundleQualityParams::mask_ks`), **C++ default OFF** so every other config
+stays bit-identical, and set **`true` for SBND** in `cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet`
+(mirrors the `require_containment` precedent). Toggling it OFF recovers the old (asymmetric) KS for
+A/B comparison; the magnitude of the change depends on how much real PE the masked channels actually
+carry, which the toggle is there to let you measure.
 
 ## 13. Light prediction: charge → predicted PE per channel
 

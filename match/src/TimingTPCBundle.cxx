@@ -85,10 +85,16 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
     double total_predicted = 0;
     double total_measured  = 0;
     for (int j = 0; j < m_nchan; ++j) {
-        measured_dist[j]  = pe[j];
-        predicted_dist[j] = pred_pe[j];
-        total_predicted  += pred_pe[j];
-        total_measured   += pe[j];
+        // Optionally mask the KS shape metric on the same channels the chi2/LASSO
+        // paths drop. The prediction is already 0 on masked channels, so this just
+        // zeroes the measured side too: a masked channel becomes (0,0) and is
+        // invisible to KS (no contribution to either CDF nor the normalisation).
+        const double m = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pe[j];
+        const double p = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pred_pe[j];
+        measured_dist[j]  = m;
+        predicted_dist[j] = p;
+        total_predicted  += p;
+        total_measured   += m;
     }
     if (total_predicted > 0) {
         for (int j = 0; j < m_nchan; ++j) predicted_dist[j] /= total_predicted;
@@ -170,10 +176,14 @@ bool TimingTPCBundle::examine_bundle()
     double total_predicted = 0;
     double total_measured  = 0;
     for (int j = 0; j < m_nchan; ++j) {
-        measured_dist[j]  = pe[j];
-        predicted_dist[j] = pred_pe[j];
-        total_predicted  += pred_pe[j];
-        total_measured   += pe[j];
+        // See examine_bundle(candidate): optionally mask the KS metric so masked
+        // channels become (0,0) and drop out, consistent with chi2/LASSO.
+        const double m = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pe[j];
+        const double p = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pred_pe[j];
+        measured_dist[j]  = m;
+        predicted_dist[j] = p;
+        total_predicted  += p;
+        total_measured   += m;
     }
     if (total_predicted > 0) {
         for (int j = 0; j < m_nchan; ++j) predicted_dist[j] /= total_predicted;

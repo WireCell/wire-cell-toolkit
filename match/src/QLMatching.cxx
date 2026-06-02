@@ -109,6 +109,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_highconsist_ks_max       = get(cfg, "highconsist_ks_max",       m_highconsist_ks_max);
     m_highconsist_min_ndf      = get(cfg, "highconsist_min_ndf",      m_highconsist_min_ndf);
     m_bundle_pe_ndf_knee       = get(cfg, "bundle_pe_ndf_knee",       m_bundle_pe_ndf_knee);
+    m_bundle_mask_ks           = get(cfg, "bundle_mask_ks",           m_bundle_mask_ks);
 
     m_readout_window_ticks = get(cfg, "readout_window_ticks", m_readout_window_ticks);
     m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
@@ -226,6 +227,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["highconsist_ks_max"]       = m_highconsist_ks_max;
     cfg["highconsist_min_ndf"]      = m_highconsist_min_ndf;
     cfg["bundle_pe_ndf_knee"]       = m_bundle_pe_ndf_knee;
+    cfg["bundle_mask_ks"]           = m_bundle_mask_ks;
 
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
@@ -434,7 +436,8 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     // Bundle-quality thresholds forwarded to every TimingTPCBundle below.
     const BundleQualityParams qp{
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
-        m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee};
+        m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee,
+        m_bundle_mask_ks};
 
     // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
     // sits on the low / high side of the cathode plane. Position-based, matching

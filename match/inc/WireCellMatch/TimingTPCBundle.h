@@ -24,6 +24,9 @@ namespace WireCell::Match {
         double highconsist_ks_max = 0.06; // max KS for the "high-consistent" flag
         int    highconsist_min_ndf = 3;   // min ndf for the "high-consistent" flag
         double pe_ndf_knee = 1.0;         // per-opdet PE level below which ndf is not counted
+        bool   mask_ks = false;           // also apply opdet_mask to the KS shape metric
+                                          // (the chi2/LASSO paths always mask). Default OFF
+                                          // so existing configs are bit-identical; SBND-on.
     };
 
     class TimingTPCBundle {

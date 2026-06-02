@@ -138,6 +138,7 @@ namespace WireCell::Match {
         double m_highconsist_ks_max{0.06};
         int    m_highconsist_min_ndf{3};
         double m_bundle_pe_ndf_knee{1.0};
+        bool   m_bundle_mask_ks{false};  // apply opdet_mask to the KS shape metric too
 
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time

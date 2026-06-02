@@ -116,6 +116,12 @@ function(params) {
             highconsist_ks_max: 0.06,
             highconsist_min_ndf: 3,
             bundle_pe_ndf_knee: 1.0,
+            // Apply ch_mask / per-TPC / saturation masking to the KS shape metric
+            // too (the chi2 and LASSO paths already mask). Without this, masked
+            // channels keep their raw measured PE in the KS while the prediction is
+            // 0 there, distorting the shape comparison (worst for the per-TPC mask,
+            // whose opposite-TPC PMTs carry real PE). C++ default OFF; SBND-on.
+            bundle_mask_ks: true,
             // §H raw readout-window truncation flag is always computed by
             // QLMatching (T0-independent, APA-agnostic) and is currently inert
             // (no consumer). edge threshold = 24 ticks (6 live slices, rebin 4).
