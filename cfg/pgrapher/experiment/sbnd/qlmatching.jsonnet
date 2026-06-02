@@ -23,8 +23,13 @@ local wc = import 'wirecell.jsonnet';
 function(params) {
     // --- SBND matching constants (matching-only) ---
     local nchan = 312,
-    local ch_mask = [39, 64, 66, 71, 85, 86, 87, 115, 138, 141, 197, 217, 221,
-                     222, 223, 226, 245, 249, 302],
+    // Dead PMT channels excluded from matching.  67/92/170/218/248 added after the
+    // sbnd_xin saturation-PE study (sbnd_xin/docs/saturation-pe.md): they read 0 PE in
+    // 100% of flashes in BOTH data and MC but were previously unmasked, so they only got
+    // dropped in bright MC flashes by the (now-disabled) mc_saturation_pe gate.  Masking
+    // them here handles them consistently in both modes and at all flash brightnesses.
+    local ch_mask = [39, 64, 66, 67, 71, 85, 86, 87, 92, 115, 138, 141, 170, 197, 217,
+                     218, 221, 222, 223, 226, 245, 248, 249, 302],
 
     // Opflash archive reader for APA n.
     opflash_source(n):: g.pnode({
@@ -91,7 +96,13 @@ function(params) {
             y_cushion: 0.0*wc.cm,
             z_cushion: 0.0*wc.cm,
             // §D pre-selection / bad-match gates.
-            mc_saturation_pe: 5000,
+            // mc_saturation_pe DISABLED (set above any real flash PE).  The sbnd_xin
+            // saturation-PE study (sbnd_xin/docs/saturation-pe.md) found no genuine PMT
+            // saturation in MC: the zero-PE PMTs in bright flashes are dead channels
+            // (now in ch_mask above), identical in MC and data, not simulated saturation.
+            // The gate is MC-only, so it just introduced an MC/data asymmetry; retired.
+            // (C++ default stays 5000; set 1e12 here to keep the gate inert.)
+            mc_saturation_pe: 1e12,
             // §E out-of-beam QA cuts.
             outbeam_ks_max: 0.2,
             outbeam_chi2ndf_max: 20,
