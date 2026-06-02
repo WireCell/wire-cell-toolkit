@@ -231,6 +231,78 @@ namespace WireCell::Match {
             TimingTPCBundleSelection& results_bundles,
             std::map<std::pair<Opflash*, WireCell::Clus::Facade::Cluster*>,
                      TimingTPCBundle::pointer>& flash_cluster_bundles_map);
+
+        // ---- Per-APA run state (operator() refactor) ----
+        // Every container the matching pipeline threads between stages lives here,
+        // not as a QLMatching member, so each APA is processed in a fresh, isolated
+        // ApaRun. That isolation keeps the pointer-keyed map iteration deterministic
+        // when more than one APA is processed in one node (joint path): no cross-APA
+        // pointer ordering can leak in. operator() builds one ApaRun per input.
+        struct ApaRun {
+            // input / identity
+            IAnodePlane::pointer anode;
+            std::unique_ptr<WireCell::PointCloud::Tree::Points::node_t> root_live;
+            WireCell::Clus::Facade::Grouping* grouping{nullptr};
+            std::string inpath;
+            int charge_ident{0};
+
+            // optical-detector mask / kept-channel index
+            std::vector<unsigned int> opdet_mask;
+            std::vector<Opflash::pointer> flashes;
+            unsigned int nopdet{0};
+            std::vector<int> opdet_idx_v;
+
+            // per-TPC drift geometry (computed once per anode)
+            int sign_offset{1};
+            double s{1.0}, anode_x{0.0}, u_cathode{0.0};
+            double y_lo{0.0}, y_hi{0.0}, z_lo{0.0}, z_hi{0.0};
+
+            // cluster-group decomposition
+            std::vector<std::pair<WireCell::Clus::Facade::Cluster*,
+                                  std::vector<WireCell::Clus::Facade::Cluster*>>> match_groups;
+            std::vector<WireCell::Clus::Facade::Cluster*> clusters;
+            std::map<Opflash*, int> global_flash_idx_map;
+            std::map<WireCell::Clus::Facade::Cluster*, int> global_cluster_idx_map;
+
+            // bundles + the three lookup maps
+            std::vector<TimingTPCBundle::pointer> all_bundles;
+            TimingTPCBundleSet pre_bundles;
+            std::vector<TimingTPCBundle::pointer> consistent_bundles;
+            FlashBundlesMap flash_bundles_map;
+            ClusterBundlesMap cluster_bundles_map;
+            std::map<std::pair<Opflash*, WireCell::Clus::Facade::Cluster*>,
+                     TimingTPCBundle::pointer> flash_cluster_bundles_map;
+
+            BundleQualityParams qp;
+
+            // charge bookkeeping (debug only)
+            double total_charge_blob{0.0};
+            double total_charge_point{0.0};
+            double total_charge_blob_all{0.0};
+        };
+
+        // Run the full single-APA matching pipeline on one ApaRun.
+        void run_one_apa(ApaRun& run);
+
+        // Pipeline stages, extracted verbatim from the old operator().
+        void build_opdet_mask(ApaRun& run);          // base OpDet on/off mask
+        void read_flashes(ApaRun& run);              // canonical flash PCs -> Opflash
+        void decompose_cluster_groups(ApaRun& run);  // main+associated split, idx maps
+        void compute_geometry(ApaRun& run);          // per-TPC drift geometry, mask cull, opdet idx
+        void build_bundles(ApaRun& run);             // (flash,group) bundles + predicted light  [Stage 1]
+        void build_bundle_maps(ApaRun& run);         // flash/cluster/pair maps + deterministic sort
+        void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
+        void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
+        void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
+        void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
+        void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
+
+        // Deterministic iteration orders over the bundle maps (pointer-keyed maps
+        // would otherwise iterate in heap-address order). Static: no this-state.
+        static std::vector<Opflash*> flash_iter_order(const FlashBundlesMap& m);
+        static std::vector<WireCell::Clus::Facade::Cluster*>
+            cluster_iter_order(const ClusterBundlesMap& m,
+                               const std::map<WireCell::Clus::Facade::Cluster*, int>& idx);
     };
 
 } // namespace WireCell::Match

@@ -250,21 +250,6 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
 
     m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
 
-    // Per-channel OpDet on/off mask, derived from the injected OpDet table
-    // (SemiAnalyticalModel::OpticalDetector::type; 1 = dome PMT, 0 = (X)Arapuca)
-    // rather than a hard-coded SBND layout: channel i is on iff its type is in
-    // m_active_opdet_types (default {1} => PMTs only, reproducing the historical
-    // SBND mask). m_ch_mask then disables specific channels.
-    std::vector<unsigned int> opdet_mask(m_opdets.size(), 0);
-    if (m_pmts) {
-        for (std::size_t i = 0; i < m_opdets.size(); ++i) {
-            if (std::find(m_active_opdet_types.begin(), m_active_opdet_types.end(),
-                          m_opdets[i].type) != m_active_opdet_types.end())
-                opdet_mask[i] = 1;
-        }
-    }
-    for (std::size_t i = 0; i < m_ch_mask.size(); ++i) opdet_mask[m_ch_mask[i]] = 0;
-
     // ---- Read inputs ----
     const auto& charge_ts = in;
     const int charge_ident = charge_ts->ident();
@@ -281,55 +266,127 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     log->debug("Got live pctree with {} children", root_live->nchildren());
     log->debug(em("got live pctree"));
 
-    auto grouping = root_live->value.facade<Grouping>();
+    // Per-APA run state. Each APA is processed in a fresh, isolated ApaRun so no
+    // cross-APA pointer ordering can perturb the pointer-keyed map iteration; the
+    // single-APA path here builds exactly one.
+    ApaRun run;
+    run.anode        = m_anode;
+    run.inpath       = inpath;
+    run.charge_ident = charge_ident;
+    run.root_live    = std::move(root_live);
+    run.grouping     = run.root_live->value.facade<Grouping>();
 
-    // Flashes come from the canonical optical point clouds on the live root node
-    // (written by Aux::FlashTensorToOpticalPCs, the same schema as
-    // root/UbooneClusterSource) via the shared facade enumerator
-    // Grouping::flashes() — which owns the flashlight-join walk. Each flash is
-    // wrapped in an Opflash matching-adapter (time + dense per-channel PE, with
-    // the matching-specific PE_err/fired synthesized in Opflash).
+    run_one_apa(run);
+
+    // ---- Build outputs ----
+    {
+        ITensor::vector outtens;
+        auto tens_live = Aux::TensorDM::as_tensors(*run.root_live, inpath + "/live");
+        outtens.insert(outtens.end(), tens_live.begin(), tens_live.end());
+
+        auto root_dead = Aux::TensorDM::as_pctree(charge_tens, inpath + "/dead");
+        auto tens_dead = Aux::TensorDM::as_tensors(*root_dead, inpath + "/dead");
+        outtens.insert(outtens.end(), tens_dead.begin(), tens_dead.end());
+
+        out = Aux::TensorDM::as_tensorset(outtens, charge_ident);
+    }
+
+    if (!run.flashes.empty()) {
+        log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
+                   run.total_charge_blob / run.flashes.size(),
+                   run.total_charge_point / run.flashes.size(),
+                   run.total_charge_blob_all);
+    }
+    else {
+        log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
+                   0, 0, run.total_charge_blob_all);
+    }
+
+    ++m_count;
+    return true;
+}
+
+// ============================================================================
+// Per-APA matching pipeline. operator() builds one ApaRun (single-APA today)
+// and calls run_one_apa(); the stages below were lifted verbatim from the old
+// inline operator() body, reading config from the m_* members and threading all
+// per-run state through ApaRun.
+// ============================================================================
+
+void QLMatching::run_one_apa(ApaRun& run)
+{
+    build_opdet_mask(run);
+    read_flashes(run);
+    decompose_cluster_groups(run);
+    compute_geometry(run);
+    build_bundles(run);
+    build_bundle_maps(run);
+    cull_inconsistent(run);
+    fit_round1(run);
+    fit_round2(run);
+    apply_matched_t0s(run);
+    write_opflash_pc(run);
+}
+
+// Per-channel OpDet on/off mask, derived from the injected OpDet table
+// (SemiAnalyticalModel::OpticalDetector::type; 1 = dome PMT, 0 = (X)Arapuca)
+// rather than a hard-coded SBND layout: channel i is on iff its type is in
+// m_active_opdet_types (default {1} => PMTs only, reproducing the historical
+// SBND mask). m_ch_mask then disables specific channels.
+void QLMatching::build_opdet_mask(ApaRun& run)
+{
+    run.opdet_mask.assign(m_opdets.size(), 0);
+    if (m_pmts) {
+        for (std::size_t i = 0; i < m_opdets.size(); ++i) {
+            if (std::find(m_active_opdet_types.begin(), m_active_opdet_types.end(),
+                          m_opdets[i].type) != m_active_opdet_types.end())
+                run.opdet_mask[i] = 1;
+        }
+    }
+    for (std::size_t i = 0; i < m_ch_mask.size(); ++i) run.opdet_mask[m_ch_mask[i]] = 0;
+}
+
+// Flashes come from the canonical optical point clouds on the live root node
+// (written by Aux::FlashTensorToOpticalPCs) via the shared facade enumerator
+// Grouping::flashes(). Each flash is wrapped in an Opflash matching-adapter.
+void QLMatching::read_flashes(ApaRun& run)
+{
     const PEErr pe_err_model{m_pe_err_floor, m_pe_err_frac, m_pe_err_knee};
-    std::vector<Opflash::pointer> flashes;
-    for (const auto& ff : grouping->flashes()) {
+    for (const auto& ff : run.grouping->flashes()) {
         auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
-        flashes.push_back(flash);
+        run.flashes.push_back(flash);
     }
 
-    grouping->set_anodes({m_anode});
-    grouping->set_detector_volumes(m_dv);
+    run.grouping->set_anodes({run.anode});
+    run.grouping->set_detector_volumes(m_dv);
+}
 
-    // ---- Cluster-group decomposition (MicroBooNE-style main + associated) ----
-    // Per-APA clustering (examine_bundles) merges a group into a single Facade
-    // Cluster carrying the "isolated"/"perblob" per-blob array: blobs tagged -1
-    // are the main cluster, other ids are sub-clusters. Split each such group
-    // back into separate Facade Clusters via Grouping::separate() (negative ids
-    // stay in the original = main; each non-negative id becomes a new sibling =
-    // associated). Bundle building below then anchors on the main and attaches
-    // the others (predicted light summed over the whole group), and the
-    // separated clusters carry the matched flash into the all-APA stage.
-    // Clusters with no perblob array (e.g. configs not running the per-APA
-    // clustering tail) are left untouched: one main, no others.
+// Cluster-group decomposition (MicroBooNE-style main + associated). Per-APA
+// clustering (examine_bundles) merges a group into a single Facade Cluster
+// carrying the "isolated"/"perblob" per-blob array: blobs tagged -1 are the main
+// cluster, other ids are sub-clusters. Split each such group back into separate
+// Facade Clusters via Grouping::separate(); bundle building anchors on the main.
+void QLMatching::decompose_cluster_groups(ApaRun& run)
+{
+    auto* grouping = run.grouping;
+
     auto sort_by_length_then_id = [](const Cluster* a, const Cluster* b) {
         if (a->get_length() != b->get_length()) return a->get_length() > b->get_length();
         return a->get_cluster_id() < b->get_cluster_id();
     };
     // Snapshot the pre-split clusters (separate() appends new siblings; iterate a
     // copy). Sub-cluster idents are drawn from a counter seeded above every
-    // existing ident, so they are unique and collision-free with the mains --- a
-    // main*100+sub scheme could collide with another main's ident and break the
-    // length-sort tie-break (get_cluster_id) into pointer order. The counter
-    // advances in children() (tree/serialization) order, so it is build-stable.
+    // existing ident, so they are unique and collision-free with the mains. The
+    // counter advances in children() (tree/serialization) order, so it is build-stable.
     std::vector<Cluster*> original_clusters = grouping->children();
     int next_sub_ident = 0;
     for (auto* c : original_clusters) next_sub_ident = std::max(next_sub_ident, c->ident());
     ++next_sub_ident;
-    std::vector<std::pair<Cluster*, std::vector<Cluster*>>> match_groups;
     for (auto* cluster : original_clusters) {
         if (!cluster->has_pcarray("isolated", "perblob")) {
-            match_groups.emplace_back(cluster, std::vector<Cluster*>{});
+            run.match_groups.emplace_back(cluster, std::vector<Cluster*>{});
             continue;
         }
         auto cc_span = cluster->get_pcarray("isolated", "perblob");
@@ -338,7 +395,7 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
         std::set<int> subs;
         for (int v : cc) if (v >= 0) subs.insert(v);
         if (!has_main || subs.empty()) {   // single component -> nothing to split
-            match_groups.emplace_back(cluster, std::vector<Cluster*>{});
+            run.match_groups.emplace_back(cluster, std::vector<Cluster*>{});
             continue;
         }
         // separate(): groups with id<0 stay in `cluster` (the main), each id>=0
@@ -352,63 +409,49 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             nc->set_flag("associated_cluster");
             others.push_back(nc);
         }
-        match_groups.emplace_back(cluster, std::move(others));
+        run.match_groups.emplace_back(cluster, std::move(others));
     }
     // Deterministic match-unit order: by main length (desc), ident tie-break.
-    std::sort(match_groups.begin(), match_groups.end(),
+    std::sort(run.match_groups.begin(), run.match_groups.end(),
               [&](const auto& a, const auto& b) { return sort_by_length_then_id(a.first, b.first); });
 
     // All separated clusters (mains + associated): charge bookkeeping, scalar
-    // reset, and the global (debug/iteration) index. Sorted by length (desc)
-    // with a stable ident tie-break: std::sort is not stable, so equal lengths
-    // would otherwise order by container/pointer order, making the cluster
-    // indices below build-dependent. get_cluster_id() is the unique,
-    // serialization-stable ident assigned upstream / by the split above.
-    std::vector<Cluster*> clusters = grouping->children();
-    std::sort(clusters.begin(), clusters.end(), sort_by_length_then_id);
+    // reset, and the global (debug/iteration) index. Sorted by length (desc) with
+    // a stable ident tie-break (std::sort is not stable).
+    run.clusters = grouping->children();
+    std::sort(run.clusters.begin(), run.clusters.end(), sort_by_length_then_id);
 
-    double total_charge_blob = 0.0;
-    double total_charge_point = 0.0;
-    double total_charge_blob_all = 0.0;
-    for (auto cluster : clusters) {
-        for (auto blob : cluster->children()) total_charge_blob_all += blob->charge();
+    for (auto cluster : run.clusters) {
+        for (auto blob : cluster->children()) run.total_charge_blob_all += blob->charge();
     }
 
-    std::for_each(clusters.begin(), clusters.end(),
+    std::for_each(run.clusters.begin(), run.clusters.end(),
                   [](Cluster* c) {
                       c->set_cluster_t0(-1e12);
                       c->set_scalar<int>("flash", -1);
                       c->set_scalar<int>("matched_flash_gid", -1);
                       // Materialize the main/associated flag scalars on EVERY
                       // cluster so the cluster_scalar PC has uniform keys at
-                      // as_tensors() time (Dataset::append requires identical
-                      // keys across clusters).  The bundle-split loop above set
-                      // these to 1 on the chosen clusters; get_flag() returns
-                      // the current value (1) or 0 if unset, so this preserves
-                      // those and writes 0 on the rest -- no clobbering.
+                      // as_tensors() time. get_flag() returns the current value
+                      // (1 if the split set it) or 0 if unset -- no clobbering.
                       c->set_flag("main_cluster", c->get_flag("main_cluster"));
                       c->set_flag("associated_cluster", c->get_flag("associated_cluster"));
                   });
 
-    std::map<Opflash*, int>  global_flash_idx_map;
-    std::map<Cluster*, int>  global_cluster_idx_map;
-    for (std::size_t i = 0; i < flashes.size(); ++i) global_flash_idx_map[flashes[i].get()] = i;
-    for (std::size_t i = 0; i < clusters.size(); ++i) global_cluster_idx_map[clusters[i]] = i;
+    for (std::size_t i = 0; i < run.flashes.size(); ++i) run.global_flash_idx_map[run.flashes[i].get()] = i;
+    for (std::size_t i = 0; i < run.clusters.size(); ++i) run.global_cluster_idx_map[run.clusters[i]] = i;
+}
 
-    std::vector<TimingTPCBundle::pointer> all_bundles;
-    TimingTPCBundleSet pre_bundles;
+// Active-volume geometry from the IDetectorVolumes service, in a per-TPC drift
+// coordinate u = s*(x-anode_x) (u=0 at the anode, u=u_cathode at the cathode) so
+// the prototype's single-TPC inequalities port directly and both reversed-drift
+// SBND APAs share one set of cushions. Also reduces the OpDet mask to this TPC
+// and caches the kept-channel index used to size the LASSO matrices.
+void QLMatching::compute_geometry(ApaRun& run)
+{
+    const unsigned int tpc = run.anode->ident();
+    run.sign_offset  = (tpc == 0) ? -1 : 1;
 
-    const unsigned int tpc = m_anode->ident();
-    const int sign_offset  = (tpc == 0) ? -1 : 1;
-
-    // Active-volume geometry from the IDetectorVolumes service (replaces the old
-    // SBND-specific x/y/z literals). inner_bounds() is the per-face sensitive
-    // bounding box. The cathode is the bbox X corner nearest the cathode seam
-    // (m_cathode_x, the same x=0 reference the OpDet split uses); the anode/PMT
-    // plane is the far corner. We work in a per-TPC drift coordinate
-    //   u = s * (x - anode_x)   with   u=0 at the anode, u=u_cathode (>0) at the
-    // cathode, so the prototype's single-TPC inequalities port directly and the
-    // two reversed-drift SBND APAs share one set of cushions.
     const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, 0, static_cast<int>(tpc));
     const BoundingBox bb = m_dv->inner_bounds(wpid);
     if (bb.empty()) {
@@ -418,45 +461,59 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     const double x_lo = bray.first.x(), x_hi = bray.second.x();
     const bool lo_is_cathode = std::abs(x_lo - m_cathode_x) < std::abs(x_hi - m_cathode_x);
     const double cathode_x = lo_is_cathode ? x_lo : x_hi;
-    const double anode_x   = lo_is_cathode ? x_hi : x_lo;
-    const double s         = (anode_x < cathode_x) ? +1.0 : -1.0;
-    const double u_cathode = s * (cathode_x - anode_x);   // > 0
+    run.anode_x   = lo_is_cathode ? x_hi : x_lo;
+    run.s         = (run.anode_x < cathode_x) ? +1.0 : -1.0;
+    run.u_cathode = run.s * (cathode_x - run.anode_x);   // > 0
     // Y/Z active bounds from the same bbox, shrunk(+)/grown(-) by the cushions.
-    const double y_lo = bray.first.y()  + m_y_cushion;
-    const double y_hi = bray.second.y() - m_y_cushion;
-    const double z_lo = bray.first.z()  + m_z_cushion;
-    const double z_hi = bray.second.z() - m_z_cushion;
+    run.y_lo = bray.first.y()  + m_y_cushion;
+    run.y_hi = bray.second.y() - m_y_cushion;
+    run.z_lo = bray.first.z()  + m_z_cushion;
+    run.z_hi = bray.second.z() - m_z_cushion;
     log->debug("anode {} bbox x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
                "anode_x {:.2f} cathode_x {:.2f} u_cathode {:.2f} cm s {}",
                tpc, x_lo / units::cm, x_hi / units::cm,
                bray.first.y() / units::cm, bray.second.y() / units::cm,
                bray.first.z() / units::cm, bray.second.z() / units::cm,
-               anode_x / units::cm, cathode_x / units::cm, u_cathode / units::cm, s);
+               run.anode_x / units::cm, cathode_x / units::cm, run.u_cathode / units::cm, run.s);
 
     // Bundle-quality thresholds forwarded to every TimingTPCBundle below.
-    const BundleQualityParams qp{
+    run.qp = BundleQualityParams{
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
         m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee,
         m_bundle_mask_ks};
 
     // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
-    // sits on the low / high side of the cathode plane. Position-based, matching
-    // the same-TPC test the optical model itself uses (center.x sign vs cathode);
-    // reproduces the historical even/odd index split for the SBND PMTs and
-    // generalizes via cathode_x. (The enclosing two-TPC-around-x=0 drift bounds
-    // above are still SBND-specific; see improve_progress.md §A.)
-    for (std::size_t idet = 0; idet < opdet_mask.size(); ++idet) {
+    // sits on the low / high side of the cathode plane.
+    for (std::size_t idet = 0; idet < run.opdet_mask.size(); ++idet) {
         const bool low_side = m_opdets[idet].center.x() < m_cathode_x;
-        if ((tpc == 0) && !low_side) opdet_mask[idet] = 0;
-        if ((tpc == 1) &&  low_side) opdet_mask[idet] = 0;
+        if ((tpc == 0) && !low_side) run.opdet_mask[idet] = 0;
+        if ((tpc == 1) &&  low_side) run.opdet_mask[idet] = 0;
     }
 
-    for (auto flash : flashes) {
+    // Kept-channel index (the surviving on-channels), used to size the LASSO matrices.
+    run.nopdet = 0;
+    run.opdet_idx_v.clear();
+    for (std::size_t idet = 0; idet < run.opdet_mask.size(); ++idet) {
+        if (run.opdet_mask.at(idet) == 1) {
+            run.opdet_idx_v.push_back(int(idet));
+            ++run.nopdet;
+        }
+    }
+    log->debug("nopdet {} opdet_idx_v size {}", run.nopdet, run.opdet_idx_v.size());
+}
+
+// [Stage 1] Build a candidate (flash, cluster-group) bundle for every pair,
+// predict its light (summed over the whole group), fill the boundary flags, and
+// drop the KS==1 degenerate (no measured/predicted overlap). Surviving bundles
+// land in run.pre_bundles.
+void QLMatching::build_bundles(ApaRun& run)
+{
+    for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
-        const double flash_x_offset = sign_offset * flash_time * m_drift_speed;
+        const double flash_x_offset = run.sign_offset * flash_time * m_drift_speed;
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
-        std::vector<unsigned int> flash_opdet_mask = opdet_mask;
+        std::vector<unsigned int> flash_opdet_mask = run.opdet_mask;
         for (std::size_t idet = 0; idet < std::size_t(flash->get_num_channels()); ++idet) {
             auto pe_det = flash->get_PE(idet);
             if ((flash->get_total_PE() > m_mc_saturation_pe) && (pe_det == 0) && (m_data == false))
@@ -468,15 +525,15 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                    int(flash->get_total_PE() * 100) / 100.,
                    int(flash_x_offset * 100) / 100.);
 
-        for (std::size_t ig = 0; ig < match_groups.size(); ++ig) {
-            Cluster* main_cluster = match_groups[ig].first;
-            const auto& others = match_groups[ig].second;
+        for (std::size_t ig = 0; ig < run.match_groups.size(); ++ig) {
+            Cluster* main_cluster = run.match_groups[ig].first;
+            const auto& others = run.match_groups[ig].second;
             // Stable cluster index of the group anchor (the main cluster).
-            const int cidx = global_cluster_idx_map.at(main_cluster);
+            const int cidx = run.global_cluster_idx_map.at(main_cluster);
             auto bundle = std::make_shared<TimingTPCBundle>(
                 flash.get(), main_cluster, flash->get_flash_id(), cidx);
-            bundle->set_quality_params(qp);
-            all_bundles.push_back(bundle);
+            bundle->set_quality_params(run.qp);
+            run.all_bundles.push_back(bundle);
             bundle->set_opdet_mask(flash_opdet_mask);
             // Attach the associated sub-clusters so the bundle carries the whole
             // group (MicroBooNE-style main + others); predicted light below sums
@@ -487,11 +544,9 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             // from the main cluster's drift endpoints (the group anchor). The
             // return is the prototype flag_good_bundle / TPC-containment verdict.
             const bool contained =
-                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, s, anode_x, u_cathode);
+                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode);
             // Discard bundles whose cluster is not contained in the TPC box once
-            // the flash T0 x-offset is applied (prototype: delete !flag_good_bundle).
-            // Skips the predicted-light loop / examine_bundle / pre_bundles below,
-            // so the bundle never competes in matching. Off by default.
+            // the flash T0 x-offset is applied. Off by default.
             if (m_require_containment && !contained) continue;
 
             const std::size_t nopdets = flash->get_num_channels();
@@ -504,25 +559,22 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             for (auto* gc : group_clusters) npt += gc->npoints();
             for (auto* gc : group_clusters) {
               for (auto blob : gc->children()) {
-                total_charge_blob += blob->charge();
+                run.total_charge_blob += blob->charge();
                 const double q = blob->charge() / blob->npoints();
                 auto points = blob->points("3d", {"x", "y", "z"});
 
                 for (int i = 0; i < blob->npoints(); ++i) {
-                    total_charge_point += q;
+                    run.total_charge_point += q;
                     const double x = points.at(i).x() + flash_x_offset;
                     const double y = points.at(i).y();
                     const double z = points.at(i).z();
 
-                    // PE-inclusion gate in the per-TPC drift coordinate u. The
-                    // window runs from just below the anode to just beyond the
-                    // cathode (prototype low_x_cut+ext1 .. high_x_cut+ext1).
-                    const double u = s * (x - anode_x);
-                    if (u < m_anode_ext1 || u > u_cathode + m_cathode_ext1) continue;
-                    if (y < y_lo || y > y_hi || z < z_lo || z > z_hi) continue;
+                    // PE-inclusion gate in the per-TPC drift coordinate u.
+                    const double u = run.s * (x - run.anode_x);
+                    if (u < m_anode_ext1 || u > run.u_cathode + m_cathode_ext1) continue;
+                    if (y < run.y_lo || y > run.y_hi || z < run.z_lo || z > run.z_hi) continue;
 
-                    // SemiAnalyticalModel expects positions in cm. Blob points
-                    // are in WCT units (mm).
+                    // SemiAnalyticalModel expects positions in cm; blob points are mm.
                     const WireCell::Point xyz_cm(x / units::cm, y / units::cm, z / units::cm);
                     std::vector<double> direct_visibilities;
                     m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm);
@@ -542,11 +594,8 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
               }
             }
 
-            // Cluster-group selection now drives matching, so the old per-bundle
-            // pre-selection cuts (min_pred_pe, drift_out_frac, preselect_chi2ndf)
-            // are removed: every (flash, group) pair becomes a candidate bundle
-            // and the LASSO competition / m_strength_cutoff decide. The KS==1
-            // guard below is kept (degenerate, no measured/predicted overlap).
+            // Cluster-group selection drives matching; the KS==1 guard below is
+            // kept (degenerate, no measured/predicted overlap).
             bundle->set_pred_flash(pred_flash);
             bundle->examine_bundle();
             if (bundle->get_ks_dis() == 1) {
@@ -565,40 +614,28 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                        int(bundle->get_chi2() / bundle->get_ndf() * 100) / 100.,
                        bundle->get_ndf());
 
-            pre_bundles.insert(bundle);
+            run.pre_bundles.insert(bundle);
         } // cluster loop
     }     // flash loop
-    log->debug("n preselected bundles: {}", pre_bundles.size());
+    log->debug("n preselected bundles: {}", run.pre_bundles.size());
+}
 
-    // ---- Build maps ----
-    FlashBundlesMap flash_bundles_map;
-    ClusterBundlesMap cluster_bundles_map;
-    std::map<std::pair<Opflash*, Cluster*>, TimingTPCBundle::pointer> flash_cluster_bundles_map;
-    std::vector<TimingTPCBundle::pointer> consistent_bundles;
-
-    for (auto bundle : pre_bundles) {
+// Build the flash-keyed / cluster-keyed / (flash,cluster)-keyed bundle maps and
+// impose a deterministic iteration order on them (pointer-keyed std::map/std::set
+// would otherwise sort by heap address and permute the LASSO matrix columns).
+void QLMatching::build_bundle_maps(ApaRun& run)
+{
+    for (auto bundle : run.pre_bundles) {
         auto flash   = bundle->get_flash();
         auto cluster = bundle->get_main_cluster();
-        if (bundle->get_consistent_flag()) consistent_bundles.push_back(bundle);
-        flash_bundles_map[flash].push_back(bundle);
-        cluster_bundles_map[cluster].push_back(bundle);
-        flash_cluster_bundles_map[std::make_pair(flash, cluster)] = bundle;
+        if (bundle->get_consistent_flag()) run.consistent_bundles.push_back(bundle);
+        run.flash_bundles_map[flash].push_back(bundle);
+        run.cluster_bundles_map[cluster].push_back(bundle);
+        run.flash_cluster_bundles_map[std::make_pair(flash, cluster)] = bundle;
     }
 
-    // Deterministic iteration order over flashes/clusters/bundles.
-    //
-    // Without these, the LASSO matrix column / row order depends on heap
-    // allocator ordering of Opflash* / Cluster* / shared_ptr addresses,
-    // because std::map<Pointer*, ...> and std::set<shared_ptr> sort by
-    // pointer value. Two runs with identical inputs then permute matrix
-    // columns and produce slightly different solution() vectors --- enough
-    // to flip bundles across the m_strength_cutoff threshold and lose
-    // run-to-run reproducibility.
-    //
-    // Outer order: flashes by flash_id (set from the input tensor row index,
-    // stable). Clusters by their global index (set from the length-sorted
-    // 'clusters' vector, stable). Inner: bundles within a flash sorted by
-    // cluster_index_id, again the global index from the sorted vector.
+    // Inner order within a flash: bundles by cluster_index_id (the stable global
+    // index). Inner order within a cluster: bundles by flash_index_id.
     auto sort_inner_by_cluster_idx = [](FlashBundlesMap& m) {
         for (auto& kv : m) {
             std::sort(kv.second.begin(), kv.second.end(),
@@ -608,10 +645,6 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                       });
         }
     };
-    // Same, for the cluster-keyed map: within one cluster the bundles differ by
-    // flash, so order them by flash_index_id (== get_flash_id(), the same stable
-    // key flash_iter_order uses). Without this, cluster_bundles_map[cluster]
-    // vectors stay in pre_bundles (pointer-set) order when iterated directly.
     auto sort_inner_by_flash_idx = [](ClusterBundlesMap& m) {
         for (auto& kv : m) {
             std::sort(kv.second.begin(), kv.second.end(),
@@ -621,280 +654,261 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                       });
         }
     };
-    auto flash_iter_order = [](const FlashBundlesMap& m) {
-        std::vector<Opflash*> v;
-        v.reserve(m.size());
-        for (auto& kv : m) v.push_back(kv.first);
-        std::sort(v.begin(), v.end(),
-                  [](Opflash* a, Opflash* b) { return a->get_flash_id() < b->get_flash_id(); });
-        return v;
-    };
-    auto cluster_iter_order = [&global_cluster_idx_map](const ClusterBundlesMap& m) {
-        std::vector<Cluster*> v;
-        v.reserve(m.size());
-        for (auto& kv : m) v.push_back(kv.first);
-        std::sort(v.begin(), v.end(), [&](Cluster* a, Cluster* b) {
-            return global_cluster_idx_map.at(a) < global_cluster_idx_map.at(b);
-        });
-        return v;
-    };
-    sort_inner_by_cluster_idx(flash_bundles_map);
-    sort_inner_by_flash_idx(cluster_bundles_map);
+    sort_inner_by_cluster_idx(run.flash_bundles_map);
+    sort_inner_by_flash_idx(run.cluster_bundles_map);
+}
 
+// [Stage 1] For each cluster that has a consistent bundle, drop its other
+// non-consistent bundles (they cannot win).
+void QLMatching::cull_inconsistent(ApaRun& run)
+{
     TimingTPCBundleSelection to_be_removed;
-    for (auto good_bundle : consistent_bundles) {
+    for (auto good_bundle : run.consistent_bundles) {
         auto cluster = good_bundle->get_main_cluster();
-        for (auto bundle : cluster_bundles_map[cluster]) {
+        for (auto bundle : run.cluster_bundles_map[cluster]) {
             if (bundle == good_bundle) continue;
             if (bundle->get_consistent_flag()) continue;
             to_be_removed.push_back(bundle);
         }
     }
-    remove_bundle_selection(to_be_removed, flash_bundles_map, cluster_bundles_map,
-                            flash_cluster_bundles_map);
-    remove_bundle_selection(to_be_removed, pre_bundles);
-    to_be_removed.clear();
+    remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
+                            run.flash_cluster_bundles_map);
+    remove_bundle_selection(to_be_removed, run.pre_bundles);
+}
 
+// [Stage 2] First LASSO round, with a per-flash background/light DOF column;
+// post-fit prune bundles whose strength <= m_strength_cutoff.
+void QLMatching::fit_round1(ApaRun& run)
+{
     const double lambda       = m_lasso_lambda;
     const double delta_charge = m_delta_charge;
     const double delta_light  = m_delta_light;
+
+    const unsigned int nbundle  = run.pre_bundles.size();
+    const unsigned int nflash   = run.flash_bundles_map.size();
+    const unsigned int ncluster = run.cluster_bundles_map.size();
+
+    auto flashes_ordered  = flash_iter_order(run.flash_bundles_map);
+    auto clusters_ordered = cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map);
+    std::map<Opflash*, int> flash_idx_map;
+    std::map<Cluster*, int> cluster_idx_map;
+    int idx = 0;
+    for (auto* c : clusters_ordered) cluster_idx_map[c] = idx++;
+    idx = 0;
+    for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
+
+    Ress::vector_t M = Ress::vector_t::Zero(run.nopdet * nflash);
+    Ress::matrix_t P = Ress::matrix_t::Zero(run.nopdet * nflash, nbundle + nflash);
+    Ress::vector_t MF = Ress::vector_t::Zero(ncluster + nflash);
+    Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster + nflash, nbundle + nflash);
+    Ress::vector_t weights = Ress::vector_t::Zero(nbundle + nflash);
+
+    std::vector<std::pair<Opflash*, Cluster*>> pairs;
+    std::size_t i = 0, ik = 0;
+    for (auto* flash : flashes_ordered) {
+        auto& bundles = run.flash_bundles_map[flash];
+        for (unsigned int j = 0; j < run.nopdet; ++j) {
+            const int opdet_idx = run.opdet_idx_v.at(j);
+            const double pe = flash->get_PE(opdet_idx);
+            const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
+            M(i * run.nopdet + j) = pe / pe_err;
+            P(i * run.nopdet + j, nbundle + i) = pe / pe_err;
+        }
+        for (auto bundle : bundles) {
+            const auto& pred_flash = bundle->get_pred_flash();
+            for (unsigned int j = 0; j < run.nopdet; ++j) {
+                const int opdet_idx = run.opdet_idx_v.at(j);
+                const double pred_pe = pred_flash.at(opdet_idx);
+                const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
+                P(i * run.nopdet + j, pairs.size()) = pred_pe / pe_err;
+            }
+            pairs.emplace_back(flash, bundle->get_main_cluster());
+            const auto meas_pe_tot = flash->get_total_PE();
+            const auto pred_pe_tot = bundle->get_total_pred_light();
+            weights(ik++) = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
+                              ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
+                              : m_pe_mismatch_floor;
+        }
+        PF(ncluster + i, nbundle + i) = 1. / delta_light;
+        flash_idx_map[flash] = nbundle + i;
+        ++i;
+    }
+    for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = m_bkg_weight;
+    for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
+    for (std::size_t n = 0; n < pairs.size(); ++n) {
+        PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
+    }
+
+    Ress::matrix_t PT  = P.transpose();
+    Ress::matrix_t PFT = PF.transpose();
+    Ress::vector_t y = PT * M + PFT * MF;
+    Ress::matrix_t X = PT * P + PFT * PF;
+    Ress::vector_t initial = Ress::vector_t::Zero(nbundle + nflash);
+    for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
+
+    Ress::Params params;
+    params.model = Ress::lasso;
+    params.lambda = lambda;
+    log->debug("solving (round 1)");
+    Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
+
+    TimingTPCBundleSelection to_be_removed;
+    int n = 0;
+    for (auto* flash : flashes_ordered) {
+        for (auto bundle : run.flash_bundles_map[flash]) {
+            if (solution(n) <= m_strength_cutoff && !m_beamonly) to_be_removed.push_back(bundle);
+            ++n;
+        }
+    }
+    remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
+                            run.flash_cluster_bundles_map);
+    remove_bundle_selection(to_be_removed, run.pre_bundles);
+}
+
+// [Stage 3] Second LASSO round: background DOF dropped, KS-shape term added to
+// the weights; prune by strength and keep the best flash per cluster, then merge
+// and apply out-of-beam QA via organize_bundles().
+void QLMatching::fit_round2(ApaRun& run)
+{
+    const double lambda       = m_lasso_lambda;
+    const double delta_charge = m_delta_charge;
     const double delta_shape  = m_delta_shape;
 
-    unsigned int nopdet = 0;
-    std::vector<int> opdet_idx_v;
-    for (std::size_t idet = 0; idet < opdet_mask.size(); ++idet) {
-        if (opdet_mask.at(idet) == 1) {
-            opdet_idx_v.push_back(int(idet));
-            ++nopdet;
+    const unsigned int nbundle  = run.pre_bundles.size();
+    const unsigned int nflash   = run.flash_bundles_map.size();
+    const unsigned int ncluster = run.cluster_bundles_map.size();
+
+    // Rebuild ordered iteration (rd-1 may have removed bundles/flashes/clusters).
+    auto flashes_ordered  = flash_iter_order(run.flash_bundles_map);
+    auto clusters_ordered = cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map);
+    std::map<Cluster*, int> cluster_idx_map;
+    std::map<Opflash*, int> flash_idx_map;
+    int idx = 0;
+    for (auto* c : clusters_ordered) cluster_idx_map[c] = idx++;
+    idx = 0;
+    for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
+
+    Ress::vector_t M = Ress::vector_t::Zero(run.nopdet * nflash);
+    Ress::matrix_t P = Ress::matrix_t::Zero(run.nopdet * nflash, nbundle);
+    Ress::vector_t MF = Ress::vector_t::Zero(ncluster);
+    Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster, nbundle);
+    Ress::vector_t weights = Ress::vector_t::Zero(nbundle);
+    std::vector<std::pair<Opflash*, Cluster*>> pairs;
+
+    std::size_t i = 0, ik = 0;
+    for (auto* flash : flashes_ordered) {
+        auto& bundles = run.flash_bundles_map[flash];
+        for (unsigned int j = 0; j < run.nopdet; ++j) {
+            const int opdet_idx = run.opdet_idx_v.at(j);
+            const double pe = flash->get_PE(opdet_idx);
+            const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
+            M(i * run.nopdet + j) = pe / pe_err;
         }
-    }
-    log->debug("nopdet {} opdet_idx_v size {}", nopdet, opdet_idx_v.size());
-
-    // ---- First matching round ----
-    {
-        const unsigned int nbundle  = pre_bundles.size();
-        const unsigned int nflash   = flash_bundles_map.size();
-        const unsigned int ncluster = cluster_bundles_map.size();
-
-        auto flashes_ordered  = flash_iter_order(flash_bundles_map);
-        auto clusters_ordered = cluster_iter_order(cluster_bundles_map);
-        std::map<Opflash*, int> flash_idx_map;
-        std::map<Cluster*, int> cluster_idx_map;
-        int idx = 0;
-        for (auto* c : clusters_ordered) cluster_idx_map[c] = idx++;
-        idx = 0;
-        for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
-
-        Ress::vector_t M = Ress::vector_t::Zero(nopdet * nflash);
-        Ress::matrix_t P = Ress::matrix_t::Zero(nopdet * nflash, nbundle + nflash);
-        Ress::vector_t MF = Ress::vector_t::Zero(ncluster + nflash);
-        Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster + nflash, nbundle + nflash);
-        Ress::vector_t weights = Ress::vector_t::Zero(nbundle + nflash);
-
-        std::vector<std::pair<Opflash*, Cluster*>> pairs;
-        std::size_t i = 0, ik = 0;
-        for (auto* flash : flashes_ordered) {
-            auto& bundles = flash_bundles_map[flash];
-            for (unsigned int j = 0; j < nopdet; ++j) {
-                const int opdet_idx = opdet_idx_v.at(j);
-                const double pe = flash->get_PE(opdet_idx);
+        for (auto bundle : bundles) {
+            const auto ks_dis = bundle->get_ks_dis();
+            const auto& pred_flash = bundle->get_pred_flash();
+            for (unsigned int j = 0; j < run.nopdet; ++j) {
+                const int opdet_idx = run.opdet_idx_v.at(j);
+                const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                M(i * nopdet + j) = pe / pe_err;
-                P(i * nopdet + j, nbundle + i) = pe / pe_err;
+                P(i * run.nopdet + j, pairs.size()) = pred_pe / pe_err;
             }
-            for (auto bundle : bundles) {
-                const auto& pred_flash = bundle->get_pred_flash();
-                for (unsigned int j = 0; j < nopdet; ++j) {
-                    const int opdet_idx = opdet_idx_v.at(j);
-                    const double pred_pe = pred_flash.at(opdet_idx);
-                    const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                    P(i * nopdet + j, pairs.size()) = pred_pe / pe_err;
-                }
-                pairs.emplace_back(flash, bundle->get_main_cluster());
-                const auto meas_pe_tot = flash->get_total_PE();
-                const auto pred_pe_tot = bundle->get_total_pred_light();
-                weights(ik++) = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
-                                  ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
-                                  : m_pe_mismatch_floor;
-            }
-            PF(ncluster + i, nbundle + i) = 1. / delta_light;
-            flash_idx_map[flash] = nbundle + i;
-            ++i;
-        }
-        for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = m_bkg_weight;
-        for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
-        for (std::size_t n = 0; n < pairs.size(); ++n) {
-            PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
-        }
+            pairs.emplace_back(flash, bundle->get_main_cluster());
 
-        Ress::matrix_t PT  = P.transpose();
-        Ress::matrix_t PFT = PF.transpose();
-        Ress::vector_t y = PT * M + PFT * MF;
-        Ress::matrix_t X = PT * P + PFT * PF;
-        Ress::vector_t initial = Ress::vector_t::Zero(nbundle + nflash);
-        for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
-
-        Ress::Params params;
-        params.model = Ress::lasso;
-        params.lambda = lambda;
-        log->debug("solving (round 1)");
-        Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
-
-        int n = 0;
-        for (auto* flash : flashes_ordered) {
-            for (auto bundle : flash_bundles_map[flash]) {
-                if (solution(n) <= m_strength_cutoff && !m_beamonly) to_be_removed.push_back(bundle);
-                ++n;
-            }
+            const auto meas_pe_tot = flash->get_total_PE();
+            const auto pred_pe_tot = bundle->get_total_pred_light();
+            const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
+                                    ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
+                                    : m_pe_mismatch_floor;
+            weights(ik++) = base + delta_shape * run.nopdet * ks_dis / lambda;
         }
-        remove_bundle_selection(to_be_removed, flash_bundles_map, cluster_bundles_map,
-                                flash_cluster_bundles_map);
-        remove_bundle_selection(to_be_removed, pre_bundles);
-        to_be_removed.clear();
+        ++i;
+    }
+    for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
+    for (std::size_t n = 0; n < pairs.size(); ++n) {
+        PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
     }
 
-    // ---- Second matching round ----
-    {
-        const unsigned int nbundle  = pre_bundles.size();
-        const unsigned int nflash   = flash_bundles_map.size();
-        const unsigned int ncluster = cluster_bundles_map.size();
+    Ress::matrix_t PT  = P.transpose();
+    Ress::matrix_t PFT = PF.transpose();
+    Ress::vector_t y = PT * M + PFT * MF;
+    Ress::matrix_t X = PT * P + PFT * PF;
+    Ress::vector_t initial = Ress::vector_t::Zero(nbundle);
+    for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 
-        // Rebuild ordered iteration (rd-1 may have removed bundles/flashes/clusters).
-        auto flashes_ordered  = flash_iter_order(flash_bundles_map);
-        auto clusters_ordered = cluster_iter_order(cluster_bundles_map);
-        std::map<Cluster*, int> cluster_idx_map;
-        std::map<Opflash*, int> flash_idx_map;
-        int idx = 0;
-        for (auto* c : clusters_ordered) cluster_idx_map[c] = idx++;
-        idx = 0;
-        for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
+    Ress::Params params;
+    params.model = Ress::lasso;
+    params.lambda = lambda;
+    log->debug("solving (round 2)");
+    Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
 
-        Ress::vector_t M = Ress::vector_t::Zero(nopdet * nflash);
-        Ress::matrix_t P = Ress::matrix_t::Zero(nopdet * nflash, nbundle);
-        Ress::vector_t MF = Ress::vector_t::Zero(ncluster);
-        Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster, nbundle);
-        Ress::vector_t weights = Ress::vector_t::Zero(nbundle);
-        std::vector<std::pair<Opflash*, Cluster*>> pairs;
-
-        std::size_t i = 0, ik = 0;
-        for (auto* flash : flashes_ordered) {
-            auto& bundles = flash_bundles_map[flash];
-            for (unsigned int j = 0; j < nopdet; ++j) {
-                const int opdet_idx = opdet_idx_v.at(j);
-                const double pe = flash->get_PE(opdet_idx);
-                const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                M(i * nopdet + j) = pe / pe_err;
-            }
-            for (auto bundle : bundles) {
-                const auto ks_dis = bundle->get_ks_dis();
-                const auto& pred_flash = bundle->get_pred_flash();
-                for (unsigned int j = 0; j < nopdet; ++j) {
-                    const int opdet_idx = opdet_idx_v.at(j);
-                    const double pred_pe = pred_flash.at(opdet_idx);
-                    const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                    P(i * nopdet + j, pairs.size()) = pred_pe / pe_err;
-                }
-                pairs.emplace_back(flash, bundle->get_main_cluster());
-
-                const auto meas_pe_tot = flash->get_total_PE();
-                const auto pred_pe_tot = bundle->get_total_pred_light();
-                const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
-                                        ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
-                                        : m_pe_mismatch_floor;
-                weights(ik++) = base + delta_shape * nopdet * ks_dis / lambda;
-            }
-            ++i;
+    TimingTPCBundleSelection to_be_removed;
+    int n = 0;
+    for (auto* flash : flashes_ordered) {
+        for (auto bundle : run.flash_bundles_map[flash]) {
+            bundle->set_strength(solution(n));
+            if (!(solution(n) > m_strength_cutoff || m_beamonly)) to_be_removed.push_back(bundle);
+            ++n;
         }
-        for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
-        for (std::size_t n = 0; n < pairs.size(); ++n) {
-            PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
+    }
+    remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
+                            run.flash_cluster_bundles_map);
+    remove_bundle_selection(to_be_removed, run.pre_bundles);
+    to_be_removed.clear();
+
+    // Keep best match per cluster.
+    std::map<int, std::pair<Opflash*, double>> matched_pairs;
+    for (std::size_t k = 0; k < pairs.size(); ++k) {
+        if (solution(k) <= m_strength_cutoff) continue;
+        const int cidx = cluster_idx_map[pairs.at(k).second];
+        auto flash = pairs.at(k).first;
+        auto it = matched_pairs.find(cidx);
+        if (it == matched_pairs.end() || solution(k) > it->second.second) {
+            matched_pairs[cidx] = std::make_pair(flash, solution(k));
         }
-
-        Ress::matrix_t PT  = P.transpose();
-        Ress::matrix_t PFT = PF.transpose();
-        Ress::vector_t y = PT * M + PFT * MF;
-        Ress::matrix_t X = PT * P + PFT * PF;
-        Ress::vector_t initial = Ress::vector_t::Zero(nbundle);
-        for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
-
-        Ress::Params params;
-        params.model = Ress::lasso;
-        params.lambda = lambda;
-        log->debug("solving (round 2)");
-        Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
-
-        int n = 0;
-        for (auto* flash : flashes_ordered) {
-            for (auto bundle : flash_bundles_map[flash]) {
-                bundle->set_strength(solution(n));
-                if (!(solution(n) > m_strength_cutoff || m_beamonly)) to_be_removed.push_back(bundle);
-                ++n;
-            }
+    }
+    TimingTPCBundleSelection results_bundles;
+    for (auto cluster : run.clusters) {
+        auto it = cluster_idx_map.find(cluster);
+        if (it == cluster_idx_map.end()) continue;
+        const int cidx = it->second;
+        auto mit = matched_pairs.find(cidx);
+        if (mit != matched_pairs.end()) {
+            auto flash = mit->second.first;
+            results_bundles.push_back(run.flash_cluster_bundles_map[std::make_pair(flash, cluster)]);
         }
-        remove_bundle_selection(to_be_removed, flash_bundles_map, cluster_bundles_map,
-                                flash_cluster_bundles_map);
-        remove_bundle_selection(to_be_removed, pre_bundles);
-        to_be_removed.clear();
-
-        // Keep best match per cluster.
-        std::map<int, std::pair<Opflash*, double>> matched_pairs;
-        for (std::size_t k = 0; k < pairs.size(); ++k) {
-            if (solution(k) <= m_strength_cutoff) continue;
-            const int cidx = cluster_idx_map[pairs.at(k).second];
-            auto flash = pairs.at(k).first;
-            auto it = matched_pairs.find(cidx);
-            if (it == matched_pairs.end() || solution(k) > it->second.second) {
-                matched_pairs[cidx] = std::make_pair(flash, solution(k));
-            }
+        else {
+            auto bundle = std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx);
+            bundle->set_quality_params(run.qp);
+            bundle->set_strength(0);
+            results_bundles.push_back(bundle);
         }
-        TimingTPCBundleSelection results_bundles;
-        for (auto cluster : clusters) {
-            auto it = cluster_idx_map.find(cluster);
-            if (it == cluster_idx_map.end()) continue;
-            const int cidx = it->second;
-            auto mit = matched_pairs.find(cidx);
-            if (mit != matched_pairs.end()) {
-                auto flash = mit->second.first;
-                results_bundles.push_back(flash_cluster_bundles_map[std::make_pair(flash, cluster)]);
-            }
-            else {
-                auto bundle = std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx);
-                bundle->set_quality_params(qp);
-                bundle->set_strength(0);
-                results_bundles.push_back(bundle);
-            }
-        }
-        organize_bundles(results_bundles, flash_cluster_bundles_map);
+    }
+    organize_bundles(results_bundles, run.flash_cluster_bundles_map);
 
-        FlashBundlesMap results_flash_bundles_map;
-        for (auto bundle : results_bundles) {
-            results_flash_bundles_map[bundle->get_flash()].push_back(bundle);
-        }
-
-        log->debug("done with matching");
+    FlashBundlesMap results_flash_bundles_map;
+    for (auto bundle : results_bundles) {
+        results_flash_bundles_map[bundle->get_flash()].push_back(bundle);
     }
 
-    // Apply matched t0s.
-    for (auto* flash : flash_iter_order(flash_bundles_map)) {
-        for (auto bundle : flash_bundles_map[flash]) {
+    log->debug("done with matching");
+}
+
+// Stamp the matched flash/t0 onto each cluster (and its associated sub-clusters):
+// cluster_t0, the "flash" row index (Cluster::get_flash()), a globally-unique
+// matched_flash_gid (survives the all-APA merge), and the per-channel flashpred.
+void QLMatching::apply_matched_t0s(ApaRun& run)
+{
+    for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+        for (auto bundle : run.flash_bundles_map[flash]) {
             auto* cluster = bundle->get_main_cluster();
             const double t0 = flash->get_time() * units::ns;
-            const int flash_gid = m_anode->ident() * kFlashGidStride + global_flash_idx_map.at(flash);
+            const int flash_gid = run.anode->ident() * kFlashGidStride + run.global_flash_idx_map.at(flash);
             cluster->set_cluster_t0(t0);
-            // Record the matched flash row index so Cluster::get_flash() reflects
-            // the match (flash_id == canonical "flash" PC row index).
             cluster->set_scalar<int>("flash", flash->get_flash_id());
-            // Persist the match for the downstream (all-APA) MABC op/flash Bee
-            // dump: a globally-unique flash id (survives the per-APA -> all-APA
-            // merge) and this bundle's predicted per-channel PE (op_pes_pred).
-            // The gid is keyed on the flash's index within `flashes` (unique
-            // per APA), NOT get_flash_id() (the stored ident, which can repeat).
             cluster->set_scalar<int>("matched_flash_gid", flash_gid);
             cluster->put_pcarray<double>(bundle->get_pred_flash(), "pe", "flashpred");
-            // Propagate the group's matched flash/t0 to its associated sub-clusters
-            // (split off above), so every cluster of the group carries the flash
-            // association into the all-APA stage. The group-level predicted PE
-            // (flashpred) stays on the main anchor only.
+            // Propagate the group's matched flash/t0 to its associated sub-clusters.
             for (auto* oc : bundle->get_other_clusters()) {
                 oc->set_cluster_t0(t0);
                 oc->set_scalar<int>("flash", flash->get_flash_id());
@@ -903,19 +917,15 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",
                        flash->get_flash_id(), flash->get_time(),
-                       global_cluster_idx_map[bundle->get_main_cluster()],
+                       run.global_cluster_idx_map[bundle->get_main_cluster()],
                        bundle->get_total_pred_light(),
                        bundle->get_main_cluster()->get_cluster_t0());
-            // Bundle boundary/quality flags for the matched anchor (main) cluster.
-            // The boundary flags are evaluated under THIS flash's t0 hypothesis
-            // (compute_endpoint_flags uses flash_x_offset); window_truncated is
-            // T0-independent (raw readout window). Debug-only; no behavior change.
             log->debug("bundle_flags: flash id {} cluster ident {} gidx {} | "
                        "at_x_boundary {} close_to_PMT {} spec_end {} "
                        "window_truncated {} high_consistent {}",
                        flash->get_flash_id(),
                        bundle->get_main_cluster()->ident(),
-                       global_cluster_idx_map[bundle->get_main_cluster()],
+                       run.global_cluster_idx_map[bundle->get_main_cluster()],
                        bundle->get_flag_at_x_boundary(),
                        bundle->get_flag_close_to_PMT(),
                        bundle->get_spec_end_flag(),
@@ -923,61 +933,53 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
                        bundle->get_consistent_flag());
         }
     }
+}
 
-    // Persist the per-flash measured light into a merge-safe, self-contained
-    // per-root "opflash" PC, so the all-APA MABC can dump the op/flash Bee
-    // display after the per-APA trees are merged (the canonical flash/light
-    // /flashlight join uses per-APA row indices that collide across APAs; this
-    // table is keyed by the global flash id instead). One row per (flash,
-    // channel): gid, time (raw ns), ch, pe. Holds ALL flashes considered for
-    // matching (incl. unmatched), as the op display shows every flash.
-    {
-        std::vector<int> op_gid, op_ch;
-        std::vector<double> op_time, op_pe;
-        for (std::size_t fi = 0; fi < flashes.size(); ++fi) {
-            const auto& flash = flashes[fi];
-            // gid keyed on the per-APA flash index (unique), matching the
-            // matched_flash_gid stamped on clusters above.
-            const int gid = m_anode->ident() * kFlashGidStride + static_cast<int>(fi);
-            for (int ch = 0; ch < m_nchan; ++ch) {
-                op_gid.push_back(gid);
-                op_time.push_back(flash->get_time());
-                op_ch.push_back(ch);
-                op_pe.push_back(flash->get_PE(ch));
-            }
+// Persist the per-flash measured light into a merge-safe, self-contained per-root
+// "opflash" PC (one row per (flash, channel): gid, time, ch, pe), so the all-APA
+// MABC can dump the op/flash Bee display after the per-APA trees are merged.
+void QLMatching::write_opflash_pc(ApaRun& run)
+{
+    std::vector<int> op_gid, op_ch;
+    std::vector<double> op_time, op_pe;
+    for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
+        const auto& flash = run.flashes[fi];
+        const int gid = run.anode->ident() * kFlashGidStride + static_cast<int>(fi);
+        for (int ch = 0; ch < m_nchan; ++ch) {
+            op_gid.push_back(gid);
+            op_time.push_back(flash->get_time());
+            op_ch.push_back(ch);
+            op_pe.push_back(flash->get_PE(ch));
         }
-        grouping->put_pcarray<int>(op_gid, "gid", "opflash");
-        grouping->put_pcarray<double>(op_time, "time", "opflash");
-        grouping->put_pcarray<int>(op_ch, "ch", "opflash");
-        grouping->put_pcarray<double>(op_pe, "pe", "opflash");
     }
+    run.grouping->put_pcarray<int>(op_gid, "gid", "opflash");
+    run.grouping->put_pcarray<double>(op_time, "time", "opflash");
+    run.grouping->put_pcarray<int>(op_ch, "ch", "opflash");
+    run.grouping->put_pcarray<double>(op_pe, "pe", "opflash");
+}
 
-    // ---- Build outputs ----
-    {
-        ITensor::vector outtens;
-        auto tens_live = Aux::TensorDM::as_tensors(*root_live, inpath + "/live");
-        outtens.insert(outtens.end(), tens_live.begin(), tens_live.end());
+// Flashes ordered by get_flash_id() (the stable input tensor row index).
+std::vector<Opflash*> QLMatching::flash_iter_order(const FlashBundlesMap& m)
+{
+    std::vector<Opflash*> v;
+    v.reserve(m.size());
+    for (auto& kv : m) v.push_back(kv.first);
+    std::sort(v.begin(), v.end(),
+              [](Opflash* a, Opflash* b) { return a->get_flash_id() < b->get_flash_id(); });
+    return v;
+}
 
-        auto root_dead = Aux::TensorDM::as_pctree(charge_tens, inpath + "/dead");
-        auto tens_dead = Aux::TensorDM::as_tensors(*root_dead, inpath + "/dead");
-        outtens.insert(outtens.end(), tens_dead.begin(), tens_dead.end());
-
-        out = Aux::TensorDM::as_tensorset(outtens, charge_ident);
-    }
-
-    if (!flashes.empty()) {
-        log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
-                   total_charge_blob / flashes.size(),
-                   total_charge_point / flashes.size(),
-                   total_charge_blob_all);
-    }
-    else {
-        log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
-                   0, 0, total_charge_blob_all);
-    }
-
-    ++m_count;
-    return true;
+// Clusters ordered by their stable global index (length-sorted vector position).
+std::vector<Cluster*> QLMatching::cluster_iter_order(
+    const ClusterBundlesMap& m, const std::map<Cluster*, int>& idx)
+{
+    std::vector<Cluster*> v;
+    v.reserve(m.size());
+    for (auto& kv : m) v.push_back(kv.first);
+    std::sort(v.begin(), v.end(), [&](Cluster* a, Cluster* b) {
+        return idx.at(a) < idx.at(b);
+    });
+    return v;
 }
 
 // Significant extreme points of a cluster (PCA-axis + coordinate extremes),
