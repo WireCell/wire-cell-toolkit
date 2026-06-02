@@ -1720,6 +1720,13 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         flash_pe[g][ch[i]] = pe[i];
     }
 
+    // Order flashes by ascending flash time so the Bee viewer steps through them
+    // low->high (it walks the op arrays by index and does no sorting of its own).
+    // stable_sort keeps the original first-seen order among equal-time flashes
+    // (e.g. the two sides of a ±80 ns TPC0/TPC1 group).
+    std::stable_sort(flash_order.begin(), flash_order.end(),
+                     [&](int a, int b) { return flash_time[a] < flash_time[b]; });
+
     // Matched clusters: predicted per-channel PE keyed by global flash id, with
     // the same total-predicted-light >= 100 filter as the legacy dump_light.
     // cluster_id is the cluster's own id, identical to the "img" charge dump
