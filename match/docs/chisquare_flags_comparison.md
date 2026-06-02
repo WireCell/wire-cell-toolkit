@@ -24,8 +24,36 @@ This document changes no code. It covers the five requested topics: (1) χ² con
 (2) flag usage, (3) regularization strength, (4) light errors, (5) χ² in the first vs second round —
 plus how the prototype reconstructs the per-channel PE error upstream of matching (§7.1), how the
 LASSO penalty weights (`delta_shape`/`bkg_weight`/`pe_mismatch_*`) enter the fit (§6.1), the bundle
-add/merge thresholds (§4.1), the MC saturation mask and out-of-beam QA cuts (§12), and a complete
-reference for the toolkit's jsonnet config parameters (§11).
+add/merge thresholds (§4.1), the MC saturation mask and out-of-beam QA cuts (§12), the
+light-prediction model that builds the predicted PE the χ²/LASSO consume (charge→PE, §13), the
+two-block LASSO matrix architecture (§14), and a complete reference for the toolkit's jsonnet config
+parameters (§11).
+
+### 1.1 End-to-end matching pipeline (the five stages)
+
+Both codebases share the **same five-stage skeleton**. The mental model "bundles are formed, then
+fit, then merged" is correct — with the key facts that (a) the *only* thing happening **between the
+two LASSO rounds is a weak-bundle prune** (no merging), and (b) **merging is strictly post-fit**.
+
+| Stage | Toolkit `QLMatching.cxx` | Prototype `ToyMatching.cxx` |
+|---|---|---|
+| **1. Pre-filter** (consistency cull) | KS==1 degenerate guard at formation (`:549-552`); then for each cluster with a consistent bundle, drop its other non-consistent bundles (`:642-653`) | for each flash with a consistent bundle, drop remaining bundles no consistent bundle can absorb (`examine_bundle` merge-test, `:1307-1358`) |
+| **2. R1 fit** | LASSO with per-flash background/light DOF; post-fit prune strength ≤ `0.05` (`:670-751`) | LASSO with per-flash "flash-alone" DOF; post-fit prune `beta < 0.05` (`:1377-1548`) |
+| *(between rounds)* | **prune only — no merging** (`:743-750`) | **prune only — no merging** (`:1516-1547`) |
+| **3. R2 fit** | background DOF dropped; KS-shape term added to weights; prune + keep best flash per cluster (`:753-849`) | flash DOF dropped; `f1` 0.06→0.05; keep best beta per cluster (`:1552-1663`) |
+| **4. Examine / merge bundles** | `organize_bundles` merges split clusters lit by the same flash (`examine_bundle`/`add_bundle` gates, `:1198-1262`) | post-LASSO `examine_bundle_rank`/`add_bundle` merge of non-best bundles into the per-flash best (`:1839-1841`) |
+| **5. Post-matching** | **remove only**: out-of-beam QA drops bundles failing `ks>0.2 \|\| chi2/ndf>20 \|\| \|meas−pred\|/meas>0.5`; dropped cluster is unmatched, no recovery (`:1264-1284`) | **aggressively re-match** (`organize_matched_bundles`, `:1744`): orphaned clusters re-tried against *other* flashes over a 3-round cascade (`:1786-1944`) — full algorithm in §12.3 |
+
+Two placement nuances:
+
+- In the **toolkit**, stages 4 and 5 both live inside `organize_bundles` (merge `:1198-1262`, then QA
+  `:1264-1284`) — one function, called once after R2 (`:864`).
+- In the **prototype**, stages 4 and 5 are **interleaved per flash** in the post-LASSO region: pick the
+  best bundle for a flash, merge what it can absorb, push the rest to the orphan re-match rounds.
+
+The **single biggest divergence is stage 5**: the prototype recovers orphaned clusters (re-matches
+them to other flashes); the toolkit only *removes* failing bundles and never retries — a known port
+gap (see §12.2).
 
 ## 2. File map
 
@@ -646,8 +674,9 @@ PMTs in MC"): in **MC** the optical simulation represents a **saturated** PMT by
 for that channel. In a **bright** flash (total PE above `mc_saturation_pe = 5000`) a healthy PMT
 should see plenty of light, so a `pe = 0` channel is taken to be one of those simulated saturated
 PMTs. Left in, it would contribute a large bogus `(pred − 0)²` to every bundle's χ² for that flash.
-Masking it (`flag = 0`) excludes it from the χ² (§3), the KS test, and the LASSO data term, for that
-flash only. The gate is doubly guarded — **MC only** (`m_data == false`) and **bright only** — so
+Masking it (`flag = 0`) excludes it from the χ² (§3) and the LASSO data term for that flash only; it
+also drops out of the KS — but only because the channel is `(measured 0, predicted 0)`, not because
+the mask is applied to the KS loop (which it is not — see §12.4). The gate is doubly guarded — **MC only** (`m_data == false`) and **bright only** — so
 dim flashes and all data are untouched (data handles saturated/dead channels by other means, e.g.
 `ch_mask`). `5000` is an absolute-PE threshold and is a **RE-TUNE for SBND** candidate (it scales
 with light yield, like the §9 entries). The behavior is verified from this toolkit code and its
@@ -701,4 +730,188 @@ cull is keyed on a **flash-time window**; the prototype keys on **flash type** (
 So §12.2 is **toolkit-specific**, and the larger design gap is the missing **orphan re-matching**:
 the prototype gives a cluster several chances at different flashes before abandoning it, whereas the
 toolkit drops it on the first failed out-of-beam QA. Whether SBND wants the prototype's recovery
-rounds is a port decision (§10-adjacent; not yet on that checklist).
+rounds is a port decision (§10-adjacent; not yet on that checklist). The full algorithm is §12.3.
+
+### 12.3 Prototype stage-5 algorithm — orphan re-matching (`organize_matched_bundles`)
+
+This is the prototype's entire post-fit stage (`ToyMatching.cxx:1744`, called at `:1724`). Its input
+`results_bundles` is the post-R2 state: each cluster carries **at most one** matched bundle (its
+best flash, from the best-per-cluster step), and unmatched clusters carry a `flash = 0` placeholder.
+The routine groups the matched bundles by flash (`:1748-1762`) and runs **three cascading rounds**.
+
+**The merge test used throughout** is `examine_bundle_rank(candidate)`
+(`FlashTPCBundle.cxx:153-232`): it builds the *combined* (anchor + candidate) predicted light, then
+accepts only if the combined KS and χ² do **not degrade beyond relative bounds** — a 3-way OR
+(`:221-229`), e.g. `temp_ks < ks+0.06 && temp_ks < 1.2·ks && temp_chi2 < chi2+5·ndf && temp_chi2 <
+1.21·chi2`, or a looser pair, or simply `temp_ks·temp_chi2 < ks·chi2`. In words: *merging this
+cluster in must not make the joint fit meaningfully worse.*
+
+**Round 1 — merge within each flash (`:1786-1868`).** For each flash owning ≥1 bundle:
+1. Pick an **anchor** `best_bundle`: the one minimizing the score
+   `value = ks_dis · (chi2/ndf)^0.8` (`:1807`), with flag down-weights that deliberately *favor*
+   boundary/PMT bundles as the anchor — `×0.8` if `flag_at_x_boundary`, a further `×0.8` if also
+   `flag_close_to_PMT`, and `×0.75` more if the running best is poor (`ks>0.2 && chi2>60·ndf`)
+   (`:1809-1818`).
+2. For every other bundle of that flash, test `best_bundle->examine_bundle_rank(bundle)`. **Pass** →
+   `add_bundle` folds that cluster's light into the anchor (`:1839-1841`) and the bundle leaves the
+   results. **Fail** → the cluster is an **orphan**, pushed to `second_round_bundles` (`:1849`).
+3. If the flash is beam (`type == 2`), `best_bundle->examine_merge_clusters()` does an extra
+   beam-only cluster merge (`:1863-1866`).
+
+**Round 2 — re-home orphans onto already-matched flashes (`:1870-1916`).** For each orphan cluster:
+scan the existing result bundles (reverse order, skipping bundles that are themselves orphans). If an
+already-matched flash had **this cluster as a candidate** (the `(flash, cluster)` pair exists in
+`fc_bundles_map`) *and* that flash's anchor accepts it via `examine_bundle_rank`, then `add_bundle`
+merges the cluster onto that flash (`:1885-1894`); the flash is marked **tried**. If no flash
+absorbs it → `third_round_bundles` (`:1899`).
+
+**Round 3 — last chance on untried flashes (`:1918-1944`).** For each still-orphan cluster: collect
+every candidate bundle `(cluster, flash)` from `fc_bundles_map` whose flash was **not yet tried**
+(`:1922-1927`). If exactly one exists, accept it (`:1928-1930`); if several, accept the one
+minimizing `ks_dis · (chi2/ndf)^0.8` (`:1931-1942`). The orphan's original bundle then has its flash
+zeroed (`set_flash(0)`, `:1943`) — so if *no* untried candidate exists, the cluster is finally left
+unmatched.
+
+**Cleanup (`:1947-1953`).** Any `fc_bundles_map` bundle not in the final results is deleted.
+
+**Net effect:** a cluster gets **up to three chances** at a flash — its own best (R1), any
+already-matched flash that wanted it (R2), then any untried flash (R3) — and is abandoned only after
+all are exhausted. Note the asymmetry the toolkit would need to replicate: rounds 2–3 reach into
+`fc_bundles_map` (the *full* (flash, cluster) candidate set, kept alive from before the LASSO), not
+just the surviving matched bundles — the prototype keeps every candidate pairing available for
+recovery. The toolkit's `organize_bundles` only merges (§4.1) and then *removes* out-of-beam failures
+(§12.2); it has no analogue of any of these three rounds.
+
+### 12.4 Masking and the KS shape metric (a toolkit asymmetry)
+
+Per-bundle quality (§3) is two numbers: the χ² and the KS shape distance. The channel **mask**
+(`opdet_mask` — built from opdet type, `ch_mask`, the opposite-TPC side, and the per-flash
+`mc_saturation` bit; §12.1) is applied consistently to the χ² and the LASSO fit, **but not to the
+KS**. This subsection records how masked detectors enter the KS in each codebase, and the small piece
+of KS arithmetic that makes the `mc_saturation` case harmless but the geometry/`ch_mask` case not.
+
+**Does a `(measured = 0, predicted = 0)` channel change the KS?** No — it is **identical to dropping
+it**. The KS here is the maximum absolute difference of the two normalised cumulative distributions
+(toolkit `calc_ks_test`, `TimingTPCBundle.cxx:14-30`; prototype `TH1::KolmogorovTest(…,"M")`). A
+channel that is zero in *both* distributions (i) adds 0 to both normalisation totals, so every other
+channel's normalised value is unchanged, and (ii) leaves both cumulatives flat across it
+(`cum_m[k]=cum_m[k−1]`, `cum_p[k]=cum_p[k−1]`), so `|Δcum|` there merely repeats the adjacent value
+and can never be a new maximum. The KS is therefore moved **only** by channels where measured and
+predicted differ — in particular where `predicted = 0` but `measured > 0`.
+
+**Toolkit — the KS skips the mask (`TimingTPCBundle.cxx:156-184`, merge variant `:68-99`).** The KS
+loop fills `measured_dist[j]=pe[j]` and `predicted_dist[j]=pred_pe[j]` over **all `m_nchan`** with
+**no `opdet_mask` test**; the mask is consulted only in the χ²/ndf loop (`:190`) and in the LASSO fit
+(`opdet_idx_v`, `QLMatching.cxx:664,697,781`). For a masked channel the **prediction is 0** (the
+light loop skips masked dets, `:530`) but the **measured PE is not zeroed** — `Opflash::init` stores
+the full input vector `PE = flash.pes(nchan)` with no per-TPC/active zeroing (`Opflash.cxx:19-20`), so
+`get_PE` returns real light on the opposite-TPC and `ch_mask` channels. Those channels are thus
+`(measured > 0, predicted = 0)` → by the rule above they **shift the KS**, even though χ² and the fit
+correctly exclude them. The existence of the opposite-TPC mask (`:447-448`) is itself evidence those
+channels carry PE — otherwise it would be unnecessary. So this is a genuine **inconsistency**: the KS
+does not apply the exclusion that χ² and the LASSO both apply.
+
+- **Exempt:** the `mc_saturation` mask is conditioned on `pe_det == 0` (`:459`), so those channels are
+  `(0, 0)` and — by the arithmetic above — invisible to the KS regardless. The asymmetry bites only
+  the geometry/`ch_mask` channels that saw light.
+
+**Prototype — no such asymmetry, by construction.** Single TPC, 32 PMTs, no per-channel mask vector;
+the KS (`FlashTPCBundle.cxx:459-470`) and χ² (`:477-500`) both run over all 32 identically. "Masking"
+is done by **zeroing the prediction** — `norm_factor[17]=0` for the dead PMT (`ToyMatching.cxx:354`)
+and the type-1 cosmic veto (`FlashTPCBundle.cxx:461-464`) — and the dead PMT's measured PE is ~0 too,
+so its bin is `(0, 0)` and drops out of the KS cleanly.
+
+**Port note.** If the SBND opposite-TPC channels carry appreciable measured light, the toolkit KS
+should gate on `opdet_mask` in the same loop as the χ² (skip masked channels before building
+`measured_dist`/`predicted_dist`). This is a behaviour change → jsonnet-togglable, default OFF, so
+existing outputs stay bit-identical until validated.
+
+## 13. Light prediction: charge → predicted PE per channel
+
+Everything above consumes `pred_flash` (the per-channel predicted PE) — it is the `pred_pe` in the χ²
+(§3), the columns of `P` in the LASSO (§6), and the shape compared in the KS (§12.4). But the two
+codebases **build that vector by fundamentally different methods**, and this is the single most
+important technical area the rest of the document took as given. The measured side (`pe`, `pe_err`)
+is covered in §7; this section is the **predicted** side.
+
+### 13.1 Prototype — voxelized photon library (table lookup)
+
+Predicted light comes from a **pre-computed optical library** (GEANT/optical sim baked in); the
+matcher only does lookups (`ToyMatching.cxx:305-360`):
+
+- Each merged cell's charge is split over its sampling points: `charge = mcell->get_q()/pts.size()`
+  (`:315`); each point is quantised to a voxel id (`convert_xyz_voxel_id`, ~`:20-40`, a few-cm grid).
+- The library returns, per voxel, a list of `(OpChannel, visibility)` pairs
+  (`photon_library->at(voxel_id)`, `:327`). Predicted PE accumulates
+  `pred += charge · visibility / elifetime_ratio` (`:330`), with the library channel remapped to the
+  PMT index via `map_lib_pmt`.
+- 32 PMTs; one detector technology.
+
+### 13.2 Toolkit — `SemiAnalyticalModel` (computed at runtime)
+
+There is **no pre-baked library**; visibilities are computed analytically per `(point, OpDet)` from
+detector geometry (`QLMatching.cxx:497-540`, `SemiAnalyticalModel.cxx`):
+
+- Per blob point, `q = blob->charge()/blob->npoints()` (`:505`), positions converted **mm→cm** (`:523`).
+- **Direct (VUV)** visibility = geometric solid angle × `exp(−d/vuv_absorption_length)` × a
+  Gaisser-Hillas border correction (`SemiAnalyticalModel.cxx:265,413-421`). The solid angle uses a
+  **dome** model for PMTs (`Omega_Dome_Model`, `:534`) and a **rectangle** model for (X)Arapuca flat
+  PDs (`Rectangle_SolidAngle`, `:465`).
+- **Reflected (VIS)** visibility = a two-hop model: point→cathode "hotspot", then hotspot→OpDet
+  (`:310-358`).
+- Predicted PE: `pred += q·QtoL·(dir_vis·VUVEff + ref_vis·VISEff)` (`QLMatching.cxx:535-536`), summed
+  over the whole cluster **group** (main + associated sub-clusters, `:497-540`).
+
+### 13.3 Three prediction differences that matter for the port
+
+1. **Electron-lifetime correction: present in the prototype, absent in the toolkit matcher.** The
+   prototype divides the predicted contribution by `elifetime_ratio` (`ToyMatching.cxx:323,330`) to
+   recover the *original* ionization — charge measured at the wire is post-drift-attenuation, but
+   scintillation is emitted pre-drift, so the light scales with the un-attenuated charge. A grep of
+   toolkit `match/` finds **no** lifetime/attenuation term; `QLMatching` feeds `blob->charge()`
+   straight in. Either the toolkit's input blob charge is already lifetime-corrected upstream
+   (clustering/imaging) **or this correction is unported** — must be confirmed for SBND, since a
+   missing correction biases predicted light low for far-drift charge (tens of %, drift-dependent).
+2. **Light-magnitude normalization differs.** Prototype: one `scaling_light_mag` (≈0.015) × a
+   per-**run** `yield_ratio` (TGraph, ~0.62–1.0, data only), with `rel_light_yield_err` folded into
+   the PE error (§7). Toolkit: an absolute `QtoL` (default **0.5**) × **per-OpDet**
+   `VUVEfficiency`/`VISEfficiency` arrays, and **no** run-dependent yield-drift term. These are the
+   §9 "DECISION / RE-TUNE" rows — §13 is where they physically enter.
+3. **Two detector technologies (SBND).** The toolkit models dome PMTs (`type 1`) and rectangular
+   (X)Arapucas (`type 0`) separately, selecting which to use via `active_opdet_types` (default `{1}` =
+   PMTs only, reproducing the historical SBND mask, `QLMatching.cxx:256-263`). The prototype is
+   PMT-only. Turning Arapucas on adds rectangle-solid-angle channels to every prediction and hence to
+   the χ²/KS — a deliberate, not automatic, extension.
+
+## 14. LASSO matrix architecture (the two-block normal-equation system)
+
+§6/§8 cover the *columns* and the *weights*; this section records the **row** structure — the soft
+constraints that §6 only names ("Σ strengths per cluster → 1"). Both codes assemble the **same**
+stacked system and solve it in normal-equation form
+(`QLMatching.cxx:727-730`; prototype `ToyMatching.cxx:1481-1485`):
+
+```
+   y = Pᵀ·M + PFᵀ·MF        X = Pᵀ·P + PFᵀ·PF        solve  min ½‖…‖² + N·λ·Σ wₖ|βₖ|
+```
+
+Two row blocks are stacked before forming the normal equations:
+
+- **Block 1 — measurement rows** (`nopdet × nflash` of them). `M(i·nopdet+j) = pe/pe_err` is the
+  measured light; `P` holds, in each bundle column, `pred_pe/pe_err`, plus (round 1 only) one
+  **background-light column per flash** holding the raw `pe/pe_err` so unexplained flash PE has
+  somewhere to go (`QLMatching.cxx:699-708,717`; prototype `ToyMatching.cxx:1415-1432`). This block
+  *is* the χ²/data term.
+- **Block 2 — regularization rows.** One **charge-conservation row per cluster**:
+  `PF(cluster, bundle) = 1/delta_charge` with target `MF(cluster) = 1/delta_charge`
+  (`QLMatching.cxx:722-724`; prototype `delta_track`, `ToyMatching.cxx:1468-1477`). Because every
+  bundle anchored on a cluster writes `1/delta_charge` into that cluster's single row against a target
+  of `1/delta_charge`, the fit is **pulled toward Σ(strengths on that cluster) = 1** — i.e. *each
+  cluster is used about once*, which is what stops one cluster's charge from being split across many
+  flashes. Round 1 adds a **per-flash light row** (`PF(flash, bkg_col) = 1/delta_light`; prototype
+  `delta_flash`) regularizing the background columns.
+
+The small `delta_*` (0.01–0.025) act as **large** penalty coefficients (`1/delta` ≈ 40–100), making
+these near-hard constraints. The per-column L1 `weights` (§6.1) ride on top of this and decide which
+columns survive; the `strength_cutoff = 0.05` then converts the soft solution into hard matches (§8).
+This architecture is shared; only the per-column `weights` content (§6.1) and the §13 light predictor
+differ between the codes.
