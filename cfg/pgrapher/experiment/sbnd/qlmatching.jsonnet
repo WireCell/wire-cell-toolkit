@@ -113,10 +113,15 @@ function(params) {
             bundle_pe_ndf_knee: 1.0,
             // §H raw readout-window truncation flag is always computed by
             // QLMatching (T0-independent, APA-agnostic) and is currently inert
-            // (no consumer), so it needs no knob here. Its window length
-            // (readout_window_ticks, default 3427 = SBND daq.nticks) and edge
-            // threshold (window_edge_ticks, ~one slice) are C++ defaults,
-            // overridable from jsonnet if ever needed.
+            // (no consumer). edge threshold = 24 ticks (6 live slices, rebin 4).
+            // readout_window_ticks is the EXCLUSIVE window end used for the
+            // trailing-edge test: SBND daq.nticks is 3427, but with rebin 4 the
+            // final 4-tick slice's slice_index_max reaches 3428, so 3428 is the
+            // correct reference. A cluster is flagged truncated when its leading
+            // slice is in [0,24] or its trailing slice is in [3404,3427]
+            // (= 3428-24 .. window end).
+            window_edge_ticks: 24,
+            readout_window_ticks: 3428,
         },
     }, nin=1, nout=1),
 }

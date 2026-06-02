@@ -95,6 +95,12 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `strength_cutoff` | `0.05` | `m_strength_cutoff` | LASSO solution threshold to keep a bundle |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
+| `anode_ext1` | `-2.0 cm` | `m_anode_ext1` | anode-side inclusion / flag-window edge in `u` (`anode_in`); see §4.1a |
+| `anode_ext2` | `4.0 cm` | `m_anode_ext2` | anode flag-window outer edge in `u` (close-to-PMT / x-boundary) |
+| `cathode_ext1` | `1.2 cm` | `m_cathode_ext1` | cathode-side inclusion edge (`cathode_in = u_cathode + ext1`) |
+| `cathode_ext2` | `-2.0 cm` | `m_cathode_ext2` | cathode flag-window inner edge (x-boundary) |
+| `window_edge_ticks` | `4` (SBND: **24**) | `m_window_edge_ticks` | raw-tick edge band for `window_truncated`; SBND jsonnet sets 24 |
+| `readout_window_ticks` | `3427` (SBND: **3428**) | `m_readout_window_ticks` | exclusive readout end for the trailing-edge truncation test; SBND jsonnet sets 3428 (rebin-4 `slice_index_max`) |
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
 `flash_minPE: 50` (not 500), `QtoL: 1.0` (not 0.5), `data` from `reality`,
@@ -137,8 +143,9 @@ flash_id, cluster_idx)` (`:269`). For each 3-D point in the cluster:
 - drift-correct the X by the flash time: `x += sign * flash_time * m_drift_speed`
   (`:252,289`); `m_drift_speed` is the configurable `drift_speed` (WCT units,
   default `1.563e-3` = the common SBND value), wired from `params.lar.drift_speed`.
-- drop points outside the drift / Y / Z bounds; set `close_to_PMT` /
-  `at_x_boundary` flags (`:293-299`).
+- drop points outside the drift / Y / Z bounds; the boundary / truncation flags
+  (`close_to_PMT`, `at_x_boundary`, `spec_end`, `window_truncated`) are filled by
+  `compute_endpoint_flags` — see §4.1a.
 - predict light: convert point to cm, call
   `m_semi_model->detectedDirectVisibilities()` and
   `detectedReflectedVisibilities()` (`:306,308`), accumulate per OpDet
@@ -148,6 +155,65 @@ Then quality-gate the bundle (`:323-337`): skip if >25% of points drifted out of
 bounds; `set_pred_flash`; skip if `get_total_pred_light() < 10`;
 `examine_bundle()` (computes KS distance + chi²/ndf); skip if `ks_dis == 1` or
 `chi2/ndf > 1e4`. Survivors go into `pre_bundles`.
+
+### 4.1a Endpoint / boundary flags (`compute_endpoint_flags`, `:961-1096`)
+Called once per candidate bundle from the build loop (`:472`). Fills four bundle
+flags. Port of the prototype `ToyMatching.cxx::calculate_pred_pe` (~176-290).
+
+**Drift coordinate `u`.** Everything below is in a per-TPC drift coordinate
+`u = s·(x_corrected − anode_x)`, with `x_corrected = blob_x + flash_x_offset`
+(`:403-408`, `:1014`). So `u = 0` at the anode plane and increases to
+`u = u_cathode (>0)` at the cathode, regardless of the TPC's physical drift sign
+(both reversed-drift SBND APAs share one convention). `flash_x_offset =
+±flash_time·drift_speed` makes these flags **T0-dependent** (re-evaluated per
+flash hypothesis) — unlike `window_truncated` below, which is T0-independent.
+
+**Endpoints `first_u` / `last_u` (`:1006-1077`).** Collect one `(u, nblobs)` per
+non-empty slice, sort ascending in `u`; `first_u` = smallest u = **anode end**,
+`last_u` = largest u = **cathode end**. Each end is then *trimmed inward*
+(`:1031-1053` anode, `:1055-1077` cathode) to discard sparse, low-charge stubs
+poking past the boundary, so the flag tests fire on the real track end. If almost
+no blobs lie strictly outside, the end **snaps** exactly to `0` (anode) /
+`u_cathode` (cathode).
+
+**Guard (`:1080-1083`).** Flags are only set if the trimmed endpoints sit
+sensibly inside the TPC: `first_u > anode_in − 1cm`, `0 < last_u < cathode_in`,
+`first_u < u_cathode`, where `anode_in = m_anode_ext1 = −2cm` and
+`cathode_in = u_cathode + m_cathode_ext1 = u_cathode + 1.2cm`.
+
+- **`flag_close_to_PMT` — anode end only (`:1087-1090`).** Set true when the
+  trimmed anode end `first_u ∈ (anode_in − 1cm, m_anode_ext2] = (−3cm, +4cm]`.
+  The SBND PMTs sit at the anode plane (`u≈0`), so this is intentionally
+  anode-side only. When it fires it also sets `at_x_boundary`.
+- **`flag_at_x_boundary` — anode OR cathode (`:1087-1094`).** True if the anode
+  end is in the anode window (above) **or** the cathode end
+  `last_u ∈ [u_cathode + m_cathode_ext2, cathode_in) = [u_cathode − 2cm,
+  u_cathode + 1.2cm)`. Marks "cluster touches an x (drift) boundary" on either
+  side; the cathode case does **not** set `close_to_PMT` (no PMTs there).
+- **`flag_spec_end` — set during trimming (`:1046`, `:1070`).** Not a position
+  test on the final endpoint: raised when an inward trim walked off **> 10
+  slices** of sparse charge (`< 5%` of the cluster's blobs) **and** the last step
+  in `u` was a small gap (`< 10cm`) — i.e. a long, contiguous, low-charge tail
+  (a genuine track extension, not a detached fragment). Committed via
+  `set_spec_end_flag` inside the guard (`:1084`).
+
+**`flag_window_truncated` — raw readout-window edge (`:986-1004`).**
+T0-independent and APA-agnostic: a property of the *raw* readout window, computed
+from the matched anode's slice indices (raw ticks, `slice_index = start/tick`).
+With `min_tick` = smallest `slice_index_min` and `max_tick` = largest
+`slice_index_max` over the cluster's non-empty slices:
+```
+truncated = (min_tick ≤ window_edge_ticks)                       // leading edge
+         || (readout_window_ticks − max_tick ≤ window_edge_ticks); // trailing edge
+```
+SBND config sets `window_edge_ticks = 24` and `readout_window_ticks = 3428`
+(`cfg/.../sbnd/qlmatching.jsonnet` §H), giving a **leading band `[0, 24]`** and a
+**trailing band `[3404, 3427]`**. `readout_window_ticks` is the *exclusive*
+window end: `daq.nticks = 3427`, but with rebin 4 the final 4-tick slice's
+`slice_index_max` reaches 3428, so 3428 is the correct trailing reference and the
+band starts on the slice boundary 3404 (= 3428 − 24). The flag is currently
+**inert** (no consumer reads it); it is only emitted on the `bundle_flags:` debug
+line (`:890-899`), so changing the cut does not alter production matching output.
 
 ### 4.2 Deterministic ordering (`:355-410`)
 Bundles are bucketed into `flash_bundles_map`, `cluster_bundles_map`, and
