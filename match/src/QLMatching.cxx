@@ -115,6 +115,13 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_require_containment  = get(cfg, "require_containment",  m_require_containment);
 
+    // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
+    // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
+    const auto cathode_fv_tn = get<std::string>(cfg, "cathode_fiducial", std::string(""));
+    if (!cathode_fv_tn.empty()) {
+        m_cathode_fv = Factory::find_tn<IFiducial>(cathode_fv_tn);
+    }
+
     if (cfg["VUVEfficiency"].isArray()) {
         m_VUVEfficiency.clear();
         for (const auto& v : cfg["VUVEfficiency"]) m_VUVEfficiency.push_back(v.asDouble());
@@ -223,6 +230,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
     cfg["require_containment"]  = m_require_containment;
+    cfg["cathode_fiducial"]     = "";
     return cfg;
 }
 
@@ -237,6 +245,8 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     }
 
     ExecMon em("starting QLMatching");
+
+    m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
 
     // Per-channel OpDet on/off mask, derived from the injected OpDet table
     // (SemiAnalyticalModel::OpticalDetector::type; 1 = dome PMT, 0 = (X)Arapuca)
@@ -967,6 +977,20 @@ bool QLMatching::operator()(const input_pointer& in, output_pointer& out)
     return true;
 }
 
+// Significant extreme points of a cluster (PCA-axis + coordinate extremes),
+// flattened and memoized. The cathode endpoint is the cathode-most of these.
+const std::vector<WireCell::Point>&
+QLMatching::cluster_extreme_points(Cluster* cluster) const
+{
+    auto it = m_extreme_cache.find(cluster);
+    if (it != m_extreme_cache.end()) return it->second;
+    std::vector<WireCell::Point> flat;
+    for (const auto& grp : cluster->get_extreme_wcps()) {
+        for (const auto& p : grp) flat.push_back(p);
+    }
+    return m_extreme_cache.emplace(cluster, std::move(flat)).first->second;
+}
+
 // ----- boundary-flag filling (port of ToyMatching.cxx::calculate_pred_pe ~176-290) -----
 bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                                         Cluster* cluster,
@@ -1104,10 +1128,31 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
             bundle->set_flag_close_to_PMT(true);
             bundle->set_flag_at_x_boundary(true);
         }
-        // Cathode end inside the flag window => at the x-boundary (no PMTs there).
-        if (last_u >= u_cathode + m_cathode_ext2 && last_u < cathode_in) {
-            bundle->set_flag_at_x_boundary(true);
+        // Cathode end => at the x-boundary (no PMTs there). With a CPA fiducial
+        // configured (SBND) this is a 3-D point-in-volume test: among the cluster's
+        // significant extreme points (get_extreme_wcps, cached per cluster), take the
+        // cathode-most (largest drift u; the flash offset is a uniform shift so it
+        // does not change which extreme is cathode-most) and test it against the
+        // structure-exclusion volume, x corrected by the flash T0 offset. Without a
+        // fiducial it falls back to the original flat-cathode 1-D drift window.
+        bool at_cathode = false;
+        if (m_cathode_fv) {
+            const auto& extremes = cluster_extreme_points(cluster);
+            bool have = false;
+            geo_point_t cathode_pt;
+            double best_u = 0.0;
+            for (const auto& p : extremes) {
+                const double u = s * (p.x() - anode_x);  // offset-independent ranking
+                if (!have || u > best_u) { have = true; best_u = u; cathode_pt = p; }
+            }
+            if (have) {
+                at_cathode = m_cathode_fv->contained(WireCell::Point(
+                    cathode_pt.x() + flash_x_offset, cathode_pt.y(), cathode_pt.z()));
+            }
+        } else {
+            at_cathode = (last_u >= u_cathode + m_cathode_ext2 && last_u < cathode_in);
         }
+        if (at_cathode) bundle->set_flag_at_x_boundary(true);
     }
     return contained;
 }

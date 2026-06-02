@@ -102,6 +102,7 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `window_edge_ticks` | `4` (SBND: **24**) | `m_window_edge_ticks` | raw-tick edge band for `window_truncated`; SBND jsonnet sets 24 |
 | `readout_window_ticks` | `3427` (SBND: **3428**) | `m_readout_window_ticks` | exclusive readout end for the trailing-edge truncation test; SBND jsonnet sets 3428 (rebin-4 `slice_index_max`) |
 | `require_containment` | `false` (SBND: **true**) | `m_require_containment` | when true, discard bundles whose cluster fails the TPC-box containment guard (prototype `flag_good_bundle`); see §4.1a. Default OFF keeps non-SBND configs bit-identical |
+| `cathode_fiducial` | `""` (SBND: CPA `CompositeFiducial` tn) | `m_cathode_fv` | optional CPA structure-exclusion fiducial tn. When set, the cathode-end `at_x_boundary` uses a 3-D point-in-volume test (§4.1a); empty ⇒ original flat-cathode 1-D window. Default empty keeps non-SBND configs bit-identical |
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
 `flash_minPE: 50` (not 500), `QtoL: 1.0` (not 0.5), `data` from `reality`,
@@ -194,11 +195,32 @@ non-SBND configs bit-identical (no `continue` is ever taken).
   trimmed anode end `first_u ∈ (anode_in − 1cm, m_anode_ext2] = (−3cm, +4cm]`.
   The SBND PMTs sit at the anode plane (`u≈0`), so this is intentionally
   anode-side only. When it fires it also sets `at_x_boundary`.
-- **`flag_at_x_boundary` — anode OR cathode (`:1087-1094`).** True if the anode
-  end is in the anode window (above) **or** the cathode end
-  `last_u ∈ [u_cathode + m_cathode_ext2, cathode_in) = [u_cathode − 2cm,
-  u_cathode + 1.2cm)`. Marks "cluster touches an x (drift) boundary" on either
-  side; the cathode case does **not** set `close_to_PMT` (no PMTs there).
+- **`flag_at_x_boundary` — anode OR cathode.** True if the anode end is in the
+  anode window (above) **or** the cluster's cathode endpoint reaches the cathode.
+  The cathode case does **not** set `close_to_PMT` (no PMTs there). The cathode
+  test has two modes:
+  - **Default (no fiducial configured — `cathode_fiducial` empty, i.e. all
+    non-SBND configs):** the original flat-cathode 1-D window
+    `last_u ∈ [u_cathode + m_cathode_ext2, cathode_in) = [u_cathode − 2cm,
+    u_cathode + 1.2cm)`. Bit-identical to the historical behavior.
+  - **SBND (`cathode_fiducial` set):** a **3-D point-in-volume** test against the
+    CPA structure-exclusion fiducial. Among the cluster's significant extreme
+    points (`Cluster::get_extreme_wcps()`, flattened and **cached per cluster** in
+    `m_extreme_cache`), the **cathode-most** is selected by largest drift `u`
+    (`u = s·(x − anode_x)`; the flash T0 offset is a uniform shift so it does not
+    change which extreme is cathode-most). That point, with `x` corrected by the
+    flash T0 offset (`x + flash_x_offset`, `y`/`z` unchanged — global toolkit
+    frame, cathode at x=0), is tested with `IFiducial::contained`. This captures a
+    cluster ending on the non-flat CPA structure (tube lattice ~2.7 cm, knuckles
+    ~4.1 cm into the drift) that the flat window misses. The fiducial is built by
+    `cfg/pgrapher/experiment/sbnd/cathode_fiducial.jsonnet` (a cushion-configurable
+    union of `BoxFiducial`s under a `CompositeFiducial{logic:'or'}`, ported from
+    `sbnd_xin/sbnd_geometry/cathode_fiducial.py`) and injected at the top level of
+    the SBND matching drivers; `QLMatching` references it by the `cathode_fiducial`
+    tn. The `contained`/`require_containment` gate and the anode-end logic are
+    unchanged. Mirror-symmetric across the two SBND TPCs by construction: the
+    ranking uses the per-TPC `u`, and the fiducial itself mirrors both TPCs about
+    x=0 (TPC0 boxes at x<0, TPC1 at x>0).
 - **`flag_spec_end` — set during trimming (`:1046`, `:1070`).** Not a position
   test on the final endpoint: raised when an inward trim walked off **> 10
   slices** of sparse charge (`< 5%` of the cluster's blobs) **and** the last step

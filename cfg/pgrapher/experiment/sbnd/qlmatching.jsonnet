@@ -49,12 +49,17 @@ function(params) {
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
-    matching(anode, dv, n, reality, semimodel_file):: g.pnode({
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial=''):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: {
             anode: wc.tn(anode),
             detector_volumes: wc.tn(dv),
+            // CPA structure-exclusion fiducial tn (cfg/.../cathode_fiducial.jsonnet);
+            // '' => disabled, cathode-end flag_at_x_boundary uses the flat-cathode
+            // 1-D test. SBND passes the cpa-exclusion CompositeFiducial tn here and
+            // injects its component configs at the top level of the job.
+            cathode_fiducial: cathode_fiducial,
             beamonly: false,
             data: if reality == 'data' then true else false,
             QtoL: 1.0,

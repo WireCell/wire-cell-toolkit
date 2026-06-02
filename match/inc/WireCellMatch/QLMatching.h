@@ -5,6 +5,7 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 #include "WireCellIface/ITensorSetFilter.h"
 
 #include "WireCellMatch/SemiAnalyticalModel.h"
@@ -14,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace WireCell::Match {
@@ -164,6 +166,21 @@ namespace WireCell::Match {
         IAnodePlane::pointer m_anode{nullptr};
         IDetectorVolumes::pointer m_dv;
 
+        // Optional SBND CPA structure-exclusion fiducial volume. When set (the
+        // "cathode_fiducial" config tn), the cathode-end flag_at_x_boundary is
+        // decided by a 3-D point-in-volume test against it; when null (default,
+        // non-SBND) the cathode-end flag falls back to the original flat-cathode
+        // 1-D drift-coordinate window, leaving those configs bit-identical.
+        IFiducial::pointer m_cathode_fv{nullptr};
+
+        // Per-cluster cache of the cluster's significant extreme points
+        // (get_extreme_wcps, flattened). Used by the cathode-end fiducial test; the
+        // geometric extremes are intrinsic to the cluster (offset-independent for
+        // ranking) so they are computed once and reused across candidate flashes.
+        // Cleared each event in operator().
+        mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*,
+                                   std::vector<WireCell::Point>> m_extreme_cache;
+
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
         float m_cluster_t0{-1e12};
@@ -195,6 +212,11 @@ namespace WireCell::Match {
                                     WireCell::Clus::Facade::Cluster* cluster,
                                     double flash_x_offset,
                                     double s, double anode_x, double u_cathode) const;
+
+        // Significant extreme points of a cluster (get_extreme_wcps, flattened),
+        // memoized in m_extreme_cache. Used to locate the cathode endpoint.
+        const std::vector<WireCell::Point>&
+            cluster_extreme_points(WireCell::Clus::Facade::Cluster* cluster) const;
 
         void remove_bundle_selection(TimingTPCBundleSelection to_be_removed,
                                      TimingTPCBundleSet& bundle_set);
