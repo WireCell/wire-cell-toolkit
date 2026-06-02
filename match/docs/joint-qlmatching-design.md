@@ -137,12 +137,38 @@ bit-identical, the remaining work turns the per-APA loop into a true joint solve
 
 ---
 
+## 4b. Hand-scan calibration dump (built)
+
+To study and hand-correct the matching ahead of the joint algorithm, `QLMatching`
+has an observation-only **`calib_dump`** mode (config string, default `""` ⇒ off,
+production bit-identical). When set, after all per-APA runs complete it writes one
+per-event JSON holding the **full candidate-bundle universe across both TPCs** —
+`run.all_bundles` (every (flash, cluster-group) pair ever created, with final
+per-bundle `pred_flash`/`ks`/`chi2`/`ndf`/`strength`/flags), plus the per-flash
+measured light, the cluster geometry, the per-TPC detector box, and a ±80 ns
+flash-coincidence `group` id (replicating `store_flash_groups`). `all_bundles` is
+only ever appended to and never pruned, so it is the right dump source: no
+mid-pipeline snapshot, no perturbation. `dump_calib()` reads finished state and
+writes via `WireCell::Persist::dump`; with the flag off it is never called.
+
+This feeds the off-line Bokeh hand-scan event display
+(`sbnd_xin/ql_scan/`, doc `sbnd_xin/docs/ql-scan-display.md`), where a human picks
+the correct flash↔cluster matches under the per-flash + ±80 ns coincidence rules
+and saves them as labels. Those labels are the ground-truth coincident pairings
+that will inform (a) the ±80 ns flash combination and (b) the χ²/`PE_err` tuning the
+joint solve needs. The dump is enabled per event by `run_ql_evt.sh -calib`
+(`calib_dump → work/ql_evt<ID>/calib-evt<ID>.json`); the joint node is the natural
+vehicle since it sees both TPCs in one `operator()` call.
+
 ## 5. Files
 
 - `match/src/QLMatching.cxx`, `match/inc/WireCellMatch/QLMatching.h`
+  (incl. `dump_calib`)
 - `cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet`,
   `cfg/pgrapher/experiment/sbnd/clus.jsonnet`
-- `sbnd_xin/wct-clus-matching-perevt.jsonnet` (wcp-porting-img repo)
+- `sbnd_xin/wct-clus-matching-perevt.jsonnet`, `sbnd_xin/run_ql_evt.sh`,
+  `sbnd_xin/ql_scan/{serve_ql_scan.sh,ql_scan_viewer.py}`,
+  `sbnd_xin/docs/ql-scan-display.md` (wcp-porting-img repo)
 - Reference: `clus/src/PointTreeMerging.cxx` (the merge reproduced in-node),
   `aux/src/FlashTensorToOpticalPCs.cxx`, `match/src/SemiAnalyticalModel.cxx`
   (cathode optical cut), `iface/inc/WireCellIface/{INode,IFaninNode}.h`.

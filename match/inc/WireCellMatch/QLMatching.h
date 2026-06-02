@@ -202,6 +202,21 @@ namespace WireCell::Match {
         std::string m_outpath{"pointtrees/%d"};
         float m_cluster_t0{-1e12};
 
+        // Hand-scan calibration dump. When non-empty, after all per-APA runs
+        // complete, write one per-event JSON holding the FULL candidate-bundle
+        // universe (run.all_bundles) with predicted/measured light, metrics, flags,
+        // cluster geometry and the detector box — the input for the off-line Q/L
+        // hand-scan event display (sbnd_xin/ql_scan). Empty (default) => the dump
+        // method is never called, so production output is bit-identical. A "%" in
+        // the path is String::format-ed with the node call count. Observation-only:
+        // it reads already-populated state and never touches the matching path.
+        std::string m_calib_dump{""};
+        // ±80 ns flash-flash coincidence gap used to tag the dump's per-flash
+        // "group" id (mirrors MultiAlgBlobClustering::store_flash_groups /
+        // SBND clus.jsonnet flash_group_window), so the viewer's both-TPC
+        // coincidence filter matches the Bee display. Calib-dump only.
+        double m_flash_group_window{80 * units::ns};
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -313,6 +328,12 @@ namespace WireCell::Match {
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
+
+        // Hand-scan calibration dump (m_calib_dump only). Builds one per-event JSON
+        // from the finished per-APA runs (the full all_bundles candidate set across
+        // both TPCs) and writes it via WireCell::Persist::dump. Never touches the
+        // matching path.
+        void dump_calib(const std::vector<ApaRun>& runs);
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

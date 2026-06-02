@@ -151,10 +151,11 @@ function(params) {
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial=''):: g.pnode({
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump=''):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
-        data: { anode: wc.tn(anode) } + match_data(dv, reality, semimodel_file, cathode_fiducial),
+        data: { anode: wc.tn(anode), calib_dump: calib_dump }
+              + match_data(dv, reality, semimodel_file, cathode_fiducial),
     }, nin=1, nout=1),
 
     // Joint multi-APA charge-light matching: ONE QLMatching node with one input
@@ -164,7 +165,7 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial=''):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump=''):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -172,6 +173,10 @@ function(params) {
             // Concatenate the per-APA optical-flash display PC into the merged
             // grouping (mirrors clus_all_apa PointTreeMerging.root_pcs_to_merge).
             root_pcs_to_merge: ['opflash'],
+            // Hand-scan calibration dump path ('' => off, production-identical).
+            // The joint node sees BOTH APAs in one operator() call, so a single
+            // dump file holds both TPCs (sbnd_xin/ql_scan).
+            calib_dump: calib_dump,
         } + match_data(dv, reality, semimodel_file, cathode_fiducial),
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be

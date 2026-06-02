@@ -121,6 +121,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_outpath       = get(cfg, "outpath", m_outpath);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
+    m_calib_dump    = get(cfg, "calib_dump", m_calib_dump);
+    m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -256,6 +258,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     Configuration cfg;
     cfg["inpath"]          = m_inpath;
     cfg["outpath"]         = m_outpath;
+    cfg["calib_dump"]      = m_calib_dump;
+    cfg["flash_group_window"] = m_flash_group_window;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
@@ -417,6 +421,10 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         outtens.insert(outtens.end(), tens_dead.begin(), tens_dead.end());
     }
     out = Aux::TensorDM::as_tensorset(outtens, out_ident);
+
+    // Hand-scan calibration dump (off unless calib_dump is set). Reads the finished
+    // per-APA runs only; never perturbs the matching above.
+    if (!m_calib_dump.empty()) dump_calib(runs);
 
     ++m_count;
     return true;
@@ -662,6 +670,7 @@ void QLMatching::build_bundles(ApaRun& run)
             const bool contained =
                 compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode,
                                        static_cast<int>(run.anode->ident()));
+            bundle->set_contained(contained);   // diagnostic only (calib dump)
             // Discard bundles whose cluster is not contained in the TPC box once
             // the flash T0 x-offset is applied. Off by default.
             if (m_require_containment && !contained) continue;
@@ -1073,6 +1082,207 @@ void QLMatching::write_opflash_pc(ApaRun& run)
     run.grouping->put_pcarray<double>(op_time, "time", "opflash");
     run.grouping->put_pcarray<int>(op_ch, "ch", "opflash");
     run.grouping->put_pcarray<double>(op_pe, "pe", "opflash");
+}
+
+// ---------------------------------------------------------------------------
+// Hand-scan calibration dump. Serialize the FULL candidate-bundle universe
+// (run.all_bundles across every APA) plus the per-flash measured light, the
+// cluster geometry and the detector box, to one per-event JSON consumed by the
+// off-line Q/L hand-scan event display (sbnd_xin/ql_scan). Observation-only:
+// nothing here feeds back into the matching, and it runs only when calib_dump is
+// set, so production output is unchanged. See match/docs/joint-qlmatching-design.md.
+//
+// Conventions: all spatial quantities in cm, flash time in us, drift speed in
+// cm/us, so the viewer recovers a bundle's T0 x-shift as
+//   dx_cm = sign_offset * flash_time_us * drift_speed_cm_per_us
+// and adds it to the (fixed-box) cluster points. Cluster idents are per-APA, so a
+// globally-unique cluster uid = apa*kFlashGidStride + ident disambiguates the two
+// TPCs (same stride convention as the flash gid).
+void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
+{
+    const double cm   = units::cm;
+    const double us   = units::us;
+    const double v_cm_us = m_drift_speed / (cm / us);
+    auto cluster_uid = [](int apa, int ident) { return apa * kFlashGidStride + ident; };
+
+    Json::Value top;
+    top["nchan"]        = m_nchan;
+    top["drift_speed"]  = v_cm_us;             // cm/us
+    top["count"]        = (Json::UInt64)m_count;
+    top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
+
+    // Quality params / uncertainty model (so the viewer shows the chi2 /
+    // flag_high_consistent ingredients and the PE_err rule next to the metrics).
+    Json::Value qp;
+    qp["highconsist_ks_max"]  = m_highconsist_ks_max;
+    qp["highconsist_min_ndf"] = m_highconsist_min_ndf;
+    qp["pe_ndf_knee"]         = m_bundle_pe_ndf_knee;
+    qp["mask_ks"]             = m_bundle_mask_ks;
+    qp["ks_merge_max"]        = m_bundle_ks_merge_max;
+    qp["chi2ndf_merge_max"]   = m_bundle_chi2ndf_merge_max;
+    qp["strength_cutoff"]     = m_strength_cutoff;
+    qp["pe_err_floor"]        = m_pe_err_floor;
+    qp["pe_err_frac"]         = m_pe_err_frac;
+    qp["pe_err_knee"]         = m_pe_err_knee;
+    top["quality_params"] = qp;
+
+    // OpDet table (all channels). apa side and active flag mirror compute_geometry:
+    // side by cathode-plane x; active iff the channel survives its own TPC's mask.
+    std::vector<bool> active(m_nchan, false);
+    for (const auto& run : runs) {
+        for (int ch = 0; ch < m_nchan && ch < (int)run.opdet_mask.size(); ++ch)
+            if (run.opdet_mask[ch] == 1) active[ch] = true;
+    }
+    Json::Value opdets(Json::arrayValue);
+    for (int ch = 0; ch < m_nchan && ch < (int)m_opdets.size(); ++ch) {
+        const auto& od = m_opdets[ch];
+        Json::Value o;
+        o["ch"]     = ch;
+        o["x"]      = od.center.x();           // OpDet table already in cm
+        o["y"]      = od.center.y();
+        o["z"]      = od.center.z();
+        o["type"]   = od.type;
+        o["apa"]    = (od.center.x() < m_cathode_x) ? 0 : 1;
+        o["active"] = (bool)active[ch];
+        opdets.append(o);
+    }
+    top["opdets"] = opdets;
+
+    Json::Value geometry(Json::objectValue);
+    Json::Value flashes(Json::arrayValue);
+    Json::Value clusters(Json::arrayValue);
+    Json::Value bundles(Json::arrayValue);
+
+    for (const auto& run : runs) {
+        const int apa = (int)run.anode->ident();
+
+        // Detector box for this TPC. cathode_x = anode_x + s*u_cathode (compute_geometry).
+        Json::Value g;
+        const double anode_x_cm   = run.anode_x / cm;
+        const double cathode_x_cm = (run.anode_x + run.s * run.u_cathode) / cm;
+        g["anode_x"]     = anode_x_cm;
+        g["cathode_x"]   = cathode_x_cm;
+        g["u_cathode"]   = run.u_cathode / cm;
+        g["s"]           = run.s;
+        g["sign_offset"] = run.sign_offset;
+        g["y_lo"]        = run.y_lo / cm;
+        g["y_hi"]        = run.y_hi / cm;
+        g["z_lo"]        = run.z_lo / cm;
+        g["z_hi"]        = run.z_hi / cm;
+        geometry[std::to_string(apa)] = g;
+
+        // Per-flash measured light + coincidence group id (computed below).
+        for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
+            const auto& fl = run.flashes[fi];
+            Json::Value f;
+            f["gid"]      = apa * kFlashGidStride + (int)fi;
+            f["id"]       = fl->get_flash_id();
+            f["apa"]      = apa;
+            f["time"]     = fl->get_time() / us;     // us
+            f["total_PE"] = fl->get_total_PE();
+            Json::Value pe(Json::arrayValue), pe_err(Json::arrayValue);
+            for (int ch = 0; ch < m_nchan; ++ch) { pe.append(fl->get_PE(ch)); pe_err.append(fl->get_PE_err(ch)); }
+            f["pe"]     = pe;
+            f["pe_err"] = pe_err;
+            f["group"]  = -1;                        // filled in the coincidence pass
+            flashes.append(f);
+        }
+
+        // Cluster geometry (raw, un-shifted; the viewer applies the per-bundle dx).
+        for (auto* cl : run.clusters) {
+            Json::Value c;
+            c["uid"]   = cluster_uid(apa, cl->ident());
+            c["ident"] = cl->ident();
+            c["apa"]   = apa;
+            Json::Value xs(Json::arrayValue), ys(Json::arrayValue), zs(Json::arrayValue), qs(Json::arrayValue);
+            std::size_t np = 0;
+            for (auto* blob : cl->children()) {
+                const double qpt = blob->npoints() ? blob->charge() / blob->npoints() : 0.0;
+                auto pts = blob->points("3d", {"x", "y", "z"});
+                for (int i = 0; i < blob->npoints(); ++i) {
+                    xs.append(pts.at(i).x() / cm);
+                    ys.append(pts.at(i).y() / cm);
+                    zs.append(pts.at(i).z() / cm);
+                    qs.append(qpt);
+                    ++np;
+                }
+            }
+            c["npoints"] = (Json::UInt64)np;
+            c["x"] = xs; c["y"] = ys; c["z"] = zs; c["q"] = qs;
+            clusters.append(c);
+        }
+
+        // Final auto-selected bundles = those left in flash_bundles_map after the fit.
+        std::set<const TimingTPCBundle*> selected;
+        for (const auto& kv : run.flash_bundles_map)
+            for (const auto& b : kv.second) selected.insert(b.get());
+
+        // The full candidate universe: every bundle ever created for this APA.
+        for (const auto& b : run.all_bundles) {
+            auto* fl = b->get_flash();
+            Json::Value jb;
+            jb["apa"]          = apa;
+            jb["flash_gid"]    = apa * kFlashGidStride + run.global_flash_idx_map.at(fl);
+            jb["flash_id"]     = fl->get_flash_id();
+            jb["main_cluster"] = cluster_uid(apa, b->get_main_cluster()->ident());
+            Json::Value others(Json::arrayValue);
+            for (auto* oc : b->get_other_clusters()) others.append(cluster_uid(apa, oc->ident()));
+            jb["other_clusters"]   = others;
+            jb["ks_dis"]           = b->get_ks_dis();
+            jb["chi2"]             = b->get_chi2();
+            jb["ndf"]              = b->get_ndf();
+            jb["strength"]         = b->get_strength();
+            jb["total_pred_light"] = b->get_total_pred_light();
+            jb["total_PE"]         = fl->get_total_PE();
+            // Containment verdict from compute_endpoint_flags. Uncontained bundles
+            // (dropped by require_containment) keep the ctor's zeroed metrics and a
+            // zero-filled pred_flash; the flag is what tells them apart.
+            const auto& pred = b->get_pred_flash();
+            jb["contained"]            = b->get_contained();
+            jb["consistent"]           = b->get_consistent_flag();
+            jb["potential_bad_match"]  = b->get_potential_bad_match_flag();
+            jb["close_to_PMT"]         = b->get_flag_close_to_PMT();
+            jb["at_x_boundary"]        = b->get_flag_at_x_boundary();
+            jb["spec_end"]             = b->get_spec_end_flag();
+            jb["window_truncated"]     = b->get_flag_window_truncated();
+            jb["auto_selected"]        = (bool)selected.count(b.get());
+            Json::Value jpred(Json::arrayValue);
+            for (double v : pred) jpred.append(v);
+            jb["pred_pe"] = jpred;
+            bundles.append(jb);
+        }
+    }
+
+    // ±80 ns flash-flash coincidence groups across BOTH TPCs (replicates
+    // MultiAlgBlobClustering::store_flash_groups on the merged flash times).
+    {
+        std::vector<std::pair<int, double>> ft;   // (array index into flashes, time_us)
+        for (Json::ArrayIndex i = 0; i < flashes.size(); ++i)
+            ft.emplace_back((int)i, flashes[i]["time"].asDouble());
+        std::sort(ft.begin(), ft.end(), [&](const auto& a, const auto& b) {
+            if (a.second != b.second) return a.second < b.second;
+            return flashes[a.first]["gid"].asInt() < flashes[b.first]["gid"].asInt();
+        });
+        const double window_us = m_flash_group_window / us;
+        int next_group = 0;
+        double prev_t = 0;
+        for (std::size_t k = 0; k < ft.size(); ++k) {
+            if (k == 0 || (ft[k].second - prev_t) > window_us) ++next_group;
+            flashes[ft[k].first]["group"] = next_group;
+            prev_t = ft[k].second;
+        }
+    }
+
+    top["geometry"] = geometry;
+    top["flashes"]  = flashes;
+    top["clusters"] = clusters;
+    top["bundles"]  = bundles;
+
+    std::string fname = m_calib_dump;
+    if (fname.find('%') != std::string::npos) fname = String::format(fname, (int)m_count);
+    Persist::dump(fname, top, /*pretty=*/false);
+    log->debug("calib dump: wrote {} ({} bundles, {} flashes, {} clusters across {} APAs)",
+               fname, bundles.size(), flashes.size(), clusters.size(), runs.size());
 }
 
 // Flashes ordered by get_flash_id() (the stable input tensor row index).

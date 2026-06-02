@@ -86,6 +86,10 @@ namespace WireCell::Match {
         bool get_flag_window_truncated() const { return flag_window_truncated; }
         bool get_potential_bad_match_flag() const { return flag_potential_bad_match; }
         void set_potential_bad_match_flag(bool v) { flag_potential_bad_match = v; }
+        // TPC-containment verdict from compute_endpoint_flags (calib/diagnostic
+        // only; nothing in the matching path reads it). Default true.
+        void set_contained(bool v) { flag_contained = v; }
+        bool get_contained() const { return flag_contained; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -107,6 +111,7 @@ namespace WireCell::Match {
         bool flag_window_truncated;
         bool flag_potential_bad_match;
         bool flag_high_consistent;
+        bool flag_contained;
 
         double ks_dis;
         double chi2;
