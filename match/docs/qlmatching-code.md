@@ -294,6 +294,9 @@ pctrees and emit it under the same `charge_ident`.
 > pre-clustering `img` dump point (where the live clusters are still the per-APA
 > matched clusters and their ids equal the `img` enumeration) and emits the `op`
 > JSON via the new `WireCell::Bee::Flashes` object (`save_opflash: true`).
+> Flashes are emitted in **ascending `op_t` (flash-time) order** (a `stable_sort`
+> in `fill_bee_flashes`), so the Bee viewer's flash next/prev steps low→high in
+> time rather than the old first-seen order.
 > The legacy `dump_*` helpers described here are retired (see porting-summary).
 >
 > **Known degeneracy (to fix with later matching-algorithm tuning):** the pctree
