@@ -22,8 +22,10 @@ quantities and **cannot be copied** — they must be re-derived for SBND. This d
 
 This document changes no code. It covers the five requested topics: (1) χ² construction,
 (2) flag usage, (3) regularization strength, (4) light errors, (5) χ² in the first vs second round —
-plus how the prototype reconstructs the per-channel PE error upstream of matching (§7.1) and a
-complete reference for the toolkit's jsonnet config parameters (§11).
+plus how the prototype reconstructs the per-channel PE error upstream of matching (§7.1), how the
+LASSO penalty weights (`delta_shape`/`bkg_weight`/`pe_mismatch_*`) enter the fit (§6.1), the bundle
+add/merge thresholds (§4.1), the MC saturation mask and out-of-beam QA cuts (§12), and a complete
+reference for the toolkit's jsonnet config parameters (§11).
 
 ## 2. File map
 
@@ -182,6 +184,61 @@ A further prototype gate beyond `flag_high_consistent` (`FlashTPCBundle.cxx:547-
 "fired fraction" (`nfired/ntot` of channels with `pred > 0.33`) to set `flag_potential_bad_match`
 and to reject bundles outright — also boundary-aware. The toolkit has no equivalent.
 
+### 4.1 Bundle add/merge thresholds (`§F` knobs)
+
+`flag_high_consistent` (above) is one of several thresholds carried in the `BundleQualityParams`
+struct (`qp`, built at `QLMatching.cxx:435-437`) and forwarded to **every** `TimingTPCBundle`. The
+other three govern **bundle merging** — combining a candidate cluster into an existing flash↔cluster
+bundle when a flash plausibly matches more than one cluster.
+
+**When/where merging happens.** Merging is **not** part of forming bundles, and **not** part of the
+χ² fit — it is a *post-fit consolidation*. The flow is three stages: (1) **formation** — each
+flash×cluster pairing becomes a bundle and `examine_bundle()` (no-arg) computes its own KS + χ²/ndf
+(the §3 χ², `QLMatching.cxx:548`); (2) **the LASSO fit** (rounds 1–2, `:670-831`) assigns strengths
+and prunes, after which a single flash may still retain *several* surviving bundles; (3) **merge** in
+`organize_bundles` (called at `:864`, body `:1198-1262`) — for each flash, the highest-strength
+bundle becomes the anchor and the flash's other survivors are folded into it
+(`examine_bundle(candidate)` then `add_bundle`, `:1240-1241`). **Why:** the upstream clustering can
+split one physical object (a long track, or a multi-prong interaction) into several clusters all lit
+by the same flash; the LASSO may keep several, and merging recombines those co-illuminated clusters
+into one consolidated `flash ↔ (multi-cluster)` match. The cuts below ensure only a cluster whose
+added light keeps the combined photon-pattern match good is absorbed.
+
+- **`bundle_ks_merge_max` (0.2), `bundle_chi2ndf_merge_max` (20)** — the *merge-acceptance* gate
+  (`TimingTPCBundle::examine_bundle(candidate)`, `TimingTPCBundle.cxx:109-112`). A candidate is
+  merged only if the *combined* prediction both improves the fit **and** stays within quality:
+
+  ```cpp
+  if ((candidate_ks_dis < ks_dis || candidate_chi2 < chi2) &&        // merging helps, and
+      candidate_ks_dis < ks_merge_max && candidate_chi2/ndf < chi2ndf_merge_max)  // stays good
+      return true;   // accept the merge
+  ```
+
+  So a merge that would push the combined KS above 0.2 or χ²/ndf above 20 is rejected even if it
+  nominally lowers one of them. These are the merge-time analog of the consistency cuts in §4.
+
+- **`bundle_addmerge_exponent` (0.8)** — the *main-cluster tie-break* in `add_bundle`
+  (`TimingTPCBundle.cxx:118-121`). Once a merge is accepted, the two clusters compete for the
+  "main" role by the combined metric `ks_dis · (chi2/ndf)^0.8`; the smaller wins and becomes the
+  bundle's `main_cluster` (the other is demoted to `other_clusters`). The exponent sets how much
+  χ²/ndf weighs against KS in that ranking (0.8 < 1 → KS dominates slightly).
+
+- **`bundle_pe_ndf_knee` (1.0)** — channels where *both* `pe` and `pred` fall below 1.0 PE do not
+  count toward `ndf` (`TimingTPCBundle.cxx:104,192`), so empty-on-both-sides OpDets neither inflate
+  χ²/ndf nor the consistency denominators.
+
+**Prototype equivalent.** The prototype merges at the same post-LASSO stage, via
+`examine_bundle_rank(other)` + `add_bundle(other)` (`ToyMatching.cxx:1839-1841`, `1888-1891`;
+`FlashTPCBundle.cxx:153,350`). Two differences in form: (a) its merge-acceptance gate uses
+**relative-improvement** bounds (`temp_ks < ks+0.06 && temp_ks < ks·1.2 && temp_chi2 < chi2+5·ndf &&
+temp_chi2 < chi2·1.21`, with a looser OR-branch; `FlashTPCBundle.cxx:106-112`) rather than the
+toolkit's improves-OR + **absolute ceilings** `0.2`/`20` — so `bundle_ks_merge_max`/
+`bundle_chi2ndf_merge_max` are a toolkit *simplification*, not direct prototype constants; (b) the
+`0.8` tie-break exponent **is** a direct port, but the prototype normalizes by predicted light —
+`ks·(chi2/ndf)^0.8 / pred_light` (`FlashTPCBundle.cxx:356`) — a `/pred_light` factor the toolkit
+drops. (Separately, the prototype also uses `examine_bundle(other)` *pre*-LASSO at `:1329` as a
+keep/drop consistency cull — a different use, not a merge.) See §9 for the re-tune view.
+
 ## 5. Flag usage
 
 | Flag | Toolkit: where SET | Prototype: how USED | Toolkit status |
@@ -218,14 +275,79 @@ with **λ = 0.1** in both rounds.
 | Charge/track constraint (Σ strengths per cluster → 1) | `delta_charge = 0.01` (row `1/δ`) | `delta_track = 0.01` |
 | Flash background absorption (rd1 only) | `delta_light = 0.025` | `delta_flash = 0.025` |
 | KS shape penalty scale (rd2 only) | `delta_shape = 0.01` | *(none — toolkit-specific)* |
-| Background column weight (rd1) | `bkg_weight = 0.5` | *(implicit in flash DOF)* |
-| Per-bundle weight floor / knee | `pe_mismatch_floor = 0.3`, `pe_mismatch_knee = 0.3` | (no floor; weight=mismatch directly) |
-| Boundary down-weight | *(not applied — flags inert)* | `0.2` for `flag_at_x_boundary` |
+| Background column weight (rd1) | `bkg_weight = 0.5` | `1.0` (fixed, `ToyMatching.cxx:1449`) |
+| Per-bundle L1 weight content | PE-total mismatch (`pe_mismatch_floor = 0.3`, `pe_mismatch_knee = 0.3`) + KS shape (rd2) | **boundary flag only** — `0.2`/`1.0`, *no* PE-mismatch or shape term (`ToyMatching.cxx:1437-1441`, `1603-1607`) |
+| Boundary down-weight | *(not applied — flags inert)* | `0.2` for `flag_at_x_boundary` (this **is** the prototype's per-bundle weight) |
 | Strength keep-threshold | `m_strength_cutoff = 0.05` | `0.05` |
 
 The λ value and `delta_*` constants are **dimensionless ratios** (the prototype comment says "the
 coefficient is all around 1"), so they are good candidates to **port as-is**; the boundary
 down-weight `0.2` is likewise dimensionless. See §9.
+
+### 6.1 How `delta_shape`, `bkg_weight`, `pe_mismatch_*` enter the fit
+
+These four are **not** part of the per-bundle χ² of §3 — that χ² (`examine_bundle`,
+`TimingTPCBundle.cxx:194`) is built before the fit and only gates `flag_high_consistent`. The four
+parameters here build the **LASSO `weights` vector**, i.e. the *L1 penalty* of the regression, a
+separate term from the data χ². The solver (`util/src/LassoModel.cxx:11`) minimizes
+
+```
+        ½‖y − Xβ‖²        +        N · λ · Σ_k  weights(k) · |β_k|
+        └── data term ──┘          └──────── L1 penalty ────────┘
+         (the χ²: y,X hold          (weights(k) is a per-column
+          pe/pred over pe_err)       penalty multiplier)
+```
+
+`β_k` is the strength of column *k* (one per candidate bundle, plus one background column per flash
+in round 1). `y`/`X` carry the `pe/pe_err` and `pred/pe_err` data — that is where the χ² of §3/§7
+lives. The four parameters only scale `weights(k)`: a **larger** `weights(k)` shrinks `β_k` harder
+toward zero (`_soft_thresholding(…, λ·weights(k))`, `LassoModel.cxx:125`), so the bundle is more
+likely to fall below the `strength_cutoff = 0.05` keep-threshold and be dropped. They do not change
+any `(pred − pe)²/σ²` value; they change *which columns survive* the joint fit.
+
+**`pe_mismatch_knee` / `pe_mismatch_floor` — per-bundle penalty** (`QLMatching.cxx:713-715` rd1,
+`:798-800` rd2). For each bundle column the base penalty is the *relative total-PE mismatch*:
+
+```cpp
+weights(k) = (|pred_tot − meas_tot| > pe_mismatch_knee · meas_tot)
+               ? |pred_tot − meas_tot| / meas_tot   // mismatch beyond the knee: penalize ∝ mismatch
+               : pe_mismatch_floor;                 // within the knee: flat floor
+```
+
+So a bundle whose predicted total light is within `knee = 0.3` (30%) of the measured flash PE pays
+only the floor `0.3`; beyond 30% it pays a penalty equal to its fractional mismatch (e.g. a 2×
+overshoot → weight 1.0). `knee` is the dead-band half-width; `floor` is the minimum penalty any
+bundle pays so even a perfect-PE bundle is still L1-regularized.
+
+**`bkg_weight` — background-column penalty** (round 1 only, `QLMatching.cxx:721`). Round 1 adds one
+"background light" column per flash (`PF = 1/delta_light`) that can absorb flash PE no bundle
+explains. `weights(nbundle+k) = bkg_weight = 0.5` is the L1 price of dumping light into that
+background instead of into a real bundle: lower `bkg_weight` makes the background cheaper (more
+flash PE explained away as background, bundles compete harder); higher makes real bundles
+preferred. Round 2 has no background column, so `bkg_weight` is round-1-only.
+
+**`delta_shape` — KS shape penalty** (round 2 only, `QLMatching.cxx:801`). Round 2 augments each
+bundle's base penalty with a shape term:
+
+```cpp
+weights(k) = base + delta_shape · nopdet · ks_dis / lambda;   // base = the pe_mismatch term above
+```
+
+A bundle whose predicted *pattern* across OpDets matches the measured one poorly (large `ks_dis`)
+pays extra L1 penalty, scaled by the channel count `nopdet` and divided by `lambda` (so the
+`N·λ·weights` product is λ-independent in this term). This is **toolkit-specific** — the prototype
+has no shape term in its LASSO and instead enforces shape upstream through the `ks_dis` cuts of
+`flag_high_consistent` (§4). `delta_shape = 0.01` is small by design: it nudges the round-2 ranking
+toward better-shaped bundles without overriding the PE-mismatch term.
+
+**Contrast with the prototype.** None of these three are prototype features. The prototype's
+per-bundle L1 weight is the **boundary flag only** — `0.2` if `flag_at_x_boundary` else `1.0`
+(`ToyMatching.cxx:1437-1441`, `1603-1607`), with no PE-mismatch and no shape dependence — and its
+background column has a fixed weight of `1.0` (`:1449`). So the two codes put entirely different
+content into the per-column penalty: prototype = drift geometry (the boundary down-weight, currently
+inert in the toolkit, §5); toolkit = PE-total mismatch + KS shape. From the likelihood view above
+these are just different choices of *per-candidate prior plausibility* — geometry-based vs
+agreement-based — fed into the same weighted-LASSO machinery.
 
 ## 7. Light error model — two distinct sites
 
@@ -418,10 +540,10 @@ the MicroBooNE convention and intentionally differ from the old SBND literals.
 | `lasso_lambda` | `0.1` | LASSO λ (‖s‖₁ penalty), both rounds |
 | `delta_charge` | `0.01` | per-cluster charge/track constraint (row `1/δ`) |
 | `delta_light` | `0.025` | flash background-absorption DOF (round 1) |
-| `delta_shape` | `0.01` | KS shape-penalty scale (round 2, toolkit-specific) |
-| `bkg_weight` | `0.5` | background-column weight (round 1) |
-| `pe_mismatch_knee` | `0.3` | PE-mismatch weight knee (fraction of measured PE) |
-| `pe_mismatch_floor` | `0.3` | PE-mismatch weight floor |
+| `delta_shape` | `0.01` | KS shape-penalty scale (round 2, toolkit-specific; §6.1) |
+| `bkg_weight` | `0.5` | background-column L1 penalty (round 1; §6.1) |
+| `pe_mismatch_knee` | `0.3` | PE-mismatch penalty knee (dead-band, fraction of measured PE; §6.1) |
+| `pe_mismatch_floor` | `0.3` | PE-mismatch penalty floor (minimum L1 weight; §6.1) |
 | `strength_cutoff` | `0.05` | drop bundles with LASSO strength below this, each round |
 
 **§G — flash PE-error model** (forwarded to `Opflash`; see §3, §7)
@@ -437,12 +559,12 @@ the MicroBooNE convention and intentionally differ from the old SBND literals.
 
 | jsonnet key | default | meaning |
 |---|---|---|
-| `bundle_ks_merge_max` | `0.2` | KS ceiling for bundle add/merge |
-| `bundle_chi2ndf_merge_max` | `20` | χ²/ndf ceiling for bundle add/merge |
-| `bundle_addmerge_exponent` | `0.8` | exponent in the add/merge acceptance |
+| `bundle_ks_merge_max` | `0.2` | KS ceiling for the merge-acceptance gate (§4.1) |
+| `bundle_chi2ndf_merge_max` | `20` | χ²/ndf ceiling for the merge-acceptance gate (§4.1) |
+| `bundle_addmerge_exponent` | `0.8` | exponent in the main-cluster tie-break `ks·(chi2/ndf)^p` (§4.1) |
 | `highconsist_ks_max` | `0.06` | `flag_high_consistent` KS cut (§4) |
 | `highconsist_min_ndf` | `3` | `flag_high_consistent` min ndf (§4) |
-| `bundle_pe_ndf_knee` | `1.0` | PE below which a channel does not count toward ndf (§3) |
+| `bundle_pe_ndf_knee` | `1.0` | PE below which a channel does not count toward ndf (§3, §4.1) |
 
 **§A — active-volume cushions** (set the endpoint/boundary flag windows; see §5, §9). Signed, in the
 per-TPC anode→cathode drift coordinate u (u=0 at the anode/PMT plane).
@@ -456,7 +578,7 @@ per-TPC anode→cathode drift coordinate u (u=0 at the anode/PMT plane).
 | `y_cushion` | `0.0 cm` | signed inward(+)/outward(−) shift of each \|y\| edge |
 | `z_cushion` | `0.0 cm` | signed inward(+)/outward(−) shift of each z edge |
 
-**§E — out-of-beam QA cuts**
+**§E — out-of-beam QA cuts** (post-fit cleanup of out-of-beam matches; see §12.2)
 
 | jsonnet key | default | meaning |
 |---|---|---|
@@ -464,11 +586,11 @@ per-TPC anode→cathode drift coordinate u (u=0 at the anode/PMT plane).
 | `outbeam_chi2ndf_max` | `20` | χ²/ndf ceiling for an out-of-beam match |
 | `outbeam_pe_frac` | `0.5` | out-of-beam total-PE mismatch fraction |
 
-**§D — pre-selection / bad-match gate**
+**§D — pre-selection / bad-match gate** (see §12.1)
 
 | jsonnet key | default | meaning |
 |---|---|---|
-| `mc_saturation_pe` | `5000` | total-flash-PE trigger for the MC saturated-PMT mask |
+| `mc_saturation_pe` | `5000` | total-flash-PE trigger for the MC saturated-PMT mask (MC only) |
 
 **§H — raw readout-window truncation flag** (always computed; sets `flag_window_truncated`, §5)
 
@@ -503,3 +625,80 @@ pre-selection — they do not enter the χ² or the flags.
 | `cluster_t0` | `-1e12` | fixed cluster T0 override (disabled by default) |
 | `inpath` / `outpath` | `pointtrees/%d` | tensor-set in/out paths |
 | `require_containment` | `false` | discard bundles whose cluster leaves the TPC box at the flash T0 (SBND-on; `project_ql_tpc_containment`) |
+
+## 12. Selection gates outside the χ²: MC saturation mask & out-of-beam QA
+
+Two toolkit gates act on the data *around* the fit rather than inside the χ². They are listed in §11
+(§D, §E) but their *when/where/why* is here.
+
+### 12.1 `mc_saturation_pe` — per-flash channel mask (pre-fit, MC only)
+
+**Where** (`QLMatching.cxx:455-461`): just before the bundles for a flash are built, the per-TPC
+`opdet_mask` is copied to a per-flash `flash_opdet_mask`, and for that copy:
+
+```cpp
+if (flash->get_total_PE() > m_mc_saturation_pe && pe_det == 0 && m_data == false)
+    flash_opdet_mask[idet] = 0;   // drop this channel for this flash only
+```
+
+**What/why** (per the code's own comment at `QLMatching.cxx:455`, "also catches simulated saturated
+PMTs in MC"): in **MC** the optical simulation represents a **saturated** PMT by emitting `pe = 0`
+for that channel. In a **bright** flash (total PE above `mc_saturation_pe = 5000`) a healthy PMT
+should see plenty of light, so a `pe = 0` channel is taken to be one of those simulated saturated
+PMTs. Left in, it would contribute a large bogus `(pred − 0)²` to every bundle's χ² for that flash.
+Masking it (`flag = 0`) excludes it from the χ² (§3), the KS test, and the LASSO data term, for that
+flash only. The gate is doubly guarded — **MC only** (`m_data == false`) and **bright only** — so
+dim flashes and all data are untouched (data handles saturated/dead channels by other means, e.g.
+`ch_mask`). `5000` is an absolute-PE threshold and is a **RE-TUNE for SBND** candidate (it scales
+with light yield, like the §9 entries). The behavior is verified from this toolkit code and its
+comment; no corresponding bright-flash zero-mask was found in the MicroBooNE prototype matcher
+(whose dead-PMT handling is a separate data-run channel veto), so this is treated as toolkit/SBND
+logic rather than a port.
+
+### 12.2 Out-of-beam QA cuts (post-fit cleanup)
+
+**Where** (`QLMatching.cxx:1264-1284`): the **final** pass, after the LASSO rounds, the
+best-per-cluster selection, and bundle merging have produced `results_bundles`.
+
+**What/why**: a matched bundle whose **flash time is outside the beam window**
+(`< beam_mintime || > beam_maxtime`) is held to a **tighter** standard than in-beam matches, because
+an out-of-beam (cosmic) match has no beam-timing prior backing it up and is more likely spurious. It
+is dropped if **any** of:
+
+```cpp
+bundle->get_ks_dis()  > outbeam_ks_max            // 0.2  — shape too far off
+bundle->get_chi2()/bundle->get_ndf() > outbeam_chi2ndf_max   // 20  — χ²/ndf too high
+|flash_total_PE − pred_light| > outbeam_pe_frac · flash_total_PE   // 0.5 — >50% total-PE mismatch
+```
+
+In-beam bundles bypass this entirely (the whole block is inside the out-of-beam time test). So these
+three are **acceptance thresholds on the already-computed** `ks_dis`, `chi2/ndf`, and total-PE
+mismatch — they prune final cosmic matches, they do not feed back into the χ² or the fit. The KS and
+χ²/ndf ceilings mirror the `§F` merge ceilings (0.2 / 20) but are applied at a different stage and
+only to out-of-beam flashes.
+
+**What happens to the dropped cluster — it is unmatched, with no recovery.** This is the *terminal*
+step (`organize_bundles` is the last processing stage; afterwards `:866-871` only builds the output
+map). When a bundle is erased here, its cluster — plus any clusters merged into it (§4.1) — has **no
+entry left** in `results_bundles`: no flash, no T0. The toolkit does **not** retry the orphaned
+cluster against any other (e.g. in-beam) flash. Note a dropped cluster is actually worse off than a
+*never-matched* one: a cluster that simply found no match keeps a `flash=nullptr` strength-0
+placeholder (`:857-861`), whereas a QA-dropped cluster is removed outright.
+
+**Prototype equivalent — none directly; the prototype is the opposite philosophy.** The toolkit's
+cull is keyed on a **flash-time window**; the prototype keys on **flash type** (1 = cosmic,
+2 = beam) and its nearest analogous code runs the *reverse* polarity:
+
+- `examine_beam_bundle()` (`FlashTPCBundle.cxx:383-443`, called `ToyMatching.cxx:1277`) is a
+  **promotion**, not a rejection: for a *beam* flash left with no consistent bundle, it promotes the
+  best bundle to consistent if it passes `(ks < 0.1 || ks₁ < 0.05) && (χ² < 12·ndf || …)`. It rescues
+  beam matches rather than culling cosmic ones.
+- For clusters orphaned by the post-fit merge, the prototype runs a **multi-round re-matching**
+  (`ToyMatching.cxx:1870-1944`): a cluster that lost its bundle is retried against *other* flashes
+  (2nd round), then still-other flashes (3rd round), and is only dropped (`set_flash(0)`, bundle
+  deleted) once all flashes are exhausted.
+
+So §12.2 is **toolkit-specific**, and the larger design gap is the missing **orphan re-matching**:
+the prototype gives a cluster several chances at different flashes before abandoning it, whereas the
+toolkit drops it on the first failed out-of-beam QA. Whether SBND wants the prototype's recovery
+rounds is a port decision (§10-adjacent; not yet on that checklist).
