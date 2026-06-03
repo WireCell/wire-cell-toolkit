@@ -216,7 +216,39 @@ SetParameter(1, fPMTCalibrationDatabaseService->getNonLineatiryAlpha(opch));  //
 
 so **every PMT has its own saturation curve**, pulled from `PMTCalibrationDatabase`.
 
+**Provenance of the per-channel `(PESat, Alpha)`.** They are not in the source tree — the
+provider (`Calibration/PDSDatabaseInterface/PMTCalibrationDatabaseProvider.cxx`) queries a
+remote LArSoft conditions DB via `lariov::DBFolder`: table **`pds_calibration`**, columns
+**`nonlinearity_pesat`** / **`nonlinearity_alpha`**, tag **`v3r1`** (SBND Fall-2025
+production, `calibration_database_PDS_TagSets_sbnd.fcl`). If a channel is absent the
+provider returns `pesat = alpha = 0` (nonlinearity effectively off for it). Obtaining the
+120 per-PMT values therefore requires a LArSoft session with DB access; export them to a
+CSV (`opch,pesat,alpha`) to drive the standalone tool below.
+
 ### How to get the NPE_true ↔ NPE_observed curve
+
+A standalone reproduction lives at
+[`sbnd_xin/pmt_nonlinearity_curve.py`](../../sbnd_xin/pmt_nonlinearity_curve.py) — it
+reproduces `NObservedPE` exactly (TF1 + 4 ns window + per-bin scaling + cap) and needs no
+LArSoft. Single-channel mode sweeps `NPE_true → NPE_observed` for the single-burst envelope
+and a realistic scintillation profile (plus the numeric inverse / saturation correction);
+`--all-pmt --params-csv <file>` overlays one curve per PMT from a per-channel
+`(opch,pesat,alpha)` CSV. Until the real `v3r1` values are available it falls back to a
+clearly-labelled *illustrative* synthetic spread; the committed all-PMT plot
+(`sbnd_xin/pics/pmt_nonlinearity_allpmt.png`) is that placeholder.
+
+The two underlying routes:
+
+1. **The analytic per-channel curve (recommended, exact, no MC run).** Plot
+   `y = x / sqrt(1+(x/p0)^p1)` over your PE range, using that channel's `(p0,p1)`. Get
+   `(p0,p1)` from the PMT calibration DB (`getNonLineatiryPESat` / `getNonLineatiryAlpha`),
+   or use the global `[269, 1.84]` for a single representative curve. This is the response
+   to `x` PE arriving within the 4 ns window.
+   - **Forward** (true→observed): `y = TF1.Eval(x)`.
+   - **Inverse** (observed→true, i.e. the saturation *correction*): the form is monotonic,
+     so invert numerically (bisection) or build the inverse lookup from the same
+     `TF1.Eval(pe)` table — it is literally the tool's `fPEAttenuation_V` table read the
+     other way round, no need to re-derive it.
 
 What you call "NPE total vs NPE_nonlinear" is exactly this mapping. Two practical routes,
 depending on which you want:
