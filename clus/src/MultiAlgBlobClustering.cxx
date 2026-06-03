@@ -183,6 +183,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
     }
+    // Take the event number from the per-event tensor ident (raw; run/subrun = 0).
+    m_rse_from_ident = get(cfg, "rse_from_ident", m_rse_from_ident);
 
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
@@ -344,6 +346,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["runNo"] = m_runNo;
     cfg["subRunNo"] = m_subRunNo;
     cfg["eventNo"] = m_eventNo;
+    cfg["rse_from_ident"] = m_rse_from_ident;
 
     return cfg;
 }
@@ -1913,7 +1916,13 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     const int ident = ints->ident();
     SPDLOG_LOGGER_DEBUG(log, "loading tensor set ident={} (last={})", ident, m_last_ident);
     if (m_last_ident < 0) {     // first time.
-        if (m_use_config_rse && !m_use_shared_sink) {
+        if (m_rse_from_ident) {
+            // The tensor ident already carries the real event id (raw, unmasked);
+            // run/subrun are not available in this chain.
+            m_runNo = 0; m_subRunNo = 0; m_eventNo = ident;
+            if (!m_use_shared_sink) m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+        else if (m_use_config_rse && !m_use_shared_sink) {
             // Set RSE in the sink (shared-sink mode passes RSE per write_obj).
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
@@ -1923,8 +1932,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         m_last_ident = ident;
     }
     else if (m_last_ident != ident) {
-        flush(ident);
-        if (m_use_config_rse) {
+        flush(ident);   // writes the previous event with its still-current RSE
+        if (m_rse_from_ident) {
+            m_runNo = 0; m_subRunNo = 0; m_eventNo = ident;
+            if (!m_use_shared_sink) m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+        else if (m_use_config_rse) {
             // Update event number for next event
             m_eventNo++;
             // Update RSE in sink (shared-sink mode passes RSE per write_obj).

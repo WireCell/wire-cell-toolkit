@@ -268,3 +268,13 @@ evt = ident & 0xffff;
 If `use_config_rse=true` and `runNo`/`subRunNo`/`eventNo` are set in the
 jsonnet configuration, those values override the ident decoding. This is
 useful when the ident encodes something other than RSE.
+
+If `rse_from_ident=true` (default `false`), the event number is taken directly
+from each input tensor set's ident as a raw integer (`eventNo = ident`,
+`run = subrun = 0`), re-applied on every new ident, not just the first. This is
+for the bundled standalone chain — a single `wire-cell` invocation that streams
+many events through one MABC node — where the ident already carries the real
+event id. Without it, such a run would otherwise label every event by the
+configured `eventNo` auto-increment (i.e. by archive order, so "event 2" in the
+zip is the 2nd event processed, not `eventNo==2`). Default `false` keeps the
+existing `use_config_rse` / ident-decode behavior byte-identical.

@@ -156,6 +156,11 @@ namespace WireCell::Clus {
         int m_subRunNo{0};
         int m_eventNo{0};
         bool m_use_config_rse{false};  // Flag to determine if we use configured RSE
+        // When set, take the event number from the per-event tensor-set ident
+        // (m_eventNo = ident, run/subrun = 0).  Used by the bundled standalone
+        // chain whose ident already carries the real event id.  Default off keeps
+        // the existing use_config_rse / auto-increment behavior unchanged.
+        bool m_rse_from_ident{false};
 
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);

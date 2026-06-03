@@ -121,7 +121,7 @@ local bs_dead_face(apa, face) = {
 // standalone chain (pointed .. connect1).  The original cfg func_cfgs tail
 // (deghost -> examine_x_boundary -> isolated) is retained below as commented
 // lines so it can be re-enabled without re-deriving it.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false) = {
     local dv = detector_volumes([anode], face),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -194,6 +194,10 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
             runNo: runNo,
             subRunNo: subRunNo,
             eventNo: eventNo,
+            // Take the Bee event number from each event's tensor ident (run/subrun
+            // = 0).  Conditional key: omitted when off, so production stays
+            // byte-identical (mirrors the bee_sink conditional above).
+            [if rse_from_ident then 'rse_from_ident']: true,
             save_deadarea: bee_sink == null,
             dead_area_version: 2,
             anodes: [wc.tn(anode)],
@@ -233,7 +237,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // per-APA cluster trees into one, so skip the PointTreeMerging fanin and feed the
 // single pre-merged input straight to the all-APA MABC.  Default false = the
 // historical per-APA path (two QLMatching nodes -> PointTreeMerging -> MABC).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -293,6 +297,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             runNo: runNo,
             subRunNo: subRunNo,
             eventNo: eventNo,
+            // Take the Bee event number from each event's tensor ident (run/subrun
+            // = 0).  Conditional key: omitted when off, so production stays
+            // byte-identical (mirrors the bee_sink conditional above).
+            [if rse_from_ident then 'rse_from_ident']: true,
             save_deadarea: true,
             dead_area_version: 2,
             // Dump the optical flash / charge-light "op" display into this same
@@ -355,26 +363,31 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     ),
 }.ret;
 
-function(output_dir='.', runNo=0, subRunNo=0, eventNo=0) {
+// rse_from_ident (default false): when true, the MultiAlgBlobClustering nodes take
+// the Bee event number from each event's tensor ident (run/subrun = 0) instead of
+// the configured runNo/eventNo auto-increment.  Used by the bundled standalone chain
+// (one wire-cell call over many events) whose ident already carries the real event
+// id.  Default false keeps production byte-identical (the key is omitted).
+function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false) {
     // bee_sink (default null): when set to a shared IBeeSink node, all Bee
     // output for this node goes into that single shared zip instead of this
     // node's own bee_zip.  Default null -> own zip (production byte-identical).
     per_face(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink),
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident),
     per_apa(anode, dump=true, bee_sink=null)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink),
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink),
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                     bee_sink=bee_sink, premerged=premerged),
+                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face),
 }
