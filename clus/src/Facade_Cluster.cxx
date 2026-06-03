@@ -2233,7 +2233,7 @@ std::vector<geo_point_t> Cluster::indices_to_points(const std::vector<size_t>& p
 // }
 
 
-std::vector<geo_point_t> Cluster::get_hull() const 
+std::vector<geo_point_t> Cluster::get_hull(int max_points) const
 {
     auto& hull_points = cache().hull_points;
 
@@ -2241,8 +2241,11 @@ std::vector<geo_point_t> Cluster::get_hull() const
         return hull_points;
     }
 
-    if (npoints() > WireCell::Clus::Facade::Constants::MaxHullPoints) {
-        SPDLOG_LOGGER_WARN(s_log,"Cluster::get_hull number of points is too large: {} return cached points", npoints());
+    const int cap = (max_points < 0)
+                        ? (int)WireCell::Clus::Facade::Constants::MaxHullPoints
+                        : max_points;
+    if (npoints() > cap) {
+        SPDLOG_LOGGER_WARN(s_log,"Cluster::get_hull number of points is too large: {} (cap {}) return cached points", npoints(), cap);
         return hull_points;
     }
 

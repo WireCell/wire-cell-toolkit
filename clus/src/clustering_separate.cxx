@@ -97,8 +97,9 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv)
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 IPCTransformSet::pointer pcts,
-                                const Tree::Scope& scope, 
-                                const bool use_ctpc);
+                                const Tree::Scope& scope,
+                                const bool use_ctpc,
+                                const int max_hull_points);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -111,15 +112,21 @@ public:
         NeedScope::configure(config);
         
         use_ctpc_ = get(config, "use_ctpc", true);
+        // Cap on points for the per-cluster convex hull used by the separation
+        // decision. <0 (default) falls back to Constants::MaxHullPoints (10000),
+        // preserving existing behavior bit-for-bit; raise it (e.g. SBND) to let
+        // large full-detector overclusters be considered for separation.
+        max_hull_points_ = get(config, "max_hull_points", -1);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_);
+        clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_);
     }
 
 private:
     double use_ctpc_{true};
+    int max_hull_points_{-1};
 };
 
 
@@ -133,7 +140,8 @@ static void clustering_separate(
     const IDetectorVolumes::pointer dv,                // detector volumes
     const IPCTransformSet::pointer pcts,
     const Tree::Scope& scope,
-    const bool use_ctpc)
+    const bool use_ctpc,
+    const int max_hull_points)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -174,7 +182,7 @@ static void clustering_separate(
             // JudgeSeparateDec_2 populates boundary_points / independent_points;
             // cache the return value so we don't re-run it below.
             bool flag_dec2 =
-                JudgeSeparateDec_2(cluster, drift_dir_abs, boundary_points, independent_points, cluster_length, fv);
+                JudgeSeparateDec_2(cluster, drift_dir_abs, boundary_points, independent_points, cluster_length, fv, max_hull_points);
             // JudgeSeparateDec_1 is cheap compared to Dec_2 but still calls PCA —
             // cache for the second call inside flag_proceed block.
             bool flag_dec1 = JudgeSeparateDec_1(cluster, drift_dir_abs, cluster_length);
@@ -270,7 +278,7 @@ static void clustering_separate(
 
                             if (JudgeSeparateDec_1(cluster2, drift_dir_abs, length_1) &&
                                 JudgeSeparateDec_2(cluster2, drift_dir_abs, boundary_points, independent_points,
-                                                   length_1, fv)) {
+                                                   length_1, fv, max_hull_points)) {
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
 
@@ -284,7 +292,7 @@ static void clustering_separate(
                                         independent_points.clear();
                                         if (JudgeSeparateDec_1(cluster4, drift_dir_abs, length_1) &&
                                             JudgeSeparateDec_2(cluster4, drift_dir_abs, boundary_points, independent_points,
-                                                               length_1, fv)) {
+                                                               length_1, fv, max_hull_points)) {
                                             std::vector<Cluster *> sep_clusters = Separate_1(
                                                 use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
 
@@ -311,7 +319,7 @@ static void clustering_separate(
                                 independent_points.clear();
                                 JudgeSeparateDec_1(final_sep_cluster, drift_dir_abs, length_1);
                                 JudgeSeparateDec_2(final_sep_cluster, drift_dir_abs, boundary_points, independent_points,
-                                                   length_1, fv);
+                                                   length_1, fv, max_hull_points);
                                 if (independent_points.size() > 0) {
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
@@ -409,7 +417,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
 
 bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir_abs,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length, const ScopeFV& fv)
+                               const double cluster_length, const ScopeFV& fv, int max_hull_points)
 {
     // Scope-aware fiducial volume (see select_scope_fv): in a per-APA pass this is
     // the FV of the drift volume being clustered, so "exiting" means leaving that
@@ -428,7 +436,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ge
     const double det_FV_zmin_margin = fv.zmin_margin;
     const double det_FV_zmax_margin = fv.zmax_margin;
 
-    boundary_points = cluster->get_hull();
+    boundary_points = cluster->get_hull(max_hull_points);
 
     // if get_hull failed, return false
     if (boundary_points.size() == 0) {

@@ -604,7 +604,10 @@ namespace WireCell::Clus::Facade {
         using wire_indices_t = std::vector<std::vector<int_t>>;
         const wire_indices_t& wire_indices() const;
 
-        std::vector<geo_point_t> get_hull() const;
+        // max_points caps the number of points the quickhull is run on; a cluster
+        // with more points than the cap returns an empty hull (the cap guards cost).
+        // Pass max_points < 0 (the default) to use Constants::MaxHullPoints.
+        std::vector<geo_point_t> get_hull(int max_points = -1) const;
 
         // Return PCA calculated on blob children sample points
         // PCA has attributes: {center,axis,values}

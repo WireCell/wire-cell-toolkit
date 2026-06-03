@@ -154,7 +154,10 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         cm.parallel_prolong(length_cut=35 * wc.cm),
         cm.close(length_cut=1.2 * wc.cm),
         cm.extend_loop(num_try=3),
-        cm.separate(use_ctpc=true),
+        // Raise the convex-hull point cap (default 10000) so full-detector
+        // multi-track overclusters (>10k points) are still considered for
+        // separation; otherwise get_hull returns empty and separation is skipped.
+        cm.separate(use_ctpc=true, max_hull_points=100000),
         cm.connect1(),
         // MicroBooNE-style clustering tail: produce cluster groups (one main +
         // associated small clusters) carried as the "isolated"/"perblob" per-blob

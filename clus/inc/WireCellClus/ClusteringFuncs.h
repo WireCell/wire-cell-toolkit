@@ -195,9 +195,10 @@ namespace WireCell::Clus::Facade {
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
     /// @param fv scope-appropriate fiducial volume (see select_scope_fv)
+    /// @param max_hull_points cap passed to Cluster::get_hull (<0 = use Constants::MaxHullPoints)
     bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length, const ScopeFV& fv);
+                               const double cluster_length, const ScopeFV& fv, int max_hull_points = -1);
     
 
 
