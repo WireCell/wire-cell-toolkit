@@ -233,9 +233,12 @@ reproduces `NObservedPE` exactly (TF1 + 4 ns window + per-bin scaling + cap) and
 LArSoft. Single-channel mode sweeps `NPE_true → NPE_observed` for the single-burst envelope
 and a realistic scintillation profile (plus the numeric inverse / saturation correction);
 `--all-pmt --params-csv <file>` overlays one curve per PMT from a per-channel
-`(opch,pesat,alpha)` CSV. Until the real `v3r1` values are available it falls back to a
-clearly-labelled *illustrative* synthetic spread; the committed all-PMT plot
-(`sbnd_xin/pics/pmt_nonlinearity_allpmt.png`) is that placeholder.
+`(opch,pesat,alpha)` CSV. The committed all-PMT plot
+(`sbnd_xin/pics/pmt_nonlinearity_allpmt.png`) is generated from the real `v3r1`
+per-channel values in `sbnd_xin/pmt_nonlin_params_v3r1.csv` (120 PMTs: 104 with a
+saturation curve, PESat 130–400 / Alpha 1.5–2.2; 16 with `pesat=alpha=0` → nonlinearity
+off, treated as linear). With no `--params-csv` it falls back to a clearly-labelled
+*illustrative* synthetic spread.
 
 The two underlying routes:
 
