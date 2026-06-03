@@ -248,6 +248,28 @@ burst capped at one SER × `round(Eval(7000))≈349` PE ≈ 8–9k ADC — never
 saturation is **inert** in the relevant range; the PE-accumulation model above is the whole
 story.
 
+### Scope: what the standalone curve reproduces vs. skips
+
+The curve is **not** produced by running the full SBND sim+reco chain — there is no Geant4
+optical sim, no `SimPhotons`, no SER-convolved digitizer waveform, and **no Wiener
+deconvolution / OpHit finding**. It maps onto the three chain stages as:
+
+| chain stage | real SBND | standalone tool |
+|-------------|-----------|-----------------|
+| 1. photon arrival (`nPE_v`) | Geant4/`PDFastSim` → `SimPhotons` → efficiency → per-1 ns `nPE_v` | **assumed** time profile (single-burst, or fast+slow scintillation mixture) of `N_true` detected PE |
+| 2. nonlinearity (`NObservedPE`) | per-bin TF1 on the 5-sample running sum | **reproduced exactly** from the C++ |
+| 3. waveform → reco PE | `AddSPE` (Σ observed·SER) → ADC → Wiener deconv → `Area/SPEArea` | **replaced by the identity** `NPE_reco = Σ_t observed(t)` (+ the minimal round-trip above) |
+
+Skipping stage 3's machinery is exact, not an approximation: every step from per-bin observed
+PE to reconstructed PE is **linear** (linear SER superposition, SER area calibrated to
+`SPEArea`/PE, linear deconvolution + integration), and ADC saturation never engages — so the
+full chain would reproduce this curve identically. The nonlinearity lives *entirely* in stage 2,
+which is copied verbatim. The **only modelling assumption is the stage-1 time profile**
+(`f_fast/tau_fast/tau_slow`): hence the *realized* curve is "assumed profile" while the
+*envelope* (parameter-free TF1) is authoritative. Running the full chain would add only
+the real photon timing, hit-finder noise/threshold scatter, and trigger windowing — none of
+which shift the mean mapping.
+
 ### How to get the NPE_true ↔ NPE_observed curve
 
 A standalone reproduction lives at
