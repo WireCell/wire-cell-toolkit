@@ -210,7 +210,7 @@ different detection paths — so a single detector has different sensitivity to
 each.
 
 The efficiency arrays are per-OpDet (312 entries) and **not uniform** — they take
-a few discrete values (e.g. VUV ∈ {0, 0.01752, 0.0357, 0.0392}, VIS ∈ {0.00271,
+a few discrete values (e.g. VUV ∈ {0, 0.01752, 0.0392}, VIS ∈ {0.00271,
 0.01264, 0.026, 0.0357}). The variation encodes detector type and PMT surface
 treatment: entries with **`VUVEfficiency = 0` but nonzero `VISEfficiency`** are
 detectors effectively blind to direct 128 nm VUV that register only the

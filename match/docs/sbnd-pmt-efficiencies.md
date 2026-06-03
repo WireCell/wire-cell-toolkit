@@ -32,7 +32,7 @@ They are overridable via the `"VUVEfficiency"` / `"VISEfficiency"` config arrays
 | PMT | role in the group | TPB | `VUVEfficiency` | `VISEfficiency` | count |
 |-----|-------------------|-----|-----------------|-----------------|-------|
 | **4 side** PMTs   | coated   | yes | **0.0392** | **0.0260** | 96 |
-| **1 central** PMT | uncoated | no  | **0.0357** | **0.0357** | 24 |
+| **1 central** PMT | uncoated | no  | **0.0000** | **0.0357** | 24 |
 
 ### The other 192 OpDets — X-ARAPUCAs
 
@@ -61,7 +61,7 @@ X-ARAPUCA (VUV/VIS):
 | level meaning | `VUVEfficiency` | `VISEfficiency` |
 |---------------|-----------------|-----------------|
 | coated PMT (side)     | 0.03920 | 0.02600 |
-| uncoated PMT (central)| 0.03570 | 0.03570 |
+| uncoated PMT (central)| 0.00000 | 0.03570 |
 | VUV X-ARAPUCA         | 0.01752 | 0.00271 |
 | VIS X-ARAPUCA         | 0.00000 | 0.01264 |
 
@@ -84,14 +84,15 @@ wavelength-shifted to ~430 nm).
 - **Side (coated) PMTs** carry TPB on the window, so they convert and detect the
   **direct 128 nm** efficiently (VUV 0.0392) plus the reflected visible (VIS 0.0260)
   — VUV-dominant.
-- **Central (uncoated) PMT** has no shifter, so it cannot enhance the direct VUV the
-  way a coated PMT does; its two efficiencies are set **equal (0.0357)** — the model
-  gives it the same response to both visibility components rather than a TPB-boosted
-  VUV term.
+- **Central (uncoated) PMT** has no shifter, so its bialkali photocathode is
+  effectively blind to the **direct 128 nm** VUV: its **VUV efficiency is 0**. It only
+  detects the reflected, already-wavelength-shifted visible component (VIS 0.0357).
+  (The original larwirecell port set VUV=VIS=0.0357 for these channels; the VUV term is
+  now zeroed because an uncoated window cannot convert direct VUV.)
 
 So summing predicted light over a quintuplet, the four coated PMTs are the
-VUV-sensitive "eyes" and the central uncoated one responds the same to direct and
-reflected light.
+VUV-sensitive "eyes" and the central uncoated one responds only to the reflected
+visible light.
 
 ## Where this lives in code
 
