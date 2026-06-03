@@ -99,6 +99,7 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `anode_ext2` | `4.0 cm` | `m_anode_ext2` | anode flag-window outer edge in `u` (close-to-PMT / x-boundary) |
 | `cathode_ext1` | `1.2 cm` | `m_cathode_ext1` | cathode-side inclusion edge (`cathode_in = u_cathode + ext1`) |
 | `cathode_ext2` | `-2.0 cm` | `m_cathode_ext2` | cathode flag-window inner edge (x-boundary) |
+| `two_boundary_margin` | `3.0 cm` | `m_two_boundary_margin` | proximity band for the diagnostic `two_boundary` flag (§4.1b): a main-PCA extreme counts as "at a detector edge" within this distance of any of the 6 per-APA active-volume faces |
 | `window_edge_ticks` | `4` (SBND: **24**) | `m_window_edge_ticks` | raw-tick edge band for `window_truncated`; SBND jsonnet sets 24 |
 | `readout_window_ticks` | `3427` (SBND: **3428**) | `m_readout_window_ticks` | exclusive readout end for the trailing-edge truncation test; SBND jsonnet sets 3428 (rebin-4 `slice_index_max`) |
 | `require_containment` | `false` (SBND: **true**) | `m_require_containment` | when true, discard bundles whose cluster fails the TPC-box containment guard (prototype `flag_good_bundle`); see §4.1a. Default OFF keeps non-SBND configs bit-identical |
@@ -248,6 +249,36 @@ window end: `daq.nticks = 3427`, but with rebin 4 the final 4-tick slice's
 band starts on the slice boundary 3404 (= 3428 − 24). The flag is currently
 **inert** (no consumer reads it); it is only emitted on the `bundle_flags:` debug
 line (`:890-899`), so changing the cut does not alter production matching output.
+
+### 4.1b `flag_two_boundary` — enters AND exits the detector
+A geometric good-match signature: the cluster crosses the active volume end to
+end. Set by `compute_two_boundary_flag` (`QLMatching.cxx`), called from
+`build_bundles` **only when a calib dump is requested** (`!m_calib_dump.empty()`),
+so production runs do zero extra work and stay bit-identical.
+
+- Take the **two main-PCA-axis extremes** of the bundle's **main cluster** (the
+  group anchor): `Cluster::get_extreme_wcps()` group `[0][0]` (high projection) and
+  `[1][0]` (low projection). The pair is **cached per cluster**
+  (`m_pca_endpoints_cache`, cleared each event) since it is flash-independent.
+  Degenerate clusters (< 2 extreme groups) ⇒ flag false.
+- Each endpoint is assigned its **nearest** of the 6 per-APA active-volume faces
+  and the distance to it. The drift faces use `u = s·(x + flash_x_offset − anode_x)`
+  (anode `u=0`, cathode `u=u_cathode`; `flash_x_offset` shifts `x` only); the
+  transverse faces use the `y_lo/y_hi`, `z_lo/z_hi` bounds from `m_dv->inner_bounds`
+  (`compute_geometry`). An endpoint is **at** that face iff its distance ≤
+  `two_boundary_margin` (default 3 cm).
+- `flag_two_boundary` = both endpoints at a face **AND** the two nearest faces are
+  **different** — i.e. the cluster enters through one surface and exits through a
+  **separate** one. Both ends near the *same* face (e.g. both at the cathode, or
+  both clipping the top) does **not** count.
+
+Unlike `flag_at_x_boundary` (anode-OR-cathode, either end), this requires **both**
+ends at a wall, on two distinct faces, and includes the ±y/±z faces, so it tags
+through-going crossers in any direction. **Diagnostic only** — never read by the
+matching path; emitted as
+`two_boundary` in the calib dump and shown as `2bnd` in the `ql_scan` viewer. (The
+cathode face could later swap to the CPA structure-exclusion `m_cathode_fv` used by
+`flag_at_x_boundary`; the uniform box-margin test is used for now.)
 
 ### 4.2 Deterministic ordering (`:355-410`)
 Bundles are bucketed into `flash_bundles_map`, `cluster_bundles_map`, and

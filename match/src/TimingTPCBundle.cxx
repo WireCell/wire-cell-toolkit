@@ -44,6 +44,7 @@ TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
     , flag_potential_bad_match(false)
     , flag_high_consistent(false)
     , flag_contained(true)
+    , flag_two_boundary(false)
     , ks_dis(1)
     , chi2(0)
     , ndf(0)

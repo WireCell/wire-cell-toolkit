@@ -112,6 +112,10 @@ namespace WireCell::Match {
         double m_cathode_ext2{-2.0 * units::cm};  // cathode flag-window inner edge (high_x_cut_ext2)
         double m_y_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each |y| edge
         double m_z_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each z edge
+        // Proximity band for the diagnostic flag_two_boundary edge test: a main-PCA
+        // extreme counts as "at the detector edge" if it is within this distance of
+        // any of the 6 per-APA active-volume faces (anode, cathode, ±y, ±z).
+        double m_two_boundary_margin{3.0 * units::cm};
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)
@@ -210,6 +214,14 @@ namespace WireCell::Match {
         // Cleared each event in operator().
         mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*,
                                    std::vector<WireCell::Point>> m_extreme_cache;
+
+        // Per-cluster cache of the two main-PCA-axis extreme endpoints
+        // (get_extreme_wcps()[0][0] / [1][0]; high/low projection). Geometric and
+        // flash-independent, so the O(npoints) scan runs once per cluster and is
+        // reused across candidate flashes by compute_two_boundary_flag. Cleared
+        // each event in operator() alongside m_extreme_cache.
+        mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*,
+                                   std::pair<WireCell::Point, WireCell::Point>> m_pca_endpoints_cache;
 
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
@@ -335,6 +347,21 @@ namespace WireCell::Match {
         void decompose_cluster_groups(ApaRun& run);  // main+associated split, idx maps
         void compute_geometry(ApaRun& run);          // per-TPC drift geometry, mask cull, opdet idx
         void build_bundles(ApaRun& run);             // (flash,group) bundles + predicted light  [Stage 1]
+
+        // Set the diagnostic flag_two_boundary on one bundle: true iff the two
+        // main-PCA extremes of the main cluster each lie within m_two_boundary_margin
+        // of a per-APA active-volume face AND those are two SEPARATE faces (different
+        // ones of the 6: anode/cathode/±y/±z) — the cluster enters through one
+        // surface and exits through a different one. Each endpoint is assigned its
+        // nearest face. flash_x_offset (drift X correction) shifts x only; y/z are
+        // drift-invariant. The two endpoints are cached per cluster
+        // (m_pca_endpoints_cache). Observation-only: never read by the matching path;
+        // build_bundles calls it only when a calib dump is requested. (The cathode
+        // face could later swap to the CPA structure-exclusion m_cathode_fv used by
+        // flag_at_x_boundary; the uniform box-margin test is used for now.)
+        void compute_two_boundary_flag(TimingTPCBundle* bundle,
+                                       WireCell::Clus::Facade::Cluster* main_cluster,
+                                       double flash_x_offset, const ApaRun& run) const;
         void build_bundle_maps(ApaRun& run);         // flash/cluster/pair maps + deterministic sort
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]

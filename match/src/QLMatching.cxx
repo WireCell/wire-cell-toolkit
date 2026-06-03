@@ -164,6 +164,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cathode_ext2 = get(cfg, "cathode_ext2", m_cathode_ext2);
     m_y_cushion    = get(cfg, "y_cushion",    m_y_cushion);
     m_z_cushion    = get(cfg, "z_cushion",    m_z_cushion);
+    m_two_boundary_margin = get(cfg, "two_boundary_margin", m_two_boundary_margin);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -296,6 +297,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["cathode_ext2"] = m_cathode_ext2;
     cfg["y_cushion"]    = m_y_cushion;
     cfg["z_cushion"]    = m_z_cushion;
+    cfg["two_boundary_margin"] = m_two_boundary_margin;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
@@ -362,6 +364,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     ExecMon em("starting QLMatching");
 
     m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
+    m_pca_endpoints_cache.clear();
 
     // Match each APA's input independently in its own fresh, isolated ApaRun (one
     // per input port). The per-APA masks, geometry and flash_gid stride are
@@ -688,6 +691,11 @@ void QLMatching::build_bundles(ApaRun& run)
                 compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode,
                                        static_cast<int>(run.anode->ident()));
             bundle->set_contained(contained);   // diagnostic only (calib dump)
+            // Diagnostic flag_two_boundary (both PCA ends at a detector edge).
+            // Only the calib dump consumes it, so compute it only when dumping —
+            // production runs do zero extra work and stay bit-identical.
+            if (!m_calib_dump.empty())
+                compute_two_boundary_flag(bundle.get(), main_cluster, flash_x_offset, run);
             // Discard bundles whose cluster is not contained in the TPC box once
             // the flash T0 x-offset is applied. Off by default.
             if (m_require_containment && !contained) continue;
@@ -1282,6 +1290,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["at_x_boundary"]        = b->get_flag_at_x_boundary();
             jb["spec_end"]             = b->get_spec_end_flag();
             jb["window_truncated"]     = b->get_flag_window_truncated();
+            jb["two_boundary"]         = b->get_flag_two_boundary();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
@@ -1525,6 +1534,56 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         if (at_cathode) bundle->set_flag_at_x_boundary(true);
     }
     return contained;
+}
+
+// ----- diagnostic flag_two_boundary (both PCA ends at a detector edge) -----
+void QLMatching::compute_two_boundary_flag(TimingTPCBundle* bundle,
+                                           Cluster* main_cluster,
+                                           double flash_x_offset,
+                                           const ApaRun& run) const
+{
+    bundle->set_flag_two_boundary(false);
+    if (!main_cluster) return;
+
+    // The two main-PCA-axis endpoints (get_extreme_wcps groups [0]=high, [1]=low
+    // projection) are intrinsic to the cluster and flash-independent, so compute
+    // once and reuse across candidate flashes. Guard degenerate clusters.
+    auto it = m_pca_endpoints_cache.find(main_cluster);
+    if (it == m_pca_endpoints_cache.end()) {
+        const auto groups = main_cluster->get_extreme_wcps();
+        if (groups.size() < 2 || groups[0].empty() || groups[1].empty()) return;
+        it = m_pca_endpoints_cache.emplace(
+            main_cluster, std::make_pair(groups[0][0], groups[1][0])).first;
+    }
+    const WireCell::Point& p_high = it->second.first;
+    const WireCell::Point& p_low  = it->second.second;
+
+    // Nearest of the 6 per-APA active-volume faces to a point, and its distance.
+    // flash_x_offset shifts x only (drift); y/z are drift-invariant. The point is
+    // "at" that face iff the distance <= m_two_boundary_margin.
+    const double m = m_two_boundary_margin;
+    auto nearest_face = [&](const WireCell::Point& p, int& face) {
+        const double u = run.s * (p.x() + flash_x_offset - run.anode_x);  // drift coord
+        const double d[6] = {
+            u,                  // 0 anode    (u = 0)
+            run.u_cathode - u,  // 1 cathode
+            p.y() - run.y_lo,   // 2 bottom   (-y)
+            run.y_hi - p.y(),   // 3 top      (+y)
+            p.z() - run.z_lo,   // 4 upstream (-z)
+            run.z_hi - p.z(),   // 5 downstream (+z)
+        };
+        face = 0;
+        double best = d[0];
+        for (int i = 1; i < 6; ++i) if (d[i] < best) { best = d[i]; face = i; }
+        return best;
+    };
+
+    int face_high = 0, face_low = 0;
+    const bool high_at_edge = nearest_face(p_high, face_high) <= m;
+    const bool low_at_edge  = nearest_face(p_low,  face_low)  <= m;
+    // Both PCA ends at a boundary AND at two SEPARATE faces (the cluster enters
+    // through one surface and exits through a different one).
+    bundle->set_flag_two_boundary(high_at_edge && low_at_edge && face_high != face_low);
 }
 
 // ----- bundle map maintenance -----

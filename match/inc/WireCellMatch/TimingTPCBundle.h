@@ -90,6 +90,11 @@ namespace WireCell::Match {
         // only; nothing in the matching path reads it). Default true.
         void set_contained(bool v) { flag_contained = v; }
         bool get_contained() const { return flag_contained; }
+        // Both main-PCA extremes of the main cluster lie at a detector edge (the
+        // cluster enters AND exits the per-APA active volume). Diagnostic only
+        // (calib dump); nothing in the matching path reads it. Default false.
+        void set_flag_two_boundary(bool v) { flag_two_boundary = v; }
+        bool get_flag_two_boundary() const { return flag_two_boundary; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -112,6 +117,7 @@ namespace WireCell::Match {
         bool flag_potential_bad_match;
         bool flag_high_consistent;
         bool flag_contained;
+        bool flag_two_boundary;
 
         double ks_dis;
         double chi2;
