@@ -15,6 +15,7 @@
 #include "WireCellUtil/Units.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 WIRECELL_FACTORY(QLMatching,
@@ -212,6 +213,18 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         for (const auto& v : cfg["VISEfficiency"]) m_VISEfficiency.push_back(v.asDouble());
     }
 
+    // Per-PMT non-linearity correction on the predicted PE (default OFF / identity).
+    m_pmt_nonlinearity = get(cfg, "pmt_nonlinearity", m_pmt_nonlinearity);
+    m_pmt_nl_knee      = get(cfg, "pmt_nl_knee",      m_pmt_nl_knee);
+    if (cfg["pmt_nl_beta"].isArray()) {
+        m_pmt_nl_beta.clear();
+        for (const auto& v : cfg["pmt_nl_beta"]) m_pmt_nl_beta.push_back(v.asDouble());
+    }
+    if (cfg["pmt_nl_gamma"].isArray()) {
+        m_pmt_nl_gamma.clear();
+        for (const auto& v : cfg["pmt_nl_gamma"]) m_pmt_nl_gamma.push_back(v.asDouble());
+    }
+
     // Load SBND semi-analytical optical model from JSON.
     auto top = Persist::load(m_semimodel_file);
     if (!top.isObject()) {
@@ -315,6 +328,10 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
     cfg["require_containment"]  = m_require_containment;
     cfg["cathode_fiducial"]     = "";
+    cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
+    cfg["pmt_nl_knee"]          = m_pmt_nl_knee;
+    cfg["pmt_nl_beta"]          = Json::arrayValue;
+    cfg["pmt_nl_gamma"]         = Json::arrayValue;
     return cfg;
 }
 
@@ -718,6 +735,21 @@ void QLMatching::build_bundles(ApaRun& run)
                     }
                 }
               }
+            }
+
+            // Per-PMT non-linearity: map the predicted PE total into the saturated
+            // (observed) space so it matches the post-saturation measured PE. Acts only
+            // above the knee; identity (no-op) when disabled or beta=1/gamma=0. See the
+            // header and match/docs/sbnd-opdetsim-chain.md.
+            if (m_pmt_nonlinearity) {
+                for (std::size_t idet = 0; idet < nopdets; ++idet) {
+                    const double p = pred_flash.at(idet);
+                    if (p <= m_pmt_nl_knee) continue;
+                    const double beta  = idet < m_pmt_nl_beta.size()  ? m_pmt_nl_beta[idet]  : 1.0;
+                    const double gamma = idet < m_pmt_nl_gamma.size() ? m_pmt_nl_gamma[idet] : 0.0;
+                    const double L = std::log(p / m_pmt_nl_knee);
+                    pred_flash.at(idet) = m_pmt_nl_knee * std::exp(beta * L + gamma * L * L);
+                }
             }
 
             // Cluster-group selection drives matching; the KS==1 guard below is

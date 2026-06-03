@@ -333,6 +333,46 @@ What you call "NPE total vs NPE_nonlinear" is exactly this mapping. Two practica
 > harmless in practice (no signal expected in the first 4 ns of the readout window) but
 > worth knowing if you instrument it.
 
+### Applying the non-linearity in QLMatching (predicted PE)
+
+QLMatching predicts **true** per-PMT PE (`pred_flash[idet] += q·QtoL·(dir_vis·VUVEff +
+ref_vis·VISEff)`, `match/src/QLMatching.cxx`), but compares against the **measured**
+post-saturation `op_pes`. To bring the prediction into the same observed space, the realized
+curve above is fitted per PMT to a **monotone log-quadratic capped power law** and applied to
+each PMT's predicted total:
+
+```
+pred' = pred                                   for pred <= knee (700 PE)
+      = knee · exp(beta·L + gamma·L²),  L = ln(pred/knee),   for pred > knee
+```
+
+(beta=1, gamma=0 ⇒ identity). The per-PMT (beta, gamma) are fitted by
+`sbnd_xin/pmt_nonlinearity_curve.py --emit-qlmatching` to NPE_true=10⁵ (≤2% over the data
+regime; see `sbnd_xin/pics/pmt_nonlinearity_fit.png`) and written to
+`cfg/pgrapher/experiment/sbnd/pmt_nonlinearity_params.jsonnet`. QLMatching reads
+`pmt_nonlinearity` / `pmt_nl_knee` / `pmt_nl_beta` / `pmt_nl_gamma`; **default OFF** (canonical
+production bit-identical). The sbnd_xin standalone chain enables it (`run_clust_QL_evt.sh`,
+`PMT_NL`, default on; `PMT_NL=false` for the OFF baseline) via the local
+`qlmatching.jsonnet` wrapper + the canonical `extra={}` overlay.
+
+**OFF-vs-ON validation** (`sbnd_xin/ql_nonlin_compare.py`,
+`sbnd_xin/pics/ql_pmt_nonlin_compare.png`; 10-event MC + data; matching unbroken, 106/106 and
+101/101 common matches, ON pred ≤ OFF by construction):
+- **MC**: detrended pred/meas *rises* with brightness (1.27→1.31 vs the <700 baseline) — a
+  genuine mild-saturation signature — and the correction **flattens it toward 1** in every
+  bright bin (→1.25→1.20). The correction acts in the right direction.
+- **Data**: detrended pred/meas *falls* with brightness (0.95→0.62) — the brightest PMTs
+  measure **more light than the reconstructed charge predicts** (a charge/light effect, e.g.
+  recombination or near-PMT visibility, **not** PMT saturation), so lowering the prediction
+  cannot help and slightly steepens the slope.
+- The per-channel effect is small relative to the pred/meas scatter (|median error| ~0.1–0.5).
+
+So the correction is physically sound and verified, but on these samples it improves only the
+MC saturation trend; the data discrepancy is dominated by a separate effect. It is therefore
+shipped **default-OFF in production** and enabled only in the sbnd_xin study chain. Using it
+for a real benefit would require re-tuning the efficiencies / `QtoL` in tandem (a separate
+study), since the current tuning already absorbed the average response.
+
 ## Where this lives in code
 
 - Module / worker: `OpDetSim/opDetDigitizerSBND_module.cc`, `opDetDigitizerWorker.cc`.

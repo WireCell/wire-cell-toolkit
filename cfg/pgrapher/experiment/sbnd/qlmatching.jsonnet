@@ -151,11 +151,16 @@ function(params) {
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump=''):: g.pnode({
+    // `extra` is an optional data overlay merged last (default {} => no-op, production
+    // bit-identical). The sbnd_xin standalone chain uses it to enable the per-PMT
+    // predicted-PE non-linearity (pmt_nonlinearity / pmt_nl_knee / pmt_nl_beta / _gamma);
+    // canonical callers pass nothing, so the correction stays OFF in production.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
-              + match_data(dv, reality, semimodel_file, cathode_fiducial),
+              + match_data(dv, reality, semimodel_file, cathode_fiducial)
+              + extra,
     }, nin=1, nout=1),
 
     // Joint multi-APA charge-light matching: ONE QLMatching node with one input
@@ -165,7 +170,7 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump=''):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -177,7 +182,8 @@ function(params) {
             // The joint node sees BOTH APAs in one operator() call, so a single
             // dump file holds both TPCs (sbnd_xin/ql_scan).
             calib_dump: calib_dump,
-        } + match_data(dv, reality, semimodel_file, cathode_fiducial),
+        } + match_data(dv, reality, semimodel_file, cathode_fiducial)
+          + extra,  // optional overlay (default {} => no-op); sbnd_xin uses it for PMT non-linearity
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be
         // dangling), so declare it as a dependency to get it into the job config.

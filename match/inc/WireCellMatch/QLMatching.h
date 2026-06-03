@@ -160,6 +160,19 @@ namespace WireCell::Match {
         // jsonnet sets require_containment: true.
         bool m_require_containment{false};
 
+        // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
+        // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
+        // match/docs/sbnd-opdetsim-chain.md). Maps the true predicted PE p on each PMT into
+        // the saturated (observed) space so it matches the post-saturation measured op_pes:
+        //   p' = p                                      for p <= knee
+        //      = knee * exp(beta*L + gamma*L^2), L=ln(p/knee)   for p > knee
+        // beta=1, gamma=0 (or empty arrays) => identity. Default OFF so production configs
+        // stay bit-identical; the sbnd_xin standalone run config enables it.
+        bool m_pmt_nonlinearity{false};
+        double m_pmt_nl_knee{700.0};
+        std::vector<double> m_pmt_nl_beta;   // per-OpDet; empty or 1.0 => identity
+        std::vector<double> m_pmt_nl_gamma;  // per-OpDet; empty or 0.0 => identity
+
         // Default SBND VUV/VIS efficiency arrays, indexed by OpDet (312 entries).
         // Configuration "VUVEfficiency"/"VISEfficiency" arrays override these.
         std::vector<double> m_VUVEfficiency{
