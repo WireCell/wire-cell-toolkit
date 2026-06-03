@@ -169,8 +169,9 @@ The response is a ROOT `TF1`. The active form (`PMTAlg/pmtnonlinearity_config.fc
 NObserved(x) = x / sqrt( 1 + (x/p0)^p1 )
 ```
 
-where **`x` = the true PE accumulated over the preceding `AttenuationPreTime` (4 ns)
-window**, `p0` is a PE-saturation scale and `p1` a steepness exponent. For small `x` it is
+where **`x` = the true PE accumulated over the preceding `AttenuationPreTime` window**
+(`bin-4 .. bin` inclusive = `PreTime+1` = **5 one-ns samples**, spanning ~4 ns),
+`p0` is a PE-saturation scale and `p1` a steepness exponent. For small `x` it is
 ≈ `x` (linear); for large `x` it bends over and grows only slowly. (`pmtnonlinearity_config.fcl`
 also keeps a commented-out alternative form; the one above is what runs.)
 
@@ -186,16 +187,18 @@ fPEAttenuation_V[opch][pe] = TF1.Eval(pe) / pe;        // factor < 1, for pe in 
 and applied per bin (`:116-123`):
 
 ```cpp
-npe_acc = sum(pe_vector[bin-PreTime .. bin]);          // accumulated load in the 4 ns window
+npe_acc = sum(pe_vector[bin-PreTime .. bin]);          // 5-sample (PreTime+1) inclusive sum
 if (npe_acc < NonLinearRange[1]) return pe_vector[bin] * fPEAttenuation_V[opch][npe_acc];
 else                            return fPESaturationValue_V[opch];
 ```
 
 So each bin's PE is scaled by the attenuation factor evaluated at the *local accumulated
-load*. Note the consequence (important for the curve below): the saturation is driven by the
-4 ns running sum, not by the pulse's grand total. If all PE of a pulse land within ≤4 ns,
-the observed total equals `TF1.Eval(total)`; if the same PE are spread over a longer time,
-each 4 ns chunk saturates independently and the net attenuation is *milder*.
+load*. Note the consequence (important for the curve below): the saturation is driven by an
+**instantaneous rate** — the running sum over a 5-sample window — **not by the pulse's grand
+total**. If all PE of a pulse land within that window, the observed total equals
+`TF1.Eval(total)`; if the same PE are spread over a longer time, each window saturates
+independently and the net attenuation is *much milder*. This is exactly why the two curves
+below (envelope vs realized) differ so dramatically.
 
 ### Per-PMT curves (your Q3 — yes)
 
@@ -225,51 +228,73 @@ provider returns `pesat = alpha = 0` (nonlinearity effectively off for it). Obta
 120 per-PMT values therefore requires a LArSoft session with DB access; export them to a
 CSV (`opch,pesat,alpha`) to drive the standalone tool below.
 
+### From observed PE to reconstructed PE (NPE_reco)
+
+The nonlinearity is applied **on the waveform** (per bin, `AddSPE` injects `npe × SER`), so
+there is **no direct `NPE_true → NPE_reco` function in sbndcode** — the total→total relation
+only exists as an integral over the time profile. But the round-trip is an *identity*: reco
+is **linear** in the recorded PE (`PE = OpHit.Area / SPEArea`, and the SER area is calibrated
+to `SPEArea` per 1 PE — see [`sbnd-opdetreco-chain.md`](sbnd-opdetreco-chain.md)). Building
+the waveform `Σ_t observed(t)·SER` and integrating it back therefore gives, exactly,
+
+> **NPE_reco = Σ_t observed(t)** &nbsp; (in the unclipped regime)
+
+i.e. summing the per-bin observed PE *is* the reconstructed PE; the deconvolution+area÷SPEArea
+step adds nothing nonlinear. `pmt_nonlinearity_curve.py` (`roundtrip_reco_pe`) verifies this
+numerically. The one separate effect is **ADC saturation** (`CreateSaturation`, a hard clip
+at `PMTBaseline ± PMTADCDynamicRange`): with `digi_pmt_sbnd.fcl` values (baseline 14250,
+dynamic range 14250) it needs a >14250-ADC excursion, but even the worst case — a single
+burst capped at one SER × `round(Eval(7000))≈349` PE ≈ 8–9k ADC — never reaches it. So ADC
+saturation is **inert** in the relevant range; the PE-accumulation model above is the whole
+story.
+
 ### How to get the NPE_true ↔ NPE_observed curve
 
 A standalone reproduction lives at
 [`sbnd_xin/pmt_nonlinearity_curve.py`](../../sbnd_xin/pmt_nonlinearity_curve.py) — it
-reproduces `NObservedPE` exactly (TF1 + 4 ns window + per-bin scaling + cap) and needs no
-LArSoft. Single-channel mode sweeps `NPE_true → NPE_observed` for the single-burst envelope
-and a realistic scintillation profile (plus the numeric inverse / saturation correction);
-`--all-pmt --params-csv <file>` overlays one curve per PMT from a per-channel
-`(opch,pesat,alpha)` CSV. The committed all-PMT plot
-(`sbnd_xin/pics/pmt_nonlinearity_allpmt.png`) is generated from the real `v3r1`
-per-channel values in `sbnd_xin/pmt_nonlin_params_v3r1.csv` (120 PMTs: 104 with a
-saturation curve, PESat 130–400 / Alpha 1.5–2.2; 16 with `pesat=alpha=0` → nonlinearity
-off, treated as linear). With no `--params-csv` it falls back to a clearly-labelled
-*illustrative* synthetic spread.
+reproduces `NObservedPE` exactly (TF1 + 5-sample window + per-bin scaling + cap), plus the
+explicit waveform round-trip above, and needs no LArSoft. Single-channel mode sweeps
+`NPE_true → NPE_observed` for **two** profiles (defined next), plus the numeric inverse /
+saturation correction; `--all-pmt --params-csv <file>` overlays one curve per PMT from a
+per-channel `(opch,pesat,alpha)` CSV. The committed all-PMT plot
+(`sbnd_xin/pics/pmt_nonlinearity_allpmt.png`) is the **realized (scintillation)** curve —
+the physical NPE_true→NPE_reco for real flashes, not the worst-case envelope — generated
+from the real `v3r1` per-channel values in `sbnd_xin/pmt_nonlin_params_v3r1.csv` (120 PMTs:
+104 with a saturation curve, PESat 130–400 / Alpha 1.5–2.2; 16 with `pesat=alpha=0` →
+nonlinearity off, treated as linear). It stays within ~1% of linear up to NPE≈1000 and
+attenuates ~8–14% by NPE≈5000 (lower-PESat channels bend earliest). With no `--params-csv`
+it falls back to a clearly-labelled *illustrative* synthetic spread.
 
-The two underlying routes:
+**Envelope vs realized — why they look so different.** Because saturation acts on the
+instantaneous 5-sample rate (not the total), the mapping depends entirely on the time profile:
 
-1. **The analytic per-channel curve (recommended, exact, no MC run).** Plot
-   `y = x / sqrt(1+(x/p0)^p1)` over your PE range, using that channel's `(p0,p1)`. Get
+- **Envelope (single burst):** all `N` PE land in one window → `npe_acc = N` →
+  `observed = TF1.Eval(N)`. This is the **worst case** and is the bare TF1 shape; it bends at
+  `N≈100` (range_lo) and plateaus near `round(Eval(range_hi))` (≈268 global / ≈349 per-channel).
+  **It is *not* the physical NPE_total→NPE_reco map** — it is the unphysical all-light-in-one-bin
+  limit.
+- **Realized (scintillation):** PE follow a fast(singlet)+slow(triplet) mixture; the ~1.5 µs
+  triplet spreads them over hundreds of windows, so the per-window rate stays below the 100-PE
+  onset until `N` is large → the curve is **nearly linear**. This is the physical mapping in
+  normal operation, and its headline is that *the nonlinearity barely engages*. Its one caveat:
+  it depends on the assumed `f_fast/tau_fast/tau_slow` (the tool's defaults, not a single
+  authoritative sbndcode constant), whereas the envelope (pure `Eval`) is authoritative.
+
+What you call "NPE total vs NPE_nonlinear" is exactly this mapping. Two practical routes:
+
+1. **The analytic per-channel curve (recommended, exact, no MC run)** = the envelope above.
+   Plot `y = x / sqrt(1+(x/p0)^p1)` over your PE range, using that channel's `(p0,p1)`. Get
    `(p0,p1)` from the PMT calibration DB (`getNonLineatiryPESat` / `getNonLineatiryAlpha`),
-   or use the global `[269, 1.84]` for a single representative curve. This is the response
-   to `x` PE arriving within the 4 ns window.
+   or use the global `[269, 1.84]` for a single representative curve.
    - **Forward** (true→observed): `y = TF1.Eval(x)`.
    - **Inverse** (observed→true, i.e. the saturation *correction*): the form is monotonic,
      so invert numerically (bisection) or build the inverse lookup from the same
      `TF1.Eval(pe)` table — it is literally the tool's `fPEAttenuation_V` table read the
      other way round, no need to re-derive it.
 
-What you call "NPE total vs NPE_nonlinear" is exactly this mapping. Two practical routes,
-depending on which you want:
-
-1. **The analytic per-channel curve (recommended, exact, no MC run).** Plot
-   `y = x / sqrt(1+(x/p0)^p1)` over your PE range, using that channel's `(p0,p1)`. Get
-   `(p0,p1)` from the PMT calibration DB (`getNonLineatiryPESat` / `getNonLineatiryAlpha`),
-   or use the global `[269, 1.84]` for a single representative curve. This is the response
-   to `x` PE arriving within the 4 ns window.
-   - **Forward** (true→observed): `y = TF1.Eval(x)`.
-   - **Inverse** (observed→true, i.e. the saturation *correction*): the form is monotonic,
-     so invert numerically (bisection) or build the inverse lookup from the same
-     `TF1.Eval(pe)` table — it is literally the tool's `fPEAttenuation_V` table read the
-     other way round, no need to re-derive it.
-
-2. **The realized MC curve (pulse-shape-aware).** Because the simulation saturates on the
-   4 ns running sum, the *effective* total-PE relationship depends on the light's time
-   profile. To measure it as it actually manifests:
+2. **The realized MC curve (pulse-shape-aware)** = the scintillation curve above. Because the
+   simulation saturates on the 5-sample running sum, the *effective* total-PE relationship
+   depends on the light's time profile. To measure it as it actually manifests:
    - Run `opdetdigitizer` **twice with the same RNG seed**, once with
      `NonLinearityParams` commented out (linear / NPE_true) and once with it on
      (NPE_observed), and scatter the two per-channel integrated PE (from OpHit/OpFlash, see
@@ -279,7 +304,7 @@ depending on which you want:
      the loop.
 
    Route 2 captures the real spread around the analytic curve; route 1 is the upper-envelope
-   (single 4 ns burst) limit of it.
+   (single-window burst) limit of it.
 
 > Minor caveat: `NObservedPE` computes `start_bin = bin - AttenuationPreTime` with unsigned
 > arithmetic, so the first `AttenuationPreTime` (4) bins of a waveform underflow the index;
