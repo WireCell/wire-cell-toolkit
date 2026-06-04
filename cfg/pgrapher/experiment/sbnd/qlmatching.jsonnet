@@ -31,6 +31,18 @@ function(params) {
     local ch_mask = [39, 64, 66, 67, 71, 85, 86, 87, 92, 115, 138, 141, 170, 197, 217,
                      218, 221, 222, 223, 226, 245, 248, 249, 302],
 
+    // Per-PMT predicted-PE non-linearity overlay (maps each PMT's accumulated
+    // predicted PE into the saturated/observed space; params fitted by
+    // sbnd_xin/pmt_nonlinearity_curve.py --emit-qlmatching). Applied by default for
+    // SBND (pmt_nl=true on matching()/matching_joint()); pass pmt_nl=false to disable.
+    local nlp = import 'pgrapher/experiment/sbnd/pmt_nonlinearity_params.jsonnet',
+    local nl_on = {
+        pmt_nonlinearity: true,
+        pmt_nl_knee: nlp.pmt_nl_knee,
+        pmt_nl_beta: nlp.pmt_nl_beta,
+        pmt_nl_gamma: nlp.pmt_nl_gamma,
+    },
+
     // Opflash archive reader for APA n.
     opflash_source(n):: g.pnode({
         type: 'TensorFileSource',
@@ -155,15 +167,15 @@ function(params) {
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
-    // `extra` is an optional data overlay merged last (default {} => no-op, production
-    // bit-identical). The sbnd_xin standalone chain uses it to enable the per-PMT
-    // predicted-PE non-linearity (pmt_nonlinearity / pmt_nl_knee / pmt_nl_beta / _gamma);
-    // canonical callers pass nothing, so the correction stays OFF in production.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', extra={}):: g.pnode({
+    // `pmt_nl` (default true) bakes the per-PMT predicted-PE non-linearity overlay
+    // (nl_on) into the node; pass pmt_nl=false to disable it. `extra` is an optional
+    // data overlay merged last (default {} => no-op) for other per-call tweaks.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
               + match_data(dv, reality, semimodel_file, cathode_fiducial)
+              + (if pmt_nl then nl_on else {})
               + extra,
     }, nin=1, nout=1),
 
@@ -174,7 +186,7 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', extra={}):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -187,7 +199,8 @@ function(params) {
             // dump file holds both TPCs (sbnd_xin/ql_scan).
             calib_dump: calib_dump,
         } + match_data(dv, reality, semimodel_file, cathode_fiducial)
-          + extra,  // optional overlay (default {} => no-op); sbnd_xin uses it for PMT non-linearity
+          + (if pmt_nl then nl_on else {})  // PMT non-linearity ON by default for SBND (pmt_nl=false disables)
+          + extra,  // optional overlay (default {} => no-op) for other per-call tweaks
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be
         // dangling), so declare it as a dependency to get it into the job config.

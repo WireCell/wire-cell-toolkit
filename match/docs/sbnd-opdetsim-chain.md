@@ -350,10 +350,13 @@ pred' = pred                                   for pred <= knee (700 PE)
 `sbnd_xin/pmt_nonlinearity_curve.py --emit-qlmatching` to NPE_true=10⁵ (≤2% over the data
 regime; see `sbnd_xin/pics/pmt_nonlinearity_fit.png`) and written to
 `cfg/pgrapher/experiment/sbnd/pmt_nonlinearity_params.jsonnet`. QLMatching reads
-`pmt_nonlinearity` / `pmt_nl_knee` / `pmt_nl_beta` / `pmt_nl_gamma`; **default OFF** (canonical
-production bit-identical). The sbnd_xin standalone chain enables it (`run_clust_QL_evt.sh`,
-`PMT_NL`, default on; `PMT_NL=false` for the OFF baseline) via the local
-`qlmatching.jsonnet` wrapper + the canonical `extra={}` overlay.
+`pmt_nonlinearity` / `pmt_nl_knee` / `pmt_nl_beta` / `pmt_nl_gamma`. **As of 2026-06-04 the SBND
+default is ON**: the canonical `qlmatching.jsonnet` `matching(...,pmt_nl=true,...)` /
+`matching_joint(...,pmt_nl=true,...)` bake the `nl_on` overlay by default (so SBND LArSoft
+production also gets it); **`pmt_nl=false` reproduces the old OFF/identity baseline byte-identical**
+(verified with `wcsonnet`: no `pmt_nl*` keys emitted). The sbnd_xin `qlmatching.jsonnet` wrapper
+just forwards `pmt_nl`; `run_ql_evt.sh` and `run_clust_QL_evt.sh` default `PMT_NL=true`. Non-SBND
+detectors are unaffected (SBND-only file).
 
 **OFF-vs-ON validation** (`sbnd_xin/ql_nonlin_compare.py`,
 `sbnd_xin/pics/ql_pmt_nonlin_compare.png`; 10-event MC + data; matching unbroken, 106/106 and
@@ -367,11 +370,23 @@ production bit-identical). The sbnd_xin standalone chain enables it (`run_clust_
   cannot help and slightly steepens the slope.
 - The per-channel effect is small relative to the pred/meas scatter (|median error| ~0.1–0.5).
 
-So the correction is physically sound and verified, but on these samples it improves only the
-MC saturation trend; the data discrepancy is dominated by a separate effect. It is therefore
-shipped **default-OFF in production** and enabled only in the sbnd_xin study chain. Using it
-for a real benefit would require re-tuning the efficiencies / `QtoL` in tandem (a separate
-study), since the current tuning already absorbed the average response.
+So the correction is physically sound and verified. On these samples its effect is small (it
+only engages per-PMT above the 700 PE knee, rare in practice — see the PE-error study below,
+where the effective light error moves only ~1 pt with NL on vs off). It is now shipped
+**default-ON for SBND** by request; `pmt_nl=false` recovers the old behavior. A real
+quantitative benefit would still require re-tuning the efficiencies / `QtoL` in tandem (a
+separate study), since the current tuning already absorbed the average response.
+
+### Per-PMT light error and the data/MC normalization (PE-error study)
+
+`sbnd_xin/ql_pe_error.py` (see `sbnd_xin/docs/pe-error-study.md`) uses the 10 data + 10 MC
+hand-scans to fit the per-PMT light error `a` from `E[(pred−meas)²]=meas+a·pred²` (the matcher
+assumes 30% ⇒ `a=0.09`). Findings: the robust per-PMT error is **~30% for data** (≈33% on clean
+matches) and **tighter for MC** (~15–24%), so 30% is reasonable-to-conservative. The notable
+result is a **data/MC normalization mismatch of ~30%**: the same photon model **over**-predicts
+data light (median meas/pred≈0.86) but **under**-predicts MC (≈1.14) — absorbed in matching by
+the per-bundle `strength`, but pointing at a light-yield / `QtoL` data-vs-MC tuning question
+separate from the per-PMT error knob.
 
 ## Where this lives in code
 
