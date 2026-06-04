@@ -1,6 +1,36 @@
 # Applying a per-TPC (Y,Z) position offset in SBND Q/L matching
 
-**Status: design recommendation only — this document changes no code.** It answers the
+**Status: IMPLEMENTED (scope route).** The recommendation below was adopted as written:
+the per-TPC `(Δy,Δz)` lives in the DetectorVolumes metadata (single source of truth) and is
+materialized **after** QLMatching by the existing `T0Correction`/`switch_scope` rail as the
+`{x_t0cor, y_cor, z_cor}` corrected scope. SBND runs with it ON (`pos_offset_on=true`).
+
+What was built (see *Files that would change* at the bottom for the exact sites):
+
+1. **Common place** — `cfg/pgrapher/experiment/sbnd/clus.jsonnet` adds a `pos_offset` array to the
+   `a0f0pA`/`a1f0pA` DetectorVolumes metadata blocks (gated by one `pos_offset_on` toggle). The
+   SAME `detector_volumes()` helper feeds both the per-APA DV given to QLMatching and the all-anode
+   DV given to `switch_scope`, so one entry reaches both consumers via `m_dv->metadata(wpid)`.
+2. **QLMatching reads it in (read-only for now)** — `ApaRun::dy/dz` are populated in
+   `compute_geometry()` from `pos_offset` and logged, but **not yet consumed** (no inline
+   `corrected_point`, no photon-model/active-volume change). They are parked for the forthcoming
+   cross-TPC matching judgement.
+3. **The scope change** — `clus/src/PCTransforms.cxx` `T0Correction` now shifts `y,z` by the
+   per-TPC `(Δy,Δz)` (constant, independent of `cluster_t0`) in `forward()` and exactly inverts it
+   in `backward()`, at both Point and Dataset level. Presence of `pos_offset` flips
+   `output_scope()`/`stored_array_names()` to carry `y_cor/z_cor`; absence keeps the original
+   `{x_t0cor,y,z}` scope (production / non-SBND **bit-identical**, verified by config diff). A hard
+   `backward(forward(p)) == p` roundtrip assertion guards the inverse (`clus/src/clustering_test.cxx`).
+4. **3D→2D safety** — confirmed: every 3D→wire site (`convert_3Dpoint_time_ch` callers, and the
+   `connect_graph_relaxed`/TrackFitting/FiducialUtils paths that run post-`switch_scope`) reads
+   `point3d_raw()` or back-transforms via `backward()` first, so the wire mapping is taken in the
+   raw frame. Correctness there reduces exactly to the `backward()` inverse of #3.
+
+The original design discussion is retained below unchanged for provenance.
+
+---
+
+**Original status: design recommendation only.** It answers the
 question "if we want to apply the measured TPC0/TPC1 transverse offset so that QLMatching
 uses the corrected position, where is the best place to inject it?"
 
@@ -280,7 +310,14 @@ unnecessary single-use abstraction under the scope approach, where the delta alr
 2. **Interpretation is modest.** An anode mis-placement and a PMT mis-placement are partly
    degenerate. Treat this as an empirical position correction applied to the charge before the
    photon model, not as a claim about which piece of hardware actually moved.
-3. **Matching-only ≠ display — unless you take the transform route.** The §1 inline
+3. **RESOLVED in the implementation — the transform (scope) route was chosen, so the display
+   reflects the transverse shift directly.** The SBND Bee `clustering` point set now reads the same
+   corrected coords as the scope (`common_corr_coords` → `{x_t0cor,y_cor,z_cor}` when on), so the
+   transverse shift is materialized once, in the display too. **Do not also apply the separate
+   Bee-zip transverse shift** documented in `sbnd_xin/docs/cathode-crossing-diagnostic.md` — that
+   would double-count. The original both-paths discussion is kept below for provenance.
+
+   **Matching-only ≠ display — unless you take the transform route.** The §1 inline
    `corrected_point` is local to QLMatching's reads and never touches the stored point cloud, so
    the Bee output is unchanged by it; the display correction then remains the separate Bee-zip
    shift documented in `sbnd_xin/docs/cathode-crossing-diagnostic.md`. If instead the transverse

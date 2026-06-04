@@ -260,6 +260,26 @@ public:
             const auto filter_result_fpc_filter = filter_result_fpc.get("filter")->elements<int>();
             SPDLOG_INFO("CTest T0Correction fpc_x {} fpc_y {} fpc_z {} bpc_x {} bpc_y {} bpc_z {} filter_result_fpc_filter {}",
                         fpc_x[0], fpc_y[0], fpc_z[0], bpc_x[0], bpc_y[0], bpc_z[0], filter_result_fpc_filter[0]);
+            // Hard roundtrip invariant: backward(forward(p)) == p, for BOTH the
+            // Point and Dataset overloads.  This is the user's "correct for forward
+            // AND backward" requirement -- it must hold exactly for any configured
+            // (dy,dz), which is also what keeps the downstream 3D->2D mapping correct
+            // (every wire-association site back-transforms via backward()).
+            const double rt_tol = 1e-6 * units::cm;
+            const bool pt_roundtrip_ok =
+                std::abs(backward_corrected_point.x() - test_point.x()) < rt_tol &&
+                std::abs(backward_corrected_point.y() - test_point.y()) < rt_tol &&
+                std::abs(backward_corrected_point.z() - test_point.z()) < rt_tol;
+            const bool ds_roundtrip_ok =
+                std::abs(bpc_x[0] - test_point.x()) < rt_tol &&
+                std::abs(bpc_y[0] - test_point.y()) < rt_tol &&
+                std::abs(bpc_z[0] - test_point.z()) < rt_tol;
+            if (!pt_roundtrip_ok || !ds_roundtrip_ok) {
+                raise<ValueError>("CTest T0Correction roundtrip backward(forward(p)) != p "
+                                  "(point_ok=%d dataset_ok=%d)",
+                                  (int)pt_roundtrip_ok, (int)ds_roundtrip_ok);
+            }
+            SPDLOG_INFO("CTest T0Correction roundtrip OK (point & dataset, dy/dz-aware)");
         }
 
         /// TEST: m_dv->contained_by()

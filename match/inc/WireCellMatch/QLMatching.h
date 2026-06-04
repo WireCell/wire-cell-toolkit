@@ -325,6 +325,10 @@ namespace WireCell::Match {
             int sign_offset{1};
             double s{1.0}, anode_x{0.0}, u_cathode{0.0};
             double y_lo{0.0}, y_hi{0.0}, z_lo{0.0}, z_hi{0.0};
+            // per-TPC transverse position offset (Y,Z), read from DetectorVolumes
+            // metadata "pos_offset" in compute_geometry().  Parked for the future
+            // cross-TPC matching judgement; not yet consumed.  0 => inert.
+            double dy{0.0}, dz{0.0};
 
             // cluster-group decomposition
             std::vector<std::pair<WireCell::Clus::Facade::Cluster*,

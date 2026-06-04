@@ -23,7 +23,21 @@ local drift_speed = 1.563 * wc.mm / wc.us;
 local bee_dir = 'data';
 
 local common_coords = ['x', 'y', 'z'];
-local common_corr_coords = ['x_t0cor', 'y', 'z'];
+
+// Per-TPC transverse (Y,Z) position offset, materialized in the post-QLMatching
+// scope by T0Correction as y_cor/z_cor (see match/docs/cathode-offset-correction.md).
+// One toggle drives BOTH the metadata injection (which the C++ keys on for the
+// y_cor/z_cor scope) and the corrected-coords names below, so jsonnet and C++ stay
+// in lockstep.  pos_offset_on=true is the SBND committed state going forward; flip
+// to false to recover the pre-offset {x_t0cor,y,z} scope (bit-identical) for
+// validation.  x component is 0 (drift stays with the t0/flash_x_offset term).
+// Values = symmetric split of the measured T_yz=(-0.22,+1.34) cm cathode gap.
+local pos_offset_on = true;
+local pos_offset_a0 = [0, -0.11 * wc.cm, 0.67 * wc.cm];   // TPC0 (East, x<0)
+local pos_offset_a1 = [0, 0.11 * wc.cm, -0.67 * wc.cm];   // TPC1 (West, x>=0)
+
+local common_corr_coords =
+    if pos_offset_on then ['x_t0cor', 'y_cor', 'z_cor'] else ['x_t0cor', 'y', 'z'];
 
 // FV = sbnd-wires-geometry-v0206 bbox - 1 cm inset on every face.
 // X anode = W (collection) plane; X inner = data CPA face (DENT-gap geometry, ±1.5 cm).
@@ -68,11 +82,11 @@ local dvm = {
         FV_ymax_margin: $.overall.FV_ymax_margin,
         FV_zmin_margin: $.overall.FV_zmin_margin,
         FV_zmax_margin: $.overall.FV_zmax_margin,
-    },
+    } + (if pos_offset_on then { pos_offset: pos_offset_a0 } else {}),
     a1f0pA: $.a0f0pA + {
         FV_xmin:    2.5  * wc.cm,  // data CPA face (+1.5) + 1 cm toward TPC1 interior
         FV_xmax:  201.05 * wc.cm,  // W plane (+202.05) - 1 cm
-    },
+    } + (if pos_offset_on then { pos_offset: pos_offset_a1 } else {}),  // override a0's
 };
 
 local anodes_name(anodes, face='') =
@@ -345,7 +359,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     detector: 'sbnd',
                     algorithm: 'clustering',
                     pcname: '3d',
-                    coords: ['x_t0cor', 'y', 'z'],
+                    // Same corrected coords as the clustering scope, so the Bee
+                    // display reflects the transverse shift when it is on (makes the
+                    // separate Bee-zip transverse shift redundant -- pick one).
+                    coords: common_corr_coords,
                     individual: false,
                 },
             ],

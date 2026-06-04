@@ -618,6 +618,23 @@ void QLMatching::compute_geometry(ApaRun& run)
     run.y_hi = bray.second.y() - m_y_cushion;
     run.z_lo = bray.first.z()  + m_z_cushion;
     run.z_hi = bray.second.z() - m_z_cushion;
+    // Per-TPC transverse position offset (Y,Z), read from the SAME DetectorVolumes
+    // metadata the post-QLMatching T0Correction scope uses (single source of truth;
+    // see match/docs/cathode-offset-correction.md).  Parked on the ApaRun for the
+    // forthcoming cross-TPC matching judgement -- NOT yet consumed here (the photon
+    // model and active-volume gate still read raw y,z).  Absent key => 0 => inert.
+    run.dy = 0.0;
+    run.dz = 0.0;
+    {
+        const auto md = m_dv->metadata(wpid);
+        if (md.isMember("pos_offset") && md["pos_offset"].isArray() &&
+            md["pos_offset"].size() >= 3) {
+            run.dy = md["pos_offset"][1].asDouble();
+            run.dz = md["pos_offset"][2].asDouble();
+        }
+    }
+    log->debug("anode {} pos_offset (dy,dz) = ({:.3f},{:.3f}) cm [parked, not yet applied]",
+               tpc, run.dy / units::cm, run.dz / units::cm);
     log->debug("anode {} bbox x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
                "anode_x {:.2f} cathode_x {:.2f} u_cathode {:.2f} cm s {}",
                tpc, x_lo / units::cm, x_hi / units::cm,
