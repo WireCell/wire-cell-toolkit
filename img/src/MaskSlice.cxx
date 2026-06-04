@@ -93,9 +93,6 @@ WireCell::Configuration Img::MaskSliceBase::default_configuration() const
     //
     cfg["masked_planes"] = Json::arrayValue;
 
-    // Hand-declared dead channels (masked across all slices). Default empty.
-    cfg["masked_channels"] = Json::arrayValue;
-
     //
     cfg["dummy_charge"] = m_dummy_charge;
     cfg["dummy_error"] = m_dummy_error;
@@ -148,12 +145,6 @@ void Img::MaskSliceBase::configure(const WireCell::Configuration& cfg)
         m_masked_planes.clear();
         for (auto id : cfg["masked_planes"]) {
             m_masked_planes.push_back(id.asInt());
-        }
-    }
-    if (cfg.isMember("masked_channels")) {
-        m_masked_channels.clear();
-        for (auto id : cfg["masked_channels"]) {
-            m_masked_channels.push_back(id.asInt());
         }
     }
     for (auto id : m_active_planes) {
@@ -386,30 +377,6 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
                 }
                 s->assign(ich, {(float)m_dummy_charge, (float)m_dummy_error});
             }
-        }
-    }
-
-    // masked_channels: hand-declared dead channels masked across all slicebins
-    // (a per-channel "dummy"), independent of the "bad" mask.  A dedicated branch
-    // sets these on a specific U/V/W crossing so GridTiling forms one dead blob
-    // there.  Default empty -> no effect.
-    for (int chid : m_masked_channels) {
-        IChannel::pointer ich = m_anode->channel(chid);
-        if (!ich) {
-            continue;
-        }
-        for (size_t slicebin = min_slicebin; slicebin < max_slicebin; ++slicebin) {
-            auto s = svcmap[slicebin];
-            if (!s) {
-#ifdef SLICE_START_TIME_IS_RELATIVE
-                const double start = slicebin * span;  // relative to slice frame's time.
-#else
-                const double start = in->time() + slicebin * span;
-#endif
-                s = new Img::Data::Slice(tlframe_ptr, slicebin, start, span);
-                svcmap[slicebin] = s;
-            }
-            s->assign(ich, {(float) m_masked_charge, (float) m_masked_error});
         }
     }
 

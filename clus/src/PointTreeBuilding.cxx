@@ -105,6 +105,7 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
             }
             reg.xbeg = get<double>(jreg, "xbeg", 0.0);
             reg.xend = get<double>(jreg, "xend", 0.0);
+            reg.gap = get<bool>(jreg, "gap", false);
             m_inject_dead_winds.push_back(reg);
         }
     }
@@ -422,6 +423,9 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     // the dead_winds map over the configured drift-x window.  faces/planes inserts
     // are REQUIRED so the dead_winds_a* PC loop below serializes U/V (planes 0,1)
     // even when the live imaging had no dead channel there.
+    // [face][W wind] -> (xbeg, xend): the "dead-gap" registry collected from the
+    // W-plane wires of gap-flagged injection regions (see below for serialization).
+    std::map<int, std::map<int, std::pair<double, double>>> gap_winds;
     for (const auto& reg : m_inject_dead_winds) {
         for (const int chid : reg.channels) {
             IChannel::pointer ich = m_anode->channel(chid);
@@ -439,6 +443,17 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
                 } else {
                     const auto& [xbeg_now, xend_now] = dead_winds[wind];
                     dead_winds[wind] = {std::min(reg.xbeg, xbeg_now), std::max(reg.xend, xend_now)};
+                }
+                // A dead W wind spans the full vertical column; record it so the
+                // whole column is treated as dead on all planes downstream.
+                if (reg.gap && plane == 2) {
+                    auto& g = gap_winds[face];
+                    if (g.find(wind) == g.end()) {
+                        g[wind] = {reg.xbeg, reg.xend};
+                    } else {
+                        const auto& [xbeg_now, xend_now] = g[wind];
+                        g[wind] = {std::min(reg.xbeg, xbeg_now), std::max(reg.xend, xend_now)};
+                    }
                 }
             }
         }
@@ -477,6 +492,25 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
         if (name.find("dead_winds") != std::string::npos) {
             SPDLOG_LOGGER_TRACE(log, "contains point cloud {} with {} points", name, pc.get("xbeg")->size_major());
         }
+    }
+
+    // Serialize the dead-gap registry (W winds only) so the downstream Grouping can
+    // reconstitute it (Grouping::get_dead_gap_winds / in_dead_gap).  Empty unless an
+    // inject_dead_winds entry is gap-flagged -> default builds add no such PC.
+    for (const auto& [face, g] : gap_winds) {
+        std::vector<float_t> xbeg_v, xend_v;
+        std::vector<int_t> wind_v;
+        for (const auto& [wind, xbeg_xend] : g) {
+            xbeg_v.push_back(xbeg_xend.first);
+            xend_v.push_back(xbeg_xend.second);
+            wind_v.push_back(wind);
+        }
+        Dataset ds;
+        ds.add("xbeg", Array(xbeg_v));
+        ds.add("xend", Array(xend_v));
+        ds.add("wind", Array(wind_v));
+        const std::string ds_name = String::format("dead_gap_a%df%dpW", anode_ident, face);
+        root->value.local_pcs().emplace(ds_name, ds);
     }
 
 }

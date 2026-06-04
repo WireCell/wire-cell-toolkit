@@ -65,10 +65,17 @@ namespace WireCell::Clus {
         // set of channels' wires dead over a drift-x window, so is_good_point()/
         // test_good_point() treat that region as crossable WITHOUT marking the
         // channels dead in imaging.  See cfg/.../sbnd/dead_regions.jsonnet.
+        //
+        // When "gap" is true, the entry's W-plane winds also feed a "dead-gap"
+        // registry (serialized to dead_gap_a*f*pW): a dead W wind spans the full
+        // vertical column, so the whole column is treated as dead on all three
+        // planes (Grouping::in_dead_gap), generalizing the y~0 center patch to the
+        // full-height defect band.
         struct DeadWindInjection {
             std::vector<int> channels;
             double xbeg{0.0};
             double xend{0.0};
+            bool gap{false};
         };
         std::vector<DeadWindInjection> m_inject_dead_winds;
 

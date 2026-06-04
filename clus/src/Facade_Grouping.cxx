@@ -307,6 +307,9 @@ const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int 
 
 
 bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const {
+    // Hand-declared dead gap: the full vertical W-defect column counts as dead on
+    // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
+    if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
     int matched_planes = 0;
     for (int pind = 0; pind < nplanes; ++pind) {
@@ -323,11 +326,14 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
     return false;
 }
 
-bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const 
+bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const
 {
+    // Hand-declared dead gap: the full vertical W-defect column counts as dead on
+    // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
+    if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
     int matched_planes = 0;
-    
+
     // Loop through U,V,W planes
     for (int pind = 0; pind < nplanes; pind++) {
         int weight = (pind == 2) ? 2 : 1; // W plane counts double
@@ -346,6 +352,12 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int a
     double radius, int ch_range) const 
 {
     std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
+    // Hand-declared dead gap: the full vertical W-defect column counts as dead on
+    // all three planes (slots 3,4,5).  Default-empty -> falls through to normal check.
+    if (in_dead_gap(point, ch_range, apa, face)) {
+        num_planes[3] = num_planes[4] = num_planes[5] = 1;
+        return num_planes;
+    }
     // std::cout << "abc: " << point << " " << radius << " " << ch_range << std::endl;
     // Check each plane (0,1,2)
     for (int pind = 0; pind < 3; ++pind) {
@@ -439,6 +451,24 @@ bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range
         const auto [xmin, xmax] = ch2xrange.at(ch);
         if (point[0] >= xmin && point[0] <= xmax) {
             // std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Grouping::in_dead_gap(const geo_point_t& point, const int ch_range, const int apa, const int face) const {
+    // Project to the W (collection) wind.  A dead W wind spans the full vertical
+    // column, so a hit here flags the whole defect band as dead on all planes.
+    const auto& gap = get_dead_gap_winds(apa, face);
+    if (gap.empty()) return false;  // default builds: no gap -> no behavior change
+    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, 2);
+    (void)tind;
+    for (int ch = wind - ch_range; ch <= wind + ch_range; ++ch) {
+        const auto it = gap.find(ch);
+        if (it == gap.end()) continue;
+        const auto [xmin, xmax] = it->second;
+        if (point[0] >= xmin && point[0] <= xmax) {
             return true;
         }
     }
@@ -698,7 +728,23 @@ void Grouping::build_wire_cache(int apa, int face, int plane) const {
             cache.dead_wires[plane][wire_index] = {start_x, end_x};
         }
     }
-    
+
+    // Dead-gap registry (W plane only): the hand-declared W winds whose full
+    // vertical column is treated as dead on all planes (see in_dead_gap).  Empty
+    // unless PointTreeBuilding serialized a dead_gap_a*f*pW PC (gap-flagged region).
+    if (plane == 2) {
+        const std::string gap_name = String::format("dead_gap_a%df%dpW", apa, face);
+        if (local_pcs.find(gap_name) != local_pcs.end()) {
+            const auto& gap = local_pcs.at(gap_name);
+            const auto& xbeg = gap.get("xbeg")->elements<float_t>();
+            const auto& xend = gap.get("xend")->elements<float_t>();
+            const auto& wind = gap.get("wind")->elements<int_t>();
+            for (size_t i = 0; i < wind.size(); ++i) {
+                cache.dead_gap_w[wind[i]] = {xbeg[i], xend[i]};
+            }
+        }
+    }
+
     cache.cached[plane] = true;
 }
 
@@ -812,6 +858,12 @@ std::map<int, std::pair<double, double>>& Grouping::get_dead_winds(const int apa
     
     // Return reference to the cached dead wires for this plane
     return cache.dead_wires[pind];
+}
+
+std::map<int, std::pair<double, double>>& Grouping::get_dead_gap_winds(const int apa, const int face) const {
+    // The gap registry is loaded alongside the W (plane 2) dead-winds cache.
+    build_wire_cache(apa, face, 2);
+    return this->cache().wire_caches[apa][face].dead_gap_w;
 }
 
 

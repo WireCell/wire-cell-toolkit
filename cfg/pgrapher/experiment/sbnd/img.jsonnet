@@ -5,7 +5,6 @@ local params = import "pgrapher/experiment/sbnd/simparams.jsonnet"; //added Ewer
 local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anodes = tools.anodes;
-local dead_regions = import 'pgrapher/experiment/sbnd/dead_regions.jsonnet';
 
 
 // added Ewerton 2023-08-23
@@ -131,7 +130,7 @@ local img = {
     }.ret,
 
     // A functio that sets up slicing for an APA.
-    slicing :: function(anode, aname, span=4, active_planes=[0,1,2], masked_planes=[], dummy_planes=[], masked_channels=[]) {
+    slicing :: function(anode, aname, span=4, active_planes=[0,1,2], masked_planes=[], dummy_planes=[]) {
         ret: g.pnode({
             type: "MaskSlices",
             name: "slicing-"+aname,
@@ -147,7 +146,6 @@ local img = {
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
-                masked_channels: masked_channels,
                 //nthreshold: [1e-6, 1e-6, 1e-6],
                 nthreshold: [3.6, 3.6, 3.6], //original
                 //nthreshold: [2.5, 2.5, 2.5], //changed Ewerton
@@ -200,16 +198,7 @@ local img = {
         local tilings = [$.tiling(anode, name+"_%d"%n)
             for n in iota],
         local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
-        // 4th branch: hand-declared dead region (W dead + U/V distorted).  Mask
-        // exactly those channels (no plane masking) so GridTiling forms one dead
-        // blob at the U/V/W crossing -> visible in the Bee deadarea.  Unique
-        // "_dead" name suffix avoids a node-name collision with the 3 branches.
-        local dead_chans = dead_regions.channels(anode.data.ident),
-        local dead_pass = g.pipeline([
-            $.slicing(anode, name+"_dead", span, active_planes=[], masked_planes=[],
-                      dummy_planes=[], masked_channels=dead_chans),
-            $.tiling(anode, name+"_dead")]),
-        ret: f.fanpipe("FrameFanout", multipass + [dead_pass], "BlobSetMerge", "multi_masked_slicing_tiling-%s"%anode.name),
+        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling-%s"%anode.name),
     }.ret,
 
     local clustering_policy = "uboone", // uboone, simple
