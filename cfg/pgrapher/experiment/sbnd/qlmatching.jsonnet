@@ -67,6 +67,9 @@ function(params) {
         },
     }, nin=2, nout=1),
 
+    // DATA predicted-light scale (sim stays 1.0); see QtoL note below. 1.0 disables.
+    local data_qtol = 0.86,
+
     // Common QLMatching `data` block (everything except the anode binding).
     // Single source of truth so the per-APA matching() and the joint
     // matching_joint() below cannot drift apart when these knobs are retuned.
@@ -79,7 +82,11 @@ function(params) {
             cathode_fiducial: cathode_fiducial,
             beamonly: false,
             data: if reality == 'data' then true else false,
-            QtoL: 1.0,
+            // DATA-only predicted-light scale (Q/L PE-error study, match/docs): the
+            // data prediction over-predicts ~16%, so scale its light yield down (sim is
+            // left at 1.0 -- it under-predicts). Set data_qtol=1.0 to disable. QtoL feeds
+            // pred_flash = q*QtoL*vis*eff, so this is exactly a per-event prediction scale.
+            QtoL: if reality == 'data' then data_qtol else 1.0,
             drift_speed: params.lar.drift_speed,
             nchan: nchan,  // must match FlashTensorToOpticalPCs.nchan (writer/reader coupling)
             ch_mask: ch_mask,
@@ -127,10 +134,17 @@ function(params) {
             bkg_weight: 0.5,
             pe_mismatch_knee: 0.3,
             pe_mismatch_floor: 0.3,
-            // §G flash PE-error model.
-            pe_err_floor: 0.3,
-            pe_err_frac: 0.3,
-            pe_err_knee: 1.0,
+            // §G per-PMT light-error model (Q/L PE-error study, match/docs): a constant
+            // floor (PE) below the knee, fractional above -- larger fractional error at low
+            // PE, ->frac at high PE. Applied to BOTH data and sim (conservative for sim, kept
+            // consistent so cuts derived on data carry over). Old values: 0.3 / 0.3 / 1.0.
+            pe_err_floor: 5.0,
+            pe_err_frac: 0.25,
+            pe_err_knee: 20.0,
+            // Compute the bundle chi2's per-PMT error from the PREDICTED PE (not measured).
+            // SBND-on; default false keeps the measured-based chi2 (other detectors, and
+            // the LASSO solve, are unchanged -- the LASSO weight stays per-flash measured).
+            pe_err_on_pred: true,
             flash_pe_threshold: 0.0,
             // §F bundle-quality thresholds.
             bundle_ks_merge_max: 0.2,

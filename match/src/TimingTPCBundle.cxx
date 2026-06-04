@@ -111,7 +111,10 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
         if (opdet_mask[j] == 0) continue;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + std::pow(pe_err[j], 2));
+        const double perr = m_qp.pe_err_on_pred
+            ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
+            : pe_err[j];
+        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
     }
 
     if ((candidate_ks_dis < ks_dis || candidate_chi2 < chi2) &&
@@ -203,7 +206,10 @@ bool TimingTPCBundle::examine_bundle()
         ++nvalidopdets;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + std::pow(pe_err[j], 2));
+        const double perr = m_qp.pe_err_on_pred
+            ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
+            : pe_err[j];
+        chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
     }
 
     flag_high_consistent = false;

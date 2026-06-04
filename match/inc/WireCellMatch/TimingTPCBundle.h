@@ -27,6 +27,14 @@ namespace WireCell::Match {
         bool   mask_ks = false;           // also apply opdet_mask to the KS shape metric
                                           // (the chi2/LASSO paths always mask). Default OFF
                                           // so existing configs are bit-identical; SBND-on.
+        // Per-PMT light-error model for the bundle chi2. When pe_err_on_pred is true the
+        // chi2's per-opdet error is PE_err = (pred < knee ? floor : frac*pred) computed from
+        // the PREDICTED pe (not the measured-based flash->get_PE_err); sigma^2 = meas + PE_err^2.
+        // Default off + floor/frac/knee = 0.3/0.3/1.0 reproduce the measured-based chi2.
+        double pe_err_floor = 0.3;
+        double pe_err_frac  = 0.3;
+        double pe_err_knee  = 1.0;
+        bool   pe_err_on_pred = false;
     };
 
     class TimingTPCBundle {

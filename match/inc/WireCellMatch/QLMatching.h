@@ -134,10 +134,14 @@ namespace WireCell::Match {
         double m_pe_mismatch_knee{0.3};        // PE-mismatch weight knee (fraction of meas)
         double m_pe_mismatch_floor{0.3};       // PE-mismatch weight floor
 
-        // §G flash PE-error model (forwarded to Opflash).
+        // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
+        // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
         double m_pe_err_floor{0.3};
         double m_pe_err_frac{0.3};
         double m_pe_err_knee{1.0};
+        // When true the bundle chi2 computes its per-PMT error from the PREDICTED pe
+        // (not measured); the LASSO weight stays measured-based. SBND-on, default off.
+        bool   m_pe_err_on_pred{false};
         double m_flash_pe_threshold{0.0};      // Opflash "fired" threshold (PE)
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).

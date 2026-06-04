@@ -382,11 +382,24 @@ separate study), since the current tuning already absorbed the average response.
 `sbnd_xin/ql_pe_error.py` (see `sbnd_xin/docs/pe-error-study.md`) uses the 10 data + 10 MC
 hand-scans to fit the per-PMT light error `a` from `E[(pred−meas)²]=meas+a·pred²` (the matcher
 assumes 30% ⇒ `a=0.09`). Findings: the robust per-PMT error is **~30% for data** (≈33% on clean
-matches) and **tighter for MC** (~15–24%), so 30% is reasonable-to-conservative. The notable
-result is a **data/MC normalization mismatch of ~30%**: the same photon model **over**-predicts
-data light (median meas/pred≈0.86) but **under**-predicts MC (≈1.14) — absorbed in matching by
-the per-bundle `strength`, but pointing at a light-yield / `QtoL` data-vs-MC tuning question
-separate from the per-PMT error knob.
+matches) and **tighter for MC** (~15–24%). The notable result is a **data/MC normalization
+mismatch of ~30%**: the same photon model **over**-predicts data light (median meas/pred≈0.86)
+but **under**-predicts MC (≈1.14).
+
+**The data recipe (implemented, SBND default):** two SBND-config corrections fix this for data
+(sim is left alone):
+1. **DATA prediction scale `QtoL = 0.86`** (sim 1.0) — since `pred = q·QtoL·vis·eff`, lowering
+   the data `QtoL` removes the ~16% over-prediction.
+2. **PE-dependent error `σ² = meas + max(5 PE, 0.25·pred)²`** (`pe_err_floor=5`, `pe_err_frac=0.25`,
+   `pe_err_knee=20`, both data and sim) — a constant floor at low PE, 25% fractional at high PE.
+   `pe_err_on_pred=true` makes the **bundle χ²** use the *predicted* PE for this error
+   (`TimingTPCBundle::examine_bundle`); the **LASSO** keeps the per-flash measured-based weight
+   (its measured vector is shared across candidate bundles).
+
+After the recipe (`sbnd_xin/ql_recipe_compare.py`, hand-scan kept matches): median **χ²/ndf drops
+from ~5 → 1.72 (data) / 1.04 (MC)**, **data meas/pred → 1.01** (MC stays 1.17, unscaled), and
+**ks is ~unchanged** (it is shape-normalized, so scaling `pred` leaves it invariant). These
+recalibrated χ²/ks plus the hand-scan labels are the inputs for further QLMatching cut tuning.
 
 ## Where this lives in code
 

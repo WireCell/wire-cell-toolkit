@@ -185,6 +185,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
     m_pe_err_knee       = get(cfg, "pe_err_knee",       m_pe_err_knee);
+    m_pe_err_on_pred    = get(cfg, "pe_err_on_pred",    m_pe_err_on_pred);
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
 
     m_bundle_ks_merge_max      = get(cfg, "bundle_ks_merge_max",      m_bundle_ks_merge_max);
@@ -320,6 +321,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_err_floor"]       = m_pe_err_floor;
     cfg["pe_err_frac"]        = m_pe_err_frac;
     cfg["pe_err_knee"]        = m_pe_err_knee;
+    cfg["pe_err_on_pred"]     = m_pe_err_on_pred;
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
 
     cfg["bundle_ks_merge_max"]      = m_bundle_ks_merge_max;
@@ -646,7 +648,7 @@ void QLMatching::compute_geometry(ApaRun& run)
     run.qp = BundleQualityParams{
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
         m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee,
-        m_bundle_mask_ks};
+        m_bundle_mask_ks, m_pe_err_floor, m_pe_err_frac, m_pe_err_knee, m_pe_err_on_pred};
 
     // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
     // sits on the low / high side of the cathode plane.
@@ -1186,6 +1188,8 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["pe_err_floor"]        = m_pe_err_floor;
     qp["pe_err_frac"]         = m_pe_err_frac;
     qp["pe_err_knee"]         = m_pe_err_knee;
+    qp["pe_err_on_pred"]      = m_pe_err_on_pred;
+    qp["QtoL"]                = m_QtoL;
     top["quality_params"] = qp;
 
     // OpDet table (all channels). apa side and active flag mirror compute_geometry:
