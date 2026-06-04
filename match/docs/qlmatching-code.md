@@ -268,13 +268,15 @@ so production runs do zero extra work and stay bit-identical.
   (`compute_geometry`). An endpoint is **at** that face iff its distance ≤
   `two_boundary_margin` (default 3 cm).
 - `flag_two_boundary` = both endpoints at a face **AND** the two nearest faces are
-  **different** — i.e. the cluster enters through one surface and exits through a
-  **separate** one. Both ends near the *same* face (e.g. both at the cathode, or
-  both clipping the top) does **not** count.
+  **different** **AND** at least one of those faces is an **x-boundary** (anode or
+  cathode). Both ends near the *same* face (e.g. both at the cathode, or both
+  clipping the top) does **not** count, and neither does a purely transverse pair
+  (e.g. top + downstream) — a pair of y/z edges constrains the drift x, hence T0,
+  hardly at all.
 
 Unlike `flag_at_x_boundary` (anode-OR-cathode, either end), this requires **both**
-ends at a wall, on two distinct faces, and includes the ±y/±z faces, so it tags
-through-going crossers in any direction. **Diagnostic only** — never read by the
+ends at a wall, on two distinct faces with at least one being an x-boundary, so it
+tags through-going crossers that actually pin the drift coordinate. **Diagnostic only** — never read by the
 matching path; emitted as
 `two_boundary` in the calib dump and shown as `2bnd` in the `ql_scan` viewer. (The
 cathode face could later swap to the CPA structure-exclusion `m_cathode_fv` used by

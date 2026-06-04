@@ -1722,9 +1722,15 @@ void QLMatching::compute_two_boundary_flag(TimingTPCBundle* bundle,
     int face_high = 0, face_low = 0;
     const bool high_at_edge = nearest_face(p_high, face_high) <= m;
     const bool low_at_edge  = nearest_face(p_low,  face_low)  <= m;
+    // At least one end must touch an x-boundary face (0 anode / 1 cathode).
+    // A pair of purely transverse (y/z) edges constrains drift x — hence T0 —
+    // hardly at all, so we don't count it as a two-boundary cluster.
+    const bool any_x_face = (face_high <= 1) || (face_low <= 1);
     // Both PCA ends at a boundary AND at two SEPARATE faces (the cluster enters
-    // through one surface and exits through a different one).
-    bundle->set_flag_two_boundary(high_at_edge && low_at_edge && face_high != face_low);
+    // through one surface and exits through a different one), with at least one
+    // of those being an x-boundary.
+    bundle->set_flag_two_boundary(high_at_edge && low_at_edge
+                                  && face_high != face_low && any_x_face);
 }
 
 // ----- bundle map maintenance -----
