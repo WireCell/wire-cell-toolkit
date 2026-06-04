@@ -108,6 +108,92 @@ downstream retile / Bee re-derivation that recomputes 2D associations from 3D po
 (`improvecluster_1.cxx:472`, `retile_cluster.cxx:251`). The offset is a read-time correction,
 not a stored geometry change.
 
+## The scope / PCTransform machinery (the "other way", and how the FV fits)
+
+There is already a non-destructive way to "change the scope of points" with an
+old↔new correspondence: the `IPCTransform` + scope mechanism the T0 correction uses.
+This is the cleanest home for the **transverse** part, and it also gives a crisp answer
+to the fiducial-volume question.
+
+### What the machinery does
+
+`T0Correction` (`clus/src/PCTransforms.cxx:34`) is an `IPCTransform`. Its
+`forward(Dataset, …)` (`:83`) reads the blob's raw `{x,y,z}` and emits corrected arrays,
+but it is **additive**: `Cluster::add_corrected_points` (`Facade_Cluster.cxx:194`) writes
+only the *new* arrays named by `stored_array_names()` (`:151`, just `{"x_t0cor"}`) into the
+same `"3d"` PC and **leaves `x,y,z` in place**. The corrected coordinates are exposed as a
+*view* — the registered `output_scope()` `{"3d",{"x_t0cor","y","z"}}` (`:145`) — not as an
+overwrite. `ClusteringSwitchScope` (`clus/src/clustering_switch_scope.cxx:50`) runs this per
+cluster, registers the scope, and makes it the cluster's **default scope** (`:77`) so
+everything downstream (the all-APA merge steps and the Bee dump) reads corrected coordinates.
+
+Two consequences matter here:
+
+- **The old↔new "mapping" is index identity plus coexistence.** Because the transform is
+  additive, point `i`'s raw `(x,y,z)` and corrected `(x_t0cor, …)` live side by side at the
+  same index. Nothing is renumbered; both frames are queryable at once.
+- **This is the sanctioned way to materialize a correction** — and it does *not* contradict
+  §3 above. §3 forbids *overwriting* the stored positions (which would desync the frozen 2D
+  "wind" arrays). The scope mechanism never overwrites; it adds named arrays and a view. So
+  materializing the transverse offset *through a transform* is safe where writing it back into
+  `x/y/z` would not be.
+
+### Why the transverse offset fits the transform but the drift offset does not
+
+`switch_scope` runs **after** QLMatching (`cfg/.../clus.jsonnet:276`; it consumes the
+`cluster_t0` QLMatching wrote). That ordering is forced for T0: the x correction is
+`sign·t0·v_drift`, so it is unknown until matching has *picked* a flash, and QLMatching
+itself must try **every** candidate flash (`QLMatching.cxx:660`) with a different
+`flash_x_offset` per flash. A single materialized x-scope therefore cannot feed the matching
+decision.
+
+The transverse offset is the opposite: `(Δy, Δz)` is a **per-TPC constant**, independent of
+t0 and of which flash is being tested. So it *can* be materialized once, as a view, **before**
+QLMatching — exactly the place T0 cannot go. The clean shape is therefore:
+
+- a small `(Δy,Δz)` transform (a sibling of `T0Correction`, keyed by `(apa,face)`) materialized
+  **pre-QLMatching**, giving QLMatching a `{"3d",{"x", "y_cor", "z_cor"}}` view to read instead
+  of raw `{x,y,z}` at `QLMatching.cxx:720`; QLMatching still adds its per-flash `flash_x_offset`
+  to `x` on top. (Equivalently — and with less plumbing — just add `+Δy/+Δz` inline at
+  `:725-726`, i.e. the `corrected_point` helper of §1. Same result; pick by taste. The
+  transform route is worth it mainly to share one corrected scope with the display.)
+- the **existing post-QLMatching `switch_scope`** extended to carry the same `(Δy,Δz)` (have its
+  `forward(Dataset)` shift `y,z` and add `y_cor,z_cor` to `stored_array_names`/`output_scope`),
+  so the downstream merge + Bee see the corrected transverse position for free.
+
+A single source of truth for the per-`(apa,face)` `(Δy,Δz)` should feed both.
+
+### The fiducial volume: neither two volumes nor a delta-parameterized FV
+
+The instinct was "two sets of FV, or FV functions that take `(Δy,Δz)` as an argument." With the
+additive scope in hand the honest answer is **neither** — you keep **one set of unchanged FV
+objects** and choose *which coordinate arrays each call site reads*. Because both `{y,z}` and
+`{y_cor,z_cor}` coexist in the PC, the frame distinction of §2 becomes a coordinate selection:
+
+| call site | frame | reads | offset effect |
+|---|---|---|---|
+| `SemiAnalyticalModel` PE prediction (`QLMatching.cxx:734`) | cathode/cryostat (PMTs fixed) | corrected `y_cor,z_cor` | **real** — intended |
+| cathode CPA `m_cathode_fv->contained()` (`:1652`) | cathode (CPA fixed) | corrected `y_cor,z_cor` | **real** — intended |
+| active-volume gate `run.y_lo/y_hi/z_lo/z_hi` (`:731`) | anode (rides the points) | original `y,z` | **none** — invariant |
+| transform `filter()` → `m_dv->contained_by` (`PCTransforms.cxx:131`) | anode (real detector geom) | original `y,z` (with `x_t0cor`) | **none** — invariant |
+
+Feeding **original** `y,z` to the unshifted anode-frame box is *exactly equivalent* to feeding
+corrected `y,z` to a box shifted by `+Δ` — so the "box rides the anode" picture of §2 needs
+**no box-bounds shift, no `TranslatedFiducial` wrapper, and no delta argument on `IFiducial`**;
+it is just a choice of array names. This is also the *only* workable form for the active
+detector volume: `m_dv->contained_by` is a full geometry lookup, not a translatable box, so the
+offset there *must* be expressed by selecting the un-shifted coordinates rather than by moving
+the volume. The T0 transform already embodies exactly this asymmetry — its `filter()` is
+anode-frame and reads the raw lookup while its `output_scope()` exposes the corrected view —
+which is good confirmation that "select coordinates per call site" is the native idiom, not a
+workaround.
+
+A `TranslatedFiducial(child, Δy, Δz)` wrapper (shift the query point, delegate to a baked child)
+is only worth adding if you choose *not* to materialize the offset and instead want a single FV
+object that self-applies the delta. Under the scope approach it is an unnecessary single-use
+abstraction — the delta already lives in the materialized `y_cor,z_cor`, and every FV stays
+baked and unchanged.
+
 ## Caveats to keep in mind
 
 1. **The ±Δ/2 symmetric split was derived for the display.** The diagnostic constrains only
@@ -118,9 +204,14 @@ not a stored geometry change.
 2. **Interpretation is modest.** An anode mis-placement and a PMT mis-placement are partly
    degenerate. Treat this as an empirical position correction applied to the charge before the
    photon model, not as a claim about which piece of hardware actually moved.
-3. **Matching-only ≠ display.** Because the offset never touches the stored point cloud, the
-   Bee output is unchanged by this code path. The display correction remains the separate
-   Bee-zip shift already documented in `sbnd_xin/docs/cathode-crossing-diagnostic.md`.
+3. **Matching-only ≠ display — unless you take the transform route.** The §1 inline
+   `corrected_point` is local to QLMatching's reads and never touches the stored point cloud, so
+   the Bee output is unchanged by it; the display correction then remains the separate Bee-zip
+   shift documented in `sbnd_xin/docs/cathode-crossing-diagnostic.md`. If instead the transverse
+   offset is carried by the `switch_scope` transform (the scope-machinery section above), it
+   becomes the cluster's default scope (`clustering_switch_scope.cxx:77`) and the Bee dump reads
+   it — so the display would then reflect the transverse shift directly and the separate Bee-zip
+   step would be redundant. Choose one path for the display; don't apply both.
 
 ## Config shape (when implemented)
 
@@ -135,12 +226,26 @@ pos_offset_tpc1: [0, +0.11, -0.67],   // cm; West,  x >= 0
 
 ## Files that would change when this is implemented
 
+**Inline route (§1):**
+
 - `match/inc/WireCellMatch/QLMatching.h` — `ApaRun::dy/dz`, the `corrected_point` declaration,
   the new config members.
-- `match/src/QLMatching.cxx` — parse the per-TPC knob in `configure()`, set `run.dy/dz` and
-  shift the active-volume box in `compute_geometry`, route the ~4 corrected-position sites
-  through `corrected_point`.
+- `match/src/QLMatching.cxx` — parse the per-TPC knob in `configure()`, set `run.dy/dz` in
+  `compute_geometry`, route the corrected-position sites through `corrected_point` (cathode CPA +
+  photon model read `y+dy, z+dz`; the active-volume gate keeps reading raw `y,z`, per the FV
+  table above).
 - the SBND Q/L jsonnet (the standalone `sbnd_xin` config) — expose `pos_offset_tpc{0,1}`,
   default zero.
 
-No source files are changed by *this* document.
+**Scope/transform route (the "other way"), in addition or instead:**
+
+- `clus/src/PCTransforms.cxx` — a `(Δy,Δz)` `IPCTransform` sibling of `T0Correction` (or extend
+  `T0Correction` to also shift `y,z`), with matching `stored_array_names()` / `output_scope()`.
+- registration in `PCTransformSet::configure` and a `correction_name`/scope wired through
+  `cfg/.../clus.jsonnet` (pre-QLMatching for the matching side, and/or the existing
+  `switch_scope` for the display side).
+- QLMatching would read the corrected scope at `QLMatching.cxx:720` instead of raw `{x,y,z}` if
+  the matching side is fed by a pre-QLMatching transform.
+
+Both routes share one per-`(apa,face)` `(Δy,Δz)` config and default to zero ⇒ OFF ⇒ production
+bit-identical. No source files are changed by *this* document.
