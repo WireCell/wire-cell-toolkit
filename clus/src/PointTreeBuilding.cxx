@@ -95,6 +95,20 @@ void PointTreeBuilding::configure(const WireCell::Configuration& cfg)
         raise<ValueError>("m_samplers must have \"3d\" sampler");
     }
 
+    // Optional hand-declared dead winds (default empty -> production unchanged).
+    m_inject_dead_winds.clear();
+    if (cfg.isMember("inject_dead_winds")) {
+        for (auto jreg : cfg["inject_dead_winds"]) {
+            DeadWindInjection reg;
+            for (auto jch : jreg["channels"]) {
+                reg.channels.push_back(jch.asInt());
+            }
+            reg.xbeg = get<double>(jreg, "xbeg", 0.0);
+            reg.xend = get<double>(jreg, "xend", 0.0);
+            m_inject_dead_winds.push_back(reg);
+        }
+    }
+
 }
 
 double PointTreeBuilding::get_time_offset(const WirePlaneId& wpid) const{
@@ -402,6 +416,34 @@ void PointTreeBuilding::add_dead_winds(Points::node_ptr& root, const WireCell::I
     //         SPDLOG_LOGGER_TRACE(log, "dead wind {} xbeg {} xend {}", wind, xbeg_xend.first, xbeg_xend.second);
     //     }
     // }
+    // Hand-declared dead winds (config "inject_dead_winds"): register extra dead
+    // wires WITHOUT marking the channels dead in imaging.  Resolve channel ->
+    // (plane, wire index) exactly as the live-imaging loop above does, then add to
+    // the dead_winds map over the configured drift-x window.  faces/planes inserts
+    // are REQUIRED so the dead_winds_a* PC loop below serializes U/V (planes 0,1)
+    // even when the live imaging had no dead channel there.
+    for (const auto& reg : m_inject_dead_winds) {
+        for (const int chid : reg.channels) {
+            IChannel::pointer ich = m_anode->channel(chid);
+            if (!ich) continue;
+            for (const auto& wire : ich->wires()) {
+                const auto& wind = wire->index();
+                const auto& wpid_wire = wire->planeid();
+                const int plane = wpid_wire.index();
+                const int face = wpid_wire.face();
+                faces.insert(face);
+                planes.insert(plane);
+                auto& dead_winds = grouping->get_dead_winds(m_anode->ident(), face, plane);
+                if (dead_winds.find(wind) == dead_winds.end()) {
+                    dead_winds[wind] = {reg.xbeg, reg.xend};
+                } else {
+                    const auto& [xbeg_now, xend_now] = dead_winds[wind];
+                    dead_winds[wind] = {std::min(reg.xbeg, xbeg_now), std::max(reg.xend, xend_now)};
+                }
+            }
+        }
+    }
+
     SPDLOG_LOGGER_TRACE(log, "got dead winds {} {} {} ", grouping->get_dead_winds(m_anode->ident(), 0, 0).size(), grouping->get_dead_winds(m_anode->ident(), 0, 1).size(),
                grouping->get_dead_winds(m_anode->ident(), 0, 2).size());
 

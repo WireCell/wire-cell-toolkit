@@ -60,6 +60,18 @@ namespace WireCell::Clus {
         // double m_time_offset {-1600 * units::us};
         double m_dead_threshold {1e10};
 
+        // Config: "inject_dead_winds" (default empty) -- hand-declared dead winds
+        // added on top of those derived from the live imaging.  Each entry marks a
+        // set of channels' wires dead over a drift-x window, so is_good_point()/
+        // test_good_point() treat that region as crossable WITHOUT marking the
+        // channels dead in imaging.  See cfg/.../sbnd/dead_regions.jsonnet.
+        struct DeadWindInjection {
+            std::vector<int> channels;
+            double xbeg{0.0};
+            double xend{0.0};
+        };
+        std::vector<DeadWindInjection> m_inject_dead_winds;
+
         // the anode to be processed
         IAnodePlane::pointer m_anode;
 

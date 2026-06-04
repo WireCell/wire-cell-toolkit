@@ -16,6 +16,7 @@ local wc = import 'wirecell.jsonnet';
 local g = import 'pgraph.jsonnet';
 local f = import 'pgrapher/common/funcs.jsonnet';
 local clus = import 'pgrapher/common/clus.jsonnet';
+local dead_regions = import 'pgrapher/experiment/sbnd/dead_regions.jsonnet';
 
 local time_offset = -205 * wc.us;  // = -tick0_time (cfg/.../sbnd/params.jsonnet sim.tick0_time)
 local drift_speed = 1.563 * wc.mm / wc.us;
@@ -136,6 +137,10 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
             anode: wc.tn(anode),
             face: face,
             detector_volumes: wc.tn(dv),
+            // Hand-declared dead winds at the known-bad Y-Z region (W dead + U/V
+            // distorted) so examine_bundles' relaxed-graph bridge crosses it
+            // instead of fragmenting a single track.  Per-anode (TPC0/TPC1).
+            inject_dead_winds: [dead_regions.region(anode.data.ident)],
         },
     }, nin=2, nout=1, uses=[bsl, bsd, dv]),
     local cluster2pct = ptb,

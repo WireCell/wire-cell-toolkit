@@ -69,6 +69,11 @@ namespace WireCell::Img {
         std::vector<int> m_active_planes;
         std::vector<int> m_dummy_planes;
         std::vector<int> m_masked_planes;
+        // Config: "masked_channels" (default empty) -- hand-declared dead channels
+        // masked across all slices (like a per-channel dummy), so a dedicated
+        // branch tiles a dead blob at a specific U/V/W crossing without touching
+        // the "bad" mask.  See cfg/.../sbnd/dead_regions.jsonnet.
+        std::vector<int> m_masked_channels;
         double m_dummy_charge{0.0}; // 0.1 in previous version
         double m_dummy_error{1e12};
         double m_masked_charge{0.0}; // 0.2 in previous version
