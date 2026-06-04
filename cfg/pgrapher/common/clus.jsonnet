@@ -355,12 +355,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // length_cut / range_cut (default null): small/big classification
+        // thresholds. When null the key is omitted and ClusteringIsolated falls
+        // back to its built-in defaults (20 cm / 150), so existing configs stay
+        // byte-identical. Set to opt into a tighter/looser threshold.
+        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
             data: {
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
+                [if length_cut != null then 'length_cut']: length_cut,
+                [if range_cut != null then 'range_cut']: range_cut,
             } + dv_cfg + scope_cfg,
         },
 

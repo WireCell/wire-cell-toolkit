@@ -21,7 +21,9 @@ static void clustering_isolated(
     IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     bool use_flash_t0 = false,
-    double flash_t0_window = 80*units::ns
+    double flash_t0_window = 80*units::ns,
+    double length_cut = 20*units::cm,
+    int range_cut = 150
     );
 
 class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -35,16 +37,23 @@ public:
 
         use_flash_t0_ = get(config, "use_flash_t0", false);
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
+        // Small/big classification thresholds. Defaults reproduce the historical
+        // hardcoded values, so configs that omit these keys are unchanged.
+        length_cut_ = get(config, "length_cut", 20*units::cm);
+        range_cut_ = get(config, "range_cut", 150);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_);
+        return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_,
+                                   length_cut_, range_cut_);
     }
 
 private:
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
+    double length_cut_{20*units::cm};
+    int range_cut_{150};
 };
 
 
@@ -69,7 +78,9 @@ static void clustering_isolated(
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     bool use_flash_t0,
-    double flash_t0_window
+    double flash_t0_window,
+    double length_cut,
+    int range_cut
 )
 {
     // Get all the wire plane IDs from the grouping
@@ -138,8 +149,8 @@ static void clustering_isolated(
     geo_point_t drift_dir_abs(1,0,0);
 
 
-    int range_cut = 150;
-    int length_cut = 20 * units::cm;
+    // range_cut / length_cut are now configurable (see configure()); the
+    // function-argument defaults (150 / 20 cm) reproduce the historical values.
 
     std::vector<Cluster*> big_clusters;
     std::vector<Cluster*> small_clusters;

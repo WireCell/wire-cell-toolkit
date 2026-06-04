@@ -173,7 +173,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         cm.examine_x_boundary(),
         cm.protect_overclustering(),
         cm.neutrino(),
-        cm.isolated(),
+        // SBND: tighten the isolated small/big length_cut from the 20 cm default
+        // to 15 cm so a ~16 cm EM (gamma) blob is no longer auto-classified
+        // "small" and absorbed into a nearby long cosmic track by the
+        // angle-less 80 cm small->big merge.  See sbnd_xin/docs/
+        // overclustering-evt11-gamma.md.  range_cut left at its 150 default.
+        cm.isolated(length_cut=15 * wc.cm),
         cm.examine_bundles(),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
