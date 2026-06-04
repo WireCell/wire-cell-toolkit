@@ -48,6 +48,10 @@ function(params) {
         name: 'flash_attach_apa%d' % n,
         data: {
             nchan: nchan,
+            // Add the per-frame "frame_apply_at_caf" (ns) offset from the opflash
+            // tensorset metadata to every flash time (no-op if the key is absent).
+            // Set false to read the raw, uncorrected flash time.
+            correct_flash_time: true,
         },
     }, nin=2, nout=1),
 
