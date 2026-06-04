@@ -242,6 +242,18 @@ namespace WireCell::Match {
         // coincidence filter matches the Bee display. Calib-dump only.
         double m_flash_group_window{80 * units::ns};
 
+        // Cathode-crossing TPC0/TPC1 offset diagnostic (off unless cathode_diag is
+        // set). Pairs a TPC0 + TPC1 cluster sharing one T0 flash group, both reaching
+        // the cathode, finds their closest pair of points in the T0-corrected frame,
+        // and logs the two local Hough directions plus the connecting vector so the
+        // drift-x gap (t0/velocity, degenerate) can be separated from a transverse
+        // y-z position shift. Empty (default) => never invoked, production unchanged.
+        // Observation-only: reads finished runs, never touches the matching path.
+        std::string m_cathode_diag{""};
+        // Radius for the local Hough direction (vhough_transform) at each cathode-end
+        // point. Cathode-diag only.
+        double m_cathode_diag_radius{15 * units::cm};
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -374,6 +386,11 @@ namespace WireCell::Match {
         // both TPCs) and writes it via WireCell::Persist::dump. Never touches the
         // matching path.
         void dump_calib(const std::vector<ApaRun>& runs);
+
+        // Cathode-crossing offset diagnostic (m_cathode_diag only). Logs, per
+        // cross-TPC cathode-crossing pair, the two local directions and the
+        // connecting vector of the closest point pair. Never touches the matching.
+        void dump_cathode_diag(const std::vector<ApaRun>& runs);
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

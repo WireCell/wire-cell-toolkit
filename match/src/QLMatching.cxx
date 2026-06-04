@@ -124,6 +124,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
     m_calib_dump    = get(cfg, "calib_dump", m_calib_dump);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
+    m_cathode_diag  = get(cfg, "cathode_diag", m_cathode_diag);
+    m_cathode_diag_radius = get(cfg, "cathode_diag_radius", m_cathode_diag_radius);
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -274,6 +276,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["outpath"]         = m_outpath;
     cfg["calib_dump"]      = m_calib_dump;
     cfg["flash_group_window"] = m_flash_group_window;
+    cfg["cathode_diag"]    = m_cathode_diag;
+    cfg["cathode_diag_radius"] = m_cathode_diag_radius;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
@@ -445,6 +449,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     // Hand-scan calibration dump (off unless calib_dump is set). Reads the finished
     // per-APA runs only; never perturbs the matching above.
     if (!m_calib_dump.empty()) dump_calib(runs);
+    if (!m_cathode_diag.empty()) dump_cathode_diag(runs);
 
     ++m_count;
     return true;
@@ -1329,6 +1334,125 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     Persist::dump(fname, top, /*pretty=*/false);
     log->debug("calib dump: wrote {} ({} bundles, {} flashes, {} clusters across {} APAs)",
                fname, bundles.size(), flashes.size(), clusters.size(), runs.size());
+}
+
+// ---------------------------------------------------------------------------
+// Cathode-crossing TPC0/TPC1 offset diagnostic. For every TPC0 + TPC1 cluster
+// pair that shares one T0 flash group and whose closest T0-corrected points are
+// near the central cathode, log three vectors: the two local Hough track
+// directions (dir0, dir1, at the cathode-end points -- offset-invariant, so they
+// give the true track direction) and the connecting vector conn = p1 - p0 (the
+// quantity the miscalibration distorts). Decompose conn into along-track (a
+// benign sampling slide, since the two closest points need not share an
+// arc-length on an angled track) and perpendicular, and split the gap into the
+// drift x (t0/velocity, DEGENERATE) and transverse y-z (position shift / SCE).
+// Observation-only: runs after matching, off unless cathode_diag is set.
+void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
+{
+    const double cm = units::cm;
+    const double us = units::us;
+    const double v  = m_drift_speed;             // internal units (length/time)
+    const double R  = m_cathode_diag_radius;     // Hough radius, internal length
+    const double band = 15 * cm;                 // cathode region half-width (corrected x)
+    const double dmax = 10 * cm;                 // closest-pair distance cut
+    const double win_us = m_flash_group_window / us;
+
+    // Matched clusters from both APAs with their per-cluster T0 x-offset.
+    struct CC { Cluster* c; int apa; double off; double t_us; };
+    std::vector<CC> ccs;
+    for (const auto& run : runs) {
+        const int apa = (int)run.anode->ident();
+        for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+            const double ft  = flash->get_time();
+            const double off = run.sign_offset * ft * v;
+            for (const auto& bundle : run.flash_bundles_map.at(flash)) {
+                ccs.push_back({bundle->get_main_cluster(), apa, off, ft / us});
+                for (auto* oc : bundle->get_other_clusters())
+                    ccs.push_back({oc, apa, off, ft / us});
+            }
+        }
+    }
+
+    auto deg = [](const geo_vector_t& a, const geo_vector_t& b) {
+        const double m = a.magnitude() * b.magnitude();
+        if (m <= 0) return 0.0;
+        double c = a.dot(b) / m;
+        c = std::max(-1.0, std::min(1.0, c));
+        return std::acos(c) * 180.0 / M_PI;
+    };
+
+    log->info("QLCATHODE header: count apa0/id0 apa1/id1 t0_us t1_us d_cm "
+              "p0(x,y,z)_cm p1(x,y,z)_cm dir0 dir1 conn_cm "
+              "ang(d0,d1) ang(d0,conn) ang(d1,conn) ang(conn,dhat)_deg "
+              "along_cm perp_cm | dX_cm[DRIFT t0/v-DEGENERATE] dY_cm dZ_cm[transverse]");
+
+    std::set<std::pair<Cluster*, Cluster*>> seen;
+    for (size_t i = 0; i < ccs.size(); ++i) {
+        if (ccs[i].apa != 0) continue;
+        for (size_t j = 0; j < ccs.size(); ++j) {
+            if (ccs[j].apa != 1) continue;
+            if (std::abs(ccs[i].t_us - ccs[j].t_us) > win_us) continue;
+            Cluster* c0 = ccs[i].c;
+            Cluster* c1 = ccs[j].c;
+            if (!seen.insert({c0, c1}).second) continue;   // dedupe pairs
+            const double off0 = ccs[i].off, off1 = ccs[j].off;
+
+            // Cathode-band point subsets in the T0-corrected frame.
+            std::vector<int> s0, s1;
+            for (int k = 0; k < c0->npoints(); ++k)
+                if (std::abs(c0->point3d(k).x() + off0) < band) s0.push_back(k);
+            for (int k = 0; k < c1->npoints(); ++k)
+                if (std::abs(c1->point3d(k).x() + off1) < band) s1.push_back(k);
+            if (s0.empty() || s1.empty()) continue;
+
+            // Closest pair in corrected coords (brute force over the bands).
+            double best = 1e18; int bi = -1, bj = -1;
+            for (int a : s0) {
+                const geo_point_t ra = c0->point3d(a);
+                const double ax = ra.x() + off0;
+                for (int b : s1) {
+                    const geo_point_t rb = c1->point3d(b);
+                    const double dx = ax - (rb.x() + off1);
+                    const double dy = ra.y() - rb.y();
+                    const double dz = ra.z() - rb.z();
+                    const double d2 = dx * dx + dy * dy + dz * dz;
+                    if (d2 < best) { best = d2; bi = a; bj = b; }
+                }
+            }
+            const double d = std::sqrt(best);
+            if (d > dmax) continue;
+
+            const geo_point_t r0 = c0->point3d(bi), r1 = c1->point3d(bj);
+            const geo_point_t p0(r0.x() + off0, r0.y(), r0.z());
+            const geo_point_t p1(r1.x() + off1, r1.y(), r1.z());
+
+            geo_vector_t dir0 = c0->vhough_transform(r0, R);   // raw point: offset-invariant
+            geo_vector_t dir1 = c1->vhough_transform(r1, R);
+            geo_vector_t conn = p1 - p0;
+            if (dir0.dot(conn) < 0) dir0 = dir0 * -1.0;        // sign-fix the Hough axes
+            if (dir1.dot(conn) < 0) dir1 = dir1 * -1.0;
+            geo_vector_t dhat = dir0.norm() + dir1.norm();
+            if (dhat.magnitude() > 0) dhat = dhat.norm();
+            const double along = conn.dot(dhat);
+            const geo_vector_t perp = conn - dhat * along;
+
+            log->info("QLCATHODE {} 0/{} 1/{} {:.3f} {:.3f} d={:.3f} "
+                      "p0=({:.3f},{:.3f},{:.3f}) p1=({:.3f},{:.3f},{:.3f}) "
+                      "dir0=({:.4f},{:.4f},{:.4f}) dir1=({:.4f},{:.4f},{:.4f}) "
+                      "conn=({:.3f},{:.3f},{:.3f}) "
+                      "a_d0d1={:.2f} a_d0c={:.2f} a_d1c={:.2f} a_cdh={:.2f} "
+                      "along={:.3f} perp={:.3f} dX={:.3f} dY={:.3f} dZ={:.3f}",
+                      m_count, c0->ident(), c1->ident(),
+                      ccs[i].t_us, ccs[j].t_us, d / cm,
+                      p0.x() / cm, p0.y() / cm, p0.z() / cm,
+                      p1.x() / cm, p1.y() / cm, p1.z() / cm,
+                      dir0.x(), dir0.y(), dir0.z(), dir1.x(), dir1.y(), dir1.z(),
+                      conn.x() / cm, conn.y() / cm, conn.z() / cm,
+                      deg(dir0, dir1), deg(dir0, conn), deg(dir1, conn), deg(conn, dhat),
+                      along / cm, perp.magnitude() / cm,
+                      conn.x() / cm, conn.y() / cm, conn.z() / cm);
+        }
+    }
 }
 
 // Flashes ordered by get_flash_id() (the stable input tensor row index).
