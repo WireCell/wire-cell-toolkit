@@ -321,7 +321,7 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
     const int nplanes = 3;
     int matched_planes = 0;
     for (int pind = 0; pind < nplanes; ++pind) {
-        if (get_closest_points(point, radius, apa, face, pind).size() > 0) {
+        if (has_closest_point(point, radius, apa, face, pind)) {
             matched_planes++;
         } else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes++;
@@ -345,7 +345,7 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const i
     // Loop through U,V,W planes
     for (int pind = 0; pind < nplanes; pind++) {
         int weight = (pind == 2) ? 2 : 1; // W plane counts double
-        if (get_closest_points(point, radius, apa, face, pind).size() > 0) {
+        if (has_closest_point(point, radius, apa, face, pind)) {
             matched_planes += weight;
         }
         else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
@@ -369,10 +369,8 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int a
     // std::cout << "abc: " << point << " " << radius << " " << ch_range << std::endl;
     // Check each plane (0,1,2)
     for (int pind = 0; pind < 3; ++pind) {
-        // Get closest points for this plane
-        const auto closest_pts = get_closest_points(point, radius, apa, face, pind);
-        
-        if (closest_pts.size() > 0) {
+        // Only existence matters here (size() > 0), so use the cheaper nearest-1 query.
+        if (has_closest_point(point, radius, apa, face, pind)) {
             // Has hits in this plane
             num_planes[pind]++;
         }
@@ -449,6 +447,23 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     const auto& skd = kd2d(apa, face, pind);
     return skd.radius<std::vector<double>>(radius * radius, {x, y});
+}
+
+bool Grouping::has_closest_point(const geo_point_t& point, const double radius, const int apa, const int face,
+                                 int pind) const
+{
+    double x = point[0];
+    const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
+    std::vector<double> angles = {angle_u, angle_v, angle_w};
+    double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
+    const auto& skd = kd2d(apa, face, pind);
+    // Equivalent to get_closest_points(...).size() > 0 but cheaper: the radius query
+    // collects every in-radius point, while the good-point callers only need existence.
+    // knn(1) returns the single nearest point; nanoflann's RadiusResultSet keeps points
+    // with dist < radius^2 (strict <), so use the same strict comparison here.  Distances
+    // are squared (L2), matching the radius^2 argument get_closest_points passes.
+    const auto res = skd.knn(1, std::vector<double>{x, y});
+    return !res.empty() && res[0].second < radius * radius;
 }
 
 bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {

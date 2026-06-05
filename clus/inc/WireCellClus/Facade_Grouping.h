@@ -217,6 +217,14 @@ namespace WireCell::Clus::Facade {
         /// @return
         kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
 
+        /// @brief Existence-only form of get_closest_points: true iff at least one ctpc
+        /// point for this plane lies within `radius` of `point`.  Uses a single
+        /// nearest-neighbour (knn=1) query instead of collecting every in-radius point, for
+        /// the callers (good-point tests) that only need `size() > 0`.  Matches
+        /// get_closest_points(...).size() > 0 exactly (same projection; nanoflann's radius
+        /// search keeps points with dist < radius^2, so the same strict comparison is used).
+        bool has_closest_point(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
+
         /// @brief true if the point is within the dead region, [wind+ch_range, wind-ch_range] and [xmin, xmax]
         bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa , const int face, int pind) const;
 

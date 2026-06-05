@@ -1654,17 +1654,25 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     const double max2 = +pi;
     direction_parameter_function_f phi_param = phi_angle;
 
-    // Dense scalar storage instead of the default unlimited_storage (a type-erased
-    // variant per bin).  The peak search below is a std::max_element over all
-    // nbins1*nbins2 (= 64 800) bins; with the variant storage every comparison
-    // dispatches a std::variant visit, which was ~1/3 of this function's CPU and made
-    // vhough_transform the top clustering hotspot once the kd2d format cost was removed
-    // (see clustering-timing-profile.md §3).  Plain double bins make each comparison a
-    // scalar compare.  Bin values, fill order, iteration and tie-break are all unchanged,
-    // so the selected peak bin is bit-identical.
-    auto hist = bh::make_histogram_with(bh::dense_storage<double>(),
-                                        bh::axis::regular<>(nbins1, min1, max1),
-                                        bh::axis::regular<>(nbins2, min2, max2));
+    // The Hough histogram is nbins1*nbins2 (= 64 800) bins but SPARSE: only the few
+    // in-radius points are ever filled.  Building a dense grid cost a 64 800-double
+    // zero-fill on construction plus an O(64 800) std::max_element scan per call (the top
+    // clustering hotspot once the kd2d format cost was removed; see
+    // clustering-timing-profile.md §3).  Instead, accumulate the weights into a map keyed
+    // by the inner-bin linear index and take the peak over only the touched bins.
+    //
+    // Bit-identical to the previous `boost::histogram + bh::indexed + std::max_element`:
+    //  - bin assignment uses the same `axis::regular::index()` boost uses internally;
+    //  - points landing in under/overflow are skipped, matching bh::indexed's default
+    //    coverage::inner (which the old max_element scanned over);
+    //  - weights accumulate in the same fill order, so per-bin sums are identical;
+    //  - the peak tie-break (max value, then first in iteration order) is reproduced as
+    //    "smallest linear index" with lin = i + j*nbins1, because bh::indexed advances the
+    //    first axis fastest (axis-0 innermost);
+    //  - an empty/all-zero grid yields bin (0,0), as max_element over all-equal bins does.
+    const bh::axis::regular<> ax1(nbins1, min1, max1);
+    const bh::axis::regular<> ax2(nbins2, min2, max2);
+    std::unordered_map<long, double> bins;  // lin = i + (long)j * nbins1  (axis-0 fastest)
 
     for (size_t ind = 0; ind < blobs.size(); ++ind) {
         const auto* blob = blobs[ind];
@@ -1680,13 +1688,23 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
 
         const double p1 = theta_param(dir);
         const double p2 = phi_param(dir);
-        hist(p1, p2, bh::weight(charge / npoints));
+        const int i = ax1.index(p1);
+        const int j = ax2.index(p2);
+        if (i < 0 || i >= nbins1 || j < 0 || j >= nbins2) continue;  // inner bins only
+        bins[i + (long)j * nbins1] += charge / npoints;
     }
 
-    auto indexed = bh::indexed(hist);
-    auto it = std::max_element(indexed.begin(), indexed.end());
-    const auto& cell = *it;
-    return {cell.bin(0).center(), cell.bin(1).center()};
+    long best_lin = 0;       // default bin (0,0) for the empty/all-zero case
+    double best_val = 0.0;
+    for (const auto& [lin, val] : bins) {
+        if (val > best_val || (val == best_val && lin < best_lin)) {
+            best_val = val;
+            best_lin = lin;
+        }
+    }
+    const int best_i = (int)(best_lin % nbins1);
+    const int best_j = (int)(best_lin / nbins1);
+    return {ax1.bin(best_i).center(), ax2.bin(best_j).center()};
 }
 
 geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, HoughParamSpace param_space,

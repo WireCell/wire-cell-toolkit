@@ -280,47 +280,54 @@ So the histogram is **sparse to fill but the peak-scan is full-grid**, and every
 std::variant visit — 31% self time). `max_element` is **65% of `vhough_transform`**. This is
 called once per relaxed-bridging candidate inside `connect_graph_relaxed`.
 
-### Fix (IMPLEMENTED 2026-06-05) — dense scalar Hough-histogram storage
+### Fixes (IMPLEMENTED 2026-06-05) — four output-identical optimizations, cumulative ~3.2–3.5×
 
-`hough_transform` now builds the histogram with **`bh::dense_storage<double>`**
-(`bh::make_histogram_with(bh::dense_storage<double>(), …)`) instead of the default
-`unlimited_storage`.  Each bin is a plain `double`, so the `std::max_element` comparisons are
-scalar compares instead of `std::variant` visits.  The axes, fill order, `bh::indexed` +
-`std::max_element` peak search and its tie-break are **unchanged**, so the selected peak bin is
-bit-identical.  Changed: `clus/src/Facade_Cluster.cxx` (`hough_transform`).
+All four target pure overhead in `connect_graph_relaxed`'s inner work and are verified
+**byte-identical (CRC-32 `mabc.zip`) against the original pre-any-fix baseline** on 59789 /
+61637 / 187650:
 
-**Measured result** (single-event, on top of the kd2d fix; total = sum over 3 MABC nodes):
+1. **kd2d scope-key memo** (§2) — `boost::format` → cached `Tree::Scope`.
+2. **Hough dense storage** — `bh::make_histogram_with(bh::dense_storage<double>(), …)` so the
+   `max_element` comparisons are scalar, not `std::variant` visits.
+3. **Hough sparse peak** — replace the dense `boost::histogram` entirely: accumulate weights
+   into an `unordered_map` keyed by inner-bin linear index and take the peak over only the
+   touched bins (O(#points) not O(64 800)), killing both the per-call 64 800-double zero-fill
+   and the full-grid scan. Binning uses `axis::regular::index()`; the tie-break is reproduced
+   as smallest `lin = i + j*nbins1` (boost `indexed` advances axis-0 fastest) → bit-identical.
+   (`clus/src/Facade_Cluster.cxx`, `hough_transform`.)
+4. **Good-point existence query** — the good-point tests
+   (`is_good_point`/`is_good_point_wc`/`test_good_point`) only use
+   `get_closest_points(...).size() > 0`, so they now call a new `Grouping::has_closest_point`
+   that does a single `knn(1)` nearest-neighbour query and checks `dist < radius²` (strict, to
+   match nanoflann's `RadiusResultSet`) instead of collecting every in-radius point.
+   (`clus/src/Facade_Grouping.cxx` + header.)
 
-| event | original | after kd2d fix | **after vhough fix** | total vs original |
-|--:|--:|--:|--:|--:|
-| 187650 | 56.7 s | 26.5 s | **22.1 s** | **2.57×** |
-| 59789  | 55.2 s | 27.6 s | **23.2 s** | **2.38×** |
-| 138824 | 47.5 s | 25.1 s | **20.1 s** | **2.36×** |
-| 61637  | 4.0 s  | 2.9 s  | **2.7 s**  | 1.48× |
-| 141530 | 6.1 s  | 5.3 s  | **4.9 s**  | 1.24× |
+**Measured progression** (single-event, local imaging; total = sum over 3 MABC nodes):
 
-**Output-identical: verified** — post-fix `mabc.zip` is **byte-identical (CRC-32) to the
-original pre-any-fix baseline** on 59789, 61637 and 187650 (so the *combined* kd2d + vhough
-chain preserves clustering output exactly).
+| event | original | +kd2d | +Hough dense | +Hough sparse | **+knn good-point** | total vs original |
+|--:|--:|--:|--:|--:|--:|--:|
+| 187650 | 56.7 s | 26.5 s | 22.1 s | 19.2 s | **16.9 s** | **3.35×** |
+| 59789  | 55.2 s | 27.6 s | 23.2 s | 20.1 s | **15.9 s** | **3.47×** |
+| 138824 | 47.5 s | 25.1 s | 20.1 s | 17.1 s | **14.7 s** | **3.23×** |
+| 61637  | 4.0 s  | 2.9 s  | 2.7 s  | 2.6 s  | **2.4 s**  | 1.67× |
+| 141530 | 6.1 s  | 5.3 s  | 4.9 s  | 4.9 s  | **4.9 s**  | 1.24× |
 
-**Post-fix profile** (187650, `cpu_vhough.prof`, 6904 samples): `buffer_type::visit` (the
-variant dispatch) is gone (612 → 7 samples); `vhough_transform` dropped 30.9% → 20.9%.
+**Post-all-four profile** (187650, `cpu_v4.prof`): total CPU samples **17 434 → 5 463** (3.2×
+fewer). `vhough_transform` is down to ~10% (from 31%); the variant-visit and the 64 800-bin
+zero-fill/scan are gone.
 
 ### Remaining hotspots / next targets
 
-1. **(Now #1, ~18%) `nanoflann` kd-tree radius searches** in the good-point tests
-   (`get_closest_points`/`test_good_point`/`is_good_point` under `connect_graph_relaxed`) —
-   genuine geometry. Algorithmic only (fewer/cheaper queries); no pure-overhead win left here.
-2. **(~17% combined) deeper `vhough` rewrite** — two residual costs remain because the grid is
-   still dense-but-sparsely-filled: a **64 800-double zero-fill on every call**
-   (`std::__fill_a1`, ~8.5%) and the **full-grid `max_element` scan** (~8%). Both vanish if we
-   **track the touched bins during fill and take the max over only those** (O(#points) instead
-   of O(64 800)) — but this must reproduce `std::max_element`'s tie-break (smallest grid index
-   among equal maxima) to stay byte-identical, so it is a more careful change than the storage
-   swap. Largest remaining vhough lever.
-3. **(Optional ~5–10%) Cache the `kd2d_t&` reference** by `(apa,face,pind)` to also skip the
-   residual `scoped_view` hash-lookup — only if verified the scoped view is not invalidated
-   between calls within a pass (otherwise keep the current safe Scope-only memo).
+1. **(~12–14%) `kd2d` → `scoped_view` lookup.** With the format gone, the residual `kd2d` cost
+   is the `scoped_view(scope)` hash-lookup. **Cache the `kd2d_t&` reference** by
+   `(apa,face,pind)` to skip it — *only* if verified the scoped view is not invalidated between
+   calls within a clustering pass (else keep the current safe Scope-only memo). Now the single
+   biggest remaining lever.
+2. **(~13%) `nanoflann` kd-tree traversal** (`searchLevel`) under the `knn`/`radius` queries —
+   genuine geometry; algorithmic only.
+3. **(~15% spread) small-vector allocations** in `NFKDVec::Tree::knn`/`radius` (per-call
+   `indices`/`distances`/result vectors). A `k=1` fast path with stack buffers would cut the
+   `malloc`/`free` churn the existence query now shows.
 
 > Validate any of these the same way: **byte-identical `mabc.zip`** (CRC-32) on
 > 59789 / 61637 / 187650 vs the original baseline, then re-pull per-event timing.
