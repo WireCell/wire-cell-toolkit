@@ -961,7 +961,7 @@ void Clus::Facade::fill_wrap_points(const Cluster *cluster, const geo_point_t &p
         if (wind < 0) wind = 0;
         auto plane_ptr =iface->plane(pind);
         const auto& wires_all = plane_ptr->wires();
-        size_t max_wind = wires_all.size();
+        size_t max_wind = wires_all.size() - 1;
         // size_t max_wind = grouping->get_plane_channels(apa, face, iplane2layer[pind]).size() - 1;
         if ((size_t)wind > max_wind) wind = max_wind;
         // get channel ...
