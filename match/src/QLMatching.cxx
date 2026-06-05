@@ -15,6 +15,7 @@
 #include "WireCellUtil/Units.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <set>
 
@@ -33,6 +34,19 @@ using namespace WireCell::Clus::Facade;
 // all-APA pctree merge and stays unambiguous across APAs. Far larger than any
 // realistic per-APA flash count.
 namespace { constexpr int kFlashGidStride = 1000000; }
+
+// ---- Per-phase profiling helpers (logging only; outputs bit-identical) ----
+// Lightweight wall-clock split of operator() so we can attribute the per-event
+// `QLMatching timing: took ...` total to its phases (prefit sub-steps, the two
+// LASSO rounds, etc.). All emitted at debug level under the "QLtiming" tag, so a
+// non-debug run pays only a few steady_clock reads and computes the same result.
+namespace {
+    using wallclock = std::chrono::steady_clock;
+    inline double ms_since(const wallclock::time_point& t0)
+    {
+        return std::chrono::duration<double, std::milli>(wallclock::now() - t0).count();
+    }
+}
 
 // ---- Per-APA tree merge (multi-APA path) ----
 // Verbatim port of clus/src/PointTreeMerging.cxx so the joint (fanin) path
@@ -444,6 +458,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     // unchanged, and the isolation keeps the pointer-keyed map iteration
     // deterministic across APAs. With multiplicity 1 this is exactly the
     // historical single-input matcher.
+    const auto t_prefit0 = wallclock::now();
     std::vector<ApaRun> runs(invec.size());
     for (std::size_t k = 0; k < invec.size(); ++k) {
         ApaRun& run = runs[k];
@@ -484,11 +499,17 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     // geometrically cross-TPC-consistent candidate pairs and drops each marked cluster's
     // non-consistent rivals. Off by default => not called, and the prefit/fit split is
     // exactly the historical run_one_apa order => bit-identical.
+    const double t_prefit = ms_since(t_prefit0);
+    const auto t_cull0 = wallclock::now();
     if (m_xtpc_flag && runs.size() > 1) cull_cross_tpc(runs);
+    const double t_cull = ms_since(t_cull0);
 
+    const auto t_fit0 = wallclock::now();
     for (std::size_t k = 0; k < invec.size(); ++k) run_one_apa_fit(runs[k]);
+    const double t_fit = ms_since(t_fit0);
 
     // ---- Build / merge outputs ----
+    const auto t_out0 = wallclock::now();
     const int out_ident = runs.front().charge_ident;
     ITensor::vector outtens;
     if (runs.size() == 1) {
@@ -541,6 +562,12 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     log->debug("QLMatching timing: ident {} took {} ms, proc RSS {:.1f} MB (delta {:.1f} MB)",
                out_ident, em.tk.since().total_milliseconds(),
                mu1.second / 1024.0, (mu1.second - mu0.second) / 1024.0);
+    // Top-level phase split (sum ≈ `took` above). prefit = all-APA run_one_apa_prefit
+    // (see `QLtiming prefit` lines), fit = all-APA run_one_apa_fit (`QLtiming fit`),
+    // xtpc_cull only fires multi-APA, output = tensor/merge assembly tail.
+    const double t_out = ms_since(t_out0);
+    log->debug("QLtiming operator: ident {} prefit {:.1f} xtpc_cull {:.1f} fit {:.1f} output {:.1f} ms",
+               out_ident, t_prefit, t_cull, t_fit, t_out);
 
     ++m_count;
     return true;
@@ -564,22 +591,29 @@ void QLMatching::run_one_apa(ApaRun& run)
 // prefit and all APAs' fit.
 void QLMatching::run_one_apa_prefit(ApaRun& run)
 {
-    build_opdet_mask(run);
-    read_flashes(run);
-    decompose_cluster_groups(run);
-    compute_geometry(run);
-    build_bundles(run);
-    build_bundle_maps(run);
-    cull_inconsistent(run);
+    auto t = wallclock::now();
+    build_opdet_mask(run);          const double t_mask   = ms_since(t); t = wallclock::now();
+    read_flashes(run);              const double t_flash  = ms_since(t); t = wallclock::now();
+    decompose_cluster_groups(run);  const double t_decomp = ms_since(t); t = wallclock::now();
+    compute_geometry(run);          const double t_geom   = ms_since(t); t = wallclock::now();
+    build_bundles(run);             const double t_bundle = ms_since(t); t = wallclock::now();
+    build_bundle_maps(run);         const double t_maps   = ms_since(t); t = wallclock::now();
+    cull_inconsistent(run);         const double t_cull   = ms_since(t);
+    log->debug("QLtiming prefit: ident {} mask {:.1f} read_flashes {:.1f} decompose {:.1f} "
+               "geometry {:.1f} build_bundles {:.1f} build_maps {:.1f} cull_inconsistent {:.1f} ms",
+               run.charge_ident, t_mask, t_flash, t_decomp, t_geom, t_bundle, t_maps, t_cull);
 }
 
 // Fit half: the two LASSO rounds + output assembly.
 void QLMatching::run_one_apa_fit(ApaRun& run)
 {
-    fit_round1(run);
-    fit_round2(run);
-    apply_matched_t0s(run);
-    write_opflash_pc(run);
+    auto t = wallclock::now();
+    fit_round1(run);         const double t_r1   = ms_since(t); t = wallclock::now();
+    fit_round2(run);         const double t_r2   = ms_since(t); t = wallclock::now();
+    apply_matched_t0s(run);  const double t_t0   = ms_since(t); t = wallclock::now();
+    write_opflash_pc(run);   const double t_pc   = ms_since(t);
+    log->debug("QLtiming fit: ident {} fit_round1 {:.1f} fit_round2 {:.1f} apply_t0 {:.1f} write_pc {:.1f} ms",
+               run.charge_ident, t_r1, t_r2, t_t0, t_pc);
 }
 
 // Per-channel OpDet on/off mask, derived from the injected OpDet table
@@ -868,6 +902,12 @@ void QLMatching::compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc)
 // land in run.pre_bundles.
 void QLMatching::build_bundles(ApaRun& run)
 {
+    // Profiling: accumulate time spent in the per-point visibility/PE loop (the
+    // SemiAnalyticalModel inner kernel, the prime suspect) vs the rest of the
+    // bundle assembly. Timed at per-bundle granularity to avoid perturbing the
+    // millions of per-opdet calls. Logging only; no effect on results.
+    double vis_ms = 0.0;
+    std::size_t total_pts = 0;
     for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
         const double flash_x_offset = run.sign_offset * flash_time * m_drift_speed;
@@ -924,6 +964,8 @@ void QLMatching::build_bundles(ApaRun& run)
             group_clusters.insert(group_clusters.end(), others.begin(), others.end());
             std::size_t npt = 0;
             for (auto* gc : group_clusters) npt += gc->npoints();
+            total_pts += npt;
+            const auto t_vis0 = wallclock::now();
             for (auto* gc : group_clusters) {
               for (auto blob : gc->children()) {
                 run.total_charge_blob += blob->charge();
@@ -964,6 +1006,7 @@ void QLMatching::build_bundles(ApaRun& run)
                 }
               }
             }
+            vis_ms += ms_since(t_vis0);
 
             // Per-PMT non-linearity: map the predicted PE total into the saturated
             // (observed) space so it matches the post-saturation measured PE. Acts only
@@ -1036,6 +1079,10 @@ void QLMatching::build_bundles(ApaRun& run)
         } // cluster loop
     }     // flash loop
     log->debug("n preselected bundles: {}", run.pre_bundles.size());
+    log->debug("QLtiming build_bundles: ident {} nflash {} ngroups {} nbundles {} "
+               "vis_loop {:.1f} ms over {} candidate-points",
+               run.charge_ident, run.flashes.size(), run.match_groups.size(),
+               run.all_bundles.size(), vis_ms, total_pts);
 }
 
 // Build the flash-keyed / cluster-keyed / (flash,cluster)-keyed bundle maps and
@@ -1110,6 +1157,7 @@ double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) con
 // post-fit prune bundles whose strength <= m_strength_cutoff.
 void QLMatching::fit_round1(ApaRun& run)
 {
+    const auto t_build0 = wallclock::now();
     // Snapshot the full pre-LASSO candidate universe for the empty-flash rescue,
     // before either round prunes by strength (§I; only when enabled).
     if (m_empty_rescue) run.prefit_snapshot = run.flash_bundles_map;
@@ -1185,7 +1233,13 @@ void QLMatching::fit_round1(ApaRun& run)
     params.model = Ress::lasso;
     params.lambda = lambda;
     log->debug("solving (round 1)");
+    const double t_build = ms_since(t_build0);
+    const auto t_solve0 = wallclock::now();
     Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
+    log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+               "lasso_solve {:.1f} ms (X {}x{})",
+               run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+               (int)X.rows(), (int)X.cols());
 
     TimingTPCBundleSelection to_be_removed;
     int n = 0;
@@ -1205,6 +1259,7 @@ void QLMatching::fit_round1(ApaRun& run)
 // and apply out-of-beam QA via organize_bundles().
 void QLMatching::fit_round2(ApaRun& run)
 {
+    const auto t_build0 = wallclock::now();
     const double lambda       = m_lasso_lambda;
     const double delta_charge = m_delta_charge;
     const double delta_shape  = m_delta_shape;
@@ -1275,7 +1330,13 @@ void QLMatching::fit_round2(ApaRun& run)
     params.model = Ress::lasso;
     params.lambda = lambda;
     log->debug("solving (round 2)");
+    const double t_build = ms_since(t_build0);
+    const auto t_solve0 = wallclock::now();
     Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
+    log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+               "lasso_solve {:.1f} ms (X {}x{})",
+               run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+               (int)X.rows(), (int)X.cols());
 
     TimingTPCBundleSelection to_be_removed;
     int n = 0;
@@ -1860,15 +1921,24 @@ bool QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
 
     // Closest approach over the full clusters in the T0-corrected frame, with the
     // per-TPC transverse (y,z) pos_offset applied (mostly shifts this vector).
+    // Hoist the scoped-view resolution out of this O(n0*n1) loop: point3d() (and the
+    // npoints() loop bound) each re-resolve the 3D scope (Scope hash + hashtable lookup)
+    // per call, which is ~all of the cross-TPC cull cost (the inner point3d(b) is
+    // re-resolved n0*n1 times; see match/docs/qlmatching-perf-event60933.md). The raw
+    // coordinate arrays are T0-independent, so bind them once; the per-point T0 +
+    // pos_offset shift stays a scalar add, so the result (closest indices, iteration
+    // order, first-min tie-break) is bit-identical.
+    const auto& P0 = m0.c->points();   // {xs,ys,zs}, resolves the 3D scope once
+    const auto& P1 = m1.c->points();
+    const int n0 = (int)P0[0].size();
+    const int n1 = (int)P1[0].size();
     double best = 1e30; int bi = -1, bj = -1;
-    for (int a = 0; a < m0.c->npoints(); ++a) {
-        const geo_point_t ra = m0.c->point3d(a);
-        const double ax = ra.x() + m0.off, ay = ra.y() + m0.dy, az = ra.z() + m0.dz;
-        for (int b = 0; b < m1.c->npoints(); ++b) {
-            const geo_point_t rb = m1.c->point3d(b);
-            const double dx = ax - (rb.x() + m1.off);
-            const double dy = ay - (rb.y() + m1.dy);
-            const double dz = az - (rb.z() + m1.dz);
+    for (int a = 0; a < n0; ++a) {
+        const double ax = P0[0][a] + m0.off, ay = P0[1][a] + m0.dy, az = P0[2][a] + m0.dz;
+        for (int b = 0; b < n1; ++b) {
+            const double dx = ax - (P1[0][b] + m1.off);
+            const double dy = ay - (P1[1][b] + m1.dy);
+            const double dz = az - (P1[2][b] + m1.dz);
             const double d2 = dx * dx + dy * dy + dz * dz;
             if (d2 < best) { best = d2; bi = a; bj = b; }
         }
@@ -1931,16 +2001,29 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
         }
     }
 
+    // Profiling: the pairing loop calls xtpc_pair_consistent, whose closest-approach
+    // step is a brute-force O(npts0 x npts1) double loop over both clusters' 3D points.
+    // Count coincident pairs actually evaluated and the total point-pair distance ops
+    // they incur, so the wall (operator's `xtpc_cull`) can be read as cost/point-pair.
+    const auto t_pair0 = wallclock::now();
+    long long n_pairs_eval = 0, n_pairs_coincident = 0;
+    double point_pairs = 0;  // double: can exceed 2^31
     for (size_t i = 0; i < cands.size(); ++i) {
         if (cands[i].apa != 0) continue;
         for (size_t j = 0; j < cands.size(); ++j) {
             if (cands[j].apa != 1) continue;
+            ++n_pairs_eval;
             if (std::abs(cands[i].t_us - cands[j].t_us) > win_us) continue;  // coincident
+            ++n_pairs_coincident;
+            point_pairs += (double)cands[i].mc.c->npoints() * cands[j].mc.c->npoints();
             if (!xtpc_pair_consistent(cands[i].mc, cands[j].mc)) continue;
             cands[i].mc.b->set_flag_xtpc_consistent(true);
             cands[j].mc.b->set_flag_xtpc_consistent(true);
         }
     }
+    log->debug("QLtiming cull_cross_tpc: ncands {} pairs_eval {} pairs_coincident {} "
+               "point_pairs {:.3g} pairing_loop {:.1f} ms",
+               cands.size(), n_pairs_eval, n_pairs_coincident, point_pairs, ms_since(t_pair0));
 
     // Cull, per run: a cluster with an xtpc-consistent bundle drops its other bundles
     // that are neither high- nor xtpc-consistent (they cannot win against the

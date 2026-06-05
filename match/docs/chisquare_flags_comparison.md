@@ -1215,9 +1215,24 @@ clustering + QLMatching) ran ~658 s wall over this file, so **QLMatching alone i
 the matching-process wall**. This corrects the earlier "QLMatching is sub-second" note
 (which was measured against yuhw's sparser larsoft active.npz; see
 [[project_clustering_examinebundles_hotspot]]): on our richer multi-3view active clusters
-the matcher's per-cluster geometry (PCA, `vhough`, cached `get_extreme_wcps`) and the
-two-round LASSO dominate, and the cost scales with cluster/point count — hence the long
-tail (median 5 s, max 31 s).
+the cost scales with cluster/point count — hence the long tail (median 5 s, max 31 s).
+
+> **Per-phase drill-down (2026-06-05, supersedes the cause speculated here).** A later
+> per-phase profile of event 60933 (`qlmatching-perf-event60933.md`) found the dominant
+> cost is **not** PCA/`vhough`/`get_extreme_wcps` or the two-round LASSO (the LASSO solve
+> is ~1.4 ms). **91 % of the wall is `cull_cross_tpc`** — its `xtpc_pair_consistent`
+> closest-approach step is a brute-force O(npts0·npts1) double loop whose per-point
+> `point3d()` re-resolves a scoped k-d view (Scope hash + hashtable lookup), ~100 ns/pair
+> over 2.7×10⁸ pairs. It scales linearly with that point-pair count (84–91 % at both
+> median and tail).
+>
+> **Fixed** by hoisting the scope resolution out of the loop (bind the raw coordinate
+> arrays once; the T0 shift stays a scalar add — bit-identical). Re-running **all 150
+> lan-reco2 events** post-fix: `xtpc_cull` max **27 s → 0.4 s**, and QLMatching `took`
+> drops from median 5.2 s / max 31 s to **median 1.1 s / max 5.6 s**. The numbers above are
+> the pre-fix baseline. Post-fix, `build_bundles`/`SemiAnalyticalModel` (median 0.9 s) is
+> the dominant QLMatching phase, and the per-event reco wall is dominated by imaging and
+> `ClusteringExamineBundles`, not QLMatching. See `qlmatching-perf-event60933.md`.
 
 ### 17.2 Memory — QLMatching's own footprint is negligible
 
