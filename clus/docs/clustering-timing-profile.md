@@ -41,9 +41,36 @@ per-stage imaging breakdown.
 > an **intermittent clustering heap-corruption** in `clus_all_apa`, newly exposed by the
 > richer local active imaging (segfaults on a layout-dependent ~50–70 % of runs; clean under
 > gdb and in single-event isolation → a memory-corruption heisenbug, distinct from the
-> already-fixed `fill_wrap_points` off-by-one). Root-causing via valgrind memcheck (Go/
-> gojsonnet startup noise suppressed). Until fixed, the §0 wall/RSS come from runs that
-> happened to complete all 50 events.
+> already-fixed `fill_wrap_points` off-by-one). Until fixed, the §0 wall/RSS come from runs
+> that happened to complete all 50 events. See the debugging trail below.
+>
+> **Debugging trail (what has and hasn't reproduced it) — for future work:**
+> The bug is rare and layout-sensitive; every "definitive" tool so far has come up empty,
+> so do **not** read these clean results as "no bug" — read them as "this probe didn't
+> trip it." Catalogue of attempts on file 1 (the only file that has ever crashed; files 2–3
+> = 50 events each, always clean):
+> - **Native, single event 60119 in isolation:** 25/25 clean → the crash is cross-event /
+>   state-dependent, not a property of one event's data.
+> - **gdb:** never reproduces (layout shift hides it) — classic heisenbug signature.
+> - **valgrind memcheck** (Go/gojsonnet startup noise suppressed via `go.supp`, JSON config
+>   to skip the Go eval path): ~35 min run, **0 errors**. Consistent with a *within-capacity*
+>   overrun (write stays inside an allocation's real heap block → invisible to memcheck).
+> - **`-D_GLIBCXX_ASSERTIONS`** (libstdc++ bounds-checked `vector::operator[]` etc.): 4/4
+>   file-1-alone passes **silent** → not a checked-container overrun; rules out the obvious
+>   `std::vector[]` OOB family.
+> - **AddressSanitizer** (`-fsanitize=address` on `WireCellClus` only; red zones catch
+>   heap-buffer-overflow + use-after-free even within-capacity-tolerant native): **12 parallel
+>   workers × 12 independent ASLR layouts, each ~43+ of file 1's 50 events, 0 catches.** No
+>   red-zone hit, no captured SEGV. (~2.2 min/event under ASan, ~7.5 GB RSS/worker.)
+> - **Net:** not reproduced under any instrumented build this session. The crash is rarer
+>   than ~1-in-12-layouts-per-pass under ASan, or its bad access lands inside a live
+>   allocation on the layouts probed. Next angles untried: longer ASan soak (many passes,
+>   not one wave), `MALLOC_PERTURB_`/`MALLOC_CHECK_` on the native build, the busy-data
+>   correlation from the [[fill_wrap_points OOB]] memory (crash favors busy events →
+>   instrument the wire/channel-projection writes on W-dead-recovery blobs specifically),
+>   or a TSan pass if any clustering state is touched off-thread. All temporary diagnostic
+>   build flags were reverted after the session (`waft/smplpkgs.py` back to HEAD; clus
+>   rebuilt with 0 `__asan` symbols).
 
 ## How it was measured
 
