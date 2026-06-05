@@ -280,30 +280,50 @@ So the histogram is **sparse to fill but the peak-scan is full-grid**, and every
 std::variant visit — 31% self time). `max_element` is **65% of `vhough_transform`**. This is
 called once per relaxed-bridging candidate inside `connect_graph_relaxed`.
 
-### Proposed improvements (next, not yet implemented)
+### Fix (IMPLEMENTED 2026-06-05) — dense scalar Hough-histogram storage
 
-1. **(Headline, output-identical) Kill the variant-visit + full-grid scan in the Hough peak.**
-   Two independent levers, both keeping identical bin values → identical peak (the weights
-   `charge/npoints` are strictly > 0, so the max is always a filled bin; tie-break = first in
-   grid order):
-   - Use **dense scalar storage** — `bh::make_histogram_with(bh::dense_storage<double>(), …)`
-     — so each bin is a plain `double` and the `max_element` comparison is a scalar compare,
-     removing the `buffer_type::visit` (~31% self). Lowest-risk, bit-identical.
-   - Better, **scan only the filled bins**: record the touched `(p1,p2)` bins during fill and
-     take the max over those (O(#points) instead of O(64 800)). Must reproduce
-     `std::max_element`'s tie-break (smallest grid index among equal maxima) to stay
-     bit-identical. Combine with dense storage for the largest win.
-   Expected to remove most of the ~31% `vhough` share, i.e. another large clustering speedup,
-   and it also helps every other `vhough_transform` caller (ExtendLoop, Connect1, …).
-2. **(#2, ~14%) nanoflann radius queries** in the good-point tests
-   (`get_closest_points`/`test_good_point`/`is_good_point`) — genuine kd-tree geometry, now the
-   second cost. Algorithmic (fewer/cheaper queries) rather than pure overhead; revisit after #1.
+`hough_transform` now builds the histogram with **`bh::dense_storage<double>`**
+(`bh::make_histogram_with(bh::dense_storage<double>(), …)`) instead of the default
+`unlimited_storage`.  Each bin is a plain `double`, so the `std::max_element` comparisons are
+scalar compares instead of `std::variant` visits.  The axes, fill order, `bh::indexed` +
+`std::max_element` peak search and its tie-break are **unchanged**, so the selected peak bin is
+bit-identical.  Changed: `clus/src/Facade_Cluster.cxx` (`hough_transform`).
+
+**Measured result** (single-event, on top of the kd2d fix; total = sum over 3 MABC nodes):
+
+| event | original | after kd2d fix | **after vhough fix** | total vs original |
+|--:|--:|--:|--:|--:|
+| 187650 | 56.7 s | 26.5 s | **22.1 s** | **2.57×** |
+| 59789  | 55.2 s | 27.6 s | **23.2 s** | **2.38×** |
+| 138824 | 47.5 s | 25.1 s | **20.1 s** | **2.36×** |
+| 61637  | 4.0 s  | 2.9 s  | **2.7 s**  | 1.48× |
+| 141530 | 6.1 s  | 5.3 s  | **4.9 s**  | 1.24× |
+
+**Output-identical: verified** — post-fix `mabc.zip` is **byte-identical (CRC-32) to the
+original pre-any-fix baseline** on 59789, 61637 and 187650 (so the *combined* kd2d + vhough
+chain preserves clustering output exactly).
+
+**Post-fix profile** (187650, `cpu_vhough.prof`, 6904 samples): `buffer_type::visit` (the
+variant dispatch) is gone (612 → 7 samples); `vhough_transform` dropped 30.9% → 20.9%.
+
+### Remaining hotspots / next targets
+
+1. **(Now #1, ~18%) `nanoflann` kd-tree radius searches** in the good-point tests
+   (`get_closest_points`/`test_good_point`/`is_good_point` under `connect_graph_relaxed`) —
+   genuine geometry. Algorithmic only (fewer/cheaper queries); no pure-overhead win left here.
+2. **(~17% combined) deeper `vhough` rewrite** — two residual costs remain because the grid is
+   still dense-but-sparsely-filled: a **64 800-double zero-fill on every call**
+   (`std::__fill_a1`, ~8.5%) and the **full-grid `max_element` scan** (~8%). Both vanish if we
+   **track the touched bins during fill and take the max over only those** (O(#points) instead
+   of O(64 800)) — but this must reproduce `std::max_element`'s tie-break (smallest grid index
+   among equal maxima) to stay byte-identical, so it is a more careful change than the storage
+   swap. Largest remaining vhough lever.
 3. **(Optional ~5–10%) Cache the `kd2d_t&` reference** by `(apa,face,pind)` to also skip the
    residual `scoped_view` hash-lookup — only if verified the scoped view is not invalidated
    between calls within a pass (otherwise keep the current safe Scope-only memo).
 
-> Validate any of these the same way the kd2d fix was: **byte-identical `mabc.zip`** on
-> 59789 / 61637 / 187650 before trusting, then re-pull per-event timing.
+> Validate any of these the same way: **byte-identical `mabc.zip`** (CRC-32) on
+> 59789 / 61637 / 187650 vs the original baseline, then re-pull per-event timing.
 
 ## How it was measured
 

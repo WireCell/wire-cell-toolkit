@@ -1654,7 +1654,17 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     const double max2 = +pi;
     direction_parameter_function_f phi_param = phi_angle;
 
-    auto hist = bh::make_histogram(bh::axis::regular<>(nbins1, min1, max1), bh::axis::regular<>(nbins2, min2, max2));
+    // Dense scalar storage instead of the default unlimited_storage (a type-erased
+    // variant per bin).  The peak search below is a std::max_element over all
+    // nbins1*nbins2 (= 64 800) bins; with the variant storage every comparison
+    // dispatches a std::variant visit, which was ~1/3 of this function's CPU and made
+    // vhough_transform the top clustering hotspot once the kd2d format cost was removed
+    // (see clustering-timing-profile.md §3).  Plain double bins make each comparison a
+    // scalar compare.  Bin values, fill order, iteration and tie-break are all unchanged,
+    // so the selected peak bin is bit-identical.
+    auto hist = bh::make_histogram_with(bh::dense_storage<double>(),
+                                        bh::axis::regular<>(nbins1, min1, max1),
+                                        bh::axis::regular<>(nbins2, min2, max2));
 
     for (size_t ind = 0; ind < blobs.size(); ++ind) {
         const auto* blob = blobs[ind];
