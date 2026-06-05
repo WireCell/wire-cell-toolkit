@@ -178,16 +178,17 @@ MultiAlgBlobClustering              85.7%   (clustering dominates; imaging/IO ar
             kd2d                     47.3%   <-- 2D kd-tree accessor by (apa,face,plane)
               String::format        40.8%   <-- !!! boost::format rebuilding a scope key
             test_good_point         43.4% / is_good_point 19.3%
+          vhough_transform          14%     <-- ALSO under connect_graph_relaxed (Hough direction)
   ProtectOverclustering             14.8%   -> Separate_overclustering -> kd2d (66% of Protect)
   ClusteringDeghost                  8.0%   -> connect_graph_ctpc -> kd2d (62% of Deghost)
-  ClusteringSeparate→vhough_transform 14%   (boost::histogram Hough — SEPARATE item, not kd2d)
 ```
 
 **`kd2d` is the shared hotspot** (verified by the upward caller chain): its 47.3% splits
 **ExamineBundles 71% / ProtectOverclustering 21% / Deghost 8%** (Examine & Protect reach it
 via `connect_graph_relaxed`, Deghost via `connect_graph_ctpc`). So fixing `kd2d` speeds all
-three at once. The `vhough_transform` 14% is a *distinct* cost (mostly standalone Separate)
-that the format fix does **not** touch.
+three at once. The other big item, `vhough_transform` (~14% here), is **also inside
+`connect_graph_relaxed`** (the per-candidate Hough direction) — not a separate stage — and is
+the next hotspot once the format cost is removed (see §3).
 
 **The hotspot is `Grouping::kd2d` (`clus/src/Facade_Grouping.cxx:297-306`):**
 
@@ -244,15 +245,65 @@ samples fell ~44% (17434 → ~9840), consistent with the ~2× wall speedup. The 
 costs are genuine work — `vhough_transform` (now ~31%, the boost::histogram Hough in
 Separate/Protect) and `nanoflann` kd-tree neighbour searches (~14%) — which are the next targets.
 
-### Remaining / next improvements
+## 3. Next hotspot after the kd2d fix: `vhough_transform` (post-fix profile of 187650, 2026-06-05)
 
-1. **(Now #1, ~31%) `vhough_transform`** (boost::histogram Hough) — real computation in
-   Separate/Protect; the largest remaining lever. Investigate histogram reuse / coarser binning.
-2. **(~14%) nanoflann kd-tree searches** in `connect_graph_relaxed`'s good-point tests — the
-   genuine geometry cost now that the format overhead is gone.
-3. **(Further ~5–10%, optional) Cache the `kd2d_t&` reference itself** by `(apa,face,pind)` to
-   also skip the `scoped_view` hash-lookup — *only* if verified the scoped view is not
-   invalidated between calls within a clustering pass (otherwise keep the current safe form).
+Re-profiling 187650 **after** the kd2d fix (`cpu_postfix.prof`; 9844 samples) shows the new
+clustering shape — ExamineBundles is still #1 (61%), and inside its `connect_graph_relaxed`
+the cost is now genuine geometry, dominated by one item:
+
+```
+ClusteringExamineBundles               61.0%
+  connect_graph_relaxed                58.6%
+    vhough_transform / hough_transform 30.9%   <-- #1 remaining: per-candidate Hough direction
+        std::max_element               20.1%   (65% of vhough)  <-- scans ALL histogram bins
+        boost::histogram::fill         19.5% (of vhough)
+    get_closest_points (good-point)    27.5%
+        nanoflann kd-tree search       14.3%   <-- #2 remaining: genuine radius queries
+ProtectOverclustering                   9.5%
+ClusteringDeghost                       4.6%
+```
+
+**Root cause of `vhough_transform`** (`clus/src/Facade_Cluster.cxx:1609-1680`,
+`hough_transform`): it builds a **180 × 360 = 64 800-bin** `boost::histogram` with the
+**default `unlimited_storage`** (an adaptive type-erased *variant* per bin), fills only the
+handful of points within the search radius, then finds the peak with
+
+```cpp
+auto hist = bh::make_histogram(bh::axis::regular<>(180,...), bh::axis::regular<>(360,...));
+... // fill ~few hundred points
+auto indexed = bh::indexed(hist);
+auto it = std::max_element(indexed.begin(), indexed.end());   // scans ALL 64 800 bins
+```
+
+So the histogram is **sparse to fill but the peak-scan is full-grid**, and every one of the
+64 800 `max_element` comparisons dispatches through `unlimited_storage::buffer_type::visit` (a
+std::variant visit — 31% self time). `max_element` is **65% of `vhough_transform`**. This is
+called once per relaxed-bridging candidate inside `connect_graph_relaxed`.
+
+### Proposed improvements (next, not yet implemented)
+
+1. **(Headline, output-identical) Kill the variant-visit + full-grid scan in the Hough peak.**
+   Two independent levers, both keeping identical bin values → identical peak (the weights
+   `charge/npoints` are strictly > 0, so the max is always a filled bin; tie-break = first in
+   grid order):
+   - Use **dense scalar storage** — `bh::make_histogram_with(bh::dense_storage<double>(), …)`
+     — so each bin is a plain `double` and the `max_element` comparison is a scalar compare,
+     removing the `buffer_type::visit` (~31% self). Lowest-risk, bit-identical.
+   - Better, **scan only the filled bins**: record the touched `(p1,p2)` bins during fill and
+     take the max over those (O(#points) instead of O(64 800)). Must reproduce
+     `std::max_element`'s tie-break (smallest grid index among equal maxima) to stay
+     bit-identical. Combine with dense storage for the largest win.
+   Expected to remove most of the ~31% `vhough` share, i.e. another large clustering speedup,
+   and it also helps every other `vhough_transform` caller (ExtendLoop, Connect1, …).
+2. **(#2, ~14%) nanoflann radius queries** in the good-point tests
+   (`get_closest_points`/`test_good_point`/`is_good_point`) — genuine kd-tree geometry, now the
+   second cost. Algorithmic (fewer/cheaper queries) rather than pure overhead; revisit after #1.
+3. **(Optional ~5–10%) Cache the `kd2d_t&` reference** by `(apa,face,pind)` to also skip the
+   residual `scoped_view` hash-lookup — only if verified the scoped view is not invalidated
+   between calls within a pass (otherwise keep the current safe Scope-only memo).
+
+> Validate any of these the same way the kd2d fix was: **byte-identical `mabc.zip`** on
+> 59789 / 61637 / 187650 before trusting, then re-pull per-event timing.
 
 ## How it was measured
 
