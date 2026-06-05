@@ -99,6 +99,10 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `beam_min/maxtime` | ∓5 ms | … | beam window |
 | `QtoL` | `0.5` (SBND sim `1.0`, **data `0.86`**) | `m_QtoL` | charge→light scale in the prediction (`:317`). SBND scales the **data** prediction down by 0.86 (data over-predicts ~16%); sim stays 1.0. See `sbnd-opdetsim-chain.md` § PE-error study. |
 | `strength_cutoff` | `0.05` | `m_strength_cutoff` | LASSO solution threshold to keep a bundle |
+| `empty_rescue` | `false` (SBND `true`) | `m_empty_rescue` | **post-fit empty-flash light-quality rescue** (§4.4a). Adopt an emptied flash's best light candidate, reassigning one-flash-per-cluster. Default OFF ⇒ bit-identical; **changes matching** when on. |
+| `rescue_metric_max` | `1e9` (SBND `0.5`) | `m_rescue_metric_max` | rescue light-quality bar `ks·(chi2/ndf)^exp`; huge ⇒ inert. SBND `0.5` is below the lowest data-regression metric (recovers MC evt11 only, at zero regression) |
+| `rescue_exponent` | `0.8` | `m_rescue_exponent` | chi2/ndf exponent in the rescue metric (prototype 0.8) |
+| `rescue_boundary_weight` | `0.8` | `m_rescue_boundary_weight` | per-flag rescue down-weight, applied for `at_x_boundary` then `close_to_PMT` (prototype 0.8/0.64) |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
 | `anode_ext1` | `-2.0 cm` | `m_anode_ext1` | anode-side inclusion / flag-window edge in `u` (`anode_in`); see §4.1a |
@@ -381,6 +385,44 @@ bundle, **or** — for an unmatched cluster — a placeholder
 `organize_bundles()` (`:735-806`) then merges compatible bundles per flash and
 applies a beam-window quality filter (drop out-of-beam bundles with `ks>0.2`,
 `chi2/ndf>20`, or PE mismatch >50%).
+
+> **The matched OUTPUT is the strength-cutoff survivors, not the organized set.**
+> `organize_bundles` operates on the *local* `results_bundles`, and `fit_round2`
+> builds a `results_flash_bundles_map` from it that is then **discarded** — never
+> assigned back to `run.flash_bundles_map`. `apply_matched_t0s` and the calib dump's
+> `auto_selected` both read `run.flash_bundles_map`, which is pruned **only** by the
+> strength cutoff. So the per-flash best-pick *removals* and the out-of-beam QA cut
+> have no effect on the matched output. (The same-flash `add_bundle` *merge* IS
+> observable — `results_bundles` holds the same `shared_ptr`s as `flash_bundles_map`,
+> so `add_bundle` mutates `other_clusters`/`pred_flash`/metrics in place.) This is an
+> incomplete port of the prototype's flash-centric organization; do not "fix" it by
+> wiring the organize result back without re-validating, as that flips the selection
+> mechanism for every experiment.
+
+### 4.4a Empty-flash light-quality rescue (`rescue_empty_flashes`, SBND-on)
+The LASSO selects by **strength**, which can leave a flash with no surviving bundle
+even when a cluster is a good **light** match for it (the cluster was won by a
+neighbouring flash on strength alone). When `empty_rescue` is on, `fit_round2`
+snapshots the full pre-LASSO candidate universe (`run.prefit_snapshot`, captured at
+`fit_round1` start) and, after the strength prune, `rescue_empty_flashes` adopts each
+emptied flash's best light-quality candidate — `metric = ks·(chi2/ndf)^rescue_exponent`
+with a `rescue_boundary_weight` per-flag down-weight (boundary, then near-PMT) — when
+the metric clears `rescue_metric_max`. **One flash per cluster** is enforced: a cluster
+already matched is *reassigned* (remove from its old flash, add to the empty one), never
+double-listed, and only when the empty flash is a strictly better light match
+(`mF < mX`).
+
+> **Finding (validated on 10 data + 10 MC hand-scans): these misses are
+> timing/drift-degenerate, not light-recoverable.** The cluster usually fits its WRONG
+> flash as well as (or better than) the correct one (e.g. a correct match with light
+> metric 25.9 is out-fit by an empty flash at 0.68), so no light bar separates "recover"
+> from "steal a correct pair." The conservative `rescue_metric_max = 0.5` sits below the
+> lowest data-regression metric (0.68): it recovers the single light-separable case
+> (MC evt11 `(10,8)`: 0.13 vs 6.37 at the wrong flash) at **zero regression**, leaving
+> the data set unchanged (DATA 95→95, MC 98→99). It DOES change SBND production matching
+> (single-flash reassignment); the remaining degenerate misses need a drift/timing
+> discriminator (and the cross-TPC ones the `xtpc` machinery), not a light rescue.
+> C++ default OFF (`rescue_metric_max` huge ⇒ inert) ⇒ production byte-identical.
 
 ### 4.5 t0 + output (`:656-680`)
 Clusters are pre-initialized with `set_scalar<int>("flash", -1)` (alongside the

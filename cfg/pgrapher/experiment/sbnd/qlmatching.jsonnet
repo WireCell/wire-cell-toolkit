@@ -239,6 +239,33 @@ function(params) {
             reject_overpred: true,
             overpred_total_ratio: 2.9,
             overpred_maxch_ratio: 4.3,
+
+            // Empty-flash light-quality rescue (prototype flash-centric pick). The
+            // LASSO selects by strength and can leave a flash with no surviving bundle
+            // even when a cluster is a good LIGHT match for it (the cluster was won by a
+            // neighbour flash on strength alone). After the fit, each emptied flash
+            // adopts its best light-quality candidate (ks*(chi2/ndf)^0.8, with a
+            // 0.8/0.64 boundary/near-PMT down-weight) if the metric clears
+            // rescue_metric_max. Enforces ONE flash per cluster: a cluster already
+            // matched elsewhere is REASSIGNED (not double-listed) only when this flash
+            // is a strictly better light match (never removes a better match).
+            //
+            // CAVEAT (validated on 10 data + 10 MC hand-scans): most of the hand-scan
+            // misses are timing/drift-degenerate, NOT light-recoverable -- the cluster
+            // fits its WRONG flash as well as (or better than) the correct one, so no
+            // light bar can separate them (e.g. a correct match can have light metric
+            // 25.9 while an empty flash out-fits it at 0.68). The conservative bar 0.5
+            // is set BELOW the lowest data-regression metric (0.68): it recovers the
+            // single light-separable case (MC evt11 (10,8): metric 0.13 vs 6.37 at the
+            // wrong flash) at ZERO regression on the 20 events, and leaves the data set
+            // unchanged. It does change SBND production matching (single-flash
+            // reassignment) -- accepted for the +1; the remaining misses need a
+            // drift/timing discriminator (and the cross-TPC ones the xtpc machinery),
+            // not a light rescue. Default OFF in C++ (huge bar = inert, bit-identical).
+            empty_rescue: true,
+            rescue_metric_max: 0.5,
+            rescue_exponent: 0.8,
+            rescue_boundary_weight: 0.8,
     },
 
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this

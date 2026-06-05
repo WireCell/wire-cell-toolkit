@@ -857,6 +857,30 @@ just the surviving matched bundles — the prototype keeps every candidate pairi
 recovery. The toolkit's `organize_bundles` only merges (§4.1) and then *removes* out-of-beam failures
 (§12.2); it has no analogue of any of these three rounds.
 
+#### 12.3a Toolkit status — the organize result is vestigial; the empty-flash rescue (SBND-on)
+
+Two findings from porting this stage (validated on 10 data + 10 MC hand-scans):
+
+1. **`organize_bundles`' output is discarded.** `fit_round2` builds a `results_flash_bundles_map`
+   from the organized `results_bundles` and then never assigns it back to `run.flash_bundles_map` —
+   the matched output is just the strength-cutoff survivors. So the toolkit's per-flash best-pick
+   *removals* and the §12.2 out-of-beam QA are dead w.r.t. output (the same-flash `add_bundle` *merge*
+   mutation IS observable, via the shared `shared_ptr`s). See `qlmatching-code.md` §4.4.
+
+2. **The recoverable misses are timing/drift-degenerate, not light-recoverable.** The single piece of
+   the prototype's recovery that the hand-scan misses actually need is the *light-quality, flash-centric*
+   pick (rounds 2–3 reach `fc_bundles_map` and rank by `ks·(chi2/ndf)^0.8`, **strength-independent**).
+   The ported `rescue_empty_flashes` (§4.4a, `empty_rescue`) does exactly that for **emptied** flashes,
+   enforcing one-flash-per-cluster by reassignment. But the misses where a cluster lost its flash to a
+   neighbour are degenerate: the cluster fits its **wrong** flash as well as the correct one (a correct
+   match can have light metric 25.9 while an empty flash out-fits it at 0.68), so **no light bar
+   separates recover-vs-steal**. Only **one** of ~5 hand-scan misses is light-separable (MC evt11
+   `(10,8)`: 0.13 at the correct flash vs 6.37 at the wrong one). The conservative bar
+   `rescue_metric_max = 0.5` (below the lowest data-regression metric 0.68) recovers exactly that one
+   at **zero regression** (DATA 95→95, MC 98→99). The rest need a drift/timing discriminator the
+   standalone matcher lacks; the cross-TPC ones belong to §16's `xtpc` machinery. Default OFF ⇒
+   bit-identical.
+
 ### 12.4 Masking and the KS shape metric (a toolkit asymmetry)
 
 Per-bundle quality (§3) is two numbers: the χ² and the KS shape distance. The channel **mask**
