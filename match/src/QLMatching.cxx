@@ -195,6 +195,12 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_highconsist_min_ndf      = get(cfg, "highconsist_min_ndf",      m_highconsist_min_ndf);
     m_bundle_pe_ndf_knee       = get(cfg, "bundle_pe_ndf_knee",       m_bundle_pe_ndf_knee);
     m_bundle_mask_ks           = get(cfg, "bundle_mask_ks",           m_bundle_mask_ks);
+    m_highconsist_ladder       = get(cfg, "highconsist_ladder",       m_highconsist_ladder);
+    m_hc_clean_ks = get(cfg, "hc_clean_ks", m_hc_clean_ks);  m_hc_clean_c2 = get(cfg, "hc_clean_c2", m_hc_clean_c2);
+    m_hc_good_ks  = get(cfg, "hc_good_ks",  m_hc_good_ks);   m_hc_good_c2  = get(cfg, "hc_good_c2",  m_hc_good_c2);
+    m_hc_tb_ks    = get(cfg, "hc_tb_ks",    m_hc_tb_ks);     m_hc_tb_c2    = get(cfg, "hc_tb_c2",    m_hc_tb_c2);
+    m_hc_miss_ks  = get(cfg, "hc_miss_ks",  m_hc_miss_ks);   m_hc_miss_c2  = get(cfg, "hc_miss_c2",  m_hc_miss_c2);
+    m_hc_miss_min_ndf = get(cfg, "hc_miss_min_ndf", m_hc_miss_min_ndf);
 
     m_readout_window_ticks = get(cfg, "readout_window_ticks", m_readout_window_ticks);
     m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
@@ -335,6 +341,12 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["highconsist_min_ndf"]      = m_highconsist_min_ndf;
     cfg["bundle_pe_ndf_knee"]       = m_bundle_pe_ndf_knee;
     cfg["bundle_mask_ks"]           = m_bundle_mask_ks;
+    cfg["highconsist_ladder"]       = m_highconsist_ladder;
+    cfg["hc_clean_ks"] = m_hc_clean_ks;  cfg["hc_clean_c2"] = m_hc_clean_c2;
+    cfg["hc_good_ks"]  = m_hc_good_ks;   cfg["hc_good_c2"]  = m_hc_good_c2;
+    cfg["hc_tb_ks"]    = m_hc_tb_ks;     cfg["hc_tb_c2"]    = m_hc_tb_c2;
+    cfg["hc_miss_ks"]  = m_hc_miss_ks;   cfg["hc_miss_c2"]  = m_hc_miss_c2;
+    cfg["hc_miss_min_ndf"] = m_hc_miss_min_ndf;
 
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
@@ -655,7 +667,10 @@ void QLMatching::compute_geometry(ApaRun& run)
     run.qp = BundleQualityParams{
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
         m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee,
-        m_bundle_mask_ks, m_pe_err_floor, m_pe_err_frac, m_pe_err_knee, m_pe_err_on_pred};
+        m_bundle_mask_ks, m_pe_err_floor, m_pe_err_frac, m_pe_err_knee, m_pe_err_on_pred,
+        m_highconsist_ladder,
+        m_hc_clean_ks, m_hc_clean_c2, m_hc_good_ks, m_hc_good_c2,
+        m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf};
 
     // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
     // sits on the low / high side of the cathode plane.
@@ -722,10 +737,10 @@ void QLMatching::build_bundles(ApaRun& run)
                 compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode,
                                        static_cast<int>(run.anode->ident()));
             bundle->set_contained(contained);   // diagnostic only (calib dump)
-            // Diagnostic flag_two_boundary (both PCA ends at a detector edge).
-            // Only the calib dump consumes it, so compute it only when dumping —
-            // production runs do zero extra work and stay bit-identical.
-            if (!m_calib_dump.empty())
+            // flag_two_boundary (both PCA ends at a detector edge). The calib dump and the
+            // high-consistent ladder's B3 branch consume it; compute it only when one of those
+            // needs it — production with the ladder off and no dump stays bit-identical.
+            if (!m_calib_dump.empty() || m_highconsist_ladder)
                 compute_two_boundary_flag(bundle.get(), main_cluster, flash_x_offset, run);
             // Discard bundles whose cluster is not contained in the TPC box once
             // the flash T0 x-offset is applied. Off by default.
@@ -1229,6 +1244,12 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["pe_err_knee"]         = m_pe_err_knee;
     qp["pe_err_on_pred"]      = m_pe_err_on_pred;
     qp["QtoL"]                = m_QtoL;
+    qp["highconsist_ladder"]  = m_highconsist_ladder;
+    qp["hc_clean_ks"] = m_hc_clean_ks;  qp["hc_clean_c2"] = m_hc_clean_c2;
+    qp["hc_good_ks"]  = m_hc_good_ks;   qp["hc_good_c2"]  = m_hc_good_c2;
+    qp["hc_tb_ks"]    = m_hc_tb_ks;     qp["hc_tb_c2"]    = m_hc_tb_c2;
+    qp["hc_miss_ks"]  = m_hc_miss_ks;   qp["hc_miss_c2"]  = m_hc_miss_c2;
+    qp["hc_miss_min_ndf"] = m_hc_miss_min_ndf;
     top["quality_params"] = qp;
 
     // OpDet table (all channels). apa side and active flag mirror compute_geometry:

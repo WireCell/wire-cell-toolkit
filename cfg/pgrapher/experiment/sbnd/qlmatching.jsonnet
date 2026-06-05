@@ -159,6 +159,20 @@ function(params) {
             // 0 there, distorting the shape comparison (worst for the per-TPC mask,
             // whose opposite-TPC PMTs carry real PE). C++ default OFF; SBND-on.
             bundle_mask_ks: true,
+            // Flag-aware multi-branch "high-consistent" ladder (prototype-structured, re-tuned
+            // for SBND from the 10 hand-scan data events; see match/docs/chisquare_flags_comparison.md
+            // §4). KS is the purity lever, chi2/ndf ceilings only fence the tail. The TIGHT
+            // operating point: very pure (~88% on the hand-scans, ~44% recall) per the directive
+            // that flag_high_consistent be pure (it gates the pre-LASSO cull). C++ default OFF =
+            // single-branch (highconsist_ks_max/min_ndf), bit-identical; SBND-on here.
+            // B1 clean very-good; B2 general good; B3 two_boundary; B4 x-boundary/close-PMT/
+            // window-truncated (ks-led, chi2 relaxed for missing charge).
+            highconsist_ladder: true,
+            hc_clean_ks: 0.06, hc_clean_c2: 6.0,
+            hc_good_ks:  0.09, hc_good_c2:  4.0,
+            hc_tb_ks:    0.10, hc_tb_c2:    8.0,
+            hc_miss_ks:  0.08, hc_miss_c2:  60.0,
+            hc_miss_min_ndf: 5,
             // §H raw readout-window truncation flag is always computed by
             // QLMatching (T0-independent, APA-agnostic) and is currently inert
             // (no consumer). edge threshold = 24 ticks (6 live slices, rebin 4).

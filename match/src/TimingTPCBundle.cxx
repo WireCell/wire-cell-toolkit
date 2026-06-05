@@ -213,8 +213,27 @@ bool TimingTPCBundle::examine_bundle()
     }
 
     flag_high_consistent = false;
-    if (ks_dis < m_qp.highconsist_ks_max && ndf >= m_qp.highconsist_min_ndf &&
-        chi2 < ndf * nvalidopdets)
-        flag_high_consistent = true;
+    if (!m_qp.highconsist_ladder) {
+        if (ks_dis < m_qp.highconsist_ks_max && ndf >= m_qp.highconsist_min_ndf &&
+            chi2 < ndf * nvalidopdets)
+            flag_high_consistent = true;
+    }
+    else if (ndf > 0) {
+        // Flag-aware multi-branch ladder (prototype-structured, SBND-tuned). KS is the
+        // purity lever; the chi2/ndf ceilings only fence the tail. The B4 boundary/near-PMT/
+        // window-truncated branch relaxes chi2 (missing charge) but keeps KS tight.
+        const double c2n = chi2 / ndf;
+        const bool miss = flag_at_x_boundary || flag_close_to_PMT || flag_window_truncated;
+        if (ndf >= m_qp.highconsist_min_ndf && ks_dis < m_qp.hc_clean_ks && c2n < m_qp.hc_clean_c2)
+            flag_high_consistent = true;                                        // B1 clean very-good
+        else if (ndf >= m_qp.highconsist_min_ndf && ks_dis < m_qp.hc_good_ks && c2n < m_qp.hc_good_c2)
+            flag_high_consistent = true;                                        // B2 general good
+        else if (flag_two_boundary && ndf >= m_qp.highconsist_min_ndf &&
+                 ks_dis < m_qp.hc_tb_ks && c2n < m_qp.hc_tb_c2)
+            flag_high_consistent = true;                                        // B3 two_boundary
+        else if (miss && ndf >= m_qp.hc_miss_min_ndf &&
+                 ks_dis < m_qp.hc_miss_ks && c2n < m_qp.hc_miss_c2)
+            flag_high_consistent = true;                                        // B4 x-bnd/PMT/trunc
+    }
     return flag_high_consistent;
 }

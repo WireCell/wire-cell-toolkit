@@ -152,6 +152,13 @@ namespace WireCell::Match {
         int    m_highconsist_min_ndf{3};
         double m_bundle_pe_ndf_knee{1.0};
         bool   m_bundle_mask_ks{false};  // apply opdet_mask to the KS shape metric too
+        // Flag-aware "high-consistent" ladder (default off = single-branch, bit-identical; SBND-on).
+        bool   m_highconsist_ladder{false};
+        double m_hc_clean_ks{0.06};  double m_hc_clean_c2{6.0};
+        double m_hc_good_ks{0.09};   double m_hc_good_c2{4.0};
+        double m_hc_tb_ks{0.10};     double m_hc_tb_c2{8.0};
+        double m_hc_miss_ks{0.08};   double m_hc_miss_c2{60.0};
+        int    m_hc_miss_min_ndf{5};
 
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time

@@ -215,6 +215,40 @@ direction of this as a simpler, data-tuned **light prefilter** (`reject_overpred
 dropped before the fit when its predicted light hugely exceeds the measured light (the prototype's
 "way more light than the flash shows" case), boundary-exempt like the prototype.
 
+### 4.1b The ported SBND ladder (implemented, `highconsist_ladder`)
+
+The single toolkit branch is replaced — **behind `highconsist_ladder` (C++ default OFF =
+single-branch, bit-identical; SBND-on)** — by a flag-aware ladder that ports the prototype's
+*structure* but **re-derives every number from the 10 hand-scan data events**. The prototype's
+χ²-per-ndf multipliers (36/45/55) do **not** transfer: after the SBND PE-error recipe a good
+match has χ²/ndf ≈ 1–2 (not MicroBooNE's tens), so those multipliers would be absurdly loose here.
+The empirics that set the design (`work/ql_recipe` dumps vs `work/ql_labels/data`): **KS is the
+purity lever, χ²/ndf is not** — in every flag category true matches sit at ks ~0.09–0.12 while
+background sits at ks ~0.44–0.68, but χ²/ndf is ~15 for *both*. So the ladder is KS-led, with
+χ²/ndf ceilings only fencing the tail. Branches (`TimingTPCBundle.cxx`, OR; `c2n = chi2/ndf`):
+
+| # | branch | condition | maps to user idea |
+|---|---|---|---|
+| B1 | clean very-good | `ndf≥3 && ks<0.06 && c2n<6` | "very good KS + low χ²" |
+| B2 | general good | `ndf≥3 && ks<0.09 && c2n<4` | (clean, moderate) |
+| B3 | two_boundary | `flag_two_boundary && ndf≥3 && ks<0.10 && c2n<8` | "flag_2_boundary: both reasonable" |
+| B4 | x-bnd / close-PMT / window-trunc | `(flag_at_x_boundary‖flag_close_to_PMT‖flag_window_truncated) && ndf≥5 && ks<0.08 && c2n<60` | "these flags: KS reasonable, χ² can be higher (missing charge)" |
+
+This is the **TIGHT** operating point, chosen because `flag_high_consistent` gates the pre-LASSO
+cull (`cull_inconsistent`, §1.1) and so **must be pure**; lower efficiency is acceptable. B4
+deliberately relaxes the χ² ceiling, *not* the KS — the simpler analogue of the prototype's
+per-channel `+(pe·0.5)²` denominator inflation (§3), which is **not** ported. The eight ceilings
++ `hc_miss_min_ndf` are jsonnet-exposed (`BundleQualityParams::hc_*`) for retuning; `flag_two_boundary`
+is now computed in the matching path whenever the ladder is on (previously calib-dump-only).
+
+**Measured impact** (the 10 hand-scan data events; `work/ql_ladder` vs the single-branch baseline):
+flag recall **18%→44%**, purity **82%→88%**, true-matches culled **2→1**. End-to-end, true-match
+agreement in the matched output rises **89→93 / 100** (+4). MC (validation only, *not* retuned):
+purity 94%, recall 53% (cleaner sim → looser), end-to-end **87→92 / 113** (+5). No regressions.
+
+`flag_spec_end` (prototype demotion gate, `ToyMatching.cxx:790-804`) is **not ported**: it is
+never set in SBND (0/99 selected, 0/762 background), so it is inert here.
+
 ### 4.1 Bundle add/merge thresholds (`§F` knobs)
 
 `flag_high_consistent` (above) is one of several thresholds carried in the `BundleQualityParams`

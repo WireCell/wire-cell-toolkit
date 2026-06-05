@@ -35,6 +35,18 @@ namespace WireCell::Match {
         double pe_err_frac  = 0.3;
         double pe_err_knee  = 1.0;
         bool   pe_err_on_pred = false;
+        // Flag-aware multi-branch "high-consistent" ladder (ported from the MicroBooNE
+        // prototype FlashTPCBundle, re-tuned for the SBND post-recipe chi2 scale from the
+        // 10 hand-scan data events). When highconsist_ladder is false the single-branch
+        // (highconsist_ks_max/min_ndf) logic above is used -> bit-identical. SBND-on.
+        // Branches (OR), c2n = chi2/ndf: B1 clean very-good; B2 general good; B3 two_boundary;
+        // B4 x-boundary/close-PMT/window-truncated (ks-led, chi2 relaxed for missing charge).
+        bool   highconsist_ladder = false;
+        double hc_clean_ks = 0.06;  double hc_clean_c2 = 6.0;   // B1
+        double hc_good_ks  = 0.09;  double hc_good_c2  = 4.0;   // B2
+        double hc_tb_ks    = 0.10;  double hc_tb_c2    = 8.0;   // B3
+        double hc_miss_ks  = 0.08;  double hc_miss_c2  = 60.0;  // B4
+        int    hc_miss_min_ndf = 5;                             // B4 ndf floor (B1-B3 use highconsist_min_ndf)
     };
 
     class TimingTPCBundle {
