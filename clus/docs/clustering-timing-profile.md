@@ -154,6 +154,88 @@ blob-graph **edge count**, not blob count.
 4. Validate any change is **clustering-output-identical** on the quiet hand-scan events
    before trusting the tail events.
 
+> **Resolved by §2 below (2026-06-05):** the gperftools profile of event 187650 answers
+> steps 1–2 directly. The cost is **not** in `connected_components` and **not** edge-count
+> per se — it is a `boost::format` scope-key string rebuilt millions of times inside
+> `connect_graph_relaxed`. See §2.
+
+## 2. Root-cause CPU profile of event 187650 (gperftools, 2026-06-05) — the real hotspot is a format() in a hot loop
+
+**Method (no rebuild).** Ran the single-event 187650 matching graph (local active +
+in-graph dead) under the gperftools CPU profiler — `LD_PRELOAD=libprofiler.so.0`,
+`CPUPROFILE=cpu.prof`, `CPUPROFILE_FREQUENCY=250` — then analyzed with `google-pprof`
+against `build/apps/wire-cell` (full symbols; 17434 samples ≈ 70 s CPU). Repro in
+`/home/xqian/tmp/lanrepro2/f3/ev187650/` (`cpu.prof`, `evprof.log`).
+
+**Call tree (cumulative % of whole-process CPU):**
+
+```
+MultiAlgBlobClustering              85.7%   (clustering dominates; imaging/IO are noise)
+  ClusteringExamineBundles          58.9%   -> connect_graph_relaxed -> get_closest_points
+      make_graph_relaxed            58.8%
+        connect_graph_relaxed       57.9%   <-- the long-range "relaxed" bridging
+          get_closest_points        57.6%
+            kd2d                     47.3%   <-- 2D kd-tree accessor by (apa,face,plane)
+              String::format        40.8%   <-- !!! boost::format rebuilding a scope key
+            test_good_point         43.4% / is_good_point 19.3%
+  ProtectOverclustering             14.8%   -> Separate_overclustering -> kd2d (66% of Protect)
+  ClusteringDeghost                  8.0%   -> connect_graph_ctpc -> kd2d (62% of Deghost)
+  ClusteringSeparate→vhough_transform 14%   (boost::histogram Hough — SEPARATE item, not kd2d)
+```
+
+**`kd2d` is the shared hotspot** (verified by the upward caller chain): its 47.3% splits
+**ExamineBundles 71% / ProtectOverclustering 21% / Deghost 8%** (Examine & Protect reach it
+via `connect_graph_relaxed`, Deghost via `connect_graph_ctpc`). So fixing `kd2d` speeds all
+three at once. The `vhough_transform` 14% is a *distinct* cost (mostly standalone Separate)
+that the format fix does **not** touch.
+
+**The hotspot is `Grouping::kd2d` (`clus/src/Facade_Grouping.cxx:297-306`):**
+
+```cpp
+const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int pind) const {
+    std::vector<std::string> plane_names = {"U", "V", "W"};                       // heap alloc / call
+    const auto sname = String::format("ctpc_a%df%dp%d", apa, face, plane_names[pind]); // line 300: 7171 samples = 41%
+    Tree::Scope scope = {sname, {"x", "y"}, 1};
+    const auto& sv = m_node->value.scoped_view(scope);                            // line 303: 781 samples (4.5%)
+    return sv.kd();
+}
+```
+
+`kd2d` is called per-point-per-plane inside `connect_graph_relaxed`'s good-point tests
+(`get_closest_points` → `test_good_point`/`is_good_point`), i.e. **millions of times**, and
+every call rebuilds — via slow `boost::format` — one of only **≤ 12 distinct, stable**
+`(apa, face, pind)` scope keys, plus a fresh `vector<string>{"U","V","W"}`. Line 300 alone
+is **41% of whole-process CPU (~48% of clustering)**; `kd2d` total is **47.3%** (the
+`__dynamic_cast` 10%-self in the flat profile is *also* under `kd2d → scoped_view`).
+
+**This explains the §1 paradox** (blob count doesn't predict time). The overhead is a flat
+per-good-point-test cost, so an event's clustering time tracks **how many long-range
+good-point tests `connect_graph_relaxed` performs**, which depends on cluster geometry/extent
+(how much candidate bridging it probes), *not* raw blob count. The isochronous 141530 — many
+blobs but geometry that triggers far fewer relaxed probes — is fast; the tangled 59789 /
+138824 / 187650 probe far more.
+
+### Proposed improvements
+
+1. **(Headline, ~41% clustering win, output-identical) Memoize the kd2d scope key.** Replace
+   the per-call `boost::format` + `vector<string>` with a precomputed `(apa,face,pind) →
+   Tree::Scope` lookup (a `mutable` map, ≤ 12 entries, or a small fixed array; `plane_names`
+   `static const`). Keep the `scoped_view(scope)` call so the tree's own kd-tree
+   caching/invalidation is unchanged → bit-identical output. `kd2d` is 47.3% of CPU here, so
+   this is **projected** to remove ~41% of clustering wall (≈ 2× on these events) — to be
+   **confirmed by measurement** after implementing (step 4). Because `kd2d` is reached by
+   **ExamineBundles, ProtectOverclustering and Deghost** (verified above), the one fix speeds
+   all three.
+2. **(Further ~5–13%) Cache the `kd2d_t&` reference itself** by `(apa,face,pind)` to also
+   skip the `scoped_view` hash-lookup + the `__dynamic_cast`s under it — *only* if verified
+   that the scoped view is not invalidated between calls within a clustering pass (otherwise
+   keep #1's safe form).
+3. **(Secondary ~14%) `vhough_transform`** (boost::histogram Hough, mostly standalone
+   ClusteringSeparate) is real computation, untouched by #1 — revisit after #1, lower priority.
+4. **Validate**: the fix must be **clustering-output-identical** on the quiet hand-scan
+   events (compare `mabc.zip` / cluster PCs) before trusting it on the tail; then re-pull the
+   per-event timing to confirm the ~2× speedup.
+
 ## How it was measured
 
 Each `MultiAlgBlobClustering` node logs `MABC timing: <Stage>:<scope> took <ms> ms`
