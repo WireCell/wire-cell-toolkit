@@ -266,6 +266,19 @@ function(params) {
             rescue_metric_max: 0.5,
             rescue_exponent: 0.8,
             rescue_boundary_weight: 0.8,
+
+            // Per-event dynamic dead-PMT auto-mask. Within one event/TPC, drop a PMT
+            // that never fires (max PE over the event's flashes < auto_mask_pe_low)
+            // while its nearest live PMTs do -- a channel dead in THIS run but absent
+            // from the static ch_mask above. SBND-on by default: the static ch_mask
+            // fits the original data run but is wrong run-to-run (e.g. lan-reco2 has
+            // ch69 dead but live in the original; see match/docs and the per-run PMT
+            // health study). auto_mask folds into run.opdet_mask so prediction / chi2 /
+            // KS / ndf all inherit it. Validated to mask the run-dead PMT with zero
+            // false positives. C++ default OFF (non-SBND production bit-identical); the
+            // C++ trigger thresholds (pe_low 5, K-neighbours 4, pe_bright 50,
+            // min_contrast 1, min_flash 3) are used unless overridden.
+            auto_mask: true,
     },
 
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
