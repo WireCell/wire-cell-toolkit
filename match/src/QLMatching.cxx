@@ -128,6 +128,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cathode_diag_radius = get(cfg, "cathode_diag_radius", m_cathode_diag_radius);
     m_xtpc_flag         = get(cfg, "xtpc_flag",         m_xtpc_flag);
     m_xtpc_dmax         = get(cfg, "xtpc_dmax",         m_xtpc_dmax);
+    m_xtpc_dmax2        = get(cfg, "xtpc_dmax2",        m_xtpc_dmax2);
     m_xtpc_angle_max    = get(cfg, "xtpc_angle_max",    m_xtpc_angle_max);
     m_xtpc_hough_radius = get(cfg, "xtpc_hough_radius", m_xtpc_hough_radius);
 
@@ -185,6 +186,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_bkg_weight       = get(cfg, "bkg_weight",       m_bkg_weight);
     m_pe_mismatch_knee = get(cfg, "pe_mismatch_knee", m_pe_mismatch_knee);
     m_pe_mismatch_floor = get(cfg, "pe_mismatch_floor", m_pe_mismatch_floor);
+    m_lasso_flag_weight    = get(cfg, "lasso_flag_weight",    m_lasso_flag_weight);
+    m_lasso_boundary_weight = get(cfg, "lasso_boundary_weight", m_lasso_boundary_weight);
 
     m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
@@ -205,6 +208,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_hc_tb_ks    = get(cfg, "hc_tb_ks",    m_hc_tb_ks);     m_hc_tb_c2    = get(cfg, "hc_tb_c2",    m_hc_tb_c2);
     m_hc_miss_ks  = get(cfg, "hc_miss_ks",  m_hc_miss_ks);   m_hc_miss_c2  = get(cfg, "hc_miss_c2",  m_hc_miss_c2);
     m_hc_miss_min_ndf = get(cfg, "hc_miss_min_ndf", m_hc_miss_min_ndf);
+    m_chi2_relax       = get(cfg, "chi2_relax",       m_chi2_relax);
+    m_chi2_pmt_excess  = get(cfg, "chi2_pmt_excess",  m_chi2_pmt_excess);
+    m_chi2_pmt_ratio   = get(cfg, "chi2_pmt_ratio",   m_chi2_pmt_ratio);
+    m_chi2_pmt_inflate = get(cfg, "chi2_pmt_inflate", m_chi2_pmt_inflate);
 
     m_readout_window_ticks = get(cfg, "readout_window_ticks", m_readout_window_ticks);
     m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
@@ -295,6 +302,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["cathode_diag_radius"] = m_cathode_diag_radius;
     cfg["xtpc_flag"]         = m_xtpc_flag;
     cfg["xtpc_dmax"]         = m_xtpc_dmax;
+    cfg["xtpc_dmax2"]        = m_xtpc_dmax2;
     cfg["xtpc_angle_max"]    = m_xtpc_angle_max;
     cfg["xtpc_hough_radius"] = m_xtpc_hough_radius;
     cfg["nchan"]           = m_nchan;
@@ -335,6 +343,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["bkg_weight"]        = m_bkg_weight;
     cfg["pe_mismatch_knee"]  = m_pe_mismatch_knee;
     cfg["pe_mismatch_floor"] = m_pe_mismatch_floor;
+    cfg["lasso_flag_weight"]    = m_lasso_flag_weight;
+    cfg["lasso_boundary_weight"] = m_lasso_boundary_weight;
 
     cfg["pe_err_floor"]       = m_pe_err_floor;
     cfg["pe_err_frac"]        = m_pe_err_frac;
@@ -355,6 +365,10 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["hc_tb_ks"]    = m_hc_tb_ks;     cfg["hc_tb_c2"]    = m_hc_tb_c2;
     cfg["hc_miss_ks"]  = m_hc_miss_ks;   cfg["hc_miss_c2"]  = m_hc_miss_c2;
     cfg["hc_miss_min_ndf"] = m_hc_miss_min_ndf;
+    cfg["chi2_relax"]       = m_chi2_relax;
+    cfg["chi2_pmt_excess"]  = m_chi2_pmt_excess;
+    cfg["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
+    cfg["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
 
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
@@ -425,7 +439,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         run.root_live = std::move(root_live);
         run.grouping  = run.root_live->value.facade<Grouping>();
 
-        run_one_apa(run);
+        run_one_apa_prefit(run);
 
         if (!run.flashes.empty()) {
             log->debug("total_charge_blob {} total_charge_point {} total_charge_blob_all {}",
@@ -439,11 +453,14 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         }
     }
 
-    // Cross-TPC cathode-crossing consistency confirm-stamp (post-matching; needs both
-    // TPCs' matched main clusters). Sets flag_xtpc_consistent + the per-cluster
-    // "xtpc_consistent" output scalar before the output is serialized below and before
-    // dump_calib. Off by default => output bit-identical. Never changes assignments.
-    if (m_xtpc_flag && runs.size() > 1) flag_cross_tpc_consistency(runs);
+    // Cross-TPC cathode-crossing pre-fit cull (needs both TPCs' candidate bundles, so it
+    // runs between the per-APA prefit above and the per-APA fit below). Marks
+    // geometrically cross-TPC-consistent candidate pairs and drops each marked cluster's
+    // non-consistent rivals. Off by default => not called, and the prefit/fit split is
+    // exactly the historical run_one_apa order => bit-identical.
+    if (m_xtpc_flag && runs.size() > 1) cull_cross_tpc(runs);
+
+    for (std::size_t k = 0; k < invec.size(); ++k) run_one_apa_fit(runs[k]);
 
     // ---- Build / merge outputs ----
     const int out_ident = runs.front().charge_ident;
@@ -499,6 +516,15 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
 
 void QLMatching::run_one_apa(ApaRun& run)
 {
+    run_one_apa_prefit(run);
+    run_one_apa_fit(run);
+}
+
+// Pre-fit half: bundles + per-TPC consistency cull (everything up to, but not
+// including, the LASSO). Split out so cull_cross_tpc can run between all APAs'
+// prefit and all APAs' fit.
+void QLMatching::run_one_apa_prefit(ApaRun& run)
+{
     build_opdet_mask(run);
     read_flashes(run);
     decompose_cluster_groups(run);
@@ -506,6 +532,11 @@ void QLMatching::run_one_apa(ApaRun& run)
     build_bundles(run);
     build_bundle_maps(run);
     cull_inconsistent(run);
+}
+
+// Fit half: the two LASSO rounds + output assembly.
+void QLMatching::run_one_apa_fit(ApaRun& run)
+{
     fit_round1(run);
     fit_round2(run);
     apply_matched_t0s(run);
@@ -684,7 +715,8 @@ void QLMatching::compute_geometry(ApaRun& run)
         m_bundle_mask_ks, m_pe_err_floor, m_pe_err_frac, m_pe_err_knee, m_pe_err_on_pred,
         m_highconsist_ladder,
         m_hc_clean_ks, m_hc_clean_c2, m_hc_good_ks, m_hc_good_c2,
-        m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf};
+        m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf,
+        m_chi2_relax, m_chi2_pmt_excess, m_chi2_pmt_ratio, m_chi2_pmt_inflate};
 
     // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
     // sits on the low / high side of the cathode plane.
@@ -934,6 +966,18 @@ void QLMatching::cull_inconsistent(ApaRun& run)
     remove_bundle_selection(to_be_removed, run.pre_bundles);
 }
 
+// Prototype flag-based per-column L1 down-weight (ToyMatching.cxx:1437), generalized to
+// the same boundary/near-PMT/window-truncated group as the ladder's B4 branch. A
+// down-weighted bundle is shrunk less and so more likely to survive the strength cutoff.
+double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const
+{
+    if (m_lasso_flag_weight &&
+        (bundle->get_flag_at_x_boundary() || bundle->get_flag_close_to_PMT()
+         || bundle->get_flag_window_truncated()))
+        return m_lasso_boundary_weight;
+    return 1.0;
+}
+
 // [Stage 2] First LASSO round, with a per-flash background/light DOF column;
 // post-fit prune bundles whose strength <= m_strength_cutoff.
 void QLMatching::fit_round1(ApaRun& run)
@@ -983,9 +1027,10 @@ void QLMatching::fit_round1(ApaRun& run)
             pairs.emplace_back(flash, bundle->get_main_cluster());
             const auto meas_pe_tot = flash->get_total_PE();
             const auto pred_pe_tot = bundle->get_total_pred_light();
-            weights(ik++) = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
-                              ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
-                              : m_pe_mismatch_floor;
+            const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
+                                    ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
+                                    : m_pe_mismatch_floor;
+            weights(ik++) = base * lasso_flag_factor(bundle);
         }
         PF(ncluster + i, nbundle + i) = 1. / delta_light;
         flash_idx_map[flash] = nbundle + i;
@@ -1078,7 +1123,7 @@ void QLMatching::fit_round2(ApaRun& run)
             const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                     ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
                                     : m_pe_mismatch_floor;
-            weights(ik++) = base + delta_shape * run.nopdet * ks_dis / lambda;
+            weights(ik++) = (base + delta_shape * run.nopdet * ks_dis / lambda) * lasso_flag_factor(bundle);
         }
         ++i;
     }
@@ -1166,15 +1211,11 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
             cluster->set_scalar<int>("flash", flash->get_flash_id());
             cluster->set_scalar<int>("matched_flash_gid", flash_gid);
             cluster->put_pcarray<double>(bundle->get_pred_flash(), "pe", "flashpred");
-            // Cross-TPC confirm-stamp default (flag_cross_tpc_consistency flips matched
-            // cathode-crossers to 1 below). Gated so the output stays bit-identical off.
-            if (m_xtpc_flag) cluster->set_scalar<int>("xtpc_consistent", 0);
             // Propagate the group's matched flash/t0 to its associated sub-clusters.
             for (auto* oc : bundle->get_other_clusters()) {
                 oc->set_cluster_t0(t0);
                 oc->set_scalar<int>("flash", flash->get_flash_id());
                 oc->set_scalar<int>("matched_flash_gid", flash_gid);
-                if (m_xtpc_flag) oc->set_scalar<int>("xtpc_consistent", 0);
             }
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",
@@ -1268,6 +1309,10 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["hc_tb_ks"]    = m_hc_tb_ks;     qp["hc_tb_c2"]    = m_hc_tb_c2;
     qp["hc_miss_ks"]  = m_hc_miss_ks;   qp["hc_miss_c2"]  = m_hc_miss_c2;
     qp["hc_miss_min_ndf"] = m_hc_miss_min_ndf;
+    qp["chi2_relax"]       = m_chi2_relax;
+    qp["chi2_pmt_excess"]  = m_chi2_pmt_excess;
+    qp["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
+    qp["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
     top["quality_params"] = qp;
 
     // OpDet table (all channels). apa side and active flag mirror compute_geometry:
@@ -1338,9 +1383,6 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             c["uid"]   = cluster_uid(apa, cl->ident());
             c["ident"] = cl->ident();
             c["apa"]   = apa;
-            // Cross-TPC confirm-stamp as written to the matched OUTPUT scalar PC
-            // (-1 = scalar absent: unmatched cluster or xtpc_flag off; 0/1 = matched).
-            c["xtpc_consistent"] = cl->get_scalar<int>("xtpc_consistent", -1);
             Json::Value xs(Json::arrayValue), ys(Json::arrayValue), zs(Json::arrayValue), qs(Json::arrayValue);
             std::size_t np = 0;
             for (auto* blob : cl->children()) {
@@ -1558,19 +1600,14 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
     }
 }
 
-// Cross-TPC cathode-crossing consistency confirm-stamp. Post-matching: for each
-// coincident matched-MAIN-cluster pair across the two TPCs, set flag_xtpc_consistent
-// (and the per-cluster "xtpc_consistent" output scalar) when the two halves connect as
-// one track across the cathode. Two data-tuned scenarios (10 SBND hand-scan events):
-//   1. closest approach (T0-corrected, with the per-TPC y,z pos_offset applied) < dmax;
-//   2. when a half is window-truncated (cathode end missing), the connecting vector is
-//      collinear with both local Hough directions to within angle_max.
-// Observation-only: matched assignments are unchanged; only the flag is added.
-void QLMatching::flag_cross_tpc_consistency(std::vector<ApaRun>& runs)
+// One candidate cross-TPC pair test (the -cathode-diag geometry on the FULL clusters,
+// with the per-TPC (y,z) pos_offset applied to the closest-point search and conn). True
+// iff scenario 1 (closest approach < dmax) OR scenario 2 (a half window-truncated AND
+// conn,dir0,dir1 mutually collinear < angle_max). A wrong-flash pairing carries the
+// wrong T0 x-offset => large d => no match, so it is self-vetoing.
+bool QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
 {
-    const double v = m_drift_speed;
     const double R = m_xtpc_hough_radius;
-    const double win_us = m_flash_group_window / units::us;
     const double amax = m_xtpc_angle_max;
 
     auto deg = [](const geo_vector_t& a, const geo_vector_t& b) {
@@ -1581,71 +1618,114 @@ void QLMatching::flag_cross_tpc_consistency(std::vector<ApaRun>& runs)
         return std::acos(c) * 180.0 / M_PI;
     };
 
-    // Matched MAIN clusters from both APAs (the user's "main clusters"), each with its
-    // T0 x-offset, transverse pos_offset, coincidence time, truncation, and bundle.
-    struct MC { TimingTPCBundle* b; Cluster* c; int apa; double off, dy, dz, t_us; bool wt; };
-    std::vector<MC> mcs;
+    // Closest approach over the full clusters in the T0-corrected frame, with the
+    // per-TPC transverse (y,z) pos_offset applied (mostly shifts this vector).
+    double best = 1e30; int bi = -1, bj = -1;
+    for (int a = 0; a < m0.c->npoints(); ++a) {
+        const geo_point_t ra = m0.c->point3d(a);
+        const double ax = ra.x() + m0.off, ay = ra.y() + m0.dy, az = ra.z() + m0.dz;
+        for (int b = 0; b < m1.c->npoints(); ++b) {
+            const geo_point_t rb = m1.c->point3d(b);
+            const double dx = ax - (rb.x() + m1.off);
+            const double dy = ay - (rb.y() + m1.dy);
+            const double dz = az - (rb.z() + m1.dz);
+            const double d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 < best) { best = d2; bi = a; bj = b; }
+        }
+    }
+    if (bi < 0) return false;
+    const double d = std::sqrt(best);
+
+    // Three-vector collinearity at the closest pair (scenario 2). Hough axes are
+    // computed on raw points (a constant T0 x-shift does not rotate them).
+    const geo_point_t r0 = m0.c->point3d(bi), r1 = m1.c->point3d(bj);
+    const geo_point_t p0(r0.x() + m0.off, r0.y() + m0.dy, r0.z() + m0.dz);
+    const geo_point_t p1(r1.x() + m1.off, r1.y() + m1.dy, r1.z() + m1.dz);
+    geo_vector_t dir0 = m0.c->vhough_transform(r0, R);
+    geo_vector_t dir1 = m1.c->vhough_transform(r1, R);
+    const geo_vector_t conn = p1 - p0;
+    if (dir0.dot(conn) < 0) dir0 = dir0 * -1.0;
+    if (dir1.dot(conn) < 0) dir1 = dir1 * -1.0;
+    const double a01 = deg(dir0, dir1), a0c = deg(dir0, conn), a1c = deg(dir1, conn);
+
+    // Scenario 1 (cathode end present): closest approach below xtpc_dmax. Scenario 2
+    // (a half window-truncated, cathode end missing): the connecting vector collinear
+    // with both local directions AND the halves no farther apart than xtpc_dmax2 -- the
+    // distance ceiling is load-bearing in the pre-fit candidate population, where
+    // far-apart collinear pairs (d>300cm) would otherwise sneak in (a real crosser's two
+    // halves cannot be arbitrarily far apart; the true sc2 pairs sit at d<=264cm).
+    const bool scenario1 = d < m_xtpc_dmax;
+    const bool scenario2 = (m0.wt || m1.wt) && d < m_xtpc_dmax2 &&
+                           a01 < amax && a0c < amax && a1c < amax;
+    if (!(scenario1 || scenario2)) return false;
+
+    log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm a01={:.1f} a0c={:.1f} a1c={:.1f} "
+               "trunc={} scenario={}", m0.c->ident(), m1.c->ident(), d / units::cm,
+               a01, a0c, a1c, (m0.wt || m1.wt), scenario1 ? 1 : 2);
+    return true;
+}
+
+// Cross-TPC cathode-crossing PRE-FIT cull. A cathode-crosser lights one coincident flash
+// group and is reconstructed as two halves (one per TPC). Pair every candidate
+// main-cluster bundle across the two TPCs whose flashes coincide; if the two halves are
+// geometrically cross-TPC consistent (xtpc_pair_consistent), flag both bundles, then drop
+// each marked cluster's non-consistent rivals so fewer bundles enter the LASSO. Tuned on
+// the 10 SBND hand-scan data events (MC validation); purity-first.
+void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
+{
+    const double v = m_drift_speed;
+    const double win_us = m_flash_group_window / units::us;
+
+    // Gather candidate main-cluster bundles from both APAs, each tagged by APA side and
+    // flash time (for coincidence) and carrying its T0 x-offset + transverse offset.
+    struct Cand { XtpcMC mc; int apa; double t_us; };
+    std::vector<Cand> cands;
     for (auto& run : runs) {
         const int apa = (int)run.anode->ident();
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double off = run.sign_offset * flash->get_time() * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash))
-                mcs.push_back({bundle.get(), bundle->get_main_cluster(), apa, off,
-                               run.dy, run.dz, flash->get_time() / units::us,
-                               bundle->get_flag_window_truncated()});
+                cands.push_back({XtpcMC{bundle.get(), bundle->get_main_cluster(), off,
+                                        run.dy, run.dz, bundle->get_flag_window_truncated()},
+                                 apa, flash->get_time() / units::us});
         }
     }
 
-    for (size_t i = 0; i < mcs.size(); ++i) {
-        if (mcs[i].apa != 0) continue;
-        for (size_t j = 0; j < mcs.size(); ++j) {
-            if (mcs[j].apa != 1) continue;
-            if (std::abs(mcs[i].t_us - mcs[j].t_us) > win_us) continue;   // coincident flash group
-            const MC& m0 = mcs[i];
-            const MC& m1 = mcs[j];
-
-            // Closest approach over the full clusters in the T0-corrected frame, with the
-            // per-TPC transverse (y,z) pos_offset applied (mostly shifts this vector).
-            double best = 1e30; int bi = -1, bj = -1;
-            for (int a = 0; a < m0.c->npoints(); ++a) {
-                const geo_point_t ra = m0.c->point3d(a);
-                const double ax = ra.x() + m0.off, ay = ra.y() + m0.dy, az = ra.z() + m0.dz;
-                for (int b = 0; b < m1.c->npoints(); ++b) {
-                    const geo_point_t rb = m1.c->point3d(b);
-                    const double dx = ax - (rb.x() + m1.off);
-                    const double dy = ay - (rb.y() + m1.dy);
-                    const double dz = az - (rb.z() + m1.dz);
-                    const double d2 = dx * dx + dy * dy + dz * dz;
-                    if (d2 < best) { best = d2; bi = a; bj = b; }
-                }
-            }
-            if (bi < 0) continue;
-            const double d = std::sqrt(best);
-
-            // Three-vector collinearity at the closest pair (scenario 2). Hough axes are
-            // computed on raw points (a constant T0 x-shift does not rotate them).
-            const geo_point_t r0 = m0.c->point3d(bi), r1 = m1.c->point3d(bj);
-            const geo_point_t p0(r0.x() + m0.off, r0.y() + m0.dy, r0.z() + m0.dz);
-            const geo_point_t p1(r1.x() + m1.off, r1.y() + m1.dy, r1.z() + m1.dz);
-            geo_vector_t dir0 = m0.c->vhough_transform(r0, R);
-            geo_vector_t dir1 = m1.c->vhough_transform(r1, R);
-            const geo_vector_t conn = p1 - p0;
-            if (dir0.dot(conn) < 0) dir0 = dir0 * -1.0;
-            if (dir1.dot(conn) < 0) dir1 = dir1 * -1.0;
-            const double a01 = deg(dir0, dir1), a0c = deg(dir0, conn), a1c = deg(dir1, conn);
-
-            const bool scenario1 = d < m_xtpc_dmax;
-            const bool scenario2 = (m0.wt || m1.wt) && a01 < amax && a0c < amax && a1c < amax;
-            if (!(scenario1 || scenario2)) continue;
-
-            m0.b->set_flag_xtpc_consistent(true);
-            m1.b->set_flag_xtpc_consistent(true);
-            m0.c->set_scalar<int>("xtpc_consistent", 1);
-            m1.c->set_scalar<int>("xtpc_consistent", 1);
-            log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm a01={:.1f} a0c={:.1f} a1c={:.1f} "
-                       "trunc={} scenario={}", m0.c->ident(), m1.c->ident(), d / units::cm,
-                       a01, a0c, a1c, (m0.wt || m1.wt), scenario1 ? 1 : 2);
+    for (size_t i = 0; i < cands.size(); ++i) {
+        if (cands[i].apa != 0) continue;
+        for (size_t j = 0; j < cands.size(); ++j) {
+            if (cands[j].apa != 1) continue;
+            if (std::abs(cands[i].t_us - cands[j].t_us) > win_us) continue;  // coincident
+            if (!xtpc_pair_consistent(cands[i].mc, cands[j].mc)) continue;
+            cands[i].mc.b->set_flag_xtpc_consistent(true);
+            cands[j].mc.b->set_flag_xtpc_consistent(true);
         }
+    }
+
+    // Cull, per run: a cluster with an xtpc-consistent bundle drops its other bundles
+    // that are neither high- nor xtpc-consistent (they cannot win against the
+    // cross-TPC-confirmed half). Mirrors cull_inconsistent.
+    auto is_consistent = [](const TimingTPCBundle::pointer& b) {
+        return b->get_consistent_flag() || b->get_flag_xtpc_consistent();
+    };
+    for (auto& run : runs) {
+        TimingTPCBundleSelection to_be_removed;
+        for (auto& kv : run.cluster_bundles_map) {
+            bool has_xtpc = false;
+            for (auto& b : kv.second)
+                if (b->get_flag_xtpc_consistent()) { has_xtpc = true; break; }
+            if (!has_xtpc) continue;
+            for (auto& b : kv.second) {
+                if (is_consistent(b)) continue;
+                to_be_removed.push_back(b);
+            }
+        }
+        remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
+                                run.flash_cluster_bundles_map);
+        remove_bundle_selection(to_be_removed, run.pre_bundles);
+        if (!to_be_removed.empty())
+            log->debug("QLXTPC apa {}: cross-TPC cull removed {} rival bundles pre-fit",
+                       (int)run.anode->ident(), to_be_removed.size());
     }
 }
 

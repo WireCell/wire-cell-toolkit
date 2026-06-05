@@ -133,6 +133,12 @@ namespace WireCell::Match {
         double m_bkg_weight{0.5};              // background-column weight (round 1)
         double m_pe_mismatch_knee{0.3};        // PE-mismatch weight knee (fraction of meas)
         double m_pe_mismatch_floor{0.3};       // PE-mismatch weight floor
+        // Flag-aware per-column L1 down-weight (prototype ToyMatching.cxx:1437; default
+        // OFF = bit-identical). When on, a boundary/near-PMT/window-truncated bundle's
+        // weight is multiplied by m_lasso_boundary_weight so it is shrunk less and more
+        // likely to survive the strength cutoff.
+        bool   m_lasso_flag_weight{false};
+        double m_lasso_boundary_weight{0.2};
 
         // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
         // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
@@ -159,6 +165,12 @@ namespace WireCell::Match {
         double m_hc_tb_ks{0.10};     double m_hc_tb_c2{8.0};
         double m_hc_miss_ks{0.08};   double m_hc_miss_c2{60.0};
         int    m_hc_miss_min_ndf{5};
+        // Per-bundle chi2 relaxation (prototype close-to-PMT denom inflation +
+        // one-inefficient-PMT subtraction); default off = bit-identical, SBND-on.
+        bool   m_chi2_relax{false};
+        double m_chi2_pmt_excess{350.0};
+        double m_chi2_pmt_ratio{1.3};
+        double m_chi2_pmt_inflate{0.5};
 
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time
@@ -294,6 +306,7 @@ namespace WireCell::Match {
         // Observation-only: matching assignments unchanged, only adds the flag.
         bool   m_xtpc_flag{false};
         double m_xtpc_dmax{5 * units::cm};
+        double m_xtpc_dmax2{300 * units::cm};     // scenario-2 closest-approach ceiling
         double m_xtpc_angle_max{20.0};            // degrees
         double m_xtpc_hough_radius{15 * units::cm};
 
@@ -400,6 +413,13 @@ namespace WireCell::Match {
         // Run the full single-APA matching pipeline on one ApaRun.
         void run_one_apa(ApaRun& run);
 
+        // The pipeline split at the LASSO-fit boundary, so a cross-TPC pre-fit cull can
+        // run between them (m_xtpc_flag, multi-APA): _prefit builds bundles + the
+        // per-TPC consistency cull; _fit runs the two LASSO rounds + output. run_one_apa
+        // = _prefit then _fit (the historical single-APA order).
+        void run_one_apa_prefit(ApaRun& run);
+        void run_one_apa_fit(ApaRun& run);
+
         // Pipeline stages, extracted verbatim from the old operator().
         void build_opdet_mask(ApaRun& run);          // base OpDet on/off mask
         void read_flashes(ApaRun& run);              // canonical flash PCs -> Opflash
@@ -425,6 +445,11 @@ namespace WireCell::Match {
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
+
+        // Per-column L1 down-weight (m_lasso_boundary_weight) for a boundary / near-PMT /
+        // window-truncated bundle when m_lasso_flag_weight is on (prototype's flag-based
+        // weight), else 1.0. Multiplies the pe-mismatch (+KS) base in both rounds.
+        double lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const;
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
 
@@ -439,13 +464,26 @@ namespace WireCell::Match {
         // connecting vector of the closest point pair. Never touches the matching.
         void dump_cathode_diag(const std::vector<ApaRun>& runs);
 
-        // Cross-TPC cathode-crossing consistency confirm-stamp (m_xtpc_flag only).
-        // Post-matching: pairs each TPC0 matched main cluster with the coincident TPC1
-        // matched main cluster, and sets flag_xtpc_consistent + the per-cluster
-        // "xtpc_consistent" output scalar when the two halves connect as one track
-        // across the cathode (see m_xtpc_* and the data-tuned cuts). Never changes the
-        // matched assignments.
-        void flag_cross_tpc_consistency(std::vector<ApaRun>& runs);
+        // Cross-TPC cathode-crossing pre-fit cull (m_xtpc_flag, multi-APA). Runs after
+        // each TPC's bundles + per-TPC cull but BEFORE the LASSO: pairs candidate
+        // main-cluster bundles across the two TPCs whose flashes coincide, sets
+        // flag_xtpc_consistent on a geometrically cross-TPC-consistent pair (the two
+        // halves connect as one track across the cathode), then drops each marked
+        // cluster's non-consistent rivals so fewer bundles enter the fit. Off by default
+        // => not called => bit-identical.
+        void cull_cross_tpc(std::vector<ApaRun>& runs);
+
+        // One candidate cross-TPC pair test, shared by cull_cross_tpc. m{0,1} carry the
+        // two clusters with their T0 x-offset, per-TPC (y,z) pos_offset, and truncation
+        // flag. Returns true iff scenario 1 (closest approach < m_xtpc_dmax) OR scenario
+        // 2 (a half truncated AND conn,dir0,dir1 mutually collinear < m_xtpc_angle_max).
+        struct XtpcMC {
+            TimingTPCBundle* b;
+            WireCell::Clus::Facade::Cluster* c;
+            double off, dy, dz;
+            bool wt;
+        };
+        bool xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const;
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

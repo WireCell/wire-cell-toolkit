@@ -47,6 +47,18 @@ namespace WireCell::Match {
         double hc_tb_ks    = 0.10;  double hc_tb_c2    = 8.0;   // B3
         double hc_miss_ks  = 0.08;  double hc_miss_c2  = 60.0;  // B4
         int    hc_miss_min_ndf = 5;                             // B4 ndf floor (B1-B3 use highconsist_min_ndf)
+        // Per-bundle chi2 relaxation ported from the prototype FlashTPCBundle.cxx:480-502
+        // (default off -> bit-identical; SBND-on). Two behaviors, on the toolkit's
+        // (meas + perr^2) Poisson base: (1) when flag_close_to_PMT and a channel shows a
+        // big measured excess (pe-pred > chi2_pmt_excess && pe > chi2_pmt_ratio*pred),
+        // widen its denominator by (pe*chi2_pmt_inflate)^2 (softens near-PMT over-
+        // response); (2) tolerate one inefficient PMT -- if the single worst-chi2 channel
+        // is (pe==0 && pred>0), subtract (max_chi2 - 1) from the total. chi2_pmt_excess is
+        // absolute PE -> re-tuned for SBND (prototype 350 is a MicroBooNE light-yield value).
+        bool   chi2_relax = false;
+        double chi2_pmt_excess  = 350.0;   // measured-excess PE threshold (RE-TUNE for SBND)
+        double chi2_pmt_ratio   = 1.3;     // measured/predicted ratio threshold
+        double chi2_pmt_inflate = 0.5;     // fraction of pe added in quadrature to the denom
     };
 
     class TimingTPCBundle {

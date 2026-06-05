@@ -201,6 +201,7 @@ bool TimingTPCBundle::examine_bundle()
     chi2 = 0;
     ndf  = 0;
     int nvalidopdets = 0;
+    double max_chi2 = -1; int max_bin = -1;
     for (int j = 0; j < m_nchan; ++j) {
         if (opdet_mask[j] == 0) continue;
         ++nvalidopdets;
@@ -209,8 +210,21 @@ bool TimingTPCBundle::examine_bundle()
         const double perr = m_qp.pe_err_on_pred
             ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
             : pe_err[j];
-        chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
+        double denom = pe[j] + perr * perr;
+        // Prototype close-to-PMT relaxation: a big measured excess near the PMTs widens
+        // the denominator (near-PMT over-response is not a real charge/light mismatch).
+        if (m_qp.chi2_relax && flag_close_to_PMT &&
+            pe[j] - pred_pe[j] > m_qp.chi2_pmt_excess &&
+            pe[j] > m_qp.chi2_pmt_ratio * pred_pe[j])
+            denom += std::pow(pe[j] * m_qp.chi2_pmt_inflate, 2);
+        const double cur = std::pow(pred_pe[j] - pe[j], 2) / denom;
+        chi2 += cur;
+        if (cur > max_chi2) { max_chi2 = cur; max_bin = j; }
     }
+    // Prototype one-inefficient-PMT tolerance: drop the single worst channel when it is a
+    // dead/inefficient PMT (measured 0 but light predicted).
+    if (m_qp.chi2_relax && max_bin >= 0 && pe[max_bin] == 0 && pred_pe[max_bin] > 0)
+        chi2 -= max_chi2 - 1;
 
     flag_high_consistent = false;
     if (!m_qp.highconsist_ladder) {

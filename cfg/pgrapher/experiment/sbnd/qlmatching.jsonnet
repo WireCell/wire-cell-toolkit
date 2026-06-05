@@ -134,6 +134,14 @@ function(params) {
             bkg_weight: 0.5,
             pe_mismatch_knee: 0.3,
             pe_mismatch_floor: 0.3,
+            // Flag-aware per-column L1 down-weight (prototype boundary down-weight,
+            // ToyMatching.cxx:1437, generalized to the ladder-B4 flag group). A
+            // boundary/near-PMT/window-truncated bundle's L1 weight is multiplied by
+            // lasso_boundary_weight so it is shrunk less and survives the strength cutoff
+            // (its measured light is an underestimate, so a raw PE-mismatch penalty would
+            // wrongly kill it). C++ default OFF (multiplier 1.0 => bit-identical); SBND-on.
+            lasso_flag_weight: true,
+            lasso_boundary_weight: 0.2,
             // §G per-PMT light-error model (Q/L PE-error study, match/docs): a constant
             // floor (PE) below the knee, fractional above -- larger fractional error at low
             // PE, ->frac at high PE. Applied to BOTH data and sim (conservative for sim, kept
@@ -173,6 +181,17 @@ function(params) {
             hc_tb_ks:    0.10, hc_tb_c2:    8.0,
             hc_miss_ks:  0.08, hc_miss_c2:  60.0,
             hc_miss_min_ndf: 5,
+            // Per-bundle chi2 relaxation (prototype FlashTPCBundle.cxx:480-502): for a
+            // close-to-PMT bundle, a channel with a big measured excess over the
+            // prediction (pe-pred > chi2_pmt_excess PE AND pe > chi2_pmt_ratio*pred) gets
+            // its denominator widened by (pe*chi2_pmt_inflate)^2 (near-PMT over-response
+            // is not a real mismatch); and the single worst-chi2 channel is dropped if it
+            // is a dead/inefficient PMT (pe==0, pred>0). chi2_pmt_excess re-tuned for SBND.
+            // C++ default OFF = bit-identical; SBND-on.
+            chi2_relax: true,
+            chi2_pmt_excess: 350.0,
+            chi2_pmt_ratio: 1.3,
+            chi2_pmt_inflate: 0.5,
             // §H raw readout-window truncation flag is always computed by
             // QLMatching (T0-independent, APA-agnostic) and is currently inert
             // (no consumer). edge threshold = 24 ticks (6 live slices, rebin 4).
@@ -203,6 +222,7 @@ function(params) {
             // match/docs/chisquare_flags_comparison.md and sbnd_xin cathode-crossing doc.
             xtpc_flag: true,
             xtpc_dmax: 5 * wc.cm,
+            xtpc_dmax2: 300 * wc.cm,
             xtpc_angle_max: 20,
             xtpc_hough_radius: 15 * wc.cm,
 

@@ -115,14 +115,21 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `hc_tb_ks` / `hc_tb_c2` | `0.10` / `8.0` | `m_hc_tb_*` | B3 (`flag_two_boundary`) ceilings. |
 | `hc_miss_ks` / `hc_miss_c2` | `0.08` / `60.0` | `m_hc_miss_*` | B4 (`flag_at_x_boundary`‖`flag_close_to_PMT`‖`flag_window_truncated`) ceilings — KS tight, chi2 relaxed (missing charge). |
 | `hc_miss_min_ndf` | `5` | `m_hc_miss_min_ndf` | B4 ndf floor (B1–B3 reuse `highconsist_min_ndf`). |
-| `xtpc_flag` | `false` (SBND: **true**) | `m_xtpc_flag` | post-matching **cross-TPC confirm-stamp** (`flag_cross_tpc_consistency`): for each coincident matched-main-cluster pair across the two TPCs, set `flag_xtpc_consistent` + the per-cluster `xtpc_consistent` output scalar when the two cathode halves connect as one track. Default OFF ⇒ pass not called, no scalar written, production output bit-identical. Observation-only (assignments unchanged). See `chisquare_flags_comparison.md` §16. |
+| `chi2_relax` | `false` (SBND: **true**) | `m_chi2_relax` | per-bundle χ² relaxation in `examine_bundle` (`BundleQualityParams::chi2_relax`): close-to-PMT denominator inflation + one-inefficient-PMT subtraction (`chisquare_flags_comparison.md` §3.1). Default OFF = bit-identical. Live-but-benign on the hand-scans (the KS-led ladder absorbs it). |
+| `chi2_pmt_excess` | `350` (PE) | `m_chi2_pmt_excess` | measured-excess threshold for the close-to-PMT inflation (`pe − pred > this`). Re-validated for SBND (over-response median ~2300 PE). Inert unless `chi2_relax`. |
+| `chi2_pmt_ratio` | `1.3` | `m_chi2_pmt_ratio` | the inflation also requires `pe > this·pred`. |
+| `chi2_pmt_inflate` | `0.5` | `m_chi2_pmt_inflate` | denominator widened by `(pe·this)²`. |
+| `lasso_flag_weight` | `false` (SBND: **true**) | `m_lasso_flag_weight` | when true the LASSO per-column L1 weight of a `flag_at_x_boundary`‖`flag_close_to_PMT`‖`flag_window_truncated` bundle is multiplied by `lasso_boundary_weight` (`chisquare_flags_comparison.md` §6.2). Default OFF = factor 1.0, bit-identical. |
+| `lasso_boundary_weight` | `0.2` | `m_lasso_boundary_weight` | the boundary down-weight factor (prototype value). Inert unless `lasso_flag_weight`. |
+| `xtpc_flag` | `false` (SBND: **true**) | `m_xtpc_flag` | **cross-TPC cathode-crossing pre-fit cull** (`cull_cross_tpc`, run between the all-APA prefit and all-APA fit loops): a coincident candidate main-cluster pair confirmed as one cathode-crosser sets `flag_xtpc_consistent` on both bundles and drops each marked cluster's non-consistent rivals before the LASSO. Default OFF ⇒ pass not called, single-loop pipeline, production output bit-identical. **Changes matching** (it culls bundles). See `chisquare_flags_comparison.md` §16. |
 | `xtpc_dmax` | `5 cm` | `m_xtpc_dmax` | scenario-1 closest-approach cut (T0-corrected, per-TPC `dy/dz` applied). |
+| `xtpc_dmax2` | `300 cm` | `m_xtpc_dmax2` | scenario-2 closest-approach **ceiling** — the candidate population admits far-apart collinear truncated pairs that angle cannot reject (§16). |
 | `xtpc_angle_max` | `20` (deg) | `m_xtpc_angle_max` | scenario-2 collinearity cut (truncated half): `conn`,`dir0`,`dir1` mutual angles all below this. |
 | `xtpc_hough_radius` | `15 cm` | `m_xtpc_hough_radius` | radius for the local `vhough_transform` direction at each closest-point. |
 
-New per-cluster **output scalar** `xtpc_consistent` (int 0/1, written only when `xtpc_flag`) rides
-the matched cluster PC alongside `cluster_t0`/`matched_flash_gid`; also dumped per bundle in the
-`-calib` JSON as `xtpc_consistent`.
+`flag_xtpc_consistent` is dumped per bundle in the `-calib` JSON as `xtpc_consistent`; it is **not**
+written to the cluster output PC (the earlier post-fit confirm-stamp's per-cluster `xtpc_consistent`
+scalar was removed when the flag became a pre-fit cull).
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
 `flash_minPE: 50` (not 500), `QtoL: 1.0` (not 0.5), `data` from `reality`,
