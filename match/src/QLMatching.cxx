@@ -431,6 +431,10 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     if (neos) raise<ValueError>("QLMatching: missing %d input tensors", (int)neos);
 
     ExecMon em("starting QLMatching");
+    // Baseline RSS at QLMatching entry (process is already loaded with the clustered
+    // pctree, so this is "everything before matching"). Used below to report the
+    // matcher's own incremental footprint vs the whole-process resident set.
+    const auto mu0 = em.mu.current();
 
     m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
     m_pca_endpoints_cache.clear();
@@ -524,6 +528,19 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     // per-APA runs only; never perturbs the matching above.
     if (!m_calib_dump.empty()) dump_calib(runs);
     if (!m_cathode_diag.empty()) dump_cathode_diag(runs);
+
+    // Per-event timing + memory. `took` is the full operator() wall time. RSS is the
+    // resident set of the WHOLE matching process at this point (dominated by the
+    // upstream clustering point clouds, NOT by QLMatching); `delta` is QLMatching's
+    // own incremental footprint over its entry baseline (typically small/near-zero
+    // since the matcher reuses the already-resident pctree).
+    // MemUsage::current() = (virtual size, resident); .second is the RSS we want.
+    // Debug-level (consistent with the MABC `MABC timing:` lines). The chain is
+    // single-threaded, so this whole operator() wall is QLMatching compute, not log I/O.
+    const auto mu1 = em.mu.current();
+    log->debug("QLMatching timing: ident {} took {} ms, proc RSS {:.1f} MB (delta {:.1f} MB)",
+               out_ident, em.tk.since().total_milliseconds(),
+               mu1.second / 1024.0, (mu1.second - mu0.second) / 1024.0);
 
     ++m_count;
     return true;

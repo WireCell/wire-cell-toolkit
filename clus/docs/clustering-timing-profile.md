@@ -6,6 +6,45 @@ events). Identifies *which clustering stage* is slow and *which events* dominate
 the optimization work can be targeted. **Numbers below are LOCKED from the final
 150-event auto_mask-on reprocess (2026-06-04, `f{1,2,3}on/match.log`).**
 
+> **⚠ Provenance (2026-06-05): the §"Headline" clustering numbers below were measured on
+> yuhw's pre-imaged `*-active.npz` (foreign live input), which we have since stopped using
+> ([[feedback_own_imaging_only]]). Our own local multi-3view active imaging changes the
+> clustering input, so those per-stage/per-event clustering shares are expected to shift and
+> should be treated as FOREIGN-INPUT BASELINE pending a re-pull from a crash-clean
+> local-imaging run. The new §0 imaging numbers below ARE from our own local imaging.**
+
+## 0. Imaging time & memory (our own local imaging, 2026-06-05)
+
+Measured on file 1 of `input-3files-lan-reco2` (50 real data events), imaging active+dead
+blobs ourselves from the SP frames — no foreign npz. Two separate wire-cell processes,
+each wrapped by `profrun.sh` (polls `/proc/PID/status` `VmHWM` for peak RSS); wall from the
+process log timestamp span.
+
+| stage | what | wall (50 evt) | per-event | peak RSS |
+|---|---|--:|--:|--:|
+| **active imaging** | `wct-img-all.jsonnet` (multi-3view + full_deghost, both APAs) | **~382 s** | ~7.6 s | **1131 MB** |
+| **matching process** | dead imaging + per-APA + all-APA clustering + QLMatching | ~658 s | ~13 s | 985 MB |
+
+The active-imaging job (multi-3view + `full_deghost` = ProjectionDeghosting ×2 + 3×
+ChargeSolving + 3× InSliceDeghosting per APA) is the heavier standalone imaging step and is
+where W-plane dead-channel charge recovery happens. Dead/masked imaging is folded into the
+matching process (in-graph) and is not separately timed here. Within the matching process,
+**QLMatching itself is ~369 s (~56 %)** — see `match/docs/chisquare_flags_comparison.md` §17
+for the per-event matcher breakdown.
+
+**Per-stage imaging timing is still NOT instrumented** (the imaging nodes emit no `took`
+lines — see the caveat below); the §0 numbers are whole-process only. Adding `took` timing
+to `MaskSlices`/`GridTiling`/`BlobClustering`/`ChargeSolving` remains the prerequisite for a
+per-stage imaging breakdown.
+
+> **Open blocker (2026-06-05):** the full local-imaging reprocess of files 1–3 is blocked by
+> an **intermittent clustering heap-corruption** in `clus_all_apa`, newly exposed by the
+> richer local active imaging (segfaults on a layout-dependent ~50–70 % of runs; clean under
+> gdb and in single-event isolation → a memory-corruption heisenbug, distinct from the
+> already-fixed `fill_wrap_points` off-by-one). Root-causing via valgrind memcheck (Go/
+> gojsonnet startup noise suppressed). Until fixed, the §0 wall/RSS come from runs that
+> happened to complete all 50 events.
+
 ## How it was measured
 
 Each `MultiAlgBlobClustering` node logs `MABC timing: <Stage>:<scope> took <ms> ms`

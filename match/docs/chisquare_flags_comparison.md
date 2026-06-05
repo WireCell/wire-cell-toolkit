@@ -1178,3 +1178,66 @@ the real C++ values, never a python PCA proxy — the PCA proxy mis-estimates th
 Config (default OFF = bit-identical; SBND-on): `xtpc_flag`, `xtpc_dmax`, `xtpc_dmax2`,
 `xtpc_angle_max`, `xtpc_hough_radius` (§11 table in `qlmatching-code.md`). Output: the
 `flag_xtpc_consistent` bundle field in the `-calib` dump (no root-node scalar).
+
+## 17. QLMatching runtime cost (timing & memory)
+
+**Measured on our own locally-imaged clusters** (file 1 of `input-3files-lan-reco2`, 50
+real BNB+cosmic data events, SBND-on, joint two-TPC matching). Active **and** dead blobs
+were imaged in-toolkit from the SP frames (`wct-img-all.jsonnet` + in-graph masked
+imaging) — **no foreign `*-active.npz`** (see [[feedback_own_imaging_only]]). Per-event
+cost is instrumented directly in `QLMatching::operator()` via the existing `ExecMon em`,
+which emits one line per event:
+
+```
+QLMatching timing: ident <N> took <ms> ms, proc RSS <MB> MB (delta <MB> MB)
+```
+
+`took` is the full `operator()` wall (prefit + cross-TPC cull + fit + output build).
+`proc RSS` is the **whole matching process** resident set at that point (size→resident is
+`MemUsage::current().second`); `delta` is QLMatching's own incremental RSS over its entry
+baseline. The chain is single-threaded (`Pgrapher`), so no other node runs inside the
+measured window — the only logging overhead inside it is QLMatching's own ~150 debug
+lines/event (tens of ms vs seconds), i.e. the numbers are compute, not log I/O.
+
+### 17.1 Timing — QLMatching is seconds/event, not "sub-second"
+
+Per-event `took`, 49 events (stable across three independent runs):
+
+| metric | value |
+|---|--:|
+| median | **5.2 s** |
+| mean | 7.5 s |
+| p99 / max | **31 s** (event 60933, the busiest cosmic pile-up) |
+| total (49 evt) | **369 s** |
+
+For context, the whole matching process (dead imaging + per-APA clustering + all-APA
+clustering + QLMatching) ran ~658 s wall over this file, so **QLMatching alone is ~56 % of
+the matching-process wall**. This corrects the earlier "QLMatching is sub-second" note
+(which was measured against yuhw's sparser larsoft active.npz; see
+[[project_clustering_examinebundles_hotspot]]): on our richer multi-3view active clusters
+the matcher's per-cluster geometry (PCA, `vhough`, cached `get_extreme_wcps`) and the
+two-round LASSO dominate, and the cost scales with cluster/point count — hence the long
+tail (median 5 s, max 31 s).
+
+### 17.2 Memory — QLMatching's own footprint is negligible
+
+| metric | value |
+|---|--:|
+| matching-process RSS at QL end (median) | **691 MB** |
+| matching-process RSS at QL end (max) | 707 MB |
+| QLMatching incremental ΔRSS (median / max) | **≈ 0 MB** (−6 .. +0) |
+
+The process resident set (~0.7 GB, dominated by the clustering point clouds) is already
+fully resident when QLMatching runs; the matcher reuses that pctree in place and allocates
+essentially nothing of its own (the small negative deltas are allocator give-back during
+matching). The whole-process **peak** RSS (`VmHWM`, polled externally) was **985 MB** for
+the matching job and **1131 MB** for the upstream active-imaging job. So matching is not a
+memory bottleneck; the per-event *time* is the cost to watch.
+
+> **Caveat (open, 2026-06-05).** The full 150-event local-imaging reprocess is **blocked by
+> an intermittent clustering heap-corruption** newly exposed by the richer local active
+> imaging (segfaults in `clus_all_apa` on a layout-dependent ~50–70 % of runs; clean under
+> gdb/valgrind layout, so it is a memory-corruption heisenbug, not the already-fixed
+> `fill_wrap_points` off-by-one). The timings above come from the runs that completed all
+> 49–50 events; root-causing is in progress (valgrind memcheck). The numbers are
+> representative per-event, but the end-to-end batch is not yet crash-clean.
