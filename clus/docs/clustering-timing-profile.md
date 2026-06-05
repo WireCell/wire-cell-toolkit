@@ -72,6 +72,88 @@ per-stage imaging breakdown.
 >   build flags were reverted after the session (`waft/smplpkgs.py` back to HEAD; clus
 >   rebuilt with 0 `__asan` symbols).
 
+## 1. Local-imaging per-event re-measurement (2026-06-05) — the foreign hotspots dissolve
+
+The five "pathological" events from the foreign-input headline (below) were re-measured
+under **our own local imaging**. Four already had complete timing on disk from the clean
+full-file `run_local.sh` reprocesses (`f2`/`f3` rc=0, 50 evt each; `f1` 59789 from the
+partial run); **61637** (never reached before the f1 heisenbug crash) and **59789** (its
+on-disk number came from the crashed f1 run) were re-run **single-event in isolation**
+(crash-safe: the `clus_all_apa` heisenbug is cross-event) via
+`/home/xqian/tmp/lanrepro2/{mkev.sh,runev.sh}` → `f1/ev<ID>/ev.log`. 59789's single-event
+total (55.2 s) matches its full-file total (54.7 s), confirming the single-event method
+and validating the crashed-run number.
+
+| rank (old) | event | file | **foreign baseline** (superseded) | **local imaging** (total clustering / ExamineBundles) |
+|--:|--:|:--:|--:|--:|
+| 1 | **141530** | 2 | 952 s (ExBundles 613 s) | **6.1 s** / 2.9 s |
+| 2 | **59789**  | 1 | 466 s (ExBundles 239 s) | **55.2 s** / 29.7 s  *(single-event re-run; full-file 54.7 s)* |
+| 3 | **138824** | 2 | 236 s (ExBundles 150 s) | **47.5 s** / 29.7 s |
+| 4 | 187650 | 3 | ~92 s (ExBundles 46 s) | **56.7 s** / 39.1 s |
+| 5 | 61637  | 1 | ~72 s | **4.0 s** / 2.3 s  *(single-event)* |
+
+Per-file local-imaging totals: **f2 = 144.5 s / 50 evt, f3 = 173 s / 50 evt** (≈ 3 s/event
+mean vs ≈ 17 s/event on the foreign baseline). ExamineBundles is **still the #1 stage
+(50–54 %)** and still long-tailed, but the worst *single* node-pass is now ~15–20 s, not
+~310 s.
+
+**Two premises overturned.**
+
+1. **141530 — the isochronous event in the screenshot
+   (`sbnd_xin/pics/Screenshot 2026-06-05 at 6.26.44 PM.png`) — is NOT a hotspot under our
+   pipeline** (6.1 s; per-node ExamineBundles 228 + 1213 + 1422 ms). The "isochronous look"
+   is not what drives clustering time. The genuinely slow events are 59789 / 138824 / 187650.
+
+2. **Neither cluster count nor blob/point count predicts ExamineBundles time.** Final live
+   `nclusters` is tiny for *every* event (≤ 30; 141530 has the most at 30, yet is fastest),
+   so the O(n²) cluster *pair* loop (`clustering_examine_bundles.cxx:113-129`) cannot be the
+   explosion — it ranges over ≤ 30 items. And raw blob/point counts (from the active npz)
+   *anti*-correlate if anything:
+
+   | event | clustering | total points | total blobs |
+   |--:|--:|--:|--:|
+   | 141530 | **6.1 s** | 8853 | **9187** (most) |
+   | 138824 | 47.5 s | 8178 | 6689 |
+   | 187650 | 56.7 s | 7436 | 6014 |
+   | 59789  | 55.2 s | 6964 | 6567 |
+   | 61637  | **4.0 s** | 4939 | 2873 |
+
+   141530 has the most blobs and points but the fastest clustering. Even within a TPC:
+   141530/apa0 (5666 blobs) = 1.2 s vs 59789/apa0 (4886 blobs) = 14.6 s — comparable blob
+   count, **12× the time**. So the cost is **topological** (the per-cluster
+   `connected_blobs` blob-graph: edge density / how tangled the blobs are in a few large
+   clusters), **not** count-driven.
+
+**Attribution caveat (do not over-claim the 5–150× drop).** The foreign baseline and these
+local runs differ in *three* uncontrolled ways — imaging input (foreign larsoft
+`*-active.npz` vs our multi-3view active), code version (the `fill_wrap_points` fix landed
+between), and config (foreign was auto_mask-on; `run_local.sh` is not). So treat the local
+numbers as the **live-pipeline measurement that supersedes** the foreign baseline; the gap
+is not attributable to any single cause. (An isolation control — current binary on foreign
+141530 input — would pin imaging-vs-code, but is not needed for the optimization decision.)
+
+### Revised optimization strategy (replaces the foreign-baseline "spatial pre-filter" plan)
+
+The original suggestion (spatial pre-filter on the O(n²) cluster pair loop) is **misdirected**
+under local imaging: with ≤ 30 final clusters that loop is negligible. The real cost is the
+per-cluster `connected_blobs` (`clustering_examine_bundles.cxx:148-162` →
+`Facade_Cluster.cxx:2949`) on a few large, densely-connected clusters, and it scales with
+blob-graph **edge count**, not blob count.
+
+1. **Split the ExamineBundles timer** into *pair-loop* vs *connected_blobs* (and, inside
+   `connected_blobs`, graph-build vs connected-components) on one slow event (138824 —
+   ExamineBundles concentrated in `apa1-0` + `clus_all_apa` ≈ 30 s). A small debug-only
+   `took` timer in `MultiAlgBlobClustering.cxx` / `Facade_Cluster.cxx`; no behavior change.
+   This is the prerequisite measurement — it tells us *which half* to optimize.
+2. **Profile `connected_blobs` per cluster**: log per-cluster blob count + graph edge count
+   + time, to confirm a handful of large tangled clusters dominate and find the edge-count
+   blow-up. The blob-graph build (proximity search via the `DynamicPointCloud` kd-tree) and
+   the edge set are the candidate hot loops.
+3. `connected_blobs` is the **shared primitive** under Deghost / ProtectOverclustering /
+   Separate (which peak on the same events), so one fix there plausibly moves all four.
+4. Validate any change is **clustering-output-identical** on the quiet hand-scan events
+   before trusting the tail events.
+
 ## How it was measured
 
 Each `MultiAlgBlobClustering` node logs `MABC timing: <Stage>:<scope> took <ms> ms`
@@ -96,6 +178,13 @@ per-event, the imaging stages (`MaskSlices`/`GridTiling`/`BlobClustering`/
 follow-up worth doing** before optimizing imaging, since right now we are blind to it.
 
 ## Headline: one stage and a handful of events dominate
+
+> **⚠ SUPERSEDED (2026-06-05) — foreign-input baseline.** The numbers in this section were
+> measured on yuhw's foreign larsoft `*-active.npz` (pre-`fill_wrap_points`-fix, auto_mask-on)
+> and are kept only for history/comparison. Under our own local imaging the per-event times
+> are 5–150× smaller and the ranking changes — see **§1** above. In particular the
+> "worst event, 141530 = 952 s" is **6.1 s** under local imaging, and ExamineBundles cost is
+> topological, not count-driven. Use §1, not this section, for optimization decisions.
 
 Total clustering wall summed over all 150 events: **~2589 s**.
 
@@ -138,6 +227,11 @@ ranking moves but the shape — one stage, a few events — is invariant.)
 | `apa1-0` (TPC 1) | ~26 % | |
 
 ## Why ClusteringExamineBundles is the hotspot (starting point for tomorrow)
+
+> **⚠ Partially revised by §1 (2026-06-05).** Direction #1 below (spatial pre-filter on the
+> O(n²) pair loop) is the wrong target under local imaging — final `nclusters` ≤ 30, so that
+> loop is negligible. The cost is the per-cluster `connected_blobs` (#2), and it scales with
+> blob-graph *edge density*, not raw blob count (see §1's count tables). Use §1's strategy.
 
 Source: `clus/src/clustering_examine_bundles.cxx` (see also the algorithm review
 `clus/docs/clustering/review_neutrino_isolated_examine_bundles.md`). Two structural
