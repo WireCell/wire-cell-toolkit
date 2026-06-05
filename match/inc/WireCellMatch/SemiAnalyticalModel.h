@@ -70,10 +70,18 @@ namespace WireCell::Match {
                             const std::vector<OpticalDetector>& opdets,
                             bool doReflectedLight = true);
 
+        // opdet_mask (optional): when non-null, opdets with mask[i]==0 are skipped
+        // (their visibility stays 0) instead of evaluating the per-opdet solid-angle
+        // and Gaisser-Hillas corrections. The caller must size the mask to nOpDets();
+        // a null mask (default) computes every opdet, leaving existing callers
+        // bit-identical. Used by QLMatching to skip the masked PMTs / non-PMT opdets
+        // whose predicted light it discards anyway.
         void detectedDirectVisibilities(std::vector<double>& vis,
-                                        const WireCell::Point& scintPoint) const;
+                                        const WireCell::Point& scintPoint,
+                                        const std::vector<unsigned int>* opdet_mask = nullptr) const;
         void detectedReflectedVisibilities(std::vector<double>& vis,
-                                           const WireCell::Point& scintPoint) const;
+                                           const WireCell::Point& scintPoint,
+                                           const std::vector<unsigned int>* opdet_mask = nullptr) const;
 
         std::size_t nOpDets() const { return m_opdets.size(); }
 

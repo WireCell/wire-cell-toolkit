@@ -926,10 +926,14 @@ void QLMatching::build_bundles(ApaRun& run)
 
                     // SemiAnalyticalModel expects positions in cm; blob points are mm.
                     const WireCell::Point xyz_cm(x / units::cm, y / units::cm, z / units::cm);
+                    // Skip masked opdets inside the model: their predicted light is
+                    // discarded by the flash_opdet_mask gate below, so evaluating the
+                    // per-opdet solid-angle/Gaisser-Hillas correction for them is wasted
+                    // (~half of the same-TPC opdets are masked). Bit-identical result.
                     std::vector<double> direct_visibilities;
-                    m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm);
+                    m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
                     std::vector<double> reflected_visibilities;
-                    m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm);
+                    m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm, &flash_opdet_mask);
 
                     for (std::size_t idet = 0; idet < nopdets; ++idet) {
                         if (flash_opdet_mask.at(idet) == 0) continue;

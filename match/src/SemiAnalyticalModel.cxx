@@ -223,10 +223,14 @@ SemiAnalyticalModel::SemiAnalyticalModel(const Configuration& VUVHits,
 // ---------------------------------------------------------------------------
 // Direct (VUV) visibilities
 void SemiAnalyticalModel::detectedDirectVisibilities(std::vector<double>& vis,
-                                                     const WireCell::Point& scintPoint) const
+                                                     const WireCell::Point& scintPoint,
+                                                     const std::vector<unsigned int>* opdet_mask) const
 {
     vis.assign(m_opdets.size(), 0.);
     for (std::size_t i = 0; i < m_opdets.size(); ++i) {
+        // Skip caller-masked opdets: their visibility is discarded downstream, so
+        // computing it is wasted (leaves vis[i]=0, bit-identical to the masked path).
+        if (opdet_mask && i < opdet_mask->size() && (*opdet_mask)[i] == 0) continue;
         const auto& od = m_opdets[i];
         // same-TPC visibility (port of SBNDOpticalPath_tool): only OpDets on
         // the same X-sign as the scintillation point are visible.
@@ -308,7 +312,8 @@ double SemiAnalyticalModel::VUVVisibility(const WireCell::Point& scintPoint,
 // ---------------------------------------------------------------------------
 // Reflected (VIS) visibilities
 void SemiAnalyticalModel::detectedReflectedVisibilities(std::vector<double>& vis,
-                                                        const WireCell::Point& scintPoint) const
+                                                        const WireCell::Point& scintPoint,
+                                                        const std::vector<unsigned int>* opdet_mask) const
 {
     vis.assign(m_opdets.size(), 0.);
     if (!m_doReflectedLight) return;
@@ -351,6 +356,8 @@ void SemiAnalyticalModel::detectedReflectedVisibilities(std::vector<double>& vis
     // Step 2: per-PD visibility from the hotspot.
     const Point hotspot(plane_depth, scintPoint.y(), scintPoint.z());
     for (std::size_t i = 0; i < m_opdets.size(); ++i) {
+        // Skip caller-masked opdets (see detectedDirectVisibilities).
+        if (opdet_mask && i < opdet_mask->size() && (*opdet_mask)[i] == 0) continue;
         const auto& od = m_opdets[i];
         if ((scintPoint.x() < 0.) != (od.center.x() < 0.)) continue;
         vis[i] = VISVisibility(scintPoint, od, cathode_visibility_rec, hotspot);
