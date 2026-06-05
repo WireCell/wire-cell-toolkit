@@ -284,6 +284,19 @@ namespace WireCell::Match {
         // point. Cathode-diag only.
         double m_cathode_diag_radius{15 * units::cm};
 
+        // Cross-TPC cathode-crossing consistency confirm-stamp (off unless xtpc_flag).
+        // Post-matching: for each coincident matched-main-cluster pair across the two
+        // TPCs, set flag_xtpc_consistent if the two halves connect as one track across
+        // the cathode -- closest approach < xtpc_dmax (scenario 1), or, when a half is
+        // window-truncated, the connecting vector is collinear with both local Hough
+        // directions to within xtpc_angle_max (scenario 2). Cuts tuned on the 10 SBND
+        // hand-scan data events. Default off => never invoked, output bit-identical.
+        // Observation-only: matching assignments unchanged, only adds the flag.
+        bool   m_xtpc_flag{false};
+        double m_xtpc_dmax{5 * units::cm};
+        double m_xtpc_angle_max{20.0};            // degrees
+        double m_xtpc_hough_radius{15 * units::cm};
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -425,6 +438,14 @@ namespace WireCell::Match {
         // cross-TPC cathode-crossing pair, the two local directions and the
         // connecting vector of the closest point pair. Never touches the matching.
         void dump_cathode_diag(const std::vector<ApaRun>& runs);
+
+        // Cross-TPC cathode-crossing consistency confirm-stamp (m_xtpc_flag only).
+        // Post-matching: pairs each TPC0 matched main cluster with the coincident TPC1
+        // matched main cluster, and sets flag_xtpc_consistent + the per-cluster
+        // "xtpc_consistent" output scalar when the two halves connect as one track
+        // across the cathode (see m_xtpc_* and the data-tuned cuts). Never changes the
+        // matched assignments.
+        void flag_cross_tpc_consistency(std::vector<ApaRun>& runs);
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

@@ -115,6 +115,14 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `hc_tb_ks` / `hc_tb_c2` | `0.10` / `8.0` | `m_hc_tb_*` | B3 (`flag_two_boundary`) ceilings. |
 | `hc_miss_ks` / `hc_miss_c2` | `0.08` / `60.0` | `m_hc_miss_*` | B4 (`flag_at_x_boundary`‖`flag_close_to_PMT`‖`flag_window_truncated`) ceilings — KS tight, chi2 relaxed (missing charge). |
 | `hc_miss_min_ndf` | `5` | `m_hc_miss_min_ndf` | B4 ndf floor (B1–B3 reuse `highconsist_min_ndf`). |
+| `xtpc_flag` | `false` (SBND: **true**) | `m_xtpc_flag` | post-matching **cross-TPC confirm-stamp** (`flag_cross_tpc_consistency`): for each coincident matched-main-cluster pair across the two TPCs, set `flag_xtpc_consistent` + the per-cluster `xtpc_consistent` output scalar when the two cathode halves connect as one track. Default OFF ⇒ pass not called, no scalar written, production output bit-identical. Observation-only (assignments unchanged). See `chisquare_flags_comparison.md` §16. |
+| `xtpc_dmax` | `5 cm` | `m_xtpc_dmax` | scenario-1 closest-approach cut (T0-corrected, per-TPC `dy/dz` applied). |
+| `xtpc_angle_max` | `20` (deg) | `m_xtpc_angle_max` | scenario-2 collinearity cut (truncated half): `conn`,`dir0`,`dir1` mutual angles all below this. |
+| `xtpc_hough_radius` | `15 cm` | `m_xtpc_hough_radius` | radius for the local `vhough_transform` direction at each closest-point. |
+
+New per-cluster **output scalar** `xtpc_consistent` (int 0/1, written only when `xtpc_flag`) rides
+the matched cluster PC alongside `cluster_t0`/`matched_flash_gid`; also dumped per bundle in the
+`-calib` JSON as `xtpc_consistent`.
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
 `flash_minPE: 50` (not 500), `QtoL: 1.0` (not 0.5), `data` from `reality`,

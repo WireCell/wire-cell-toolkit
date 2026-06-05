@@ -115,6 +115,12 @@ namespace WireCell::Match {
         // (calib dump); nothing in the matching path reads it. Default false.
         void set_flag_two_boundary(bool v) { flag_two_boundary = v; }
         bool get_flag_two_boundary() const { return flag_two_boundary; }
+        // Cross-TPC cathode-crossing confirmation (post-matching): the matched main
+        // cluster connects geometrically, across the cathode, to the coincident other
+        // TPC's matched main cluster. Confirm-stamp only; nothing in the matching path
+        // reads it. Default false. See QLMatching::flag_cross_tpc_consistency.
+        void set_flag_xtpc_consistent(bool v) { flag_xtpc_consistent = v; }
+        bool get_flag_xtpc_consistent() const { return flag_xtpc_consistent; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -138,6 +144,7 @@ namespace WireCell::Match {
         bool flag_high_consistent;
         bool flag_contained;
         bool flag_two_boundary;
+        bool flag_xtpc_consistent{false};
 
         double ks_dis;
         double chi2;

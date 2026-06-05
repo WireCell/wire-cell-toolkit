@@ -126,6 +126,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_cathode_diag  = get(cfg, "cathode_diag", m_cathode_diag);
     m_cathode_diag_radius = get(cfg, "cathode_diag_radius", m_cathode_diag_radius);
+    m_xtpc_flag         = get(cfg, "xtpc_flag",         m_xtpc_flag);
+    m_xtpc_dmax         = get(cfg, "xtpc_dmax",         m_xtpc_dmax);
+    m_xtpc_angle_max    = get(cfg, "xtpc_angle_max",    m_xtpc_angle_max);
+    m_xtpc_hough_radius = get(cfg, "xtpc_hough_radius", m_xtpc_hough_radius);
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -289,6 +293,10 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["flash_group_window"] = m_flash_group_window;
     cfg["cathode_diag"]    = m_cathode_diag;
     cfg["cathode_diag_radius"] = m_cathode_diag_radius;
+    cfg["xtpc_flag"]         = m_xtpc_flag;
+    cfg["xtpc_dmax"]         = m_xtpc_dmax;
+    cfg["xtpc_angle_max"]    = m_xtpc_angle_max;
+    cfg["xtpc_hough_radius"] = m_xtpc_hough_radius;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
@@ -430,6 +438,12 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
                        0, 0, run.total_charge_blob_all);
         }
     }
+
+    // Cross-TPC cathode-crossing consistency confirm-stamp (post-matching; needs both
+    // TPCs' matched main clusters). Sets flag_xtpc_consistent + the per-cluster
+    // "xtpc_consistent" output scalar before the output is serialized below and before
+    // dump_calib. Off by default => output bit-identical. Never changes assignments.
+    if (m_xtpc_flag && runs.size() > 1) flag_cross_tpc_consistency(runs);
 
     // ---- Build / merge outputs ----
     const int out_ident = runs.front().charge_ident;
@@ -1152,11 +1166,15 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
             cluster->set_scalar<int>("flash", flash->get_flash_id());
             cluster->set_scalar<int>("matched_flash_gid", flash_gid);
             cluster->put_pcarray<double>(bundle->get_pred_flash(), "pe", "flashpred");
+            // Cross-TPC confirm-stamp default (flag_cross_tpc_consistency flips matched
+            // cathode-crossers to 1 below). Gated so the output stays bit-identical off.
+            if (m_xtpc_flag) cluster->set_scalar<int>("xtpc_consistent", 0);
             // Propagate the group's matched flash/t0 to its associated sub-clusters.
             for (auto* oc : bundle->get_other_clusters()) {
                 oc->set_cluster_t0(t0);
                 oc->set_scalar<int>("flash", flash->get_flash_id());
                 oc->set_scalar<int>("matched_flash_gid", flash_gid);
+                if (m_xtpc_flag) oc->set_scalar<int>("xtpc_consistent", 0);
             }
             log->debug("flash_bundles_map: flash id {} time {} ns, cluster gidx {} "
                        "total_pred_light {} t0 {}",
@@ -1320,6 +1338,9 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             c["uid"]   = cluster_uid(apa, cl->ident());
             c["ident"] = cl->ident();
             c["apa"]   = apa;
+            // Cross-TPC confirm-stamp as written to the matched OUTPUT scalar PC
+            // (-1 = scalar absent: unmatched cluster or xtpc_flag off; 0/1 = matched).
+            c["xtpc_consistent"] = cl->get_scalar<int>("xtpc_consistent", -1);
             Json::Value xs(Json::arrayValue), ys(Json::arrayValue), zs(Json::arrayValue), qs(Json::arrayValue);
             std::size_t np = 0;
             for (auto* blob : cl->children()) {
@@ -1377,6 +1398,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["spec_end"]             = b->get_spec_end_flag();
             jb["window_truncated"]     = b->get_flag_window_truncated();
             jb["two_boundary"]         = b->get_flag_two_boundary();
+            jb["xtpc_consistent"]      = b->get_flag_xtpc_consistent();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
@@ -1532,6 +1554,97 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
                       deg(dir0, dir1), deg(dir0, conn), deg(dir1, conn), deg(conn, dhat),
                       along / cm, perp.magnitude() / cm,
                       conn.x() / cm, conn.y() / cm, conn.z() / cm);
+        }
+    }
+}
+
+// Cross-TPC cathode-crossing consistency confirm-stamp. Post-matching: for each
+// coincident matched-MAIN-cluster pair across the two TPCs, set flag_xtpc_consistent
+// (and the per-cluster "xtpc_consistent" output scalar) when the two halves connect as
+// one track across the cathode. Two data-tuned scenarios (10 SBND hand-scan events):
+//   1. closest approach (T0-corrected, with the per-TPC y,z pos_offset applied) < dmax;
+//   2. when a half is window-truncated (cathode end missing), the connecting vector is
+//      collinear with both local Hough directions to within angle_max.
+// Observation-only: matched assignments are unchanged; only the flag is added.
+void QLMatching::flag_cross_tpc_consistency(std::vector<ApaRun>& runs)
+{
+    const double v = m_drift_speed;
+    const double R = m_xtpc_hough_radius;
+    const double win_us = m_flash_group_window / units::us;
+    const double amax = m_xtpc_angle_max;
+
+    auto deg = [](const geo_vector_t& a, const geo_vector_t& b) {
+        const double m = a.magnitude() * b.magnitude();
+        if (m <= 0) return 180.0;
+        double c = a.dot(b) / m;
+        c = std::max(-1.0, std::min(1.0, c));
+        return std::acos(c) * 180.0 / M_PI;
+    };
+
+    // Matched MAIN clusters from both APAs (the user's "main clusters"), each with its
+    // T0 x-offset, transverse pos_offset, coincidence time, truncation, and bundle.
+    struct MC { TimingTPCBundle* b; Cluster* c; int apa; double off, dy, dz, t_us; bool wt; };
+    std::vector<MC> mcs;
+    for (auto& run : runs) {
+        const int apa = (int)run.anode->ident();
+        for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+            const double off = run.sign_offset * flash->get_time() * v;
+            for (const auto& bundle : run.flash_bundles_map.at(flash))
+                mcs.push_back({bundle.get(), bundle->get_main_cluster(), apa, off,
+                               run.dy, run.dz, flash->get_time() / units::us,
+                               bundle->get_flag_window_truncated()});
+        }
+    }
+
+    for (size_t i = 0; i < mcs.size(); ++i) {
+        if (mcs[i].apa != 0) continue;
+        for (size_t j = 0; j < mcs.size(); ++j) {
+            if (mcs[j].apa != 1) continue;
+            if (std::abs(mcs[i].t_us - mcs[j].t_us) > win_us) continue;   // coincident flash group
+            const MC& m0 = mcs[i];
+            const MC& m1 = mcs[j];
+
+            // Closest approach over the full clusters in the T0-corrected frame, with the
+            // per-TPC transverse (y,z) pos_offset applied (mostly shifts this vector).
+            double best = 1e30; int bi = -1, bj = -1;
+            for (int a = 0; a < m0.c->npoints(); ++a) {
+                const geo_point_t ra = m0.c->point3d(a);
+                const double ax = ra.x() + m0.off, ay = ra.y() + m0.dy, az = ra.z() + m0.dz;
+                for (int b = 0; b < m1.c->npoints(); ++b) {
+                    const geo_point_t rb = m1.c->point3d(b);
+                    const double dx = ax - (rb.x() + m1.off);
+                    const double dy = ay - (rb.y() + m1.dy);
+                    const double dz = az - (rb.z() + m1.dz);
+                    const double d2 = dx * dx + dy * dy + dz * dz;
+                    if (d2 < best) { best = d2; bi = a; bj = b; }
+                }
+            }
+            if (bi < 0) continue;
+            const double d = std::sqrt(best);
+
+            // Three-vector collinearity at the closest pair (scenario 2). Hough axes are
+            // computed on raw points (a constant T0 x-shift does not rotate them).
+            const geo_point_t r0 = m0.c->point3d(bi), r1 = m1.c->point3d(bj);
+            const geo_point_t p0(r0.x() + m0.off, r0.y() + m0.dy, r0.z() + m0.dz);
+            const geo_point_t p1(r1.x() + m1.off, r1.y() + m1.dy, r1.z() + m1.dz);
+            geo_vector_t dir0 = m0.c->vhough_transform(r0, R);
+            geo_vector_t dir1 = m1.c->vhough_transform(r1, R);
+            const geo_vector_t conn = p1 - p0;
+            if (dir0.dot(conn) < 0) dir0 = dir0 * -1.0;
+            if (dir1.dot(conn) < 0) dir1 = dir1 * -1.0;
+            const double a01 = deg(dir0, dir1), a0c = deg(dir0, conn), a1c = deg(dir1, conn);
+
+            const bool scenario1 = d < m_xtpc_dmax;
+            const bool scenario2 = (m0.wt || m1.wt) && a01 < amax && a0c < amax && a1c < amax;
+            if (!(scenario1 || scenario2)) continue;
+
+            m0.b->set_flag_xtpc_consistent(true);
+            m1.b->set_flag_xtpc_consistent(true);
+            m0.c->set_scalar<int>("xtpc_consistent", 1);
+            m1.c->set_scalar<int>("xtpc_consistent", 1);
+            log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm a01={:.1f} a0c={:.1f} a1c={:.1f} "
+                       "trunc={} scenario={}", m0.c->ident(), m1.c->ident(), d / units::cm,
+                       a01, a0c, a1c, (m0.wt || m1.wt), scenario1 ? 1 : 2);
         }
     }
 }

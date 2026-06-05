@@ -1048,3 +1048,48 @@ exactly the bundles the Python metric predicts: 190/190 data, 355/355 MC) and **
 
 Config knobs (defaults inert in C++): `reject_overpred` (false), `overpred_total_ratio` (1e9),
 `overpred_maxch_ratio` (1e9).
+
+## 16. Cross-TPC cathode-crossing consistency (`flag_xtpc_consistent`)
+
+A cathode-crossing cosmic is reconstructed as two halves — one per TPC — lit by **one coincident
+flash group**. If the per-TPC matcher picked the *correct* cluster in both TPCs, the two halves form
+one continuous track across the cathode. That cross-TPC geometry is an independent confirmation the
+per-TPC χ²/KS ladder (§4) cannot see (it is single-TPC). This is a **post-matching confirm-stamp**:
+it needs each TPC's *matched main cluster*, so it runs after both APAs are matched and **does not
+change which clusters get matched** — it only sets a new flag. It is a **separate** flag, not
+overloaded onto `flag_high_consistent` (which is already spent by the pre-LASSO cull).
+
+**Where.** `QLMatching::flag_cross_tpc_consistency(runs)`, called from `operator()` after the
+per-APA loop and before the output is serialized / `dump_calib`. Reuses the geometry primitives of
+the `-cathode-diag` instrument (`dump_cathode_diag`, the closest-point pair + `Cluster::vhough_transform`
+local directions + the connecting vector `conn`), but pairs only **matched main clusters**, uses the
+**full** clusters (not the cathode band, so a window-truncated half whose cathode end is cut off
+still gets a closest pair), and **applies the per-TPC transverse offset `ApaRun.dy/dz`** to the
+closest-point search and `conn`.
+
+**The two scenarios** (exactly as posed): for each TPC0×TPC1 matched-main pair with coincident flash
+times (`|t0−t1| < flash_group_window`), in the T0-corrected frame,
+
+- **Scenario 1 — closest distance** (cathode end present): `d` = closest approach between the two
+  clusters. `flag = d < xtpc_dmax (5 cm)`.
+- **Scenario 2 — three-vector collinearity** (a half is `flag_window_truncated`, cathode end missing
+  so `d` is large): the connecting vector `conn` and the two local Hough directions `dir0`,`dir1`
+  must be mutually collinear — `a01,a0c,a1c` all `< xtpc_angle_max (20°)`. (`conn` *along* both
+  tracks is what separates one-track-across-the-gap from two parallel cosmics, whose `conn` is ⊥.)
+
+Combined: `flag_xtpc_consistent = (d < 5 cm) OR (window_truncated AND a01,a0c,a1c < 20°)`.
+
+**Cuts — tuned on the 10 SBND hand-scan data events only** (MC validation; reconstruct every
+coincident matched-main pair, TRUE iff both halves hand-scan-selected). The discriminator is
+near-perfect: **no FALSE pair has `d < 73 cm`** (scenario 1 is clean by a wide margin), and scenario
+2 at 20° passes the collinear truncated true (evt1302, `d=264 cm`, angles ≤2.8°) with **0 false**.
+Result: **DATA 8/10 true flagged, 0/71 false (100% purity); MC 10/10, 0/15 false.** The 2 data
+misses are genuine: evt1720 (heavily truncated, `conn` ⊥ track, angles ~63°) and evt2050 (truncated,
+real `vhough` angles ~31.7° — indistinguishable from the best false pair at 31.8°, so it cannot be
+caught without losing purity). Purity-first, so they are left out. MC catches all true crossers
+because its halves are cleaner (`dy/dz≈0`, no transverse offset ⇒ small `d` ⇒ scenario 1) — a check
+that the *metric*, not the data-specific offset, drives the flag.
+
+Config (default OFF = bit-identical; SBND-on): `xtpc_flag`, `xtpc_dmax`, `xtpc_angle_max`,
+`xtpc_hough_radius` (§11 table in `qlmatching-code.md`). Output: per-cluster int scalar
+`xtpc_consistent` + the `-calib` bundle field.

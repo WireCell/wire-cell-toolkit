@@ -191,6 +191,21 @@ function(params) {
             // qlmatching-code.md §4.1a). Default OFF in C++; enabled here for SBND.
             require_containment: true,
 
+            // Cross-TPC cathode-crossing consistency confirm-stamp (post-matching).
+            // For each coincident matched-main-cluster pair across the two TPCs, set
+            // flag_xtpc_consistent + the per-cluster "xtpc_consistent" output scalar when
+            // the two halves connect as one track across the cathode. Cuts tuned on the
+            // 10 SBND hand-scan data events (9/10 true, 0/71 false): closest approach
+            // (T0-corrected, per-TPC y,z pos_offset applied) < xtpc_dmax, or — when a half
+            // is window-truncated — the connecting vector collinear with both local Hough
+            // directions to within xtpc_angle_max. C++ default OFF (output bit-identical);
+            // SBND-on. Observation-only: matched assignments unchanged. See
+            // match/docs/chisquare_flags_comparison.md and sbnd_xin cathode-crossing doc.
+            xtpc_flag: true,
+            xtpc_dmax: 5 * wc.cm,
+            xtpc_angle_max: 20,
+            xtpc_hough_radius: 15 * wc.cm,
+
             // Light-pattern over-prediction prefilter (the prototype fired-fraction
             // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle
             // before the chi2 fit when its predicted light is much larger than the
