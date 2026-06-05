@@ -9,10 +9,10 @@ the optimization work can be targeted. **Numbers below are LOCKED from the final
 ## How it was measured
 
 Each `MultiAlgBlobClustering` node logs `MABC timing: <Stage>:<scope> took <ms> ms`
-per clustering method per event. The parser
-(`/home/xqian/tmp/lanrepro/timing_analysis.py`) attributes every timing line to its
-MABC node instance (`apa0-0`, `apa1-0` = per-TPC; `clus_all_apa` = all-APA merge) and
-to the event ident currently loaded in that node, then aggregates. Run:
+per clustering method per event. The parser (`sbnd_xin/clustering_timing_analysis.py`)
+attributes every timing line to its MABC node instance (`apa0-0`, `apa1-0` = per-TPC;
+`clus_all_apa` = all-APA merge) and to the event ident currently loaded in that node,
+then aggregates. Run:
 
 ```
 python3 timing_analysis.py f1/match_f1_fixed.log f2on/match.log f3on/match.log
@@ -111,3 +111,14 @@ already on the radar.)
    / Deghost / Separate tail — one fix may cover all four.
 5. Validate any change is **clustering-output-identical** on the 10 hand-scan events
    before trusting it on the tail events.
+6. **Follow-up on today's `fill_wrap_points` crash fix** (`DynamicPointCloud.cxx:964`):
+   the fix restores the documented `wires_all.size() - 1` clamp (a strict improvement —
+   it converts an out-of-bounds read into the long-standing pre-2025-07-28 behavior). But
+   the *correctness* of clamping when `point2wind` overshoots is a pre-existing question:
+   log `wind - wires_all.size()` where the clamp fires. If it is always ~+1 these are
+   genuine edge-of-plane points and clamping to the last wire is right; if it is *large*,
+   `point2wind` may have a coordinate/pitch mismatch and the clamped wire is arbitrary on
+   exactly the busy events — i.e. non-crashing but subtly wrong. This session verified
+   non-crash on all 150 events and byte-identical matched output on the quiet hand-scans
+   (where the clamp does not fire), but did NOT separately verify the clamp value on the
+   busy tail.

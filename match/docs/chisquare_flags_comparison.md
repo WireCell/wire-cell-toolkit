@@ -807,6 +807,19 @@ the prototype gives a cluster several chances at different flashes before abando
 toolkit drops it on the first failed out-of-beam QA. Whether SBND wants the prototype's recovery
 rounds is a port decision (§10-adjacent; not yet on that checklist). The full algorithm is §12.3.
 
+**Resolution (2026-06-04 gap review).** The high-value, light-separable slice of the orphan
+re-matching IS now ported as `empty_rescue` (§4.4a): each LASSO-emptied flash adopts its best
+light-quality candidate (`ks·(χ²/ndf)^0.8`) from the pre-fit snapshot, one-flash-per-cluster.
+The residual full 3-round loop is empirically inert for SBND — of ~5 hand-scan misses only 1 is
+light-separable (recovered at zero regression); the rest are timing/drift-degenerate (no light bar
+separates recover-from-steal) or cross-TPC (handled by the `xtpc` machinery). The one genuinely
+**live, un-ported** piece is `examine_beam_bundle`'s beam-flash *promotion*: the toolkit ladder has
+no "beam flash with no consistent bundle → promote its best" fallback, so the toolkit is strictly
+*more permissive* there (it leaves more candidates in the LASSO; it cannot drop a true match).
+Low SBND impact; addable behind a default-OFF / SBND-on knob if a beam-recall need ever shows up.
+Verdict: **post-fit / merge / re-matching port is complete for SBND**; only this minor promotion
+remains optional.
+
 ### 12.3 Prototype stage-5 algorithm — orphan re-matching (`organize_matched_bundles`)
 
 This is the prototype's entire post-fit stage (`ToyMatching.cxx:1744`, called at `:1724`). Its input
