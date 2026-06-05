@@ -6,6 +6,8 @@
 //
 
 #include "WireCellClus/IPCTransform.h"
+#include "WireCellClus/SCECorrection.h"
+#include "WireCellIface/ISCEField.h"
 #include "WireCellIface/IDetectorVolumes.h"
 
 #include "WireCellIface/IConfigurable.h"
@@ -239,6 +241,23 @@ public:
         auto dv = Factory::find_tn<WireCell::IDetectorVolumes>(dvtn);
         const bool relax = get(cfg, "relax_containment_filter", false);
         m_pcts["T0Correction"] = std::make_shared<T0Correction>(dv, relax);
+        // SBND SCE (Space Charge Effect) -- per-TPC TH3 displacement field
+        // provided externally as an ISCEField (typically WireCell::Root::SCEFieldTH3),
+        // looked up by TypeName from DetectorVolumes per-APA metadata key "sce_field".
+        // Falls back to a no-op (T0 only) when no field is configured.
+        WireCell::ISCEField::pointer sce_field;
+        for (const auto& [wfid, _] : dv->wpident_faces()) {
+            WirePlaneId wpid(wfid);
+            const auto md = dv->metadata(wpid);
+            if (md.isMember("sce_field")) {
+                std::string fld_tn = md["sce_field"].asString();
+                if (!fld_tn.empty()) {
+                    sce_field = Factory::find_tn<WireCell::ISCEField>(fld_tn);
+                }
+                break;
+            }
+        }
+        m_pcts["SCECorrection"] = std::make_shared<SCECorrection>(dv, sce_field);
         // ...
     }
 
