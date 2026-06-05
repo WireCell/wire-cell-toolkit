@@ -86,6 +86,14 @@ namespace WireCell::Clus::Facade {
         std::map<int, IAnodePlane::pointer> m_anodes;
         IDetectorVolumes::pointer m_dv{nullptr};
 
+        // Memoized data-independent (apa,face,pind) -> 2D scoped-view Scope.  The scope
+        // string ("ctpc_a*f*p*") depends only on the indices, not on event content, so it
+        // is built once per key instead of via boost::format on every kd2d() call -- that
+        // format was ~40% of clustering CPU (see clustering-timing-profile.md §2 and
+        // Facade_Grouping.cxx::kd2d).  scoped_view() still handles kd-tree caching, so the
+        // memoization is output-identical.
+        mutable std::map<int, std::map<int, std::map<int, Tree::Scope>>> m_kd2d_scope_cache;
+
         /// TODO: remove these in the future
         // IAnodePlane::pointer m_anode{nullptr};
         // TPCParams m_tp{};  // use default value by default.

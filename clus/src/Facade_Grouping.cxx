@@ -296,12 +296,20 @@ size_t Grouping::hash() const
 
 const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int pind) const
 {
-    std::vector<std::string> plane_names = {"U", "V", "W"};
-    const auto sname = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
-    // const auto sname = String::format("ctpc_f%dp%d", face, pind);
-    Tree::Scope scope = {sname, {"x", "y"}, 1};
-    const auto& sv = m_node->value.scoped_view(scope);
-    // std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
+    // kd2d() is called per-point-per-plane inside the graph-building good-point tests
+    // (millions of times per event), but the (apa,face,pind) -> Scope mapping is
+    // data-independent.  Memoize the Scope so the expensive boost::format scope-key build
+    // runs once per key instead of on every call (it was ~40% of clustering CPU; see
+    // clustering-timing-profile.md §2).  scoped_view() still does its own kd-tree caching,
+    // so the result is bit-identical to constructing the Scope fresh each call.
+    auto& by_face = m_kd2d_scope_cache[apa][face];
+    auto it = by_face.find(pind);
+    if (it == by_face.end()) {
+        std::vector<std::string> plane_names = {"U", "V", "W"};
+        const auto sname = String::format("ctpc_a%df%dp%d", apa, face, plane_names[pind]);
+        it = by_face.emplace(pind, Tree::Scope{sname, {"x", "y"}, 1}).first;
+    }
+    const auto& sv = m_node->value.scoped_view(it->second);
     return sv.kd();
 }
 

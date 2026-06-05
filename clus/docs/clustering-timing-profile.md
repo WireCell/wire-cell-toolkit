@@ -215,26 +215,44 @@ good-point tests `connect_graph_relaxed` performs**, which depends on cluster ge
 blobs but geometry that triggers far fewer relaxed probes — is fast; the tangled 59789 /
 138824 / 187650 probe far more.
 
-### Proposed improvements
+### Fix (IMPLEMENTED 2026-06-05) — memoize the kd2d scope key
 
-1. **(Headline, ~41% clustering win, output-identical) Memoize the kd2d scope key.** Replace
-   the per-call `boost::format` + `vector<string>` with a precomputed `(apa,face,pind) →
-   Tree::Scope` lookup (a `mutable` map, ≤ 12 entries, or a small fixed array; `plane_names`
-   `static const`). Keep the `scoped_view(scope)` call so the tree's own kd-tree
-   caching/invalidation is unchanged → bit-identical output. `kd2d` is 47.3% of CPU here, so
-   this is **projected** to remove ~41% of clustering wall (≈ 2× on these events) — to be
-   **confirmed by measurement** after implementing (step 4). Because `kd2d` is reached by
-   **ExamineBundles, ProtectOverclustering and Deghost** (verified above), the one fix speeds
-   all three.
-2. **(Further ~5–13%) Cache the `kd2d_t&` reference itself** by `(apa,face,pind)` to also
-   skip the `scoped_view` hash-lookup + the `__dynamic_cast`s under it — *only* if verified
-   that the scoped view is not invalidated between calls within a clustering pass (otherwise
-   keep #1's safe form).
-3. **(Secondary ~14%) `vhough_transform`** (boost::histogram Hough, mostly standalone
-   ClusteringSeparate) is real computation, untouched by #1 — revisit after #1, lower priority.
-4. **Validate**: the fix must be **clustering-output-identical** on the quiet hand-scan
-   events (compare `mabc.zip` / cluster PCs) before trusting it on the tail; then re-pull the
-   per-event timing to confirm the ~2× speedup.
+The per-call `boost::format` + `vector<string>` are replaced by a memoized, data-independent
+`(apa,face,pind) → Tree::Scope` lookup (`mutable m_kd2d_scope_cache` on `Grouping`); the
+`scoped_view(scope)` call is unchanged, so the tree's own kd-tree caching/invalidation — and
+thus the clustering result — is **bit-identical**. Changed files:
+`clus/src/Facade_Grouping.cxx` (kd2d) + `clus/inc/WireCellClus/Facade_Grouping.h` (cache member).
+
+**Measured result** (single-event, local imaging; total = sum over all 3 MABC nodes):
+
+| event | pre-fix | post-fix | speedup | ExamineBundles pre→post |
+|--:|--:|--:|--:|--:|
+| 187650 | 56.7 s | 26.5 s | **2.14×** | 39.1 → 17.8 s |
+| 59789  | 55.2 s | 27.6 s | **2.00×** | 29.7 → 17.9 s |
+| 138824 | 47.5 s | 25.1 s | **1.89×** | 29.7 → 18.0 s |
+| 61637  | 4.0 s  | 2.9 s  | 1.38×    | 2.3 → 1.6 s |
+| 141530 | 6.1 s  | 5.3 s  | 1.15×    | 2.9 → 2.2 s |
+
+**Output-identical: verified** — pre-fix vs post-fix `mabc.zip` is **byte-for-byte identical**
+across all Bee members on 59789, 61637 and 187650 (including the worst event). The tail events
+(the ones that matter) get ~2×; the already-fast events less, because they spent proportionally
+little time in the format.
+
+**Post-fix profile** (re-run of 187650 under gperftools): `String::format` is **gone** from the
+top; `kd2d` dropped **47.3% → 8.9%** (now just the legitimate `scoped_view` lookup); total CPU
+samples fell ~44% (17434 → ~9840), consistent with the ~2× wall speedup. The new top clustering
+costs are genuine work — `vhough_transform` (now ~31%, the boost::histogram Hough in
+Separate/Protect) and `nanoflann` kd-tree neighbour searches (~14%) — which are the next targets.
+
+### Remaining / next improvements
+
+1. **(Now #1, ~31%) `vhough_transform`** (boost::histogram Hough) — real computation in
+   Separate/Protect; the largest remaining lever. Investigate histogram reuse / coarser binning.
+2. **(~14%) nanoflann kd-tree searches** in `connect_graph_relaxed`'s good-point tests — the
+   genuine geometry cost now that the format overhead is gone.
+3. **(Further ~5–10%, optional) Cache the `kd2d_t&` reference itself** by `(apa,face,pind)` to
+   also skip the `scoped_view` hash-lookup — *only* if verified the scoped view is not
+   invalidated between calls within a clustering pass (otherwise keep the current safe form).
 
 ## How it was measured
 
