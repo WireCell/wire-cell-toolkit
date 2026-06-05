@@ -168,6 +168,25 @@ namespace WireCell::Match {
         // jsonnet sets require_containment: true.
         bool m_require_containment{false};
 
+        // Light-pattern over-prediction prefilter (the prototype's fired-fraction
+        // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle BEFORE
+        // the chi2 fit when its predicted light is much larger than the measured
+        // light (a cluster emitting far more light than the flash shows cannot be the
+        // match). One-directional: only over-prediction is rejected; under-prediction
+        // is physically fine (a flash may be lit by several clusters). Two metrics,
+        // both over the same opdet_mask the chi2 uses:
+        //   R_total = sum(pred_masked) / sum(meas_masked)
+        //   R_max   = pred[ch*] / max(meas[ch*], 1),  ch* = argmax(pred_masked)
+        // Reject if R_total > overpred_total_ratio OR R_max > overpred_maxch_ratio.
+        // Boundary/truncated bundles (close_to_PMT | window_truncated | at_x_boundary)
+        // are EXEMPT (measured is an underestimate there). Default OFF (large ratios
+        // = inert) so production stays bit-identical; SBND jsonnet sets the tuned
+        // values (tuned on data hand-scans, validated on MC; see
+        // sbnd_xin/ql_prefilter_tune.py).
+        bool m_reject_overpred{false};
+        double m_overpred_total_ratio{1e9};   // R_total ceiling (inert when huge)
+        double m_overpred_maxch_ratio{1e9};   // R_max   ceiling (inert when huge)
+
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
         // match/docs/sbnd-opdetsim-chain.md). Maps the true predicted PE p on each PMT into

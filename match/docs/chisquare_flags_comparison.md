@@ -37,7 +37,7 @@ two LASSO rounds is a weak-bundle prune** (no merging), and (b) **merging is str
 
 | Stage | Toolkit `QLMatching.cxx` | Prototype `ToyMatching.cxx` |
 |---|---|---|
-| **1. Pre-filter** (consistency cull) | KS==1 degenerate guard at formation (`:549-552`); then for each cluster with a consistent bundle, drop its other non-consistent bundles (`:642-653`) | for each flash with a consistent bundle, drop remaining bundles no consistent bundle can absorb (`examine_bundle` merge-test, `:1307-1358`) |
+| **1. Pre-filter** (geometry + light + consistency cull) | TPC-containment cull (`require_containment`, SBND-on, §15); KS==1 degenerate guard at formation (`:549-552`); **over-prediction light cull** (`reject_overpred`, SBND-on, §15); then for each cluster with a consistent bundle, drop its other non-consistent bundles (`:642-653`) | TPC-containment gate (`flag_good_bundle`); for each flash with a consistent bundle, drop remaining bundles no consistent bundle can absorb (`examine_bundle` merge-test, `:1307-1358`); fired-fraction reject (`:547-602`) |
 | **2. R1 fit** | LASSO with per-flash background/light DOF; post-fit prune strength ≤ `0.05` (`:670-751`) | LASSO with per-flash "flash-alone" DOF; post-fit prune `beta < 0.05` (`:1377-1548`) |
 | *(between rounds)* | **prune only — no merging** (`:743-750`) | **prune only — no merging** (`:1516-1547`) |
 | **3. R2 fit** | background DOF dropped; KS-shape term added to weights; prune + keep best flash per cluster (`:753-849`) | flash DOF dropped; `f1` 0.06→0.05; keep best beta per cluster (`:1552-1663`) |
@@ -210,7 +210,10 @@ than the prototype's `ndf · 36`; this differs because SBND has many more channe
 
 A further prototype gate beyond `flag_high_consistent` (`FlashTPCBundle.cxx:547-602`) uses the
 "fired fraction" (`nfired/ntot` of channels with `pred > 0.33`) to set `flag_potential_bad_match`
-and to reject bundles outright — also boundary-aware. The toolkit has no equivalent.
+and to reject bundles outright — also boundary-aware. The toolkit ports the *over-prediction*
+direction of this as a simpler, data-tuned **light prefilter** (`reject_overpred`, §15): a bundle is
+dropped before the fit when its predicted light hugely exceeds the measured light (the prototype's
+"way more light than the flash shows" case), boundary-exempt like the prototype.
 
 ### 4.1 Bundle add/merge thresholds (`§F` knobs)
 
@@ -275,7 +278,7 @@ keep/drop consistency cull — a different use, not a merge.) See §9 for the re
 | `flag_at_x_boundary` | `QLMatching.cxx:1129` (anode), `:1155` (cathode, CPA 3-D fiducial) | relaxed consistency `χ²<9·ndf`/`3·ndf` (`FlashTPCBundle.cxx:510-513`); LASSO weight 1.0→0.2 (`ToyMatching.cxx:1437-1441`, rd1; `1603-1607`, rd2) | **inert** |
 | `flag_spec_end` | `QLMatching.cxx:1080,1104,1124` | informational; tail-alignment bookkeeping | **inert** |
 | `flag_window_truncated` | `QLMatching.cxx:1032-1037` (slice within `m_window_edge_ticks` of readout window edge) | *no direct prototype analog* — see note below | **inert** |
-| `flag_potential_bad_match` | (toolkit sets via `ks==1` drop, `QLMatching.cxx:550`) | fired-fraction reject, boundary-aware (`FlashTPCBundle.cxx:577-599`) | partial |
+| `flag_potential_bad_match` | toolkit sets via `ks==1` drop **and the over-prediction light prefilter** (`reject_overpred`, §15) | fired-fraction reject, boundary-aware (`FlashTPCBundle.cxx:577-599`) | **active** (over-prediction direction; §15) |
 
 Prototype flag-set site (`ToyMatching.cxx:281-290`): `flag_close_to_PMT` + `flag_at_x_boundary` are
 set when the cluster's **anode-end** position falls in the low-x boundary window; `flag_at_x_boundary`
@@ -958,3 +961,56 @@ these near-hard constraints. The per-column L1 `weights` (§6.1) ride on top of 
 columns survive; the `strength_cutoff = 0.05` then converts the soft solution into hard matches (§8).
 This architecture is shared; only the per-column `weights` content (§6.1) and the §13 light predictor
 differ between the codes.
+
+## 15. The bundle prefilter (what reaches the χ² fit)
+
+Before the LASSO/χ² fit (§8), each (flash × cluster) bundle passes through a prefilter in
+`build_bundles` (`QLMatching.cxx`). Two of its stages are **geometry** then **light**, both ported
+from the MicroBooNE prototype, both **default OFF in C++ / SBND-on in jsonnet** (convention
+`feedback_toggleable_behavior_changes`). Surviving bundles are what the fit sees.
+
+### 15.1 Geometry — `require_containment` (already present; SBND-on)
+
+`require_containment` drops a bundle whose charge cluster is not contained in the TPC drift box once
+the flash-T0 x-offset is applied (`QLMatching.cxx`, cull at `if (m_require_containment && !contained)
+continue;`). `contained` is the 4-part box test in `compute_endpoint_flags`, a direct port of the
+prototype `flag_good_bundle` gate (`ToyMatching.cxx:272-275`) with the same cushions (−2 cm anode,
++1.2 cm cathode — "not too far outside the box"). Validated against the 20 hand-scans: **0 of the
+214 ground-truth bundles are dropped** by containment (`sbnd_xin/ql_prefilter_tune.py` step 1).
+
+### 15.2 Light — `reject_overpred` (new; SBND-on)
+
+A bundle is dropped when its **predicted** light is much larger than the **measured** light: a charge
+cluster emitting far more light than the flash actually shows cannot be the match. It is
+**one-directional** — under-prediction is allowed (a flash may be lit by several clusters; near-PMT
+over-response and window truncation make *measured* an underestimate). This ports the over-prediction
+direction of the prototype fired-fraction reject (`FlashTPCBundle.cxx:547-602`) as a simpler,
+data-tuned cut. Two metrics, both over the **same `opdet_mask` the χ² uses** (PMT, same TPC, active):
+
+```
+R_total = Σ pred_masked / Σ meas_masked
+R_max   = pred[ch*] / max(meas[ch*], 1),   ch* = argmax(pred_masked)
+reject if (R_total > overpred_total_ratio  OR  R_max > overpred_maxch_ratio)
+```
+
+Boundary/truncated bundles (`close_to_PMT | window_truncated | at_x_boundary`) are **exempt**
+(measured underestimates there), mirroring the prototype's boundary-aware reject and the flash drops
+in `ql_pe_error.py`. A rejected bundle gets `flag_potential_bad_match` and is skipped before
+`pre_bundles`, exactly like the KS==1 guard, so it never enters the fit.
+
+**Tuning & validation** (`sbnd_xin/ql_prefilter_tune.py`, parity `ql_prefilter_parity.py`). Cuts were
+set on the **10 data hand-scans** as (worst non-boundary ground-truth) × 1.5 margin and confirmed on
+the **10 MC hand-scans** (the GT baseline is not 1.0 — true matches over-predict ~1.3 — and shifts
+data↔MC via `data_qtol=0.86` vs `sim=1.0`, so the data→MC transfer was checked explicitly):
+
+| | worst non-boundary GT `R_total` | worst GT `R_max` | GT removed | non-GT culled |
+|---|---|---|---|---|
+| data (tune) | 1.92 | 2.89 | 0 | 26% |
+| MC (validate) | 1.11 | 2.81 | 0 | 32% |
+
+Chosen SBND values (`cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet`): `overpred_total_ratio = 2.9`,
+`overpred_maxch_ratio = 4.3`. Post-build re-dump confirms **full C++/Python parity** (the C++ flags
+exactly the bundles the Python metric predicts: 190/190 data, 355/355 MC) and **0 GT rejected**.
+
+Config knobs (defaults inert in C++): `reject_overpred` (false), `overpred_total_ratio` (1e9),
+`overpred_maxch_ratio` (1e9).

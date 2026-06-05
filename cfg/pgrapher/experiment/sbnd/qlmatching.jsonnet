@@ -176,6 +176,20 @@ function(params) {
             // 4-part in-window guard in compute_endpoint_flags (match/docs
             // qlmatching-code.md §4.1a). Default OFF in C++; enabled here for SBND.
             require_containment: true,
+
+            // Light-pattern over-prediction prefilter (the prototype fired-fraction
+            // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle
+            // before the chi2 fit when its predicted light is much larger than the
+            // measured light over the masked PMT set:
+            //   reject if  sum(pred)/sum(meas) > overpred_total_ratio
+            //          or  pred/meas at the brightest predicted PMT > overpred_maxch_ratio
+            // Boundary/truncated bundles are exempt. Ceilings tuned on the 10 data
+            // hand-scans (worst non-boundary GT R_total=1.92, R_max=2.89, x1.5 margin)
+            // and validated on the 10 MC hand-scans (0 GT removed, ~26%/32% of non-GT
+            // bundles culled). See sbnd_xin/ql_prefilter_tune.py. Default OFF in C++.
+            reject_overpred: true,
+            overpred_total_ratio: 2.9,
+            overpred_maxch_ratio: 4.3,
     },
 
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this

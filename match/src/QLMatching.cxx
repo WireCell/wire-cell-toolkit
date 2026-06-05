@@ -201,6 +201,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_require_containment  = get(cfg, "require_containment",  m_require_containment);
 
+    m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
+    m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
+    m_overpred_maxch_ratio = get(cfg, "overpred_maxch_ratio", m_overpred_maxch_ratio);
+
     // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
     // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
     const auto cathode_fv_tn = get<std::string>(cfg, "cathode_fiducial", std::string(""));
@@ -335,6 +339,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
     cfg["require_containment"]  = m_require_containment;
+    cfg["reject_overpred"]      = m_reject_overpred;
+    cfg["overpred_total_ratio"] = m_overpred_total_ratio;
+    cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
     cfg["pmt_nl_knee"]          = m_pmt_nl_knee;
@@ -791,6 +798,38 @@ void QLMatching::build_bundles(ApaRun& run)
             if (bundle->get_ks_dis() == 1) {
                 bundle->set_potential_bad_match_flag(true);
                 continue;
+            }
+
+            // Light-pattern over-prediction prefilter (prototype fired-fraction
+            // reject, FlashTPCBundle.cxx 547-602). Drop a bundle whose predicted
+            // light hugely exceeds the measured light over the SAME masked PMT set
+            // the chi2 uses (R_total = sum pred/meas; R_max = pred/meas at the
+            // brightest predicted channel). One-directional: only over-prediction is
+            // cut. Boundary/truncated bundles are exempt (measured underestimates
+            // there). OFF by default (huge ratios = inert); SBND sets the data-tuned
+            // ceilings (sbnd_xin/ql_prefilter_tune.py).
+            if (m_reject_overpred &&
+                !(bundle->get_flag_close_to_PMT() || bundle->get_flag_window_truncated() ||
+                  bundle->get_flag_at_x_boundary())) {
+                const auto& mask = bundle->get_opdet_mask();
+                double tot_pred = 0.0, tot_meas = 0.0, max_pred = 0.0, meas_at_max = 0.0;
+                for (std::size_t j = 0; j < pred_flash.size(); ++j) {
+                    if (j >= mask.size() || mask[j] == 0) continue;
+                    const double p = pred_flash[j];
+                    const double m = flash->get_PE(static_cast<int>(j));
+                    tot_pred += p;
+                    tot_meas += m;
+                    if (p > max_pred) { max_pred = p; meas_at_max = m; }
+                }
+                const double r_total = (tot_meas > 0.0) ? tot_pred / tot_meas
+                                                        : (tot_pred > 0.0 ? 1e30 : 0.0);
+                const double r_max = (max_pred > 0.0)
+                                         ? max_pred / (meas_at_max > 1.0 ? meas_at_max : 1.0)
+                                         : 0.0;
+                if (r_total > m_overpred_total_ratio || r_max > m_overpred_maxch_ratio) {
+                    bundle->set_potential_bad_match_flag(true);
+                    continue;
+                }
             }
 
             log->debug("initial eval: flash {} and cluster {}, meas PE {}, pred PE {}, npts {}, "
