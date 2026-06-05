@@ -146,6 +146,13 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         for (const auto& jch : cfg["ch_mask"]) m_ch_mask.push_back(jch.asInt());
     }
 
+    m_auto_mask              = get(cfg, "auto_mask",              m_auto_mask);
+    m_auto_mask_pe_low       = get(cfg, "auto_mask_pe_low",       m_auto_mask_pe_low);
+    m_auto_mask_neighbors    = get(cfg, "auto_mask_neighbors",    m_auto_mask_neighbors);
+    m_auto_mask_pe_bright    = get(cfg, "auto_mask_pe_bright",    m_auto_mask_pe_bright);
+    m_auto_mask_min_contrast = get(cfg, "auto_mask_min_contrast", m_auto_mask_min_contrast);
+    m_auto_mask_min_flash    = get(cfg, "auto_mask_min_flash",    m_auto_mask_min_flash);
+
     m_flash_minPE   = get(cfg, "flash_minPE",   m_flash_minPE);
     m_flash_mintime = get(cfg, "flash_mintime", m_flash_mintime);
     m_flash_maxtime = get(cfg, "flash_maxtime", m_flash_maxtime);
@@ -221,6 +228,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
     m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
     m_overpred_maxch_ratio = get(cfg, "overpred_maxch_ratio", m_overpred_maxch_ratio);
+
+    m_empty_rescue          = get(cfg, "empty_rescue",          m_empty_rescue);
+    m_rescue_metric_max     = get(cfg, "rescue_metric_max",     m_rescue_metric_max);
+    m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
+    m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
 
     // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
     // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
@@ -313,6 +325,12 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["data"]            = m_data;
     cfg["beamonly"]        = m_beamonly;
     cfg["ch_mask"]         = Json::arrayValue;
+    cfg["auto_mask"]              = m_auto_mask;
+    cfg["auto_mask_pe_low"]       = m_auto_mask_pe_low;
+    cfg["auto_mask_neighbors"]    = m_auto_mask_neighbors;
+    cfg["auto_mask_pe_bright"]    = m_auto_mask_pe_bright;
+    cfg["auto_mask_min_contrast"] = m_auto_mask_min_contrast;
+    cfg["auto_mask_min_flash"]    = m_auto_mask_min_flash;
     cfg["flash_minPE"]     = m_flash_minPE;
     cfg["flash_mintime"]   = m_flash_mintime;
     cfg["flash_maxtime"]   = m_flash_maxtime;
@@ -375,6 +393,10 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["require_containment"]  = m_require_containment;
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
+    cfg["empty_rescue"]          = m_empty_rescue;
+    cfg["rescue_metric_max"]     = m_rescue_metric_max;
+    cfg["rescue_exponent"]       = m_rescue_exponent;
+    cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -726,6 +748,10 @@ void QLMatching::compute_geometry(ApaRun& run)
         if ((tpc == 1) &&  low_side) run.opdet_mask[idet] = 0;
     }
 
+    // Per-event dynamic dead-PMT auto-mask (optional; off => bit-identical). Folds into
+    // run.opdet_mask before opdet_idx_v below, so the fit inherits it consistently.
+    if (m_auto_mask) compute_dynamic_opdet_mask(run, tpc);
+
     // Kept-channel index (the surviving on-channels), used to size the LASSO matrices.
     run.nopdet = 0;
     run.opdet_idx_v.clear();
@@ -736,6 +762,87 @@ void QLMatching::compute_geometry(ApaRun& run)
         }
     }
     log->debug("nopdet {} opdet_idx_v size {}", run.nopdet, run.opdet_idx_v.size());
+}
+
+// Per-event dynamic dead-PMT auto-mask. Within this single event/TPC, drop a PMT that
+// never fires (max measured PE over the event's flashes < pe_low) while its nearest live
+// PMTs do see light (in >= min_contrast flashes the median PE of its K nearest live PMTs
+// exceeds pe_bright). This catches a channel that is dead in THIS run but absent from the
+// static ch_mask, without touching one that is merely in a quiet region (no bright
+// neighbours => not masked). All decisions come from a snapshot (per-channel event max +
+// the live reference pool), applied after the scan, in channel order, with (distance,
+// channel) tie-breaking — deterministic and Python-parity with sbnd_xin/automask_prototype.py.
+void QLMatching::compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc)
+{
+    if (run.flashes.size() < (std::size_t)m_auto_mask_min_flash) return;
+    const int nchan = m_nchan;
+
+    // Per-channel max measured PE over this event's flashes.
+    std::vector<double> maxpe(nchan, 0.0);
+    for (const auto& fl : run.flashes) {
+        const int nc = std::min(nchan, fl->get_num_channels());
+        for (int ch = 0; ch < nc; ++ch)
+            maxpe[ch] = std::max(maxpe[ch], fl->get_PE(ch));
+    }
+
+    auto is_pmt = [&](int ch) {
+        return std::find(m_active_opdet_types.begin(), m_active_opdet_types.end(),
+                         m_opdets[ch].type) != m_active_opdet_types.end();
+    };
+    auto in_tpc = [&](int ch) {
+        const bool low_side = m_opdets[ch].center.x() < m_cathode_x;
+        return (tpc == 0) ? low_side : !low_side;
+    };
+
+    // Live brightness reference: PMTs in this TPC that fire somewhere this event
+    // (includes ones that happen to be in the static ch_mask but are alive this run).
+    std::vector<int> live;
+    for (int ch = 0; ch < nchan && ch < (int)m_opdets.size(); ++ch)
+        if (is_pmt(ch) && in_tpc(ch) && maxpe[ch] >= m_auto_mask_pe_low)
+            live.push_back(ch);
+
+    std::vector<int> to_mask;
+    for (int ch = 0; ch < nchan && ch < (int)run.opdet_mask.size(); ++ch) {
+        if (run.opdet_mask[ch] != 1) continue;      // only currently-active PMTs
+        if (maxpe[ch] >= m_auto_mask_pe_low) continue;  // it fires => healthy
+
+        // K nearest live PMTs by (Y,Z) distance; tie-break by channel for determinism.
+        const auto& o = m_opdets[ch].center;
+        std::vector<std::pair<double,int>> d;
+        d.reserve(live.size());
+        for (int c : live) {
+            if (c == ch) continue;
+            const double dy = m_opdets[c].center.y() - o.y();
+            const double dz = m_opdets[c].center.z() - o.z();
+            d.push_back({dy * dy + dz * dz, c});
+        }
+        if (d.empty()) continue;
+        const int K = std::min((int)d.size(), m_auto_mask_neighbors);
+        std::partial_sort(d.begin(), d.begin() + K, d.end(),
+            [](const std::pair<double,int>& a, const std::pair<double,int>& b) {
+                return a.first != b.first ? a.first < b.first : a.second < b.second; });
+
+        // Count flashes where the neighbour-median PE exceeds the bright threshold.
+        int contrast = 0;
+        std::vector<double> vals(K);
+        for (const auto& fl : run.flashes) {
+            for (int k = 0; k < K; ++k) vals[k] = fl->get_PE(d[k].second);
+            std::sort(vals.begin(), vals.end());
+            const double med = (K % 2) ? vals[K/2] : 0.5 * (vals[K/2 - 1] + vals[K/2]);
+            if (med > m_auto_mask_pe_bright) ++contrast;
+        }
+        if (contrast >= m_auto_mask_min_contrast) to_mask.push_back(ch);
+    }
+
+    for (int ch : to_mask) {
+        run.opdet_mask[ch] = 0;
+        run.auto_masked.insert(ch);
+        log->debug("QLAUTOMASK tpc {} ch {} auto-masked (event max PE {:.2f} < {:.2f})",
+                   tpc, ch, maxpe[ch], m_auto_mask_pe_low);
+    }
+    if (!to_mask.empty())
+        log->info("QLAUTOMASK tpc {} auto-masked {} dead-in-event PMT(s) over {} flashes",
+                  tpc, to_mask.size(), run.flashes.size());
 }
 
 // [Stage 1] Build a candidate (flash, cluster-group) bundle for every pair,
@@ -982,6 +1089,10 @@ double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) con
 // post-fit prune bundles whose strength <= m_strength_cutoff.
 void QLMatching::fit_round1(ApaRun& run)
 {
+    // Snapshot the full pre-LASSO candidate universe for the empty-flash rescue,
+    // before either round prunes by strength (§I; only when enabled).
+    if (m_empty_rescue) run.prefit_snapshot = run.flash_bundles_map;
+
     const double lambda       = m_lasso_lambda;
     const double delta_charge = m_delta_charge;
     const double delta_light  = m_delta_light;
@@ -1159,6 +1270,11 @@ void QLMatching::fit_round2(ApaRun& run)
     remove_bundle_selection(to_be_removed, run.pre_bundles);
     to_be_removed.clear();
 
+    // Empty-flash light-quality rescue (§I; default OFF = bit-identical, SBND-on).
+    // Uses the pre-LASSO snapshot captured at fit_round1 start, so it can reach the
+    // strength-0 but light-good bundles both rounds pruned.
+    if (m_empty_rescue) rescue_empty_flashes(run, run.prefit_snapshot);
+
     // Keep best match per cluster.
     std::map<int, std::pair<Opflash*, double>> matched_pairs;
     for (std::size_t k = 0; k < pairs.size(); ++k) {
@@ -1195,6 +1311,99 @@ void QLMatching::fit_round2(ApaRun& run)
     }
 
     log->debug("done with matching");
+}
+
+// Empty-flash light-quality rescue (§I; the prototype's flash-centric light pick).
+// The LASSO selects by strength and can leave a flash with NO surviving bundle even
+// when a cluster is an excellent LIGHT match for it (that cluster was won, on strength
+// alone, by a neighbouring flash). For each emptied flash, adopt its best light-quality
+// candidate from the pre-cutoff snapshot if it clears the m_rescue_metric_max bar. If
+// that cluster is already matched elsewhere, reassign it ONLY when the empty flash is a
+// strictly better light match (the guard makes the rescue non-regressive: it never
+// removes a better match, so it cannot drop a currently-correct pair). Mutates
+// run.flash_bundles_map in place.
+void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapshot)
+{
+    // Light-quality metric: ks*(chi2/ndf)^exp, with a per-flag down-weight for
+    // boundary / near-PMT bundles (prototype 0.8 then 0.64). Lower = better.
+    auto metric = [this](const TimingTPCBundle::pointer& b) {
+        const int ndf = std::max(b->get_ndf(), 1);
+        double m = b->get_ks_dis() * std::pow(b->get_chi2() / ndf, m_rescue_exponent);
+        if (b->get_flag_at_x_boundary()) m *= m_rescue_boundary_weight;
+        if (b->get_flag_close_to_PMT()) m *= m_rescue_boundary_weight;
+        return m;
+    };
+
+    // Where each currently-matched cluster lives: main_cluster -> (flash, metric).
+    std::map<Cluster*, std::pair<Opflash*, double>> matched;
+    for (auto& kv : run.flash_bundles_map) {
+        for (auto& b : kv.second) matched[b->get_main_cluster()] = {kv.first, metric(b)};
+    }
+
+    // Empty flashes (in snapshot, absent/empty in the live map), in flash-id order.
+    std::vector<Opflash*> empty_flashes;
+    for (auto& kv : snapshot) {
+        auto* flash = kv.first;
+        auto it = run.flash_bundles_map.find(flash);
+        if (it == run.flash_bundles_map.end() || it->second.empty()) {
+            empty_flashes.push_back(flash);
+        }
+    }
+    std::sort(empty_flashes.begin(), empty_flashes.end(),
+              [](Opflash* a, Opflash* b) { return a->get_flash_id() < b->get_flash_id(); });
+
+    int n_rescued = 0;
+    for (auto* flash : empty_flashes) {
+        // Best light-quality candidate on this flash (tie-break by cluster_index_id).
+        TimingTPCBundle::pointer best;
+        double best_m = 0;
+        for (const auto& b : snapshot.at(flash)) {
+            const double m = metric(b);
+            if (!best || m < best_m ||
+                (m == best_m && b->get_cluster_index_id() < best->get_cluster_index_id())) {
+                best = b;
+                best_m = m;
+            }
+        }
+        if (!best || best_m > m_rescue_metric_max) continue;  // quality bar
+
+        auto* C = best->get_main_cluster();
+        // One flash per cluster: never leave C double-matched.
+        auto mit = matched.find(C);
+        if (mit == matched.end()) {
+            // C is unmatched: pure addition.
+            run.flash_bundles_map[flash].push_back(best);
+        }
+        else {
+            // C is matched to X: REASSIGN (remove X,C; add F,C) only when this flash is
+            // a strictly better light match (mF < mX). The guard never removes a better
+            // match, so it cannot drop a correct pair on light-confident cases; the
+            // tight m_rescue_metric_max bar restricts it to high-confidence rescues.
+            if (!(best_m < mit->second.second)) continue;
+            auto* X = mit->second.first;
+            auto& xv = run.flash_bundles_map[X];
+            xv.erase(std::remove_if(xv.begin(), xv.end(),
+                                    [C](const TimingTPCBundle::pointer& b) {
+                                        return b->get_main_cluster() == C;
+                                    }),
+                     xv.end());
+            if (xv.empty()) run.flash_bundles_map.erase(X);
+            run.flash_bundles_map[flash].push_back(best);
+        }
+        matched[C] = {flash, best_m};
+        ++n_rescued;
+        log->debug("QLrescue: flash id {} adopted cluster ident {} (metric {})",
+                   flash->get_flash_id(), C->ident(), best_m);
+    }
+
+    // Re-sort inner vectors by cluster_index_id for build-stable output.
+    for (auto& kv : run.flash_bundles_map) {
+        std::sort(kv.second.begin(), kv.second.end(),
+                  [](const TimingTPCBundle::pointer& a, const TimingTPCBundle::pointer& b) {
+                      return a->get_cluster_index_id() < b->get_cluster_index_id();
+                  });
+    }
+    log->debug("QLrescue: rescued {} empty flash(es)", n_rescued);
 }
 
 // Stamp the matched flash/t0 onto each cluster (and its associated sub-clusters):
@@ -1313,14 +1522,23 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["chi2_pmt_excess"]  = m_chi2_pmt_excess;
     qp["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
     qp["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
+    qp["auto_mask"]              = m_auto_mask;
+    qp["auto_mask_pe_low"]       = m_auto_mask_pe_low;
+    qp["auto_mask_neighbors"]    = m_auto_mask_neighbors;
+    qp["auto_mask_pe_bright"]    = m_auto_mask_pe_bright;
+    qp["auto_mask_min_contrast"] = m_auto_mask_min_contrast;
+    qp["auto_mask_min_flash"]    = m_auto_mask_min_flash;
     top["quality_params"] = qp;
 
     // OpDet table (all channels). apa side and active flag mirror compute_geometry:
     // side by cathode-plane x; active iff the channel survives its own TPC's mask.
     std::vector<bool> active(m_nchan, false);
+    std::vector<bool> automasked(m_nchan, false);
     for (const auto& run : runs) {
         for (int ch = 0; ch < m_nchan && ch < (int)run.opdet_mask.size(); ++ch)
             if (run.opdet_mask[ch] == 1) active[ch] = true;
+        for (int ch : run.auto_masked)
+            if (ch >= 0 && ch < m_nchan) automasked[ch] = true;
     }
     Json::Value opdets(Json::arrayValue);
     for (int ch = 0; ch < m_nchan && ch < (int)m_opdets.size(); ++ch) {
@@ -1333,6 +1551,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         o["type"]   = od.type;
         o["apa"]    = (od.center.x() < m_cathode_x) ? 0 : 1;
         o["active"] = (bool)active[ch];
+        o["auto_masked"] = (bool)automasked[ch];   // dynamic (event) mask vs static ch_mask
         opdets.append(o);
     }
     top["opdets"] = opdets;

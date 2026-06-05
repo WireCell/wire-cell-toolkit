@@ -71,6 +71,19 @@ namespace WireCell::Match {
         std::vector<int> m_active_opdet_types{1};
         bool m_data{true};
         std::vector<int> m_ch_mask;
+
+        // Per-event dynamic PMT auto-mask (off by default => production bit-identical).
+        // Within a single event/TPC, drop a PMT that never fires (max PE over the
+        // event's flashes < pe_low) while its nearest live PMTs do (>= min_contrast
+        // flashes whose neighbour-median PE > pe_bright). Catches a channel that is
+        // dead in THIS run but not in the static ch_mask. Folds into run.opdet_mask, so
+        // prediction / chi2 / KS / ndf all inherit it. See match/docs/qlmatching-code.md.
+        bool m_auto_mask{false};
+        double m_auto_mask_pe_low{5.0};      // a PMT "fires" if its max event PE >= this
+        int    m_auto_mask_neighbors{4};     // K nearest live PMTs for the brightness ref
+        double m_auto_mask_pe_bright{50.0};  // neighbour-median PE meaning "light present"
+        int    m_auto_mask_min_contrast{1};  // # bright-neighbour flashes required
+        int    m_auto_mask_min_flash{3};     // skip auto-masking below this flash count
         bool m_beamonly{false};
         double m_flash_minPE{500};
         double m_flash_mintime{-1.5 * units::ms};
@@ -205,6 +218,22 @@ namespace WireCell::Match {
         bool m_reject_overpred{false};
         double m_overpred_total_ratio{1e9};   // R_total ceiling (inert when huge)
         double m_overpred_maxch_ratio{1e9};   // R_max   ceiling (inert when huge)
+
+        // §I empty-flash light-quality rescue (the prototype's flash-centric pick,
+        // ToyMatching.cxx organize_matched_bundles). The LASSO selects by strength,
+        // which can leave a flash EMPTY (no bundle above m_strength_cutoff) even when
+        // a cluster is an excellent LIGHT match for it — the cluster was won by a
+        // neighbouring flash on strength alone. After the fit, for each empty flash,
+        // adopt its best light-quality candidate (metric = ks*(chi2/ndf)^exp, with a
+        // boundary/near-PMT down-weight) from the pre-cutoff universe if the metric
+        // clears m_rescue_metric_max. If that cluster is already matched elsewhere,
+        // reassign it ONLY when the empty flash is a strictly better light match
+        // (guard: it never removes a better match, so it cannot drop a correct pair).
+        // Default OFF (huge bar = inert) so production stays bit-identical; SBND-on.
+        bool   m_empty_rescue{false};
+        double m_rescue_metric_max{1e9};       // light-quality bar (inert when huge)
+        double m_rescue_exponent{0.8};         // chi2/ndf exponent (prototype 0.8)
+        double m_rescue_boundary_weight{0.8};  // per-flag down-weight (prototype 0.8/0.64)
 
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
@@ -373,6 +402,7 @@ namespace WireCell::Match {
 
             // optical-detector mask / kept-channel index
             std::vector<unsigned int> opdet_mask;
+            std::set<int> auto_masked;          // channels dropped by the dynamic auto-mask
             std::vector<Opflash::pointer> flashes;
             unsigned int nopdet{0};
             std::vector<int> opdet_idx_v;
@@ -402,6 +432,12 @@ namespace WireCell::Match {
             std::map<std::pair<Opflash*, WireCell::Clus::Facade::Cluster*>,
                      TimingTPCBundle::pointer> flash_cluster_bundles_map;
 
+            // Full pre-LASSO candidate universe (flash -> every candidate bundle),
+            // captured at fit_round1 start before any strength prune. Only filled when
+            // m_empty_rescue; consumed by rescue_empty_flashes after the round-2 prune
+            // so it can reach the strength-0-but-light-good bundles the fit drops.
+            FlashBundlesMap prefit_snapshot;
+
             BundleQualityParams qp;
 
             // charge bookkeeping (debug only)
@@ -425,6 +461,7 @@ namespace WireCell::Match {
         void read_flashes(ApaRun& run);              // canonical flash PCs -> Opflash
         void decompose_cluster_groups(ApaRun& run);  // main+associated split, idx maps
         void compute_geometry(ApaRun& run);          // per-TPC drift geometry, mask cull, opdet idx
+        void compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc);  // per-event dead-PMT auto-mask
         void build_bundles(ApaRun& run);             // (flash,group) bundles + predicted light  [Stage 1]
 
         // Set the diagnostic flag_two_boundary on one bundle: true iff the two
@@ -450,6 +487,11 @@ namespace WireCell::Match {
         // window-truncated bundle when m_lasso_flag_weight is on (prototype's flag-based
         // weight), else 1.0. Multiplies the pe-mismatch (+KS) base in both rounds.
         double lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const;
+
+        // Empty-flash light-quality rescue (m_empty_rescue; see §I). snapshot is the
+        // full pre-strength-cutoff flash->candidate map; this mutates run.flash_bundles_map
+        // in place, adopting the best light-quality candidate of each emptied flash.
+        void rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapshot);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
 

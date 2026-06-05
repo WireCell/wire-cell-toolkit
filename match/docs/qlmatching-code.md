@@ -87,7 +87,13 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `active_opdet_types` | `[1]` | `m_active_opdet_types` | OpDet `type`s kept by the mask (1=PMT, 0=(X)Arapuca); derived from the injected `OpDets` table |
 | `data` | `true` | `m_data` | data vs MC; MC masks saturated PMTs (`:258`) |
 | `beamonly` | `false` | `m_beamonly` | force beam window + skip strength cut |
-| `ch_mask` | `[]` | `m_ch_mask` | OpDet indices to disable |
+| `ch_mask` | `[]` | `m_ch_mask` | OpDet indices to disable (static, all events) |
+| `auto_mask` | `false` | `m_auto_mask` | **per-event dynamic dead-PMT auto-mask** (`compute_dynamic_opdet_mask`, run in `compute_geometry` after the per-TPC mask cull, before `opdet_idx_v`). When true, within each event/TPC it drops a PMT that never fires (max measured PE over the event's flashes `< auto_mask_pe_low`) while its nearest *live* PMTs do (`>= auto_mask_min_contrast` flashes whose median PE over the `K` nearest live PMTs `> auto_mask_pe_bright`). Catches a channel dead in **this run** but absent from the static `ch_mask`; folds into `run.opdet_mask`, so prediction/χ²/KS/ndf all inherit it. Default OFF ⇒ bit-identical. **Changes matching** when on. See §4.0a. |
+| `auto_mask_pe_low` | `5.0` | `m_auto_mask_pe_low` | a PMT "fires" if its max event PE ≥ this; below it across all flashes ⇒ candidate |
+| `auto_mask_neighbors` | `4` | `m_auto_mask_neighbors` | `K` nearest live PMTs (by Y,Z) used as the brightness reference |
+| `auto_mask_pe_bright` | `50.0` | `m_auto_mask_pe_bright` | neighbour-median PE above which "light was present" near the candidate |
+| `auto_mask_min_contrast` | `1` | `m_auto_mask_min_contrast` | # flashes with bright neighbours required to mask (the "never fires" guard is the dominant discriminator) |
+| `auto_mask_min_flash` | `3` | `m_auto_mask_min_flash` | skip auto-masking in a TPC with fewer flashes (too little evidence) |
 | `flash_minPE` | `500` | `m_flash_minPE` | min total PE to keep a flash |
 | `flash_min/maxtime` | ∓1500 ms | … | flash time window (overridden if `beamonly`) |
 | `beam_min/maxtime` | ∓5 ms | … | beam window |
@@ -165,6 +171,36 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 ---
 
 ## 4. Algorithm (`operator()`)
+
+### 4.0a Per-event dead-PMT auto-mask (`compute_dynamic_opdet_mask`)
+Optional (`auto_mask`, default OFF ⇒ bit-identical). Runs once per event/TPC inside
+`compute_geometry`, **after** the per-TPC `opdet_mask` cull and **before** `opdet_idx_v`
+is built, so the dynamic decision folds into the same `run.opdet_mask` every downstream
+metric reads. Within the single event (QLMatching only ever sees one event per
+`operator()`):
+
+1. Skip if the TPC has `< auto_mask_min_flash` flashes (too little evidence).
+2. Per-channel **max measured PE** over the event's flashes (`maxpe[ch]`).
+3. **Live reference pool** = PMTs in this TPC that fire somewhere this event
+   (`maxpe ≥ auto_mask_pe_low`) — includes a channel that happens to be in the static
+   `ch_mask` but is alive this run, and excludes dead ones so the brightness reference
+   is demonstrably-live.
+4. For each currently-active PMT with `maxpe < auto_mask_pe_low` (never fires): take its
+   `K = auto_mask_neighbors` nearest live PMTs by (Y,Z) distance — tie-broken by channel
+   for determinism — and count flashes where their **median** PE `> auto_mask_pe_bright`.
+   Mask the channel (`run.opdet_mask = 0`, recorded in `run.auto_masked`) if that count
+   `≥ auto_mask_min_contrast`.
+
+All decisions come from a snapshot (the per-channel maxima + the live pool), applied
+after the scan in channel order, so the result is order-independent and reproduces
+`sbnd_xin/automask_prototype.py` (validated: masks the run-dead lan-reco2 PMT ch69 in
+150/150 events with **zero** false positives, and nothing in the original data / MC).
+The "never fires this event" condition is the dominant discriminator; the bright-neighbour
+contrast guards against masking a PMT that is merely in a quiet region. Auto-masked
+channels appear in the `-calib` dump as `active:false` with `auto_masked:true` (vs static
+`ch_mask` channels, `auto_masked:false`); logged as `QLAUTOMASK` lines. Use a per-run
+**static** `ch_mask` instead if you need to *un-mask* a channel that is dead in the
+original run but alive in a new one (auto-mask only adds masks).
 
 ### 4.1 Build candidate bundles (`:231-352`)
 For every (flash × cluster) pair create a `TimingTPCBundle(flash, cluster,
