@@ -57,18 +57,8 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
         m_chunk[0] = jchunk[0].asInt();
         m_chunk[1] = jchunk[1].asInt();
     }
-    if (!m_chunk[0] || !m_chunk[1]) {
-        // HDF5 filters require chunked layout.
-        if (m_gzip) {
-            log->warn("gzip filter requires non-zero chunking, output will be uncompressed");
-        }
-        if (m_shuffle) {
-            log->warn("shuffle filter requires non-zero chunking, output will be unshuffled");
-        }
-        m_gzip = false;
-        m_shuffle = false;
-        m_chunk[0] = m_chunk[1] = 0;
-    }
+    // A zero chunk dimension (the default) means "use the dataset dimension",
+    // resolved per dataset in operator().  Filters stay enabled.
 
     if (m_gzip) {
         if (!H5Zfilter_avail(H5Z_FILTER_DEFLATE)) {
@@ -265,7 +255,13 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
             if (dcpl == H5I_INVALID_HID) {
                 raise<IOError>("failed to create dataset creation property list");
             }
-            log->debug("gzip:{} chunks:[{},{}]", m_gzip, m_chunk[0], m_chunk[1]);
+            // A zero chunk dimension means "use the dataset dimension".  HDF5
+            // requires chunk dims <= dataset dims for fixed-size datasets, so
+            // clamp non-zero values.
+            hsize_t chunk[2] = {
+                (m_chunk[0] && m_chunk[0] < (hsize_t)nrows) ? m_chunk[0] : (hsize_t)nrows,
+                (m_chunk[1] && m_chunk[1] < (hsize_t)ncols) ? m_chunk[1] : (hsize_t)ncols};
+            log->debug("gzip:{} chunks:[{},{}]", m_gzip, chunk[0], chunk[1]);
 
             if (m_gzip || m_shuffle) {
                 // Note, filters require chunked layout
@@ -279,8 +275,8 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
                         raise<IOError>("failed set gzip compression of %s", m_gzip);
                     }
                 }
-                if (H5Pset_chunk (dcpl, 2, m_chunk.data()) < 0) {
-                    raise<IOError>("failed set chunk of [%d,%d]", m_chunk[0], m_chunk[1]);
+                if (H5Pset_chunk (dcpl, 2, chunk) < 0) {
+                    raise<IOError>("failed set chunk of [%d,%d]", chunk[0], chunk[1]);
                 }
             }
 

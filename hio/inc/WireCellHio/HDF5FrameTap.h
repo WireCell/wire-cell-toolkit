@@ -53,6 +53,8 @@ namespace WireCell::Hio {
             default and compression is applied.
 
             chunk (int or 2-int array) - The chunk size along each dimension used for gzip.
+            A zero (the default) uses the dataset dimension itself; non-zero values are
+            clamped to the dataset dimension.
 
             shuffle (bool) - Enable the HDF5 shuffle filter (requires chunking).
          */
@@ -60,7 +62,7 @@ namespace WireCell::Hio {
         bool m_digitize{false};
         int m_gzip{2};
         bool m_shuffle{true};
-        std::vector<hsize_t> m_chunk = {2560,6000};
+        std::vector<hsize_t> m_chunk = {0,0};
 
         Configuration m_cfg;           /// copy of configuration
         //IAnodePlane::pointer m_anode;  /// pointer to some APA, needed to associate chnnel ID to planes
