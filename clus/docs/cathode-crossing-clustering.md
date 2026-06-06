@@ -315,8 +315,9 @@ sample shows far candidates in the 20–50° connection band. **Efficiency cavea
 drift residual up to 5.3 cm) with ~0.5–0.7 cm margin — a crosser with a substantially larger
 gap-truncation or drift residual would still be missed; this is an efficiency limit, not a purity
 risk (the conn-alignment gate is unchanged). `min_length_short = 2 cm` admits a bridge fragment to
-the CLOSE-regime collinearity path only; a fragment with no reliable local direction (e.g. 137680's
-14-point stub, `tt_hough` 66°) is still left out by design.
+the CLOSE-regime collinearity path; a fragment with no reliable local direction (e.g. 137680's
+14-point stub, `tt_hough` 66°) was originally left out, and is now recovered by the **short-stub
+prolongation** branch (`short_dir_len`, below).
 
 ### 150-sample tail: wider cathode reach + a short bridge fragment (events 59415, 137680)
 
@@ -345,8 +346,8 @@ explicit args on the `cm.cathode_connect(...)` call in `cfg/.../sbnd/clus.jsonne
   partner requires it to be within `dis_cut` (5 cm) of the anchor's cathode end, cross-TPC, both
   within `cathode_x_cut`, AND collinear < `angle_cut` — a spatially tiny conjunction that a noise
   fragment is very unlikely to satisfy at once. (137680's own bridge, a 14-point 2.2 cm stub, has
-  no reliable direction — `tt_hough` 66° — and is correctly *not* merged; recovering it would need
-  a connection-to-anchor path that is out of proportion to the gain.)
+  no reliable direction — `tt_hough` 66° — so it cannot ride the collinearity path; it is instead
+  recovered by the short-stub prolongation branch below, which tests the *anchor's* direction.)
 
 Closest-point geometry (from the connector's instrumentation; cut values that admit them):
 
@@ -363,6 +364,42 @@ close crosser (27/2) all still merge, and **no new or removed merges** appear. S
 relaxations are a *no-op on the established 20-event set* and act only on the 150-sample tail
 (59415, 137680), where each unifies the crosser's halves into one geometric cluster (verified by
 shared `real_cluster_id`; 59415 also absorbs its bridge fragment).
+
+### Short-stub prolongation: connect a short half via the anchor's direction (event 138670)
+
+The CLOSE-regime collinearity test (`tt_hough < angle_cut`) requires *both* halves to have a
+reliable local direction. Event 138670 (150-sample tail) is a crosser whose two halves clear every
+geometric gate — dis **3.01 cm**, drift sep **2.19 cm**, both cathode ends ≈ 1.1 cm, different TPCs
+— but the TPC0 half is a **18.9 cm stub** whose own direction is junk (`tt_hough = 16.4°`, PCA 44°
+to the anchor), so the pair is rejected. Yet the stub plainly continues the **215 cm anchor**: the
+anchor→stub connection vector is **14.7°** off the anchor's PCA axis (perpendicular residual
+0.78 cm). The information is in the *anchor's* direction, not the stub's.
+
+The **short-stub prolongation** branch (SBND arg `short_dir_len = 25 cm`, `conn_short_cut = 30°`;
+default `short_dir_len = 0` ⇒ branch OFF, byte-identical) handles exactly this. Inside the close
+regime, after the existing collinearity accept, if the pair has **exactly one** short member
+(`< short_dir_len`) and the other is a **genuinely long anchor** (`≥ short_dir_len`, not merely
+`≥ min_length` — a mid-length anchor's direction is itself untrustworthy), it accepts when the
+anchor→stub connection aligns with the anchor's direction (Hough at its closest point **or** cluster
+PCA axis) within `conn_short_cut`. It never uses the stub's own direction. The discriminator is
+self-vetoing: a coincidental short cluster offset transversely from the anchor's extrapolation has a
+~perpendicular connection and is rejected — confirmed on the 20-event set, where short stubs at 8 cm
+(conn 72.7°) and 3 cm (conn 87.3°) are correctly *not* merged.
+
+| crosser | pieces (len) | dis | \|x₁−x₂\| | cathode-x | tt(H/PCA) | anchor-conn (best) | result |
+|---|---|---|---|---|---|---|---|
+| data 138670 | anchor↔stub (215 / 18.9) | 3.01 | 2.19 | 1.09 / 1.10 | 16.4° / 44° | **14.7°** (PCA) | merged (short_dir_len) |
+| data 137680 | anchor↔stub (381 / 2.2)  | 3.07 | 1.57 | 0.78 / 0.79 | 65.7° / —  | **8.6°** (Hough)  | merged (short_dir_len) |
+
+**Regression: analytical accept-log no-op (0 new edges) on the 20-event set.** The branch can only
+OR-in acceptances; parsing the connector's per-pair geometry across all 10 data + 10 MC events shows
+**no pair** the short-stub branch newly accepts (every close-regime pair with `tt_hough ≥ angle_cut`
+and a short member has an anchor-connection ≥ `conn_short_cut`), so the edge set — hence the
+`merge_clusters` output — is unchanged from the prior binary. The 6 known crossers + evt12 (27/2)
+still merge (re-confirmed by shared `real_cluster_id` on the ON outputs). The branch fires only on
+the 150-tail: 138670 (the requested case) and, as a side effect, 137680's previously-deferred 2.2 cm
+stub (its 8.6° anchor alignment makes it the *better*-aligned of the two — no `short_dir_len` /
+`conn_short_cut` choice keeps 138670 while dropping it).
 
 ## Artifacts
 

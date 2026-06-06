@@ -19,6 +19,12 @@
 //     offset (the calibration artifact, ~along the drift axis), not the track, so the
 //     generic passes' connection-alignment test rejects these crossers; here we accept
 //     on the local (Hough) track-direction collinearity alone -- the hole the pass fills.
+//     SHORT-STUB sub-case (default OFF, short_dir_len > 0): when one half is too short
+//     (< short_dir_len) for its own direction to be trusted and the other is a genuinely
+//     long anchor (>= short_dir_len), the collinearity test is unreliable, so instead
+//     require the anchor->stub connection to continue the ANCHOR's direction (Hough or
+//     PCA) within conn_short_cut -- a gap-splintered stub attaches to its anchor while a
+//     transversely-offset short cluster (connection ~perpendicular) is rejected.
 //   - far  (dis_cut <= dis < max_dis): a shallow-angle crosser travels within the cathode
 //     plane, so the halves are offset transversely (large dis) and the p1->p2 connection
 //     vector becomes a reliable direction.  Two refinements vs close: (a) the local Hough
@@ -68,6 +74,8 @@ static void clustering_cathode_connect(
     double hough_radius,
     double min_length,       // the longer half of a pair must reach this (the anchor track)
     double min_length_short, // the shorter member only needs this (admits a bridge fragment)
+    double short_dir_len,    // below this a half's own direction is untrusted (prolong instead)
+    double conn_short_cut,   // degrees; short-stub anchor->stub connection vs anchor direction
     double flash_t0_window);
 
 class ClusteringCathodeConnect : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
@@ -90,6 +98,10 @@ public:
         // default min_length_short == min_length: both members must reach min_length,
         // i.e. byte-identical to the pre-asymmetric behaviour unless explicitly set.
         min_length_short_= get(config, "min_length_short", min_length_);
+        // default short_dir_len == 0: short-stub prolongation branch OFF, i.e.
+        // byte-identical to the pre-prolongation behaviour unless explicitly set.
+        short_dir_len_   = get(config, "short_dir_len", 0.0);
+        conn_short_cut_  = get(config, "conn_short_cut", 30.0);     // degrees
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
     virtual Configuration default_configuration() const {
@@ -101,7 +113,8 @@ public:
         auto& live = *ensemble.with_name("live").at(0);
         clustering_cathode_connect(live, m_scope, drift_cut_, dis_cut_, max_dis_, angle_cut_,
                                    conn_far_cut_, cathode_x_, cathode_x_cut_, hough_radius_,
-                                   min_length_, min_length_short_, flash_t0_window_);
+                                   min_length_, min_length_short_, short_dir_len_, conn_short_cut_,
+                                   flash_t0_window_);
     }
 
 private:
@@ -115,6 +128,8 @@ private:
     double hough_radius_{20*units::cm};
     double min_length_{10*units::cm};
     double min_length_short_{10*units::cm};
+    double short_dir_len_{0.0};
+    double conn_short_cut_{30.0};
     double flash_t0_window_{80*units::ns};
 };
 
@@ -139,7 +154,9 @@ static bool is_cathode_crossing_pair(
     double conn_far_cut,
     double cathode_x,
     double cathode_x_cut,
-    double hough_radius)
+    double hough_radius,
+    double short_dir_len,
+    double conn_short_cut)
 {
     geo_point_t p1;
     geo_point_t p2;
@@ -172,22 +189,8 @@ static bool is_cathode_crossing_pair(
     geo_point_t dir2 = cluster2.vhough_transform(p2, hough_radius);
     double tt_hough = collinear_deg(dir1.angle(dir2));
 
-    if (dis < dis_cut) {
-        // CLOSE regime: the p1->p2 connection vector is dominated by the drift-x offset
-        //   (the calibration artifact, ~along the drift axis), not the track, so the
-        //   generic passes' connection-alignment test rejects these crossers -- the hole
-        //   this pass fills.  Accept on the local half-track collinearity alone.
-        return tt_hough < angle_cut;
-    }
-
-    // FAR regime: the two halves are offset within the cathode plane (large transverse
-    //   separation from a shallow-angle crosser travelling along the cathode).  Two
-    //   things change vs CLOSE: (a) the local Hough direction can be unreliable when one
-    //   half is a dense blob near the cathode, so we ADD the cluster PCA principal axis
-    //   as an alternative direction estimate (Hough OR PCA may satisfy collinearity);
-    //   (b) the now-long p1->p2 connection vector is meaningful, so we require it to
-    //   align with the track (PCA or Hough) -- this rejects parallel-offset cosmics,
-    //   whose connection is ~perpendicular (>=50 deg), while passing a real crosser.
+    // cluster PCA principal axes (an alternative, global direction estimate used by both
+    // the short-stub branch and the far regime; empty/invalid axis is guarded).
     geo_point_t pca1, pca2;
     bool have_pca = false;
     {
@@ -199,6 +202,51 @@ static bool is_cathode_crossing_pair(
             have_pca = true;
         }
     }
+
+    if (dis < dis_cut) {
+        // CLOSE regime: the p1->p2 connection vector is dominated by the drift-x offset
+        //   (the calibration artifact, ~along the drift axis), not the track, so the
+        //   generic passes' connection-alignment test rejects these crossers -- the hole
+        //   this pass fills.  Accept on the local half-track collinearity alone.
+        if (tt_hough < angle_cut) return true;
+
+        // SHORT-STUB prolongation (default OFF: short_dir_len == 0).  When one half is
+        //   too short for its own direction to be trusted (a gap-splintered cathode
+        //   stub), the collinearity test above is unreliable.  Instead use only the LONG
+        //   (anchor) half's reliable direction: the anchor->stub connection vector must
+        //   continue the anchor track (within conn_short_cut).  The anchor's Hough (at its
+        //   closest point) OR cluster PCA axis may satisfy it.  Require EXACTLY one short
+        //   member (< short_dir_len) and the other a genuinely long anchor (>= short_dir_len,
+        //   not merely >= min_length) -- a mid-length "anchor" has an unreliable direction
+        //   too, so trusting its extrapolation would test conn against junk.  A coincidental
+        //   short cluster offset transversely from the anchor's extrapolation has a
+        //   ~perpendicular connection and is rejected.
+        if (short_dir_len > 0 &&
+            std::min(length_1, length_2) < short_dir_len &&
+            std::max(length_1, length_2) >= short_dir_len) {
+            const bool one_is_anchor = (length_1 >= length_2);
+            const geo_point_t& anchor_pt    = one_is_anchor ? p1 : p2;
+            const geo_point_t& stub_pt      = one_is_anchor ? p2 : p1;
+            const geo_point_t& anchor_hough = one_is_anchor ? dir1 : dir2;
+            const geo_point_t& anchor_pca   = one_is_anchor ? pca1 : pca2;
+            geo_point_t conn(anchor_pt.x() - stub_pt.x(),
+                             anchor_pt.y() - stub_pt.y(),
+                             anchor_pt.z() - stub_pt.z());
+            double cc_hough = collinear_deg(conn.angle(anchor_hough));
+            double cc_pca = have_pca ? collinear_deg(conn.angle(anchor_pca)) : 999.0;
+            return std::min(cc_hough, cc_pca) < conn_short_cut;
+        }
+        return false;
+    }
+
+    // FAR regime: the two halves are offset within the cathode plane (large transverse
+    //   separation from a shallow-angle crosser travelling along the cathode).  Two
+    //   things change vs CLOSE: (a) the local Hough direction can be unreliable when one
+    //   half is a dense blob near the cathode, so we ADD the cluster PCA principal axis
+    //   as an alternative direction estimate (Hough OR PCA may satisfy collinearity);
+    //   (b) the now-long p1->p2 connection vector is meaningful, so we require it to
+    //   align with the track (PCA or Hough) -- this rejects parallel-offset cosmics,
+    //   whose connection is ~perpendicular (>=50 deg), while passing a real crosser.
     double tt_pca = have_pca ? collinear_deg(pca1.angle(pca2)) : 999.0;
     // track-track collinear: Hough OR (additional) PCA.
     if (tt_hough >= angle_cut && tt_pca >= angle_cut) return false;
@@ -227,6 +275,8 @@ static void clustering_cathode_connect(
     double hough_radius,
     double min_length,
     double min_length_short,
+    double short_dir_len,
+    double conn_short_cut,
     double flash_t0_window)
 {
     // prepare graph ... (same skeleton as the other merge passes)
@@ -269,7 +319,8 @@ static void clustering_cathode_connect(
             if (is_cathode_crossing_pair(*cluster_1, *cluster_2,
                                          cluster_1->get_length(), cluster_2->get_length(),
                                          drift_cut, dis_cut, max_dis, angle_cut, conn_far_cut,
-                                         cathode_x, cathode_x_cut, hough_radius)) {
+                                         cathode_x, cathode_x_cut, hough_radius,
+                                         short_dir_len, conn_short_cut)) {
                 boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                 ilive2desc[map_cluster_index[cluster_2]], g);
             }
