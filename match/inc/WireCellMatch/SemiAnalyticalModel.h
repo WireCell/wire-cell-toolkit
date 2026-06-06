@@ -86,12 +86,19 @@ namespace WireCell::Match {
         std::size_t nOpDets() const { return m_opdets.size(); }
 
     private:
+        // r is the precomputed border radius hypot(y-cy, z-cz) and distance the
+        // precomputed point->opdet range; both are passed in so VUVVisibility does
+        // not recompute them per opdet (bit-identical, same operands).
         double VUVVisibility(const WireCell::Point& scintPoint,
-                             const OpticalDetector& opDet) const;
+                             const OpticalDetector& opDet, double r, double distance) const;
+        // rxy (cathode-plane border radius) and d_c (cathode distance) are passed in
+        // (point-invariant across opdets) so VISVisibility does not recompute them
+        // per opdet (bit-identical, same operands).
         double VISVisibility(const WireCell::Point& scintPoint,
                              const OpticalDetector& opDet,
                              double cathode_visibility,
-                             const WireCell::Point& hotspot) const;
+                             const WireCell::Point& hotspot,
+                             double rxy, double d_c) const;
 
         double Gaisser_Hillas(double x, const double* par) const;
         double Rectangle_SolidAngle(double a, double b, double d) const;

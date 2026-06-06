@@ -202,10 +202,12 @@ QLMatching max dropped from **31 s → 5.6 s**; `xtpc_cull` max from **27 s → 
 
 1. **Within QLMatching:** `build_bundles` / `SemiAnalyticalModel` is now dominant —
    median 887 ms, max 5060 ms (~77 % of `ql_total`). It's the per-point
-   `detectedDirect/ReflectedVisibilities` over all opdets (`build_bundles:927-964`). Headroom:
-   the visibility loop redundantly re-evaluates per-point solid-angle/Gaisser-Hillas; a
-   first cut is to skip masked opdets earlier and cache per-opdet geometry, or coarsen the
-   per-point sampling for large blobs.
+   `detectedDirect/ReflectedVisibilities` over all opdets (`build_bundles:927-964`). This was
+   profiled and partly optimized — see "Profiling the `build_bundles` visibility loop" below:
+   the safe bit-identical micro-opts (A) buy ~8.7 % on the worst event, but the math itself is
+   irreducible and memoizing the reflected geometry (B) does **not** pay. A bigger win would
+   need an approximation (coarsen per-point sampling for large blobs), which is out of scope
+   here.
 
 2. **In the whole per-event chain (QLMatching is no longer significant):** per-event wall
    (timestamps) is now dominated by
@@ -223,3 +225,62 @@ QLMatching max dropped from **31 s → 5.6 s**; `xtpc_cull` max from **27 s → 
    (largest aggregate) and **`ClusteringExamineBundles`** — see
    `clus/docs/clustering-timing-profile.md` and [[project_clustering_examinebundles_hotspot]],
    not QLMatching.
+
+## Profiling the `build_bundles` visibility loop (longest event 141530)
+
+Took the post-fix **longest** QLMatching event, **141530** (`ql_total` 5.6 s in the 150-run;
+4.0–4.4 s under lighter load), staged single-event (`f2/ev141530`) and CPU-profiled with
+gperftools. `ql_total` is now ~90 % `build_bundles` `vis_loop` (≈ 3.9 s over 608 648
+candidate-points × ~78 unmasked same-TPC opdets × 2 calls). gperftools `--focus=build_bundles`:
+
+| leaf | % of `build_bundles` | x-dependent? |
+|---|--:|---|
+| `detectedDirectVisibilities` (VUV) | 49 % | **yes** — every per-opdet term depends on `x = px + flash_x_offset` |
+| `detectedReflectedVisibilities` (VIS) | 46 % | **partly** — solid-angle geometry transverse-only; table corr x-dependent |
+| `Omega_Dome_Model` / `Gaisser_Hillas` / `interpolate2` / `fast_acos` | the bulk of the above | irreducible ported larsim math |
+
+So the cost is structural — **O(n_flashes × n_points × n_opdets)** — and compute-bound on the
+solid-angle + Gaisser-Hillas + table-interpolation math, not on bookkeeping.
+
+### A — hoist per-point-invariants + reuse buffers (shipped, bit-identical)
+
+Three micro-opts, all leaving outputs **byte-for-byte identical**:
+- `build_bundles` reuses the two `vis` buffers across all points instead of allocating a fresh
+  pair per point (~1.2 M `std::vector<double>` allocations removed).
+- `detectedDirectVisibilities` computes the border radius `r` once and passes it (plus the
+  already-computed `distance`) into `VUVVisibility` instead of recomputing per opdet.
+- `detectedReflectedVisibilities` hoists `rxy`/`d_c` out of the opdet loop into `VISVisibility`.
+
+**Measured (event 141530, interleaved same-window, 4 runs each, summed `vis_loop` ms):**
+
+| | runs | median |
+|---|---|--:|
+| baseline | 4025, 4037, 4066, 4076 | 4051 |
+| **+A** | 3697, 3696, 3677, 3716 | **3697** |
+
+≈ **8.7 % faster `vis_loop`** (tight, non-overlapping; the buffer reuse dominates the gain).
+Bit-identical verified on **141530 and median 58667** (all 7 `mabc` JSONs incl. `0-op.json`
+flash predictions byte-equal).
+
+### B — cross-flash VIS-geometry memoization (investigated, **dropped**)
+
+The reflected (VIS) per-opdet solid-angle geometry (`Omega_Dome_Model`, `theta_vis`, angle bin
+`k`) depends only on `(sign(x), y, z)` — the cathode-hotspot→opdet vector is x-independent — so
+it is identical across the ~24 flashes that re-evaluate the same cluster point shifted only in
+x. Memoizing it keyed on `(sign, y, z)` gave a **~92 % hit rate** and did remove the geometry
+math (gperftools: `Omega_Dome_Model` 23 %→14 %, `fast_acos` 7 %→4 %).
+
+But it **does not pay**: the cacheable reflected geometry is only ~5.6 % of the whole
+matching-graph CPU (cheap `sqrt`/poly, not the expensive elliptic-integral path, which is in
+the *un*-cacheable VUV/cathode `Rectangle_SolidAngle`). The memoization bookkeeping — a hash
+lookup on every one of ~600 k calls, plus map/arena management — costs about as much as the
+math it saves. The first attempt (`unordered_map<key, vector<VISGeom>>`) regressed because each
+of ~48 k misses heap-allocated a 312-element vector (gperftools alloc+hash 22 %→31 %, exactly
+cancelling the geometry win); a flat-arena rewrite removed the per-miss allocation but still
+netted **neutral-to-negative**. Conclusion: the `SemiAnalyticalModel` math is effectively
+irreducible and memoizing it is not worth the complexity. **B was removed; only A shipped.**
+
+**ROI note.** A is ~8.7 % on the *longest* event and negligible on the median; QLMatching is
+~1.1 s median vs imaging 9.9 s and `ClusteringExamineBundles` up to ~12 s, so this does not
+move the per-event chain. The actionable result is the **negative** one (the visibility math is
+the floor; caching it doesn't help) and the pointer above to the real chain hotspots.

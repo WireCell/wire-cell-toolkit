@@ -908,6 +908,10 @@ void QLMatching::build_bundles(ApaRun& run)
     // millions of per-opdet calls. Logging only; no effect on results.
     double vis_ms = 0.0;
     std::size_t total_pts = 0;
+    // Reuse the visibility buffers across all points (detected*Visibilities re-zero
+    // them via assign), avoiding a per-point allocation pair.
+    std::vector<double> direct_visibilities;
+    std::vector<double> reflected_visibilities;
     for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
         const double flash_x_offset = run.sign_offset * flash_time * m_drift_speed;
@@ -989,9 +993,7 @@ void QLMatching::build_bundles(ApaRun& run)
                     // discarded by the flash_opdet_mask gate below, so evaluating the
                     // per-opdet solid-angle/Gaisser-Hillas correction for them is wasted
                     // (~half of the same-TPC opdets are masked). Bit-identical result.
-                    std::vector<double> direct_visibilities;
                     m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
-                    std::vector<double> reflected_visibilities;
                     m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm, &flash_opdet_mask);
 
                     for (std::size_t idet = 0; idet < nopdets; ++idet) {

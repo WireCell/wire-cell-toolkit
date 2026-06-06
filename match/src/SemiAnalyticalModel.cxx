@@ -227,6 +227,10 @@ void SemiAnalyticalModel::detectedDirectVisibilities(std::vector<double>& vis,
                                                      const std::vector<unsigned int>* opdet_mask) const
 {
     vis.assign(m_opdets.size(), 0.);
+    // Border radius is point-invariant (independent of opdet); compute once and
+    // pass into VUVVisibility instead of recomputing it per opdet. Bit-identical.
+    const double r = std::hypot(scintPoint.y() - m_geom.active_center_y,
+                                scintPoint.z() - m_geom.active_center_z);
     for (std::size_t i = 0; i < m_opdets.size(); ++i) {
         // Skip caller-masked opdets: their visibility is discarded downstream, so
         // computing it is wasted (leaves vis[i]=0, bit-identical to the masked path).
@@ -239,15 +243,16 @@ void SemiAnalyticalModel::detectedDirectVisibilities(std::vector<double>& vis,
         const Vector relative = scintPoint - od.center;
         const double distance = relative.magnitude();
         if (distance > m_maxPDDistance) continue;
-        vis[i] = VUVVisibility(scintPoint, od);
+        vis[i] = VUVVisibility(scintPoint, od, r, distance);
     }
 }
 
 double SemiAnalyticalModel::VUVVisibility(const WireCell::Point& scintPoint,
-                                          const OpticalDetector& opDet) const
+                                          const OpticalDetector& opDet,
+                                          double r, double distance) const
 {
     const Vector relative = scintPoint - opDet.center;
-    const double distance = relative.magnitude();
+    // distance passed in (already computed for the maxPDDistance gate above).
     // orientation 0 (anode/cathode) only
     const double cosine = std::abs(relative.x()) / distance;
     const double theta = fast_acos(cosine) * 180. / kPi;
@@ -269,10 +274,8 @@ double SemiAnalyticalModel::VUVVisibility(const WireCell::Point& scintPoint,
     const double visibility_geo = std::exp(-distance / m_geom.vuv_absorption_length) *
                                   (solid_angle / (4. * kPi));
 
-    // border radius in cathode-plane coordinates (orientation 0).
-    const double r = std::hypot(scintPoint.y() - m_geom.active_center_y,
-                                scintPoint.z() - m_geom.active_center_z);
-
+    // border radius r in cathode-plane coordinates (orientation 0) passed in by the
+    // caller (point-invariant across opdets).
     double pars_ini[4] = {0., 0., 0., 0.};
     double s1 = 0., s2 = 0., s3 = 0.;
     if (opDet.type == 0 && m_isFlatPDCorr) {
@@ -353,24 +356,28 @@ void SemiAnalyticalModel::detectedReflectedVisibilities(std::vector<double>& vis
     if (!std::isfinite(GH) || GH < 0 || GH > 10) GH = 0;
     const double cathode_visibility_rec = GH * cathode_vis_geo;
 
-    // Step 2: per-PD visibility from the hotspot.
+    // Step 2: per-PD visibility from the hotspot. rxy and d_c are point-invariant
+    // (independent of opdet) and so are hoisted out of the loop and passed into
+    // VISVisibility instead of recomputed per opdet: rxy is the same hypot as r
+    // above; d_c == distance_cathode (|x - plane_depth|, bitwise). Bit-identical.
     const Point hotspot(plane_depth, scintPoint.y(), scintPoint.z());
+    const double rxy = r;
+    const double d_c = distance_cathode;
     for (std::size_t i = 0; i < m_opdets.size(); ++i) {
         // Skip caller-masked opdets (see detectedDirectVisibilities).
         if (opdet_mask && i < opdet_mask->size() && (*opdet_mask)[i] == 0) continue;
         const auto& od = m_opdets[i];
         if ((scintPoint.x() < 0.) != (od.center.x() < 0.)) continue;
-        vis[i] = VISVisibility(scintPoint, od, cathode_visibility_rec, hotspot);
+        vis[i] = VISVisibility(scintPoint, od, cathode_visibility_rec, hotspot, rxy, d_c);
     }
 }
 
 double SemiAnalyticalModel::VISVisibility(const WireCell::Point& scintPoint,
                                           const OpticalDetector& opDet,
                                           double cathode_visibility,
-                                          const WireCell::Point& hotspot) const
+                                          const WireCell::Point& hotspot,
+                                          double rxy, double d_c) const
 {
-    const double plane_depth = scintPoint.x() < 0. ? -m_plane_depth : m_plane_depth;
-
     const Vector emission_rel = hotspot - opDet.center;
     const double distance_vis = emission_rel.magnitude();
     const double cosine_vis = std::abs(emission_rel.x()) / distance_vis;
@@ -396,10 +403,8 @@ double SemiAnalyticalModel::VISVisibility(const WireCell::Point& scintPoint,
     const std::size_t k = angle_bin(theta_vis, m_delta_angulo_vis,
                                     m_vispars_flat.empty() ? m_vispars_dome.size()
                                                            : m_vispars_flat.size());
-    const double rxy = std::hypot(scintPoint.y() - m_geom.active_center_y,
-                                  scintPoint.z() - m_geom.active_center_z);
-    const double d_c = std::abs(scintPoint.x() - plane_depth);
-
+    // rxy (cathode-plane border radius) and d_c (cathode distance) are passed in by
+    // the caller (point-invariant across opdets).
     double border_correction = 0.;
     if (opDet.type == 0 && m_isFlatPDCorr) {
         border_correction =
