@@ -177,17 +177,16 @@ the `std::set` tree cost. Options, roughly increasing risk:
     feature the local active imaging was built for. It is a clean toggle
     (`wct-img-all.jsonnet:30`), so it is worth *quantifying*, but it is not a free win.
 
-**R2 — Cut `judge_coverage`'s per-call sparse-matrix allocations (~6 %).** *Re-scoped after
-measurement — see "R2/R3 investigation" below.* The original idea (bbox pre-filter + triplet
-`reserve()`) does **not** pan out: `judge_coverage` is already gated by `cs_graph` edges (not an
-all-pairs O(n²) compare), bbox-disjoint pairs are only 0.16–2.9 % of calls, and `get_projection`'s
-cost is `setFromTriplets` (inherent), which `reserve()` cannot touch. The real lever is that each
-`judge_coverage` call allocates **three** sparse matrices — `mask(ref)` + `mask(tar)` +
-`(ref_mask − tar_mask)` (the subtraction alone is 54 % of the function) — and ~99 % of calls hit
-that path. A bit-identical single union-pass over the two matrices' non-zeros (tracking
-ref_nz/tar_nz/has_pos/has_neg with early-exit) removes all three allocations. Ceiling ≈ most of the
-6 % → ~4–5 % on the worst event. This is a **logic rewrite, not churn reduction**, so it is
-proposed (not shipped) pending greenlight and full `cmpnpz.py` validation.
+**R2 — Cut `judge_coverage`'s per-call sparse-matrix allocations (6.1 % → 1.1 %, SHIPPED).**
+*Re-scoped after measurement — see "R2/R3 investigation" below.* The original idea (bbox pre-filter
++ triplet `reserve()`) does **not** pan out: `judge_coverage` is already gated by `cs_graph` edges
+(not an all-pairs O(n²) compare), bbox-disjoint pairs are only 0.16–2.9 % of calls, and
+`get_projection`'s cost is `setFromTriplets` (inherent), which `reserve()` cannot touch. The real
+lever is that each `judge_coverage` call allocated **three** sparse matrices — `mask(ref)` +
+`mask(tar)` + `(ref_mask − tar_mask)` (the subtraction alone is 54 % of the function) — and ~99 % of
+calls hit that path. Replaced with a single union-pass over the two matrices' non-zeros (tracking
+ref_nz/tar_nz/has_pos/has_neg with early-exit) — no allocations. Bit-identical and shipped; see "R2/R3
+investigation" for the equivalence proof and result.
 
 **R3 — Reduce the `setS` edge-tree cost (~21–27 % Rb_tree) — same root cause as R1.** The Rb_tree
 is the cluster graph's own `setS` out-edge container (`ICluster.h:167`), not any application
@@ -294,12 +293,19 @@ Conclusions:
   line 215 = **220 (52 %)**, the 3 empty `Projection2D(nchan,nslice)` ctors = 66, and
   `SimpleSlice::activity()`'s by-value map copy line 150 = 64. `reserve()` touches none of these;
   the triplet `push_back`s do not even appear.
-- **The real lever** (proposed, not shipped): replace `mask(ref)+mask(tar)+(ref_mask−tar_mask)`
-  with a single union-pass over the two matrices' non-zeros computing the same four booleans
-  (`ref_nz`, `tar_nz`, `has_pos`, `has_neg`) with early-exit. Removes all three allocations on the
-  ~99 % expensive path → ceiling ~4–5 % on the worst event. Bit-identical bar = exactly replicate
-  the mask threshold (`x > −uncer_cut`), explicit-zero handling, only-in-one-matrix positions, and
-  the ±0.01 thresholds; validate with `cmpnpz.py` on all 11 events as in Tier A.
+- **The real lever** (SHIPPED): replace `mask(ref)+mask(tar)+(ref_mask−tar_mask)` with a single
+  per-column merge over the two matrices' (row-sorted) non-zeros computing the same four booleans
+  (`ref_nz`, `tar_nz`, `has_pos`, `has_neg`) with early-exit, then the identical branch logic.
+  **Equivalence:** `mask` sets every *stored* cell to exactly `0`/`1` and keeps the sparsity, so
+  `ref_mask − tar_mask ∈ {−1,0,1}` over the union of stored cells; `diff=+1 ⟺ (ref live ∧ tar
+  not-live)` and `diff=−1 ⟺ (tar live ∧ ref not-live)`, where "live" = stored ∧ `value > −uncer_cut`
+  and "not-live" subsumes not-stored — exactly what `ref_m_tar_pos`/`ref_m_tar_neg` test, and the
+  ±0.01 thresholds are exact on integer diffs. The early-exit to `OTHER` is sound because the four
+  flags are monotone. Removed the now-orphaned `loop_exist` helper (kept `mask`, still used by
+  `judge_coverage_alt`). `judge_coverage` has a **single caller** (`ProjectionDeghosting.cxx:264`),
+  so the imaging validation covers it fully. **Measured 6.1 % → 1.1 %** on 141530 (~83 % of the
+  function removed; ProjectionDeghosting 27.8 % → 22.3 % with R5+this); output canonically identical
+  on all 44 npz via `cmpnpz.py`.
 
 **R3 — confirmed scoping, not reopened.** (a) "fewer graph builds/copies" = R1 (Tier A shipped).
 (b) Out-edge selector `setS`→`hashS` (O(1) edge insert, preserves `setS` parallel-edge dedup

@@ -277,18 +277,6 @@ namespace {
         return smm;
     }
 
-    bool loop_exist(const sparse_mat_t& sm, std::function<bool(scaler_t)> f)
-    {
-        for (int k = 0; k < sm.outerSize(); ++k) {
-            for (sparse_mat_t::InnerIterator it(sm, k); it; ++it) {
-                if (f(it.value())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
 }  // namespace
 
 // 1: tar is part of ref: REF_COVERS_TAR
@@ -300,16 +288,54 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
                                                                                   const Projection2D& tar,
                                                                                   double uncer_cut)
 {
-    sparse_mat_t ref_mask = mask(ref.m_proj, [&](scaler_t x) { return x > -uncer_cut; });
-    sparse_mat_t tar_mask = mask(tar.m_proj, [&](scaler_t x) { return x > -uncer_cut; });
-
-    // non zero component in both
-    // bool ref_non_zero = loop_exist(ref.m_proj, [&](scaler_t x){return (x!=0 && x > -uncer_cut);}); // number of live
-    // elements bool tar_non_zero = loop_exist(tar.m_proj, [&](scaler_t x){return (x!=0 && x > -uncer_cut);}); // number
-    // of live elements ...
-
-    bool ref_non_zero = loop_exist(ref_mask, [](scaler_t x) { return (x != 0); });  // number of live elements
-    bool tar_non_zero = loop_exist(tar_mask, [](scaler_t x) { return (x != 0); });  // number of live elements ...
+    // Single union-pass over the two projections' stored entries, replacing the
+    // previous mask(ref)+mask(tar)+(ref_mask-tar_mask) (three sparse allocations).
+    // Bit-identical: mask() sets every STORED entry to 1 (live: value > -uncer_cut)
+    // or 0, keeping the same sparsity, so ref_mask-tar_mask is in {-1,0,1} over the
+    // UNION of stored positions, and the four booleans reduce exactly to:
+    //   ref_non_zero  = exists a position live in ref
+    //   tar_non_zero  = exists a position live in tar
+    //   ref_m_tar_pos = exists a position live in ref but NOT live in tar  (diff +1)
+    //   ref_m_tar_neg = exists a position live in tar but NOT live in ref  (diff -1)
+    // where "live in M" == stored in M.m_proj with value > -uncer_cut, and
+    // "not live" includes both not-stored and stored-but-<=-uncer_cut. Both
+    // projections share dims (nchan x nslice) and are column-major, so a per-column
+    // merge of the (row-sorted) InnerIterators visits each union position once.
+    bool ref_non_zero = false, tar_non_zero = false;
+    bool ref_m_tar_pos = false, ref_m_tar_neg = false;
+    const int ncols = ref.m_proj.outerSize();
+    for (int k = 0; k < ncols; ++k) {
+        sparse_mat_t::InnerIterator rit(ref.m_proj, k);
+        sparse_mat_t::InnerIterator tit(tar.m_proj, k);
+        while (rit || tit) {
+            const int rrow = rit ? (int) rit.row() : std::numeric_limits<int>::max();
+            const int trow = tit ? (int) tit.row() : std::numeric_limits<int>::max();
+            bool r_live = false, t_live = false;
+            if (rrow == trow) {
+                r_live = rit.value() > -uncer_cut;
+                t_live = tit.value() > -uncer_cut;
+                ++rit;
+                ++tit;
+            }
+            else if (rrow < trow) {
+                r_live = rit.value() > -uncer_cut;
+                ++rit;
+            }
+            else {
+                t_live = tit.value() > -uncer_cut;
+                ++tit;
+            }
+            ref_non_zero  = ref_non_zero  || r_live;
+            tar_non_zero  = tar_non_zero  || t_live;
+            ref_m_tar_pos = ref_m_tar_pos || (r_live && !t_live);
+            ref_m_tar_neg = ref_m_tar_neg || (t_live && !r_live);
+            // all flags saturated: both non-empty with exclusive live cells -> OTHER,
+            // and no later cell can change that.
+            if (ref_non_zero && tar_non_zero && ref_m_tar_pos && ref_m_tar_neg) {
+                return OTHER;
+            }
+        }
+    }
 
     if ((!ref_non_zero) && (!tar_non_zero)) {
         return BOTH_EMPTY;
@@ -320,35 +346,17 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
     else if ((!ref_non_zero) && tar_non_zero) {
         return TAR_COVERS_REF;
     }
+    else if ((!ref_m_tar_neg) && (!ref_m_tar_pos)) {
+        return REF_EQ_TAR;
+    }
+    else if (ref_m_tar_neg && (!ref_m_tar_pos)) {
+        return TAR_COVERS_REF;
+    }
+    else if ((!ref_m_tar_neg) && ref_m_tar_pos) {
+        return REF_COVERS_TAR;
+    }
     else {
-        // ref - tar
-        //    sparse_mat_t ref_m_tar = ref.m_proj - tar.m_proj;
-        sparse_mat_t ref_m_tar = ref_mask - tar_mask;
-
-        // bool ref_m_tar_neg = loop_exist(ref_m_tar, [&](scaler_t x){return (x<0 && fabs(x)<fabs(uncer_cut));}); //
-        // number of live elements belong to tar, not belong to ref bool ref_m_tar_pos = loop_exist(ref_m_tar,
-        // [&](scaler_t x){return (x>0 && fabs(x)<fabs(uncer_cut));}); // number of live elements belong to ref, not
-        // belong to tar
-
-        bool ref_m_tar_neg = loop_exist(ref_m_tar, [](scaler_t x) {
-            return x < -0.01;
-        });  // number of live elements belong to tar, not belong to ref
-        bool ref_m_tar_pos = loop_exist(ref_m_tar, [](scaler_t x) {
-            return x > 0.01;
-        });  // number of live elements belong to ref, not belong to tar
-
-        if ((!ref_m_tar_neg) && (!ref_m_tar_pos)) {
-            return REF_EQ_TAR;
-        }
-        else if (ref_m_tar_neg && (!ref_m_tar_pos)) {
-            return TAR_COVERS_REF;
-        }
-        else if ((!ref_m_tar_neg) && ref_m_tar_pos) {
-            return REF_COVERS_TAR;
-        }
-        else {
-            return OTHER;
-        }
+        return OTHER;
     }
 
     // ref * tar
