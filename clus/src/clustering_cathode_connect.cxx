@@ -66,7 +66,8 @@ static void clustering_cathode_connect(
     double cathode_x,        // cathode position in the (T0-corrected) clustering frame
     double cathode_x_cut,    // |x - cathode_x| below which a closest point "ends at the cathode"
     double hough_radius,
-    double min_length,
+    double min_length,       // the longer half of a pair must reach this (the anchor track)
+    double min_length_short, // the shorter member only needs this (admits a bridge fragment)
     double flash_t0_window);
 
 class ClusteringCathodeConnect : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
@@ -86,6 +87,9 @@ public:
         cathode_x_cut_   = get(config, "cathode_x_cut", 3.5*units::cm);
         hough_radius_    = get(config, "hough_radius", 20*units::cm);
         min_length_      = get(config, "min_length", 10*units::cm);
+        // default min_length_short == min_length: both members must reach min_length,
+        // i.e. byte-identical to the pre-asymmetric behaviour unless explicitly set.
+        min_length_short_= get(config, "min_length_short", min_length_);
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
     virtual Configuration default_configuration() const {
@@ -97,7 +101,7 @@ public:
         auto& live = *ensemble.with_name("live").at(0);
         clustering_cathode_connect(live, m_scope, drift_cut_, dis_cut_, max_dis_, angle_cut_,
                                    conn_far_cut_, cathode_x_, cathode_x_cut_, hough_radius_,
-                                   min_length_, flash_t0_window_);
+                                   min_length_, min_length_short_, flash_t0_window_);
     }
 
 private:
@@ -110,6 +114,7 @@ private:
     double cathode_x_cut_{3.5*units::cm};
     double hough_radius_{20*units::cm};
     double min_length_{10*units::cm};
+    double min_length_short_{10*units::cm};
     double flash_t0_window_{80*units::ns};
 };
 
@@ -221,6 +226,7 @@ static void clustering_cathode_connect(
     double cathode_x_cut,
     double hough_radius,
     double min_length,
+    double min_length_short,
     double flash_t0_window)
 {
     // prepare graph ... (same skeleton as the other merge passes)
@@ -248,11 +254,17 @@ static void clustering_cathode_connect(
     for (size_t i = 0; i != live_clusters.size(); i++) {
         auto cluster_1 = live_clusters.at(i);
         if (!cluster_1->get_scope_filter(scope)) continue;
-        if (cluster_1->get_length() < min_length) continue;
+        if (cluster_1->get_length() < min_length_short) continue;
         for (size_t j = i + 1; j < live_clusters.size(); j++) {
             auto cluster_2 = live_clusters.at(j);
             if (!cluster_2->get_scope_filter(scope)) continue;
-            if (cluster_2->get_length() < min_length) continue;
+            if (cluster_2->get_length() < min_length_short) continue;
+            // Asymmetric length gate: the longer member must be a real anchor track
+            // (>= min_length); the shorter only needs min_length_short.  This admits a
+            // short bridge fragment that attaches to a long half (a gap-splintered
+            // crosser) while forbidding short<->short pairs.  With min_length_short ==
+            // min_length (the default) this is the original "both >= min_length" gate.
+            if (std::max(cluster_1->get_length(), cluster_2->get_length()) < min_length) continue;
             if (flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (is_cathode_crossing_pair(*cluster_1, *cluster_2,
                                          cluster_1->get_length(), cluster_2->get_length(),

@@ -325,7 +325,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         cathode_connect(name="", drift_cut=5*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
                         angle_cut=10.0, conn_far_cut=30.0, cathode_x=0.0,
                         cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
-                        min_length=10*wc.cm, flash_t0_window=80*wc.ns) :: {
+                        min_length=10*wc.cm, min_length_short=null, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringCathodeConnect",
             name: prefix+name,
             data: {
@@ -338,6 +338,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 cathode_x_cut: cathode_x_cut,
                 hough_radius: hough_radius,
                 min_length: min_length,
+                // null => C++ defaults min_length_short to min_length (symmetric gate)
+                [if min_length_short != null then "min_length_short"]: min_length_short,
                 flash_t0_window: flash_t0_window,
             } + scope_cfg,
         },

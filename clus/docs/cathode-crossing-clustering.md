@@ -307,12 +307,62 @@ geometry for the four crossers — the numbers that set the cuts:
 > trusting a comparison — the authoritative merge list comes from the connector's own accept log.
 
 **Scope caveats:** purity is established on the 20 hand-sample events (the population the cuts were
-tuned on); a larger-sample firing-rate scan is the next purity probe. The far-regime values
-(`conn_far_cut = 30°`, `max_dis = 25 cm`) are bounded by the two far crossers (2050, MC35) and the
-≥50° parallel-offset floor; retune if a larger sample shows far candidates in the 20–50° connection
-band. **Efficiency caveat:** `cathode_x_cut = 3.5 cm` and `drift_cut = 5 cm` catch the sample
-crossers with ~0.5–1 cm margin — a crosser with a substantially larger drift residual would still
-be missed; this is an efficiency limit, not a purity risk.
+tuned on) plus the two 150-sample crossers above; a larger-sample firing-rate scan is the next
+purity probe. The far-regime values (`conn_far_cut = 30°`, `max_dis = 25 cm`) are bounded by the
+far crossers (2050, MC35, 59415, 137680) and the ≥50° parallel-offset floor; retune if a larger
+sample shows far candidates in the 20–50° connection band. **Efficiency caveat:** the SBND-scoped
+`cathode_x_cut = 5 cm` / `drift_cut = 6 cm` catch the sample crossers (cathode reach up to 4.54 cm,
+drift residual up to 5.3 cm) with ~0.5–0.7 cm margin — a crosser with a substantially larger
+gap-truncation or drift residual would still be missed; this is an efficiency limit, not a purity
+risk (the conn-alignment gate is unchanged). `min_length_short = 2 cm` admits a bridge fragment to
+the CLOSE-regime collinearity path only; a fragment with no reliable local direction (e.g. 137680's
+14-point stub, `tt_hough` 66°) is still left out by design.
+
+### 150-sample tail: wider cathode reach + a short bridge fragment (events 59415, 137680)
+
+Two crossers from the larger **150-event data sample** (not in the 20-event hand sample above)
+fall just outside the tuned-on cut set, and motivated three SBND-scoped relaxations — applied as
+explicit args on the `cm.cathode_connect(...)` call in `cfg/.../sbnd/clus.jsonnet` (the
+`common/clus.jsonnet` defaults are unchanged, so non-SBND callers keep the original values):
+
+- **`cathode_x_cut` 3.5 → 5 cm** and **`drift_cut` 5 → 6 cm.** Both 59415 and 137680 are genuine
+  far-regime crossers (PCA track-track 2.9°/1.7°, connection 15°/8°) whose TPC1 half is *truncated
+  by an imaging gap a few cm short of the cathode*: its closest point reaches only x = **3.95 cm**
+  (59415) / **4.54 cm** (137680), and the inter-half drift separation is **5.1 / 5.3 cm** — both
+  just past the 3.5 / 5 cm cuts. The conn-alignment purity gate (`conn_far_cut = 30°`, far regime)
+  is untouched, so widening the "did it reach the cathode / same drift depth" gates does not weaken
+  the gate doing the purity work. (These residuals exceed the 20-event sample's max of 4.1 cm —
+  consistent with a position-dependent calibration tail.)
+- **`min_length_short = 2 cm` (new asymmetric length gate).** 59415's crossing region also contains
+  a **2.3 cm bridge fragment** (cluster 77, gap-splintered off the TPC1 half) sitting between the
+  two cathode ends. The pre-existing gate required *both* members ≥ `min_length` (10 cm), dropping
+  it. The new `min_length_short` lets the **shorter** member of a pair be as short as 2 cm while
+  still requiring the **longer** member to be a real anchor track (≥ `min_length`) — so a short
+  bridge can attach to a long half, but two short fragments can never pair. It defaults to
+  `min_length` (the original symmetric "both ≥ 10 cm" gate; OFF/unset ⇒ byte-identical). The
+  fragment rides the existing CLOSE-regime collinearity path (its `tt_hough` to the long half is
+  1.3°). Purity here is carried by **mechanism, not regression**: a close-regime accept of a short
+  partner requires it to be within `dis_cut` (5 cm) of the anchor's cathode end, cross-TPC, both
+  within `cathode_x_cut`, AND collinear < `angle_cut` — a spatially tiny conjunction that a noise
+  fragment is very unlikely to satisfy at once. (137680's own bridge, a 14-point 2.2 cm stub, has
+  no reliable direction — `tt_hough` 66° — and is correctly *not* merged; recovering it would need
+  a connection-to-anchor path that is out of proportion to the gain.)
+
+Closest-point geometry (from the connector's instrumentation; cut values that admit them):
+
+| crosser | pieces | regime | dis | \|x₁−x₂\| | cathode-x (p1/p2) | tt(H/PCA) | conn(best) | result |
+|---|---|---|---|---|---|---|---|---|
+| data 59415 | 14↔59 (halves) | far  | 11.77 | 5.09 | 1.14 / **3.95** | 9.3 / 2.9 | 15.0 | merged (cathode_x_cut, drift_cut) |
+| data 59415 | 14↔77 (bridge) | close | 4.12 | 1.66 | 1.14 / 0.52 | **1.3** / 21 | — | merged (min_length_short) |
+| data 137680 | 1↔15 (halves) | far  | 11.70 | 5.32 | 0.78 / **4.54** | 8.0 / 1.7 | 8.3 | merged (cathode_x_cut, drift_cut) |
+
+**Regression (10 data + 10 MC, new SBND args vs the original defaults): accept lists byte-identical.**
+The connector's accept set across all 20 events is **the same pair-for-pair** with the widened
+cuts as with the originals — the 6 known crossers (686/1852/2050/MC18/35/42) plus evt12's genuine
+close crosser (27/2) all still merge, and **no new or removed merges** appear. So the three SBND
+relaxations are a *no-op on the established 20-event set* and act only on the 150-sample tail
+(59415, 137680), where each unifies the crosser's halves into one geometric cluster (verified by
+shared `real_cluster_id`; 59415 also absorbs its bridge fragment).
 
 ## Artifacts
 
@@ -320,6 +370,10 @@ be missed; this is an efficiency limit, not a purity risk.
   `cfg/pgrapher/common/clus.jsonnet`, toggle `cathode_connect_on` + pipeline wiring in
   `cfg/pgrapher/experiment/sbnd/clus.jsonnet`.
 - Connector verification (ON vs OFF, 10 data events): `/home/xqian/tmp/cathode_connect/`.
+- 150-sample tail (59415, 137680) tuning: instrumented per-pair geometry in
+  `/home/xqian/tmp/ccdbg_{59415,137680}_*.log`; 20-event old-vs-new accept-list diff in
+  `/home/xqian/tmp/accepts_{OLD,NEW}.txt` (identical); merge confirmation via shared
+  `real_cluster_id` (`/home/xqian/tmp/check_merge.py`).
 - Diagnostic runs + parsers: `/home/xqian/tmp/cathode_ab/` (`full_<evt>.zip`, `trunc_<evt>.zip`,
   `dbg_*/pp_*/pin_*` instrumented logs, `run_*` logs).
 - Truncated run = comment `cm.examine_bundles(use_flash_t0=true)` (`clus.jsonnet:302`); gate
