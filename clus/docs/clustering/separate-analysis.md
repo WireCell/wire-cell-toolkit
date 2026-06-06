@@ -3,6 +3,11 @@
 Comparison of `clustering_separate.cxx` against the prototype
 `ToyClustering_separate.h`. Covers correctness, bugs, randomness, and efficiency.
 
+> SBND extension (not in the prototype): a two-track upstream-boundary tag
+> (`JudgeSeparateDec_SBND_boundary`, toggle `sbnd_boundary_tag`, default OFF) catches
+> beam-inclined crossing cosmics whose PCA looks single-track. See
+> [clustering-separate-sbnd-boundary-tag.md](../clustering-separate-sbnd-boundary-tag.md).
+
 Prototype functions examined:
 - `Clustering_separate` (lines 1827–2193, and 2358+)
 - `JudgeSeparateDec_1` (lines 11–34)

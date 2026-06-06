@@ -363,12 +363,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // (Cluster::get_hull). -1 (default) uses Constants::MaxHullPoints (10000),
         // i.e. bit-identical to prior behavior; raise it to let large full-detector
         // overclusters be considered for separation.
-        separate(name="", use_ctpc=true, max_hull_points=-1) :: {
+        separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
                 use_ctpc: use_ctpc,
                 max_hull_points: max_hull_points,
+                // SBND-only two-track upstream-boundary tag; key omitted when false
+                // so existing (non-SBND) configs stay bit-identical.
+                [if sbnd_boundary_tag then 'sbnd_boundary_tag']: sbnd_boundary_tag,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
