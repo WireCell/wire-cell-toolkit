@@ -69,6 +69,12 @@ namespace WireCell::Match {
         TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
                         int flash_index_id, int cluster_index_id);
         ~TimingTPCBundle();
+        // Member-wise copy is safe: the Cluster*/Opflash* members are non-owning
+        // (the destructor is =default and frees nothing) and the rest are values.
+        // QLMatching deep-copies matched bundles before the discarded organize pass
+        // so its in-place merge cannot corrupt the live flash_bundles_map.
+        TimingTPCBundle(const TimingTPCBundle&) = default;
+        TimingTPCBundle& operator=(const TimingTPCBundle&) = default;
 
         void set_flag_close_to_PMT(bool v) { flag_close_to_PMT = v; }
         void set_flag_at_x_boundary(bool v) { flag_at_x_boundary = v; }

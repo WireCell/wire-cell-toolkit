@@ -1378,7 +1378,18 @@ void QLMatching::fit_round2(ApaRun& run)
         auto mit = matched_pairs.find(cidx);
         if (mit != matched_pairs.end()) {
             auto flash = mit->second.first;
-            results_bundles.push_back(run.flash_cluster_bundles_map[std::make_pair(flash, cluster)]);
+            // Deep-copy the matched bundle. organize_bundles()'s result is discarded
+            // (the matched output is the strength-cutoff survivors left in
+            // run.flash_bundles_map), but its add_bundle() merge mutates bundles IN
+            // PLACE -- and results_bundles shares the very shared_ptr objects that
+            // flash_bundles_map (read later by apply_matched_t0s and the calib dump)
+            // still references. Sharing them lets the merge fold a rival cluster's
+            // predicted light into the surviving bundle while leaving the rival in
+            // flash_bundles_map, double-counting that cluster's light on its flash.
+            // Operating on copies isolates the (discarded) organize pass from the
+            // live result.
+            results_bundles.push_back(std::make_shared<TimingTPCBundle>(
+                *run.flash_cluster_bundles_map[std::make_pair(flash, cluster)]));
         }
         else {
             auto bundle = std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx);

@@ -370,9 +370,10 @@ independent solves.
 
 ### 4.4 Selection & organization (`:607-634`)
 `matched_pairs` keeps, per cluster, the flash with the highest strength
-(`:607-617`). `results_bundles` is built per cluster (`:618-633`): the matched
-bundle, **or** — for an unmatched cluster — a placeholder
-`std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx)` (`:629`).
+(`:607-617`). `results_bundles` is built per cluster: a **deep copy** of the matched
+bundle (`std::make_shared<TimingTPCBundle>(*matched)` — see the box below), **or** —
+for an unmatched cluster — a placeholder
+`std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx)`.
 
 > **Null-flash bundle (fixed):** that `nullptr` flash used to crash the
 > `TimingTPCBundle` ctor, which did `flash->get_num_channels()`
@@ -392,12 +393,29 @@ applies a beam-window quality filter (drop out-of-beam bundles with `ks>0.2`,
 > assigned back to `run.flash_bundles_map`. `apply_matched_t0s` and the calib dump's
 > `auto_selected` both read `run.flash_bundles_map`, which is pruned **only** by the
 > strength cutoff. So the per-flash best-pick *removals* and the out-of-beam QA cut
-> have no effect on the matched output. (The same-flash `add_bundle` *merge* IS
-> observable — `results_bundles` holds the same `shared_ptr`s as `flash_bundles_map`,
-> so `add_bundle` mutates `other_clusters`/`pred_flash`/metrics in place.) This is an
-> incomplete port of the prototype's flash-centric organization; do not "fix" it by
-> wiring the organize result back without re-validating, as that flips the selection
-> mechanism for every experiment.
+> have no effect on the matched output.
+>
+> **Bug (was observable) — now fixed.** `results_bundles` used to hold the same
+> `shared_ptr`s as `flash_bundles_map`, so the same-flash `add_bundle` *merge* mutated
+> `other_clusters`/`pred_flash`/metrics **in place** on the live bundles. Because the
+> merge *folds* a rival cluster's predicted light into the surviving bundle while the
+> de-dup that should drop the rival only touches the (discarded) local `results_bundles`,
+> a merged cluster's light was **double-counted** on its flash — both inside the host
+> bundle and in its own surviving standalone bundle. Triggered on SBND mc evt2 APA0:
+> clusters 2 and 4 (one contiguous object, 0.31 cm junction, same t0) both match flash 3;
+> flash-3 predicted light showed 33839 PE (host bundle 24159 with cluster 2 folded in +
+> cluster-2 bundle 9680) vs 21007 measured — a spurious 1.6×. **Fix:** `results_bundles`
+> now holds **deep copies** of the matched bundles, so the (still-discarded) organize pass
+> mutates throwaway copies and the live `flash_bundles_map` stays the pure strength-cutoff
+> survivors. Each cluster's flash/t0 assignment is byte-identical; only the corrupted
+> `pred_flash` is corrected (flash-3 total → 24159 ≈ 1.15× meas). `TimingTPCBundle` gained
+> a defaulted copy ctor/assign (members are non-owning `Cluster*`/`Opflash*` + values, dtor
+> `=default`). See [[project_ql_organize_doublecount_bug]].
+>
+> The organize pass is still an **incomplete port** of the prototype's flash-centric
+> organization (its per-flash best-pick removals and out-of-beam QA remain inert); do not
+> "fix" that by wiring the organize result back without re-validating, as that flips the
+> selection mechanism for every experiment.
 
 ### 4.4a Empty-flash light-quality rescue (`rescue_empty_flashes`, SBND-on)
 The LASSO selects by **strength**, which can leave a flash with no surviving bundle

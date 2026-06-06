@@ -40,6 +40,12 @@ the bundle maps, index maps, flash vector, geometry and charge bookkeeping:
     which calls organize_bundles for Stage 4 merge + Stage 5 out-of-beam QA] ->
     apply_matched_t0s -> write_opflash_pc
 
+`organize_bundles`' result is discarded (the matched output is the strength-cutoff
+survivors in `run.flash_bundles_map`); `fit_round2` now feeds it **deep copies** of
+the matched bundles so its in-place `add_bundle` merge cannot corrupt the live result.
+That leak previously double-counted a merged cluster's predicted light on its flash —
+see `qlmatching-code.md` §4.4 and [[project_ql_organize_doublecount_bug]].
+
 `run_one_apa()` runs the sequence. **Invariant:** every per-run container lives in
 `ApaRun`; nothing per-run is a `QLMatching` member or static. That isolation is
 what keeps the pointer-keyed map iteration deterministic when one node processes
