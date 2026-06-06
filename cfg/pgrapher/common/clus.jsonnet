@@ -376,12 +376,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // iso_max_dis (default null/-1 == OFF, byte-identical): upper bound on the
+        // actual cluster-to-cluster closest-point distance for the isochronous-relaxed
+        // connection branch, which otherwise merges two separated isochronous tracks on
+        // the (misleadingly small) infinite-line distance.  SBND sets a finite value.
+        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, iso_max_dis=null) :: {
             type: "ClusteringConnect1",
             name: prefix+name,
             data: {
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
+                [if iso_max_dis != null then 'iso_max_dis']: iso_max_dis,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },

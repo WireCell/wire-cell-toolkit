@@ -187,7 +187,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // multi-track overclusters (>10k points) are still considered for
         // separation; otherwise get_hull returns empty and separation is skipped.
         cm.separate(use_ctpc=true, max_hull_points=100000, sbnd_boundary_tag=true),
-        cm.connect1(),
+        // SBND: cap the isochronous-relaxed connection on the real closest-point
+        // distance.  Without it, connect1 merges two genuinely-separate isochronous
+        // cosmics (e.g. evt 183888, ~7.3 cm apart in drift) on the misleadingly small
+        // infinite-line distance.  5 cm < the 7.3 cm real gap, above SBND broken-track
+        // gaps.  Default OFF (-1) elsewhere keeps production bit-identical.
+        cm.connect1(iso_max_dis=5 * wc.cm),
         // MicroBooNE-style clustering tail: produce cluster groups (one main +
         // associated small clusters) carried as the "isolated"/"perblob" per-blob
         // array (main blobs tagged -1). examine_bundles MUST follow neutrino/isolated,
