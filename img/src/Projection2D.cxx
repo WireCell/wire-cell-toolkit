@@ -1,6 +1,7 @@
 #include "WireCellImg/Projection2D.h"
 #include "WireCellUtil/Exceptions.h"
-#include "WireCellUtil/GraphTools.h"
+
+#include <boost/graph/filtered_graph.hpp>
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/Stream.h"
 #include "WireCellUtil/String.h"
@@ -57,69 +58,22 @@ std::unordered_map<int, std::set<cluster_vertex_t> > WireCell::Img::Projection2D
     const WireCell::cluster_graph_t& cg)
 {
     std::unordered_map<int, std::set<cluster_vertex_t> > groups;
-    cluster_graph_t cg_blob;
 
-    size_t nblobs = 0;
-    std::unordered_map<cluster_vertex_t, cluster_vertex_t> old2new;
-    std::unordered_map<cluster_vertex_t, cluster_vertex_t> new2old;
-    for (const auto& vtx : GraphTools::mir(boost::vertices(cg))) {
-        const auto& node = cg[vtx];
-        if (node.code() == 'b') {
-            ++nblobs;
-            auto newvtx = boost::add_vertex(node, cg_blob);
-            old2new[vtx] = newvtx;
-            new2old[newvtx] = vtx;
-        }
-    }
-    // debug
-    // std::cout << "nblobs: " << nblobs << std::endl;
-
-    if (!nblobs) {
-        return groups;
-    }
-
-    for (auto edge : GraphTools::mir(boost::edges(cg))) {
-        auto old_tail = boost::source(edge, cg);
-        auto old_head = boost::target(edge, cg);
-
-        auto old_tit = old2new.find(old_tail);
-        if (old_tit == old2new.end()) {
-            continue;
-        }
-        auto old_hit = old2new.find(old_head);
-        if (old_hit == old2new.end()) {
-            continue;
-        }
-        const auto& hnode = cg_blob[old_hit->second];
-        const auto& tnode = cg_blob[old_tit->second];
-        if (hnode.code() == 'b' && tnode.code() == 'b') {
-            boost::add_edge(old_tit->second, old_hit->second, cg_blob);
-        }
-    }
-
-    // for debugging, return as one group
-    // for (const auto& desc : GraphTools::mir(boost::vertices(cg_blob))) {
-    //     groups[0].insert(new2old[desc]);
-    // }
-    // return groups;
+    // Blob-only subgraph as a lazy view: keep 'b' vertices (a b-b edge survives in a
+    // vertex-filtered graph only when both of its endpoints do, so this is exactly the
+    // blob + b-b-edge subgraph).  Was a materialized copy (add_vertex/add_edge into a
+    // fresh cg_blob) + connected_components; the filtered_graph yields identical
+    // components with no graph allocation, and the descriptors are already the
+    // original cg vertices so no new2old remap is needed.
+    using BFiltered =
+        boost::filtered_graph<cluster_graph_t, boost::keep_all, std::function<bool(cluster_vertex_t)> >;
+    BFiltered bcg(cg, {}, [&](auto vtx) { return cg[vtx].code() == 'b'; });
 
     std::unordered_map<cluster_vertex_t, int> desc2id;
-    boost::connected_components(cg_blob, boost::make_assoc_property_map(desc2id));
-    for (auto& [desc, id] : desc2id) {  // invert
-        groups[id].insert(new2old[desc]);
+    boost::connected_components(bcg, boost::make_assoc_property_map(desc2id));
+    for (auto& [desc, id] : desc2id) {  // invert: component id -> original blob descriptors
+        groups[id].insert(desc);
     }
-
-    // debug
-    // for (auto id2desc : groups) {
-    //     auto & descvec = id2desc.second;
-    //     if (descvec.size()>10) {
-    //         std::cout << id2desc.first << ": ";
-    //         for (auto &desc : descvec) {
-    //             std::cout << desc << " ";
-    //         }
-    //         std::cout << std::endl;
-    //     }
-    // }
 
     return groups;
 }

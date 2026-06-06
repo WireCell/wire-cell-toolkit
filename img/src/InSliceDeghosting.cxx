@@ -740,7 +740,7 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
     TimeKeeper tk(fmt::format("InSliceDeghosting"));
 
     const auto in_graph = in->graph();
-    log->debug("in_graph: {}", dumps(in_graph));
+    if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));
 
     // blob desc -> quality tag
     vertex_tags_t blob_tags;
@@ -761,48 +761,42 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
         /// DEBUGONLY:
         log->debug("conf 1 step 2 {}", dump_blob_tags(blob_tags));
 
-        /// 3, delete some blobs. in: ICluster + blob_quality_tags out: filtered ICluster
+        /// 3+4, delete TO_BE_REMOVED blobs AND strip old b-b edges in a SINGLE
+        /// filtered copy.  This was two back-to-back copy_graph passes (a vertex
+        /// filter into cg_old_bb, then an edge filter on cg_old_bb into cg_new_bb);
+        /// combining the vertex+edge predicates into one filtered_graph removes a
+        /// full-graph copy.  Output-identical: the surviving vertices keep their
+        /// in_graph iteration order (so copy_graph assigns identical descriptors) and
+        /// the removed edges are the same set (b-b edges + any edge touching a removed
+        /// blob).  c2o (new->orig) is just the inverse of the single orig->copy map.
         log->debug(tk(fmt::format("start delete some blobs")));
-        using VFiltered =
-            typename boost::filtered_graph<cluster_graph_t, boost::keep_all, std::function<bool(cluster_vertex_t)> >;
-        VFiltered fg_rm_bad_blobs(in_graph, {}, [&](auto vtx) { return !tag(blob_tags, vtx, TO_BE_REMOVED); });
         /// DEBUGONLY:
         log->debug("conf 1 step 3 {}", dump_blob_tags(blob_tags));
-
-        /// 4, in-group clustering. in: ICluster + blob_quality_tags out: filtered ICluster
-        /// TODO: do we need to call copy_graph?
         log->debug(tk(fmt::format("start per group clustering")));
         using desc_map_t = std::unordered_map<cluster_vertex_t, cluster_vertex_t>;
         using pm_desc_map_t = boost::associative_property_map<desc_map_t>;
-        desc_map_t o2c1;
-        WireCell::cluster_graph_t cg_old_bb;
-        boost::copy_graph(fg_rm_bad_blobs, cg_old_bb, boost::orig_to_copy(pm_desc_map_t(o2c1)));
-        log->debug("cg_old_bb: {}", dumps(cg_old_bb));
-        /// rm old b-b edges
-        using EFiltered =
-            typename boost::filtered_graph<cluster_graph_t, std::function<bool(cluster_edge_t)>, boost::keep_all>;
-        EFiltered fg_no_bb(cg_old_bb,
-                           [&](auto edge) {
-                               auto source = boost::source(edge, cg_old_bb);
-                               auto target = boost::target(edge, cg_old_bb);
-                               if (cg_old_bb[source].code() == 'b' and cg_old_bb[target].code() == 'b') {
-                                   return false;
-                               }
-                               return true;
-                           },
-                           {});
-
-        desc_map_t o2c2;
-        boost::copy_graph(fg_no_bb, cg_new_bb, boost::orig_to_copy(pm_desc_map_t(o2c2)));
-
-        /// reverse the mapping
-        /// TODO: need protection?
+        using VEFiltered = typename boost::filtered_graph<cluster_graph_t,
+                                                          std::function<bool(cluster_edge_t)>,
+                                                          std::function<bool(cluster_vertex_t)> >;
+        VEFiltered fg_rm_bad_no_bb(
+            in_graph,
+            [&](auto edge) {
+                auto source = boost::source(edge, in_graph);
+                auto target = boost::target(edge, in_graph);
+                if (in_graph[source].code() == 'b' and in_graph[target].code() == 'b') {
+                    return false;
+                }
+                return true;
+            },
+            [&](auto vtx) { return !tag(blob_tags, vtx, TO_BE_REMOVED); });
+        desc_map_t o2c;
+        boost::copy_graph(fg_rm_bad_no_bb, cg_new_bb, boost::orig_to_copy(pm_desc_map_t(o2c)));
+        /// reverse the mapping (new -> orig) for the per-group filters below
         desc_map_t c2o;
-        for (const auto [o, c1] : o2c1) {
-            const auto c2 = o2c2[c1];
-            c2o[c2] = o;
+        for (const auto [o, c] : o2c) {
+            c2o[c] = o;
         }
-        log->debug("cg_new_bb: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb: {}", dumps(cg_new_bb));
         /// make new b-b edges within groups
         /// four separated groups, good&bad, good&good, bad&bad  (two of these might not be useful ...)
         std::vector<gc_filter_t> filters = {
@@ -847,7 +841,7 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
 
         grouped_geom_clustering(cg_new_bb, m_clustering_policy, groups);
         log->debug(tk(fmt::format("end")));
-        log->debug("cg_new_bb: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb: {}", dumps(cg_new_bb));
     }
     else if (m_config_round == 2) {
         // after charge solving ...
@@ -863,7 +857,7 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
         VFiltered fg_rm_bad_blobs(in_graph, {}, [&](auto vtx) { return !tag(blob_tags, vtx, TO_BE_REMOVED); });
         // do we have to copy this every time ???
         boost::copy_graph(fg_rm_bad_blobs, cg_new_bb);
-        log->debug("cg_new_bb 2nd: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb 2nd: {}", dumps(cg_new_bb));
     }
     else if (m_config_round == 3) {
         // after charge solving ...
@@ -880,14 +874,14 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
         });
         // do we have to copy this every time ???
         boost::copy_graph(fg_rm_bad_blobs, cg_new_bb);
-        log->debug("cg_new_bb 3rd: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb 3rd: {}", dumps(cg_new_bb));
     }
 
     /// output
     auto& out_graph = cg_new_bb;
     /// TODO: keep this?
-    log->debug("in_graph: {}", dumps(in_graph));
-    log->debug("out_graph: {}", dumps(out_graph));
+    if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));
+    if (log->level() <= spdlog::level::debug) log->debug("out_graph: {}", dumps(out_graph));
 
     out = std::make_shared<Aux::SimpleCluster>(out_graph, in->ident());
     if (m_dryrun) {

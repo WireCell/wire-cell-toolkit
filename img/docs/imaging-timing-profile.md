@@ -199,6 +199,60 @@ surgical one.
 tail-driving. MaskSlice thresholding and GridTiling are **not** worth touching (small and/or
 shrinking share).
 
+## R1 investigation & Tier-A implementation
+
+**Where the copies come from.** With `full_deghost=true` the per-APA chain runs ~18 full
+`cluster_graph_t` (re)builds + 6 per-slice unpack restructurings. The single largest is
+**`ChargeSolving::repack`** (`CSGraph.cxx:438-490`), which rebuilds the *entire* graph (re-adds
+every surviving node + edge, each a `setS` Rb_tree insert) just to overwrite blob values and
+drop pruned b/m — and it runs **6×** (2 ChargeSolving per solving block × 3 blocks). The code
+comment concedes it: *"removal of vertices… is dreadfully slow due to using vecS… we use a
+somewhat verbose construction instead of copy+remove."* `CS::unpack` additionally restructures
+into per-slice b-m subgraphs (inherent to the per-slice LASSO — survives any dataflow change).
+
+**Why the big levers are hard.**
+- *Selector change (`setS`→`vecS`/`hashS`, Tier B)* would cut both Rb_tree and most per-edge
+  allocs, but `ClusterArrays.cxx:482/511` writes the node/edge npz arrays in **unsorted
+  `boost::edges()` order**, so the change reorders the output — **not bit-identical** without a
+  canonical output sort + an order-dependence audit. Core `iface` type shared by clus/img/aux.
+- *Mutable/move dataflow (Tier C)* addresses the ~14 full copies but **not** `unpack`'s
+  restructuring nor `ProjectionDeghosting`'s projections, so it recovers a large fraction, not
+  "most," of the 55 %. Contract change to every `IClusterFilter`.
+
+**Validation gotcha — imaging npz are NOT byte-deterministic.** Imaging builds graphs/arrays by
+iterating `std::unordered_map` keyed by pointers/descriptors, so the npz **row order varies
+run-to-run** (heap-address dependent) even though the physics is identical — two unmodified-binary
+runs give different md5. So bit-identical here means **canonical-content-identical**: compare each
+npz up to row permutation (node rows as a multiset minus the descriptor column; edges remapped
+through their endpoints' content-signatures). Tool: `/home/xqian/tmp/imgprof/cmpnpz.py`, validated
+to call two unmodified runs IDENTICAL.
+
+**Tier A — implemented, committed, output bit-identical, ~3 % CPU.** Three safe, surgical edits:
+- `InSliceDeghosting` round-1: the two back-to-back `copy_graph` passes (remove bad blobs →
+  `cg_old_bb`, then strip b-b edges → `cg_new_bb`) collapse into **one** combined vertex+edge
+  filtered copy (`InSliceDeghosting.cxx`).
+- `Projection2D::get_geom_clusters`: the materialized blob subgraph (`cg_blob` via
+  add_vertex/add_edge) → a lazy `filtered_graph` + `connected_components` (mirrors the existing
+  `LocalGeomClustering:60-64` pattern); no graph allocation.
+- Guard eager debug: `LocalGeomClustering`'s unconditional `connected_components` (debug-only,
+  the bug-class `efficiency-concerns.md` #12 already fixed in *GlobalGeomClustering*) and the
+  whole-graph `dumps()` calls (evaluated as `log->debug` arguments even at `-L info`, since
+  `img/` uses `log->debug(...)` not the short-circuiting `SPDLOG_LOGGER_DEBUG` macro).
+
+Measured (single-event imaging, CPU-seconds = samples/250 Hz):
+
+| evt | baseline | Tier A | Δ |
+|---|--:|--:|--:|
+| 141530 | 29.7 | 28.8 | −2.9 % |
+| 59789  | 17.4 | 16.8 | −3.8 % |
+| 60933  | 12.8 | 12.5 | −2.6 % |
+
+Output **canonically identical on all 44 npz** — every one of the 11 profiled events ×
+{apa0,apa1} × {active,masked} — via `cmpnpz.py` (old binary vs final modified binary; the
+deghosting topology varies event-to-event, so the 11-event breadth is the real correctness check,
+not just the 608k giant). This is the safe ceiling for R1; the larger wins (Tier B/C) remain open
+and are the user's call.
+
 ## Reproduce
 
 ```
