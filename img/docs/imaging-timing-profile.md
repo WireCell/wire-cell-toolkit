@@ -340,8 +340,19 @@ the BlobShadow graph — and everything downstream — is identical. Removed the
 BlobShadow's share is event-dependent (biggest on the busiest, most-overlapping events). The
 within-profile drop (~⅓ of the function removed) is the robust signal and matches the predicted
 map-removal. Output **canonically identical on all 44 npz** (11 events × {apa0,apa1} ×
-{active,masked}) via `cmpnpz.py`. The remaining lever in this function is the 27 % `edge_range`
-scan (the `pair_hash` cache) — left as a follow-up.
+{active,masked}) via `cmpnpz.py`.
+
+**Per-pair edge cache — TRIED, rejected (it is slower).** The remaining ~27 % of the function is
+the `edge_range` multiset scan, and the dormant `pair_hash` struct hints the author once meant to
+cache it (pair → layer → edge), turning each scan into a hash lookup. Implemented and measured
+(output still bit-identical, 44/44): it is **substantially slower**, not faster. With the stock
+`pair_hash` (`h1 ^ h2`) it was catastrophic — symmetric XOR collides for `(min,max)` index pairs
+(e.g. `(0,3)` and `(1,2)` both hash to 3), degenerating the map into linear bucket scans (141530
+BlobShadow 4.3 % → 63 %). Even with a proper `hash_combine`, the per-slice `unordered_map` +
+per-pair `vector` overhead beats the savings: 141530 BlobShadow **4.3 % → 10.9 %** (total 7014 →
+8239 samples), 59789 **2.0 % → 4.0 %**. Boost's `edge_range` is a sorted O(log·deg) multiset
+lookup over the ≤3 edges of a pair — already cheap — so a hash cache cannot win here. That is why
+the stub stayed dormant; reverted to the direct scan. **No further lever inside `BlobShadow`.**
 
 ## Reproduce
 
