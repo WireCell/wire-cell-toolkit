@@ -39,6 +39,16 @@ local pos_offset_a1 = [0, 0.11 * wc.cm, -0.67 * wc.cm];   // TPC1 (West, x>=0)
 local common_corr_coords =
     if pos_offset_on then ['x_t0cor', 'y_cor', 'z_cor'] else ['x_t0cor', 'y', 'z'];
 
+// SBND cathode-crossing connector: connect the two halves of a cathode-crossing
+// cosmic that the generic all-APA merge passes leave unmerged (their closest-point
+// distance lands just over the 3 cm lenient-merge cap; see
+// clus/docs/cathode-crossing-clustering.md).  Narrow cathode-specific cut set
+// (collinear + close + opposite TPCs + both ends at the cathode), so it cannot fire
+// within a single TPC.  SBND committed ON; set false to recover the pre-connector
+// all-APA pipeline (bit-identical).  Retire (flip false) when the pos_offset / SCE
+// transverse calibration tightens enough that the generic 3 cm path catches these.
+local cathode_connect_on = true;
+
 // FV = sbnd-wires-geometry-v0206 bbox - 1 cm inset on every face.
 // X anode = W (collection) plane; X inner = data CPA face (DENT-gap geometry, ±1.5 cm).
 // See wire-cell-bee3/docs/sbnd_geometry.md §8.1 for the source TPC bounding boxes.
@@ -299,6 +309,12 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         cm.parallel_prolong(length_cut=35 * wc.cm, use_flash_t0=true),
         cm.close(length_cut=1.2 * wc.cm, use_flash_t0=true),
         cm.extend_loop(num_try=3, use_flash_t0=true),
+    ]
+    // Cathode-crossing connector: after the generic merge passes (so it only ADDS
+    // merges they missed) and before examine_bundles (so a connected crosser is one
+    // cluster before the flash-bundle collapse).  SBND-on; off => list unchanged.
+    + (if cathode_connect_on then [cm.cathode_connect()] else [])
+    + [
         cm.examine_bundles(use_flash_t0=true),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',

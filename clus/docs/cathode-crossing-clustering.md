@@ -24,8 +24,9 @@ flash-*merges* them into one bucket, §3). The single binding gate is a **3 cm c
 "lenient" collinear-merge path** in `Clustering_1st_round`: a cathode-crosser's closest-point
 distance (physical gap ~1.25–1.5 cm + transverse-offset residual) is pushed just past 3 cm
 for the worst cases, and above 3 cm the remaining paths demand a connection-vector alignment
-the gap+offset destroys. Fix: a separate, default-OFF, retireable cathode-crossing connector
-(or, minimally, a larger distance budget on that lenient path for cathode-end cross-TPC pairs).
+the gap+offset destroys. **Fix implemented and SBND-on:** a separate, retireable
+`ClusteringCathodeConnect` pass (§5) — verified to merge exactly the two failing crossers
+(686, 1852) and to leave the other 8 of 10 data events byte-identical (no false merges).
 
 ## 1. How the cross-TPC clustering is wired
 
@@ -169,54 +170,67 @@ removes the coherent ~1.34 cm piece, but a position-dependent (SCE-like) residua
 remains and is largest for 686/1852. MC's transverse offset is ~0.48 cm (≈⅓ of data, per the
 diagnostic), so MC crossers keep `dis` under 3 cm and merge — i.e. this is a data-specific tail.
 
-## 5. Recommendations
+## 5. Implementation: `ClusteringCathodeConnect` (SBND-on)
 
 ### The gap — no gap-specific change
 
 The merge passes ignore the gap (no path validation) and bridge it for 3/5 crossers;
 `examine_bundles`' fully-bad-gap penalty is post-merge sub-structure only and below threshold
-for the ~1.5 cm cathode gap. **Do not** close the physical x-gap (it is real, ~1.25 cm,
-MC≈data) and do not add gap-special path handling. The gap matters only as its contribution to
-the closest-point distance (§4), which the distance budget below already covers.
+for the ~1.5 cm cathode gap. **The physical x-gap is real (~1.25 cm, MC≈data) and is not
+closed.** The gap matters only as its contribution to the closest-point distance (§4), which
+the connector's distance budget covers.
 
-### The misalignment — a separate, default-OFF, retireable cathode-crossing connector
+### The misalignment — a separate, retireable cathode-crossing connector
 
-This is the user's preferred form and the right lever. Add a dedicated all-APA pass (own
-`clustering_*.cxx` + jsonnet method, fully duplicated, not woven into `Clustering_1st_round` —
-`feedback_fork_by_duplication`), default-OFF / bit-identical when off
-(`feedback_toggleable_behavior_changes`), placed among the merge passes before
-`examine_bundles`:
+Implemented as a dedicated all-APA pass `ClusteringCathodeConnect`
+(`clus/src/clustering_cathode_connect.cxx`, modelled on `clustering_close.cxx` — own file, not
+woven into `Clustering_1st_round`, per `feedback_fork_by_duplication`), with jsonnet method
+`cathode_connect()` (`pgrapher/common/clus.jsonnet`). It is placed in the SBND all-APA pipeline
+**after** the generic merge passes (so it can only ADD merges they missed) and **before**
+`examine_bundles` (so a connected crosser is one cluster before the flash-bundle collapse). It
+is driven by the toggle `cathode_connect_on` (`cfg/pgrapher/experiment/sbnd/clus.jsonnet`),
+**committed ON for SBND**; set it `false` to recover the pre-connector all-APA pipeline
+(bit-identical — verified below).
 
-- **Candidate pairs:** opposite-TPC clusters in the same flash-T0 group, **both** with an
-  extreme point near the cathode `|x_t0cor| < ~5 cm` (reuse `get_extreme_wcps` /
-  `get_two_extreme_points`, `Facade_Cluster.h:402,431`). The both-ends-at-cathode requirement
-  is what excludes the out-of-scope readout-gap pairs.
-- **Accept on direction collinearity at a cathode-sized distance budget.** Require the two
-  half-directions collinear (the `dis≤3 cm` path's dir–dir test, all crossers ≤4.5°) but allow
-  the closest-point distance up to a tuned **~6–10 cm** (covers gap + offset; the failures sit
-  at 3.3 cm). Mechanically this is the existing lenient path with the 3 cm cap raised, scoped
-  to cathode-end cross-TPC pairs so the generic 3 cm cut is untouched elsewhere.
-- **Purity comes from the cathode-end gate + the bounded distance, not from collinearity.**
-  The diagnostic warns collinearity alone admits false pairs (an MC false at 3.6° is *more*
-  collinear than a true crosser at 2.8°), which is why QLMatching's `flag_xtpc_consistent`
-  needed a distance ceiling for 100% purity. Tune the dir–dir and distance cuts on the 10 data
-  + 10 MC hand-scan crossers against random same-flash pairs, on the real C++ `vhough` values.
-- **Cheaper alternative to weigh:** QLMatching *already* pairs these as
-  `flag_xtpc_consistent` (`match/src/QLMatching.cxx`, `cull_cross_tpc`; `d<5 cm`, or collinear
-  &`d<300 cm`). Propagating that confirmed-pair flag into the all-APA clustering as a direct
-  merge hint would connect the halves with **no new geometry** — the implementer should weigh
-  this against a fresh pass.
-- **Why separate / retireable:** the gap is permanent geometry (already handled), but the
-  misalignment is a *calibration artifact*. As `pos_offset`/SCE transverse calibration
-  tightens, the residual offset shrinks, `dis` falls back under 3 cm, the existing lenient path
-  merges these crossers, and this connector can be switched off and retired without touching
-  production logic.
+For every pair of clusters in the same flash-T0 group, above `min_length` (10 cm), it accepts
+the pair when **all four** hold (defaults in the jsonnet method):
 
-Expected effect on the hand-scan set: recover 686 and 1852 (3/5 already merge), at no cost to
-the others when off.
+1. **collinear** — the two half-directions (`vhough_transform` at the closest points, radius
+   20 cm) within `angle_cut` (10°, unsigned axis → near 0° or 180°);
+2. **close** — closest-point distance `< dis_cut` (5 cm);
+3. **separate TPCs** — the two closest points' `wpid().apa()` differ (this is what makes the
+   pass incapable of acting within a single TPC);
+4. **both ends at the cathode** — `|x − cathode_x| < cathode_x_cut` (3 cm) for each closest
+   point, in the T0-corrected frame where the cathode is `x≈0`.
+
+Purity comes from cuts 3 + 4 + the bounded distance, **not** from collinearity alone (the
+diagnostic warns an MC false pair at 3.6° is *more* collinear than a true crosser at 2.8°).
+This is the same geometry QLMatching uses to flag cross-TPC pairs (`flag_xtpc_consistent` /
+`cull_cross_tpc`), here used to **connect** rather than flag.
+
+**Why retireable:** the gap is permanent geometry, but the misalignment is a *calibration
+artifact*. As `pos_offset`/SCE transverse calibration tightens, the residual shrinks, `dis`
+falls back under 3 cm, the generic lenient path catches these crossers, and the connector can
+be flipped off and retired without touching production logic.
+
+### Verification (10 data events, connector ON vs OFF)
+
+Runs/parsers in `/home/xqian/tmp/cathode_connect/` (`on_<evt>.zip`, `off_<evt>.zip`):
+
+- **Recovers exactly the two failing crossers.** ON merges 686 (halves → one cluster spanning
+  x[−134, 68], TPC0 1479 pts + TPC1 782) and 1852 (→ x[−125, 201], TPC0 2037 + TPC1 3167).
+- **No false merges.** The other **8 of 10** data events are byte-identical ON vs OFF
+  (`clustering-global.json` CRC unchanged); the connector makes zero merges there. The
+  already-merged crossers (1302/1346/2028) are untouched.
+- **Additive / production-safe.** With the toggle OFF the new-binary output is CRC-identical to
+  the pre-connector baseline on every checked event — the pass changes nothing when off.
 
 ## Artifacts
 
+- Implementation: `clus/src/clustering_cathode_connect.cxx`, `cathode_connect()` in
+  `cfg/pgrapher/common/clus.jsonnet`, toggle `cathode_connect_on` + pipeline wiring in
+  `cfg/pgrapher/experiment/sbnd/clus.jsonnet`.
+- Connector verification (ON vs OFF, 10 data events): `/home/xqian/tmp/cathode_connect/`.
 - Diagnostic runs + parsers: `/home/xqian/tmp/cathode_ab/` (`full_<evt>.zip`, `trunc_<evt>.zip`,
   `dbg_*/pp_*/pin_*` instrumented logs, `run_*` logs).
 - Truncated run = comment `cm.examine_bundles(use_flash_t0=true)` (`clus.jsonnet:302`); gate
