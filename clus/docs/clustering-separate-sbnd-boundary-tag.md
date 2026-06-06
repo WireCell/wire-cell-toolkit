@@ -55,11 +55,13 @@ lowest-false-split form; it was chosen over a general "any face" / "two-tips-alo
   land in separate clusters. All other clusters in the event are unchanged.
 - **OFF byte-identical**: with `sbnd_boundary_tag=false` the apa0/apa1/all-APA clustering
   is byte-identical to the pre-change build.
-- **Regression**: a 32-event data+MC spread (incl. the cathode-connect accept events),
-  tag ON vs OFF, is per-APA byte-identical on all but evt 139220. One all-APA-only
-  discrepancy on evt 138670 was traced to the pre-existing intermittent `clus_all_apa`
-  non-determinism (the tag does not fire on 138670; a fresh tag-ON run matches tag-OFF),
-  i.e. unrelated to this change.
+- **Regression (broad)**: a 170-event data spread, tag ON vs OFF, differs on **exactly one
+  event — 139220** (apa1 7→8 clusters, all-APA 12→13); the other 169 are byte-identical
+  across apa0/apa1/all-APA. So the tag is a clean no-op everywhere except the genuine
+  two-track overcluster it targets. (An earlier 32-event run had shown a lone all-APA-only
+  blip on evt 138670; the 170-event run reproduces 138670 as byte-identical, confirming
+  that blip was the pre-existing intermittent `clus_all_apa` non-determinism — the tag does
+  not fire on 138670 — and not this change.)
 
 ## Files
 
