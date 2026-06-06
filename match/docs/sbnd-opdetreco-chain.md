@@ -150,3 +150,98 @@ reco: [ opdecopmt, ophitpmt, opflashtpc0, opflashtpc1 ]
 - OpFlash: `OpDetReco/OpFlash/SBNDFlashFinder_module.cc`,
   `FlashFinder/SimpleFlashAlgo.*`, `FlashFinder/PECalib.cxx`, `FlashTools/*`.
 - Jobs: `OpDetReco/OpDeconvolution/job/run_decohitfinder.fcl`.
+
+## Known failure mode: closely-spaced flashes (≲8 µs) and cross-TPC inconsistency
+
+When two genuine flashes arrive within ~8 µs of each other, `SimpleFlashAlgo` cannot keep
+both **in the same TPC**, and — because the finder runs **independently per TPC with no
+cross-TPC reconciliation** — the two TPCs can end up keeping *different* members of the
+pair. A cross-TPC object that physically shares one flash time then matches two
+non-coincident flashes and fails cross-TPC (xTPC) matching downstream.
+
+### Symptom (data event 59415)
+
+Two cluster halves of a cathode-crossing cosmic — at `(x,y,z) = (31.8, -57.0, 451.1)` and
+`(-2.5, -81.2, 450.1)`, i.e. nearly identical y/z, opposite sides of the cathode — did **not**
+get xTPC matched. Each half matched a different flash, and the two flashes are **not
+coincident in time**, even though the geometry says both halves belong to the same flash
+group.
+
+### Root cause
+
+The finder is `SBNDFlashFinder_module.cc` driving `SimpleFlashAlgo::RecoFlash`
+(`OpFlash/FlashFinder/SimpleFlashAlgo.cxx`). Four structural facts combine:
+
+1. **Per-TPC, independent.** `run_flashfinder.fcl:60-61` instantiates two producers,
+   `opflashtpc0` (`SimpleFlashTPC0.TPC: 0`) and `opflashtpc1` (`TPC: 1`); each algorithm
+   only sees its own TPC's PMTs (`Configure()` → `ListOpChannelsByTPC(_tpc)`,
+   SimpleFlashAlgo.cxx:63-72). The two `recob::OpFlash` collections are never reconciled in
+   time anywhere in sbndcode.
+
+2. **Hard veto, brightest-first.** Candidate time-bins are processed in **descending PE
+   order** (`pesum_idx_map` keyed by `1./pe`, SimpleFlashAlgo.cxx:190-197). The brightest
+   claims a flash; every later candidate whose start lies within
+   `veto_ctr = VetoSize / TimeResolution` of an already-accepted flash is **skipped entirely**
+   (SimpleFlashAlgo.cxx:211-250, the `skip=true` branches at lines 224-231). Defaults
+   (`job/sbnd_flashalgo.fcl`): `VetoSize = 8 µs`, `IntegralTime = 8 µs`,
+   `TimeResolution = 0.01 µs`, `PEThreshold = 20`, `MinPECoinc = 6`, `MinMultCoinc = 3`.
+   So **within one TPC, two flashes < 8 µs apart cannot both exist** — only the single
+   brightest survives.
+
+3. **The bug.** For two real flashes within 8 µs, each TPC keeps only whichever flash is
+   brighter **in that TPC**. If flash A is brighter in TPC0 and flash B is brighter in TPC1,
+   TPC0 keeps A and vetoes B's coincident partner; TPC1 keeps B and vetoes A's. The two
+   surviving flash times then differ by the A–B separation, so the cross-TPC pair splits onto
+   two non-coincident flashes. (Secondary effect: the surviving flash's `IntegralTime = 8 µs`
+   window — `pesum` loop at SimpleFlashAlgo.cxx:253-256 and PE fill at 278-284 — also absorbs
+   the vetoed partner's PE, corrupting total PE and the per-channel pattern used for the Y/Z
+   barycenter and the downstream Q/L predicted light.) Note also the flash time is the single
+   **brightest 10 ns bin**, not a PE-weighted centroid (`flash_time_v` = `idx`,
+   SimpleFlashAlgo.cxx:266, 310-314).
+
+4. **No spatial discrimination.** Time-bins are cut on PE-sum + hit-multiplicity only
+   (SimpleFlashAlgo.cxx:191-197). There is **no analog of MicroBooNE's per-PMT
+   Kolmogorov–Smirnov spatial-pattern test** — the very information (different PMT
+   illumination of A vs B) that would distinguish two close flashes is discarded.
+
+### Evidence — reconstructed flashes for event 59415
+
+From `opflash_apa{0,1}.tar.gz` (col 0 = time [ns], cols 1..312 = per-channel PE), the region
+near −1.26 ms:
+
+| flash | TPC0 (apa0) | TPC1 (apa1) |
+|-------|-------------|-------------|
+| near −1.2688 ms | **−1268808 ns, 22712 PE** | absent (nearest −1259707, 212 PE) |
+| near −1.2640 ms | absent | **−1264017 ns, 12394 PE** |
+
+The two bright flashes are **4.79 µs apart**, each bright in exactly one TPC and **missing in
+the other**. TPC0 has no flash at −1264017 (it is 4.79 µs < 8 µs from its brighter −1268808 →
+vetoed); TPC1 has no flash at −1268808 (same reason). This veto signature is the direct cause
+of the 59415 xTPC failure.
+
+### Contrast with the MicroBooNE reference (mechanism, not threshold)
+
+`prototype_base/2dtoy/src/ToyLightReco.cxx` (`Process_beam_wfs`) bins 1500 samples → 250 bins
+(6 samples/bin ≈ 93.75 ns/bin at 64 MHz). Its 78-bin auto-new-flash gap / default window is
+**≈ 7.3 µs** — *comparable* to SBND's 8 µs, so the real difference is the **mechanism**:
+
+- MicroBooNE separates close-in-time flashes with **gap + brightening + a per-PMT KS
+  spatial-pattern test** (the 4–15 bin / ~0.4–1.4 µs regime), truncates each flash window at
+  the next flash's start (no PE double-counting), and runs on **one coherent PMT system**, so
+  a flash has a single consistent time.
+- SBND uses a **flat PE+multiplicity threshold + a hard veto, independently per TPC**, so it
+  (a) cannot split two close flashes inside a TPC and (b) produces **inconsistent cross-TPC
+  flash times** for one physical event.
+
+### Possible remedies (not implemented — diagnostic note only)
+
+- **Reconcile TPC0 + TPC1 flashes into cross-TPC flash groups** by coincident time before
+  matching (cleanest fix; mirrors how the toolkit already groups via `flash_t0_window`). This
+  fixes the xTPC symptom without touching the per-TPC time clustering.
+- **Reduce `VetoSize` / `IntegralTime`** so two flashes a few µs apart can both be
+  reconstructed within a TPC.
+- **Add a per-PMT spatial (KS-style) test** to split close-in-time flashes that differ in
+  spatial pattern, à la MicroBooNE.
+- Trade-off: a smaller veto risks splitting a single flash's late (slow-scintillation) light
+  into two spurious flashes, so any veto reduction needs validation against single-flash late
+  light.
