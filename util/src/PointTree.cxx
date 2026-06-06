@@ -213,10 +213,19 @@ const Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) const
     return it->second.scoped.get();
 }
 
-Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope) 
+Tree::ScopedBase* Tree::Points::get_scoped(const Scope& scope)
 {
     return const_cast<Tree::ScopedBase*>(
         const_cast<const self_t*>(this)->get_scoped(scope));
+}
+
+const bool* Tree::Points::scoped_indices_valid(const Scope& scope) const
+{
+    auto it = m_scoped.find(scope);
+    if (it == m_scoped.end()) {
+        return nullptr;
+    }
+    return &it->second.indices_valid;
 }
 
 void WireCell::PointCloud::Tree::Points::rebuild_indices(const WireCell::PointCloud::Tree::Scope& scope) const

@@ -300,16 +300,33 @@ const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int 
     // (millions of times per event), but the (apa,face,pind) -> Scope mapping is
     // data-independent.  Memoize the Scope so the expensive boost::format scope-key build
     // runs once per key instead of on every call (it was ~40% of clustering CPU; see
-    // clustering-timing-profile.md §2).  scoped_view() still does its own kd-tree caching,
-    // so the result is bit-identical to constructing the Scope fresh each call.
+    // clustering-timing-profile.md §2).
     auto& by_face = m_kd2d_scope_cache[apa][face];
     auto it = by_face.find(pind);
     if (it == by_face.end()) {
         std::vector<std::string> plane_names = {"U", "V", "W"};
         const auto sname = String::format("ctpc_a%df%dp%d", apa, face, plane_names[pind]);
-        it = by_face.emplace(pind, Tree::Scope{sname, {"x", "y"}, 1}).first;
+        it = by_face.emplace(pind, kd2d_cache_t{Tree::Scope{sname, {"x", "y"}, 1}, nullptr, nullptr}).first;
     }
-    const auto& sv = m_node->value.scoped_view(it->second);
+    auto& entry = it->second;
+
+    // Fast path: the scoped view's indices are still valid, i.e. no node has been
+    // inserted or removed in this scope since we last resolved it (on_insert/on_remove
+    // unconditionally clear the flag).  Its k-d tree is therefore current, so return it
+    // directly and skip the scoped_view() Scope hash-lookup + dynamic_cast (~16% of
+    // clustering; see clustering-timing-profile.md §4).  Safe because the ctpc scoped
+    // views are never erased, so the cached pointers stay valid for the tree's lifetime.
+    if (entry.sv && entry.valid && *entry.valid) {
+        return entry.sv->kd();
+    }
+
+    // Slow path: (re)resolve via scoped_view(), which rebuilds the indices and revalidates
+    // as needed; then cache the (stable) view pointer and validity flag for the fast path.
+    const auto& sv = m_node->value.scoped_view(entry.scope);
+    entry.sv = &sv;
+    if (!entry.valid) {
+        entry.valid = m_node->value.scoped_indices_valid(entry.scope);
+    }
     return sv.kd();
 }
 

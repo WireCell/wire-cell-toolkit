@@ -400,6 +400,55 @@ clustering, `ClusteringExamineBundles` (44.7 %) → `connected_blobs` → `conne
 5. **(~14 % spread) `malloc`/`free`** — remaining churn is the `knn` result vector and
    `DynamicPointCloud` growth, not the now-removed query scratch.
 
+## 5. The `scoped_view` fast path — the safe form of the §4 #1 lever (2026-06-05)
+
+The §4 #1 lever (the `scoped_view` Scope-hash, ~16 %) is now **captured, output-identical**.
+The naive ref-cache stays ruled out; this is the safe form, gated on two empirical facts
+established with temporary env-gated counters (since reverted):
+
+- **`indices_valid` is the authority.** `Tree::Points::on_insert`/`on_remove` clear
+  `m_scoped[scope].indices_valid` **unconditionally** on any tree change, and `ScopedView::kd()`
+  lazily rebuilds its `m_nfkd` when its selections change. So `indices_valid == true` ⟹ nothing
+  was inserted/removed since the last resolve ⟹ the view's k-d tree is current.
+- **ctpc scoped views are never erased.** A per-`(tree,scope)` creation counter showed each
+  `ctpc_a*f*p*` `ScopedView` is created **exactly once** per tree (`create_count == 1`) on 187650
+  — `on_remove` (which *would* erase a scope and dangle a cached pointer) never fires for these
+  scopes. So the `ScopedView*` and the `&indices_valid` flag are **stable for the tree's life**.
+
+**Implementation.** A new accessor `Tree::Points::scoped_indices_valid(scope)` returns a stable
+`const bool*` to the flag (`util/{inc/WireCellUtil/PointTree.h,src/PointTree.cxx}`). `Grouping`'s
+per-`(apa,face,pind)` memo now also caches the resolved `ScopedView*` + that flag pointer
+(`Facade_Grouping.{h,cxx}`). `kd2d()` fast-paths: when the flag is true it returns
+`sv->kd()` directly — **no `Scope` hash, no `dynamic_cast`, no rebuild check**; when false (or on
+the first call) it falls back to `scoped_view()`, which rebuilds/revalidates, and re-caches the
+(stable) pointers. The flag goes false only on the ~3 invalidations/tree, so the slow path is rare.
+
+**Measured (single-event, local imaging; total over 3 MABC nodes), CRC-identical `mabc.zip` to the
+original baseline on all three:**
+
+| event | §4 (k=1+array) | **+`scoped_view` fast path** | total vs original |
+|--:|--:|--:|--:|
+| 187650 | 16.2 s | **13.5 s** | **4.2×** |
+| 59789  | 15.0 s | **12.6 s** | **4.4×** |
+| 61637  | 2.4 s  | **2.3 s**  | 1.7× |
+
+This is the largest single win since the §2 `kd2d` format fix. Profile (`cpu_v7.prof`, 187650):
+total samples **5 237 → 4 689** (original 17 434 → **3.7× fewer**); `scoped_view` **16.1 % → 3.7 %**,
+the `_M_find_node` Scope hashing **9.4 % → 4.8 %**; `kd2d` is no longer a top frame.
+
+### Refreshed next-hotspots (`cpu_v7.prof`, 187650)
+
+The hot path is now dominated by genuine geometry, not bookkeeping:
+
+1. **(~15 %) `nanoflann::searchLevel`** under `knn` — now the single biggest lever, and
+   **irreducible** (exact search; the §4 leaf-size sweep found no robust gain). Algorithmic only.
+2. **(~11 %) `hough_transform`** via `Separate_overclustering` (Protect) — already sparse; the
+   residual is the per-candidate direction-accumulation loop itself.
+3. **(~9 %) `get_closest_dead_chs`** — per-good-point dead-channel `ch`-range scan, one map lookup
+   per channel; relatively grew as the others shrank. A tighter early-out / denser per-plane
+   structure could trim it. Best *bookkeeping* lever left.
+4. **(~15 % spread) `malloc`/`free`** — `knn` result vector + `DynamicPointCloud` growth.
+
 ## How it was measured
 
 Each `MultiAlgBlobClustering` node logs `MABC timing: <Stage>:<scope> took <ms> ms`

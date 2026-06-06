@@ -86,13 +86,22 @@ namespace WireCell::Clus::Facade {
         std::map<int, IAnodePlane::pointer> m_anodes;
         IDetectorVolumes::pointer m_dv{nullptr};
 
-        // Memoized data-independent (apa,face,pind) -> 2D scoped-view Scope.  The scope
-        // string ("ctpc_a*f*p*") depends only on the indices, not on event content, so it
-        // is built once per key instead of via boost::format on every kd2d() call -- that
-        // format was ~40% of clustering CPU (see clustering-timing-profile.md §2 and
-        // Facade_Grouping.cxx::kd2d).  scoped_view() still handles kd-tree caching, so the
-        // memoization is output-identical.
-        mutable std::map<int, std::map<int, std::map<int, Tree::Scope>>> m_kd2d_scope_cache;
+        // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
+        // depends only on the indices, not on event content, so it is built once per key
+        // instead of via boost::format on every kd2d() call -- that format was ~40% of
+        // clustering CPU (see clustering-timing-profile.md §2).  We additionally cache the
+        // resolved ScopedView* and a pointer to its "indices valid" flag so that, while the
+        // flag is true, kd2d() returns the view's k-d tree directly and skips the
+        // scoped_view() Scope hash-lookup (~16% of clustering, §4); the flag is cleared by
+        // the tree on any insert/remove, dropping us back to the safe scoped_view() path.
+        // Both pointers are stable: the ctpc scoped views are never erased (one ScopedView
+        // per (tree,scope), verified).  All output-identical.
+        struct kd2d_cache_t {
+            Tree::Scope scope;
+            const Tree::ScopedView<float_t>* sv{nullptr};
+            const bool* valid{nullptr};
+        };
+        mutable std::map<int, std::map<int, std::map<int, kd2d_cache_t>>> m_kd2d_scope_cache;
 
         /// TODO: remove these in the future
         // IAnodePlane::pointer m_anode{nullptr};
