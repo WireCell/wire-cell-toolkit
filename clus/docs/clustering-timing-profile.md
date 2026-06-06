@@ -32,10 +32,17 @@ matching process (in-graph) and is not separately timed here. Within the matchin
 **QLMatching itself is ~369 s (~56 %)** — see `match/docs/chisquare_flags_comparison.md` §17
 for the per-event matcher breakdown.
 
-**Per-stage imaging timing is still NOT instrumented** (the imaging nodes emit no `took`
-lines — see the caveat below); the §0 numbers are whole-process only. Adding `took` timing
-to `MaskSlices`/`GridTiling`/`BlobClustering`/`ChargeSolving` remains the prerequisite for a
-per-stage imaging breakdown.
+**Per-stage imaging breakdown now exists — see `img/docs/imaging-timing-profile.md`**
+(gperftools CPU profile of the 10 busiest events; no `took` instrumentation needed because
+imaging runs on single-threaded `Pgrapher` and each stage is a distinct INode that
+`google-pprof --cum` separates natively). Headline: imaging is **graph-lifecycle bound** —
+~52–58 % of CPU is allocator + `std::_Rb_tree` churn — one root cause: the `cluster_graph_t`
+`setS` out-edge container (`ICluster.h:167`) makes every `add_edge`/destroy a red-black-tree
+op, paid repeatedly as `full_deghost`'s ProjectionDeghosting ×2 + ChargeSolving ×3 +
+geom-clustering build/copy/destroy the graph. The LASSO/Eigen numeric work is only ~10–15 %,
+and `GridTiling` is negligible (<2 %). ProjectionDeghosting is the tail-driving stage (up to
+27 % on the worst event), but its growth is graph copy/destroy, not its O(n²) `judge_coverage`
+(~6 % even there). The §0 wall/RSS numbers below remain whole-process only.
 
 > **Open blocker (2026-06-05):** the full local-imaging reprocess of files 1–3 is blocked by
 > an **intermittent clustering heap-corruption** in `clus_all_apa`, newly exposed by the
