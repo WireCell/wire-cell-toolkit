@@ -177,13 +177,17 @@ the `std::set` tree cost. Options, roughly increasing risk:
     feature the local active imaging was built for. It is a clean toggle
     (`wct-img-all.jsonnet:30`), so it is worth *quantifying*, but it is not a free win.
 
-**R2 — Spatial pre-filter on ProjectionDeghosting's `judge_coverage` (the explicitly-O(n²)
-part, ~6 %).** `judge_coverage` compares every cluster pair per plane; pre-filter pairs by their
-2D (channel × slice) projection bounding boxes and skip the sparse comparison for disjoint pairs
-(O(n²)→≈O(n·k); mirrors the ExamineBundles pair-loop prefilter). Scope it honestly: this is the
-~6 % named compare, **not** the 27 % stage — most of ProjectionDeghosting is the graph copy/
-projection-build that R1 targets. Separately, `reserve()`/reuse the Eigen triplet buffers in
-`get_projection` (~6 %, per-cluster), which currently rebuilds a sparse matrix per cluster.
+**R2 — Cut `judge_coverage`'s per-call sparse-matrix allocations (~6 %).** *Re-scoped after
+measurement — see "R2/R3 investigation" below.* The original idea (bbox pre-filter + triplet
+`reserve()`) does **not** pan out: `judge_coverage` is already gated by `cs_graph` edges (not an
+all-pairs O(n²) compare), bbox-disjoint pairs are only 0.16–2.9 % of calls, and `get_projection`'s
+cost is `setFromTriplets` (inherent), which `reserve()` cannot touch. The real lever is that each
+`judge_coverage` call allocates **three** sparse matrices — `mask(ref)` + `mask(tar)` +
+`(ref_mask − tar_mask)` (the subtraction alone is 54 % of the function) — and ~99 % of calls hit
+that path. A bit-identical single union-pass over the two matrices' non-zeros (tracking
+ref_nz/tar_nz/has_pos/has_neg with early-exit) removes all three allocations. Ceiling ≈ most of the
+6 % → ~4–5 % on the worst event. This is a **logic rewrite, not churn reduction**, so it is
+proposed (not shipped) pending greenlight and full `cmpnpz.py` validation.
 
 **R3 — Reduce the `setS` edge-tree cost (~21–27 % Rb_tree) — same root cause as R1.** The Rb_tree
 is the cluster graph's own `setS` out-edge container (`ICluster.h:167`), not any application
@@ -198,6 +202,12 @@ surgical one.
 (`efficiency-concerns.md` #1, stable ~9.4 %) would need grid/spatial indexing — real but not
 tail-driving. MaskSlice thresholding and GridTiling are **not** worth touching (small and/or
 shrinking share).
+
+**R5 — `BlobShadow::shadow` (NEW, surfaced during the R2 investigation, ~6.3 %).** On 141530
+`Aux::BlobShadow::shadow` (`aux/src/BlobShadow.cxx`) is the **single largest ProjectionDeghosting
+sub-cost — larger than `judge_coverage` (6.1 %) and `get_projection` (5.8 %)** — yet it is absent
+from R1–R4 (R1–R4 under-prioritized it). It builds the per-wire blob-overlap graph that gates the
+whole deghosting pair loop. Not investigated here; flagged as the next follow-up after R2.
 
 ## R1 investigation & Tier-A implementation
 
@@ -252,6 +262,52 @@ Output **canonically identical on all 44 npz** — every one of the 11 profiled 
 deghosting topology varies event-to-event, so the 11-event breadth is the real correctness check,
 not just the 608k giant). This is the safe ceiling for R1; the larger wins (Tier B/C) remain open
 and are the user's call.
+
+## R2/R3 investigation
+
+**Where ProjectionDeghosting's time actually goes (141530, `--cum`).** The 27.8 % stage splits
+into: `BlobShadow::shadow` 6.3 %, `judge_coverage` 6.1 %, `get_projection` 5.8 %,
+`ClusterShadow::shadow` 1.1 %, `remove_blobs` 0.6 %, `judge_coverage_alt` 0.4 % — the rest is the
+per-cluster graph copy/destroy R1 targets. So R2's `judge_coverage` is **not** the biggest
+sub-cost (R5's `BlobShadow::shadow` is).
+
+**R2 — `judge_coverage` (line-level, 441 samples on 141530).** Costs concentrate in three sparse
+allocations: `mask(ref)` line 303 = 87, `mask(tar)` line 304 = 44, and `ref_mask − tar_mask`
+line 326 = **239 (54 %)**; the `loop_exist` scans are 56+7+7. The pair loop is **gated by
+`boost::edge_range(cs_cluster, clust3D, cs_graph)`** (Projection2D.cxx caller), so only
+shadow-overlapping cluster pairs are ever judged — it is *not* an all-pairs O(n²) compare.
+
+Outcome distribution, measured with throwaway counters (since reverted):
+
+| evt | judge_coverage calls | both-non-zero (line-326 path) | bbox-disjoint |
+|---|--:|--:|--:|
+| 141530 | 24,157 | 24,017 (99.4 %) | 38 (0.16 %) |
+| 59789  | 14,392 | 14,383 (99.9 %) | 417 (2.9 %) |
+
+Conclusions:
+- **bbox pre-filter is marginal, not ineffective-by-construction.** A `'w'` shadow edge shares a
+  *wire* (channel axis) regardless of *slice*, so disjoint (channel × slice) live-bboxes are
+  possible and deterministically return `OTHER` — a valid bit-identical short-circuit. But it fires
+  on only 0.16–2.9 % of calls, so caching a bbox on `Projection2D` is not worth it.
+- **triplet `reserve()` is worthless.** `get_projection`'s 419 samples are `setFromTriplets`
+  line 215 = **220 (52 %)**, the 3 empty `Projection2D(nchan,nslice)` ctors = 66, and
+  `SimpleSlice::activity()`'s by-value map copy line 150 = 64. `reserve()` touches none of these;
+  the triplet `push_back`s do not even appear.
+- **The real lever** (proposed, not shipped): replace `mask(ref)+mask(tar)+(ref_mask−tar_mask)`
+  with a single union-pass over the two matrices' non-zeros computing the same four booleans
+  (`ref_nz`, `tar_nz`, `has_pos`, `has_neg`) with early-exit. Removes all three allocations on the
+  ~99 % expensive path → ceiling ~4–5 % on the worst event. Bit-identical bar = exactly replicate
+  the mask threshold (`x > −uncer_cut`), explicit-zero handling, only-in-one-matrix positions, and
+  the ±0.01 thresholds; validate with `cmpnpz.py` on all 11 events as in Tier A.
+
+**R3 — confirmed scoping, not reopened.** (a) "fewer graph builds/copies" = R1 (Tier A shipped).
+(b) Out-edge selector `setS`→`hashS` (O(1) edge insert, preserves `setS` parallel-edge dedup
+semantics — *not* `vecS`, which would admit duplicate edges) is the structural lever for the
+~21–27 % Rb_tree, but `cluster_graph_t` (`ICluster.h:167`) is a **core `iface` type shared by every
+clus/img/aux consumer**, and it needs a canonical output sort in `ClusterArrays.cxx:482/511` first
+(unsorted `boost::edges()` order → byte-different output; our `cmpnpz.py` already treats output as
+permutation-invariant, so "canonically identical" is the right bar). Broad, full-chain-validated
+change — **not implementable in this pass**; documented as the big open structural win.
 
 ## Reproduce
 
