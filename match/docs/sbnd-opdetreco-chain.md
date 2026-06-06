@@ -233,15 +233,89 @@ of the 59415 xTPC failure.
   (a) cannot split two close flashes inside a TPC and (b) produces **inconsistent cross-TPC
   flash times** for one physical event.
 
-### Possible remedies (not implemented — diagnostic note only)
+## How I would fix it (design only — not implemented)
 
-- **Reconcile TPC0 + TPC1 flashes into cross-TPC flash groups** by coincident time before
-  matching (cleanest fix; mirrors how the toolkit already groups via `flash_t0_window`). This
-  fixes the xTPC symptom without touching the per-TPC time clustering.
-- **Reduce `VetoSize` / `IntegralTime`** so two flashes a few µs apart can both be
-  reconstructed within a TPC.
-- **Add a per-PMT spatial (KS-style) test** to split close-in-time flashes that differ in
-  spatial pattern, à la MicroBooNE.
-- Trade-off: a smaller veto risks splitting a single flash's late (slow-scintillation) light
-  into two spurious flashes, so any veto reduction needs validation against single-flash late
-  light.
+There are really **two coupled defects**: (a) the hard time-veto *drops a genuinely separate
+flash* whenever it lands within `VetoSize` of a brighter one, and (b) because the finder runs
+**independently per TPC**, that loss is asymmetric, so the two TPCs disagree on which flash
+survives. A complete fix must address (a); fixing only (b) hides the symptom but still loses
+real flashes. Three options below, from most-principled to quickest, each kept behind a
+default-OFF toggle so existing production stays bit-identical (repo convention: new reco
+variants must be jsonnet/fcl-togglable and default off).
+
+### Option 1 (recommended, root cause) — spatial-pattern veto instead of a blind time-veto
+
+This is the SBND port of what MicroBooNE already does. In `ToyLightReco.cxx:780-786`, when a
+new candidate is close in time to the previous flash, it is **only merged if the per-PMT light
+pattern is consistent** — `curr_hpe->KolmogorovTest(prev_hpe,"M") > 0.1` declares a *separate*
+flash when the spatial pattern differs. Two sub-peaks of one flash share a pattern (→ veto);
+two distinct interactions have different patterns (→ keep both).
+
+The SBND veto today is unconditional. In `SimpleFlashAlgo::RecoFlash`
+(`OpFlash/FlashFinder/SimpleFlashAlgo.cxx`):
+
+- The skip happens at **lines 224-231** (`skip=true` the moment a candidate's `start_time`
+  falls within `veto_ctr = VetoSize/TimeResolution` of any accepted `flash_period_v` entry).
+- The per-bin per-PMT pattern needed for a shape test is **already computed**: `pespec_v[idx]`
+  is filled at **line 185** and summed into each flash's `pe_v` at **lines 277-284**.
+
+Change:
+1. Keep, alongside `flash_period_v` (declared **line 200**), a parallel
+   `std::vector<std::vector<double>>` holding each accepted flash's per-PMT pattern (the same
+   `pe_v` built at 277-284, or just `pespec_v` summed over its window).
+2. In the veto loop (224-231), before setting `skip=true`, build the candidate's pattern from
+   `pespec_v` around `idx` and compare it to the conflicting flash's stored pattern with a
+   shape metric (a KS distance like ROOT's, or a normalized χ²/cosine distance — no ROOT
+   dependency needed). If the distance exceeds a configurable cut, **do not skip**; instead
+   accept it as a separate flash and set `integral_ctr` so its window stops at the neighbour's
+   `start_time` — exactly the truncation already written at **lines 232-239** — so the slow
+   tail of the first flash is not double-counted.
+3. Add a knob in `job/sbnd_flashalgo.fcl` (next to `VetoSize` at line 10), e.g.
+   `SpatialVetoDist: -1` read in `Configure()` (lines 25-28); `-1`/disabled reproduces the
+   current unconditional veto byte-for-byte.
+
+Why this is the right fix: it resolves **both** (a) and (b) at once. Each TPC now keeps both
+real flashes (A *and* B), so the two TPCs agree, and the existing toolkit grouping by
+`flash_t0_window` re-associates the cross-TPC halves with no further change.
+
+### Option 2 (targeted, lower-risk) — cross-TPC flash reconciliation after the finder
+
+If touching the core loop is undesirable, recover the symptom directly. After `opflashtpc0`
+and `opflashtpc1` are produced (`run_flashfinder.fcl:60-61`), take the **union of flash times**
+across the two TPCs; for any time present in one TPC but missing (within a coincidence window)
+in the other, **synthesize the missing flash by re-integrating that TPC's OpHits** in a window
+around the time — bypassing the veto. The OpHits that make up the vetoed flash still exist
+(the veto only suppressed *flash creation*, not the hits), so this fully recovers it.
+
+Implementation: either a new small producer consuming both OpFlash collections plus the
+OpHit collections, or a second pass inside `SBNDFlashFinder::produce`
+(`SBNDFlashFinder_module.cc`) — the OpHit loading at **lines 123-152** and
+`GetAssociatedLiteHits` at **lines 208-219** are the reusable pieces; the per-TPC channel
+masks come from `ListOpChannelsByTPC` (`SimpleFlashAlgo.cxx:63-72`). Use the toolkit's
+existing `flash_t0_window` (~0.8 µs) as the coincidence width so it matches downstream
+grouping.
+
+Caveat: this restores cross-TPC consistency (defect b) and recovers any flash that survived in
+*at least one* TPC, but cannot recover an interaction that is dim enough to be vetoed in *both*
+TPCs (no seed time exists). For that residual case you still need Option 1. In practice Option
+2 fixes the reported event 59415 class (one flash bright in each TPC).
+
+### Option 3 (stop-gap, config only) — shrink the veto
+
+Lowering `VetoSize` in `job/sbnd_flashalgo.fcl` (line 10) lets two flashes a few µs apart both
+survive. But `Configure()` enforces `IntegralTime ≤ VetoSize` (**SimpleFlashAlgo.cxx:33-36**),
+and `IntegralTime = 8 µs` is deliberately large to integrate the **slow scintillation tail**
+(`HypoSignalTimeConsts: [25, 1500]` ns — the 1.5 µs slow component spreads light over several
+µs). So shrinking the veto below the integral requires relaxing that guard and accepting
+overlapping integration windows (partial PE double-counting, only partly handled by the
+truncation at lines 232-239), and it risks **splitting one flash's slow tail into spurious
+secondaries**. Lowest effort, least safe — use only as a diagnostic experiment, validated
+against single-flash late light, not as the production fix.
+
+### Recommendation
+
+Ship **Option 2** first (smallest, directly fixes the 59415 class, no change to the core
+clustering math), then add **Option 1** as the general solution that also covers the
+dim-in-both-TPCs corner case. Treat **Option 3** as a knob for studies only. All three stay
+behind default-OFF toggles so the current production output is unchanged until explicitly
+enabled.
