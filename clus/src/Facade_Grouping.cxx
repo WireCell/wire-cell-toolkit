@@ -443,10 +443,13 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
 {
     double x = point[0];
     const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
-    std::vector<double> angles = {angle_u, angle_v, angle_w};
+    const std::array<double, 3> angles = {angle_u, angle_v, angle_w};
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     const auto& skd = kd2d(apa, face, pind);
-    return skd.radius<std::vector<double>>(radius * radius, {x, y});
+    // Stack query (std::array) instead of a 2-element heap vector; this helper
+    // runs per-point-per-plane in the clustering good-point tests.
+    const std::array<double, 2> query{x, y};
+    return skd.radius<std::array<double, 2>>(radius * radius, query);
 }
 
 bool Grouping::has_closest_point(const geo_point_t& point, const double radius, const int apa, const int face,
@@ -454,7 +457,7 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
 {
     double x = point[0];
     const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
-    std::vector<double> angles = {angle_u, angle_v, angle_w};
+    const std::array<double, 3> angles = {angle_u, angle_v, angle_w};
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     const auto& skd = kd2d(apa, face, pind);
     // Equivalent to get_closest_points(...).size() > 0 but cheaper: the radius query
@@ -462,7 +465,9 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
     // knn(1) returns the single nearest point; nanoflann's RadiusResultSet keeps points
     // with dist < radius^2 (strict <), so use the same strict comparison here.  Distances
     // are squared (L2), matching the radius^2 argument get_closest_points passes.
-    const auto res = skd.knn(1, std::vector<double>{x, y});
+    // Stack query (std::array) to avoid a 2-element heap vector on this hot path.
+    const std::array<double, 2> query{x, y};
+    const auto res = skd.knn(1, query);
     return !res.empty() && res[0].second < radius * radius;
 }
 

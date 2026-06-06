@@ -227,6 +227,23 @@ namespace WireCell::NFKDVec {
             }
             this->prepquery<nfkdindex_type>();
 
+            // Fast path for k=1 (the common nearest/existence query, e.g. the
+            // good-point tests in clustering).  Use stack scalars instead of two
+            // single-element heap vectors; nanoflann writes the same index and
+            // distance, so the result is bit-identical.
+            if (kay == 1) {
+                size_t index = 0;
+                distance_type distance = 0;
+                nanoflann::KNNResultSet<element_type> nf(1);
+                nf.init(&index, &distance);
+                m_nfkdindex->findNeighbors(nf, query_point.data(),
+                                           nanoflann::SearchParameters());
+                if (nf.size() > 0) {
+                    ret.emplace_back(index, distance);
+                }
+                return ret;
+            }
+
             std::vector<size_t> indices(kay,0);
             std::vector<distance_type> distances(kay, 0);
             nanoflann::KNNResultSet<element_type> nf(kay);

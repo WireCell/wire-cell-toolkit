@@ -332,6 +332,74 @@ zero-fill/scan are gone.
 > Validate any of these the same way: **byte-identical `mabc.zip`** (CRC-32) on
 > 59789 / 61637 / 187650 vs the original baseline, then re-pull per-event timing.
 
+## 4. Follow-up on the three §3 next-targets (2026-06-05) — one kept, two findings
+
+The three "next targets" above were each investigated. **Only one was a safe win; the other
+two are findings (one unsafe, one no-benefit) — kept here so they are not re-attempted.**
+All kept changes remain **byte-identical (CRC-32 `mabc.zip`)** to the original pre-any-fix
+baseline on 59789 / 61637 / 187650.
+
+1. **`k=1` stack fast path in `NFKDVec::Tree::knn` — KEPT (output-identical).** The good-point
+   existence query calls `knn(1)` millions of times; each call heap-allocated two 1-element
+   scratch vectors (`indices`, `distances`). Added a `kay == 1` branch that uses stack scalars
+   and `nanoflann` writes the same index+distance → bit-identical. Plus, the two hot kd2d
+   query helpers (`has_closest_point`, `get_closest_points`) built a `std::vector<double>{x,y}`
+   query and a `std::vector<double>` `angles` per call — both replaced with stack
+   `std::array` (`Facade_Grouping.cxx`). (`util/inc/WireCellUtil/NFKDVec.h`,
+   `clus/src/Facade_Grouping.cxx`.)
+
+2. **`kd2d` → `scoped_view` ref-cache (the §3 #1 lever) — NOT DONE, proven UNSAFE.** The plan
+   was to cache the `kd2d_t&` reference per `(apa,face,pind)` to skip the `scoped_view()`
+   hash-lookup. **Settled empirically, not by reasoning:** a temporary per-tree counter in
+   `Tree::Points::rebuild_indices` (env-gated `WC_REBUILD_COUNT`) showed each `ctpc_a*f*p*`
+   scope is **invalidated and rebuilt 3× within a single tree's lifetime** on 187650 — the
+   clustering passes (ExamineBundles / Protect / Deghost) reinsert blob nodes at the scope
+   depth, firing `on_insert` → `indices_valid = false`. The residual `scoped_view()` call **is**
+   that invalidation safety net (`get_scoped` → `!indices_valid` → `rebuild_indices`). A bare
+   ref-cache would bypass it and use a **stale kd-tree** → wrong output on merge-heavy events
+   (a data-dependent failure CRC-on-3-events would not necessarily catch). *A safe version
+   exists but is larger:* cache the `ScopedView*` + its `indices_valid` flag per key and still
+   honor invalidation (skipping only the Scope **hash**, not the rebuild) — needs a new
+   `PointTree::Points` accessor. Left as the documented next lever (see below).
+
+3. **`nanoflann` leaf-size tuning (the §3 #2 lever) — NOT DONE, no robust benefit.** `searchLevel`
+   is an *exact* search, so `leaf_max_size` changes traversal but never results. Swept
+   `leaf_max_size ∈ {4,6,8,10,16,24,32}` on 187650 (env-gated `WC_NFKD_LEAF`): total clustering
+   was **16.4–17.6 s**, with the default 10 already at 16.6 s and the spread inside the ~0.2 s
+   run-to-run jitter (larger leaves regressed). The "~14% `searchLevel`" is genuine, irreducible
+   2-D nearest-neighbour geometry; the default leaf is near-optimal. Not worth a global change
+   to a shared primitive. (Both knobs reverted; only change #1 above shipped.)
+
+**Measured (single-event, local imaging; total over 3 MABC nodes), vs the §3 post-four state:**
+
+| event | §3 (+knn) | **+`k=1` stack + array query** | total vs original |
+|--:|--:|--:|--:|
+| 187650 | 16.9 s | **16.2 s** | **3.5×** |
+| 59789  | 15.9 s | **15.0 s** | **3.7×** |
+| 61637  | 2.4 s  | **2.4 s**  | 1.67× |
+
+The k=1/array allocation removal is a small further gain (near the noise floor on the busy
+events) but harmless and output-identical.
+
+### Refreshed next-hotspots (gperftools `cpu_v6.prof`, 187650, 2026-06-05)
+
+Total CPU samples **17 434 (original) → 5 237** (3.3× fewer). `MultiAlgBlobClustering` = 81.7 %
+of process; the rest is QLMatching light prediction (`SemiAnalyticalModel`) + IO. Within
+clustering, `ClusteringExamineBundles` (44.7 %) → `connected_blobs` → `connect_graph_relaxed`
+(41.3 %) still dominates. Ranked remaining levers:
+
+1. **(~16 %) `scoped_view` Scope-hash lookup** inside `has_closest_point` — the biggest single
+   lever (dominated by `_M_find_node` hashing the `Scope` string). The **safe** optimization is
+   the larger one in finding #2 above (cache `ScopedView*`+validity, skip only the hash). The
+   naive ref-cache is ruled out.
+2. **(~14 %) `nanoflann::searchLevel`** — genuine geometry, irreducible (finding #3).
+3. **(~10 %) `hough_transform`** via `Separate_overclustering` (Protect) — already sparse; the
+   residual is the per-candidate direction-accumulation loop itself, not storage.
+4. **(~8 %) `get_closest_dead_chs`** — per-good-point dead-channel `ch`-range scan with a map
+   lookup per channel; a tighter early-out or a denser per-plane structure could trim it.
+5. **(~14 % spread) `malloc`/`free`** — remaining churn is the `knn` result vector and
+   `DynamicPointCloud` growth, not the now-removed query scratch.
+
 ## How it was measured
 
 Each `MultiAlgBlobClustering` node logs `MABC timing: <Stage>:<scope> took <ms> ms`
