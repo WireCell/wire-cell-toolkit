@@ -19,7 +19,8 @@ static void clustering_connect1(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 const Tree::Scope& scope,
                                 bool use_flash_t0 = false,
-                                double flash_t0_window = 80*units::ns);
+                                double flash_t0_window = 80*units::ns,
+                                double iso_max_dis = -1);
 
 class ClusteringConnect1 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
@@ -32,11 +33,15 @@ public:
 
         use_flash_t0_ = get(config, "use_flash_t0", false);
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
+        // SBND isochronous over-merge guard (default OFF / -1 == byte-identical):
+        // upper bound on the actual cluster-to-cluster closest-point distance for the
+        // isochronous-relaxed connection branch.  See clustering_connect1().
+        iso_max_dis_ = get(config, "iso_max_dis", -1.0);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_);
+        clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_, iso_max_dis_);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -46,6 +51,7 @@ public:
 private:
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
+    double iso_max_dis_{-1};
 };
 
 
@@ -66,7 +72,8 @@ void clustering_connect1(
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     bool use_flash_t0,
-    double flash_t0_window)
+    double flash_t0_window,
+    double iso_max_dis)
 {
     // Check that live_grouping has less than one wpid
     if (live_grouping.wpids().size() > 1) {
@@ -568,10 +575,26 @@ void clustering_connect1(
                             //     std::cout << "Check 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << angle_diff << " " << dis/units::cm << " " << dis1/units::cm << " " << angle1_drift << " " << angle2_drift << std::endl;
                             // }
 
+                            // Isochronous-relaxed collinearity (both axes ~perp to drift):
+                            // tolerates angle_diff up to 30 deg and merges on the infinite-line
+                            // distance `dis`, which is near-zero for slightly-tilted axes whose
+                            // extrapolations cross even when the two clusters are physically
+                            // separated in drift.  SBND guard (iso_max_dis > 0): additionally
+                            // require the real cluster-to-cluster closest-point distance to be
+                            // within iso_max_dis.  Default -1 leaves the branch unchanged.
+                            bool iso_relax = (fabs(angle1_drift - 90) < 5 && fabs(angle2_drift - 90) < 5 &&
+                                              fabs(angle1_drift - 90) + fabs(angle2_drift - 90) < 6 &&
+                                              (angle_diff < 30 || angle_diff > 150));
+                            if (iso_relax && iso_max_dis > 0) {
+                                geo_point_t icp1, icp2;
+                                double icpd = WireCell::Clus::Facade::Find_Closest_Points(
+                                    *cluster, *max_cluster, cluster->get_length(),
+                                    max_cluster->get_length(), 1000 * units::cm, icp1, icp2);
+                                if (icpd > iso_max_dis) iso_relax = false;
+                            }
+
                             if ((angle_diff < 5 || angle_diff > 175 ||
-                                 fabs(angle1_drift - 90) < 5 && fabs(angle2_drift - 90) < 5 &&
-                                     fabs(angle1_drift - 90) + fabs(angle2_drift - 90) < 6 &&
-                                     (angle_diff < 30 || angle_diff > 150)) &&
+                                 iso_relax) &&
                                     dis < 1.5 * units::cm ||
                                 (angle_diff < 10 || angle_diff > 170) && dis < 0.9 * units::cm &&
                                     dis1 > (cluster->get_length() + max_cluster->get_length()) / 3.) {

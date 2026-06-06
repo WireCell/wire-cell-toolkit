@@ -186,8 +186,13 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // Raise the convex-hull point cap (default 10000) so full-detector
         // multi-track overclusters (>10k points) are still considered for
         // separation; otherwise get_hull returns empty and separation is skipped.
-        cm.separate(use_ctpc=true, max_hull_points=100000),
-        cm.connect1(),
+        cm.separate(use_ctpc=true, max_hull_points=100000, sbnd_boundary_tag=true),
+        // SBND: cap the isochronous-relaxed connection on the real closest-point
+        // distance.  Without it, connect1 merges two genuinely-separate isochronous
+        // cosmics (e.g. evt 183888, ~7.3 cm apart in drift) on the misleadingly small
+        // infinite-line distance.  5 cm < the 7.3 cm real gap, above SBND broken-track
+        // gaps.  Default OFF (-1) elsewhere keeps production bit-identical.
+        cm.connect1(iso_max_dis=5 * wc.cm),
         // MicroBooNE-style clustering tail: produce cluster groups (one main +
         // associated small clusters) carried as the "isolated"/"perblob" per-blob
         // array (main blobs tagged -1). examine_bundles MUST follow neutrino/isolated,
@@ -313,7 +318,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     // Cathode-crossing connector: after the generic merge passes (so it only ADDS
     // merges they missed) and before examine_bundles (so a connected crosser is one
     // cluster before the flash-bundle collapse).  SBND-on; off => list unchanged.
-    + (if cathode_connect_on then [cm.cathode_connect()] else [])
+    + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, flash_t0_window=800*wc.ns)] else [])
     + [
         cm.examine_bundles(use_flash_t0=true),
     ],

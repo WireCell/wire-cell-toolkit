@@ -94,12 +94,105 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv)
 }
 
 
+// SBND-only two-track boundary tag (default OFF; gated by sbnd_boundary_tag).
+//
+// A single track touches any given planar detector face at most once, so >=2
+// well-separated, charge-dense endpoints on ONE face imply >=2 tracks.  SBND's
+// fiducial "outside" thresholds sit ~3.5-4 cm inside the wires (1 cm inset +
+// 2.5-3 cm margin), so genuine cosmic endpoints that land right at the upstream
+// (z-min) wall are captured as hull extremes but never flagged "outside" by
+// JudgeSeparateDec_2 -- this tag uses a near-wall band to see them.  Per the
+// agreed SBND scope it fires only when the upstream face carries two such tips
+// AND a 3rd dense exit sits on a different face (the full evt-139220
+// "two-on-upstream + one-elsewhere" topology), which is the lowest-false-split
+// form.  On a trigger it seeds the detected tips into independent_points so
+// Separate_1's endpoint selection picks the real prongs.  boundary_points is the
+// convex hull already populated by JudgeSeparateDec_2.
+static bool JudgeSeparateDec_SBND_boundary(const Cluster* cluster,
+                                           const std::vector<geo_point_t>& boundary_points,
+                                           const WireCell::Clus::Facade::ScopeFV& fv,
+                                           const double cluster_length,
+                                           std::vector<geo_point_t>& independent_points)
+{
+    // SBND tunables, hard-coded to match the existing threshold style in this file
+    // (pinned against data evt 139220; see clustering-separate doc).
+    const double LEN_MIN    = 250 * units::cm;  // long-cosmic regime
+    const double Z_NEAR     = 10  * units::cm;  // upstream near-wall band: z < zmin + Z_NEAR
+    const double OTHER_NEAR = 5   * units::cm;  // near-wall band for the other faces
+    const double GROUP_DIS  = 25  * units::cm;  // merge upstream tips within this distance
+    const double SEP_MIN    = 40  * units::cm;  // the two upstream tips must be this far apart
+    const double GAP_MIN    = 10  * units::cm;  // tip-midpoint must be this far from charge
+                                                // (two-track divergence ~14 cm on evt 139220;
+                                                //  a single grazing track keeps it ~0-3 cm)
+    const int    DENS_MIN   = 75;               // charge-dense endpoint (nnearby within 15 cm)
+
+    if (cluster_length < LEN_MIN) return false;
+
+    // 1. Dense hull points within the upstream (z-min) near-wall band.
+    std::vector<geo_point_t> up;
+    for (const auto& p : boundary_points) {
+        if (p.z() < fv.zmin + Z_NEAR) {
+            geo_point_t tp(p.x(), p.y(), p.z());
+            if (cluster->nnearby(tp, 15 * units::cm) > DENS_MIN) up.push_back(p);
+        }
+    }
+    if (up.size() < 2) return false;
+
+    // 2. Greedy-group the upstream points (representative = first point of each group).
+    std::vector<geo_point_t> reps;
+    for (const auto& p : up) {
+        bool merged = false;
+        for (const auto& r : reps)
+            if ((p - r).magnitude() < GROUP_DIS) { merged = true; break; }
+        if (!merged) reps.push_back(p);
+    }
+    if (reps.size() < 2) return false;
+
+    // the two most-separated upstream tips
+    double best = -1; geo_point_t a, b;
+    for (size_t i = 0; i + 1 < reps.size(); i++)
+        for (size_t j = i + 1; j < reps.size(); j++) {
+            double d = (reps[i] - reps[j]).magnitude();
+            if (d > best) { best = d; a = reps[i]; b = reps[j]; }
+        }
+    if (best < SEP_MIN) return false;
+
+    // 3. Gap guard: the midpoint between the two tips must lie in a charge gap; a
+    //    single track grazing the wall would keep the midpoint sitting on charge.
+    geo_point_t mid((a.x() + b.x()) / 2., (a.y() + b.y()) / 2., (a.z() + b.z()) / 2.);
+    if (cluster->get_closest_dis(mid) < GAP_MIN) return false;
+
+    // 4. Require >=1 dense exit on a face OTHER than upstream-zmin.
+    geo_point_t other; bool have_other = false;
+    for (const auto& p : boundary_points) {
+        if (p.z() < fv.zmin + Z_NEAR) continue;  // skip the upstream band
+        bool near = p.y() < fv.ymin + OTHER_NEAR || p.y() > fv.ymax - OTHER_NEAR ||
+                    p.x() < fv.xmin + OTHER_NEAR || p.x() > fv.xmax - OTHER_NEAR ||
+                    p.z() > fv.zmax - OTHER_NEAR;
+        if (!near) continue;
+        geo_point_t tp(p.x(), p.y(), p.z());
+        if (cluster->nnearby(tp, 15 * units::cm) > DENS_MIN) { other = p; have_other = true; break; }
+    }
+    if (!have_other) return false;
+
+    // Seed the detected prongs (15 cm dedup) so Separate_1 sees the real tips.
+    auto seed = [&](const geo_point_t& q) {
+        for (const auto& ip : independent_points)
+            if ((ip - q).magnitude() < 15 * units::cm) return;
+        independent_points.push_back(q);
+    };
+    seed(a); seed(b); seed(other);
+    return true;
+}
+
+
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 IPCTransformSet::pointer pcts,
                                 const Tree::Scope& scope,
                                 const bool use_ctpc,
-                                const int max_hull_points);
+                                const int max_hull_points,
+                                const bool sbnd_boundary_tag);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -117,16 +210,20 @@ public:
         // preserving existing behavior bit-for-bit; raise it (e.g. SBND) to let
         // large full-detector overclusters be considered for separation.
         max_hull_points_ = get(config, "max_hull_points", -1);
+        // SBND-only two-track upstream-boundary tag (default OFF => bit-identical
+        // to prior behavior).  See JudgeSeparateDec_SBND_boundary.
+        sbnd_boundary_tag_ = get(config, "sbnd_boundary_tag", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_);
+        clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_);
     }
 
 private:
     double use_ctpc_{true};
     int max_hull_points_{-1};
+    bool sbnd_boundary_tag_{false};
 };
 
 
@@ -141,7 +238,8 @@ static void clustering_separate(
     const IPCTransformSet::pointer pcts,
     const Tree::Scope& scope,
     const bool use_ctpc,
-    const int max_hull_points)
+    const int max_hull_points,
+    const bool sbnd_boundary_tag)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -251,6 +349,15 @@ static void clustering_separate(
                     }
                 }
                 //	std::cout << flag_top << " " << flag_proceed << std::endl;
+
+                // SBND-only: catch two beam-inclined cosmics that merged into one
+                // cluster and whose PCA looks single-track (so the angle gates above
+                // miss them) but which expose two endpoints on the upstream wall plus
+                // a third exit elsewhere.  Default OFF; purely additive (false->true).
+                if (!flag_proceed && sbnd_boundary_tag &&
+                    JudgeSeparateDec_SBND_boundary(cluster, boundary_points, fv, cluster_length, independent_points)) {
+                    flag_proceed = true;
+                }
             }
 
 

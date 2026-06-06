@@ -325,7 +325,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         cathode_connect(name="", drift_cut=5*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
                         angle_cut=10.0, conn_far_cut=30.0, cathode_x=0.0,
                         cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
-                        min_length=10*wc.cm, flash_t0_window=80*wc.ns) :: {
+                        min_length=10*wc.cm, min_length_short=null,
+                        short_dir_len=null, conn_short_cut=30.0, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringCathodeConnect",
             name: prefix+name,
             data: {
@@ -338,6 +339,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 cathode_x_cut: cathode_x_cut,
                 hough_radius: hough_radius,
                 min_length: min_length,
+                // null => C++ defaults min_length_short to min_length (symmetric gate)
+                [if min_length_short != null then "min_length_short"]: min_length_short,
+                // null => C++ defaults short_dir_len to 0 (short-stub prolongation OFF)
+                [if short_dir_len != null then "short_dir_len"]: short_dir_len,
+                conn_short_cut: conn_short_cut,
                 flash_t0_window: flash_t0_window,
             } + scope_cfg,
         },
@@ -357,22 +363,30 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // (Cluster::get_hull). -1 (default) uses Constants::MaxHullPoints (10000),
         // i.e. bit-identical to prior behavior; raise it to let large full-detector
         // overclusters be considered for separation.
-        separate(name="", use_ctpc=true, max_hull_points=-1) :: {
+        separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
                 use_ctpc: use_ctpc,
                 max_hull_points: max_hull_points,
+                // SBND-only two-track upstream-boundary tag; key omitted when false
+                // so existing (non-SBND) configs stay bit-identical.
+                [if sbnd_boundary_tag then 'sbnd_boundary_tag']: sbnd_boundary_tag,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
 
-        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // iso_max_dis (default null/-1 == OFF, byte-identical): upper bound on the
+        // actual cluster-to-cluster closest-point distance for the isochronous-relaxed
+        // connection branch, which otherwise merges two separated isochronous tracks on
+        // the (misleadingly small) infinite-line distance.  SBND sets a finite value.
+        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, iso_max_dis=null) :: {
             type: "ClusteringConnect1",
             name: prefix+name,
             data: {
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
+                [if iso_max_dis != null then 'iso_max_dis']: iso_max_dis,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
