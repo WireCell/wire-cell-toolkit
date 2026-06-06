@@ -203,11 +203,12 @@ surgical one.
 tail-driving. MaskSlice thresholding and GridTiling are **not** worth touching (small and/or
 shrinking share).
 
-**R5 — `BlobShadow::shadow` (NEW, surfaced during the R2 investigation, ~6.3 %).** On 141530
-`Aux::BlobShadow::shadow` (`aux/src/BlobShadow.cxx`) is the **single largest ProjectionDeghosting
-sub-cost — larger than `judge_coverage` (6.1 %) and `get_projection` (5.8 %)** — yet it is absent
-from R1–R4 (R1–R4 under-prioritized it). It builds the per-wire blob-overlap graph that gates the
-whole deghosting pair loop. Not investigated here; flagged as the next follow-up after R2.
+**R5 — `BlobShadow::shadow` (NEW, surfaced during the R2 investigation; ~6.3 % → 4.3 % SHIPPED).**
+On 141530 `Aux::BlobShadow::shadow` (`aux/src/BlobShadow.cxx`) is the **single largest
+ProjectionDeghosting sub-cost — larger than `judge_coverage` (6.1 %) and `get_projection`
+(5.8 %)** — yet it was absent from R1–R4. It builds the per-wire blob-overlap graph that gates the
+whole deghosting pair loop. Investigated and a bit-identical fix shipped — see "R5 investigation &
+fix" below.
 
 ## R1 investigation & Tier-A implementation
 
@@ -308,6 +309,39 @@ clus/img/aux consumer**, and it needs a canonical output sort in `ClusterArrays.
 (unsorted `boost::edges()` order → byte-different output; our `cmpnpz.py` already treats output as
 permutation-invariant, so "canonically identical" is the right bar). Broad, full-chain-validated
 change — **not implementable in this pass**; documented as the big open structural win.
+
+## R5 investigation & fix (BlobShadow::shadow)
+
+**Where the time goes (141530, 457 samples).** `BlobShadow::shadow` builds the per-wire
+blob-overlap graph by looping, per slice, over every *(shared-leaf, blob-pair)* and ensuring one
+edge per layer between the pair (extending its `[beg,end]` index range). The hot line was
+`existing_layer_edges(bsgraph, v1, v2)` (line 185, **212 samples = 46 %**) + `add_edge` (line 197,
+83). Under `--focus=BlobShadow::shadow`, that 46 % splits into the `edge_range` multiset scan
+(`multiset::equal_range` **27.4 %**) and a **fresh per-call `unordered_map`** (`insert` 16.6 % +
+rehash `_M_need_rehash` 11.2 % / `_M_next_bkt` 6.6 % + `find` 7.2 %): `existing_layer_edges` built a
+map of *all* layers' edges between the pair on **every call**, then read back a **single** layer
+(`wpid.layer()`, which is constant per leaf) — the map grew from empty each time, forcing rehashes,
+and was discarded immediately.
+
+**Fix (shipped, bit-identical).** Replace `existing_layer_edges` (returns a layer→edge map) with
+`existing_layer_edge(..., layer)` — a direct `edge_range` scan returning the single matching-layer
+edge (first match in `edge_range` order, exactly the previous insert-then-`find` semantics). No
+per-call map, no rehash. The `add_edge` order, edge set, and `[beg,end]` values are unchanged, so
+the BlobShadow graph — and everything downstream — is identical. Removed the now-orphaned
+`bs_layer_edge_t` typedef; left the pre-existing-unused `pair_hash` struct in place (it hints at the
+*next* lever — a persistent per-pair edge cache to also kill the 27 % `edge_range` scan).
+
+| evt | BlobShadow share (HEAD → fix) | samples cut | total CPU-s (HEAD → fix) |
+|---|---|--:|---|
+| 141530 | 6.3 % → **4.3 %** | −147 (−33 % of fn) | 28.8 → 28.1 |
+| 59789  | 3.0 % → **2.0 %** | −43 (−35 % of fn)  | 16.8 → 16.5 |
+| 60933  | 1.2 % → **1.0 %** | −7                 | 12.5 → 12.2 |
+
+BlobShadow's share is event-dependent (biggest on the busiest, most-overlapping events). The
+within-profile drop (~⅓ of the function removed) is the robust signal and matches the predicted
+map-removal. Output **canonically identical on all 44 npz** (11 events × {apa0,apa1} ×
+{active,masked}) via `cmpnpz.py`. The remaining lever in this function is the 27 % `edge_range`
+scan (the `pair_hash` cache) — left as a follow-up.
 
 ## Reproduce
 

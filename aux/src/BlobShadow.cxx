@@ -8,6 +8,7 @@
 #include <boost/graph/breadth_first_search.hpp>
 
 #include <unordered_map>
+#include <optional>
 
 using namespace WireCell;
 using namespace WireCell::GraphTools;
@@ -80,24 +81,24 @@ namespace {
         }
     };
 
-    // find edges from bsedges cache, layer info from bsgraph
-    // one layer should has at most one edge
-    using bs_layer_edge_t = std::unordered_map<WirePlaneLayer_t, BlobShadow::edesc_t>;
-    bs_layer_edge_t existing_layer_edges(
+    // find the existing BS edge of the given layer between v1 and v2, if any.
+    // one layer should have at most one edge; returns the first match in
+    // edge_range order (matching the previous insert-then-find semantics).
+    std::optional<BlobShadow::edesc_t> existing_layer_edge(
         const BlobShadow::graph_t& bsgraph,
         const BlobShadow::vdesc_t& bs_vtx1,
-        const BlobShadow::vdesc_t& bs_vtx2)
+        const BlobShadow::vdesc_t& bs_vtx2,
+        WirePlaneLayer_t layer)
     {
-        bs_layer_edge_t ret;
-        // for undirected graph (BS), edge_range(0,1) yields edges from 
+        // for undirected graph (BS), edge_range(0,1) yields edges from
         // both add_edge(0,1) and add_edge(1,0)
         // https://onlinegdb.com/u4D6du-Sj
         for (const auto& edge : mir(boost::edge_range(bs_vtx1, bs_vtx2, bsgraph))) {
-            const auto& eobj = bsgraph[edge];
-            ret.insert({eobj.wpid.layer(), edge});
+            if (bsgraph[edge].wpid.layer() == layer) {
+                return edge;
+            }
         }
-
-        return ret;
+        return std::nullopt;
     }
 }  // namespace
 
@@ -181,13 +182,10 @@ BlobShadow::graph_t BlobShadow::shadow(const cluster_graph_t& cgraph, char leaf_
                         continue;
                     }
 
-                    // returns an existing layer -> edge map
-                    auto layer_edges = existing_layer_edges(bsgraph, bs_vtx1, bs_vtx2);
-
-                    // if layer -> edge exists, refresh the edge beg-end
-                    if (layer_edges.find(wpid.layer())!=layer_edges.end()) {
-                        auto edge = layer_edges.at(wpid.layer());
-                        Edge& eobj = bsgraph[edge];
+                    // if a same-layer edge already exists, refresh its beg-end
+                    auto existing = existing_layer_edge(bsgraph, bs_vtx1, bs_vtx2, wpid.layer());
+                    if (existing) {
+                        Edge& eobj = bsgraph[*existing];
                         eobj.beg = std::min(eobj.beg, index);
                         eobj.end = std::max(eobj.end, index + 1);
                         continue;
