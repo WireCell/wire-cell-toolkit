@@ -434,6 +434,54 @@ member, so the both-long branch is skipped), and the 6 known crossers + evt12 ar
 the `tt_hough < angle_cut` path). 183096 is outside the 20-event hand-scan sample — a separate target
 check (merged: shared `real_cluster_id` on the ON output).
 
+### `drift_cut` 6 → 8 cm: symmetric far crossers with a larger drift residual (event 185362)
+
+A far crosser whose two halves each carry ~3 cm of drift-x residual sits at, e.g., x₁ ≈ −3.9,
+x₂ ≈ +3.0 — both within `cathode_x_cut` (5 cm) of the cathode, but their *separation*
+`|x₁ − x₂| ≈ 6.9 cm` exceeds `drift_cut = 6 cm`, so the same-drift-depth gate
+(`clustering_cathode_connect.cxx:188`) rejects the pair before any collinearity test. Event 185362
+is exactly this: rcid 2 (short, 25.5 cm) ↔ rcid 31 (301.8 cm), `dis` = 8.6 cm (far regime), PCA–PCA
+= 3.7°, connection-PCA = 18.7° — a clean crosser by every angle test — blocked only by `|x₁ − x₂|`
+= 6.93 cm.
+
+The fix is a one-line SBND config change: **`drift_cut` 6 → 8 cm**. Raising `drift_cut` is a *pure
+loosening* of a reject gate (`|x₁ − x₂| ≥ drift_cut → reject`), so it can only **add** edges, never
+remove them — every existing crosser sits under `drift_cut` and is untouched. 8 cm gives 185362 ~1 cm
+margin and stays under the natural ceiling `2 × cathode_x_cut = 10 cm`. A *symmetry* gate
+(`|x₁ + x₂| < cut`, the two halves equidistant about the cathode) was considered but rejected: it is
+a *tightening* (can only remove edges), it is nearly redundant inside the `cathode_x_cut = 5 cm` box
+(`|x₁ + x₂|` ranges only 0–5 there), and a useful value would cut the documented one-sided crossers
+whose residual reaches ~4.1 cm on a single half. The 20-event bar (below) confirms no symmetry guard
+is needed.
+
+| crosser | pieces (len) | regime | dis | \|x₁−x₂\| | \|x₁+x₂\| | tt-PCA | conn-PCA | result |
+|---|---|---|---|---|---|---|---|---|
+| data 185362 | 25.5 / 301.8 | far | 8.58 | **6.93** | 0.93 | 3.7° | 18.7° | merged (drift_cut 8) |
+
+**Regression: 20-event member-CRC no-op.** Re-running all 10 data + 10 MC hand-scan events at
+`drift_cut = 8` vs the current `drift_cut = 6` binary gives a **byte-identical** clustering result
+(`real_cluster_id` md5 unchanged on all 20) — no new merges, no overclustering. 185362 newly merges
+(separate target, shared `real_cluster_id`), and every prior target still merges: 185428, 183096,
+138670, 137680 (rcid 32), 59415 (rcid 76 + the 23-pt bridge rcid 3).
+
+### Not a connector fix: cross-TPC flash-time split (event 183118)
+
+Event 183118 is a geometrically *pristine* crosser — rcid 15 (TPC0, 159.7 cm) ↔ rcid 38 (TPC1,
+280.0 cm), PCA–PCA = 0.4°, connection-PCA = 4.2°, `|x₁ + x₂|` = 0.10 cm (perfectly symmetric about
+the cathode) — yet it stays split even with `drift_cut` opened to 12 cm. The blocker is the
+flash-coincidence gate (`clustering_cathode_connect.cxx:343`): the two halves matched **different
+flashes 617 ns apart** (TPC0 half → flash at 234.107 µs, TPC1 half → 233.490 µs), which exceeds the
+80 ns grouping window, so `assign_flash_t0_groups` places them in different groups and the connector
+(correctly) refuses to bridge non-coincident clusters. The 617 ns gap is consistent with one physical
+scintillation reconstructed far apart across the two independent TPC flash finders — every *other*
+flash in the event pairs across TPCs within ~25 ns, so 617 ns is a flash-reco outlier, not a property
+of crossers — though it could equally be a half mismatched to a genuinely different flash; the two
+readings are indistinguishable here (the drift impact of 617 ns is only `v·Δt ≈ 0.1 cm` either way,
+which is why the geometry still reads as one object). Both land on the same conclusion. **This is an upstream flash-reconstruction defect (cf. the evt12 cross-TPC
+"wrong flash" diagnosis), not something the geometry connector should fix** — widening the connector's
+flash window to 617 ns would open its coincidence guard ~8× on the strength of a single anomalous
+flash. Left for the flash-reco / matching layer.
+
 ## Artifacts
 
 - Implementation: `clus/src/clustering_cathode_connect.cxx`, `cathode_connect()` in
