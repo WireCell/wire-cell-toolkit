@@ -42,8 +42,24 @@ public:
         
         for (const auto& [wfid, _] : m_dv->wpident_faces()) {
             WirePlaneId wpid(wfid);
-            m_time_global_offsets[wpid.apa()][wpid.face()] = m_dv->metadata(wpid)["time_offset"].asDouble();
-            m_drift_speeds[wpid.apa()][wpid.face()] = m_dv->metadata(wpid)["drift_speed"].asDouble();
+            const auto md = m_dv->metadata(wpid);
+            m_time_global_offsets[wpid.apa()][wpid.face()] = md["time_offset"].asDouble();
+            m_drift_speeds[wpid.apa()][wpid.face()] = md["drift_speed"].asDouble();
+            // Optional per-TPC transverse position offset (Y,Z); default zero.  The
+            // x component (pos_offset[0]) is intentionally ignored -- the drift/x
+            // correction stays with the t0/flash_x_offset term.  Presence of the
+            // "pos_offset" key on ANY face flips the corrected scope to carry
+            // y_cor/z_cor (so the post-QLMatching switch_scope materializes the
+            // shift); absence => OFF => production bit-identical.  See
+            // match/docs/cathode-offset-correction.md.
+            double dy = 0.0, dz = 0.0;
+            if (md.isMember("pos_offset") && md["pos_offset"].isArray() &&
+                md["pos_offset"].size() >= 3) {
+                dy = md["pos_offset"][1].asDouble();
+                dz = md["pos_offset"][2].asDouble();
+                m_has_pos_offset = true;
+            }
+            m_pos_offsets[wpid.apa()][wpid.face()] = {dy, dz};
         }
     }
 
@@ -60,6 +76,10 @@ public:
         Point pos_corr(pos_raw);
         pos_corr[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
             m_drift_speeds.at(apa).at(face);
+        // Transverse (Y,Z) shift: a per-TPC constant, independent of cluster_t0.
+        const auto& [dy, dz] = m_pos_offsets.at(apa).at(face);
+        pos_corr[1] += dy;
+        pos_corr[2] += dz;
         return pos_corr;
     }
 
@@ -68,6 +88,10 @@ public:
         Point pos_raw(pos_corr);
         pos_raw[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
             m_drift_speeds.at(apa).at(face);
+        // Invert the transverse (Y,Z) shift symmetrically with forward().
+        const auto& [dy, dz] = m_pos_offsets.at(apa).at(face);
+        pos_raw[1] -= dy;
+        pos_raw[2] -= dz;
         return pos_raw;
     }
 
@@ -87,19 +111,20 @@ public:
         const auto &arr_x = pc_raw.get(arr_raw_names[0])->elements<double>();
         const auto &arr_y = pc_raw.get(arr_raw_names[1])->elements<double>();
         const auto &arr_z = pc_raw.get(arr_raw_names[2])->elements<double>();
+        const auto& [dy, dz] = m_pos_offsets.at(apa).at(face);
         std::vector<double> arr_x_corr(arr_x.size());
+        std::vector<double> arr_y_corr(arr_y.size());
+        std::vector<double> arr_z_corr(arr_z.size());
         for (size_t i = 0; i < arr_x.size(); ++i) {
             arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
                 m_drift_speeds.at(apa).at(face);
+            arr_y_corr[i] = arr_y[i] + dy;
+            arr_z_corr[i] = arr_z[i] + dz;
         }
         Dataset ds_corr;
         ds_corr.add(arr_cor_names[0], Array(arr_x_corr));
-        ds_corr.add(arr_cor_names[1], Array(arr_y));
-        ds_corr.add(arr_cor_names[2], Array(arr_z));
-         
-        //  ds_corr.add("x_corr", Array(arr_x_corr));
-        //  ds_corr.add("y_corr", Array(arr_y));
-        //  ds_corr.add("z_corr", Array(arr_z));
+        ds_corr.add(arr_cor_names[1], Array(arr_y_corr));
+        ds_corr.add(arr_cor_names[2], Array(arr_z_corr));
         return ds_corr;
     }
 
@@ -108,15 +133,20 @@ public:
         const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
         const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
         const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
+        const auto& [dy, dz] = m_pos_offsets.at(apa).at(face);
         std::vector<double> arr_x_raw(arr_x.size());
+        std::vector<double> arr_y_raw(arr_y.size());
+        std::vector<double> arr_z_raw(arr_z.size());
         for (size_t i = 0; i < arr_x.size(); ++i) {
             arr_x_raw[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
                 m_drift_speeds.at(apa).at(face);
+            arr_y_raw[i] = arr_y[i] - dy;
+            arr_z_raw[i] = arr_z[i] - dz;
         }
         Dataset ds_raw;
         ds_raw.add(arr_raw_names[0], Array(arr_x_raw));
-        ds_raw.add(arr_raw_names[1], Array(arr_y));
-        ds_raw.add(arr_raw_names[2], Array(arr_z));
+        ds_raw.add(arr_raw_names[1], Array(arr_y_raw));
+        ds_raw.add(arr_raw_names[2], Array(arr_z_raw));
         return ds_raw;
     }
 
@@ -143,13 +173,18 @@ public:
     }
  
     virtual PointCloud::Tree::Scope output_scope() const override {
-        // T0 correction shifts x only; y and z are unchanged and already exist
-        // in the blob's 3d PC under their original names.
+        // Without a transverse offset, the correction shifts x only; y and z are
+        // unchanged and already exist in the blob's 3d PC under their original
+        // names (production bit-identical).  With a per-TPC (Y,Z) offset, y and z
+        // are shifted too, so the corrected scope names new y_cor/z_cor arrays.
+        if (m_has_pos_offset) return {"3d", {"x_t0cor", "y_cor", "z_cor"}};
         return {"3d", {"x_t0cor", "y", "z"}};
     }
 
     virtual std::vector<std::string> stored_array_names() const override {
-        // Only the corrected x coordinate needs to be added to the blob PC.
+        // Persist only the arrays that actually changed.  Without a transverse
+        // offset only x_t0cor is new; with one, y_cor/z_cor are new too.
+        if (m_has_pos_offset) return {"x_t0cor", "y_cor", "z_cor"};
         return {"x_t0cor"};
     }
 
@@ -159,6 +194,11 @@ private:
     // m_time_global_offsets.at(apa).at(face) = time_global_offset
     std::map<int, std::map<int, double>> m_time_global_offsets;
     std::map<int, std::map<int, double>> m_drift_speeds;
+    // m_pos_offsets.at(apa).at(face) = {dy, dz} transverse position offset (cm-internal).
+    std::map<int, std::map<int, std::pair<double, double>>> m_pos_offsets;
+    // True iff any face declared a "pos_offset"; flips the corrected scope/stored
+    // arrays to carry y_cor/z_cor.  False => OFF => bit-identical.
+    bool m_has_pos_offset{false};
 };
 
 class PCTransformSet : public WireCell::Clus::IPCTransformSet,

@@ -21,6 +21,7 @@
 #include "WireCellUtil/GraphTools.h"
 
 #include <chrono>
+#include <algorithm>
 #include <map>
 #include <set>
 #include <fstream>
@@ -153,8 +154,21 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     // Add new configuration option for initial index
     m_initial_index = get<int>(cfg, "initial_index", m_initial_index);
 
-    //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
-    m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+    // Optional shared Bee sink: when "bee_sink" names an IBeeSink component, all
+    // Bee writes go to that single shared zip (at an explicit per-event index)
+    // and m_sink is left unused, so a multi-node chain emits one .zip.
+    std::string bee_sink_tn = get<std::string>(cfg, "bee_sink", "");
+    if (!bee_sink_tn.empty()) {
+        m_shared_sink = Factory::find_tn<IBeeSink>(bee_sink_tn);
+        m_shared_sink->acquire();
+        m_use_shared_sink = true;
+        m_bee_event_index = m_initial_index;
+        log->debug("using shared Bee sink {} (own bee_zip disabled)", bee_sink_tn);
+    }
+    else {
+        //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
+        m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
+    }
 
     // Configure RSE numbers
     if (cfg.isMember("use_config_rse")) {
@@ -169,11 +183,20 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
     }
+    // Take the event number from the per-event tensor ident (raw; run/subrun = 0).
+    m_rse_from_ident = get(cfg, "rse_from_ident", m_rse_from_ident);
 
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
     m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
+
+    m_save_opflash = get(cfg, "save_opflash", m_save_opflash);
+    if (m_save_opflash) {
+        m_bee_flash = Bee::Flashes(get<std::string>(cfg, "bee_detector", "uboone"), "op");
+    }
+    m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
+    m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
@@ -323,6 +346,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["runNo"] = m_runNo;
     cfg["subRunNo"] = m_subRunNo;
     cfg["eventNo"] = m_eventNo;
+    cfg["rse_from_ident"] = m_rse_from_ident;
 
     return cfg;
 }
@@ -330,7 +354,22 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
 void MultiAlgBlobClustering::finalize()
 {
     flush();
-    m_sink.close();
+    if (m_use_shared_sink) {
+        // Shared zip is reference-counted: it is closed on the last release(),
+        // independent of which node finalizes last.
+        m_shared_sink->release();
+    }
+    else {
+        m_sink.close();
+    }
+}
+
+size_t MultiAlgBlobClustering::write_obj(const WireCell::Bee::Object& obj)
+{
+    if (m_use_shared_sink) {
+        return m_shared_sink->write(obj, m_bee_event_index, m_runNo, m_subRunNo, m_eventNo);
+    }
+    return m_sink.write(obj);
 }
 
 static void reset_bee(int ident, WireCell::Bee::Points& bpts)
@@ -347,7 +386,7 @@ void MultiAlgBlobClustering::flush(WireCell::Bee::Points& bpts, int ident)
 {
     if (bpts.empty()) return;
 
-    m_sink.write(bpts);
+    write_obj(bpts);
     reset_bee(ident, bpts);
 }
 
@@ -372,7 +411,7 @@ void MultiAlgBlobClustering::flush(int ident)
             for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
                 for (auto& [face, bpts] : face_map) {
                     if (!bpts.empty()) {
-                        m_sink.write(bpts);
+                        write_obj(bpts);
                         // Clear after writing
                         int run = 0, evt = 0;
                         if (ident > 0) {
@@ -386,7 +425,7 @@ void MultiAlgBlobClustering::flush(int ident)
         } else {
             // Write global bee points
             if (!apa_bpts.global.empty()) {
-                m_sink.write(apa_bpts.global);
+                write_obj(apa_bpts.global);
                 // Clear after writing
                 int run = 0, evt = 0;
                 if (ident > 0) {
@@ -411,19 +450,39 @@ void MultiAlgBlobClustering::flush(int ident)
             for (auto& [face, patches] : face_map) {
                 if (patches.size()) {
                     patches.flush();
-                    m_sink.write(patches);
+                    write_obj(patches);
                     patches.clear();
                 }
             }
         }
     }
 
+    // Flush the optical flash / charge-light "op" display.
+    if (m_save_opflash && !m_bee_flash.empty()) {
+        write_obj(m_bee_flash);
+        int run = 0, evt = 0;
+        if (ident > 0) {
+            run = (ident >> 16) & 0x7fff;
+            evt = (ident) & 0xffff;
+        }
+        m_bee_flash.reset(evt, 0, run);
+    }
+
     // Flush particle-flow mc trees
     for (auto& [name, tree] : m_bee_pf_trees) {
         if (!tree.empty()) {
-            m_sink.write(tree);
+            write_obj(tree);
             tree.reset();
         }
+    }
+
+    // One flush(int) call == one event boundary (or EOS).  In shared-sink mode
+    // advance the explicit per-event index so the next event's objects land at
+    // the next Bee index.  Incrementing unconditionally (not only when this
+    // node wrote something) keeps all nodes' indices aligned by event ordinal
+    // even when a given node has an empty event.
+    if (m_use_shared_sink) {
+        ++m_bee_event_index;
     }
 
     m_last_ident = ident;
@@ -1401,6 +1460,18 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
             const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
             const auto& spcs = sv.pcs();
 
+            // Original (pre-flash-merge) per-blob cluster ids, if present (written
+            // by examine_bundles' flash-time merge into "real_cluster_id"/"perblob").
+            // One id per blob, in the same blob order as spcs.  When absent (any
+            // non-flash-merged cluster / other layers / detectors) the Bee
+            // real_cluster_id stays == clid, so output is backward-compatible.
+            std::vector<int> orig_ids;
+            if (cluster.has_pcarray<int>("real_cluster_id", "perblob")) {
+                auto sp = cluster.get_pcarray<int>("real_cluster_id", "perblob");
+                orig_ids.assign(sp.begin(), sp.end());
+            }
+            const bool use_orig = (orig_ids.size() == spcs.size());
+
             // Dead-channel threshold: uncertainty > 1e10 flags a dead wire
             // (matches PointTreeBuilding m_dead_threshold and Facade_Cluster::is_wire_dead).
             const double dead_threshold = 1e10;
@@ -1415,6 +1486,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                 auto x = spc.get().get(coords[0])->elements<double>();
                 auto y = spc.get().get(coords[1])->elements<double>();
                 auto z = spc.get().get(coords[2])->elements<double>();
+
+                // Per-blob original cluster id (falls back to the merged clid).
+                const int real_clid = use_orig ? orig_ids[spc_idx] : clid;
 
                 const size_t size = x.size();
                 for (size_t ind = 0; ind < size; ++ind) {
@@ -1435,7 +1509,7 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                     }
                     const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
 
-                    bpts.append(pt, point_charge, clid, clid);
+                    bpts.append(pt, point_charge, clid, real_clid);
                 }
             }
 
@@ -1540,6 +1614,187 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
     }
 }
 
+
+// Group the root "opflash" flashes (both TPC sides) by their time with the
+// given window and stash a per-row "group" array (parallel to gid/time/ch/pe)
+// on the root opflash PC.  No-op when the window is non-positive or the opflash
+// arrays are missing, so it is off by default and adds nothing to the output.
+// Run pre-pipeline: the array then survives the whole pipeline and is read by
+// fill_bee_flashes (and is available to later steps for reuse).
+static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, double window)
+{
+    if (window <= 0) return;
+
+    auto& lpcs = grouping.local_pcs();
+    auto it = lpcs.find("opflash");
+    if (it == lpcs.end()) return;
+    auto& ds = it->second;
+    auto a_gid = ds.get("gid");
+    auto a_time = ds.get("time");
+    if (!a_gid || !a_time) return;
+    const auto gid = a_gid->elements<int>();
+    const auto time = a_time->elements<double>();
+    const size_t nrow = gid.size();
+    if (nrow == 0) return;
+
+    // Unique flashes: gid -> time (first occurrence).
+    std::map<int, double> flash_time;
+    for (size_t i = 0; i < nrow; ++i) {
+        if (flash_time.find(gid[i]) == flash_time.end()) flash_time[gid[i]] = time[i];
+    }
+
+    // Sort unique flashes by time (tie-break on gid) for deterministic grouping.
+    std::vector<std::pair<int, double>> flashes(flash_time.begin(), flash_time.end());
+    std::sort(flashes.begin(), flashes.end(), [](const auto& a, const auto& b) {
+        if (a.second != b.second) return a.second < b.second;
+        return a.first < b.first;
+    });
+
+    // Greedily start a new group whenever the gap to the previous flash time
+    // exceeds the window (same logic as assign_flash_t0_groups, on flash times).
+    std::map<int, int> group_of;
+    int next_group = 0;
+    double prev_t = 0;
+    for (size_t i = 0; i < flashes.size(); ++i) {
+        if (i == 0 || (flashes[i].second - prev_t) > window) ++next_group;
+        group_of[flashes[i].first] = next_group;
+        prev_t = flashes[i].second;
+    }
+
+    // Per-row group array, aligned to the opflash rows.
+    std::vector<int> group(nrow);
+    for (size_t i = 0; i < nrow; ++i) group[i] = group_of[gid[i]];
+    grouping.put_pcarray<int>(group, "group", "opflash");
+}
+
+void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grouping& grouping)
+{
+    // Run/sub/event numbers (same convention as the points/patches dumps).
+    if (m_use_config_rse) {
+        m_bee_flash.rse(m_runNo, m_subRunNo, m_eventNo);
+    } else {
+        int run = 0, evt = 0;
+        if (m_last_ident > 0) { run = (m_last_ident >> 16) & 0x7fff; evt = (m_last_ident) & 0xffff; }
+        m_bee_flash.reset(evt, 0, run);
+    }
+
+    // The self-contained per-flash optical display PC on the (merged) root,
+    // written by QLMatching and carried across the per-APA -> all-APA merge.
+    // One row per (flash, channel): gid, time (raw ns), ch, pe.
+    const auto& lpcs = grouping.local_pcs();
+    auto it = lpcs.find("opflash");
+    if (it == lpcs.end()) return;   // no flashes attached
+    const auto& ds = it->second;
+    auto a_gid = ds.get("gid");
+    auto a_time = ds.get("time");
+    auto a_ch = ds.get("ch");
+    auto a_pe = ds.get("pe");
+    if (!a_gid || !a_time || !a_ch || !a_pe) return;
+    const auto gid = a_gid->elements<int>();
+    const auto time = a_time->elements<double>();
+    const auto ch = a_ch->elements<int>();
+    const auto pe = a_pe->elements<double>();
+    const size_t nrow = gid.size();
+
+    // Optional ±80 ns flash-flash grouping across TPC sides, stored on the root
+    // by ClusteringSwitchScope (flash_group_window>0).  Absent => no grouping
+    // is emitted and the op JSON stays bit-identical to the ungrouped case.
+    auto a_group = ds.get("group");
+    const bool have_group = (a_group != nullptr);
+    std::vector<int> group_col;
+    if (have_group) {
+        auto gc = a_group->elements<int>();
+        group_col.assign(gc.begin(), gc.end());
+    }
+
+    // Group rows by global flash id (first-seen order) into per-flash time +
+    // dense per-channel measured PE.
+    std::vector<int> flash_order;
+    std::map<int, double> flash_time;
+    std::map<int, int> flash_group;                  // gid -> flash-group id
+    std::map<int, std::map<int, double>> flash_pe;   // gid -> (ch -> pe)
+    for (size_t i = 0; i < nrow; ++i) {
+        const int g = gid[i];
+        if (flash_pe.find(g) == flash_pe.end()) {
+            flash_order.push_back(g);
+            flash_time[g] = time[i];
+            if (have_group) flash_group[g] = group_col[i];
+        }
+        flash_pe[g][ch[i]] = pe[i];
+    }
+
+    // Order flashes by ascending flash time so the Bee viewer steps through them
+    // low->high (it walks the op arrays by index and does no sorting of its own).
+    // stable_sort keeps the original first-seen order among equal-time flashes
+    // (e.g. the two sides of a ±80 ns TPC0/TPC1 group).
+    std::stable_sort(flash_order.begin(), flash_order.end(),
+                     [&](int a, int b) { return flash_time[a] < flash_time[b]; });
+
+    // Matched clusters: predicted per-channel PE keyed by global flash id, with
+    // the same total-predicted-light >= 100 filter as the legacy dump_light.
+    // cluster_id is the cluster's own id, identical to the "img" charge dump
+    // enumeration (this runs at the same pre-pipeline point), so the Bee viewer
+    // associates each flash to the same physical charge cluster.
+    std::map<int, std::vector<std::pair<int, std::vector<double>>>> matched;
+    for (const auto* cluster : grouping.children()) {
+        const int mgid = cluster->get_scalar<int>("matched_flash_gid", -1);
+        if (mgid < 0) continue;
+        if (!cluster->has_pcarray<double>("pe", "flashpred")) continue;
+        auto pred_span = cluster->get_pcarray<double>("pe", "flashpred");
+        std::vector<double> pred(pred_span.begin(), pred_span.end());
+        double pred_tot = 0;
+        for (double v : pred) pred_tot += v;
+        if (pred_tot < 100) continue;
+        matched[mgid].push_back({cluster->get_cluster_id(), std::move(pred)});
+    }
+
+    // Emit ALL flashes (matched + unmatched). A matched flash emits one row per
+    // matched cluster; an unmatched flash emits one row with empty cluster_id.
+    // The global flash id encodes the APA as gid = anode_ident*kFlashGidStride +
+    // idx (see QLMatching.cxx), so apa = gid / kFlashGidStride.
+    constexpr int kFlashGidStride = 1000000;
+    std::vector<int> appended_groups;   // one per appended row, same order
+    for (const int g : flash_order) {
+        const int apa = g / kFlashGidStride;
+        const int grp = have_group ? flash_group[g] : -1;
+        int maxch = -1;
+        for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;
+        std::vector<double> pes(maxch + 1, 0.0);
+        double peTotal = 0;
+        for (const auto& cv : flash_pe[g]) { pes[cv.first] = cv.second; peTotal += cv.second; }
+        const double t_us = flash_time[g] * 1e-3;   // ns -> us (matches dump_light)
+
+        auto mit = matched.find(g);
+        if (mit != matched.end() && !mit->second.empty()) {
+            if (m_bee_flash_per_flash) {
+                // One row per flash: all matched cluster ids together, and the
+                // predicted light is the element-wise sum over the matched
+                // clusters (each cluster contributes its own predicted PE).
+                std::vector<int> cids;
+                std::vector<double> pred_sum;
+                for (const auto& cp : mit->second) {
+                    cids.push_back(cp.first);
+                    if (pred_sum.size() < cp.second.size()) pred_sum.resize(cp.second.size(), 0.0);
+                    for (size_t k = 0; k < cp.second.size(); ++k) pred_sum[k] += cp.second[k];
+                }
+                m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
+                appended_groups.push_back(grp);
+            } else {
+                for (const auto& cp : mit->second) {
+                    m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
+                    appended_groups.push_back(grp);
+                }
+            }
+        } else {
+            m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
+            appended_groups.push_back(grp);
+        }
+    }
+
+    // Attach the per-row flash-group array only when grouping was computed, so
+    // the ungrouped output is unchanged.
+    if (have_group) m_bee_flash.set_groups(appended_groups);
+}
 
 struct Perf {
     using Clock = std::chrono::steady_clock;
@@ -1661,8 +1916,14 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     const int ident = ints->ident();
     SPDLOG_LOGGER_DEBUG(log, "loading tensor set ident={} (last={})", ident, m_last_ident);
     if (m_last_ident < 0) {     // first time.
-        if (m_use_config_rse) {
-            // Set RSE in the sink
+        if (m_rse_from_ident) {
+            // The tensor ident already carries the real event id (raw, unmasked);
+            // run/subrun are not available in this chain.
+            m_runNo = 0; m_subRunNo = 0; m_eventNo = ident;
+            if (!m_use_shared_sink) m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+        else if (m_use_config_rse && !m_use_shared_sink) {
+            // Set RSE in the sink (shared-sink mode passes RSE per write_obj).
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
         }
         // Use default behavior
@@ -1671,12 +1932,18 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         m_last_ident = ident;
     }
     else if (m_last_ident != ident) {
-        flush(ident);
-        if (m_use_config_rse) {
+        flush(ident);   // writes the previous event with its still-current RSE
+        if (m_rse_from_ident) {
+            m_runNo = 0; m_subRunNo = 0; m_eventNo = ident;
+            if (!m_use_shared_sink) m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+        }
+        else if (m_use_config_rse) {
             // Update event number for next event
             m_eventNo++;
-            // Update RSE in sink
-            m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+            // Update RSE in sink (shared-sink mode passes RSE per write_obj).
+            if (!m_use_shared_sink) {
+                m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
+            }
         }
     }
     // else do nothing when ident is unchanged.
@@ -1714,6 +1981,23 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             continue;
         }
         fill_bee_points(config.name, *gs[0]);
+    }
+
+    // Dump the optical flash / charge-light "op" display at the SAME point as
+    // the "img" charge dump, BEFORE the clustering pipeline runs: at this point
+    // the live clusters are exactly the per-APA matched clusters (their
+    // matched-flash association + predicted PE intact, cluster ids == the "img"
+    // enumeration). The pipeline below re-clusters/merges them, after which the
+    // 1:1 cluster<->flash mapping no longer holds.
+    if (m_save_opflash) {
+        auto gs = ensemble.with_name("live");
+        if (gs.size()) {
+            // Stash the ±window TPC0/TPC1 flash grouping on the root opflash PC
+            // first, so the op dump (and every later pipeline step) can read it.
+            store_flash_groups(*gs[0], m_flash_group_window);
+            fill_bee_flashes(*gs[0]);
+            perf("dump op flashes to bee");
+        }
     }
 
     perf.dump("start clustering", ensemble);

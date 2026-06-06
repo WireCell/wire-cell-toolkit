@@ -1654,7 +1654,25 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     const double max2 = +pi;
     direction_parameter_function_f phi_param = phi_angle;
 
-    auto hist = bh::make_histogram(bh::axis::regular<>(nbins1, min1, max1), bh::axis::regular<>(nbins2, min2, max2));
+    // The Hough histogram is nbins1*nbins2 (= 64 800) bins but SPARSE: only the few
+    // in-radius points are ever filled.  Building a dense grid cost a 64 800-double
+    // zero-fill on construction plus an O(64 800) std::max_element scan per call (the top
+    // clustering hotspot once the kd2d format cost was removed; see
+    // clustering-timing-profile.md §3).  Instead, accumulate the weights into a map keyed
+    // by the inner-bin linear index and take the peak over only the touched bins.
+    //
+    // Bit-identical to the previous `boost::histogram + bh::indexed + std::max_element`:
+    //  - bin assignment uses the same `axis::regular::index()` boost uses internally;
+    //  - points landing in under/overflow are skipped, matching bh::indexed's default
+    //    coverage::inner (which the old max_element scanned over);
+    //  - weights accumulate in the same fill order, so per-bin sums are identical;
+    //  - the peak tie-break (max value, then first in iteration order) is reproduced as
+    //    "smallest linear index" with lin = i + j*nbins1, because bh::indexed advances the
+    //    first axis fastest (axis-0 innermost);
+    //  - an empty/all-zero grid yields bin (0,0), as max_element over all-equal bins does.
+    const bh::axis::regular<> ax1(nbins1, min1, max1);
+    const bh::axis::regular<> ax2(nbins2, min2, max2);
+    std::unordered_map<long, double> bins;  // lin = i + (long)j * nbins1  (axis-0 fastest)
 
     for (size_t ind = 0; ind < blobs.size(); ++ind) {
         const auto* blob = blobs[ind];
@@ -1670,13 +1688,23 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
 
         const double p1 = theta_param(dir);
         const double p2 = phi_param(dir);
-        hist(p1, p2, bh::weight(charge / npoints));
+        const int i = ax1.index(p1);
+        const int j = ax2.index(p2);
+        if (i < 0 || i >= nbins1 || j < 0 || j >= nbins2) continue;  // inner bins only
+        bins[i + (long)j * nbins1] += charge / npoints;
     }
 
-    auto indexed = bh::indexed(hist);
-    auto it = std::max_element(indexed.begin(), indexed.end());
-    const auto& cell = *it;
-    return {cell.bin(0).center(), cell.bin(1).center()};
+    long best_lin = 0;       // default bin (0,0) for the empty/all-zero case
+    double best_val = 0.0;
+    for (const auto& [lin, val] : bins) {
+        if (val > best_val || (val == best_val && lin < best_lin)) {
+            best_val = val;
+            best_lin = lin;
+        }
+    }
+    const int best_i = (int)(best_lin % nbins1);
+    const int best_j = (int)(best_lin / nbins1);
+    return {ax1.bin(best_i).center(), ax2.bin(best_j).center()};
 }
 
 geo_point_t Cluster::vhough_transform(const geo_point_t& origin, const double dis, HoughParamSpace param_space,
@@ -2233,7 +2261,7 @@ std::vector<geo_point_t> Cluster::indices_to_points(const std::vector<size_t>& p
 // }
 
 
-std::vector<geo_point_t> Cluster::get_hull() const 
+std::vector<geo_point_t> Cluster::get_hull(int max_points) const
 {
     auto& hull_points = cache().hull_points;
 
@@ -2241,8 +2269,11 @@ std::vector<geo_point_t> Cluster::get_hull() const
         return hull_points;
     }
 
-    if (npoints() > WireCell::Clus::Facade::Constants::MaxHullPoints) {
-        SPDLOG_LOGGER_WARN(s_log,"Cluster::get_hull number of points is too large: {} return cached points", npoints());
+    const int cap = (max_points < 0)
+                        ? (int)WireCell::Clus::Facade::Constants::MaxHullPoints
+                        : max_points;
+    if (npoints() > cap) {
+        SPDLOG_LOGGER_WARN(s_log,"Cluster::get_hull number of points is too large: {} (cap {}) return cached points", npoints(), cap);
         return hull_points;
     }
 
@@ -2620,56 +2651,16 @@ void Facade::sort_clusters(std::vector<Cluster*>& clusters)
 
 Facade::Cluster::Flash Facade::Cluster::get_flash() const
 {
-    Flash flash;                // starts invalid
-
+    // The flashlight-join walk lives in Grouping::flash_at() (shared with
+    // Grouping::flashes()); here we only resolve this cluster's matched flash
+    // index (the per-cluster "flash" scalar) and delegate.
     const auto* p = this->node()->parent;
-    if (!p)  return flash;
+    if (!p)  return Flash{};
     const auto* g = p->value.facade<Grouping>();
-    if (!g)  return flash;
+    if (!g)  return Flash{};
 
     const int flash_index = this->get_scalar("flash", -1);
-
-    //std::cout << "Test3 " << flash_index << std::endl;
-    
-    if (flash_index < 0) {
-        return flash;
-    }
-    if (! g->has_pc("flash")) {
-        return flash;
-    }
-    flash.m_valid = true;
-        
-    // These are kind of inefficient as we get the "flash" PC each time.
-    flash.m_time = g->get_element<double>("flash", "time", flash_index, 0);
-    flash.m_value = g->get_element<double>("flash", "value", flash_index, 0);
-    flash.m_ident = g->get_element<int>("flash", "ident", flash_index, -1);
-    flash.m_type = g->get_element<int>("flash", "type", flash_index, -1);
-
-    // std::cout << "Test3: " << g->has_pc("flash") << " " << g->has_pc("light") << " " << g->has_pc("flashlight") << " " << flash_index << " " << flash.m_time << std::endl;
-
-    if (!(g->has_pc("light") && g->has_pc("flashlight"))) {
-        return flash;           // valid, but no vector info.
-    }
-    
-    // These are spans.  We walk the fl to look up in the l.
-    const auto fl_flash = g->get_pcarray<int>("flash", "flashlight");
-    const auto fl_light = g->get_pcarray<int>("light", "flashlight");
-    const auto l_times = g->get_pcarray<double>("time", "light");
-    const auto l_values = g->get_pcarray<double>("value", "light");
-    const auto l_errors = g->get_pcarray<double>("error", "light");
-
-    // std::cout << "Test3: " << fl_flash.size() << " " << fl_light.size() << std::endl;
-
-    const size_t nfl = fl_light.size();
-    for (size_t ifl = 0; ifl < nfl; ++ifl) {
-        if (fl_flash[ifl] != flash_index) continue;
-        const int light_index = fl_light[ifl];
-        
-        flash.m_times.push_back(l_times[light_index]);
-        flash.m_values.push_back(l_values[light_index]);
-        flash.m_errors.push_back(l_errors[light_index]);
-    }
-    return flash;
+    return g->flash_at(flash_index);
 }
 
 

@@ -4,6 +4,7 @@
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/IBeeSink.h"
 #include "WireCellClus/Facade.h"
 
 #include "WireCellAux/Logger.h"
@@ -43,6 +44,14 @@ namespace WireCell::Clus {
         Bee::Sink m_sink;
         int m_last_ident{-1};
         int m_initial_index{0};  // Default to 0 for backward compatibility
+
+        // Optional shared Bee sink (config "bee_sink").  When set, all Bee
+        // writes go to this shared single-zip sink (at an explicit per-event
+        // index) instead of the per-node m_sink above, so a multi-node chain
+        // produces one .zip.  Default: unset -> own m_sink (back-compat).
+        IBeeSink::pointer m_shared_sink{nullptr};
+        bool m_use_shared_sink{false};
+        size_t m_bee_event_index{0};
         
         // Replace the existing bee points structures with a more flexible approach
         struct BeePointsConfig {
@@ -116,17 +125,49 @@ namespace WireCell::Clus {
 
         void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
 
-        std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches; 
+        std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...
+
+        // ---- Optical flash / charge-light "op" Bee dump ----
+        // When m_save_opflash is set, the merged-grouping root carries a
+        // self-contained per-flash "opflash" point cloud (gid, time, ch, pe)
+        // written by the upstream QLMatching, and matched clusters carry a
+        // "matched_flash_gid" scalar + a "flashpred" PC (predicted per-channel
+        // PE).  At the pre-pipeline "img" dump point we read these and emit the
+        // "op" display so the flash/QL-matching result lands in the same zip
+        // as the charge clusters.  Default OFF (no flash dump for detectors
+        // that don't attach an "opflash" PC, e.g. uboone).
+        bool m_save_opflash{false};
+        // When set, fill_bee_flashes emits one "op" row per flash carrying ALL
+        // matched cluster ids (op_cluster_ids array) with element-wise summed
+        // predicted PE, instead of one row per (flash, cluster).  Default OFF so
+        // existing output is bit-identical; enabled for the SBND all-APA match.
+        bool m_bee_flash_per_flash{false};
+        // When > 0, group the root opflash flashes across both TPC sides by this
+        // ±time window (stored as a per-flash "group" array on the root opflash
+        // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence
+        // together.  Default 0 = off, output bit-identical; set for SBND all-APA.
+        double m_flash_group_window{0.0};
+        Bee::Flashes m_bee_flash;
+        void fill_bee_flashes(const Facade::Grouping& grouping);
 
         // Add new member variables for run/subrun/event
         int m_runNo{0};
         int m_subRunNo{0};
         int m_eventNo{0};
         bool m_use_config_rse{false};  // Flag to determine if we use configured RSE
+        // When set, take the event number from the per-event tensor-set ident
+        // (m_eventNo = ident, run/subrun = 0).  Used by the bundled standalone
+        // chain whose ident already carries the real event id.  Default off keeps
+        // the existing use_config_rse / auto-increment behavior unchanged.
+        bool m_rse_from_ident{false};
 
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);
+
+        // Write one Bee object: routes to the shared sink (at the current
+        // per-event index) when m_use_shared_sink, else to the per-node m_sink.
+        size_t write_obj(const WireCell::Bee::Object& obj);
 
         bool m_save_deadarea{false};
         // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for

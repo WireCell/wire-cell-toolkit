@@ -25,6 +25,8 @@ using namespace WireCell::PointCloud::Tree;
     
 class ClusteringLiveDead :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
     int dead_live_overlap_offset_{2};
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
 public:
     ClusteringLiveDead() {}
     virtual ~ClusteringLiveDead() {}
@@ -32,8 +34,10 @@ public:
     virtual void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedScope::configure(config);
-        
+
         dead_live_overlap_offset_ = get(config, "dead_live_overlap_offset", 2);
+        use_flash_t0_ = get(config, "use_flash_t0", false);
+        flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -85,6 +89,12 @@ public:
         std::map<const Cluster*, std::vector<std::vector<const Blob*>>> dead_live_mcells_mapping;
 
         std::vector<Cluster*> live_clusters = live_grouping.children(); // copy
+
+        // When flash-aware, only merge live clusters coincident in matched flash time.
+        std::map<const Cluster*, int> flash_t0_group;
+        if (use_flash_t0_) {
+            flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window_);
+        }
 
         for (auto& cluster : live_clusters) {
             if (cluster->get_default_scope().hash() != m_scope.hash()) {
@@ -162,7 +172,8 @@ public:
                     cluster_1->set_flag(Flags::live_dead);
                     for (size_t j = i + 1; j < connected_live_clusters.size(); j++) {
                         const auto& cluster_2 = connected_live_clusters.at(j);
-        
+
+                        if (use_flash_t0_ && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
 
                         if (tested_pairs.insert(pair_key(cluster_1, cluster_2)).second) {
 

@@ -7,6 +7,9 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/ITerminal.h"
 
+#include <set>
+#include <string>
+
 namespace WireCell::Clus {
 
     class PointTreeMerging
@@ -63,6 +66,20 @@ namespace WireCell::Clus {
          * APA to zero).  Default is false for backward compatibility.
          */
         bool m_tolerate_missing{false};
+
+        /** Config: "root_pcs_to_merge"
+         *
+         * Names of root-node local point clouds to actually merge (concatenate)
+         * across inputs. By default this is EMPTY, in which case only the child
+         * cluster nodes are merged (via take_children) and the source roots'
+         * own local PCs are dropped — the historical behavior. Names listed
+         * here are emplaced (first input) / appended (subsequent inputs) onto
+         * the merged root. Used e.g. by the SBND all-APA stage to carry the
+         * per-APA "opflash" optical display PC into the merged grouping; other
+         * per-anode root PCs (ctpc_a*, dead_winds_a*, flash/light/flashlight)
+         * are intentionally NOT merged so existing chains are unaffected.
+         */
+        std::set<std::string> m_root_pcs_to_merge;
 
         // Count how many times we are called
         size_t m_count{0};

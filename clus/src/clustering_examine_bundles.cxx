@@ -7,6 +7,8 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellAux/Logger.h"
 
+#include <unordered_map>
+
 
 class ClusteringExamineBundles;
 WIRECELL_FACTORY(ClusteringExamineBundles, ClusteringExamineBundles,
@@ -26,6 +28,8 @@ static void clustering_examine_bundles(
         const Tree::Scope& scope,
         const bool use_ctpc,
         const std::string& graph_name,
+        const bool use_flash_t0,
+        const double flash_t0_window,
         WireCell::Log::logptr_t log);
 
 class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, public Aux::Logger, private NeedDV, private NeedPCTS, private NeedScope {
@@ -43,16 +47,21 @@ public:
         // If false, then DV and PCTS are not needed.
         use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
         graph_name_ = get<std::string>(config, "graph_name", graph_name_);
+        use_flash_t0_ = get<bool>(config, "use_flash_t0", use_flash_t0_);
+        flash_t0_window_ = get<double>(config, "flash_t0_window", flash_t0_window_);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_, log);
+        clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_,
+                                   use_flash_t0_, flash_t0_window_, log);
     }
 
 private:
     bool use_ctpc_{true};
     std::string graph_name_{"relaxed"};
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
 };
 
 
@@ -75,9 +84,64 @@ static void clustering_examine_bundles(
     const Tree::Scope& scope,
     const bool use_ctpc,
     const std::string& graph_name,
+    const bool use_flash_t0,
+    const double flash_t0_window,
     WireCell::Log::logptr_t log)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
+
+    // Flash-aware pre-step: collapse each matched-flash-time group of clusters
+    // into a single cluster, so the per-cluster labeling below partitions one
+    // cluster per flash group (main sub-component = -1), like clustering_isolated
+    // but grouped by flash time instead of geometry.  merge_clusters() (see
+    // ClusteringFuncs.cxx) carries the longest contributing member's flash onto
+    // the merged cluster.  With use_flash_t0=false this is skipped entirely.
+    if (use_flash_t0) {
+        auto pre_clusters = live_grouping.children();
+        auto flash_t0_group = assign_flash_t0_groups(pre_clusters, flash_t0_window);
+
+        cluster_connectivity_graph_t g;
+        std::unordered_map<int, int> ilive2desc;
+        std::unordered_map<const Cluster*, int> map_cluster_index;
+        for (size_t ilive = 0; ilive < pre_clusters.size(); ++ilive) {
+            auto live = pre_clusters[ilive];
+            map_cluster_index[live] = ilive;
+            ilive2desc[ilive] = boost::add_vertex(ilive, g);
+        }
+        // Edge between every pair of in-scope clusters sharing a flash-time group.
+        // Unmatched clusters get unique singleton groups, so they are never linked.
+        for (size_t i = 0; i < pre_clusters.size(); ++i) {
+            auto c1 = pre_clusters[i];
+            if (!c1->get_scope_filter(scope)) continue;
+            for (size_t j = i + 1; j < pre_clusters.size(); ++j) {
+                auto c2 = pre_clusters[j];
+                if (!c2->get_scope_filter(scope)) continue;
+                if (flash_t0_group.at(c1) != flash_t0_group.at(c2)) continue;
+                boost::add_edge(ilive2desc[map_cluster_index[c1]],
+                                ilive2desc[map_cluster_index[c2]], g);
+            }
+        }
+
+        // Diagnostic: how many in-scope matched clusters fall into how many
+        // distinct flash-time groups (each multi-member group is merged into one).
+        std::set<int> matched_groups;
+        int n_matched_inscope = 0;
+        for (auto c : pre_clusters) {
+            if (c->get_scope_filter(scope) && c->get_scalar<int>("flash", -1) >= 0) {
+                ++n_matched_inscope;
+                matched_groups.insert(flash_t0_group.at(c));
+            }
+        }
+        log->debug("flash-t0 merge: {} in-scope matched clusters -> {} flash-time groups",
+                   n_matched_inscope, matched_groups.size());
+
+        // Save, per blob, the original (pre-merge) cluster ident of each
+        // flash-group member into a "real_cluster_id" array in the "perblob" PC.
+        // The Bee writer reads this so the merged group's far-apart members keep
+        // their distinct original ids (colors).  Only here, under use_flash_t0
+        // (all-APA), so per-APA / other-detector output is bit-identical.
+        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id");
+    }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();
 

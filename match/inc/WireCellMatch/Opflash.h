@@ -1,7 +1,7 @@
 #ifndef WIRECELL_MATCH_OPFLASH
 #define WIRECELL_MATCH_OPFLASH
 
-#include "WireCellIface/ITensorSet.h"
+#include "WireCellClus/Facade_Flash.h"
 
 #include <memory>
 #include <set>
@@ -9,14 +9,37 @@
 
 namespace WireCell::Match {
 
+    /// Per-channel PE-error model: PE_err = (PE < knee) ? floor : frac*PE.
+    /// Defaults reproduce the historical hard-coded 0.3 rule; QLMatching passes
+    /// its configured values so the model is tunable without a rebuild.
+    struct PEErr {
+        double floor = 0.3;  // PE_err for sub-knee channels
+        double frac  = 0.3;  // fractional PE_err for channels at/above knee
+        double knee  = 1.0;  // PE level (in PE) separating the two regimes
+    };
+
+    /// The matcher's per-flash working object: a thin adapter over the canonical
+    /// optical flash (Clus::Facade::Flash) that adds the matching-specific
+    /// conventions — synthesized per-channel PE_err (the 0.3 rule), the
+    /// fired-channel list, and the time-ordering comparator used to keep the
+    /// LASSO solve deterministic. It holds no tensor/PC knowledge of its own.
     class Opflash {
     public:
         using pointer = std::shared_ptr<Opflash>;
 
-        /// Construct an Opflash from a 2D ITensor of doubles. ncol must be
-        /// at least nchan+1. Column 0 is the flash time, columns 1..nchan
-        /// hold per-channel PE.
-        Opflash(const ITensor::pointer ten, int idx, double threshold, int nchan = 32);
+        /// Construct from the canonical flash facade: pulls time + the dense
+        /// per-channel PE vector (pes(nchan)) and the flash ident, then
+        /// synthesizes PE_err/fired via the matching convention below.
+        Opflash(const WireCell::Clus::Facade::Flash& flash, double threshold, int nchan,
+                const PEErr& pe_err = {});
+
+        /// Construct from a flash time and a per-channel PE vector
+        /// (resized/zero-filled to nchan). The facade ctor delegates to this.
+        /// PE_err is synthesized here (the PEErr rule), keeping that convention
+        /// in one place.
+        Opflash(double time, std::vector<double> pe, double threshold, int nchan,
+                const PEErr& pe_err = {});
+
         ~Opflash();
 
         void set_flash_id(int v) { flash_id = v; }
@@ -35,6 +58,12 @@ namespace WireCell::Match {
         double get_high_time()    const { return high_time; }
         int    get_num_channels() const { return m_nchan; }
         double get_threshold()    const { return m_threshold; }
+
+    private:
+        // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
+        // PE vector (resized to nchan). flash_id is left 0 for callers to set.
+        void init(double time, std::vector<double> pe, double threshold, int nchan,
+                  const PEErr& pe_err);
 
     protected:
         int    m_nchan;

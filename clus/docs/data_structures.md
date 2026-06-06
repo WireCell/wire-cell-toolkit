@@ -80,6 +80,15 @@ auto& futil = grouping.fiducial_utils();
 bool inside = futil.is_inside_fiducial(point);
 ```
 
+### Root (grouping-level) point clouds
+
+Besides per-cluster arrays, the grouping (root) node carries its own named local
+PCs (`grouping.local_pcs()` / `grouping.put_pcarray(...)`). The Q/L chain uses:
+
+| Name | Content | Set by |
+|---|---|---|
+| `"opflash"` | One row per (flash, channel): `gid` (global flash id = `anode_ident*1e6+idx`), `time` (ns), `ch`, `pe`. Optionally a parallel `group` array: a ±80 ns flash-flash coincidence id (one per flash, shared across TPC0/TPC1) written pre-pipeline by `MultiAlgBlobClustering` when `flash_group_window>0`, so the Bee op dump (and later steps) can show coincident flashes together. | `QLMatching` (carried across the per-APA → all-APA merge via `PointTreeMerging` `root_pcs_to_merge`); `group` by `MultiAlgBlobClustering` |
+
 ---
 
 ## Facade::Cluster
@@ -121,7 +130,7 @@ PointCloud::Dataset& local_pc(const std::string& name);
 | `"3d"` | Raw 3D blob positions | Upstream imaging |
 | `"tagger_info"` | Numeric flag arrays from upstream taggers | Tagger stages |
 | `"isolated"` | Points in "isolated" sub-cluster | Upstream clustering |
-| `"perblob"` | One point per blob | Upstream clustering |
+| `"perblob"` | Per-blob arrays on a merged cluster (`merge_clusters`). `parent_id` = sequential index of the contributing sub-cluster (`savecc`); `real_cluster_id` = original `ident()` of the sub-cluster each blob came from (written by `examine_bundles` under `use_flash_t0`, so the Bee writer can keep merged flash-group members' original ids/colors) | `merge_clusters` |
 | `"associate_points"` | Points from shower/delta-ray clustering | `clustering_points()` |
 | `"fit"` | Fitted 3D positions from TrackFitting | `TrackFitting` |
 

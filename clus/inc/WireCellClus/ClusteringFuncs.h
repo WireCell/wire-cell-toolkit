@@ -29,6 +29,7 @@
 
 #include <string>
 #include <fstream>
+#include <set>
 
 namespace WireCell::Clus::Facade {
     using namespace WireCell::PointCloud::Tree;
@@ -112,12 +113,28 @@ namespace WireCell::Clus::Facade {
     // Pointers to the newly created cluster node facades are returned.  These
     // are loaned.  As usual, the cluster node owns the facade and these nodes
     // are in turn owned by the grouping node.
-    std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, // 
+    // When orig_id_aname is non-empty, each merged cluster also gets a per-blob
+    // int array (stored under orig_id_aname in PC "pcname") holding the original
+    // ident() of the sub-cluster each blob came from, so a downstream consumer
+    // (e.g. the Bee writer) can recover the pre-merge cluster identity of every
+    // blob.  This is independent of the aname/parent_id ("perblob") array above.
+    std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
-                                         const std::string& pcname="perblob");
+                                         const std::string& pcname="perblob",
+                                         const std::string& orig_id_aname="");
 
-    
+    // Assign each cluster an integer "flash-time group" id.  Clusters whose
+    // matched flash time (cluster_t0) differ by less than `window` share a group
+    // id.  A cluster without a valid matched flash (scalar "flash" < 0) gets a
+    // unique singleton id so it can never share a group with another cluster.
+    // Every cluster in `clusters` is present as a key in the returned map.  This
+    // is used by the combined-stage (post QL-matching) clustering functions to
+    // restrict merging to clusters coincident in flash time.
+    std::map<const Cluster*, int> assign_flash_t0_groups(
+        const std::vector<Cluster*>& clusters, double window);
+
+
 
     /**
      * Extract geometry information from a grouping
@@ -148,6 +165,27 @@ namespace WireCell::Clus::Facade {
 
 
 
+    // Fiducial-volume bounds selected for the scope (set of drift volumes) that a
+    // clustering pass operates on.  Populated by select_scope_fv().  All values are
+    // in WireCell internal units.
+    struct ScopeFV {
+        double xmin{0}, xmax{0}, ymin{0}, ymax{0}, zmin{0}, zmax{0};
+        double xmin_margin{0}, xmax_margin{0}, ymin_margin{0}, ymax_margin{0}, zmin_margin{0}, zmax_margin{0};
+        geo_point_t vertical_dir{0, 1, 0}, beam_dir{0, 0, 1};
+    };
+
+    // Select the fiducial volume appropriate to the scope `dv` was configured for.
+    // The scope is taken from the dv's configured drift volumes (dv->wpident_faces()),
+    // NOT from which TPCs happen to have live activity in a given event:
+    //   - dv spans >1 APA (or none)  -> the global "overall" (cryostat) FV.  This
+    //     reproduces the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit, so
+    //     all-APA stages are unchanged regardless of per-event activity.
+    //   - dv spans a single APA      -> the union (outermost envelope) of that APA's
+    //     configured per-(APA,face) FV blocks (full APA even if a face is quiet).
+    // Any FV field missing from a per-face block falls back to the "overall" value.
+    // vertical_dir / beam_dir are detector-global and are always read from "overall".
+    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv);
+
     // These Judge*() functions are used by multiple clustering methods.  They
     // are defined in clustering_separate.cxx.
 
@@ -156,9 +194,11 @@ namespace WireCell::Clus::Facade {
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
-    bool JudgeSeparateDec_2(const Cluster* cluster, IDetectorVolumes::pointer dv, const geo_point_t& drift_dir,
+    /// @param fv scope-appropriate fiducial volume (see select_scope_fv)
+    /// @param max_hull_points cap passed to Cluster::get_hull (<0 = use Constants::MaxHullPoints)
+    bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length);
+                               const double cluster_length, const ScopeFV& fv, int max_hull_points = -1);
     
 
 

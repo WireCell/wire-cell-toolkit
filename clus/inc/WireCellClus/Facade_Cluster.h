@@ -16,6 +16,7 @@
 #include "WireCellIface/IDetectorVolumes.h"
 
 #include "WireCellClus/Facade_Mixins.h"
+#include "WireCellClus/Facade_Flash.h"
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_ClusterCache.h"
 #include "WireCellClus/IPCTransform.h"
@@ -603,7 +604,10 @@ namespace WireCell::Clus::Facade {
         using wire_indices_t = std::vector<std::vector<int_t>>;
         const wire_indices_t& wire_indices() const;
 
-        std::vector<geo_point_t> get_hull() const;
+        // max_points caps the number of points the quickhull is run on; a cluster
+        // with more points than the cap returns an empty hull (the cap guards cost).
+        // Pass max_points < 0 (the default) to use Constants::MaxHullPoints.
+        std::vector<geo_point_t> get_hull(int max_points = -1) const;
 
         // Return PCA calculated on blob children sample points
         // PCA has attributes: {center,axis,values}
@@ -637,46 +641,13 @@ namespace WireCell::Clus::Facade {
         /// @note p_test will be updated
         bool judge_vertex(geo_point_t& p_test, const IDetectorVolumes::pointer dv, const double asy_cut = 1. / 3., const double occupied_cut = 0.85);
 
-        class Flash {
-            friend class Cluster;
-            bool m_valid{false};
-            double m_time{0}, m_value{0};
-            int m_ident{-1}, m_type{-1};
-            std::vector<double> m_times, m_values, m_errors;
-        public:
-
-            /// A "false" means there was not "flash" PC array and all values
-            /// are invalid.  A "true" does not guarantee all values are valid.
-            explicit operator bool() const { return m_valid;}
-
-            /// Any "singular" methods are about the flash itself.
-
-            /// Get the time of the flash.  
-            double time() const { return m_time; }
-
-            /// Get the measurement of the flash
-            double value() const {return m_value; }
-
-            /// The ID of the flash
-            int ident() const { return m_ident; }
-
-            /// The type of the flash.
-            int type() const { return m_type; }
-
-            /// Any "plural" methods return per-optical-detector quantities.
-            /// They will be empty() if the "light" and "flashlight" arrays are
-            /// missing.  These vectors have the same size.
-
-            // keep these return-by-value.
-
-            /// Times of individual optical detector readouts.
-            std::vector<double> times() const { return m_times; }
-            /// Measurement values from optical detectors.
-            std::vector<double> values() const { return m_values; }
-            /// Measurement uncertainty from optical detectors.
-            std::vector<double> errors() const { return m_errors; }
-        };
-        // Return a flash.  If there is none, it will hold default values.
+        // The flash facade was promoted to a standalone Facade::Flash (see
+        // WireCellClus/Facade_Flash.h) so the Grouping can also enumerate flashes.
+        // This alias keeps Cluster::Flash valid for back-compat.
+        using Flash = ::WireCell::Clus::Facade::Flash;
+        // Return this cluster's matched flash.  If there is none, it will hold
+        // default values (operator bool() == false).  Delegates to
+        // Grouping::flash_at() for the matched flash index ("flash" scalar).
         Flash get_flash() const;
 
         /// Helper function to check if a point is spatially related to a reference cluster using time_blob_map

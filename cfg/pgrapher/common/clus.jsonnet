@@ -250,16 +250,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        live_dead(name="", dead_live_overlap_offset=2) :: {
+        live_dead(name="", dead_live_overlap_offset=2, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringLiveDead",
             name: prefix+name,
             data: {
                 dead_live_overlap_offset: dead_live_overlap_offset,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        extend(name="", flag=0, length_cut=150*wc.cm, num_try=0, length_2_cut=3*wc.cm, num_dead_try=3) :: {
+        extend(name="", flag=0, length_cut=150*wc.cm, num_try=0, length_2_cut=3*wc.cm, num_dead_try=3, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExtend",
             name: prefix+name,
             data: {
@@ -268,60 +270,110 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 num_try: num_try,
                 length_2_cut: length_2_cut,
                 num_dead_try: num_dead_try,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
-        
 
-        regular(name="",  length_cut=45*wc.cm, flag_enable_extend=true) :: {
+
+        regular(name="",  length_cut=45*wc.cm, flag_enable_extend=true, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringRegular",
             name: prefix+name,
             data: {
                 length_cut: length_cut,
                 flag_enable_extend: flag_enable_extend,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        parallel_prolong(name="", length_cut=35*wc.cm) :: {
+        parallel_prolong(name="", length_cut=35*wc.cm, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringParallelProlong",
             name: prefix+name,
             data: {
                 length_cut: length_cut,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        close(name="", length_cut=1*wc.cm) :: {
+        close(name="", length_cut=1*wc.cm, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringClose",
             name: prefix+name,
             data: {
                 length_cut: length_cut,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + scope_cfg,
         },
 
-        extend_loop(name="", num_try=0) :: {
+        // SBND cathode-crossing connector (default-OFF, retireable; see
+        // clus/docs/cathode-crossing-clustering.md).  Connects the two halves of a
+        // cathode-crossing track left unmerged by the generic passes, using a narrow
+        // cathode-specific cut set (collinear + opposite TPCs + both ends at the
+        // cathode + same drift depth).  The 3D closest-point distance is handled in two
+        // regimes: below dis_cut, accept on the local (Hough) track collinearity alone;
+        // from dis_cut to max_dis (large transverse / in-cathode-plane travel), the local
+        // Hough direction can be unreliable for a blobby half, so the cluster PCA axis is
+        // added as an ALTERNATIVE direction (Hough OR PCA), and the p1->p2 connection
+        // vector must align with the track within conn_far_cut (rejects parallel-offset
+        // cosmics).  Cannot fire within a single TPC, so it is safe to add to the all-APA
+        // pipeline only.  cathode_x is the cathode position in the T0-corrected frame.
+        cathode_connect(name="", drift_cut=5*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
+                        angle_cut=10.0, conn_far_cut=30.0, cathode_x=0.0,
+                        cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
+                        min_length=10*wc.cm, flash_t0_window=80*wc.ns) :: {
+            type: "ClusteringCathodeConnect",
+            name: prefix+name,
+            data: {
+                drift_cut: drift_cut,
+                dis_cut: dis_cut,
+                max_dis: max_dis,
+                angle_cut: angle_cut,
+                conn_far_cut: conn_far_cut,
+                cathode_x: cathode_x,
+                cathode_x_cut: cathode_x_cut,
+                hough_radius: hough_radius,
+                min_length: min_length,
+                flash_t0_window: flash_t0_window,
+            } + scope_cfg,
+        },
+
+        extend_loop(name="", num_try=0, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExtendLoop",
             name: prefix+name,
             data: {
                 num_try: num_try,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        separate(name="", use_ctpc=true) :: {
+        // max_hull_points: cap on points for the separation-decision convex hull
+        // (Cluster::get_hull). -1 (default) uses Constants::MaxHullPoints (10000),
+        // i.e. bit-identical to prior behavior; raise it to let large full-detector
+        // overclusters be considered for separation.
+        separate(name="", use_ctpc=true, max_hull_points=-1) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
                 use_ctpc: use_ctpc,
+                max_hull_points: max_hull_points,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
 
-        connect1(name="") :: {
+        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringConnect1",
             name: prefix+name,
-            data: dv_cfg + scope_cfg,
+            data: {
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
+            } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
@@ -335,16 +387,29 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        isolated(name="") :: {
+        // length_cut / range_cut (default null): small/big classification
+        // thresholds. When null the key is omitted and ClusteringIsolated falls
+        // back to its built-in defaults (20 cm / 150), so existing configs stay
+        // byte-identical. Set to opt into a tighter/looser threshold.
+        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
-            data: dv_cfg + scope_cfg,
+            data: {
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
+                [if length_cut != null then 'length_cut']: length_cut,
+                [if range_cut != null then 'range_cut']: range_cut,
+            } + dv_cfg + scope_cfg,
         },
 
-        examine_bundles(name="", graph_name="relaxed") :: {
+        examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
-            data: dv_cfg + pcts_cfg + scope_cfg + {graph_name: graph_name},
+            data: dv_cfg + pcts_cfg + scope_cfg + {
+                graph_name: graph_name,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
+            },
             uses: [detector_volumes, pc_transforms],
         },
 
@@ -362,11 +427,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        neutrino(name="", num_try=1) :: {
+        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringNeutrino",
             name: prefix+name,
             data: {
                 num_try: num_try,
+                use_flash_t0: use_flash_t0,
+                flash_t0_window: flash_t0_window,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },

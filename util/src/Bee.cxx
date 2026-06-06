@@ -262,6 +262,96 @@ bool Bee::Patches::empty() const {
     return m_tpc < 0 ? m_data.empty() : m_data["polygons"].empty();
 }
 
+///// Flashes
+
+namespace {
+    void init_flashes_arrays(Configuration& d)
+    {
+        d["op_t"] = Json::arrayValue;
+        d["op_peTotal"] = Json::arrayValue;
+        d["op_pes"] = Json::arrayValue;
+        d["op_pes_pred"] = Json::arrayValue;
+        d["op_cluster_ids"] = Json::arrayValue;
+        d["apa"] = Json::arrayValue;
+    }
+}
+
+Bee::Flashes::Flashes()
+    : Object("")
+{
+    detector("");
+    rse(0, 0, 0);
+    init_flashes_arrays(m_data);
+}
+
+Bee::Flashes::Flashes(const std::string& geom, const std::string& name,
+                      int run, int sub, int evt)
+    : Object(name)
+{
+    detector(geom);
+    rse(run, sub, evt);
+    init_flashes_arrays(m_data);
+}
+
+void Bee::Flashes::detector(const std::string& geom)
+{
+    m_data["geom"] = geom;
+}
+
+void Bee::Flashes::rse(int run, int sub, int evt)
+{
+    if (run >= 0) m_data["runNo"] = run;
+    if (sub >= 0) m_data["subRunNo"] = sub;
+    if (evt >= 0) m_data["eventNo"] = evt;
+}
+
+void Bee::Flashes::reset(int evt, int sub, int run)
+{
+    rse(run, sub, evt);
+    init_flashes_arrays(m_data);
+}
+
+void Bee::Flashes::append(double t, const std::vector<double>& pes, double peTotal,
+                          const std::vector<int>& cluster_ids,
+                          const std::vector<double>& pes_pred,
+                          int apa)
+{
+    m_data["op_t"].append(t);
+    m_data["op_peTotal"].append(peTotal);
+
+    Json::Value jpes(Json::arrayValue);
+    for (auto v : pes) jpes.append(v);
+    m_data["op_pes"].append(jpes);
+
+    Json::Value jpred(Json::arrayValue);
+    for (auto v : pes_pred) jpred.append(v);
+    m_data["op_pes_pred"].append(jpred);
+
+    Json::Value jcid(Json::arrayValue);
+    for (auto c : cluster_ids) jcid.append(c);
+    m_data["op_cluster_ids"].append(jcid);
+
+    // Legacy dump_light stored the per-flash APA as a string ("0"/"1").
+    m_data["apa"].append(std::to_string(apa));
+}
+
+void Bee::Flashes::set_groups(const std::vector<int>& groups)
+{
+    Json::Value jg(Json::arrayValue);
+    for (int g : groups) jg.append(g);
+    m_data["op_flash_group"] = jg;
+}
+
+size_t Bee::Flashes::size() const
+{
+    return m_data["op_t"].size();
+}
+bool Bee::Flashes::empty() const
+{
+    return m_data["op_t"].empty();
+}
+
+
 ///// Sink
 
 Bee::Sink::Sink()

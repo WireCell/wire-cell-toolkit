@@ -22,11 +22,15 @@ static void clustering_regular(Grouping& live_clusters,
                                IDetectorVolumes::pointer dv,
                                const Tree::Scope& scope,
                                const double length_cut = 45*units::cm,
-                               bool flag_enable_extend = true);
+                               bool flag_enable_extend = true,
+                               bool use_flash_t0 = false,
+                               double flash_t0_window = 80*units::ns);
 
 class ClusteringRegular :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
     double m_length_cut{45*units::cm};
     bool m_flag_enable_extend{true};
+    bool m_use_flash_t0{false};
+    double m_flash_t0_window{80*units::ns};
 public:
     ClusteringRegular() {}
     virtual ~ClusteringRegular() {}
@@ -37,6 +41,8 @@ public:
 
         m_length_cut = get(config, "length_cut", 45*units::cm);
         m_flag_enable_extend = get(config, "flag_enable_extend", true);
+        m_use_flash_t0 = get(config, "use_flash_t0", false);
+        m_flash_t0_window = get(config, "flash_t0_window", 80*units::ns);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -45,7 +51,8 @@ public:
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_regular(live, m_dv, m_scope, m_length_cut, m_flag_enable_extend);
+        clustering_regular(live, m_dv, m_scope, m_length_cut, m_flag_enable_extend,
+                           m_use_flash_t0, m_flash_t0_window);
     }
 };
 
@@ -424,7 +431,9 @@ static void clustering_regular(
     IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     const double length_cut,
-    bool flag_enable_extend)
+    bool flag_enable_extend,
+    bool use_flash_t0,
+    double flash_t0_window)
 {
   // Get all the wire plane IDs from the grouping
   const auto& wpids = live_grouping.wpids();
@@ -470,6 +479,12 @@ static void clustering_regular(
   std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
   std::unordered_map<const Cluster*, int> map_cluster_index;
   auto live_clusters = live_grouping.children();
+  // When flash-aware, group clusters by matched flash time so we only merge
+  // clusters coincident in flash time (see assign_flash_t0_groups()).
+  std::map<const Cluster*, int> flash_t0_group;
+  if (use_flash_t0) {
+    flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window);
+  }
   // Build the graph vertex index in children() order: merge_clusters() dereferences
   // these vertex indices against grouping.children(), so the index order here MUST match
   // children(), not the sorted order.  sort_clusters() is applied only afterwards, to make
@@ -495,6 +510,7 @@ static void clustering_regular(
       auto cluster_2 = live_clusters.at(j);
       if (!cluster_2->get_scope_filter(scope)) continue;
       if (cluster_2->get_length() < internal_length_cut) continue;
+      if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
       if (Clustering_1st_round(*cluster_1,*cluster_2, cluster_1->get_length(), cluster_2->get_length(), wpid_U_dir, wpid_V_dir, wpid_W_dir, dv, length_cut, flag_enable_extend)){
 	      //	to_be_merged_pairs.insert(std::make_pair(cluster_1,cluster_2));
 	      boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
