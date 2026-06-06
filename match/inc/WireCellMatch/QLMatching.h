@@ -426,7 +426,6 @@ namespace WireCell::Match {
             // bundles + the three lookup maps
             std::vector<TimingTPCBundle::pointer> all_bundles;
             TimingTPCBundleSet pre_bundles;
-            std::vector<TimingTPCBundle::pointer> consistent_bundles;
             FlashBundlesMap flash_bundles_map;
             ClusterBundlesMap cluster_bundles_map;
             std::map<std::pair<Opflash*, WireCell::Clus::Facade::Cluster*>,
@@ -517,15 +516,16 @@ namespace WireCell::Match {
 
         // One candidate cross-TPC pair test, shared by cull_cross_tpc. m{0,1} carry the
         // two clusters with their T0 x-offset, per-TPC (y,z) pos_offset, and truncation
-        // flag. Returns true iff scenario 1 (closest approach < m_xtpc_dmax) OR scenario
-        // 2 (a half truncated AND conn,dir0,dir1 mutually collinear < m_xtpc_angle_max).
+        // flag. Returns the scenario code: 1 = scenario 1 (closest approach < m_xtpc_dmax,
+        // tight/self-vetoing), 2 = scenario 2 (a half truncated AND conn,dir0,dir1 mutually
+        // collinear < m_xtpc_angle_max AND d < m_xtpc_dmax2), 0 = not consistent.
         struct XtpcMC {
             TimingTPCBundle* b;
             WireCell::Clus::Facade::Cluster* c;
             double off, dy, dz;
             bool wt;
         };
-        bool xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const;
+        int xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const;
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

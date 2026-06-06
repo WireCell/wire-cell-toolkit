@@ -139,6 +139,12 @@ namespace WireCell::Match {
         // reads it. Default false. See QLMatching::flag_cross_tpc_consistency.
         void set_flag_xtpc_consistent(bool v) { flag_xtpc_consistent = v; }
         bool get_flag_xtpc_consistent() const { return flag_xtpc_consistent; }
+        // Subset of flag_xtpc_consistent: the cross-TPC pair passed scenario 1 (both
+        // cathode ends present, closest approach < xtpc_dmax — a tight, self-vetoing
+        // match). Drives the xtpc-PRIORITY cull (a scenario-1 crosser half overrides a
+        // cluster's high-consistent bundle on a different flash). Default false.
+        void set_flag_xtpc_scenario1(bool v) { flag_xtpc_scenario1 = v; }
+        bool get_flag_xtpc_scenario1() const { return flag_xtpc_scenario1; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -163,6 +169,7 @@ namespace WireCell::Match {
         bool flag_contained;
         bool flag_two_boundary;
         bool flag_xtpc_consistent{false};
+        bool flag_xtpc_scenario1{false};
 
         double ks_dis;
         double chi2;

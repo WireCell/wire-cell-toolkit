@@ -494,14 +494,20 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         }
     }
 
-    // Cross-TPC cathode-crossing pre-fit cull (needs both TPCs' candidate bundles, so it
-    // runs between the per-APA prefit above and the per-APA fit below). Marks
-    // geometrically cross-TPC-consistent candidate pairs and drops each marked cluster's
-    // non-consistent rivals. Off by default => not called, and the prefit/fit split is
-    // exactly the historical run_one_apa order => bit-identical.
+    // Cross-TPC cathode-crossing FLAG pass (needs both TPCs' candidate bundles, so it
+    // runs between the per-APA prefit above and the per-APA cull+fit below). It marks
+    // geometrically cross-TPC-consistent candidate pairs (flag_xtpc_consistent, and
+    // flag_xtpc_scenario1 for the tight cathode-end case) on the FULL pre-cull bundle
+    // set — BEFORE cull_inconsistent collapses each cluster onto its single
+    // high-consistent flash, which would otherwise drop a truncated crosser half before
+    // it can be paired. Off by default (single-APA / xtpc_flag:false) => not called.
     const double t_prefit = ms_since(t_prefit0);
     const auto t_cull0 = wallclock::now();
     if (m_xtpc_flag && runs.size() > 1) cull_cross_tpc(runs);
+    // Per-TPC consistency cull, now AFTER the cross-TPC flag pass so it can honour the
+    // xtpc flags (xtpc-priority). When no xtpc flag is set (non-SBND / xtpc_flag:false)
+    // this reproduces the historical cull_inconsistent exactly => bit-identical.
+    for (std::size_t k = 0; k < invec.size(); ++k) cull_inconsistent(runs[k]);
     const double t_cull = ms_since(t_cull0);
 
     const auto t_fit0 = wallclock::now();
@@ -580,15 +586,21 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
 // per-run state through ApaRun.
 // ============================================================================
 
+// Single-APA convenience driver (not used by operator(), which runs the three
+// stages explicitly so cull_cross_tpc can flag between them). Kept self-consistent
+// with that order: prefit (build only) -> cull_inconsistent -> fit.
 void QLMatching::run_one_apa(ApaRun& run)
 {
     run_one_apa_prefit(run);
+    cull_inconsistent(run);
     run_one_apa_fit(run);
 }
 
-// Pre-fit half: bundles + per-TPC consistency cull (everything up to, but not
-// including, the LASSO). Split out so cull_cross_tpc can run between all APAs'
-// prefit and all APAs' fit.
+// Pre-fit half: bundles + maps (everything up to, but not including, the
+// per-TPC consistency cull and the LASSO). cull_inconsistent is now run by
+// operator() AFTER cull_cross_tpc (so cross-TPC flagging sees the full pre-cull
+// bundle set), not here. Split out so cull_cross_tpc can run between all APAs'
+// prefit and all APAs' cull+fit.
 void QLMatching::run_one_apa_prefit(ApaRun& run)
 {
     auto t = wallclock::now();
@@ -597,11 +609,10 @@ void QLMatching::run_one_apa_prefit(ApaRun& run)
     decompose_cluster_groups(run);  const double t_decomp = ms_since(t); t = wallclock::now();
     compute_geometry(run);          const double t_geom   = ms_since(t); t = wallclock::now();
     build_bundles(run);             const double t_bundle = ms_since(t); t = wallclock::now();
-    build_bundle_maps(run);         const double t_maps   = ms_since(t); t = wallclock::now();
-    cull_inconsistent(run);         const double t_cull   = ms_since(t);
+    build_bundle_maps(run);         const double t_maps   = ms_since(t);
     log->debug("QLtiming prefit: ident {} mask {:.1f} read_flashes {:.1f} decompose {:.1f} "
-               "geometry {:.1f} build_bundles {:.1f} build_maps {:.1f} cull_inconsistent {:.1f} ms",
-               run.charge_ident, t_mask, t_flash, t_decomp, t_geom, t_bundle, t_maps, t_cull);
+               "geometry {:.1f} build_bundles {:.1f} build_maps {:.1f} ms",
+               run.charge_ident, t_mask, t_flash, t_decomp, t_geom, t_bundle, t_maps);
 }
 
 // Fit half: the two LASSO rounds + output assembly.
@@ -1095,7 +1106,6 @@ void QLMatching::build_bundle_maps(ApaRun& run)
     for (auto bundle : run.pre_bundles) {
         auto flash   = bundle->get_flash();
         auto cluster = bundle->get_main_cluster();
-        if (bundle->get_consistent_flag()) run.consistent_bundles.push_back(bundle);
         run.flash_bundles_map[flash].push_back(bundle);
         run.cluster_bundles_map[cluster].push_back(bundle);
         run.flash_cluster_bundles_map[std::make_pair(flash, cluster)] = bundle;
@@ -1125,18 +1135,52 @@ void QLMatching::build_bundle_maps(ApaRun& run)
     sort_inner_by_flash_idx(run.cluster_bundles_map);
 }
 
-// [Stage 1] For each cluster that has a consistent bundle, drop its other
-// non-consistent bundles (they cannot win).
+// [Stage 1] Per-cluster consistency cull, cross-TPC-aware (runs AFTER cull_cross_tpc's
+// flag pass). For each cluster:
+//   - has a SCENARIO-1 cross-TPC bundle -> keep the xtpc bundle(s), drop ALL others
+//     (incl. high-consistent bundles on other flashes). A tight cathode-crossing match
+//     (closest approach < dmax, self-vetoing) overrides an accidental high-consistent
+//     match on the wrong flash -- this is the steering fix.
+//   - else has a high-consistent OR (scenario-2) xtpc bundle -> keep those, drop the
+//     rest. Reproduces the historical cull_inconsistent + the old cull_cross_tpc weak
+//     rival cull combined; scenario-2 xtpc keeps the weaker (compete-in-LASSO) behaviour.
+//   - else -> keep all.
+// When no bundle is xtpc-flagged (single-APA / xtpc_flag:false) only the middle branch
+// fires with high-consistent bundles == today's behaviour => BIT-IDENTICAL.
 void QLMatching::cull_inconsistent(ApaRun& run)
 {
+    auto keep_flag = [](const TimingTPCBundle::pointer& b) {
+        return b->get_consistent_flag() || b->get_flag_xtpc_consistent();
+    };
     TimingTPCBundleSelection to_be_removed;
-    for (auto good_bundle : run.consistent_bundles) {
-        auto cluster = good_bundle->get_main_cluster();
-        for (auto bundle : run.cluster_bundles_map[cluster]) {
-            if (bundle == good_bundle) continue;
-            if (bundle->get_consistent_flag()) continue;
-            to_be_removed.push_back(bundle);
+    for (auto* cluster : cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map)) {
+        auto& bundles = run.cluster_bundles_map[cluster];
+        bool has_sc1 = false, has_keep = false;
+        for (auto& b : bundles) {
+            if (b->get_flag_xtpc_scenario1()) has_sc1 = true;
+            if (keep_flag(b)) has_keep = true;
         }
+        if (has_sc1) {
+            for (auto& b : bundles)
+                if (!b->get_flag_xtpc_scenario1()) {
+                    to_be_removed.push_back(b);
+                    log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
+                               "(cluster kept xtpc scenario-1 crosser)",
+                               (int)run.anode->ident(), cluster->ident(),
+                               b->get_flash()->get_flash_id());
+                }
+        }
+        else if (has_keep) {
+            for (auto& b : bundles)
+                if (!keep_flag(b)) {
+                    to_be_removed.push_back(b);
+                    log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
+                               "(cluster kept high/xtpc-consistent bundle)",
+                               (int)run.anode->ident(), cluster->ident(),
+                               b->get_flash()->get_flash_id());
+                }
+        }
+        // else: no consistent/xtpc bundle -> keep all
     }
     remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
                             run.flash_cluster_bundles_map);
@@ -1755,6 +1799,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["window_truncated"]     = b->get_flag_window_truncated();
             jb["two_boundary"]         = b->get_flag_two_boundary();
             jb["xtpc_consistent"]      = b->get_flag_xtpc_consistent();
+            jb["xtpc_scenario1"]       = b->get_flag_xtpc_scenario1();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
@@ -1915,11 +1960,12 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
 }
 
 // One candidate cross-TPC pair test (the -cathode-diag geometry on the FULL clusters,
-// with the per-TPC (y,z) pos_offset applied to the closest-point search and conn). True
-// iff scenario 1 (closest approach < dmax) OR scenario 2 (a half window-truncated AND
-// conn,dir0,dir1 mutually collinear < angle_max). A wrong-flash pairing carries the
-// wrong T0 x-offset => large d => no match, so it is self-vetoing.
-bool QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
+// with the per-TPC (y,z) pos_offset applied to the closest-point search and conn).
+// Returns the scenario code: 1 = scenario 1 (closest approach < dmax, cathode ends
+// present — tight, self-vetoing), 2 = scenario 2 (a half window-truncated AND
+// conn,dir0,dir1 mutually collinear < angle_max AND d < dmax2), 0 = not consistent. A
+// wrong-flash pairing carries the wrong T0 x-offset => large d => no match (self-vetoing).
+int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
 {
     const double R = m_xtpc_hough_radius;
     const double amax = m_xtpc_angle_max;
@@ -1980,12 +2026,20 @@ bool QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
     const bool scenario1 = d < m_xtpc_dmax;
     const bool scenario2 = (m0.wt || m1.wt) && d < m_xtpc_dmax2 &&
                            a01 < amax && a0c < amax && a1c < amax;
-    if (!(scenario1 || scenario2)) return false;
+    const bool pass = scenario1 || scenario2;
 
-    log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm a01={:.1f} a0c={:.1f} a1c={:.1f} "
-               "trunc={} scenario={}", m0.c->ident(), m1.c->ident(), d / units::cm,
-               a01, a0c, a1c, (m0.wt || m1.wt), scenario1 ? 1 : 2);
-    return true;
+    // Diagnostic: log EVERY coincident pair we evaluate (not only passes), with the
+    // cut values, so a near-miss (geometry just outside dmax/angle) is visible.
+    log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm (dmax={:.1f} dmax2={:.1f}) "
+               "a01={:.1f} a0c={:.1f} a1c={:.1f} (amax={:.1f}) trunc={} sc1={} sc2={} pass={}",
+               m0.c->ident(), m1.c->ident(), d / units::cm,
+               m_xtpc_dmax / units::cm, m_xtpc_dmax2 / units::cm,
+               a01, a0c, a1c, amax, (m0.wt || m1.wt), scenario1, scenario2, pass);
+    // Scenario 1 takes precedence (it is the tight, self-vetoing match that drives the
+    // xtpc-priority cull); scenario 2 is the looser collinear-truncated fallback.
+    if (scenario1) return 1;
+    if (scenario2) return 2;
+    return 0;
 }
 
 // Cross-TPC cathode-crossing PRE-FIT cull. A cathode-crosser lights one coincident flash
@@ -2001,18 +2055,30 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
 
     // Gather candidate main-cluster bundles from both APAs, each tagged by APA side and
     // flash time (for coincidence) and carrying its T0 x-offset + transverse offset.
+    // This now runs on the FULL pre-cull bundle set (cull_inconsistent has not run yet),
+    // so restrict to cathode-relevant bundles -- a cathode-end present (at_x_boundary,
+    // scenario 1) OR a truncated half (window_truncated, scenario 2). A clean
+    // non-crossing bundle carries neither and cannot be a crosser half, so dropping it
+    // here keeps the O(n0*n1*npts^2) pairing bounded without losing any real pair.
     struct Cand { XtpcMC mc; int apa; double t_us; };
     std::vector<Cand> cands;
     for (auto& run : runs) {
         const int apa = (int)run.anode->ident();
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double off = run.sign_offset * flash->get_time() * v;
-            for (const auto& bundle : run.flash_bundles_map.at(flash))
+            for (const auto& bundle : run.flash_bundles_map.at(flash)) {
+                if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated())
+                    continue;
                 cands.push_back({XtpcMC{bundle.get(), bundle->get_main_cluster(), off,
                                         run.dy, run.dz, bundle->get_flag_window_truncated()},
                                  apa, flash->get_time() / units::us});
+            }
         }
     }
+    // Diagnostic: list every cross-TPC candidate (main-cluster bundle surviving prefit).
+    for (const auto& c : cands)
+        log->debug("QLXTPC cand apa{} t={:.3f}us mainclus={} npts={} trunc={}",
+                   c.apa, c.t_us, c.mc.c->ident(), c.mc.c->npoints(), c.mc.wt);
 
     // Profiling: the pairing loop calls xtpc_pair_consistent, whose closest-approach
     // step is a brute-force O(npts0 x npts1) double loop over both clusters' 3D points.
@@ -2028,41 +2094,25 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
             ++n_pairs_eval;
             if (std::abs(cands[i].t_us - cands[j].t_us) > win_us) continue;  // coincident
             ++n_pairs_coincident;
+            log->debug("QLXTPC coincident 0/{} (t={:.3f}us) 1/{} (t={:.3f}us)",
+                       cands[i].mc.c->ident(), cands[i].t_us,
+                       cands[j].mc.c->ident(), cands[j].t_us);
             point_pairs += (double)cands[i].mc.c->npoints() * cands[j].mc.c->npoints();
-            if (!xtpc_pair_consistent(cands[i].mc, cands[j].mc)) continue;
+            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc);
+            if (scenario == 0) continue;
             cands[i].mc.b->set_flag_xtpc_consistent(true);
             cands[j].mc.b->set_flag_xtpc_consistent(true);
+            if (scenario == 1) {
+                cands[i].mc.b->set_flag_xtpc_scenario1(true);
+                cands[j].mc.b->set_flag_xtpc_scenario1(true);
+            }
         }
     }
     log->debug("QLtiming cull_cross_tpc: ncands {} pairs_eval {} pairs_coincident {} "
                "point_pairs {:.3g} pairing_loop {:.1f} ms",
                cands.size(), n_pairs_eval, n_pairs_coincident, point_pairs, ms_since(t_pair0));
-
-    // Cull, per run: a cluster with an xtpc-consistent bundle drops its other bundles
-    // that are neither high- nor xtpc-consistent (they cannot win against the
-    // cross-TPC-confirmed half). Mirrors cull_inconsistent.
-    auto is_consistent = [](const TimingTPCBundle::pointer& b) {
-        return b->get_consistent_flag() || b->get_flag_xtpc_consistent();
-    };
-    for (auto& run : runs) {
-        TimingTPCBundleSelection to_be_removed;
-        for (auto& kv : run.cluster_bundles_map) {
-            bool has_xtpc = false;
-            for (auto& b : kv.second)
-                if (b->get_flag_xtpc_consistent()) { has_xtpc = true; break; }
-            if (!has_xtpc) continue;
-            for (auto& b : kv.second) {
-                if (is_consistent(b)) continue;
-                to_be_removed.push_back(b);
-            }
-        }
-        remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
-                                run.flash_cluster_bundles_map);
-        remove_bundle_selection(to_be_removed, run.pre_bundles);
-        if (!to_be_removed.empty())
-            log->debug("QLXTPC apa {}: cross-TPC cull removed {} rival bundles pre-fit",
-                       (int)run.anode->ident(), to_be_removed.size());
-    }
+    // The actual culling (dropping a flagged cluster's rivals) is done by the unified
+    // cull_inconsistent, which operator() runs per-APA right after this flag pass.
 }
 
 // Flashes ordered by get_flash_id() (the stable input tensor row index).
