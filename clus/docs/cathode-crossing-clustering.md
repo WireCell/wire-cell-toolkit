@@ -213,17 +213,35 @@ artifact*. As `pos_offset`/SCE transverse calibration tightens, the residual shr
 falls back under 3 cm, the generic lenient path catches these crossers, and the connector can
 be flipped off and retired without touching production logic.
 
-### Verification (10 data events, connector ON vs OFF)
+### Blast radius
 
-Runs/parsers in `/home/xqian/tmp/cathode_connect/` (`on_<evt>.zip`, `off_<evt>.zip`):
+The connector lives in the **all-APA** pipeline, which runs only in the standalone
+post-QLMatching dev chain (`sbnd_xin/wct-clus-matching-perevt.jsonnet` via `all_apa()`).
+**LArSoft production (`wcls-img-clus.jsonnet`) uses `per_volume()` only — it does not run the
+all-APA pipeline** — so the SBND-on default does not touch LArSoft production clustering.
 
-- **Recovers exactly the two failing crossers.** ON merges 686 (halves → one cluster spanning
-  x[−134, 68], TPC0 1479 pts + TPC1 782) and 1852 (→ x[−125, 201], TPC0 2037 + TPC1 3167).
-- **No false merges.** The other **8 of 10** data events are byte-identical ON vs OFF
-  (`clustering-global.json` CRC unchanged); the connector makes zero merges there. The
-  already-merged crossers (1302/1346/2028) are untouched.
+### Verification (10 data + 10 MC events, connector ON vs OFF)
+
+Runs in `/home/xqian/tmp/cathode_connect/`. Ground truth = the connector's own per-merge log
+(temporary `std::cerr`, reverted):
+
+- **Fires 4× across the 20 events, all genuine cathode crossers.** Data: 686 (collinear 5.9°,
+  dis 3.32 cm) and 1852 (2.2°, 3.33 cm), each → one cluster spanning the cathode. MC: evt18
+  (3.6°, 3.18 cm) and evt42 (3.2°, 3.17 cm) — both collinear, both closest points at |x|<0.7 cm
+  in opposite TPCs. Every accepted pair has collinearity ≤ 6° and both ends at the cathode.
+- **No false merges; the cuts reject the dangerous case.** The other 8/10 data and 8/10 MC
+  events are byte-identical ON vs OFF (`clustering-global.json` CRC unchanged). In MC evt42 a
+  *non*-collinear cross-TPC cathode-region pair (local dir–dir 27.5°) was **correctly rejected**
+  by cut 1 — i.e. two unrelated tracks meeting near the cathode are not merged. MC is a near
+  no-op (only the 2 genuine crossers recovered), consistent with its small offset.
 - **Additive / production-safe.** With the toggle OFF the new-binary output is CRC-identical to
   the pre-connector baseline on every checked event — the pass changes nothing when off.
+
+**Scope caveat:** purity is established on the 20 hand-sample events (the same population the
+cuts were tuned on, plus MC); a larger-sample firing-rate scan is the next purity probe if a
+bigger sample becomes available. **Efficiency caveat:** `cathode_x_cut = 3 cm` only just
+catches 686 (its TPC1 closest point is at x = 2.55 cm) — a crosser with a larger drift residual
+would be missed; this is an efficiency limit, not a purity risk.
 
 ## Artifacts
 
