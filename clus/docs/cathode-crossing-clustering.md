@@ -201,13 +201,13 @@ the pair when the following hold (defaults in the jsonnet method). **Always requ
    pass incapable of acting within a single TPC);
 3. **both ends at the cathode** — `|x − cathode_x| < cathode_x_cut` (3.5 cm) for each closest
    point, in the T0-corrected frame where the cathode is `x≈0`;
-4. **same drift depth** — `|x₁ − x₂| < drift_cut` (4 cm). This is the binding cut: between the
+4. **same drift depth** — `|x₁ − x₂| < drift_cut` (5 cm). This is the binding cut: between the
    two halves there is only the ~1.5 cm cathode gap plus a drift-x calibration residual
-   (measured up to **3.22 cm** for 686), so the closest points sit at nearly the same drift
-   depth even when they are offset within the cathode plane.
+   (measured up to **4.1 cm** for the steep crosser 2050), so the closest points sit at nearly
+   the same drift depth even when they are offset within the cathode plane.
 
-The **3D closest-point distance** is then handled in two regimes — this is the improvement over
-a single 3 cm-style distance cap:
+The **3D closest-point distance** is then handled in two regimes — the improvement over a single
+3 cm-style distance cap:
 
 - **close** (`dis < dis_cut`, 5 cm): the p1→p2 connection vector here is **dominated by the
   drift-x offset** (the ~3 cm calibration artifact, nearly along the drift axis), *not* by the
@@ -215,27 +215,51 @@ a single 3 cm-style distance cap:
   (`clustering_regular.cxx`) requires the connection vector to align with the track, which the
   drift-dominated connection fails — only the `dis ≤ 3 cm` lenient path (which drops the
   connection test) can save them, and 686/1852 fall just past it. The connector fills that hole
-  by accepting on the half-track collinearity (cut 1) alone. *All four sample crossers live here*
-  (dis 3.17–3.33 cm).
-- **far** (`dis_cut ≤ dis < max_dis`, 5–25 cm): a shallow-angle crosser travels *inside* the
-  cathode plane, so the two halves are offset transversely (large `dis`) while still being one
-  track. At this longer baseline the connection vector becomes a *reliable* direction, so the
-  pass **borrows the generic passes' distance-graded alignment** (`clustering_regular.cxx:209-215`
-  — `7.5°` out to 15 cm, `5°` beyond) and requires **both** the (tightened) track collinearity
-  **and** the p1→p2 connection vector to align with the track. Two unrelated cosmics that merely
-  graze the cathode at the same drift depth cannot fake both at a long baseline, so the relaxed
-  distance does not open a false-merge hole. (`max_dis = 25 cm` matches the generic passes'
-  long-track regular-merge ceiling.)
+  by accepting on the local (Hough) half-track collinearity (cut 1) alone. *Four sample crossers
+  live here* (686, 1852, MC18, MC42; dis 3.17–3.33 cm).
+- **far** (`dis_cut ≤ dis < max_dis`, 5–25 cm): a *steep* crosser crosses the thin cathode gap at
+  a shallow angle, so it travels far **inside the cathode plane** and the two halves are offset
+  transversely (large `dis`, e.g. 2050 at 13.9 cm) while still being one track. Two refinements
+  vs the close regime, both driven by the 2050 case:
+  - **PCA as an additional direction estimate.** When one half is a dense blob at the cathode (2050's
+    TPC+ half is an 18 855-pt cluster), the *local* `vhough` at the closest point is corrupted
+    (2050 track-track reads **26°** by Hough) even though the halves are collinear. The cluster
+    **PCA principal axis** (`get_pca().axis[0]`) gives the true **1°**. So in the far regime the
+    track-track test passes if **either** Hough **or** PCA is collinear — PCA is *added*, it does
+    not replace the Hough test (which still governs the close regime unchanged).
+  - **Connection-alignment, robust.** The now-long p1→p2 connection vector must align with the
+    track (Hough or PCA) within `conn_far_cut` (**30°**). A real crosser's connection runs along
+    the track (2050: **8°**, MC35: **17°**); two **parallel-offset** cosmics — collinear by
+    definition (PCA ≈ 0°) but laterally displaced — have a ~perpendicular connection (**≥50°**)
+    and are rejected. This is what stops PCA's permissiveness (near-vertical cosmics are all
+    parallel) from opening a false-merge hole. `Find_Closest_Points` returns the global-closest
+    pair, which for a steep blobby crosser is slightly off the cathode extreme — using the PCA
+    *axis* for direction makes the test robust to that.
 
-Purity comes from cuts 2 + 3 + 4 + the two-regime distance, **not** from collinearity alone (the
-diagnostic warns an MC false pair at 3.6° is *more* collinear than a true crosser at 2.8°).
-This is the same geometry QLMatching uses to flag cross-TPC pairs (`flag_xtpc_consistent` /
-`cull_cross_tpc`), here used to **connect** rather than flag.
+Purity comes from cuts 2 + 3 + 4 + the two-regime distance + the far connection-alignment, **not**
+from collinearity alone (the diagnostic warns an MC false pair at 3.6° is *more* collinear than a
+true crosser at 2.8°; and parallel-offset cosmics are collinear by definition). This is the same
+geometry QLMatching uses to flag cross-TPC pairs (`flag_xtpc_consistent` / `cull_cross_tpc`), here
+used to **connect** rather than flag.
 
 **Why retireable:** the gap is permanent geometry, but the misalignment is a *calibration
 artifact*. As `pos_offset`/SCE transverse calibration tightens, the drift residual shrinks,
 `|x₁ − x₂|` falls back under 3 cm, the generic lenient path catches these crossers, and the
 connector can be flipped off and retired without touching production logic.
+
+### The far-regime / steep-crosser case (event 2050)
+
+2050 is a near-vertical crosser (track direction mostly −y). It crosses the ~4 cm drift gap at a
+shallow angle, so its two halves' cathode ends are offset **~14 cm in y** (`dis = 13.9 cm`,
+transverse 13.3 cm) — far outside the close regime. The TPC+ half (`rid38`) is a dense 18 855-pt
+blob, so `vhough` at the closest point reads the blob's local structure (track-track **26°**,
+connection **28°**) and the original far cut rejected it. The cluster **PCA axes** are **1.0°**
+apart and the connection aligns at **8°** — unambiguously one track. The PCA-additional far
+logic recovers it (`drift_cut` 4→5 cm to admit its 4.1 cm drift separation, `dis_cut`→`max_dis`
+far regime, `conn_far_cut = 30°`). A *fragment* check rules out the small TPC+ stub `rid50`
+(connection 87° off — correctly ignored). The fix also recovers **MC35** (a 203 cm track + a
+collinear 21 cm stub across the cathode, connection 17°) — a second genuine far crosser the
+sample happened to contain.
 
 ### Blast radius
 
@@ -250,40 +274,45 @@ Runs in `/home/xqian/tmp/cc_verify/` (ON vs OFF) and `/home/xqian/tmp/cc_geom_*.
 per-pair geometry, from a temporary `std::cerr` that was reverted). The connector's closest-point
 geometry for the four crossers — the numbers that set the cuts:
 
-| crosser | dis | **\|x₁−x₂\| (drift)** | transverse | collinear | x₁ / x₂ |
-|---|---|---|---|---|---|
-| data 686  | 3.32 | **3.22** | 0.77 | 5.9° | −0.68 / 2.55 |
-| data 1852 | 3.33 | 2.77 | 1.85 | 2.2° | 2.17 / −0.60 |
-| MC 18     | 3.18 | 1.14 | 2.96 | 3.6° | 0.57 / −0.57 |
-| MC 42     | 3.17 | 1.34 | 2.88 | 3.2° | 0.67 / −0.67 |
+| crosser | regime | dis | **\|x₁−x₂\|** | transv. | tt(Hough) | tt(PCA) | conn(best) |
+|---|---|---|---|---|---|---|---|
+| data 686  | close | 3.32 | 3.22 | 0.77 | 5.9° | 4.0° | — (drift-dom.) |
+| data 1852 | close | 3.33 | 2.77 | 1.85 | 2.2° | 1.2° | — |
+| MC 18     | close | 3.18 | 1.14 | 2.96 | 3.6° | 12.5° | — |
+| MC 42     | close | 3.17 | 1.34 | 2.88 | 3.2° | 0.2° | — |
+| **data 2050** | **far** | 13.93 | **4.10** | 13.31 | **26°** | **1.0°** | **7.9°** |
+| **MC 35** | far | 5.09 | 1.31 | 4.92 | 2.8° | 1.3° | 17° |
 
-- **`drift_cut` is set from the data:** 686's drift separation is 3.22 cm, so `drift_cut = 4 cm`
-  keeps it with margin; `cathode_x_cut = 3.5 cm` keeps 686's `x₂ = 2.55 cm` off the edge. (A
-  naive `drift_cut = 3 cm`, as first sketched, would have *rejected* 686.) All four crossers
-  have `dis < 5 cm`, so they are accepted in the **close** regime; the far regime adds capability
-  but is not exercised by this sample.
-- **Fires exactly 4× across the 20 events, all genuine crossers; no false merges.** Comparing the
-  output zips member-CRC ON vs OFF, **only** data 686, data 1852, MC 18, MC 42 differ; the other
-  8/10 data and 8/10 MC events are byte-identical. The connector only adds edges, so a differing
-  event *is* a merge — and only the four true crossers merge.
-- **The dangerous case is rejected.** In MC evt42 a *non*-collinear cross-TPC cathode-region pair
-  (local dir–dir 27.5°) is **rejected by cut 1** — two unrelated tracks meeting near the cathode
-  are not merged.
+- **Cuts set from the data, not picked to split:** `drift_cut = 5 cm` admits 2050's 4.1 cm drift
+  separation (the close 4 are ≤3.22); `cathode_x_cut = 3.5 cm` keeps 686's `x₂ = 2.55 cm` off the
+  edge. The close crossers' `tt(Hough)` is reliable (cut 1 stays Hough-only in close), while 2050
+  needs PCA (Hough 26° → PCA 1°) — neither estimate alone works (MC18's PCA is 12.5°), so the far
+  regime takes the **better of the two**. `conn_far_cut = 30°` sits in the safe band: real crossers
+  are 8°/17°, parallel-offset is ≥50°.
+- **Fires exactly 6× across the 20 events, all genuine; no false merges.** Member-CRC ON vs OFF,
+  **only** data 686/1852/2050 and MC18/35/42 differ; the other 14 are byte-identical. The connector
+  only adds edges, so a differing event *is* a merge. The four close merges are **bit-identical to
+  the pre-2050 version** (close regime unchanged), confirmed against the archived run.
+- **The dangerous cases are rejected.** MC42's *non*-collinear pair (Hough 27.5°) is rejected by
+  cut 1; 2050's small TPC+ stub `rid50` (connection **87°** off the track) is rejected by the far
+  connection-alignment — i.e. parallel-offset / unrelated tracks are not merged.
 - **Additive / production-safe.** The toggle wraps the whole pass (`if cathode_connect_on then
   [cm.cathode_connect()] else []`); OFF the all-APA pipeline is structurally identical to the
-  pre-connector one, and the 16 byte-identical ON≡OFF events confirm the pass is a no-op where it
+  pre-connector one, and the 14 byte-identical ON≡OFF events confirm the pass is a no-op where it
   must not fire.
 
-**Scope caveats:** purity is established on the 20 hand-sample events (the population the close-
-regime cuts were tuned on); a larger-sample firing-rate scan is the next purity probe. The
-**far-regime** distance relaxation (`dis ≥ dis_cut`, with the graded connection-alignment
-borrowed from `clustering_regular.cxx`) is **implemented but unexercised** by this sample — no
-crosser here has a transverse offset above ~3 cm, so all four merge in the close regime and the
-graded far cut never fires. The graded values (`7.5°`/`5°`, `max_dis = 25 cm`) inherit the
-generic passes' tuning rather than being fit here; retune when a longer in-plane crosser is
-hand-scanned. **Efficiency caveat:** `cathode_x_cut = 3.5 cm` and `drift_cut = 4 cm` catch 686
-(x₂ = 2.55 cm, drift = 3.22 cm) with ~0.8–1 cm margin — a crosser with a substantially larger
-drift residual would still be missed; this is an efficiency limit, not a purity risk.
+> **Gotcha (measurement):** the parallel `./wcb install` race intermittently leaves a truncated
+> `local/lib/libWireCellClus.so`; a run against that corrupt binary produced *spurious* many-event
+> diffs. Always confirm `file …/libWireCellClus.so` is ELF (restore with `cp build/clus/…`) before
+> trusting a comparison — the authoritative merge list comes from the connector's own accept log.
+
+**Scope caveats:** purity is established on the 20 hand-sample events (the population the cuts were
+tuned on); a larger-sample firing-rate scan is the next purity probe. The far-regime values
+(`conn_far_cut = 30°`, `max_dis = 25 cm`) are bounded by the two far crossers (2050, MC35) and the
+≥50° parallel-offset floor; retune if a larger sample shows far candidates in the 20–50° connection
+band. **Efficiency caveat:** `cathode_x_cut = 3.5 cm` and `drift_cut = 5 cm` catch the sample
+crossers with ~0.5–1 cm margin — a crosser with a substantially larger drift residual would still
+be missed; this is an efficiency limit, not a purity risk.
 
 ## Artifacts
 

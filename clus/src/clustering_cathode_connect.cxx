@@ -18,13 +18,16 @@
 //   - close (dis < dis_cut): the p1->p2 connection vector is dominated by the drift-x
 //     offset (the calibration artifact, ~along the drift axis), not the track, so the
 //     generic passes' connection-alignment test rejects these crossers; here we accept
-//     on the track-direction collinearity alone -- this is the hole the pass fills.
-//   - far  (dis_cut <= dis < max_dis): a shallow-angle crosser travels within the
-//     cathode plane, so the halves are offset transversely (large dis) and the p1->p2
-//     connection vector becomes a reliable direction.  Borrowing the generic passes'
-//     distance-graded alignment (clustering_regular.cxx:209-215), require BOTH the
-//     (tightened) track collinearity AND the connection vector to align with the track;
-//     a pair of unrelated cosmics grazing the cathode cannot fake both at a long baseline.
+//     on the local (Hough) track-direction collinearity alone -- the hole the pass fills.
+//   - far  (dis_cut <= dis < max_dis): a shallow-angle crosser travels within the cathode
+//     plane, so the halves are offset transversely (large dis) and the p1->p2 connection
+//     vector becomes a reliable direction.  Two refinements vs close: (a) the local Hough
+//     direction can be unreliable when one half is a dense blob at the cathode, so the
+//     cluster PCA principal axis is added as an ALTERNATIVE direction estimate (Hough OR
+//     PCA may satisfy collinearity -- additional, it does not replace the Hough test);
+//     (b) require the connection vector to align with the track (Hough or PCA) within
+//     conn_far_cut, which rejects parallel-offset cosmics (connection ~perpendicular,
+//     >=50 deg) while passing a real crosser (a few deg to ~20 deg).
 // plus the all-APA flash-time gate (same matched flash group), so only coincident
 // clusters are paired.  It runs after the generic merge passes, so it can only ADD
 // merges they missed; it is the same logic QLMatching uses to flag cross-TPC pairs
@@ -58,7 +61,8 @@ static void clustering_cathode_connect(
     double drift_cut,        // |x1 - x2| below which the two points are at the same drift depth
     double dis_cut,          // 3D distance below which we accept on track collinearity alone
     double max_dis,          // 3D distance ceiling (connection-aligned far regime)
-    double angle_cut,        // degrees; collinearity of the two half-directions (close regime)
+    double angle_cut,        // degrees; collinearity of the two half-directions
+    double conn_far_cut,     // degrees; far-regime alignment of the p1->p2 connection with the track
     double cathode_x,        // cathode position in the (T0-corrected) clustering frame
     double cathode_x_cut,    // |x - cathode_x| below which a closest point "ends at the cathode"
     double hough_radius,
@@ -73,10 +77,11 @@ public:
     void configure(const WireCell::Configuration& config) {
         NeedScope::configure(config);
 
-        drift_cut_       = get(config, "drift_cut", 4*units::cm);
+        drift_cut_       = get(config, "drift_cut", 5*units::cm);
         dis_cut_         = get(config, "dis_cut", 5*units::cm);
         max_dis_         = get(config, "max_dis", 25*units::cm);
         angle_cut_       = get(config, "angle_cut", 10.0);          // degrees
+        conn_far_cut_    = get(config, "conn_far_cut", 30.0);       // degrees
         cathode_x_       = get(config, "cathode_x", 0.0);
         cathode_x_cut_   = get(config, "cathode_x_cut", 3.5*units::cm);
         hough_radius_    = get(config, "hough_radius", 20*units::cm);
@@ -91,15 +96,16 @@ public:
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_cathode_connect(live, m_scope, drift_cut_, dis_cut_, max_dis_, angle_cut_,
-                                   cathode_x_, cathode_x_cut_, hough_radius_,
+                                   conn_far_cut_, cathode_x_, cathode_x_cut_, hough_radius_,
                                    min_length_, flash_t0_window_);
     }
 
 private:
-    double drift_cut_{4*units::cm};
+    double drift_cut_{5*units::cm};
     double dis_cut_{5*units::cm};
     double max_dis_{25*units::cm};
     double angle_cut_{10.0};
+    double conn_far_cut_{30.0};
     double cathode_x_{0.0};
     double cathode_x_cut_{3.5*units::cm};
     double hough_radius_{20*units::cm};
@@ -125,6 +131,7 @@ static bool is_cathode_crossing_pair(
     double dis_cut,
     double max_dis,
     double angle_cut,
+    double conn_far_cut,
     double cathode_x,
     double cathode_x_cut,
     double hough_radius)
@@ -149,36 +156,54 @@ static bool is_cathode_crossing_pair(
 
     // (4) the two points must be at the same DRIFT depth (always tight): the only
     //     thing between the two halves is the ~1.5 cm cathode gap plus a drift-x
-    //     calibration residual (observed up to ~3.2 cm in data).
+    //     calibration residual (observed up to ~4.1 cm in data).
     if (std::fabs(p1.x() - p2.x()) >= drift_cut) return false;
 
     // outer 3D distance ceiling.
     if (dis >= max_dis) return false;
 
-    // (1) the two local track directions must be collinear.  vhough_transform
-    //     returns an unsigned axis, so collinear means the angle is near 0 OR 180.
-    //     In the CLOSE regime this is the only direction test: the p1->p2 connection
-    //     vector there is dominated by the drift-x offset (the calibration artifact,
-    //     nearly along the drift axis), not by the track, so the generic passes'
-    //     connection-alignment test rejects these crossers -- which is exactly the
-    //     hole this pass fills (it accepts on the half-track directions alone).
+    // (1) local track directions, from the Hough transform at the closest points.
     geo_point_t dir1 = cluster1.vhough_transform(p1, hough_radius);
     geo_point_t dir2 = cluster2.vhough_transform(p2, hough_radius);
-    if (collinear_deg(dir1.angle(dir2)) >= angle_cut) return false;
+    double tt_hough = collinear_deg(dir1.angle(dir2));
 
-    // FAR regime: when the 3D distance is large the two halves are offset within the
-    // cathode plane (large transverse separation), and the p1->p2 connection vector
-    // becomes a long, reliable direction.  Borrow the generic passes' distance-graded
-    // alignment (clustering_regular.cxx:209-215): the longer the baseline, the tighter
-    // the angle.  Require BOTH the track-track collinearity (tightened) AND the
-    // connection vector to align with the track -- a single track satisfies both, two
-    // unrelated grazing cosmics at a long baseline do not.
-    if (dis >= dis_cut) {
-        const double far_cut = (dis < 15*units::cm) ? 7.5 : 5.0;  // deg; cf. clustering_regular.cxx:211-214
-        if (collinear_deg(dir1.angle(dir2)) >= far_cut) return false;
-        geo_point_t conn(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
-        if (collinear_deg(conn.angle(dir1)) >= far_cut) return false;
+    if (dis < dis_cut) {
+        // CLOSE regime: the p1->p2 connection vector is dominated by the drift-x offset
+        //   (the calibration artifact, ~along the drift axis), not the track, so the
+        //   generic passes' connection-alignment test rejects these crossers -- the hole
+        //   this pass fills.  Accept on the local half-track collinearity alone.
+        return tt_hough < angle_cut;
     }
+
+    // FAR regime: the two halves are offset within the cathode plane (large transverse
+    //   separation from a shallow-angle crosser travelling along the cathode).  Two
+    //   things change vs CLOSE: (a) the local Hough direction can be unreliable when one
+    //   half is a dense blob near the cathode, so we ADD the cluster PCA principal axis
+    //   as an alternative direction estimate (Hough OR PCA may satisfy collinearity);
+    //   (b) the now-long p1->p2 connection vector is meaningful, so we require it to
+    //   align with the track (PCA or Hough) -- this rejects parallel-offset cosmics,
+    //   whose connection is ~perpendicular (>=50 deg), while passing a real crosser.
+    geo_point_t pca1, pca2;
+    bool have_pca = false;
+    {
+        const auto& ax1 = cluster1.get_pca().axis;
+        const auto& ax2 = cluster2.get_pca().axis;
+        if (!ax1.empty() && !ax2.empty()) {
+            pca1.set(ax1.at(0).x(), ax1.at(0).y(), ax1.at(0).z());
+            pca2.set(ax2.at(0).x(), ax2.at(0).y(), ax2.at(0).z());
+            have_pca = true;
+        }
+    }
+    double tt_pca = have_pca ? collinear_deg(pca1.angle(pca2)) : 999.0;
+    // track-track collinear: Hough OR (additional) PCA.
+    if (tt_hough >= angle_cut && tt_pca >= angle_cut) return false;
+
+    // connection vector aligned with the track: Hough OR (additional) PCA.
+    geo_point_t conn(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
+    double cc_hough = collinear_deg(conn.angle(dir1));
+    double cc_pca = have_pca ? std::min(collinear_deg(conn.angle(pca1)),
+                                        collinear_deg(conn.angle(pca2))) : 999.0;
+    if (cc_hough >= conn_far_cut && cc_pca >= conn_far_cut) return false;
 
     return true;
 }
@@ -191,6 +216,7 @@ static void clustering_cathode_connect(
     double dis_cut,
     double max_dis,
     double angle_cut,
+    double conn_far_cut,
     double cathode_x,
     double cathode_x_cut,
     double hough_radius,
@@ -230,7 +256,7 @@ static void clustering_cathode_connect(
             if (flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (is_cathode_crossing_pair(*cluster_1, *cluster_2,
                                          cluster_1->get_length(), cluster_2->get_length(),
-                                         drift_cut, dis_cut, max_dis, angle_cut,
+                                         drift_cut, dis_cut, max_dis, angle_cut, conn_far_cut,
                                          cathode_x, cathode_x_cut, hough_radius)) {
                 boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                 ilive2desc[map_cluster_index[cluster_2]], g);

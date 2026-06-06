@@ -315,14 +315,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // cathode-crossing track left unmerged by the generic passes, using a narrow
         // cathode-specific cut set (collinear + opposite TPCs + both ends at the
         // cathode + same drift depth).  The 3D closest-point distance is handled in two
-        // regimes: below dis_cut, accept on track collinearity alone; from dis_cut to
-        // max_dis (large transverse / in-cathode-plane travel), ALSO require the p1->p2
-        // connection vector to align with the track, using the generic passes'
-        // distance-graded angle (clustering_regular.cxx:209-215).  Cannot fire within a
-        // single TPC, so it is safe to add to the all-APA pipeline only.  cathode_x is
-        // the cathode position in the T0-corrected frame (x_t0cor, ~0).
-        cathode_connect(name="", drift_cut=4*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
-                        angle_cut=10.0, cathode_x=0.0,
+        // regimes: below dis_cut, accept on the local (Hough) track collinearity alone;
+        // from dis_cut to max_dis (large transverse / in-cathode-plane travel), the local
+        // Hough direction can be unreliable for a blobby half, so the cluster PCA axis is
+        // added as an ALTERNATIVE direction (Hough OR PCA), and the p1->p2 connection
+        // vector must align with the track within conn_far_cut (rejects parallel-offset
+        // cosmics).  Cannot fire within a single TPC, so it is safe to add to the all-APA
+        // pipeline only.  cathode_x is the cathode position in the T0-corrected frame.
+        cathode_connect(name="", drift_cut=5*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
+                        angle_cut=10.0, conn_far_cut=30.0, cathode_x=0.0,
                         cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
                         min_length=10*wc.cm, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringCathodeConnect",
@@ -332,6 +333,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 dis_cut: dis_cut,
                 max_dis: max_dis,
                 angle_cut: angle_cut,
+                conn_far_cut: conn_far_cut,
                 cathode_x: cathode_x,
                 cathode_x_cut: cathode_x_cut,
                 hough_radius: hough_radius,
