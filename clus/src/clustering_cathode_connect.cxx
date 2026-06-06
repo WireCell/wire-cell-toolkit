@@ -19,6 +19,12 @@
 //     offset (the calibration artifact, ~along the drift axis), not the track, so the
 //     generic passes' connection-alignment test rejects these crossers; here we accept
 //     on the local (Hough) track-direction collinearity alone -- the hole the pass fills.
+//     BOTH-LONG sub-case (default OFF, short_dir_len > 0): when both halves are long
+//     enough for their cluster PCA to be reliable (>= short_dir_len) but the local Hough
+//     at the dense cathode tips is noisy (e.g. 183096: tt_hough=24 deg, tt_pca=1.1 deg),
+//     accept on the FAR-regime test applied to this close pair -- PCA-axis collinearity
+//     AND a connection vector that continues the track (cc_pca < conn_far_cut); the
+//     connection term rejects two distinct parallel cosmics passing close at the cathode.
 //     SHORT-STUB sub-case (default OFF, short_dir_len > 0): when one half is too short
 //     (< short_dir_len) for its own direction to be trusted and the other is a genuinely
 //     long anchor (>= short_dir_len), the collinearity test is unreliable, so instead
@@ -209,6 +215,25 @@ static bool is_cathode_crossing_pair(
         //   generic passes' connection-alignment test rejects these crossers -- the hole
         //   this pass fills.  Accept on the local half-track collinearity alone.
         if (tt_hough < angle_cut) return true;
+
+        // BOTH-LONG PCA fallback (default OFF: short_dir_len == 0).  When BOTH halves
+        //   are long enough for their cluster PCA to be reliable (>= short_dir_len) but
+        //   the local Hough at the dense cathode tips is noisy, the Hough collinearity
+        //   above is untrustworthy (e.g. 183096: tt_hough=24 deg while tt_pca=1.1 deg).
+        //   Accept on the FAR-regime test applied to this close pair: the PCA principal
+        //   axes are collinear (tt_pca < angle_cut) AND the p1->p2 connection vector
+        //   continues the track (cc_pca < conn_far_cut).  The connection-alignment term
+        //   is essential -- two distinct parallel cosmics that merely pass close at the
+        //   cathode are also PCA-collinear, but their connection is ~perpendicular, so
+        //   cc_pca rejects them (a PCA-collinearity-only test would wrongly merge them).
+        if (short_dir_len > 0 && have_pca &&
+            std::min(length_1, length_2) >= short_dir_len) {
+            double tt_pca = collinear_deg(pca1.angle(pca2));
+            geo_point_t conn(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
+            double cc_pca = std::min(collinear_deg(conn.angle(pca1)),
+                                     collinear_deg(conn.angle(pca2)));
+            if (tt_pca < angle_cut && cc_pca < conn_far_cut) return true;
+        }
 
         // SHORT-STUB prolongation (default OFF: short_dir_len == 0).  When one half is
         //   too short for its own direction to be trusted (a gap-splintered cathode

@@ -401,6 +401,39 @@ the 150-tail: 138670 (the requested case) and, as a side effect, 137680's previo
 stub (its 8.6° anchor alignment makes it the *better*-aligned of the two — no `short_dir_len` /
 `conn_short_cut` choice keeps 138670 while dropping it).
 
+### Both-long PCA fallback: noisy Hough at the cathode tips (event 183096)
+
+The short-stub branch above handles the case where **one** half is too short for its own direction.
+The complementary failure is when **both** halves are long but the *local Hough* at the dense
+cathode tips is noisy. Event 183096 is exactly this: two halves clear every hard gate — different
+TPC, both at the cathode (|x| = 1.21 / 2.47 cm), drift sep 3.68 cm, closest-point `dis` = 4.72 cm
+(close regime) — and they are essentially one line (**PCA–PCA = 1.1°**), but the Hough directions
+sampled at their cathode-most points read **`tt_hough` = 24°**, so the close-regime collinearity
+test (`tt_hough < angle_cut`) rejects them. The close regime never consulted the cluster PCA, even
+though the far regime already trusts PCA as an alternative when the Hough is unreliable.
+
+The **both-long PCA fallback** (gated on the same SBND arg `short_dir_len = 25 cm`; reuses
+`angle_cut` and `conn_far_cut`, no new params) applies the far-regime test to a *close* pair when
+both halves are long enough for their PCA to be reliable (`min(len) ≥ short_dir_len`): accept iff the
+PCA axes are collinear (`tt_pca < angle_cut`) **and** the p1→p2 connection vector continues the track
+(`cc_pca < conn_far_cut`). The connection term is what keeps it safe — two *distinct* parallel
+cosmics passing close at the cathode are also PCA-collinear, but their connection is ~perpendicular,
+so `cc_pca` rejects them; a PCA-collinearity-only test would wrongly merge them.
+
+| crosser | pieces (len) | dis | \|x₁−x₂\| | cathode-x | tt(H/PCA) | conn-PCA (cc) | result |
+|---|---|---|---|---|---|---|---|
+| data 183096 | both long (332 / 62.5) | 4.72 | 3.68 | 2.47 / 1.21 | **24.2° / 1.1°** | **24.9°** | merged (both-long PCA) |
+
+**Regression: analytical accept-log no-op (0 new edges) on the 20-event set.** The branch is reached
+only when the existing close path fails (`tt_hough ≥ angle_cut`) and both members are long
+(`≥ short_dir_len`); parsing the connector's per-pair geometry across all 10 data + 10 MC events
+shows **no** close-regime pair is simultaneously `tt_hough ≥ angle_cut`, both-long, `tt_pca < angle_cut`
+and `cc_pca < conn_far_cut`, so the edge set — hence the `merge_clusters` output — is unchanged from
+the prior binary. 138670 and 137680 still merge via the short-stub branch (both have a sub-25 cm
+member, so the both-long branch is skipped), and the 6 known crossers + evt12 are untouched (all take
+the `tt_hough < angle_cut` path). 183096 is outside the 20-event hand-scan sample — a separate target
+check (merged: shared `real_cluster_id` on the ON output).
+
 ## Artifacts
 
 - Implementation: `clus/src/clustering_cathode_connect.cxx`, `cathode_connect()` in
