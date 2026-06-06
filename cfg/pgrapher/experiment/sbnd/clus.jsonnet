@@ -313,7 +313,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     // Cathode-crossing connector: after the generic merge passes (so it only ADDS
     // merges they missed) and before examine_bundles (so a connected crosser is one
     // cluster before the flash-bundle collapse).  SBND-on; off => list unchanged.
-    + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0)] else [])
+    + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, flash_t0_window=800*wc.ns)] else [])
     + [
         cm.examine_bundles(use_flash_t0=true),
     ],

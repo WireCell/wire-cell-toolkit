@@ -464,7 +464,7 @@ is needed.
 (separate target, shared `real_cluster_id`), and every prior target still merges: 185428, 183096,
 138670, 137680 (rcid 32), 59415 (rcid 76 + the 23-pt bridge rcid 3).
 
-### Not a connector fix: cross-TPC flash-time split (event 183118)
+### `flash_t0_window` 80 → 800 ns: cross-TPC flash-time spread (event 183118)
 
 Event 183118 is a geometrically *pristine* crosser — rcid 15 (TPC0, 159.7 cm) ↔ rcid 38 (TPC1,
 280.0 cm), PCA–PCA = 0.4°, connection-PCA = 4.2°, `|x₁ + x₂|` = 0.10 cm (perfectly symmetric about
@@ -472,15 +472,31 @@ the cathode) — yet it stays split even with `drift_cut` opened to 12 cm. The b
 flash-coincidence gate (`clustering_cathode_connect.cxx:343`): the two halves matched **different
 flashes 617 ns apart** (TPC0 half → flash at 234.107 µs, TPC1 half → 233.490 µs), which exceeds the
 80 ns grouping window, so `assign_flash_t0_groups` places them in different groups and the connector
-(correctly) refuses to bridge non-coincident clusters. The 617 ns gap is consistent with one physical
+refuses to bridge non-coincident clusters. The 617 ns gap is consistent with one physical
 scintillation reconstructed far apart across the two independent TPC flash finders — every *other*
-flash in the event pairs across TPCs within ~25 ns, so 617 ns is a flash-reco outlier, not a property
-of crossers — though it could equally be a half mismatched to a genuinely different flash; the two
-readings are indistinguishable here (the drift impact of 617 ns is only `v·Δt ≈ 0.1 cm` either way,
-which is why the geometry still reads as one object). Both land on the same conclusion. **This is an upstream flash-reconstruction defect (cf. the evt12 cross-TPC
-"wrong flash" diagnosis), not something the geometry connector should fix** — widening the connector's
-flash window to 617 ns would open its coincidence guard ~8× on the strength of a single anomalous
-flash. Left for the flash-reco / matching layer.
+flash in the event pairs across TPCs within ~25 ns, so 617 ns is a flash-reco outlier (the drift
+impact is only `v·Δt ≈ 0.1 cm`, which is why the geometry still reads as one object).
+
+The fix is a one-line SBND config change: **`flash_t0_window` 80 → 800 ns** on the `cathode_connect`
+call (its own param, separate from the 80 ns used by the generic merge passes and `examine_bundles`).
+The connector's flash window is only a *secondary* coincidence guard: the pass already requires a
+tight geometric conjunction — opposite TPC, both ends within `cathode_x_cut` of the cathode,
+drift-coincident within `drift_cut`, collinear track directions, connection-aligned — so two
+*distinct* cosmics passing all of that within 800 ns is vanishingly unlikely at cosmic rates. 800 ns
+covers the 617 ns spread with margin, and the 20-event bar (below) confirms the geometry carries the
+purity: no new merge appears.
+
+| crosser | pieces (len) | PCA–PCA | conn-PCA | \|x₁+x₂\| | flash gap | result |
+|---|---|---|---|---|---|---|
+| data 183118 | 159.7 / 280.0 | 0.4° | 4.2° | 0.10 | **617 ns** | merged (flash_t0_window 800) |
+
+**Regression: 20-event member-CRC no-op.** Re-running all 10 data + 10 MC hand-scan events at
+`flash_t0_window = 800 ns` vs the `80 ns` binary (both at `drift_cut = 8`, shipped config) gives a
+**byte-identical** clustering result (`real_cluster_id` md5 unchanged on all 20) — no new merges. 183118
+newly merges (separate target, shared `real_cluster_id`), and every prior target still merges (185362,
+185428, 183096, 138670, 137680, 59415). The 617 ns spread itself remains a flash-reco artifact worth
+fixing upstream (cf. the evt12 cross-TPC "wrong flash" diagnosis); widening the connector window
+recovers the crosser in the meantime without disturbing the rest of the sample.
 
 ## Artifacts
 
