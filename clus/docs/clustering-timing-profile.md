@@ -430,7 +430,11 @@ original baseline on all three:**
 |--:|--:|--:|--:|
 | 187650 | 16.2 s | **13.5 s** | **4.2×** |
 | 59789  | 15.0 s | **12.6 s** | **4.4×** |
+| 138824 | 14.7 s | **12.1 s** | **3.9×** |
 | 61637  | 2.4 s  | **2.3 s**  | 1.7× |
+
+(CRC-identity verified on 187650 / 59789 / 61637, which have saved original-baseline
+`mabc.zip`; 138824 is a timing-only re-run.)
 
 This is the largest single win since the §2 `kd2d` format fix. Profile (`cpu_v7.prof`, 187650):
 total samples **5 237 → 4 689** (original 17 434 → **3.7× fewer**); `scoped_view` **16.1 % → 3.7 %**,
