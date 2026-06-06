@@ -483,8 +483,7 @@ The connector's flash window is only a *secondary* coincidence guard: the pass a
 tight geometric conjunction — opposite TPC, both ends within `cathode_x_cut` of the cathode,
 drift-coincident within `drift_cut`, collinear track directions, connection-aligned — so two
 *distinct* cosmics passing all of that within 800 ns is vanishingly unlikely at cosmic rates. 800 ns
-covers the 617 ns spread with margin, and the 20-event bar (below) confirms the geometry carries the
-purity: no new merge appears.
+covers the 617 ns spread with margin, and the 20-event bar (below) shows no regression.
 
 | crosser | pieces (len) | PCA–PCA | conn-PCA | \|x₁+x₂\| | flash gap | result |
 |---|---|---|---|---|---|---|
@@ -494,9 +493,14 @@ purity: no new merge appears.
 `flash_t0_window = 800 ns` vs the `80 ns` binary (both at `drift_cut = 8`, shipped config) gives a
 **byte-identical** clustering result (`real_cluster_id` md5 unchanged on all 20) — no new merges. 183118
 newly merges (separate target, shared `real_cluster_id`), and every prior target still merges (185362,
-185428, 183096, 138670, 137680, 59415). The 617 ns spread itself remains a flash-reco artifact worth
-fixing upstream (cf. the evt12 cross-TPC "wrong flash" diagnosis); widening the connector window
-recovers the crosser in the meantime without disturbing the rest of the sample.
+185428, 183096, 138670, 137680, 59415). Scope of this no-op (instrumented, CCDBG): all **227** candidate
+pairs reaching the flash gate on the 20-event sample have flash gaps **≤ 80 ns**, so widening to 800 ns
+admits *no new pair* there — the bar proves no regression but does **not** itself exercise the widened
+(80, 800) ns window. The only pair in the sample-plus-targets that falls in that window is 183118 itself
+(617 ns), a true crosser; new-merge safety in the widened window therefore rests on the low cosmic rate
+and the tight geometric conjunction, not on a demonstrated rejection. The 617 ns spread itself remains a
+flash-reco artifact worth fixing upstream (cf. the evt12 cross-TPC "wrong flash" diagnosis); widening the
+connector window recovers the crosser in the meantime without disturbing the rest of the sample.
 
 ## Artifacts
 
