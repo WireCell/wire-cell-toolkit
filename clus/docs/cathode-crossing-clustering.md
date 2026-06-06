@@ -193,25 +193,49 @@ is driven by the toggle `cathode_connect_on` (`cfg/pgrapher/experiment/sbnd/clus
 (bit-identical — verified below).
 
 For every pair of clusters in the same flash-T0 group, above `min_length` (10 cm), it accepts
-the pair when **all four** hold (defaults in the jsonnet method):
+the pair when the following hold (defaults in the jsonnet method). **Always required:**
 
 1. **collinear** — the two half-directions (`vhough_transform` at the closest points, radius
    20 cm) within `angle_cut` (10°, unsigned axis → near 0° or 180°);
-2. **close** — closest-point distance `< dis_cut` (5 cm);
-3. **separate TPCs** — the two closest points' `wpid().apa()` differ (this is what makes the
+2. **separate TPCs** — the two closest points' `wpid().apa()` differ (this is what makes the
    pass incapable of acting within a single TPC);
-4. **both ends at the cathode** — `|x − cathode_x| < cathode_x_cut` (3 cm) for each closest
-   point, in the T0-corrected frame where the cathode is `x≈0`.
+3. **both ends at the cathode** — `|x − cathode_x| < cathode_x_cut` (3.5 cm) for each closest
+   point, in the T0-corrected frame where the cathode is `x≈0`;
+4. **same drift depth** — `|x₁ − x₂| < drift_cut` (4 cm). This is the binding cut: between the
+   two halves there is only the ~1.5 cm cathode gap plus a drift-x calibration residual
+   (measured up to **3.22 cm** for 686), so the closest points sit at nearly the same drift
+   depth even when they are offset within the cathode plane.
 
-Purity comes from cuts 3 + 4 + the bounded distance, **not** from collinearity alone (the
+The **3D closest-point distance** is then handled in two regimes — this is the improvement over
+a single 3 cm-style distance cap:
+
+- **close** (`dis < dis_cut`, 5 cm): the p1→p2 connection vector here is **dominated by the
+  drift-x offset** (the ~3 cm calibration artifact, nearly along the drift axis), *not* by the
+  track. This is precisely why the generic passes miss these crossers: their merge logic
+  (`clustering_regular.cxx`) requires the connection vector to align with the track, which the
+  drift-dominated connection fails — only the `dis ≤ 3 cm` lenient path (which drops the
+  connection test) can save them, and 686/1852 fall just past it. The connector fills that hole
+  by accepting on the half-track collinearity (cut 1) alone. *All four sample crossers live here*
+  (dis 3.17–3.33 cm).
+- **far** (`dis_cut ≤ dis < max_dis`, 5–25 cm): a shallow-angle crosser travels *inside* the
+  cathode plane, so the two halves are offset transversely (large `dis`) while still being one
+  track. At this longer baseline the connection vector becomes a *reliable* direction, so the
+  pass **borrows the generic passes' distance-graded alignment** (`clustering_regular.cxx:209-215`
+  — `7.5°` out to 15 cm, `5°` beyond) and requires **both** the (tightened) track collinearity
+  **and** the p1→p2 connection vector to align with the track. Two unrelated cosmics that merely
+  graze the cathode at the same drift depth cannot fake both at a long baseline, so the relaxed
+  distance does not open a false-merge hole. (`max_dis = 25 cm` matches the generic passes'
+  long-track regular-merge ceiling.)
+
+Purity comes from cuts 2 + 3 + 4 + the two-regime distance, **not** from collinearity alone (the
 diagnostic warns an MC false pair at 3.6° is *more* collinear than a true crosser at 2.8°).
 This is the same geometry QLMatching uses to flag cross-TPC pairs (`flag_xtpc_consistent` /
 `cull_cross_tpc`), here used to **connect** rather than flag.
 
 **Why retireable:** the gap is permanent geometry, but the misalignment is a *calibration
-artifact*. As `pos_offset`/SCE transverse calibration tightens, the residual shrinks, `dis`
-falls back under 3 cm, the generic lenient path catches these crossers, and the connector can
-be flipped off and retired without touching production logic.
+artifact*. As `pos_offset`/SCE transverse calibration tightens, the drift residual shrinks,
+`|x₁ − x₂|` falls back under 3 cm, the generic lenient path catches these crossers, and the
+connector can be flipped off and retired without touching production logic.
 
 ### Blast radius
 
@@ -222,26 +246,44 @@ all-APA pipeline** — so the SBND-on default does not touch LArSoft production 
 
 ### Verification (10 data + 10 MC events, connector ON vs OFF)
 
-Runs in `/home/xqian/tmp/cathode_connect/`. Ground truth = the connector's own per-merge log
-(temporary `std::cerr`, reverted):
+Runs in `/home/xqian/tmp/cc_verify/` (ON vs OFF) and `/home/xqian/tmp/cc_geom_*.log` (the
+per-pair geometry, from a temporary `std::cerr` that was reverted). The connector's closest-point
+geometry for the four crossers — the numbers that set the cuts:
 
-- **Fires 4× across the 20 events, all genuine cathode crossers.** Data: 686 (collinear 5.9°,
-  dis 3.32 cm) and 1852 (2.2°, 3.33 cm), each → one cluster spanning the cathode. MC: evt18
-  (3.6°, 3.18 cm) and evt42 (3.2°, 3.17 cm) — both collinear, both closest points at |x|<0.7 cm
-  in opposite TPCs. Every accepted pair has collinearity ≤ 6° and both ends at the cathode.
-- **No false merges; the cuts reject the dangerous case.** The other 8/10 data and 8/10 MC
-  events are byte-identical ON vs OFF (`clustering-global.json` CRC unchanged). In MC evt42 a
-  *non*-collinear cross-TPC cathode-region pair (local dir–dir 27.5°) was **correctly rejected**
-  by cut 1 — i.e. two unrelated tracks meeting near the cathode are not merged. MC is a near
-  no-op (only the 2 genuine crossers recovered), consistent with its small offset.
-- **Additive / production-safe.** With the toggle OFF the new-binary output is CRC-identical to
-  the pre-connector baseline on every checked event — the pass changes nothing when off.
+| crosser | dis | **\|x₁−x₂\| (drift)** | transverse | collinear | x₁ / x₂ |
+|---|---|---|---|---|---|
+| data 686  | 3.32 | **3.22** | 0.77 | 5.9° | −0.68 / 2.55 |
+| data 1852 | 3.33 | 2.77 | 1.85 | 2.2° | 2.17 / −0.60 |
+| MC 18     | 3.18 | 1.14 | 2.96 | 3.6° | 0.57 / −0.57 |
+| MC 42     | 3.17 | 1.34 | 2.88 | 3.2° | 0.67 / −0.67 |
 
-**Scope caveat:** purity is established on the 20 hand-sample events (the same population the
-cuts were tuned on, plus MC); a larger-sample firing-rate scan is the next purity probe if a
-bigger sample becomes available. **Efficiency caveat:** `cathode_x_cut = 3 cm` only just
-catches 686 (its TPC1 closest point is at x = 2.55 cm) — a crosser with a larger drift residual
-would be missed; this is an efficiency limit, not a purity risk.
+- **`drift_cut` is set from the data:** 686's drift separation is 3.22 cm, so `drift_cut = 4 cm`
+  keeps it with margin; `cathode_x_cut = 3.5 cm` keeps 686's `x₂ = 2.55 cm` off the edge. (A
+  naive `drift_cut = 3 cm`, as first sketched, would have *rejected* 686.) All four crossers
+  have `dis < 5 cm`, so they are accepted in the **close** regime; the far regime adds capability
+  but is not exercised by this sample.
+- **Fires exactly 4× across the 20 events, all genuine crossers; no false merges.** Comparing the
+  output zips member-CRC ON vs OFF, **only** data 686, data 1852, MC 18, MC 42 differ; the other
+  8/10 data and 8/10 MC events are byte-identical. The connector only adds edges, so a differing
+  event *is* a merge — and only the four true crossers merge.
+- **The dangerous case is rejected.** In MC evt42 a *non*-collinear cross-TPC cathode-region pair
+  (local dir–dir 27.5°) is **rejected by cut 1** — two unrelated tracks meeting near the cathode
+  are not merged.
+- **Additive / production-safe.** The toggle wraps the whole pass (`if cathode_connect_on then
+  [cm.cathode_connect()] else []`); OFF the all-APA pipeline is structurally identical to the
+  pre-connector one, and the 16 byte-identical ON≡OFF events confirm the pass is a no-op where it
+  must not fire.
+
+**Scope caveats:** purity is established on the 20 hand-sample events (the population the close-
+regime cuts were tuned on); a larger-sample firing-rate scan is the next purity probe. The
+**far-regime** distance relaxation (`dis ≥ dis_cut`, with the graded connection-alignment
+borrowed from `clustering_regular.cxx`) is **implemented but unexercised** by this sample — no
+crosser here has a transverse offset above ~3 cm, so all four merge in the close regime and the
+graded far cut never fires. The graded values (`7.5°`/`5°`, `max_dis = 25 cm`) inherit the
+generic passes' tuning rather than being fit here; retune when a longer in-plane crosser is
+hand-scanned. **Efficiency caveat:** `cathode_x_cut = 3.5 cm` and `drift_cut = 4 cm` catch 686
+(x₂ = 2.55 cm, drift = 3.22 cm) with ~0.8–1 cm margin — a crosser with a substantially larger
+drift residual would still be missed; this is an efficiency limit, not a purity risk.
 
 ## Artifacts
 
