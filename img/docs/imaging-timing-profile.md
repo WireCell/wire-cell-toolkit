@@ -307,14 +307,49 @@ Conclusions:
   function removed; ProjectionDeghosting 27.8 % → 22.3 % with R5+this); output canonically identical
   on all 44 npz via `cmpnpz.py`.
 
-**R3 — confirmed scoping, not reopened.** (a) "fewer graph builds/copies" = R1 (Tier A shipped).
+**R3 — confirmed scoping.** (a) "fewer graph builds/copies" = R1 (Tier A shipped).
 (b) Out-edge selector `setS`→`hashS` (O(1) edge insert, preserves `setS` parallel-edge dedup
 semantics — *not* `vecS`, which would admit duplicate edges) is the structural lever for the
 ~21–27 % Rb_tree, but `cluster_graph_t` (`ICluster.h:167`) is a **core `iface` type shared by every
-clus/img/aux consumer**, and it needs a canonical output sort in `ClusterArrays.cxx:482/511` first
-(unsorted `boost::edges()` order → byte-different output; our `cmpnpz.py` already treats output as
-permutation-invariant, so "canonically identical" is the right bar). Broad, full-chain-validated
-change — **not implementable in this pass**; documented as the big open structural win.
+clus/img/aux consumer**. **Spike attempted and rejected — see "R3b spike" below.**
+
+## R3b spike — `setS`→`hash_setS` selector change (ATTEMPTED, REJECTED)
+
+Ran the one-line change as a throwaway spike to settle the effort/payoff question empirically.
+Result: **not a drop-in, and it changes physics output.** Three concrete findings, in order hit:
+
+1. **It cascades past one line.** `boost::hashS` does not exist — the real selector is
+   `boost::hash_setS`. And `cluster_indexed_graph_t = IndexedGraph<cluster_node_t>`
+   (`util/inc/WireCellUtil/IndexedGraph.h:37`) hard-codes its *own* `setS` graph and feeds
+   `.graph()` straight into `SimpleCluster(cluster_graph_t)` at `BlobClustering.cxx:123`, so
+   `IndexedGraph` must flip too. (It is the only non-test instantiation, so for the spike both
+   were flipped.) ~11 img/aux/sio files mix graph mutation with adjacency walking — the audit
+   surface for the change is broad.
+
+2. **It segfaults — the code depends on `setS` iterator stability.**
+   `ClusterArrays::bodge_channel_slice` (`aux/src/ClusterArrays.cxx:131`) walks
+   `adjacent_vertices(mvtx)` while calling `add_edge(active_cvtx, mvtx)` **inside** the loop,
+   mutating `mvtx`'s out-edge set mid-iteration. A node-based `setS` (Rb_tree) keeps the live
+   iterator valid across insertion; `hash_setS` (boost `unordered_set`) rehashes and invalidates
+   it → SIGSEGV on `++`. A local collect-then-add fix (output-equivalent: `add_edge` dedups, so
+   deferring is edge-set identical) cleared this one site, but every mutate-while-iterating site
+   would need the same treatment, each a latent UB / crash.
+
+3. **Even patched, the output drifts.** After the fix, 141530 imaging *completed* (the only crash
+   site for that event), but `cmpnpz.py` vs the `setS` baseline split:
+   **masked APAs IDENTICAL, active APAs DIFFERENT.** The masked-identical result is a control: it
+   proves the writer fix is edge-set-correct *and* that `cmpnpz` canonicalization factors ordering
+   out across selectors — so the active difference is **genuine content drift**, the hash edge
+   iteration order perturbing the active-imaging deghost/solve chain (FP-accumulation order /
+   tie-breaks / component labeling). A compile-time typedef cannot be runtime-toggled, so a change
+   that alters physics output is **blocked by the default-OFF togglability rule**.
+
+**Timing is moot.** A single uncontrolled run hinted ~24.5 s vs `setS` ~29 s, but a result that
+computes *different* physics is not shippable, and the predicted small-degree-out-edge regime (the
+same one where the BlobShadow per-pair hash cache lost to a tiny tree, see R5) makes even a clean
+win unlikely. **Net: `setS`→`hash_setS` converts an uncertain payoff into a high, latent-UB cost
+for a likely-modest and output-changing payoff — not pursued.** All spike edits reverted; tree is
+back to the original `setS`.
 
 ## R5 investigation & fix (BlobShadow::shadow)
 
