@@ -6,12 +6,15 @@
 // (typically WireCell::Root::SCEFieldTH3) lives in the root/ subpackage and
 // is looked up by jsonnet TypeName.
 //
-// Applies:
+// Applies (all in WCT mm):
 //   (1) T0:  x_t0  = x_raw - dirx * cluster_t0 * drift_speed
-//   (2) SCE: x_sce = x_t0  + field->displacement_x(apa, x_t0, y, z)
+//   (2) SCE: x_sce = x_t0 + field->displacement_x(apa, x_t0, y, z)
+//            y_sce = y    + field->displacement_y(apa, x_t0, y, z)
+//            z_sce = z    + field->displacement_z(apa, x_t0, y, z)
 //
 // East/West (apa==0/1) routing is handled inside the ISCEField implementation.
-// If no field is provided (nullptr), the SCE step is a no-op (T0 still applied).
+// If no field is provided (nullptr), the SCE step is a no-op (T0 still applied
+// to x; y, z pass through).
 //
 // Author: Avinay Bhat (UChicago), for SBND
 // Modeled on T0Correction by Haiwang Yu.
@@ -53,10 +56,10 @@ namespace WireCell::Clus {
                                double cluster_t0, int face, int apa) const override;
 
         virtual PointCloud::Tree::Scope output_scope() const override {
-            return {"3d", {"x_sce", "y", "z"}};
+            return {"3d", {"x_sce", "y_sce", "z_sce"}};
         }
         virtual std::vector<std::string> stored_array_names() const override {
-            return {"x_sce"};
+            return {"x_sce", "y_sce", "z_sce"};
         }
 
     private:
@@ -64,13 +67,19 @@ namespace WireCell::Clus {
         WireCell::ISCEField::pointer m_field;
         std::map<int, std::map<int, double>> m_drift_speeds;
 
-        // Combined T0 + SCE for one X coordinate.  All quantities in WCT mm.
-        inline double corrected_x(double x_raw_mm, double y_mm, double z_mm,
-                                  double cluster_t0, int face, int apa) const {
+        // Combined T0 + full 3D SCE for one point.  All quantities in WCT mm.
+        inline void corrected_xyz(double x_raw_mm, double y_mm, double z_mm,
+                                  double cluster_t0, int face, int apa,
+                                  double& xs, double& ys, double& zs) const {
             const double dirx = m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa));
             const double x_t0_mm = x_raw_mm - dirx * cluster_t0 * m_drift_speeds.at(apa).at(face);
-            const double dx_mm = m_field ? m_field->displacement_x(apa, x_t0_mm, y_mm, z_mm) : 0.0;
-            return x_t0_mm + dx_mm;
+            if (m_field) {
+                xs = x_t0_mm + m_field->displacement_x(apa, x_t0_mm, y_mm, z_mm);
+                ys = y_mm    + m_field->displacement_y(apa, x_t0_mm, y_mm, z_mm);
+                zs = z_mm    + m_field->displacement_z(apa, x_t0_mm, y_mm, z_mm);
+            } else {
+                xs = x_t0_mm; ys = y_mm; zs = z_mm;
+            }
         }
     };
 
@@ -83,21 +92,23 @@ namespace WireCell::Clus {
             const auto md = m_dv->metadata(wpid);
             m_drift_speeds[wpid.apa()][wpid.face()] = md["drift_speed"].asDouble();
         }
-        if (m_field) spdlog::info("SCECorrection: ISCEField wired in");
+        if (m_field) spdlog::info("SCECorrection: ISCEField wired in (x,y,z)");
         else         spdlog::info("SCECorrection: no ISCEField -- SCE disabled (T0 still applied)");
     }
 
     inline Point SCECorrection::forward(const Point& pos_raw, double t0, int face, int apa) const {
         Point pc(pos_raw);
-        pc[0] = corrected_x(pos_raw[0], pos_raw[1], pos_raw[2], t0, face, apa);
+        corrected_xyz(pos_raw[0], pos_raw[1], pos_raw[2], t0, face, apa, pc[0], pc[1], pc[2]);
         return pc;
     }
 
     inline Point SCECorrection::backward(const Point& pos_cor, double t0, int face, int apa) const {
         Point pr(pos_cor);
         if (m_field) {
-            // Approximate: evaluate field at x_sce instead of x_t0 (small displacement OK).
+            // Approximate: evaluate field at the corrected position.
             pr[0] -= m_field->displacement_x(apa, pos_cor[0], pos_cor[1], pos_cor[2]);
+            pr[1] -= m_field->displacement_y(apa, pos_cor[0], pos_cor[1], pos_cor[2]);
+            pr[2] -= m_field->displacement_z(apa, pos_cor[0], pos_cor[1], pos_cor[2]);
         }
         const double dirx = m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa));
         pr[0] += dirx * t0 * m_drift_speeds.at(apa).at(face);
@@ -117,14 +128,15 @@ namespace WireCell::Clus {
         const auto& ax = pc_raw.get(arr_raw_names[0])->elements<double>();
         const auto& ay = pc_raw.get(arr_raw_names[1])->elements<double>();
         const auto& az = pc_raw.get(arr_raw_names[2])->elements<double>();
-        std::vector<double> ax_c(ax.size());
+        std::vector<double> ax_c(ax.size()), ay_c(ax.size()), az_c(ax.size());
         for (size_t i = 0; i < ax.size(); ++i) {
-            ax_c[i] = corrected_x(ax[i], ay[i], az[i], t0, face, apa);
+            corrected_xyz(ax[i], ay[i], az[i], t0, face, apa,
+                          ax_c[i], ay_c[i], az_c[i]);
         }
         Dataset ds;
-        ds.add(arr_cor_names[0], Array(ax_c));
-        ds.add(arr_cor_names[1], Array(ay));
-        ds.add(arr_cor_names[2], Array(az));
+        ds.add(arr_cor_names[0], Array(ax_c));   // x_sce
+        ds.add(arr_cor_names[1], Array(ay_c));   // y_sce
+        ds.add(arr_cor_names[2], Array(az_c));   // z_sce
         return ds;
     }
 
@@ -138,17 +150,21 @@ namespace WireCell::Clus {
         const auto& az = pc_cor.get(arr_cor_names[2])->elements<double>();
         const double dirx = m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa));
         const double v = m_drift_speeds.at(apa).at(face);
-        std::vector<double> ax_r(ax.size());
+        std::vector<double> ax_r(ax.size()), ay_r(ax.size()), az_r(ax.size());
         for (size_t i = 0; i < ax.size(); ++i) {
-            double x = ax[i];
-            if (m_field) x -= m_field->displacement_x(apa, ax[i], ay[i], az[i]);
+            double x = ax[i], y = ay[i], z = az[i];
+            if (m_field) {
+                x -= m_field->displacement_x(apa, ax[i], ay[i], az[i]);
+                y -= m_field->displacement_y(apa, ax[i], ay[i], az[i]);
+                z -= m_field->displacement_z(apa, ax[i], ay[i], az[i]);
+            }
             x += dirx * t0 * v;
-            ax_r[i] = x;
+            ax_r[i] = x; ay_r[i] = y; az_r[i] = z;
         }
         Dataset ds;
         ds.add(arr_raw_names[0], Array(ax_r));
-        ds.add(arr_raw_names[1], Array(ay));
-        ds.add(arr_raw_names[2], Array(az));
+        ds.add(arr_raw_names[1], Array(ay_r));
+        ds.add(arr_raw_names[2], Array(az_r));
         return ds;
     }
 
