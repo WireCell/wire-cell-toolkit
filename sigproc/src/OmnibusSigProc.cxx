@@ -213,6 +213,17 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
        }
     }
     m_rebase_nbins = get(config, "rebase_nbins", m_rebase_nbins);
+    {
+        std::string method = get<std::string>(config, "rebase_method", "mean");
+        if (method == "mean") m_rebase_method = RB_MEAN;
+        else if (method == "median") m_rebase_method = RB_MEDIAN;
+        else if (method == "sigmask") m_rebase_method = RB_SIGMASK;
+        else {
+            THROW(ValueError() << errmsg{"OmnibusSigProc: unknown rebase_method \"" + method +
+                                         "\" (expect mean|median|sigmask)"});
+        }
+    }
+    m_rebase_nsigma = get(config, "rebase_nsigma", m_rebase_nsigma);
 
     m_isWrapped = get<bool>(config, "isWrapped", m_isWrapped);
 
@@ -361,7 +372,9 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["mp_th2"] = m_mp_th2;
     cfg["mp_tick_resolution"] = m_mp_tick_resolution;
     
-    cfg["rebase_nbins"] = m_rebase_nbins;    
+    cfg["rebase_nbins"] = m_rebase_nbins;
+    cfg["rebase_method"] = "mean";  // mean|median|sigmask
+    cfg["rebase_nsigma"] = m_rebase_nsigma;
 
     cfg["isWrapped"] = m_isWrapped;  // default false
 
@@ -416,7 +429,8 @@ void OmnibusSigProc::load_data(const input_pointer& in, int plane)
     }
     //rebase for this plane
     if (std::find(m_rebase_planes.begin(), m_rebase_planes.end(), plane) != m_rebase_planes.end()) {
-        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {}", plane, m_rebase_nbins);
+        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {} method = {} (0=mean,1=median,2=sigmask)",
+                   plane, m_rebase_nbins, (int) m_rebase_method);
         auto m_r_data_ref = m_r_data[plane].block(0, 0, m_r_data[plane].rows(), m_nticks);
         rebase_waveform(m_r_data_ref,m_rebase_nbins);
     }
@@ -1036,25 +1050,93 @@ void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int&
             }
 
             signal.resize(ncount);
-	    Waveform::realseq_t front_sig(n_bins);
-	    Waveform::realseq_t back_sig(n_bins);
-            
-	    for (int j = 0; j < n_bins; ++j) {
-                front_sig.at(j) = signal.at(j);
-	        back_sig.at(j) = signal.at(arr.cols()-j-1);
+
+            // Estimate the baseline anchors of the first/last n_bins windows
+            // and the (mean) time at which each anchor sits.  RB_MEAN is the
+            // historical behavior; RB_MEDIAN and RB_SIGMASK are signal-safe
+            // against large peaks inside the windows.
+            double t1 = n_bins/2.0;
+            double t2 = m_nticks - n_bins/2.0;
+            float front_base = 0;
+            float back_base = 0;
+
+            if (m_rebase_method == RB_SIGMASK) {
+                // robust per-row scale from 16/50/84 percentiles (signal
+                // occupies few samples so it barely moves the percentiles)
+                const float p16 = WireCell::Waveform::percentile_binned(signal, 0.5 - 0.34);
+                const float p50 = WireCell::Waveform::percentile_binned(signal, 0.5);
+                const float p84 = WireCell::Waveform::percentile_binned(signal, 0.5 + 0.34);
+                const float sigma = sqrt((pow(p84 - p50, 2) + pow(p50 - p16, 2)) / 2.);
+                const float cut = m_rebase_nsigma * sigma;
+                const int min_count = n_bins / 4;
+
+                // mean of non-signal samples in a window, widening the window
+                // inward (2x, 4x) when signal leaves too few clean samples.
+                // front: j0=0 going forward; back: j0=m_nticks-1 going backward.
+                auto masked_anchor = [&](int j0, int dir, double& tout) {
+                    for (int widen = 1; widen <= 4; widen *= 2) {
+                        const int nwin = std::min(n_bins * widen, m_nticks);
+                        double sum = 0, tsum = 0;
+                        int count = 0;
+                        for (int k = 0; k < nwin; ++k) {
+                            const int j = j0 + dir * k;
+                            const float v = signal.at(j);
+                            if (fabs(v - p50) < cut) {
+                                sum += v;
+                                tsum += j;
+                                count++;
+                            }
+                        }
+                        if (count >= min_count || nwin == m_nticks) {
+                            if (count > 0) {
+                                tout = tsum / count;
+                                return (float) (sum / count);
+                            }
+                            break;
+                        }
+                    }
+                    // hopeless window (all signal): fall back to the row median
+                    return p50;
+                };
+
+                front_base = masked_anchor(0, +1, t1);
+                back_base = masked_anchor(m_nticks - 1, -1, t2);
+            }
+            else {
+                Waveform::realseq_t front_sig(n_bins);
+                Waveform::realseq_t back_sig(n_bins);
+
+                for (int j = 0; j < n_bins; ++j) {
+                    front_sig.at(j) = signal.at(j);
+                    back_sig.at(j) = signal.at(arr.cols()-j-1);
+                }
+
+                if (m_rebase_method == RB_MEDIAN) {
+                    front_base = WireCell::Waveform::median(front_sig);
+                    back_base = WireCell::Waveform::median(back_sig);
+                }
+                else {  // RB_MEAN
+                    front_base = WireCell::Waveform::mean_rms(front_sig).first;
+                    back_base = WireCell::Waveform::mean_rms(back_sig).first;
+                }
             }
 
-	    float front_base = WireCell::Waveform::mean_rms(front_sig).first;
-	    float back_base = WireCell::Waveform::mean_rms(back_sig).first;
-	    double t1 = n_bins/2.0;
-	    double t2 = m_nticks - n_bins/2.0;
-	    double m = (back_base - front_base)/(t2-t1);
-	    double b = back_base - m*t2;
+	    double m = 0;
+	    double b = 0;
+	    if (t2 - t1 > 1.0) {
+	        m = (back_base - front_base)/(t2-t1);
+	        b = back_base - m*t2;
+	    }
+	    else {
+	        // degenerate anchors (both windows widened to the full
+	        // waveform): subtract a constant, no tilt.
+	        b = 0.5*(front_base + back_base);
+	    }
 
 	    for (int j = 0; j < m_nticks; ++j) {
 	        double corr = m*j+b;
 	        arr(i,j) -= corr;
-	    }	
+	    }
         }
 }
 

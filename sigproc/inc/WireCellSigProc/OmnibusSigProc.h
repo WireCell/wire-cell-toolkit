@@ -260,9 +260,23 @@ namespace WireCell {
             double m_mp_th2{500.};
             int m_mp_tick_resolution{4};
 
-	    //Rebase waveforms for each channel of spesific wire-plane. 
-	    std::vector<int> m_rebase_planes{0,1,2}; 
+	    //Rebase waveforms for each channel of spesific wire-plane.
+	    std::vector<int> m_rebase_planes{0,1,2};
             int m_rebase_nbins=200;
+
+            // How the front/back baseline anchors of rebase_waveform are
+            // estimated ("rebase_method" config):
+            //   RB_MEAN   - plain mean of the window (historical default;
+            //               biased by any signal inside the window)
+            //   RB_MEDIAN - median of the window (safe while signal occupies
+            //               < 50% of the window)
+            //   RB_SIGMASK- mean of window samples after masking
+            //               |x - median| > rebase_nsigma * sigma outliers
+            //               (sigma from 16/50/84 percentiles); window widens
+            //               inward if too few clean samples survive.
+            enum RebaseMethod { RB_MEAN, RB_MEDIAN, RB_SIGMASK };
+            RebaseMethod m_rebase_method{RB_SIGMASK};
+            double m_rebase_nsigma{4.0};
 
             bool m_isWrapped{false};
 
