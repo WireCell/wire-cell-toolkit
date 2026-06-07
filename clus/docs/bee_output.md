@@ -76,30 +76,39 @@ cluster is routed by its APA into one bucket per group instead.
 For multi-APA detectors the default output produces one Bee instance per APA
 (or per APA/face), which can be more images than wanted. The `apa_groups`
 feature collapses several APAs into a single Bee instance, keeping the
-clustering computation unchanged — it only changes how the *final* dump is
-bucketed.
+clustering computation unchanged — it only changes how a dump is bucketed.
 
 ### Clustering points
 
-Add an extra point set to `bee_points_sets` that carries `apa_groups`:
+A point set that carries `apa_groups` routes each cluster (by its APA, via
+`Cluster::wpids_blob_set()`) into the first group that owns one of those APAs,
+and dumps one `Bee::Points` per group named `"<algorithm>-<group name>"` (e.g.
+`clustering-group02`). `apa_groups` empty → behavior unchanged (byte-identical).
+`enumerate_idents()` has run before any dump, so cluster ids are globally
+unique and the groups partition the clusters with no color collisions.
+
+The dump *timing* (set by the `name`/`visitor` fields, see "Trigger timing")
+selects *which* clustering stage is grouped. On the all-APA MABC node the PDHD
+config uses two sets, giving the natural per-stage views:
 
 ```jsonnet
-{
-    name: "clustering_grouped", detector: "protodunehd", algorithm: "clustering",
-    pcname: "3d", coords: ["x","y","z"], individual: false,
-    apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ],
-}
+bee_points_sets: [
+    // (c) full-detector clustering: end-of-pipeline global dump
+    { name:"clustering", detector:"protodunehd", algorithm:"clustering",
+      pcname:"3d", coords:["x","y","z"], individual:false },             // -> clustering-global
+    // (b) per-APA clustering: name "img" dumps the live grouping BEFORE the
+    //     all-APA pipeline (= the merged per-APA result), grouped by drift side
+    { name:"img", detector:"protodunehd", algorithm:"clustering",
+      pcname:"3d", coords:["x","y","z"], individual:false,
+      apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ] },
+                                            // -> clustering-group02 / clustering-group13
+]
 ```
 
-This is applied on the all-APA MABC node (the only node that sees every APA).
-For each cluster, `fill_bee_points` reads its APA(s) via
-`Cluster::wpids_blob_set()` and appends the whole cluster to the first group
-that owns one of those APAs, dumping one `Bee::Points` named
-`"<algorithm>-<group name>"` (e.g. `clustering-group02`). Because the all-APA
-grouping has already run `enumerate_idents()`, cluster ids are globally unique,
-so the groups partition the clusters with no color collisions and
-group02 + group13 point counts sum to the ungrouped global count. `apa_groups`
-empty → behavior unchanged (byte-identical).
+The special name `"img"` dumps the live grouping *before* the pipeline runs;
+on the all-APA node that input is exactly the merged per-APA clustering, so the
+`img` + `apa_groups` set yields the per-APA result grouped by drift side, while
+the plain `clustering` set (end dump) yields the full-detector `clustering-global`.
 
 ### Dead area
 
