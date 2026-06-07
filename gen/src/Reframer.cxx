@@ -41,6 +41,7 @@ WireCell::Configuration Gen::Reframer::default_configuration() const
     cfg["toffset"] = m_toffset;
     cfg["fill"] = m_fill;
     cfg["ignore_tags"] = m_ignore_tags;
+    cfg["keep_masks"] = m_keep_masks;
 
     return cfg;
 }
@@ -61,6 +62,7 @@ void Gen::Reframer::configure(const WireCell::Configuration& cfg)
     m_fill = get(cfg, "fill", m_fill);
     m_nticks = get(cfg, "nticks", m_nticks);
     m_ignore_tags = get(cfg, "ignore_tags", m_ignore_tags);
+    m_keep_masks = get(cfg, "keep_masks", m_keep_masks);
     if ( m_ignore_tags && m_input_tags.size() ) {
         raise<ValueError>("providing and ignoring tags is not consistent");
     }
@@ -186,7 +188,8 @@ bool Gen::Reframer::operator()(const input_pointer& inframe, output_pointer& out
     }
 
     auto sframe = make_shared<SimpleFrame>(inframe->ident(), inframe->time() + m_toffset + m_tbin * inframe->tick(),
-                                           out_traces, inframe->tick());
+                                           out_traces, inframe->tick(),
+                                           m_keep_masks ? inframe->masks() : Waveform::ChannelMaskMap());
     if (! m_frame_tag.empty()) {
         sframe->tag_frame(m_frame_tag);
     }

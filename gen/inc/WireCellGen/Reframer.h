@@ -105,6 +105,14 @@ namespace WireCell {
             /// The size of the output frame array along the time dimension.
             int m_nticks{0};
 
+            /// Configure: keep_masks
+            ///
+            /// If true, carry the input frame's channel-mask-map onto the
+            /// output frame.  Default false preserves the historic behaviour
+            /// (a reframed frame had an empty CMM).  Needed when a mask-driven
+            /// stage (e.g. the dead/masked imaging fork) runs after a Reframer.
+            bool m_keep_masks{false};
+
             // count calls for more useful log messages.
             size_t m_count{0};
         };
