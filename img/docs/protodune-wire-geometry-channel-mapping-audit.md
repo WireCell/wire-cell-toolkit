@@ -168,19 +168,85 @@ unconfirmed** and is the thing to settle.
 
 ---
 
-## 5. Why HD reproduces but VD doesn't (and the cross-cutting NF hypothesis)
+## 5. Why HD reproduces but VD doesn't
 
 - **HD** channels reproduce exactly because `build_hd_channel_map` is the same tool
   (or direct ancestor) that made the HD reference, with a fully pinned pitch
   convention. **VD**'s `assign_vd_channels` has an acknowledged U/V drift-order
   ambiguity, and the shipped v3 was evidently produced by a different/older
   channel-assignment pass — hence the mismatch.
-- **Cross-cutting hypothesis (flagged, not asserted):** the 2026-04
-  `coh_group_shift` (B) is empirical evidence that the run-027409 *data* needed a
-  ±3 offline-channel correction in U/V. Given §3, the HD **wire geometry** is not
-  the cause; the more likely story is a **data/channel-map-version** mismatch
-  (which offline-channel convention the data was decoded with) rather than a
-  geometry-file bug. Confirming this needs a LArSoft channel-map dump.
+
+---
+
+## 5b. The PDHD `coh_group_shift` ±3, and sim↔data consistency (resolved)
+
+Follow-up question: is the channel↔wire mapping consistent between **simulation**
+and **real data**, and is the ±3 in the coherent-noise removal / FEMB-saturation
+tagger a wire-mapping bug or just a FEMB-grouping confusion?
+
+**The key distinction — two independent lookups from an offline channel:**
+- **channel↔wire** (geometry) — where the signal sits in 3D. Lives in the
+  wire-geometry file; used by SP / imaging / reco.
+- **channel↔FEMB** (electronics) — which 64 channels share a cold-electronics
+  motherboard → coherent noise & saturation. **Not in the wire file**; it is the
+  `n*2560 + 40*u` block arithmetic in `chndb-base.jsonnet`.
+The ±3 lives **entirely in the second relation.** A correct wire mapping can still
+need a ±3 in the grouping.
+
+**Q1 — channel↔wire consistent sim↔data? YES.**
+- WCT **sim and reco share the same wire file** (`params.jsonnet:167`;
+  `simparams.jsonnet` inherits `files:` via `super`) — identical by construction.
+- It matches the real data empirically: **run-027409 imaging closes richly**
+  (6712 / 7647 / 3035 / 6287 blob points in APA0–3). A 3-wire U/V offset
+  (opposite sign per APA) would destroy U∩V∩W closure and collapse those counts.
+
+**Q2 — is the ±3 just a FEMB-grouping confusion? YES (confirmed from the map).**
+For APA0 U-plane (`PD2HDChannelMap_WIBEth_*`):
+
+| map | physical FEMB → offline channels |
+|---|---|
+| **electronics** (`…_electronics_v1`) | clean `[40m … 40m+39]` (FEMB10 = 0–39, FEMB20 = 400–439) |
+| **visible-wire** (`…_visiblewires_v1`, post-flip) | same FEMBs, offline labels **−3** (FEMB9 = 37–76, FEMB10 wraps 797…36) |
+
+A physical FEMB is a fixed set of 40 wires. WCT's `40*u+j` grouping assumes the
+**electronics** block layout, but the data's offline numbering follows the
+**visible-wire** convention — shifting the blocks by ±3 in U/V (W has no wrap → no
+shift, exactly as in `chndb-base.jsonnet`). Hence `40u, 40u+1, 40u+2` carry the
+*previous* FEMB's common mode — the exact run-027409 symptom. The FEMB-saturation
+tagger uses the same shifted groups (`femb-negpulse-groups-shifted_v2.jsonnet`),
+so it is the same effect. **A grouping issue, not a wire-mapping issue.**
+
+**Q3 — channel↔wire mismatch sim↔data? Not operative for this data — but a
+convention flag.** The APA-dependent sign (`+3` on upright anodes 0&2, `−3` on
+upside-down 1&3 — a colleague's finding) is the official visible-wire structure
+(mapmaker `udown = (icrate==1||icrate==3)`; WCT anode0 = `APA_P02SU` = crate 0 =
+upright). Verified against git:
+
+| convention | upright APA0 U | FEMB10 offline (e.g.) |
+|---|---|---|
+| **pre**-flip (before `c8f43809`, 2025-06-30) | electronics **+3** | 3–42 |
+| **post**-flip (current `v10_20_08d00`) | electronics **−3** | wraps 797…36 |
+
+`coh_group_shift` uses **+3 on upright APAs ⇒ the pre-flip convention** ⇒
+**run-027409 was decoded with the pre-June-2025 channel map.** Since imaging closes
+against the wire file, the **wire file is effectively on the same old (pre-flip)
+convention as this data** — mutually consistent, so no wire mismatch bites and sim
+(same file) is consistent too.
+
+**Actionable caveat:** the official map was **sign-flipped 2025-06-30**. If
+production data is re-decoded with the **post-flip** map, (i) the `coh_group_shift`
+sign must **flip**, and (ii) the wire file must be re-confirmed — an old-convention
+wire file against post-flip data *would* produce a real 3-wire U/V mismatch.
+
+**Simulation caveat:** PDHD `wct-sim` injects **only incoherent
+`EmpiricalNoiseModel` noise — no coherent FEMB noise** (no `CoherentAddNoise` /
+`GroupNoiseModel`; sim NF pipes commented out). So the ±3 is **benign on sim**, and
+the **FEMB grouping / saturation logic cannot be validated on this sim** — that
+would require injecting coherent noise on the true (electronics) FEMB grouping.
+
+**Residual (needs LArSoft runtime):** the *absolute* offline→wire convention of the
+wire file in isolation needs a `PD2HDChannelMapService` dump; the imaging-closure +
+sign evidence pins the practical answer above.
 
 ---
 
