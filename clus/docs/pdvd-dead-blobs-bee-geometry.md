@@ -50,47 +50,52 @@ spillover is injected on **reload**:
 - The **correct** corners are already saved in the JSON (`jblob["corners"]`,
   cartesian x,y,z) but were discarded on load.
 
-**Fix (toggle, default OFF → byte-identical for every existing config):**
-- `ClusterFileSource` gains `restore_corners` (default false). When true, the
-  JSON loader carries the saved corners onto the `SimpleBlob`
-  (`set_stored_corners`).
-- `make_corner_dataset` uses the stored corners (via `dynamic_cast` to
+**Fix (`ClusterFileSource restore_corners`, default ON — correctness fix):**
+- `ClusterFileSource` has `restore_corners`, **default true**.  It is a pure
+  correctness fix (the dead corners were simply wrong on reload), so it is on by
+  default rather than opt-in; set `restore_corners: false` to get the old
+  (overflowing) behaviour back.  It changes **only** the dead-area `"corner"`
+  point cloud — live/reco output is byte-identical — so the usual "new behaviour
+  defaults OFF / bit-identical production" rule does not apply (no reco change),
+  though it does change the dead-bee *display* for every `ClusterFileSource`
+  consumer; byte-comparison snapshots of dead-bee output need rebaselining.
+- The JSON loader carries the saved corners onto the `SimpleBlob`
+  (`set_stored_corners`); `make_corner_dataset` uses them (via `dynamic_cast` to
   `Aux::SimpleBlob`) when present, else falls back to the reloaded shape.
-- This touches **only** the dead-area `"corner"` PC (its sole consumer is the
-  dead bee patch; the live consumer in `Facade_Blob` is commented out). The
-  RayGrid `shape().corners()` is intentionally left as-is — fixing the
+- The RayGrid `shape().corners()` is intentionally left as-is — fixing the
   boundary-layer reconstruction would change geometry for all consumers and is
   out of scope.
-- Enabled in `pdvd/wct-clustering.jsonnet` (`restore_corners: true`).
 - The numpy cluster-file path (`ClusterArrays::to_cluster`) is **also covered**:
-  the same `restore_corners` flag carries the stored (y,z) corners from the `b`
-  array (count at col `(sigu_col+1)+4+6 = 14`, then y,z pairs) onto the blob
-  (x set to 0 — the dead patch consumes only y,z).
+  the same flag carries the stored (y,z) corners from the `b` array (count at col
+  `(sigu_col+1)+4+6 = 14`, then y,z pairs) onto the blob (x set to 0 — the dead
+  patch consumes only y,z).
 
 ## Cross-detector status (does each chain have the bug, and is it fixed?)
 The overflow only occurs for **2-view dead blobs** (2 real planes + 1 full-width
 dummy) when the loader drops the RayGrid boundary layers.  Whether a chain is
 affected depends on its load path **and** whether its dead blobs are 2-view.
 
-| chain | load path | dead-blob views (tested evt) | overflow? | `restore_corners` |
+It is on by default (no per-config flag needed); the table shows the tested events.
+
+| chain | load path | dead-blob views (tested evt) | overflow? | with default-on |
 |---|---|---|---|---|
-| **PDVD** run039324 | JSON (`ClusterLoader`) | 2-view at anode-2 edge | **YES, −3.9 cm** | enabled, **fixes it** |
-| **PDHD** 027380 evt0 | JSON (`ClusterLoader`) | all 680 blobs **3-view** (max plane width 3–8 wires) | no (10 µm rounding only) | enabled, protective + byte-identical |
-| **SBND** evt11 (`wct-clustering`/`perevt`) | numpy (`ClusterArrays`) | 3-view; numpy `{0,1}`+nudge reconstruction already faithful | no | enabled, **faithful no-op** (sentinel-proven the readback fires) |
+| **PDVD** run039324 | JSON (`ClusterLoader`) | 2-view at anode-2 edge | **YES, −3.9 cm** | **fixed** (anode-2 Ymin −3.31→0.60) |
+| **PDHD** 027380 evt0 | JSON (`ClusterLoader`) | all 680 blobs **3-view** (max plane width 3–8 wires) | no (10 µm rounding only) | protective + byte-identical |
+| **SBND** evt11 (`wct-clustering`/`perevt`) | numpy (`ClusterArrays`) | 3-view; numpy `{0,1}`+nudge reconstruction already faithful | no | **faithful no-op** (sentinel-proven the readback fires) |
 
 Notes:
 - PDHD/SBND don't exhibit PDVD's spill in the tested events because their dead
-  blobs are 3-view (fully constrained — boundary layers redundant).  The flag is
-  enabled on the same proven code path so a 2-view edge blob, if it ever appears,
-  is corrected; live output is byte-identical in all cases.
+  blobs are 3-view (fully constrained — boundary layers redundant).  The fix is on
+  the same proven code path so a 2-view edge blob, if it ever appears, is
+  corrected; live output is byte-identical in all cases.
 - **SBND `wct-clus-matching-standalone.jsonnet` (the main `run_clust_QL_evt.sh`
   BEE chain) images the dead view in-graph** (not file-loaded), so its dead blobs
-  use fresh imaging-time corners and never had the bug — `restore_corners` is not
-  set there (its `ClusterFileSource` loads only active).
+  use fresh imaging-time corners and never had the bug; its `ClusterFileSource`
+  loads only active.
 - The numpy readback was verified live by a sentinel: injecting `y+12345` shifted
   the SBND dead corners by exactly +1234.5 cm, then reverted.
-- Configs enabling it: `pdvd/wct-clustering.jsonnet`, `pdhd/wct-clustering.jsonnet`,
-  `sbnd_xin/wct-clustering.jsonnet`, `sbnd_xin/wct-clus-matching-perevt.jsonnet`.
+- Default-on confirmed: with no per-config flag, PDVD anode-2 Ymin = 0.60; an
+  explicit `restore_corners: false` brings the overflow back (−3.31).
 
 Files: `aux/inc/WireCellAux/SimpleBlob.h`, `aux/inc/WireCellAux/ClusterHelpers.h`,
 `aux/src/ClusterHelpersLoader.cxx` (JSON), `aux/inc/WireCellAux/ClusterArrays.h`

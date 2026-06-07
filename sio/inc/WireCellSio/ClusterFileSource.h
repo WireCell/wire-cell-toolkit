@@ -83,7 +83,12 @@ namespace WireCell::Sio {
 
         size_t m_count{0};
         bool m_eos_sent{false};
-        bool m_restore_corners{false};
+        // Default true: use the imaging-time corners stored in the cluster file
+        // for the dead-area bee patch instead of re-deriving them from the
+        // reloaded shape (which drops RayGrid boundary layers and lets 2-view
+        // dead blobs spill past the wire boundary).  Dead "corner" cloud only;
+        // live/reco output is unaffected.  Set restore_corners:false to opt out.
+        bool m_restore_corners{true};
         std::vector<IAnodePlane::pointer> m_anodes;
     };
 
