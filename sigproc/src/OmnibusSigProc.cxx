@@ -214,13 +214,14 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
     }
     m_rebase_nbins = get(config, "rebase_nbins", m_rebase_nbins);
     {
-        std::string method = get<std::string>(config, "rebase_method", "mean");
-        if (method == "mean") m_rebase_method = RB_MEAN;
-        else if (method == "median") m_rebase_method = RB_MEDIAN;
+        std::string method = get<std::string>(config, "rebase_method", "sigmask");
+        if (method == "median") m_rebase_method = RB_MEDIAN;
         else if (method == "sigmask") m_rebase_method = RB_SIGMASK;
         else {
+            // "mean" was removed: a signal pulse inside a window biases the
+            // plain-mean anchor and tilts the whole channel.
             THROW(ValueError() << errmsg{"OmnibusSigProc: unknown rebase_method \"" + method +
-                                         "\" (expect mean|median|sigmask)"});
+                                         "\" (expect median|sigmask)"});
         }
     }
     m_rebase_nsigma = get(config, "rebase_nsigma", m_rebase_nsigma);
@@ -373,7 +374,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["mp_tick_resolution"] = m_mp_tick_resolution;
     
     cfg["rebase_nbins"] = m_rebase_nbins;
-    cfg["rebase_method"] = "mean";  // mean|median|sigmask
+    cfg["rebase_method"] = "sigmask";  // median|sigmask
     cfg["rebase_nsigma"] = m_rebase_nsigma;
 
     cfg["isWrapped"] = m_isWrapped;  // default false
@@ -429,7 +430,7 @@ void OmnibusSigProc::load_data(const input_pointer& in, int plane)
     }
     //rebase for this plane
     if (std::find(m_rebase_planes.begin(), m_rebase_planes.end(), plane) != m_rebase_planes.end()) {
-        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {} method = {} (0=mean,1=median,2=sigmask)",
+        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {} method = {} (0=median,1=sigmask)",
                    plane, m_rebase_nbins, (int) m_rebase_method);
         auto m_r_data_ref = m_r_data[plane].block(0, 0, m_r_data[plane].rows(), m_nticks);
         rebase_waveform(m_r_data_ref,m_rebase_nbins);
@@ -1052,9 +1053,10 @@ void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int&
             signal.resize(ncount);
 
             // Estimate the baseline anchors of the first/last n_bins windows
-            // and the (mean) time at which each anchor sits.  RB_MEAN is the
-            // historical behavior; RB_MEDIAN and RB_SIGMASK are signal-safe
-            // against large peaks inside the windows.
+            // and the (mean) time at which each anchor sits.  Both methods
+            // are signal-safe against large peaks inside the windows; the
+            // historical plain-mean anchor was removed for being biased by
+            // any in-window signal.
             double t1 = n_bins/2.0;
             double t2 = m_nticks - n_bins/2.0;
             float front_base = 0;
@@ -1102,7 +1104,7 @@ void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int&
                 front_base = masked_anchor(0, +1, t1);
                 back_base = masked_anchor(m_nticks - 1, -1, t2);
             }
-            else {
+            else {  // RB_MEDIAN
                 Waveform::realseq_t front_sig(n_bins);
                 Waveform::realseq_t back_sig(n_bins);
 
@@ -1111,14 +1113,8 @@ void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int&
                     back_sig.at(j) = signal.at(arr.cols()-j-1);
                 }
 
-                if (m_rebase_method == RB_MEDIAN) {
-                    front_base = WireCell::Waveform::median(front_sig);
-                    back_base = WireCell::Waveform::median(back_sig);
-                }
-                else {  // RB_MEAN
-                    front_base = WireCell::Waveform::mean_rms(front_sig).first;
-                    back_base = WireCell::Waveform::mean_rms(back_sig).first;
-                }
+                front_base = WireCell::Waveform::median(front_sig);
+                back_base = WireCell::Waveform::median(back_sig);
             }
 
 	    double m = 0;

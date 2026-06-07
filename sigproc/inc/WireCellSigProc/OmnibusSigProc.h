@@ -265,16 +265,16 @@ namespace WireCell {
             int m_rebase_nbins=200;
 
             // How the front/back baseline anchors of rebase_waveform are
-            // estimated ("rebase_method" config):
-            //   RB_MEAN   - plain mean of the window (historical default;
-            //               biased by any signal inside the window)
+            // estimated ("rebase_method" config).  The historical plain-mean
+            // anchor was removed: any signal pulse inside a window biased it
+            // and tilted the whole channel.
             //   RB_MEDIAN - median of the window (safe while signal occupies
             //               < 50% of the window)
             //   RB_SIGMASK- mean of window samples after masking
             //               |x - median| > rebase_nsigma * sigma outliers
             //               (sigma from 16/50/84 percentiles); window widens
             //               inward if too few clean samples survive.
-            enum RebaseMethod { RB_MEAN, RB_MEDIAN, RB_SIGMASK };
+            enum RebaseMethod { RB_MEDIAN, RB_SIGMASK };
             RebaseMethod m_rebase_method{RB_SIGMASK};
             double m_rebase_nsigma{4.0};
 
