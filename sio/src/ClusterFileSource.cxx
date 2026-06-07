@@ -233,7 +233,7 @@ ICluster::pointer ClusterFileSource::load_numpy(int ident)
     //     return nullptr;
     // }
 
-    auto graph = to_cluster(nas, eas, m_anodes);
+    auto graph = to_cluster(nas, eas, m_anodes, 1e-3 /*default nudge*/, m_restore_corners);
     return std::make_shared<SimpleCluster>(graph, ident);
 }
 
