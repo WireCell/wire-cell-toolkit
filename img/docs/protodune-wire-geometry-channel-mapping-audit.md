@@ -2,41 +2,42 @@
 
 **Status:** investigation only — *no code/config/wire-file changes made*.
 **Date:** 2026-06-07.
-**Author:** geometry audit (read-only).
 
-## 1. Scope & method
+> **Update (same day):** the initial draft of this doc concluded, from git
+> provenance alone, that the PDHD wire file was "strongly-evidenced stale." That
+> was **revised after empirically regenerating the wire files from the official
+> GDMLs** (dunecore/dunereco cloned at the matching release tag). The regeneration
+> shows **PDHD is current and reproducible**, and surfaces a **concrete PDVD U/V
+> channel-assignment discrepancy** instead. The provenance argument was misleading;
+> the empirical results below supersede it.
 
-This compares the WireCell **toolkit** wire-geometry files for ProtoDUNE-HD
-(PDHD) and ProtoDUNE-VD (PDVD) against the **official** DUNE channel maps /
-geometry, and examines the channel→wire mapping for each, with focus on:
+## 1. Scope, method, and what was actually done
 
-- the **PDHD "3-wire shift"** (a known issue, reportedly fixed upstream), and
-- a suspected **stale/outdated PDVD** wire file or channel mapping.
+Compares the WireCell **toolkit** wire-geometry files for ProtoDUNE-HD (PDHD) and
+ProtoDUNE-VD (PDVD) against the **official** DUNE geometry / channel maps, with
+focus on the **PDHD "3-wire shift"** (known issue, reportedly fixed upstream) and
+a suspected **stale/incorrect PDVD** mapping.
 
-**Files compared**
+**Repos used (cloned into `../` at tag `v10_20_08d00`, matching `duneprototypes`):**
 
-| Side | Path |
-|---|---|
-| Toolkit PDHD wires | `wire-cell-data/protodunehd-wires-larsoft-v1.json.bz2` |
-| Toolkit PDVD wires | `wire-cell-data/protodunevd-wires-larsoft-v3.json.bz2` (also v1, v1-drift-y present, unused) |
-| Official channel maps | `protodunecode/hd/ChannelMap/`, `protodunecode/vd/ChannelMap/` (symlink → `duneprototypes/.../Protodune`) |
-| Wire-file generator | `wire-cell-python/wirecell/util/wires/gdml.py` (`wirecell-util gdml-to-wires`) |
+| Repo | Path | Provides |
+|---|---|---|
+| `duneprototypes` (`protodunecode` symlink) | `../duneprototypes` | official channel-map text + mapmakers |
+| `dunecore` | `../dunecore` | official GDML geometry (`…/Geometry/gdml/`) |
+| `dunereco` | `../dunereco` | official wire-cell reference wires (`…/DUNEWireCell/`) |
+| generator | `../wire-cell-python/wirecell/util/wires/gdml.py` | `wirecell-util gdml-to-wires` |
 
-`protodunecode` resolves to `duneprototypes` tag **v10_20_08d00**.
-
-**Method** was read-only: decompressing the wire JSON and tallying
-anodes/planes/channels/positions, reading the official channel-map text files and
-their `mapmakers/`, and tracing git provenance of each file. **No GDML files are
-present on disk** (`dunecore`/`dunereco` are not cloned here), so the one check
-that would *prove* a PDHD channel↔wire shift — regenerating from the current GDML
-and diffing — **cannot be run locally yet**. Conclusions below are therefore
-labelled **proven** vs **strongly-evidenced (needs regenerate-and-diff)**.
+**Method (read-only):** decompressed every wire JSON and tallied
+anodes/planes/channels/positions; read the official channel-map text + mapmakers;
+**regenerated** the wire files from the current GDMLs with `wirecell-util
+gdml-to-wires` and diffed channel↔position per face-plane; ran the upstream
+integration tests. No wire file, config, or code was modified.
 
 ---
 
 ## 2. Disambiguation: there are TWO different "±3 shifts"
 
-These are easy to conflate; they are **different things** on different axes.
+Easy to conflate; they live on **different axes**.
 
 ### (A) Official "visible-wire" ±3 channel shift — channel ↔ wire-position
 A *cyclic permutation of offline channels within each U/V plane* so the offline
@@ -44,255 +45,199 @@ channel numbering follows where wires **emerge from under the head boards**
 (the visible/active portion, matching the offline geometry's wire endpoints)
 rather than their **soldered anchor points**.
 
-- Introduced in offline channel map **v3** — `duneprototypes` commit `6bbccf25`
-  (2022-06-29): *"V3 PDHD channel map with +-3 channel shifts in U and V to
-  account for anchor-point vs active area shifts."*
-- Carried into the WIBEth electronics era as
-  `PD2HDChannelMap_WIBEth_visiblewires_v1.txt` (commit `76aadccd`, 2024-08-05).
-- **Sign-flipped 2025-06-30** — commit `c8f43809`, PR #89
-  (`trj_flip_threewiresign_pdhd_viswirefix_jun30_2025`):
-  *"flip the sign of the +/- 3 wire shift — looks like a global offset"*; the
-  mapmaker header records *"flip the sign of the +/- 3 wire correction, to fix the
-  cathode-crossing inefficiency and a sign mistake."*
-- Sign convention (mapmaker `MakePD2HDChannelMap_WIBEth_v1_visiblewires.C`):
-  `+3` on inverted (North/Lower) APAs, `-3` on upright (South/Upper) APAs, with a
-  cyclic wrap inside each plane's 800-channel block. **U and V only; W (collection)
-  is unaffected** (collection wires do not wrap / have no anchor-vs-emergence
-  ambiguity).
+- Intro in offline channel map **v3** — `duneprototypes` `6bbccf25` (2022-06-29):
+  *"V3 PDHD channel map with +-3 channel shifts in U and V to account for
+  anchor-point vs active area shifts."*
+- Carried to WIBEth as `…_visiblewires_v1.txt` (`76aadccd`, 2024-08-05).
+- **Sign-flipped 2025-06-30** — `c8f43809` / PR #89: *"flip the sign of the +/- 3
+  wire shift … fix the cathode-crossing inefficiency and a sign mistake."*
+- `+3` on inverted (North/Lower) APAs, `-3` on upright (South/Upper); **U/V only,
+  W exempt**. Verified directly in the text maps: **v5 = (v4 + 3) mod 800** within
+  each U/V plane block (e.g. v4 planechan-0 offlchans 119,159,199,… → v5
+  122,162,202,…). This lives **entirely in the offline-channel labeling
+  (LArSoft channel map)** — it does *not* move wire positions.
 
 ### (B) Toolkit `coh_group_shift` — channel ↔ FEMB electronics grouping
-A noise-filtering grouping patch in
-`cfg/pgrapher/experiment/pdhd/chndb-base.jsonnet` (commit `9e151a19`, 2026-04-28):
+`cfg/pgrapher/experiment/pdhd/chndb-base.jsonnet` (`9e151a19`, 2026-04-28): pure
+offline-channel arithmetic `n*2560 + std.mod(40*u + shift + j, 800)` deciding
+which 40 offline channels share a coherent-noise group; `+3` on anodes 0&2 /
+`-3` on 1&3, U/V only; from a run-027409 FEMB-edge correlation audit.
 
-```jsonnet
-// coh_group_shift: cyclic offset (in offline channels) applied to U and V
-// group boundaries ...  Default magnitude 3 corrects the FEMB-edge
-// misassignment identified in the 027409-evt0-apa0 coherent-noise audit
-// (U/V only; W is unchanged).  Sign flips by anode: +shift on anodes 0 & 2,
-// -shift on anodes 1 & 3.
-local shift = if n == 0 || n == 2 then coh_group_shift
-              else if n == 1 || n == 3 then -coh_group_shift else 0;
-local u_group(u) = std.map(function(j) n*2560 + std.mod(40*u + shift + j, 800), std.range(0,39));
-local v_group(v) = std.map(function(j) n*2560 + 800 + std.mod(40*v + shift + j, 800), std.range(0,39));
-```
-
-This is **pure offline-channel arithmetic** that decides which 40 offline channels
-share a coherent-noise group (a property of FEMB/WIB *electronics*, not wire
-position). It was found empirically from a run-027409 correlation audit.
-
-**Why they are different but parallel:** (A) is channel↔**wire-position**;
-(B) is channel↔**FEMB grouping**. Yet both are magnitude **3**, both **U/V only**
-(W exempt), and both **sign-flip by APA orientation**. That parallel motivates the
-hypothesis in §5.
+Both are magnitude 3, U/V-only, APA-orientation sign-flipped — but (A) is
+channel↔**wire-position** and (B) is channel↔**FEMB grouping**.
 
 ---
 
-## 3. PDHD — the toolkit wire file is STALE relative to the upstream fix
+## 3. PDHD — wire file is CURRENT and reproducible (no geometry-file shift)
 
-**Config reference (only one):**
-`cfg/pgrapher/experiment/pdhd/params.jsonnet:167`
+**Config:** `cfg/pgrapher/experiment/pdhd/params.jsonnet:167`
 `wires: "protodunehd-wires-larsoft-v1.json.bz2"`.
 
-**Provenance — the heart of the problem:**
+**Finding 1 — identical to the official release.** The toolkit file is
+**byte-identical** (md5 `ef190f4b…`, and identical decompressed) to the official
+`dunereco/dunereco/DUNEWireCell/pdhd/protodunehd-wires-larsoft-v1.json.bz2` at the
+current release tag **`v10_20_08d00`**. The 2022 git date in `wire-cell-data` is
+misleading: the *content* equals the current DUNE release. **It is not stale vs
+upstream.**
 
-| Event | Date | Ref |
-|---|---|---|
-| Toolkit PDHD wire file added (single commit, never updated) | **2022-06-12** | `eb40668` "add wire geo for protodune hd" |
-| Official visible-wire ±3 shift introduced (channel map v3) | 2022-06-29 | `6bbccf25` |
-| WIBEth `visiblewires_v1` map | 2024-08-05 | `76aadccd` |
-| **Sign-flip fix** (cathode-crossing inefficiency) | **2025-06-30** | `c8f43809` / PR #89 |
+**Finding 2 — exactly reproducible from the current GDML.** Regenerating with
+```bash
+wirecell-util gdml-to-wires -d protodunehd_v8 -o regen.json.bz2 \
+   ../dunecore/dunecore/Geometry/gdml/protodunehd_v8_refactored.gdml
+```
+yields the **same channel↔position mapping in all 24 face-planes** — `0/8`
+differing in U, `0/8` in V, `0/8` in W (seg-0 wires, ordered by pitch). Structure
+identical (4 anodes / 8 faces / 24 planes / 22 208 wires / 44 416 points).
 
-The toolkit's `protodunehd-wires-larsoft-v1.json.bz2` is from **2022-06-12 and was
-never regenerated**. It therefore predates the *entire* visible-wire correction
-chain — most importantly the **2025-06-30 sign flip**.
+**Finding 3 — the channel numbering is purely geometric.** `build_hd_channel_map`
+(`gdml.py`) allocates channels **sequentially by pitch position** over the GDML's
+**active-wire** endpoints (face1 then face0, with the documented U/V
+descending/ascending pitch convention), explicitly "to reproduce the reference
+file convention." The ±3 *visible-wire* shift (§2A) is **not** encoded in this
+geometric file; it is a LArSoft channel-**map** convention applied at decode time.
 
-Upstream confirms this file is *meant* to be the GDML conversion output:
-`wire-cell-python/.../test_gdml_integration_hd.py` uses
-`dunecore/.../Geometry/gdml/protodunehd_v8_refactored.gdml` as input and
-`dunereco/.../pdhd/protodunehd-wires-larsoft-v1.json.bz2` as the **reference** —
-i.e. the same filename the toolkit ships. If the current `v8` GDML embeds the
-corrected (post-2025-06-30) channel map, the 2022 file no longer matches it.
+**Conclusion (PDHD).** The wire-geometry file is **current and self-consistent**:
+content = current DUNE release, and reproducible from the current `protodunehd_v8`
+GDML. Because its channels are pitch-ordered from the **active-wire** GDML
+endpoints — the same "emergence" geometry the **visible-wire** convention targets,
+and the channel map was **sign-flipped in 2025-06-30 to match that geometry** —
+the file is consistent with the corrected (post-2025) convention. **There is no
+stale "3-wire shift" baked into the wire-geometry file.**
 
-**Structure (decoded from the file):** 4 APAs / 8 faces / 24 planes / 22 208 wire
-segments / 44 416 points; per APA U=V=800 channels, W=960 (10 240 channels total).
-Within a plane, channel-by-position is **perfectly sequential**.
+> **One residual, honestly bounded gap.** This proves the file is consistent with
+> the GDML geometry, *not* that a given data file's per-trace channel labels match
+> it. The ±3 visible-wire shift lives in LArSoft's channel map; confirming the
+> *data path* is byte-aligned needs a LArSoft channel-map dump
+> (`PD2HDChannelMapService` at runtime), which requires the LArSoft runtime (not
+> available here). All on-disk evidence points to consistency.
 
-> **Important caveat (why this isn't yet *proven*):** internal sequentiality does
-> **not** by itself reveal shift (A). The ±3 is the *offset between* the
-> anchor-point ordering and the wire-emergence ordering; *each* ordering is
-> internally sequential. Discriminating the two requires comparing
-> channel→**physical position** against position truth (the GDML wire-emergence
-> endpoints). The collection (W) plane and the per-plane channel *set* are
-> identical under either convention, so neither can reveal it — **only U/V
-> channel↔position can.**
-
-**Conclusion (strongly-evidenced; not locally proven):** the PDHD wire file's U/V
-channel→wire association reflects the **2022 convention** and almost certainly does
-**not** carry the corrected post-2025-06-30 visible-wire mapping. The likely
-observable symptom of a residual ±3 mismatch is exactly what PR #89 was fixing —
-**cathode-crossing inefficiency / track-matching offsets in U/V**. Definitive
-confirmation = regenerate from the current `protodunehd_v8` GDML and diff U/V
-channel↔position (see §6–§7).
-
----
-
-## 4. PDVD — channel-count-correct, but built from v4 geometry while v5 exists
-
-**Config reference (only one):**
-`cfg/pgrapher/experiment/protodunevd/params.jsonnet:180`
-`wires: "protodunevd-wires-larsoft-v3.json.bz2"` (the `pdvd/`, `pdvd_sim/`
-symlink trees carry no wire reference of their own).
-
-**v1 → v3 reconciliation (decoded):**
-
-| | v1 (2022-10-18) | v3 (2026-04-21, in use) |
-|---|---|---|
-| anodes | 16 (idents 110–117, 120–127) | **8 (idents 0–7)** |
-| total channels | 12 304 | **12 288 (0–12 287)** |
-| U plane (ident 0) | 3 816 ch | 3 808 ch |
-| V plane (ident 1) | 3 816 ch | 3 808 ch |
-| W plane (ident 2) | 4 672 ch | 4 672 ch (identical) |
-
-v3's **12 288** channels (0–12 287) **exactly match the official scheme**
-(`vd/ChannelMap/mapmakers/addcrpnum.cxx`: 0–3071 → CRP5, 3072–6143 → CRP4,
-6144–9215 → CRP2, 9216–12287 → CRP3). The 16→8 anode renumber and the 16 fewer
-U/V channels (8 per plane) are a **convention/numbering correction, not missing
-wires** — W is byte-for-byte identical in count, and the channel range collapses
-from v1's spurious 12 304 onto the official 12 288.
-
-> **So v3 is the cleaner, current-*convention* file — it is *not* obviously
-> broken.** This refines the user's "may have a problem / not latest" suspicion:
-> the issue is not that v3 is malformed, but a **geometry-version** question (below).
-
-**The version-axis confusion (the likely "not the latest version" issue):**
-the wire-FILE name "v3" is a *wire-cell-data file version*, **distinct from the
-GDML *geometry* version**. Upstream VD integration tests show:
-
-- `test_gdml_integration_v4.py`: GDML `protodunevd_v4_refactored.gdml` →
-  **reference** `protodunevd-wires-larsoft-v3.json.bz2` (the toolkit's file).
-- `test_gdml_integration_v5.py`: GDML `protodunevd_v5_ggd.gdml` → **no reference
-  wire file** yet. A `protodunevd_v5` generator config already exists in
-  `gdml.py` (its U/V wire LVs carry a mandatory `_N` suffix the v4 patterns can't
-  match — i.e. a genuinely different geometry).
-
-⇒ **The toolkit PDVD wires derive from `v4` geometry; a `v5`-geometry wire file
-has not been produced/adopted.** If `protodunevd_v5_ggd.gdml` is the intended
-production geometry, the toolkit is one geometry generation behind.
-
-**Channel-map currency:** official VD channel-map activity is mostly *before*
-v3's 2026-04-21 commit (top-CRP `PD2VD…ChannelMap_v2`, 2025-07-10/16; TDE DAQ map
-`PD2VDTopTDEChannelMap_v2`, 2025-11-28). Because v3 (2026-04) post-dates the v2
-map, it **likely** incorporates it — but this is **unverified** against
-`PD2VDTPCChannelMap_v2` directly, and the Nov-2025 TDE map is a separate DAQ
-readout path.
-
-**Conclusion:** v3 is channel-count-correct and current-*convention*, but is
-pinned to **v4 geometry**. Recommend (a) confirming whether **v5** is the intended
-production geometry and, if so, generating/adopting a v5 wire file, and
-(b) verifying v3's channel↔wire against `PD2VDTPCChannelMap_v2`.
+The toolkit `coh_group_shift` **(B)** therefore remains a **separate**, empirically
+real FEMB-electronics grouping correction for the specific run-027409 data — it is
+**not** evidence of a wire-geometry-file bug. (If anything, (B) is the place a
+residual data-vs-convention ±3 would show up, and it was patched in config.)
 
 ---
 
-## 5. Cross-cutting hypothesis (well-supported — flagged as hypothesis, not asserted)
+## 4. PDVD — geometry is right, but the U/V channel↔wire assignment is UNVERIFIED and differs from the current converter
 
-The 2026-04 `coh_group_shift` NF patch **(B)** and the PDHD wire-file staleness
-**(A)** may share **one root cause**: the reconstructed data being processed
-(run 027409) carries the **post-2025-06-30 visible-wire offline-channel
-convention**, while the toolkit's **2022 wire file** *and* the original
-coherent-noise grouping both assumed the **pre-fix** convention. A relabel of
-offline channels by ±3 shifts *both* the channel↔wire-position map (A) *and* the
-channel↔FEMB grouping (B) by the same amount.
+**Config:** `cfg/pgrapher/experiment/protodunevd/params.jsonnet:180`
+`wires: "protodunevd-wires-larsoft-v3.json.bz2"`.
 
-Converging evidence:
-- identical magnitude (**3**),
-- identical scope (**U/V only; W exempt**),
-- identical **APA-orientation sign-flip** (inverted vs upright APAs).
+**Finding 1 — identical to the official release, and channel-count-correct.**
+Byte-identical (md5 `217c2f66…`) to
+`dunereco/.../protodunevd/protodunevd-wires-larsoft-v3.json.bz2` at `v10_20_08d00`.
+v3 has **8 anodes (idents 0–7)** and **12 288 channels (0–12 287)** — matching the
+official scheme (`vd/ChannelMap/mapmakers/addcrpnum.cxx`). The old v1 (16 anodes /
+12 304 ch) is a superseded numbering. **v3 is the latest, count-correct file.**
 
-**If true**, regenerating the wire file from the current GDML may make
-`coh_group_shift` redundant, or require re-tuning it (the two corrections should
-not be applied twice). This is the single most valuable thing to confirm, and it
-is exactly what the regenerate-and-diff in §6–§7 settles. **Stated as a hypothesis
-to test — not a proven claim.** (Caveat: the empirical FEMB-edge audit that
-motivated (B) is independent evidence the grouping needed a shift *for that data*;
-that does not by itself pin the cause to the wire-file convention.)
+**Finding 2 — geometry (positions) matches the current v4 *and* v5 GDML.** The v4
+and v5 GDML produce **identical** channel↔position mappings (`0/48` face-planes
+differ between `regen-v4` and `regen-v5`); v5 only adds more wire *segments*
+(25 344 vs 23 792 points) without changing the seg-0 channel↔position. The upstream
+`test_gdml_integration_v4` passes (19/19), validating Z-plane wire **counts and
+endpoint coordinates** (0.1 mm tol) against the shipped v3. **So the v4-vs-v5
+"which geometry" question is moot for the channel↔wire map** — they agree.
+
+**Finding 3 — the shipped v3's U/V channel↔wire assignment does NOT match the
+current converter, and upstream does not test it.** Diffing the shipped v3 against
+`regen-v4`/`regen-v5` (same converter that reproduces PDHD perfectly):
+
+| plane | face-planes differing (of 16) |
+|---|---|
+| U | 12 |
+| V | **16** |
+| W | 12 |
+
+The wire **positions and segment histograms are identical**; what differs is the
+**global channel number assigned to the same physical wire** (e.g. anode-0 face-0:
+V starts at offline 1239 in shipped vs 1055 in regen; W at 2196 vs 1244). The
+upstream `test_gdml_integration_v4` **passes anyway because it deliberately does
+not check U/V channel assignment** — its own comment: *"The U/V planes of the
+positive-X (seg=1) face can swap relative to the reference due to different
+drift-order conventions, so we only assert the Z-plane count and the total per
+face."* It checks only **Z-plane geometry**, never the U/V channel↔wire pairing.
+
+**Conclusion (PDVD).** The v3 **geometry** is correct and current, but its **U/V
+channel-to-wire assignment is on a convention that the current wire-cell converter
+does not reproduce and that no upstream test validates.** This is the concrete
+locus matching the user's suspicion. It is *not* a ±3-style shift and *not* a
+position error — it is a **U/V drift-order / channel-block convention** difference
+between the (older) tool that produced the shipped v3 and the current converter.
+**Which one matches the LArSoft VD offline channels (`PD2VDTPCChannelMap_v2`) is
+unconfirmed** and is the thing to settle.
 
 ---
 
-## 6. Recommended fixes (no change made here)
+## 5. Why HD reproduces but VD doesn't (and the cross-cutting NF hypothesis)
 
-1. **Clone `dunecore` + `dunereco`** (matching the duneprototypes
-   `v10_20_08d00` tag) so the official GDMLs and reference wires are on disk:
-   - `dunecore/dunecore/Geometry/gdml/protodunehd_v8_refactored.gdml`
-   - `dunecore/dunecore/Geometry/gdml/protodunevd_v5_ggd.gdml` (and `…_v4_…`)
-   - `dunereco/dunereco/DUNEWireCell/{pdhd,protodunevd}/…-wires-larsoft-*.json.bz2`
-2. **PDHD — regenerate and diff** the U/V channel↔position mapping:
-   ```bash
-   wirecell-util gdml-to-wires -d protodunehd_v8 \
-       -o protodunehd-wires-larsoft-regen.json.bz2 \
-       <dunecore>/Geometry/gdml/protodunehd_v8_refactored.gdml
-   ```
-   Compare against the shipped `…-v1.json.bz2` (see §7). If U/V channel↔position
-   differs by exactly the ±3 APA-orientation signature, **replace the wire file**
-   and **re-evaluate `coh_group_shift`** (likely redundant or needs re-tuning).
-3. **PDVD — decide v4 vs v5.** Confirm with the DUNE geometry owners whether
-   `protodunevd_v5_ggd.gdml` is the production geometry. If yes, generate and adopt
-   a v5 wire file:
-   ```bash
-   wirecell-util gdml-to-wires -d protodunevd_v5 \
-       -o protodunevd-wires-larsoft-v5.json.bz2 \
-       <dunecore>/Geometry/gdml/protodunevd_v5_ggd.gdml
-   ```
-   and point `protodunevd/params.jsonnet:180` at it. Independently, verify the
-   current v3 channel↔wire against `PD2VDTPCChannelMap_v2`.
-4. Any wire-file swap is a **geometry change** — gate behind the usual
+- **HD** channels reproduce exactly because `build_hd_channel_map` is the same tool
+  (or direct ancestor) that made the HD reference, with a fully pinned pitch
+  convention. **VD**'s `assign_vd_channels` has an acknowledged U/V drift-order
+  ambiguity, and the shipped v3 was evidently produced by a different/older
+  channel-assignment pass — hence the mismatch.
+- **Cross-cutting hypothesis (flagged, not asserted):** the 2026-04
+  `coh_group_shift` (B) is empirical evidence that the run-027409 *data* needed a
+  ±3 offline-channel correction in U/V. Given §3, the HD **wire geometry** is not
+  the cause; the more likely story is a **data/channel-map-version** mismatch
+  (which offline-channel convention the data was decoded with) rather than a
+  geometry-file bug. Confirming this needs a LArSoft channel-map dump.
+
+---
+
+## 6. Recommended next steps (no change made here)
+
+1. **PDHD — treat as good.** No wire-file change indicated. If a residual data-vs-
+   convention ±3 is suspected, dump `PD2HDChannelMapService` for run-027409's
+   release and compare its offlchan↔(plane,wire) to the wire file's
+   channel↔position — that, not the geometry file, is where (A) would bite. Keep
+   `coh_group_shift` (B) as the electronics-grouping fix it is.
+2. **PDVD — resolve the U/V channel convention.** Compare the shipped v3 and the
+   converter's `regen` U/V channel↔wire against the LArSoft VD channel map
+   (`vd/ChannelMap/PD2VDTPCChannelMap_v2.txt`, 2025-07) to decide which is correct.
+   If the converter is correct, regenerate and adopt
+   `wirecell-util gdml-to-wires -d protodunevd_v5 …` (v5 = current geometry); if the
+   shipped v3 is correct, the converter's `assign_vd_channels` U/V drift-order needs
+   fixing and the upstream test should be extended to assert U/V channel↔wire.
+3. Any wire-file swap is a **geometry change** — gate behind the usual
    bit-identical-by-default discipline and rebaseline imaging/clustering snapshots.
 
 ---
 
-## 7. Verification plan (the discriminating test)
+## 7. Empirical results table (this audit)
 
-The ±3 shift (A) is a **cyclic permutation within each U/V plane only**; the W
-plane and the per-plane channel *set* are invariant. So:
-
-- **Signal:** for each U/V plane, build `channel → rank-by-pitch-position` from
-  both the shipped file and the regenerated file; the difference should be a
-  constant **±3** (cyclic, mod 800), with **+3 on inverted APAs / −3 on upright
-  APAs** — the visible-wire signature.
-- **Null controls:** the **W plane** must show **0** difference; the per-plane
-  **channel set** must be identical (only the channel↔position *pairing* moves).
-- A clean ±3-only-in-U/V result **proves** the staleness; a zero result would mean
-  the 2022 file already matched (it would also then fail to explain (B)).
-
-Position truth comes from the GDML wire endpoints (head/tail in the regenerated
-JSON `points`), so this requires step 6.1 first.
+| check | PDHD | PDVD |
+|---|---|---|
+| toolkit file == dunereco release `v10_20_08d00`? | **yes (byte-identical)** | **yes (byte-identical)** |
+| reproducible from current GDML (channel↔position)? | **yes, 0/24 face-planes differ** | **no — U 12/16, V 16/16, W 12/16 differ** |
+| geometry (positions) matches current GDML? | yes | yes (Z-plane, 0.1 mm, test passes) |
+| upstream test covers U/V channel↔wire? | (HD test) — n/a here | **no (Z-plane only, by design)** |
+| channel numbering source | pure geometric pitch order (active-wire GDML) | differs between shipped v3 and converter |
+| verdict | **current & consistent; no geometry-file shift** | **geometry OK; U/V channel↔wire convention unverified / differs** |
 
 ---
 
 ## 8. Reference appendix
 
-**Toolkit**
-- `cfg/pgrapher/experiment/pdhd/params.jsonnet:167` — PDHD `wires:`.
-- `cfg/pgrapher/experiment/protodunevd/params.jsonnet:180` — PDVD `wires:`.
-- `cfg/pgrapher/experiment/pdhd/chndb-base.jsonnet` — `coh_group_shift` (B).
-- `wire-cell-data/protodunehd-wires-larsoft-v1.json.bz2` — git `eb40668`
-  (2022-06-12).
-- `wire-cell-data/protodunevd-wires-larsoft-v3.json.bz2` — git `baeb475`
-  (2026-04-21); v1 `08fcfca` (2022-10-18); v1-drift-y `f7c7e98` (2023-03-28).
-- `wire-cell-python/wirecell/util/wires/gdml.py` — `gdml-to-wires`, configs
-  `protodunehd_v8` / `protodunevd_v4` / `protodunevd_v5`.
-- `wire-cell-python/wirecell/util/test/test_gdml_integration_{hd,v4,v5}.py` —
-  GDML→wires references.
+**Toolkit** — `cfg/pgrapher/experiment/pdhd/params.jsonnet:167` (PDHD wires);
+`cfg/pgrapher/experiment/protodunevd/params.jsonnet:180` (PDVD wires);
+`cfg/pgrapher/experiment/pdhd/chndb-base.jsonnet` (`coh_group_shift`, B);
+`wire-cell-data/protodune{hd,vd}-wires-larsoft-*.json.bz2`.
 
-**Official (`protodunecode` → duneprototypes v10_20_08d00)**
-- `hd/ChannelMap/README.txt` — v0–v5 + WIBEth map history, APA numbering.
-- `hd/ChannelMap/PD2HDChannelMap_WIBEth_visiblewires_v1.txt` (+ mapmaker
-  `MakePD2HDChannelMap_WIBEth_v1_visiblewires.C`) — the ±3 visible-wire logic.
-- `vd/ChannelMap/PD2VDTPCChannelMap_v2.txt`, `PD2VDTopTPCChannelMap_v2.txt`,
-  `PD2VDTopTDEChannelMap_v2.txt`; `mapmakers/addcrpnum.cxx` — CRP↔channel ranges.
+**Official (tag `v10_20_08d00`)** —
+`dunecore/dunecore/Geometry/gdml/protodunehd_v8_refactored.gdml`,
+`…/protodunevd_v4_refactored.gdml`, `…/protodunevd_v5_ggd.gdml`;
+`dunereco/dunereco/DUNEWireCell/{pdhd,protodunevd}/…-wires-larsoft-*.json.bz2`
+(byte-identical to the toolkit copies);
+`duneprototypes/.../Protodune/hd/ChannelMap/` (README, `…_visiblewires_v1.txt`,
+v4/v5, mapmakers — the ±3 logic), `…/vd/ChannelMap/` (`PD2VDTPCChannelMap_v2`,
+`addcrpnum.cxx`).
 
-**Key commits (duneprototypes)**
-- `6bbccf25` 2022-06-29 — introduce ±3 (U/V) channel-map v3.
-- `76aadccd` 2024-08-05 — WIBEth `visiblewires_v1`.
-- `c8f43809` 2025-06-30 — **flip sign of ±3** (PR #89); merge `a8a2dcdd` 2025-07-07.
-- `2f71e7df` 2025-07-10 / `4e92f76c` 2025-07-16 — VD top-CRP map / v2 maps.
-- `a67411a4` 2025-11-28 — VD TDE map.
+**Generator** — `wire-cell-python/wirecell/util/wires/gdml.py`
+(`gdml-to-wires`; configs `protodunehd_v8`, `protodunevd_v4`, `protodunevd_v5`;
+`build_hd_channel_map` pitch-order allocation; `assign_vd_channels` U/V drift-order
+note); tests `…/util/test/test_gdml_integration_{hd,v4,v5}.py`.
+
+**Key channel-map commits (duneprototypes)** — `6bbccf25` 2022-06-29 (intro ±3);
+`76aadccd` 2024-08-05 (WIBEth visiblewires); `c8f43809` 2025-06-30 (**sign-flip**,
+PR #89); `2f71e7df`/`4e92f76c` 2025-07 (VD top-CRP / v2 maps); `a67411a4`
+2025-11-28 (VD TDE map).
