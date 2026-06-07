@@ -46,6 +46,7 @@ WireCell::Configuration ClusterFileSource::default_configuration() const
     cfg["inname"] = m_inname;
     cfg["prefix"] = m_prefix;
     cfg["anodes"] = Json::arrayValue;
+    cfg["restore_corners"] = m_restore_corners;
 
     return cfg;
 }
@@ -254,6 +255,12 @@ void ClusterFileSource::configure(const WireCell::Configuration& cfg)
         THROW(ValueError() << errmsg{"ClusterFileSource: no anodes given"});
     }
     m_json_loader = std::make_unique<ClusterLoader>(m_anodes);
+    // Carry the original per-blob corners from the JSON onto the loaded blobs so
+    // the dead-area bee patch uses the imaging-time corners (which respect the
+    // wire boundary) rather than re-deriving them from the boundary-less reloaded
+    // shape.  Default false keeps existing output byte-identical.
+    m_restore_corners = get(cfg, "restore_corners", m_restore_corners);
+    m_json_loader->set_restore_corners(m_restore_corners);
 }
 
 

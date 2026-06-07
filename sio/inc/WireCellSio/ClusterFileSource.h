@@ -83,6 +83,7 @@ namespace WireCell::Sio {
 
         size_t m_count{0};
         bool m_eos_sent{false};
+        bool m_restore_corners{false};
         std::vector<IAnodePlane::pointer> m_anodes;
     };
 
