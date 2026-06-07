@@ -313,13 +313,29 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     // up to the next multiple of tick_per_slice so the downsample/upsample
     // cycle is exactly divisible.  The output is cropped back to input_ticks
     // before traces are emitted.
-    int input_ticks = m_cfg.nticks;
+    //
+    // Use the maximum trace extent (tbin + size) so SPARSE input frames are
+    // handled correctly: taking the first trace's size (old behavior) under
+    // sparse input set the window to one arbitrary ROI's length and silently
+    // truncated everything later in drift time.  For dense input the max
+    // extent equals the old first-trace size.
+    //
+    // Probe ALL input tags plus the decon-charge tag: a single tag does not
+    // bound the others, and traces of any of them beyond the probed extent
+    // would be silently truncated by traces_to_eigen()/the output crop.
+    int input_ticks = 0;
     {
-        auto probe = Aux::tagged_traces(inframe, m_cfg.intags.front());
-        for (const auto& tr : probe) {
-            const int n = static_cast<int>(tr->charge().size());
-            if (n > 0) { input_ticks = n; break; }
+        std::vector<std::string> probe_tags = m_cfg.intags;
+        probe_tags.push_back(m_cfg.decon_charge_tag);
+        for (const auto& tag : probe_tags) {
+            for (const auto& tr : Aux::tagged_traces(inframe, tag)) {
+                const int extent = tr->tbin() + static_cast<int>(tr->charge().size());
+                input_ticks = std::max(input_ticks, extent);
+            }
         }
+    }
+    if (input_ticks <= 0) {
+        input_ticks = m_cfg.nticks;
     }
     const int tps = m_cfg.tick_per_slice;
     const int pad_mult = m_cfg.tick_pad_multiple > 0 ? m_cfg.tick_pad_multiple : tps;
