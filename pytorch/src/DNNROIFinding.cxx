@@ -329,7 +329,11 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
         probe_tags.push_back(m_cfg.decon_charge_tag);
         for (const auto& tag : probe_tags) {
             for (const auto& tr : Aux::tagged_traces(inframe, tag)) {
-                const int extent = tr->tbin() + static_cast<int>(tr->charge().size());
+                // Aux::fill (traces_to_eigen) places charge at array column
+                // tbin - tick0, so the extent is measured in the same
+                // array-column units the output crop (leftCols) uses. With the
+                // default tick0=0 this is identical to tbin + size.
+                const int extent = tr->tbin() + static_cast<int>(tr->charge().size()) - m_cfg.tick0;
                 input_ticks = std::max(input_ticks, extent);
             }
         }
@@ -342,9 +346,14 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     const int model_ticks = ((input_ticks + pad_mult - 1) / pad_mult) * pad_mult;
     log->debug("call={} input_ticks={} model_ticks={} pad_mult={} cfg.nticks={}",
                m_save_count, input_ticks, model_ticks, pad_mult, m_cfg.nticks);
-    if (input_ticks > m_cfg.nticks && m_save_count == 0) {
-        log->info("input_ticks={} exceeds configured nticks={}, using input-driven size",
-                  input_ticks, m_cfg.nticks);
+    // The model array is sized to the largest trace extent across all probed
+    // tags, so a single far-out (e.g. noise) ROI inflates model_ticks for the
+    // whole plane. There is no clamp by design (clamping would re-truncate);
+    // surface the first oversize so the cost is at least visible.
+    if (input_ticks > m_cfg.nticks && !m_warned_oversize) {
+        log->info("call={} input_ticks={} exceeds configured nticks={}, using input-driven size",
+                  m_save_count, input_ticks, m_cfg.nticks);
+        m_warned_oversize = true;
     }
 
     // frame to eigen
