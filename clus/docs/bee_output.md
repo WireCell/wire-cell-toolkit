@@ -41,6 +41,7 @@ struct BeePointsConfig {
     double dQdx_offset{0.0};
     bool use_associate_points{false}; // use dpcloud("associate_points") + shower charge
     bool use_graph_vertices{false};   // dump PR::Vertex positions instead of PC
+    std::vector<ApaGroup> apa_groups; // drift-side grouping (empty = off), see below
 };
 ```
 
@@ -65,7 +66,63 @@ Iterates all clusters in `grouping`. For each cluster calls
 
 If `individual=true`, points are bucketed per APA+face combination so Bee can
 display one readout plane at a time. If `individual=false`, all points go into
-a single global `Bee::Points` object.
+a single global `Bee::Points` object. If `apa_groups` is set (see below), each
+cluster is routed by its APA into one bucket per group instead.
+
+---
+
+## APA grouping (drift-side display)
+
+For multi-APA detectors the default output produces one Bee instance per APA
+(or per APA/face), which can be more images than wanted. The `apa_groups`
+feature collapses several APAs into a single Bee instance, keeping the
+clustering computation unchanged — it only changes how the *final* dump is
+bucketed.
+
+### Clustering points
+
+Add an extra point set to `bee_points_sets` that carries `apa_groups`:
+
+```jsonnet
+{
+    name: "clustering_grouped", detector: "protodunehd", algorithm: "clustering",
+    pcname: "3d", coords: ["x","y","z"], individual: false,
+    apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ],
+}
+```
+
+This is applied on the all-APA MABC node (the only node that sees every APA).
+For each cluster, `fill_bee_points` reads its APA(s) via
+`Cluster::wpids_blob_set()` and appends the whole cluster to the first group
+that owns one of those APAs, dumping one `Bee::Points` named
+`"<algorithm>-<group name>"` (e.g. `clustering-group02`). Because the all-APA
+grouping has already run `enumerate_idents()`, cluster ids are globally unique,
+so the groups partition the clusters with no color collisions and
+group02 + group13 point counts sum to the ungrouped global count. `apa_groups`
+empty → behavior unchanged (byte-identical).
+
+### Dead area
+
+The same grouping is applied to the dead-area patches via the node-level
+`dead_apa_groups` config:
+
+```jsonnet
+MultiAlgBlobClustering: { ..., save_deadarea: true, dead_area_version: 2,
+    dead_apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ] }
+```
+
+Each dead blob is routed by APA into one `Bee::Patches` per group, named
+`channel-deadarea-<group name>`, replacing the per-(apa,face) dead files.
+
+The v2 dead wrapper carries a single `tpc` index that the Bee viewer
+(`wire-cell-bee3`) uses only to place the slab's anode-face **X** (drift
+direction); the polygons themselves carry global Y,Z. Grouping is therefore
+only valid when every APA in a group shares the same anode-X and drift
+direction — which is exactly the drift-side split (PDHD even APAs at x0=−358,
+odd APAs at x0=+358). The group's first APA is used as the representative
+`tpc`, so the grouped dead area is **positionally identical** to the old
+per-(apa,face) output, just merged into fewer instances. `dead_apa_groups`
+empty → per-(apa,face) output unchanged.
 
 ### `fill_bee_points_from_pr_graph(name, grouping)`
 
