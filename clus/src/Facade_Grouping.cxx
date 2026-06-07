@@ -296,21 +296,49 @@ size_t Grouping::hash() const
 
 const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int pind) const
 {
-    std::vector<std::string> plane_names = {"U", "V", "W"};
-    const auto sname = String::format("ctpc_a%df%dp%d",apa, face, plane_names[pind]);
-    // const auto sname = String::format("ctpc_f%dp%d", face, pind);
-    Tree::Scope scope = {sname, {"x", "y"}, 1};
-    const auto& sv = m_node->value.scoped_view(scope);
-    // std::cout << "sname: " << sname << " npoints: " << sv.kd().npoints() << std::endl;
+    // kd2d() is called per-point-per-plane inside the graph-building good-point tests
+    // (millions of times per event), but the (apa,face,pind) -> Scope mapping is
+    // data-independent.  Memoize the Scope so the expensive boost::format scope-key build
+    // runs once per key instead of on every call (it was ~40% of clustering CPU; see
+    // clustering-timing-profile.md §2).
+    auto& by_face = m_kd2d_scope_cache[apa][face];
+    auto it = by_face.find(pind);
+    if (it == by_face.end()) {
+        std::vector<std::string> plane_names = {"U", "V", "W"};
+        const auto sname = String::format("ctpc_a%df%dp%d", apa, face, plane_names[pind]);
+        it = by_face.emplace(pind, kd2d_cache_t{Tree::Scope{sname, {"x", "y"}, 1}, nullptr, nullptr}).first;
+    }
+    auto& entry = it->second;
+
+    // Fast path: the scoped view's indices are still valid, i.e. no node has been
+    // inserted or removed in this scope since we last resolved it (on_insert/on_remove
+    // unconditionally clear the flag).  Its k-d tree is therefore current, so return it
+    // directly and skip the scoped_view() Scope hash-lookup + dynamic_cast (~16% of
+    // clustering; see clustering-timing-profile.md §4).  Safe because the ctpc scoped
+    // views are never erased, so the cached pointers stay valid for the tree's lifetime.
+    if (entry.sv && entry.valid && *entry.valid) {
+        return entry.sv->kd();
+    }
+
+    // Slow path: (re)resolve via scoped_view(), which rebuilds the indices and revalidates
+    // as needed; then cache the (stable) view pointer and validity flag for the fast path.
+    const auto& sv = m_node->value.scoped_view(entry.scope);
+    entry.sv = &sv;
+    if (!entry.valid) {
+        entry.valid = m_node->value.scoped_indices_valid(entry.scope);
+    }
     return sv.kd();
 }
 
 
 bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const {
+    // Hand-declared dead gap: the full vertical W-defect column counts as dead on
+    // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
+    if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
     int matched_planes = 0;
     for (int pind = 0; pind < nplanes; ++pind) {
-        if (get_closest_points(point, radius, apa, face, pind).size() > 0) {
+        if (has_closest_point(point, radius, apa, face, pind)) {
             matched_planes++;
         } else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes++;
@@ -323,15 +351,18 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
     return false;
 }
 
-bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const 
+bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const
 {
+    // Hand-declared dead gap: the full vertical W-defect column counts as dead on
+    // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
+    if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
     int matched_planes = 0;
-    
+
     // Loop through U,V,W planes
     for (int pind = 0; pind < nplanes; pind++) {
         int weight = (pind == 2) ? 2 : 1; // W plane counts double
-        if (get_closest_points(point, radius, apa, face, pind).size() > 0) {
+        if (has_closest_point(point, radius, apa, face, pind)) {
             matched_planes += weight;
         }
         else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
@@ -346,13 +377,17 @@ std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int a
     double radius, int ch_range) const 
 {
     std::vector<int> num_planes(6, 0);  // Initialize with 6 zeros
+    // Hand-declared dead gap: the full vertical W-defect column counts as dead on
+    // all three planes (slots 3,4,5).  Default-empty -> falls through to normal check.
+    if (in_dead_gap(point, ch_range, apa, face)) {
+        num_planes[3] = num_planes[4] = num_planes[5] = 1;
+        return num_planes;
+    }
     // std::cout << "abc: " << point << " " << radius << " " << ch_range << std::endl;
     // Check each plane (0,1,2)
     for (int pind = 0; pind < 3; ++pind) {
-        // Get closest points for this plane
-        const auto closest_pts = get_closest_points(point, radius, apa, face, pind);
-        
-        if (closest_pts.size() > 0) {
+        // Only existence matters here (size() > 0), so use the cheaper nearest-1 query.
+        if (has_closest_point(point, radius, apa, face, pind)) {
             // Has hits in this plane
             num_planes[pind]++;
         }
@@ -425,10 +460,32 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
 {
     double x = point[0];
     const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
-    std::vector<double> angles = {angle_u, angle_v, angle_w};
+    const std::array<double, 3> angles = {angle_u, angle_v, angle_w};
     double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
     const auto& skd = kd2d(apa, face, pind);
-    return skd.radius<std::vector<double>>(radius * radius, {x, y});
+    // Stack query (std::array) instead of a 2-element heap vector; this helper
+    // runs per-point-per-plane in the clustering good-point tests.
+    const std::array<double, 2> query{x, y};
+    return skd.radius<std::array<double, 2>>(radius * radius, query);
+}
+
+bool Grouping::has_closest_point(const geo_point_t& point, const double radius, const int apa, const int face,
+                                 int pind) const
+{
+    double x = point[0];
+    const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
+    const std::array<double, 3> angles = {angle_u, angle_v, angle_w};
+    double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
+    const auto& skd = kd2d(apa, face, pind);
+    // Equivalent to get_closest_points(...).size() > 0 but cheaper: the radius query
+    // collects every in-radius point, while the good-point callers only need existence.
+    // knn(1) returns the single nearest point; nanoflann's RadiusResultSet keeps points
+    // with dist < radius^2 (strict <), so use the same strict comparison here.  Distances
+    // are squared (L2), matching the radius^2 argument get_closest_points passes.
+    // Stack query (std::array) to avoid a 2-element heap vector on this hot path.
+    const std::array<double, 2> query{x, y};
+    const auto res = skd.knn(1, query);
+    return !res.empty() && res[0].second < radius * radius;
 }
 
 bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {
@@ -439,6 +496,24 @@ bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range
         const auto [xmin, xmax] = ch2xrange.at(ch);
         if (point[0] >= xmin && point[0] <= xmax) {
             // std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Grouping::in_dead_gap(const geo_point_t& point, const int ch_range, const int apa, const int face) const {
+    // Project to the W (collection) wind.  A dead W wind spans the full vertical
+    // column, so a hit here flags the whole defect band as dead on all planes.
+    const auto& gap = get_dead_gap_winds(apa, face);
+    if (gap.empty()) return false;  // default builds: no gap -> no behavior change
+    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, 2);
+    (void)tind;
+    for (int ch = wind - ch_range; ch <= wind + ch_range; ++ch) {
+        const auto it = gap.find(ch);
+        if (it == gap.end()) continue;
+        const auto [xmin, xmax] = it->second;
+        if (point[0] >= xmin && point[0] <= xmax) {
             return true;
         }
     }
@@ -698,7 +773,23 @@ void Grouping::build_wire_cache(int apa, int face, int plane) const {
             cache.dead_wires[plane][wire_index] = {start_x, end_x};
         }
     }
-    
+
+    // Dead-gap registry (W plane only): the hand-declared W winds whose full
+    // vertical column is treated as dead on all planes (see in_dead_gap).  Empty
+    // unless PointTreeBuilding serialized a dead_gap_a*f*pW PC (gap-flagged region).
+    if (plane == 2) {
+        const std::string gap_name = String::format("dead_gap_a%df%dpW", apa, face);
+        if (local_pcs.find(gap_name) != local_pcs.end()) {
+            const auto& gap = local_pcs.at(gap_name);
+            const auto& xbeg = gap.get("xbeg")->elements<float_t>();
+            const auto& xend = gap.get("xend")->elements<float_t>();
+            const auto& wind = gap.get("wind")->elements<int_t>();
+            for (size_t i = 0; i < wind.size(); ++i) {
+                cache.dead_gap_w[wind[i]] = {xbeg[i], xend[i]};
+            }
+        }
+    }
+
     cache.cached[plane] = true;
 }
 
@@ -812,6 +903,12 @@ std::map<int, std::pair<double, double>>& Grouping::get_dead_winds(const int apa
     
     // Return reference to the cached dead wires for this plane
     return cache.dead_wires[pind];
+}
+
+std::map<int, std::pair<double, double>>& Grouping::get_dead_gap_winds(const int apa, const int face) const {
+    // The gap registry is loaded alongside the W (plane 2) dead-winds cache.
+    build_wire_cache(apa, face, 2);
+    return this->cache().wire_caches[apa][face].dead_gap_w;
 }
 
 

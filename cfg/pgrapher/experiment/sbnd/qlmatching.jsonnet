@@ -31,6 +31,18 @@ function(params) {
     local ch_mask = [39, 64, 66, 67, 71, 85, 86, 87, 92, 115, 138, 141, 170, 197, 217,
                      218, 221, 222, 223, 226, 245, 248, 249, 302],
 
+    // Per-PMT predicted-PE non-linearity overlay (maps each PMT's accumulated
+    // predicted PE into the saturated/observed space; params fitted by
+    // sbnd_xin/pmt_nonlinearity_curve.py --emit-qlmatching). Applied by default for
+    // SBND (pmt_nl=true on matching()/matching_joint()); pass pmt_nl=false to disable.
+    local nlp = import 'pgrapher/experiment/sbnd/pmt_nonlinearity_params.jsonnet',
+    local nl_on = {
+        pmt_nonlinearity: true,
+        pmt_nl_knee: nlp.pmt_nl_knee,
+        pmt_nl_beta: nlp.pmt_nl_beta,
+        pmt_nl_gamma: nlp.pmt_nl_gamma,
+    },
+
     // Opflash archive reader for APA n.
     opflash_source(n):: g.pnode({
         type: 'TensorFileSource',
@@ -48,8 +60,15 @@ function(params) {
         name: 'flash_attach_apa%d' % n,
         data: {
             nchan: nchan,
+            // Add the per-frame "frame_apply_at_caf" (ns) offset from the opflash
+            // tensorset metadata to every flash time (no-op if the key is absent).
+            // Set false to read the raw, uncorrected flash time.
+            correct_flash_time: true,
         },
     }, nin=2, nout=1),
+
+    // DATA predicted-light scale (sim stays 1.0); see QtoL note below. 1.0 disables.
+    local data_qtol = 0.86,
 
     // Common QLMatching `data` block (everything except the anode binding).
     // Single source of truth so the per-APA matching() and the joint
@@ -63,7 +82,11 @@ function(params) {
             cathode_fiducial: cathode_fiducial,
             beamonly: false,
             data: if reality == 'data' then true else false,
-            QtoL: 1.0,
+            // DATA-only predicted-light scale (Q/L PE-error study, match/docs): the
+            // data prediction over-predicts ~16%, so scale its light yield down (sim is
+            // left at 1.0 -- it under-predicts). Set data_qtol=1.0 to disable. QtoL feeds
+            // pred_flash = q*QtoL*vis*eff, so this is exactly a per-event prediction scale.
+            QtoL: if reality == 'data' then data_qtol else 1.0,
             drift_speed: params.lar.drift_speed,
             nchan: nchan,  // must match FlashTensorToOpticalPCs.nchan (writer/reader coupling)
             ch_mask: ch_mask,
@@ -111,10 +134,25 @@ function(params) {
             bkg_weight: 0.5,
             pe_mismatch_knee: 0.3,
             pe_mismatch_floor: 0.3,
-            // §G flash PE-error model.
-            pe_err_floor: 0.3,
-            pe_err_frac: 0.3,
-            pe_err_knee: 1.0,
+            // Flag-aware per-column L1 down-weight (prototype boundary down-weight,
+            // ToyMatching.cxx:1437, generalized to the ladder-B4 flag group). A
+            // boundary/near-PMT/window-truncated bundle's L1 weight is multiplied by
+            // lasso_boundary_weight so it is shrunk less and survives the strength cutoff
+            // (its measured light is an underestimate, so a raw PE-mismatch penalty would
+            // wrongly kill it). C++ default OFF (multiplier 1.0 => bit-identical); SBND-on.
+            lasso_flag_weight: true,
+            lasso_boundary_weight: 0.2,
+            // §G per-PMT light-error model (Q/L PE-error study, match/docs): a constant
+            // floor (PE) below the knee, fractional above -- larger fractional error at low
+            // PE, ->frac at high PE. Applied to BOTH data and sim (conservative for sim, kept
+            // consistent so cuts derived on data carry over). Old values: 0.3 / 0.3 / 1.0.
+            pe_err_floor: 5.0,
+            pe_err_frac: 0.25,
+            pe_err_knee: 20.0,
+            // Compute the bundle chi2's per-PMT error from the PREDICTED PE (not measured).
+            // SBND-on; default false keeps the measured-based chi2 (other detectors, and
+            // the LASSO solve, are unchanged -- the LASSO weight stays per-flash measured).
+            pe_err_on_pred: true,
             flash_pe_threshold: 0.0,
             // §F bundle-quality thresholds.
             bundle_ks_merge_max: 0.2,
@@ -129,6 +167,31 @@ function(params) {
             // 0 there, distorting the shape comparison (worst for the per-TPC mask,
             // whose opposite-TPC PMTs carry real PE). C++ default OFF; SBND-on.
             bundle_mask_ks: true,
+            // Flag-aware multi-branch "high-consistent" ladder (prototype-structured, re-tuned
+            // for SBND from the 10 hand-scan data events; see match/docs/chisquare_flags_comparison.md
+            // §4). KS is the purity lever, chi2/ndf ceilings only fence the tail. The TIGHT
+            // operating point: very pure (~88% on the hand-scans, ~44% recall) per the directive
+            // that flag_high_consistent be pure (it gates the pre-LASSO cull). C++ default OFF =
+            // single-branch (highconsist_ks_max/min_ndf), bit-identical; SBND-on here.
+            // B1 clean very-good; B2 general good; B3 two_boundary; B4 x-boundary/close-PMT/
+            // window-truncated (ks-led, chi2 relaxed for missing charge).
+            highconsist_ladder: true,
+            hc_clean_ks: 0.06, hc_clean_c2: 6.0,
+            hc_good_ks:  0.09, hc_good_c2:  4.0,
+            hc_tb_ks:    0.10, hc_tb_c2:    8.0,
+            hc_miss_ks:  0.08, hc_miss_c2:  60.0,
+            hc_miss_min_ndf: 5,
+            // Per-bundle chi2 relaxation (prototype FlashTPCBundle.cxx:480-502): for a
+            // close-to-PMT bundle, a channel with a big measured excess over the
+            // prediction (pe-pred > chi2_pmt_excess PE AND pe > chi2_pmt_ratio*pred) gets
+            // its denominator widened by (pe*chi2_pmt_inflate)^2 (near-PMT over-response
+            // is not a real mismatch); and the single worst-chi2 channel is dropped if it
+            // is a dead/inefficient PMT (pe==0, pred>0). chi2_pmt_excess re-tuned for SBND.
+            // C++ default OFF = bit-identical; SBND-on.
+            chi2_relax: true,
+            chi2_pmt_excess: 350.0,
+            chi2_pmt_ratio: 1.3,
+            chi2_pmt_inflate: 0.5,
             // §H raw readout-window truncation flag is always computed by
             // QLMatching (T0-independent, APA-agnostic) and is currently inert
             // (no consumer). edge threshold = 24 ticks (6 live slices, rebin 4).
@@ -146,20 +209,90 @@ function(params) {
             // 4-part in-window guard in compute_endpoint_flags (match/docs
             // qlmatching-code.md §4.1a). Default OFF in C++; enabled here for SBND.
             require_containment: true,
+
+            // Cross-TPC cathode-crossing consistency confirm-stamp (post-matching).
+            // For each coincident matched-main-cluster pair across the two TPCs, set
+            // flag_xtpc_consistent + the per-cluster "xtpc_consistent" output scalar when
+            // the two halves connect as one track across the cathode. Cuts tuned on the
+            // 10 SBND hand-scan data events (9/10 true, 0/71 false): closest approach
+            // (T0-corrected, per-TPC y,z pos_offset applied) < xtpc_dmax, or — when a half
+            // is window-truncated — the connecting vector collinear with both local Hough
+            // directions to within xtpc_angle_max. C++ default OFF (output bit-identical);
+            // SBND-on. Observation-only: matched assignments unchanged. See
+            // match/docs/chisquare_flags_comparison.md and sbnd_xin cathode-crossing doc.
+            xtpc_flag: true,
+            xtpc_dmax: 5 * wc.cm,
+            xtpc_dmax2: 300 * wc.cm,
+            xtpc_angle_max: 20,
+            xtpc_hough_radius: 15 * wc.cm,
+
+            // Light-pattern over-prediction prefilter (the prototype fired-fraction
+            // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle
+            // before the chi2 fit when its predicted light is much larger than the
+            // measured light over the masked PMT set:
+            //   reject if  sum(pred)/sum(meas) > overpred_total_ratio
+            //          or  pred/meas at the brightest predicted PMT > overpred_maxch_ratio
+            // Boundary/truncated bundles are exempt. Ceilings tuned on the 10 data
+            // hand-scans (worst non-boundary GT R_total=1.92, R_max=2.89, x1.5 margin)
+            // and validated on the 10 MC hand-scans (0 GT removed, ~26%/32% of non-GT
+            // bundles culled). See sbnd_xin/ql_prefilter_tune.py. Default OFF in C++.
+            reject_overpred: true,
+            overpred_total_ratio: 2.9,
+            overpred_maxch_ratio: 4.3,
+
+            // Empty-flash light-quality rescue (prototype flash-centric pick). The
+            // LASSO selects by strength and can leave a flash with no surviving bundle
+            // even when a cluster is a good LIGHT match for it (the cluster was won by a
+            // neighbour flash on strength alone). After the fit, each emptied flash
+            // adopts its best light-quality candidate (ks*(chi2/ndf)^0.8, with a
+            // 0.8/0.64 boundary/near-PMT down-weight) if the metric clears
+            // rescue_metric_max. Enforces ONE flash per cluster: a cluster already
+            // matched elsewhere is REASSIGNED (not double-listed) only when this flash
+            // is a strictly better light match (never removes a better match).
+            //
+            // CAVEAT (validated on 10 data + 10 MC hand-scans): most of the hand-scan
+            // misses are timing/drift-degenerate, NOT light-recoverable -- the cluster
+            // fits its WRONG flash as well as (or better than) the correct one, so no
+            // light bar can separate them (e.g. a correct match can have light metric
+            // 25.9 while an empty flash out-fits it at 0.68). The conservative bar 0.5
+            // is set BELOW the lowest data-regression metric (0.68): it recovers the
+            // single light-separable case (MC evt11 (10,8): metric 0.13 vs 6.37 at the
+            // wrong flash) at ZERO regression on the 20 events, and leaves the data set
+            // unchanged. It does change SBND production matching (single-flash
+            // reassignment) -- accepted for the +1; the remaining misses need a
+            // drift/timing discriminator (and the cross-TPC ones the xtpc machinery),
+            // not a light rescue. Default OFF in C++ (huge bar = inert, bit-identical).
+            empty_rescue: true,
+            rescue_metric_max: 0.5,
+            rescue_exponent: 0.8,
+            rescue_boundary_weight: 0.8,
+
+            // Per-event dynamic dead-PMT auto-mask. Within one event/TPC, drop a PMT
+            // that never fires (max PE over the event's flashes < auto_mask_pe_low)
+            // while its nearest live PMTs do -- a channel dead in THIS run but absent
+            // from the static ch_mask above. SBND-on by default: the static ch_mask
+            // fits the original data run but is wrong run-to-run (e.g. lan-reco2 has
+            // ch69 dead but live in the original; see match/docs and the per-run PMT
+            // health study). auto_mask folds into run.opdet_mask so prediction / chi2 /
+            // KS / ndf all inherit it. Validated to mask the run-dead PMT with zero
+            // false positives. C++ default OFF (non-SBND production bit-identical); the
+            // C++ trigger thresholds (pe_low 5, K-neighbours 4, pe_bright 50,
+            // min_contrast 1, min_flash 3) are used unless overridden.
+            auto_mask: true,
     },
 
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
-    // `extra` is an optional data overlay merged last (default {} => no-op, production
-    // bit-identical). The sbnd_xin standalone chain uses it to enable the per-PMT
-    // predicted-PE non-linearity (pmt_nonlinearity / pmt_nl_knee / pmt_nl_beta / _gamma);
-    // canonical callers pass nothing, so the correction stays OFF in production.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', extra={}):: g.pnode({
+    // `pmt_nl` (default true) bakes the per-PMT predicted-PE non-linearity overlay
+    // (nl_on) into the node; pass pmt_nl=false to disable it. `extra` is an optional
+    // data overlay merged last (default {} => no-op) for other per-call tweaks.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
               + match_data(dv, reality, semimodel_file, cathode_fiducial)
+              + (if pmt_nl then nl_on else {})
               + extra,
     }, nin=1, nout=1),
 
@@ -170,7 +303,7 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', extra={}):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -183,7 +316,8 @@ function(params) {
             // dump file holds both TPCs (sbnd_xin/ql_scan).
             calib_dump: calib_dump,
         } + match_data(dv, reality, semimodel_file, cathode_fiducial)
-          + extra,  // optional overlay (default {} => no-op); sbnd_xin uses it for PMT non-linearity
+          + (if pmt_nl then nl_on else {})  // PMT non-linearity ON by default for SBND (pmt_nl=false disables)
+          + extra,  // optional overlay (default {} => no-op) for other per-call tweaks
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be
         // dangling), so declare it as a dependency to get it into the job config.

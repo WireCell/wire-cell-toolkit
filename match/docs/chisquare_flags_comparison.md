@@ -37,7 +37,7 @@ two LASSO rounds is a weak-bundle prune** (no merging), and (b) **merging is str
 
 | Stage | Toolkit `QLMatching.cxx` | Prototype `ToyMatching.cxx` |
 |---|---|---|
-| **1. Pre-filter** (consistency cull) | KS==1 degenerate guard at formation (`:549-552`); then for each cluster with a consistent bundle, drop its other non-consistent bundles (`:642-653`) | for each flash with a consistent bundle, drop remaining bundles no consistent bundle can absorb (`examine_bundle` merge-test, `:1307-1358`) |
+| **1. Pre-filter** (geometry + light + consistency cull) | TPC-containment cull (`require_containment`, SBND-on, §15); KS==1 degenerate guard at formation (`:549-552`); **over-prediction light cull** (`reject_overpred`, SBND-on, §15); then for each cluster with a consistent bundle, drop its other non-consistent bundles (`:642-653`) | TPC-containment gate (`flag_good_bundle`); for each flash with a consistent bundle, drop remaining bundles no consistent bundle can absorb (`examine_bundle` merge-test, `:1307-1358`); fired-fraction reject (`:547-602`) |
 | **2. R1 fit** | LASSO with per-flash background/light DOF; post-fit prune strength ≤ `0.05` (`:670-751`) | LASSO with per-flash "flash-alone" DOF; post-fit prune `beta < 0.05` (`:1377-1548`) |
 | *(between rounds)* | **prune only — no merging** (`:743-750`) | **prune only — no merging** (`:1516-1547`) |
 | **3. R2 fit** | background DOF dropped; KS-shape term added to weights; prune + keep best flash per cluster (`:753-849`) | flash DOF dropped; `f1` 0.06→0.05; keep best beta per cluster (`:1552-1663`) |
@@ -172,6 +172,27 @@ So this is **not** "toolkit has Poisson, prototype doesn't." The real porting ha
 *where* Poisson is folded in, not *whether*. Re-deriving the `350`-PE inflation threshold for SBND
 is mandatory regardless (§9).
 
+### 3.1 The ported χ² relaxation (implemented, `chi2_relax`)
+
+The prototype's two per-bundle χ² relaxations (§3) are now ported behind
+`BundleQualityParams::chi2_relax` (`TimingTPCBundle::examine_bundle`; **C++ default OFF =
+bit-identical; SBND-on**), keeping the toolkit's `pe + perr²` Poisson base:
+
+- **Close-to-PMT denominator inflation**: when `flag_close_to_PMT` and a channel shows a big measured
+  excess (`pe − pred > chi2_pmt_excess` PE **and** `pe > chi2_pmt_ratio·pred`), the denominator is
+  widened by `(pe·chi2_pmt_inflate)²`. `chi2_pmt_excess` is absolute PE and was **re-validated for
+  SBND**: the prototype's `350` is kept, but only after confirming the SBND close-to-PMT measured
+  excess sits at a *median ~2300 PE* (p90 ~7000), so 350 cleanly admits genuine over-response while
+  excluding sub-350 noise. `chi2_pmt_ratio = 1.3`, `chi2_pmt_inflate = 0.5` (prototype values).
+- **One-inefficient-PMT subtraction**: the single worst-χ² channel, if `pe == 0 && pred > 0`, is
+  dropped (`chi² −= max_χ² − 1`).
+
+**Live but benign.** On the 20 hand-scan events the inflation *fires* (the excess condition is met)
+but changes **no** `flag_high_consistent` ladder or end-to-end matching decision: the ladder is
+KS-led and its B4 branch (§4.1b) already loosens the χ² ceiling for close-to-PMT/boundary/truncated
+bundles, so reducing those bundles' χ² further does not move the gate. It is kept as the faithful
+prototype port (it does change χ² *values*, so it is not a no-op for any future χ²-keyed consumer).
+
 ## 4. `flag_high_consistent` consistency gate
 
 `flag_high_consistent` is a pre-LASSO quality flag: a high-consistency bundle survives, and within
@@ -210,7 +231,44 @@ than the prototype's `ndf · 36`; this differs because SBND has many more channe
 
 A further prototype gate beyond `flag_high_consistent` (`FlashTPCBundle.cxx:547-602`) uses the
 "fired fraction" (`nfired/ntot` of channels with `pred > 0.33`) to set `flag_potential_bad_match`
-and to reject bundles outright — also boundary-aware. The toolkit has no equivalent.
+and to reject bundles outright — also boundary-aware. The toolkit ports the *over-prediction*
+direction of this as a simpler, data-tuned **light prefilter** (`reject_overpred`, §15): a bundle is
+dropped before the fit when its predicted light hugely exceeds the measured light (the prototype's
+"way more light than the flash shows" case), boundary-exempt like the prototype.
+
+### 4.1b The ported SBND ladder (implemented, `highconsist_ladder`)
+
+The single toolkit branch is replaced — **behind `highconsist_ladder` (C++ default OFF =
+single-branch, bit-identical; SBND-on)** — by a flag-aware ladder that ports the prototype's
+*structure* but **re-derives every number from the 10 hand-scan data events**. The prototype's
+χ²-per-ndf multipliers (36/45/55) do **not** transfer: after the SBND PE-error recipe a good
+match has χ²/ndf ≈ 1–2 (not MicroBooNE's tens), so those multipliers would be absurdly loose here.
+The empirics that set the design (`work/ql_recipe` dumps vs `work/ql_labels/data`): **KS is the
+purity lever, χ²/ndf is not** — in every flag category true matches sit at ks ~0.09–0.12 while
+background sits at ks ~0.44–0.68, but χ²/ndf is ~15 for *both*. So the ladder is KS-led, with
+χ²/ndf ceilings only fencing the tail. Branches (`TimingTPCBundle.cxx`, OR; `c2n = chi2/ndf`):
+
+| # | branch | condition | maps to user idea |
+|---|---|---|---|
+| B1 | clean very-good | `ndf≥3 && ks<0.06 && c2n<6` | "very good KS + low χ²" |
+| B2 | general good | `ndf≥3 && ks<0.09 && c2n<4` | (clean, moderate) |
+| B3 | two_boundary | `flag_two_boundary && ndf≥3 && ks<0.10 && c2n<8` | "flag_2_boundary: both reasonable" |
+| B4 | x-bnd / close-PMT / window-trunc | `(flag_at_x_boundary‖flag_close_to_PMT‖flag_window_truncated) && ndf≥5 && ks<0.08 && c2n<60` | "these flags: KS reasonable, χ² can be higher (missing charge)" |
+
+This is the **TIGHT** operating point, chosen because `flag_high_consistent` gates the pre-LASSO
+cull (`cull_inconsistent`, §1.1) and so **must be pure**; lower efficiency is acceptable. B4
+deliberately relaxes the χ² ceiling, *not* the KS — the simpler analogue of the prototype's
+per-channel `+(pe·0.5)²` denominator inflation (§3), which is **not** ported. The eight ceilings
++ `hc_miss_min_ndf` are jsonnet-exposed (`BundleQualityParams::hc_*`) for retuning; `flag_two_boundary`
+is now computed in the matching path whenever the ladder is on (previously calib-dump-only).
+
+**Measured impact** (the 10 hand-scan data events; `work/ql_ladder` vs the single-branch baseline):
+flag recall **18%→44%**, purity **82%→88%**, true-matches culled **2→1**. End-to-end, true-match
+agreement in the matched output rises **89→93 / 100** (+4). MC (validation only, *not* retuned):
+purity 94%, recall 53% (cleaner sim → looser), end-to-end **87→92 / 113** (+5). No regressions.
+
+`flag_spec_end` (prototype demotion gate, `ToyMatching.cxx:790-804`) is **not ported**: it is
+never set in SBND (0/99 selected, 0/762 background), so it is inert here.
 
 ### 4.1 Bundle add/merge thresholds (`§F` knobs)
 
@@ -271,11 +329,11 @@ keep/drop consistency cull — a different use, not a merge.) See §9 for the re
 
 | Flag | Toolkit: where SET | Prototype: how USED | Toolkit status |
 |---|---|---|---|
-| `flag_close_to_PMT` | `QLMatching.cxx:1128` (anode-end, within `m_anode_ext2`) | χ² denom inflation `+ (pe·0.5)²` for big excess (`FlashTPCBundle.cxx:480-485`); relaxed consistency `χ²<55·ndf` (`:518`); LASSO weight 1.0→0.2 via paired `flag_at_x_boundary` | **inert** (debug log only) |
-| `flag_at_x_boundary` | `QLMatching.cxx:1129` (anode), `:1155` (cathode, CPA 3-D fiducial) | relaxed consistency `χ²<9·ndf`/`3·ndf` (`FlashTPCBundle.cxx:510-513`); LASSO weight 1.0→0.2 (`ToyMatching.cxx:1437-1441`, rd1; `1603-1607`, rd2) | **inert** |
-| `flag_spec_end` | `QLMatching.cxx:1080,1104,1124` | informational; tail-alignment bookkeeping | **inert** |
-| `flag_window_truncated` | `QLMatching.cxx:1032-1037` (slice within `m_window_edge_ticks` of readout window edge) | *no direct prototype analog* — see note below | **inert** |
-| `flag_potential_bad_match` | (toolkit sets via `ks==1` drop, `QLMatching.cxx:550`) | fired-fraction reject, boundary-aware (`FlashTPCBundle.cxx:577-599`) | partial |
+| `flag_close_to_PMT` | `QLMatching.cxx:1128` (anode-end, within `m_anode_ext2`) | χ² denom inflation `+ (pe·0.5)²` for big excess (`FlashTPCBundle.cxx:480-485`); relaxed consistency `χ²<55·ndf` (`:518`); LASSO weight 1.0→0.2 via paired `flag_at_x_boundary` | **active**: LASSO down-weight (`lasso_flag_weight`, §6.2) + χ² denom inflation (`chi2_relax`, §3.1) + ladder B4 (§4.1b) |
+| `flag_at_x_boundary` | `QLMatching.cxx:1129` (anode), `:1155` (cathode, CPA 3-D fiducial) | relaxed consistency `χ²<9·ndf`/`3·ndf` (`FlashTPCBundle.cxx:510-513`); LASSO weight 1.0→0.2 (`ToyMatching.cxx:1437-1441`, rd1; `1603-1607`, rd2) | **active**: LASSO down-weight (`lasso_flag_weight`, §6.2) + ladder B4 (§4.1b) |
+| `flag_spec_end` | `QLMatching.cxx:1080,1104,1124` | informational; tail-alignment bookkeeping | **inert** (not set in SBND; §4.1b) |
+| `flag_window_truncated` | `QLMatching.cxx:1032-1037` (slice within `m_window_edge_ticks` of readout window edge) | *no direct prototype analog* — see note below | **active**: LASSO down-weight (`lasso_flag_weight`, §6.2) + ladder B4 (§4.1b) + cross-TPC scenario 2 (§16) |
+| `flag_potential_bad_match` | toolkit sets via `ks==1` drop **and the over-prediction light prefilter** (`reject_overpred`, §15) | fired-fraction reject, boundary-aware (`FlashTPCBundle.cxx:577-599`) | **active** (over-prediction direction; §15) |
 
 Prototype flag-set site (`ToyMatching.cxx:281-290`): `flag_close_to_PMT` + `flag_at_x_boundary` are
 set when the cluster's **anode-end** position falls in the low-x boundary window; `flag_at_x_boundary`
@@ -376,6 +434,23 @@ content into the per-column penalty: prototype = drift geometry (the boundary do
 inert in the toolkit, §5); toolkit = PE-total mismatch + KS shape. From the likelihood view above
 these are just different choices of *per-candidate prior plausibility* — geometry-based vs
 agreement-based — fed into the same weighted-LASSO machinery.
+
+### 6.2 The ported flag down-weight (implemented, `lasso_flag_weight`)
+
+The prototype's boundary down-weight is now ported behind `lasso_flag_weight` (**C++ default OFF =
+factor 1.0, bit-identical; SBND-on**). `QLMatching::lasso_flag_factor(bundle)` returns
+`lasso_boundary_weight (0.2)` when the bundle is `flag_at_x_boundary || flag_close_to_PMT ||
+flag_window_truncated` (the ladder-B4 group, generalizing the prototype's `flag_at_x_boundary`-only
+0.2), else 1.0. It **multiplies** the existing per-column base (`pe_mismatch` floor/knee in round 1;
+`base + KS-shape` in round 2) in `fit_round1`/`fit_round2`, so the toolkit's agreement-based content
+is kept and only *scaled down* for boundary bundles. A down-weighted bundle pays less L1 penalty,
+is shrunk less, and so survives the `strength_cutoff` instead of being killed — the point being that
+a boundary/truncated bundle's *measured* light is an underestimate (§5, §13.4), so a raw PE-mismatch
+penalty would wrongly reject a real match.
+
+**Measured impact** (10 data + 10 MC hand-scans, true-match agreement): **DATA +2 (92→94)**, MC
+net-neutral (one event loses two marginal `ks > 0.25` boundary matches, offset by gains elsewhere).
+Purity-first, net-positive, no per-event data regression — kept.
 
 ## 7. Light error model — two distinct sites
 
@@ -732,6 +807,19 @@ the prototype gives a cluster several chances at different flashes before abando
 toolkit drops it on the first failed out-of-beam QA. Whether SBND wants the prototype's recovery
 rounds is a port decision (§10-adjacent; not yet on that checklist). The full algorithm is §12.3.
 
+**Resolution (2026-06-04 gap review).** The high-value, light-separable slice of the orphan
+re-matching IS now ported as `empty_rescue` (§4.4a): each LASSO-emptied flash adopts its best
+light-quality candidate (`ks·(χ²/ndf)^0.8`) from the pre-fit snapshot, one-flash-per-cluster.
+The residual full 3-round loop is empirically inert for SBND — of ~5 hand-scan misses only 1 is
+light-separable (recovered at zero regression); the rest are timing/drift-degenerate (no light bar
+separates recover-from-steal) or cross-TPC (handled by the `xtpc` machinery). The one genuinely
+**live, un-ported** piece is `examine_beam_bundle`'s beam-flash *promotion*: the toolkit ladder has
+no "beam flash with no consistent bundle → promote its best" fallback, so the toolkit is strictly
+*more permissive* there (it leaves more candidates in the LASSO; it cannot drop a true match).
+Low SBND impact; addable behind a default-OFF / SBND-on knob if a beam-recall need ever shows up.
+Verdict: **post-fit / merge / re-matching port is complete for SBND**; only this minor promotion
+remains optional.
+
 ### 12.3 Prototype stage-5 algorithm — orphan re-matching (`organize_matched_bundles`)
 
 This is the prototype's entire post-fit stage (`ToyMatching.cxx:1744`, called at `:1724`). Its input
@@ -781,6 +869,30 @@ all are exhausted. Note the asymmetry the toolkit would need to replicate: round
 just the surviving matched bundles — the prototype keeps every candidate pairing available for
 recovery. The toolkit's `organize_bundles` only merges (§4.1) and then *removes* out-of-beam failures
 (§12.2); it has no analogue of any of these three rounds.
+
+#### 12.3a Toolkit status — the organize result is vestigial; the empty-flash rescue (SBND-on)
+
+Two findings from porting this stage (validated on 10 data + 10 MC hand-scans):
+
+1. **`organize_bundles`' output is discarded.** `fit_round2` builds a `results_flash_bundles_map`
+   from the organized `results_bundles` and then never assigns it back to `run.flash_bundles_map` —
+   the matched output is just the strength-cutoff survivors. So the toolkit's per-flash best-pick
+   *removals* and the §12.2 out-of-beam QA are dead w.r.t. output (the same-flash `add_bundle` *merge*
+   mutation IS observable, via the shared `shared_ptr`s). See `qlmatching-code.md` §4.4.
+
+2. **The recoverable misses are timing/drift-degenerate, not light-recoverable.** The single piece of
+   the prototype's recovery that the hand-scan misses actually need is the *light-quality, flash-centric*
+   pick (rounds 2–3 reach `fc_bundles_map` and rank by `ks·(chi2/ndf)^0.8`, **strength-independent**).
+   The ported `rescue_empty_flashes` (§4.4a, `empty_rescue`) does exactly that for **emptied** flashes,
+   enforcing one-flash-per-cluster by reassignment. But the misses where a cluster lost its flash to a
+   neighbour are degenerate: the cluster fits its **wrong** flash as well as the correct one (a correct
+   match can have light metric 25.9 while an empty flash out-fits it at 0.68), so **no light bar
+   separates recover-vs-steal**. Only **one** of ~5 hand-scan misses is light-separable (MC evt11
+   `(10,8)`: 0.13 at the correct flash vs 6.37 at the wrong one). The conservative bar
+   `rescue_metric_max = 0.5` (below the lowest data-regression metric 0.68) recovers exactly that one
+   at **zero regression** (DATA 95→95, MC 98→99). The rest need a drift/timing discriminator the
+   standalone matcher lacks; the cross-TPC ones belong to §16's `xtpc` machinery. Default OFF ⇒
+   bit-identical.
 
 ### 12.4 Masking and the KS shape metric (a toolkit asymmetry)
 
@@ -958,3 +1070,189 @@ these near-hard constraints. The per-column L1 `weights` (§6.1) ride on top of 
 columns survive; the `strength_cutoff = 0.05` then converts the soft solution into hard matches (§8).
 This architecture is shared; only the per-column `weights` content (§6.1) and the §13 light predictor
 differ between the codes.
+
+## 15. The bundle prefilter (what reaches the χ² fit)
+
+Before the LASSO/χ² fit (§8), each (flash × cluster) bundle passes through a prefilter in
+`build_bundles` (`QLMatching.cxx`). Two of its stages are **geometry** then **light**, both ported
+from the MicroBooNE prototype, both **default OFF in C++ / SBND-on in jsonnet** (convention
+`feedback_toggleable_behavior_changes`). Surviving bundles are what the fit sees.
+
+### 15.1 Geometry — `require_containment` (already present; SBND-on)
+
+`require_containment` drops a bundle whose charge cluster is not contained in the TPC drift box once
+the flash-T0 x-offset is applied (`QLMatching.cxx`, cull at `if (m_require_containment && !contained)
+continue;`). `contained` is the 4-part box test in `compute_endpoint_flags`, a direct port of the
+prototype `flag_good_bundle` gate (`ToyMatching.cxx:272-275`) with the same cushions (−2 cm anode,
++1.2 cm cathode — "not too far outside the box"). Validated against the 20 hand-scans: **0 of the
+214 ground-truth bundles are dropped** by containment (`sbnd_xin/ql_prefilter_tune.py` step 1).
+
+### 15.2 Light — `reject_overpred` (new; SBND-on)
+
+A bundle is dropped when its **predicted** light is much larger than the **measured** light: a charge
+cluster emitting far more light than the flash actually shows cannot be the match. It is
+**one-directional** — under-prediction is allowed (a flash may be lit by several clusters; near-PMT
+over-response and window truncation make *measured* an underestimate). This ports the over-prediction
+direction of the prototype fired-fraction reject (`FlashTPCBundle.cxx:547-602`) as a simpler,
+data-tuned cut. Two metrics, both over the **same `opdet_mask` the χ² uses** (PMT, same TPC, active):
+
+```
+R_total = Σ pred_masked / Σ meas_masked
+R_max   = pred[ch*] / max(meas[ch*], 1),   ch* = argmax(pred_masked)
+reject if (R_total > overpred_total_ratio  OR  R_max > overpred_maxch_ratio)
+```
+
+Boundary/truncated bundles (`close_to_PMT | window_truncated | at_x_boundary`) are **exempt**
+(measured underestimates there), mirroring the prototype's boundary-aware reject and the flash drops
+in `ql_pe_error.py`. A rejected bundle gets `flag_potential_bad_match` and is skipped before
+`pre_bundles`, exactly like the KS==1 guard, so it never enters the fit.
+
+**Tuning & validation** (`sbnd_xin/ql_prefilter_tune.py`, parity `ql_prefilter_parity.py`). Cuts were
+set on the **10 data hand-scans** as (worst non-boundary ground-truth) × 1.5 margin and confirmed on
+the **10 MC hand-scans** (the GT baseline is not 1.0 — true matches over-predict ~1.3 — and shifts
+data↔MC via `data_qtol=0.86` vs `sim=1.0`, so the data→MC transfer was checked explicitly):
+
+| | worst non-boundary GT `R_total` | worst GT `R_max` | GT removed | non-GT culled |
+|---|---|---|---|---|
+| data (tune) | 1.92 | 2.89 | 0 | 26% |
+| MC (validate) | 1.11 | 2.81 | 0 | 32% |
+
+Chosen SBND values (`cfg/pgrapher/experiment/sbnd/qlmatching.jsonnet`): `overpred_total_ratio = 2.9`,
+`overpred_maxch_ratio = 4.3`. Post-build re-dump confirms **full C++/Python parity** (the C++ flags
+exactly the bundles the Python metric predicts: 190/190 data, 355/355 MC) and **0 GT rejected**.
+
+Config knobs (defaults inert in C++): `reject_overpred` (false), `overpred_total_ratio` (1e9),
+`overpred_maxch_ratio` (1e9).
+
+## 16. Cross-TPC cathode-crossing cull (`flag_xtpc_consistent`)
+
+A cathode-crossing cosmic is reconstructed as two halves — one per TPC — lit by **one coincident
+flash group**. If the per-TPC matcher picked the *correct* cluster in both TPCs, the two halves form
+one continuous track across the cathode. That cross-TPC geometry is an independent constraint the
+per-TPC χ²/KS ladder (§4) cannot see (it is single-TPC). It is used as a **pre-fit cull**: a pair of
+candidate bundles confirmed as one cathode-crosser drops their competing rivals before the LASSO, so
+fewer bundles enter the fit (the §1.1 stage-1 idea, extended across TPCs). It is a **separate** flag,
+not overloaded onto `flag_high_consistent`.
+
+*(History: this was originally a post-matching observation-only confirm-stamp that also wrote a
+per-cluster `xtpc_consistent` output scalar. It is now a pre-fit cull that DOES change matching, and
+the output scalar was removed — only the `-calib` bundle field remains. The geometry/cuts below are
+unchanged except for the new scenario-2 distance ceiling.)*
+
+**Where.** The per-APA pipeline `run_one_apa` is split at the LASSO boundary into
+`run_one_apa_prefit` (bundles + the per-TPC `cull_inconsistent`) and `run_one_apa_fit` (the two LASSO
+rounds + output). `operator()` runs the prefit for **all** APAs, then
+`QLMatching::cull_cross_tpc(runs)` (multi-APA, `xtpc_flag`), then the fit for all APAs. The OFF path
+is the historical single-loop order, bit-identical. `cull_cross_tpc` reuses the `-cathode-diag`
+geometry primitives (`xtpc_pair_consistent`: full-cluster closest-point pair +
+`Cluster::vhough_transform` local dirs + `conn`, with the per-TPC transverse offset `ApaRun.dy/dz`
+applied), but pairs **candidate** main-cluster bundles (every coincident-flash bundle, not just
+matched mains). A wrong-flash pairing carries the wrong T0 x-offset ⇒ large `d` ⇒ self-vetoing. A
+confirmed pair sets `flag_xtpc_consistent` on both bundles; then per run, a cluster owning an
+xtpc-consistent bundle drops its other bundles that are neither high- nor xtpc-consistent.
+
+**The two scenarios:** for each TPC0×TPC1 candidate-main pair with coincident flash times
+(`|t0−t1| < flash_group_window`), in the T0-corrected frame,
+
+- **Scenario 1 — closest distance** (cathode end present): `flag = d < xtpc_dmax (5 cm)`.
+- **Scenario 2 — three-vector collinearity** (a half is `flag_window_truncated`, cathode end missing
+  so `d` is large): `conn`, `dir0`, `dir1` mutually collinear (`a01,a0c,a1c < xtpc_angle_max (20°)`)
+  **AND** `d < xtpc_dmax2 (300 cm)`. The distance ceiling is load-bearing in the candidate
+  population — see below.
+
+Combined: `flag_xtpc_consistent = (d < 5 cm) OR (window_truncated AND d < 300 cm AND a01,a0c,a1c < 20°)`.
+
+**Cuts — tuned on the 10 SBND hand-scan data events only** (MC validation; reconstruct every
+coincident **candidate**-main pair, TRUE iff both halves hand-scan-selected, on the real C++ `vhough`
+values via a temporary all-pairs log). Scenario 1 is clean: no FALSE pair has `d < 326 cm`. Scenario
+2 is the subtle one: pairing *candidate* (not just matched) bundles admits far-apart collinear
+truncated pairs the post-fit version never saw — a data false at `d=473 cm` and an MC false at
+`d=406/326 cm`, all with angles `< 14°`. **Angle cannot separate them** (the MC false at `3.6°` is
+*more* collinear than the data true evt1302 at `2.8°`); **distance can** — every true scenario-2 pair
+sits at `d ≤ 264 cm`, every false at `d ≥ 326 cm`, hence `xtpc_dmax2 = 300 cm`. With the ceiling:
+**flag purity 100% (data 16/16, MC 30/30 flagged true).** End-to-end (true-match agreement vs the
+post-fit baseline): the cull removes ~46 (data) / ~139 (MC) rival bundles pre-fit and takes **MC
+recall 91→97 (+6), DATA flat 92**, with no per-event data regression. (Tune the vhough angles/`d` on
+the real C++ values, never a python PCA proxy — the PCA proxy mis-estimates the angle.)
+
+Config (default OFF = bit-identical; SBND-on): `xtpc_flag`, `xtpc_dmax`, `xtpc_dmax2`,
+`xtpc_angle_max`, `xtpc_hough_radius` (§11 table in `qlmatching-code.md`). Output: the
+`flag_xtpc_consistent` bundle field in the `-calib` dump (no root-node scalar).
+
+## 17. QLMatching runtime cost (timing & memory)
+
+**Measured on our own locally-imaged clusters** (file 1 of `input-3files-lan-reco2`, 50
+real BNB+cosmic data events, SBND-on, joint two-TPC matching). Active **and** dead blobs
+were imaged in-toolkit from the SP frames (`wct-img-all.jsonnet` + in-graph masked
+imaging) — **no foreign `*-active.npz`** (see [[feedback_own_imaging_only]]). Per-event
+cost is instrumented directly in `QLMatching::operator()` via the existing `ExecMon em`,
+which emits one line per event:
+
+```
+QLMatching timing: ident <N> took <ms> ms, proc RSS <MB> MB (delta <MB> MB)
+```
+
+`took` is the full `operator()` wall (prefit + cross-TPC cull + fit + output build).
+`proc RSS` is the **whole matching process** resident set at that point (size→resident is
+`MemUsage::current().second`); `delta` is QLMatching's own incremental RSS over its entry
+baseline. The chain is single-threaded (`Pgrapher`), so no other node runs inside the
+measured window — the only logging overhead inside it is QLMatching's own ~150 debug
+lines/event (tens of ms vs seconds), i.e. the numbers are compute, not log I/O.
+
+### 17.1 Timing — QLMatching is seconds/event, not "sub-second"
+
+Per-event `took`, 49 events (stable across three independent runs):
+
+| metric | value |
+|---|--:|
+| median | **5.2 s** |
+| mean | 7.5 s |
+| p99 / max | **31 s** (event 60933, the busiest cosmic pile-up) |
+| total (49 evt) | **369 s** |
+
+For context, the whole matching process (dead imaging + per-APA clustering + all-APA
+clustering + QLMatching) ran ~658 s wall over this file, so **QLMatching alone is ~56 % of
+the matching-process wall**. This corrects the earlier "QLMatching is sub-second" note
+(which was measured against yuhw's sparser larsoft active.npz; see
+[[project_clustering_examinebundles_hotspot]]): on our richer multi-3view active clusters
+the cost scales with cluster/point count — hence the long tail (median 5 s, max 31 s).
+
+> **Per-phase drill-down (2026-06-05, supersedes the cause speculated here).** A later
+> per-phase profile of event 60933 (`qlmatching-perf-event60933.md`) found the dominant
+> cost is **not** PCA/`vhough`/`get_extreme_wcps` or the two-round LASSO (the LASSO solve
+> is ~1.4 ms). **91 % of the wall is `cull_cross_tpc`** — its `xtpc_pair_consistent`
+> closest-approach step is a brute-force O(npts0·npts1) double loop whose per-point
+> `point3d()` re-resolves a scoped k-d view (Scope hash + hashtable lookup), ~100 ns/pair
+> over 2.7×10⁸ pairs. It scales linearly with that point-pair count (84–91 % at both
+> median and tail).
+>
+> **Fixed** by hoisting the scope resolution out of the loop (bind the raw coordinate
+> arrays once; the T0 shift stays a scalar add — bit-identical). Re-running **all 150
+> lan-reco2 events** post-fix: `xtpc_cull` max **27 s → 0.4 s**, and QLMatching `took`
+> drops from median 5.2 s / max 31 s to **median 1.1 s / max 5.6 s**. The numbers above are
+> the pre-fix baseline. Post-fix, `build_bundles`/`SemiAnalyticalModel` (median 0.9 s) is
+> the dominant QLMatching phase, and the per-event reco wall is dominated by imaging and
+> `ClusteringExamineBundles`, not QLMatching. See `qlmatching-perf-event60933.md`.
+
+### 17.2 Memory — QLMatching's own footprint is negligible
+
+| metric | value |
+|---|--:|
+| matching-process RSS at QL end (median) | **691 MB** |
+| matching-process RSS at QL end (max) | 707 MB |
+| QLMatching incremental ΔRSS (median / max) | **≈ 0 MB** (−6 .. +0) |
+
+The process resident set (~0.7 GB, dominated by the clustering point clouds) is already
+fully resident when QLMatching runs; the matcher reuses that pctree in place and allocates
+essentially nothing of its own (the small negative deltas are allocator give-back during
+matching). The whole-process **peak** RSS (`VmHWM`, polled externally) was **985 MB** for
+the matching job and **1131 MB** for the upstream active-imaging job. So matching is not a
+memory bottleneck; the per-event *time* is the cost to watch.
+
+> **Caveat (open, 2026-06-05).** The full 150-event local-imaging reprocess is **blocked by
+> an intermittent clustering heap-corruption** newly exposed by the richer local active
+> imaging (segfaults in `clus_all_apa` on a layout-dependent ~50–70 % of runs; clean under
+> gdb/valgrind layout, so it is a memory-corruption heisenbug, not the already-fixed
+> `fill_wrap_points` off-by-one). The timings above come from the runs that completed all
+> 49–50 events; root-causing is in progress (valgrind memcheck). The numbers are
+> representative per-event, but the end-to-end batch is not yet crash-clean.

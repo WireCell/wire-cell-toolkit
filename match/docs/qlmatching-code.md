@@ -87,12 +87,22 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `active_opdet_types` | `[1]` | `m_active_opdet_types` | OpDet `type`s kept by the mask (1=PMT, 0=(X)Arapuca); derived from the injected `OpDets` table |
 | `data` | `true` | `m_data` | data vs MC; MC masks saturated PMTs (`:258`) |
 | `beamonly` | `false` | `m_beamonly` | force beam window + skip strength cut |
-| `ch_mask` | `[]` | `m_ch_mask` | OpDet indices to disable |
+| `ch_mask` | `[]` | `m_ch_mask` | OpDet indices to disable (static, all events) |
+| `auto_mask` | `false` (SBND: **true**) | `m_auto_mask` | **per-event dynamic dead-PMT auto-mask** (`compute_dynamic_opdet_mask`, run in `compute_geometry` after the per-TPC mask cull, before `opdet_idx_v`). When true, within each event/TPC it drops a PMT that never fires (max measured PE over the event's flashes `< auto_mask_pe_low`) while its nearest *live* PMTs do (`>= auto_mask_min_contrast` flashes whose median PE over the `K` nearest live PMTs `> auto_mask_pe_bright`). Catches a channel dead in **this run** but absent from the static `ch_mask`; folds into `run.opdet_mask`, so prediction/χ²/KS/ndf all inherit it. C++ default OFF ⇒ non-SBND bit-identical; **SBND-on by default (2026-06-04)** — the static `ch_mask` is run-dependent (e.g. lan-reco2 has ch69 dead but live in the original data run), so auto_mask catches the run-dead channel the static mask misses. **Changes matching** when on. See §4.0a. |
+| `auto_mask_pe_low` | `5.0` | `m_auto_mask_pe_low` | a PMT "fires" if its max event PE ≥ this; below it across all flashes ⇒ candidate |
+| `auto_mask_neighbors` | `4` | `m_auto_mask_neighbors` | `K` nearest live PMTs (by Y,Z) used as the brightness reference |
+| `auto_mask_pe_bright` | `50.0` | `m_auto_mask_pe_bright` | neighbour-median PE above which "light was present" near the candidate |
+| `auto_mask_min_contrast` | `1` | `m_auto_mask_min_contrast` | # flashes with bright neighbours required to mask (the "never fires" guard is the dominant discriminator) |
+| `auto_mask_min_flash` | `3` | `m_auto_mask_min_flash` | skip auto-masking in a TPC with fewer flashes (too little evidence) |
 | `flash_minPE` | `500` | `m_flash_minPE` | min total PE to keep a flash |
 | `flash_min/maxtime` | ∓1500 ms | … | flash time window (overridden if `beamonly`) |
 | `beam_min/maxtime` | ∓5 ms | … | beam window |
-| `QtoL` | `0.5` | `m_QtoL` | charge→light scale in the prediction (`:317`) |
+| `QtoL` | `0.5` (SBND sim `1.0`, **data `0.86`**) | `m_QtoL` | charge→light scale in the prediction (`:317`). SBND scales the **data** prediction down by 0.86 (data over-predicts ~16%); sim stays 1.0. See `sbnd-opdetsim-chain.md` § PE-error study. |
 | `strength_cutoff` | `0.05` | `m_strength_cutoff` | LASSO solution threshold to keep a bundle |
+| `empty_rescue` | `false` (SBND `true`) | `m_empty_rescue` | **post-fit empty-flash light-quality rescue** (§4.4a). Adopt an emptied flash's best light candidate, reassigning one-flash-per-cluster. Default OFF ⇒ bit-identical; **changes matching** when on. |
+| `rescue_metric_max` | `1e9` (SBND `0.5`) | `m_rescue_metric_max` | rescue light-quality bar `ks·(chi2/ndf)^exp`; huge ⇒ inert. SBND `0.5` is below the lowest data-regression metric (recovers MC evt11 only, at zero regression) |
+| `rescue_exponent` | `0.8` | `m_rescue_exponent` | chi2/ndf exponent in the rescue metric (prototype 0.8) |
+| `rescue_boundary_weight` | `0.8` | `m_rescue_boundary_weight` | per-flag rescue down-weight, applied for `at_x_boundary` then `close_to_PMT` (prototype 0.8/0.64) |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
 | `anode_ext1` | `-2.0 cm` | `m_anode_ext1` | anode-side inclusion / flag-window edge in `u` (`anode_in`); see §4.1a |
@@ -104,9 +114,32 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `readout_window_ticks` | `3427` (SBND: **3428**) | `m_readout_window_ticks` | exclusive readout end for the trailing-edge truncation test; SBND jsonnet sets 3428 (rebin-4 `slice_index_max`) |
 | `require_containment` | `false` (SBND: **true**) | `m_require_containment` | when true, discard bundles whose cluster fails the TPC-box containment guard (prototype `flag_good_bundle`); see §4.1a. Default OFF keeps non-SBND configs bit-identical |
 | `cathode_fiducial` | `""` (SBND: CPA `CompositeFiducial` tn) | `m_cathode_fv` | optional CPA structure-exclusion fiducial tn. When set, the cathode-end `at_x_boundary` uses a 3-D point-in-volume test (§4.1a); empty ⇒ original flat-cathode 1-D window. Default empty keeps non-SBND configs bit-identical |
-| `pmt_nonlinearity` | `false` | `m_pmt_nonlinearity` | when true, map each PMT's predicted-PE total into the saturated (observed) space before `set_pred_flash` (`:721`): `pred' = knee·exp(β·L+γ·L²)`, `L=ln(pred/knee)`, for `pred > knee` (else identity). Study feature (profile-dependent); default OFF keeps production bit-identical. Enabled only in the sbnd_xin standalone chain. See `sbnd-opdetsim-chain.md` § "Applying the non-linearity in QLMatching". |
+| `pmt_nonlinearity` | `false` (C++); **SBND jsonnet default `true`** | `m_pmt_nonlinearity` | when true, map each PMT's predicted-PE total into the saturated (observed) space before `set_pred_flash` (`:721`): `pred' = knee·exp(β·L+γ·L²)`, `L=ln(pred/knee)`, for `pred > knee` (else identity). The C++ component default is OFF, but as of 2026-06-04 the SBND `qlmatching.jsonnet` `matching(...,pmt_nl=true)` bakes it ON by default (incl. production); `pmt_nl=false` restores the OFF baseline. See `sbnd-opdetsim-chain.md` § "Applying the non-linearity in QLMatching". |
 | `pmt_nl_knee` | `700` | `m_pmt_nl_knee` | PE below which the non-linearity is identity |
 | `pmt_nl_beta` / `pmt_nl_gamma` | `[]` (identity) | `m_pmt_nl_beta` / `_gamma` | per-OpDet log-quadratic power-law params; empty ⇒ identity. Generated by `sbnd_xin/pmt_nonlinearity_curve.py --emit-qlmatching` into `cfg/.../pmt_nonlinearity_params.jsonnet` |
+| `pe_err_floor` / `pe_err_frac` / `pe_err_knee` | `0.3 / 0.3 / 1.0` (SBND: **`5.0 / 0.25 / 20.0`**) | `m_pe_err_floor` / `_frac` / `_knee` | per-PMT light-error model `PE_err = (pe < knee ? floor : frac·pe)`, `σ² = meas + PE_err²`. SBND retuned (PE-error study): a 5 PE floor below a 20 PE knee, 25% above, so the fractional error is large at low PE and ~25% at high PE. Applied to both data and sim. |
+| `pe_err_on_pred` | `false` (SBND: **true**) | `m_pe_err_on_pred` | when true the **bundle chi2** (`examine_bundle`) computes `PE_err` from the **predicted** pe instead of the measured-based `flash->get_PE_err`; the LASSO weight stays per-flash measured-based. Default OFF keeps non-SBND configs (and the LASSO) bit-identical. See `sbnd-opdetsim-chain.md` § PE-error study. |
+| `highconsist_ladder` | `false` (SBND: **true**) | `m_highconsist_ladder` | when true `flag_high_consistent` uses the flag-aware multi-branch ladder (B1 clean / B2 good / B3 two_boundary / B4 x-bnd·close-PMT·trunc, KS-led) instead of the single `highconsist_ks_max`/`min_ndf` branch. Default OFF = bit-identical. Also forces `flag_two_boundary` to be computed in the matching path. TIGHT/pure operating point — see `chisquare_flags_comparison.md` §4.1b. |
+| `hc_clean_ks` / `hc_clean_c2` | `0.06` / `6.0` | `m_hc_clean_*` | B1 (clean very-good) KS / (chi2/ndf) ceilings. Inert unless `highconsist_ladder`. |
+| `hc_good_ks` / `hc_good_c2` | `0.09` / `4.0` | `m_hc_good_*` | B2 (general good) ceilings. |
+| `hc_tb_ks` / `hc_tb_c2` | `0.10` / `8.0` | `m_hc_tb_*` | B3 (`flag_two_boundary`) ceilings. |
+| `hc_miss_ks` / `hc_miss_c2` | `0.08` / `60.0` | `m_hc_miss_*` | B4 (`flag_at_x_boundary`‖`flag_close_to_PMT`‖`flag_window_truncated`) ceilings — KS tight, chi2 relaxed (missing charge). |
+| `hc_miss_min_ndf` | `5` | `m_hc_miss_min_ndf` | B4 ndf floor (B1–B3 reuse `highconsist_min_ndf`). |
+| `chi2_relax` | `false` (SBND: **true**) | `m_chi2_relax` | per-bundle χ² relaxation in `examine_bundle` (`BundleQualityParams::chi2_relax`): close-to-PMT denominator inflation + one-inefficient-PMT subtraction (`chisquare_flags_comparison.md` §3.1). Default OFF = bit-identical. Live-but-benign on the hand-scans (the KS-led ladder absorbs it). |
+| `chi2_pmt_excess` | `350` (PE) | `m_chi2_pmt_excess` | measured-excess threshold for the close-to-PMT inflation (`pe − pred > this`). Re-validated for SBND (over-response median ~2300 PE). Inert unless `chi2_relax`. |
+| `chi2_pmt_ratio` | `1.3` | `m_chi2_pmt_ratio` | the inflation also requires `pe > this·pred`. |
+| `chi2_pmt_inflate` | `0.5` | `m_chi2_pmt_inflate` | denominator widened by `(pe·this)²`. |
+| `lasso_flag_weight` | `false` (SBND: **true**) | `m_lasso_flag_weight` | when true the LASSO per-column L1 weight of a `flag_at_x_boundary`‖`flag_close_to_PMT`‖`flag_window_truncated` bundle is multiplied by `lasso_boundary_weight` (`chisquare_flags_comparison.md` §6.2). Default OFF = factor 1.0, bit-identical. |
+| `lasso_boundary_weight` | `0.2` | `m_lasso_boundary_weight` | the boundary down-weight factor (prototype value). Inert unless `lasso_flag_weight`. |
+| `xtpc_flag` | `false` (SBND: **true**) | `m_xtpc_flag` | **cross-TPC cathode-crossing pre-fit cull** (`cull_cross_tpc`, run between the all-APA prefit and all-APA fit loops): a coincident candidate main-cluster pair confirmed as one cathode-crosser sets `flag_xtpc_consistent` on both bundles and drops each marked cluster's non-consistent rivals before the LASSO. Default OFF ⇒ pass not called, single-loop pipeline, production output bit-identical. **Changes matching** (it culls bundles). See `chisquare_flags_comparison.md` §16. |
+| `xtpc_dmax` | `5 cm` | `m_xtpc_dmax` | scenario-1 closest-approach cut (T0-corrected, per-TPC `dy/dz` applied). |
+| `xtpc_dmax2` | `300 cm` | `m_xtpc_dmax2` | scenario-2 closest-approach **ceiling** — the candidate population admits far-apart collinear truncated pairs that angle cannot reject (§16). |
+| `xtpc_angle_max` | `20` (deg) | `m_xtpc_angle_max` | scenario-2 collinearity cut (truncated half): `conn`,`dir0`,`dir1` mutual angles all below this. |
+| `xtpc_hough_radius` | `15 cm` | `m_xtpc_hough_radius` | radius for the local `vhough_transform` direction at each closest-point. |
+
+`flag_xtpc_consistent` is dumped per bundle in the `-calib` JSON as `xtpc_consistent`; it is **not**
+written to the cluster output PC (the earlier post-fit confirm-stamp's per-cluster `xtpc_consistent`
+scalar was removed when the flag became a pre-fit cull).
 
 **Standalone jsonnet overrides** (`wct-clus-matching-standalone.jsonnet`): sets
 `flash_minPE: 50` (not 500), `QtoL: 1.0` (not 0.5), `data` from `reality`,
@@ -142,6 +175,36 @@ The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 ---
 
 ## 4. Algorithm (`operator()`)
+
+### 4.0a Per-event dead-PMT auto-mask (`compute_dynamic_opdet_mask`)
+Optional (`auto_mask`, default OFF ⇒ bit-identical). Runs once per event/TPC inside
+`compute_geometry`, **after** the per-TPC `opdet_mask` cull and **before** `opdet_idx_v`
+is built, so the dynamic decision folds into the same `run.opdet_mask` every downstream
+metric reads. Within the single event (QLMatching only ever sees one event per
+`operator()`):
+
+1. Skip if the TPC has `< auto_mask_min_flash` flashes (too little evidence).
+2. Per-channel **max measured PE** over the event's flashes (`maxpe[ch]`).
+3. **Live reference pool** = PMTs in this TPC that fire somewhere this event
+   (`maxpe ≥ auto_mask_pe_low`) — includes a channel that happens to be in the static
+   `ch_mask` but is alive this run, and excludes dead ones so the brightness reference
+   is demonstrably-live.
+4. For each currently-active PMT with `maxpe < auto_mask_pe_low` (never fires): take its
+   `K = auto_mask_neighbors` nearest live PMTs by (Y,Z) distance — tie-broken by channel
+   for determinism — and count flashes where their **median** PE `> auto_mask_pe_bright`.
+   Mask the channel (`run.opdet_mask = 0`, recorded in `run.auto_masked`) if that count
+   `≥ auto_mask_min_contrast`.
+
+All decisions come from a snapshot (the per-channel maxima + the live pool), applied
+after the scan in channel order, so the result is order-independent and reproduces
+`sbnd_xin/automask_prototype.py` (validated: masks the run-dead lan-reco2 PMT ch69 in
+150/150 events with **zero** false positives, and nothing in the original data / MC).
+The "never fires this event" condition is the dominant discriminator; the bright-neighbour
+contrast guards against masking a PMT that is merely in a quiet region. Auto-masked
+channels appear in the `-calib` dump as `active:false` with `auto_masked:true` (vs static
+`ch_mask` channels, `auto_masked:false`); logged as `QLAUTOMASK` lines. Use a per-run
+**static** `ch_mask` instead if you need to *un-mask* a channel that is dead in the
+original run but alive in a new one (auto-mask only adds masks).
 
 ### 4.1 Build candidate bundles (`:231-352`)
 For every (flash × cluster) pair create a `TimingTPCBundle(flash, cluster,
@@ -268,13 +331,15 @@ so production runs do zero extra work and stay bit-identical.
   (`compute_geometry`). An endpoint is **at** that face iff its distance ≤
   `two_boundary_margin` (default 3 cm).
 - `flag_two_boundary` = both endpoints at a face **AND** the two nearest faces are
-  **different** — i.e. the cluster enters through one surface and exits through a
-  **separate** one. Both ends near the *same* face (e.g. both at the cathode, or
-  both clipping the top) does **not** count.
+  **different** **AND** at least one of those faces is an **x-boundary** (anode or
+  cathode). Both ends near the *same* face (e.g. both at the cathode, or both
+  clipping the top) does **not** count, and neither does a purely transverse pair
+  (e.g. top + downstream) — a pair of y/z edges constrains the drift x, hence T0,
+  hardly at all.
 
 Unlike `flag_at_x_boundary` (anode-OR-cathode, either end), this requires **both**
-ends at a wall, on two distinct faces, and includes the ±y/±z faces, so it tags
-through-going crossers in any direction. **Diagnostic only** — never read by the
+ends at a wall, on two distinct faces with at least one being an x-boundary, so it
+tags through-going crossers that actually pin the drift coordinate. **Diagnostic only** — never read by the
 matching path; emitted as
 `two_boundary` in the calib dump and shown as `2bnd` in the `ql_scan` viewer. (The
 cathode face could later swap to the CPA structure-exclusion `m_cathode_fv` used by
@@ -305,9 +370,10 @@ independent solves.
 
 ### 4.4 Selection & organization (`:607-634`)
 `matched_pairs` keeps, per cluster, the flash with the highest strength
-(`:607-617`). `results_bundles` is built per cluster (`:618-633`): the matched
-bundle, **or** — for an unmatched cluster — a placeholder
-`std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx)` (`:629`).
+(`:607-617`). `results_bundles` is built per cluster: a **deep copy** of the matched
+bundle (`std::make_shared<TimingTPCBundle>(*matched)` — see the box below), **or** —
+for an unmatched cluster — a placeholder
+`std::make_shared<TimingTPCBundle>(nullptr, cluster, 0, cidx)`.
 
 > **Null-flash bundle (fixed):** that `nullptr` flash used to crash the
 > `TimingTPCBundle` ctor, which did `flash->get_num_channels()`
@@ -320,6 +386,61 @@ bundle, **or** — for an unmatched cluster — a placeholder
 `organize_bundles()` (`:735-806`) then merges compatible bundles per flash and
 applies a beam-window quality filter (drop out-of-beam bundles with `ks>0.2`,
 `chi2/ndf>20`, or PE mismatch >50%).
+
+> **The matched OUTPUT is the strength-cutoff survivors, not the organized set.**
+> `organize_bundles` operates on the *local* `results_bundles`, and `fit_round2`
+> builds a `results_flash_bundles_map` from it that is then **discarded** — never
+> assigned back to `run.flash_bundles_map`. `apply_matched_t0s` and the calib dump's
+> `auto_selected` both read `run.flash_bundles_map`, which is pruned **only** by the
+> strength cutoff. So the per-flash best-pick *removals* and the out-of-beam QA cut
+> have no effect on the matched output.
+>
+> **Bug (was observable) — now fixed.** `results_bundles` used to hold the same
+> `shared_ptr`s as `flash_bundles_map`, so the same-flash `add_bundle` *merge* mutated
+> `other_clusters`/`pred_flash`/metrics **in place** on the live bundles. Because the
+> merge *folds* a rival cluster's predicted light into the surviving bundle while the
+> de-dup that should drop the rival only touches the (discarded) local `results_bundles`,
+> a merged cluster's light was **double-counted** on its flash — both inside the host
+> bundle and in its own surviving standalone bundle. Triggered on SBND mc evt2 APA0:
+> clusters 2 and 4 (one contiguous object, 0.31 cm junction, same t0) both match flash 3;
+> flash-3 predicted light showed 33839 PE (host bundle 24159 with cluster 2 folded in +
+> cluster-2 bundle 9680) vs 21007 measured — a spurious 1.6×. **Fix:** `results_bundles`
+> now holds **deep copies** of the matched bundles, so the (still-discarded) organize pass
+> mutates throwaway copies and the live `flash_bundles_map` stays the pure strength-cutoff
+> survivors. Each cluster's flash/t0 assignment is byte-identical; only the corrupted
+> `pred_flash` is corrected (flash-3 total → 24159 ≈ 1.15× meas). `TimingTPCBundle` gained
+> a defaulted copy ctor/assign (members are non-owning `Cluster*`/`Opflash*` + values, dtor
+> `=default`). See [[project_ql_organize_doublecount_bug]].
+>
+> The organize pass is still an **incomplete port** of the prototype's flash-centric
+> organization (its per-flash best-pick removals and out-of-beam QA remain inert); do not
+> "fix" that by wiring the organize result back without re-validating, as that flips the
+> selection mechanism for every experiment.
+
+### 4.4a Empty-flash light-quality rescue (`rescue_empty_flashes`, SBND-on)
+The LASSO selects by **strength**, which can leave a flash with no surviving bundle
+even when a cluster is a good **light** match for it (the cluster was won by a
+neighbouring flash on strength alone). When `empty_rescue` is on, `fit_round2`
+snapshots the full pre-LASSO candidate universe (`run.prefit_snapshot`, captured at
+`fit_round1` start) and, after the strength prune, `rescue_empty_flashes` adopts each
+emptied flash's best light-quality candidate — `metric = ks·(chi2/ndf)^rescue_exponent`
+with a `rescue_boundary_weight` per-flag down-weight (boundary, then near-PMT) — when
+the metric clears `rescue_metric_max`. **One flash per cluster** is enforced: a cluster
+already matched is *reassigned* (remove from its old flash, add to the empty one), never
+double-listed, and only when the empty flash is a strictly better light match
+(`mF < mX`).
+
+> **Finding (validated on 10 data + 10 MC hand-scans): these misses are
+> timing/drift-degenerate, not light-recoverable.** The cluster usually fits its WRONG
+> flash as well as (or better than) the correct one (e.g. a correct match with light
+> metric 25.9 is out-fit by an empty flash at 0.68), so no light bar separates "recover"
+> from "steal a correct pair." The conservative `rescue_metric_max = 0.5` sits below the
+> lowest data-regression metric (0.68): it recovers the single light-separable case
+> (MC evt11 `(10,8)`: 0.13 vs 6.37 at the wrong flash) at **zero regression**, leaving
+> the data set unchanged (DATA 95→95, MC 98→99). It DOES change SBND production matching
+> (single-flash reassignment); the remaining degenerate misses need a drift/timing
+> discriminator (and the cross-TPC ones the `xtpc` machinery), not a light rescue.
+> C++ default OFF (`rescue_metric_max` huge ⇒ inert) ⇒ production byte-identical.
 
 ### 4.5 t0 + output (`:656-680`)
 Clusters are pre-initialized with `set_scalar<int>("flash", -1)` (alongside the

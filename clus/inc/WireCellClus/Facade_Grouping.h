@@ -63,7 +63,13 @@ namespace WireCell::Clus::Facade {
             
             // [plane][wire_index] -> (start_x_position, end_x_position)
             std::array<std::map<int, std::pair<double, double>>, 3> dead_wires;
-            
+
+            // Hand-declared "dead gap" W winds (collection plane only):
+            // [W wire_index] -> (xbeg, xend).  A W wind maps to a single z over the
+            // full y extent, so these define a full-vertical dead COLUMN treated as
+            // dead on all three planes (see Grouping::in_dead_gap).  Default empty.
+            std::map<int, std::pair<double, double>> dead_gap_w;
+
             // Track which planes have been cached
             std::array<bool, 3> cached = {false, false, false};
         };
@@ -79,6 +85,23 @@ namespace WireCell::Clus::Facade {
 
         std::map<int, IAnodePlane::pointer> m_anodes;
         IDetectorVolumes::pointer m_dv{nullptr};
+
+        // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
+        // depends only on the indices, not on event content, so it is built once per key
+        // instead of via boost::format on every kd2d() call -- that format was ~40% of
+        // clustering CPU (see clustering-timing-profile.md §2).  We additionally cache the
+        // resolved ScopedView* and a pointer to its "indices valid" flag so that, while the
+        // flag is true, kd2d() returns the view's k-d tree directly and skips the
+        // scoped_view() Scope hash-lookup (~16% of clustering, §4); the flag is cleared by
+        // the tree on any insert/remove, dropping us back to the safe scoped_view() path.
+        // Both pointers are stable: the ctpc scoped views are never erased (one ScopedView
+        // per (tree,scope), verified).  All output-identical.
+        struct kd2d_cache_t {
+            Tree::Scope scope;
+            const Tree::ScopedView<float_t>* sv{nullptr};
+            const bool* valid{nullptr};
+        };
+        mutable std::map<int, std::map<int, std::map<int, kd2d_cache_t>>> m_kd2d_scope_cache;
 
         /// TODO: remove these in the future
         // IAnodePlane::pointer m_anode{nullptr};
@@ -165,6 +188,11 @@ namespace WireCell::Clus::Facade {
 
         const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& all_dead_winds() const;
         std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const;
+
+        /// @brief Mutable W-only "dead gap" registry for (apa, face): hand-declared
+        /// W winds whose full-vertical column is treated as dead on all planes.
+        /// Populated by PointTreeBuilding from inject_dead_winds entries flagged gap.
+        std::map<int, std::pair<double, double>>& get_dead_gap_winds(const int apa, const int face) const;
         
 
         using sv2d_t = Tree::ScopedView<float_t>;
@@ -198,8 +226,22 @@ namespace WireCell::Clus::Facade {
         /// @return
         kd_results_t get_closest_points(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
 
+        /// @brief Existence-only form of get_closest_points: true iff at least one ctpc
+        /// point for this plane lies within `radius` of `point`.  Uses a single
+        /// nearest-neighbour (knn=1) query instead of collecting every in-radius point, for
+        /// the callers (good-point tests) that only need `size() > 0`.  Matches
+        /// get_closest_points(...).size() > 0 exactly (same projection; nanoflann's radius
+        /// search keeps points with dist < radius^2, so the same strict comparison is used).
+        bool has_closest_point(const geo_point_t& point, const double radius, const int apa, const int face, int pind) const;
+
         /// @brief true if the point is within the dead region, [wind+ch_range, wind-ch_range] and [xmin, xmax]
         bool get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa , const int face, int pind) const;
+
+        /// @brief true if the point's W projection falls in a hand-declared dead-gap
+        /// W wind (within ch_range, x in window).  A dead W wind spans the full
+        /// vertical column, so this flags the whole gap (all three planes treated as
+        /// dead).  Always false when the gap registry is empty (default).
+        bool in_dead_gap(const geo_point_t& point, const int ch_range, const int apa, const int face) const;
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;

@@ -71,6 +71,19 @@ namespace WireCell::Match {
         std::vector<int> m_active_opdet_types{1};
         bool m_data{true};
         std::vector<int> m_ch_mask;
+
+        // Per-event dynamic PMT auto-mask (off by default => production bit-identical).
+        // Within a single event/TPC, drop a PMT that never fires (max PE over the
+        // event's flashes < pe_low) while its nearest live PMTs do (>= min_contrast
+        // flashes whose neighbour-median PE > pe_bright). Catches a channel that is
+        // dead in THIS run but not in the static ch_mask. Folds into run.opdet_mask, so
+        // prediction / chi2 / KS / ndf all inherit it. See match/docs/qlmatching-code.md.
+        bool m_auto_mask{false};
+        double m_auto_mask_pe_low{5.0};      // a PMT "fires" if its max event PE >= this
+        int    m_auto_mask_neighbors{4};     // K nearest live PMTs for the brightness ref
+        double m_auto_mask_pe_bright{50.0};  // neighbour-median PE meaning "light present"
+        int    m_auto_mask_min_contrast{1};  // # bright-neighbour flashes required
+        int    m_auto_mask_min_flash{3};     // skip auto-masking below this flash count
         bool m_beamonly{false};
         double m_flash_minPE{500};
         double m_flash_mintime{-1.5 * units::ms};
@@ -133,11 +146,21 @@ namespace WireCell::Match {
         double m_bkg_weight{0.5};              // background-column weight (round 1)
         double m_pe_mismatch_knee{0.3};        // PE-mismatch weight knee (fraction of meas)
         double m_pe_mismatch_floor{0.3};       // PE-mismatch weight floor
+        // Flag-aware per-column L1 down-weight (prototype ToyMatching.cxx:1437; default
+        // OFF = bit-identical). When on, a boundary/near-PMT/window-truncated bundle's
+        // weight is multiplied by m_lasso_boundary_weight so it is shrunk less and more
+        // likely to survive the strength cutoff.
+        bool   m_lasso_flag_weight{false};
+        double m_lasso_boundary_weight{0.2};
 
-        // §G flash PE-error model (forwarded to Opflash).
+        // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
+        // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
         double m_pe_err_floor{0.3};
         double m_pe_err_frac{0.3};
         double m_pe_err_knee{1.0};
+        // When true the bundle chi2 computes its per-PMT error from the PREDICTED pe
+        // (not measured); the LASSO weight stays measured-based. SBND-on, default off.
+        bool   m_pe_err_on_pred{false};
         double m_flash_pe_threshold{0.0};      // Opflash "fired" threshold (PE)
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).
@@ -148,6 +171,19 @@ namespace WireCell::Match {
         int    m_highconsist_min_ndf{3};
         double m_bundle_pe_ndf_knee{1.0};
         bool   m_bundle_mask_ks{false};  // apply opdet_mask to the KS shape metric too
+        // Flag-aware "high-consistent" ladder (default off = single-branch, bit-identical; SBND-on).
+        bool   m_highconsist_ladder{false};
+        double m_hc_clean_ks{0.06};  double m_hc_clean_c2{6.0};
+        double m_hc_good_ks{0.09};   double m_hc_good_c2{4.0};
+        double m_hc_tb_ks{0.10};     double m_hc_tb_c2{8.0};
+        double m_hc_miss_ks{0.08};   double m_hc_miss_c2{60.0};
+        int    m_hc_miss_min_ndf{5};
+        // Per-bundle chi2 relaxation (prototype close-to-PMT denom inflation +
+        // one-inefficient-PMT subtraction); default off = bit-identical, SBND-on.
+        bool   m_chi2_relax{false};
+        double m_chi2_pmt_excess{350.0};
+        double m_chi2_pmt_ratio{1.3};
+        double m_chi2_pmt_inflate{0.5};
 
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time
@@ -163,6 +199,41 @@ namespace WireCell::Match {
         // Default OFF so existing production configs stay bit-identical; SBND
         // jsonnet sets require_containment: true.
         bool m_require_containment{false};
+
+        // Light-pattern over-prediction prefilter (the prototype's fired-fraction
+        // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle BEFORE
+        // the chi2 fit when its predicted light is much larger than the measured
+        // light (a cluster emitting far more light than the flash shows cannot be the
+        // match). One-directional: only over-prediction is rejected; under-prediction
+        // is physically fine (a flash may be lit by several clusters). Two metrics,
+        // both over the same opdet_mask the chi2 uses:
+        //   R_total = sum(pred_masked) / sum(meas_masked)
+        //   R_max   = pred[ch*] / max(meas[ch*], 1),  ch* = argmax(pred_masked)
+        // Reject if R_total > overpred_total_ratio OR R_max > overpred_maxch_ratio.
+        // Boundary/truncated bundles (close_to_PMT | window_truncated | at_x_boundary)
+        // are EXEMPT (measured is an underestimate there). Default OFF (large ratios
+        // = inert) so production stays bit-identical; SBND jsonnet sets the tuned
+        // values (tuned on data hand-scans, validated on MC; see
+        // sbnd_xin/ql_prefilter_tune.py).
+        bool m_reject_overpred{false};
+        double m_overpred_total_ratio{1e9};   // R_total ceiling (inert when huge)
+        double m_overpred_maxch_ratio{1e9};   // R_max   ceiling (inert when huge)
+
+        // §I empty-flash light-quality rescue (the prototype's flash-centric pick,
+        // ToyMatching.cxx organize_matched_bundles). The LASSO selects by strength,
+        // which can leave a flash EMPTY (no bundle above m_strength_cutoff) even when
+        // a cluster is an excellent LIGHT match for it — the cluster was won by a
+        // neighbouring flash on strength alone. After the fit, for each empty flash,
+        // adopt its best light-quality candidate (metric = ks*(chi2/ndf)^exp, with a
+        // boundary/near-PMT down-weight) from the pre-cutoff universe if the metric
+        // clears m_rescue_metric_max. If that cluster is already matched elsewhere,
+        // reassign it ONLY when the empty flash is a strictly better light match
+        // (guard: it never removes a better match, so it cannot drop a correct pair).
+        // Default OFF (huge bar = inert) so production stays bit-identical; SBND-on.
+        bool   m_empty_rescue{false};
+        double m_rescue_metric_max{1e9};       // light-quality bar (inert when huge)
+        double m_rescue_exponent{0.8};         // chi2/ndf exponent (prototype 0.8)
+        double m_rescue_boundary_weight{0.8};  // per-flag down-weight (prototype 0.8/0.64)
 
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
@@ -242,6 +313,32 @@ namespace WireCell::Match {
         // coincidence filter matches the Bee display. Calib-dump only.
         double m_flash_group_window{80 * units::ns};
 
+        // Cathode-crossing TPC0/TPC1 offset diagnostic (off unless cathode_diag is
+        // set). Pairs a TPC0 + TPC1 cluster sharing one T0 flash group, both reaching
+        // the cathode, finds their closest pair of points in the T0-corrected frame,
+        // and logs the two local Hough directions plus the connecting vector so the
+        // drift-x gap (t0/velocity, degenerate) can be separated from a transverse
+        // y-z position shift. Empty (default) => never invoked, production unchanged.
+        // Observation-only: reads finished runs, never touches the matching path.
+        std::string m_cathode_diag{""};
+        // Radius for the local Hough direction (vhough_transform) at each cathode-end
+        // point. Cathode-diag only.
+        double m_cathode_diag_radius{15 * units::cm};
+
+        // Cross-TPC cathode-crossing consistency confirm-stamp (off unless xtpc_flag).
+        // Post-matching: for each coincident matched-main-cluster pair across the two
+        // TPCs, set flag_xtpc_consistent if the two halves connect as one track across
+        // the cathode -- closest approach < xtpc_dmax (scenario 1), or, when a half is
+        // window-truncated, the connecting vector is collinear with both local Hough
+        // directions to within xtpc_angle_max (scenario 2). Cuts tuned on the 10 SBND
+        // hand-scan data events. Default off => never invoked, output bit-identical.
+        // Observation-only: matching assignments unchanged, only adds the flag.
+        bool   m_xtpc_flag{false};
+        double m_xtpc_dmax{5 * units::cm};
+        double m_xtpc_dmax2{300 * units::cm};     // scenario-2 closest-approach ceiling
+        double m_xtpc_angle_max{20.0};            // degrees
+        double m_xtpc_hough_radius{15 * units::cm};
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -305,6 +402,7 @@ namespace WireCell::Match {
 
             // optical-detector mask / kept-channel index
             std::vector<unsigned int> opdet_mask;
+            std::set<int> auto_masked;          // channels dropped by the dynamic auto-mask
             std::vector<Opflash::pointer> flashes;
             unsigned int nopdet{0};
             std::vector<int> opdet_idx_v;
@@ -313,6 +411,10 @@ namespace WireCell::Match {
             int sign_offset{1};
             double s{1.0}, anode_x{0.0}, u_cathode{0.0};
             double y_lo{0.0}, y_hi{0.0}, z_lo{0.0}, z_hi{0.0};
+            // per-TPC transverse position offset (Y,Z), read from DetectorVolumes
+            // metadata "pos_offset" in compute_geometry().  Parked for the future
+            // cross-TPC matching judgement; not yet consumed.  0 => inert.
+            double dy{0.0}, dz{0.0};
 
             // cluster-group decomposition
             std::vector<std::pair<WireCell::Clus::Facade::Cluster*,
@@ -324,11 +426,16 @@ namespace WireCell::Match {
             // bundles + the three lookup maps
             std::vector<TimingTPCBundle::pointer> all_bundles;
             TimingTPCBundleSet pre_bundles;
-            std::vector<TimingTPCBundle::pointer> consistent_bundles;
             FlashBundlesMap flash_bundles_map;
             ClusterBundlesMap cluster_bundles_map;
             std::map<std::pair<Opflash*, WireCell::Clus::Facade::Cluster*>,
                      TimingTPCBundle::pointer> flash_cluster_bundles_map;
+
+            // Full pre-LASSO candidate universe (flash -> every candidate bundle),
+            // captured at fit_round1 start before any strength prune. Only filled when
+            // m_empty_rescue; consumed by rescue_empty_flashes after the round-2 prune
+            // so it can reach the strength-0-but-light-good bundles the fit drops.
+            FlashBundlesMap prefit_snapshot;
 
             BundleQualityParams qp;
 
@@ -341,11 +448,19 @@ namespace WireCell::Match {
         // Run the full single-APA matching pipeline on one ApaRun.
         void run_one_apa(ApaRun& run);
 
+        // The pipeline split at the LASSO-fit boundary, so a cross-TPC pre-fit cull can
+        // run between them (m_xtpc_flag, multi-APA): _prefit builds bundles + the
+        // per-TPC consistency cull; _fit runs the two LASSO rounds + output. run_one_apa
+        // = _prefit then _fit (the historical single-APA order).
+        void run_one_apa_prefit(ApaRun& run);
+        void run_one_apa_fit(ApaRun& run);
+
         // Pipeline stages, extracted verbatim from the old operator().
         void build_opdet_mask(ApaRun& run);          // base OpDet on/off mask
         void read_flashes(ApaRun& run);              // canonical flash PCs -> Opflash
         void decompose_cluster_groups(ApaRun& run);  // main+associated split, idx maps
         void compute_geometry(ApaRun& run);          // per-TPC drift geometry, mask cull, opdet idx
+        void compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc);  // per-event dead-PMT auto-mask
         void build_bundles(ApaRun& run);             // (flash,group) bundles + predicted light  [Stage 1]
 
         // Set the diagnostic flag_two_boundary on one bundle: true iff the two
@@ -366,6 +481,16 @@ namespace WireCell::Match {
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
+
+        // Per-column L1 down-weight (m_lasso_boundary_weight) for a boundary / near-PMT /
+        // window-truncated bundle when m_lasso_flag_weight is on (prototype's flag-based
+        // weight), else 1.0. Multiplies the pe-mismatch (+KS) base in both rounds.
+        double lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const;
+
+        // Empty-flash light-quality rescue (m_empty_rescue; see §I). snapshot is the
+        // full pre-strength-cutoff flash->candidate map; this mutates run.flash_bundles_map
+        // in place, adopting the best light-quality candidate of each emptied flash.
+        void rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapshot);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
 
@@ -374,6 +499,33 @@ namespace WireCell::Match {
         // both TPCs) and writes it via WireCell::Persist::dump. Never touches the
         // matching path.
         void dump_calib(const std::vector<ApaRun>& runs);
+
+        // Cathode-crossing offset diagnostic (m_cathode_diag only). Logs, per
+        // cross-TPC cathode-crossing pair, the two local directions and the
+        // connecting vector of the closest point pair. Never touches the matching.
+        void dump_cathode_diag(const std::vector<ApaRun>& runs);
+
+        // Cross-TPC cathode-crossing pre-fit cull (m_xtpc_flag, multi-APA). Runs after
+        // each TPC's bundles + per-TPC cull but BEFORE the LASSO: pairs candidate
+        // main-cluster bundles across the two TPCs whose flashes coincide, sets
+        // flag_xtpc_consistent on a geometrically cross-TPC-consistent pair (the two
+        // halves connect as one track across the cathode), then drops each marked
+        // cluster's non-consistent rivals so fewer bundles enter the fit. Off by default
+        // => not called => bit-identical.
+        void cull_cross_tpc(std::vector<ApaRun>& runs);
+
+        // One candidate cross-TPC pair test, shared by cull_cross_tpc. m{0,1} carry the
+        // two clusters with their T0 x-offset, per-TPC (y,z) pos_offset, and truncation
+        // flag. Returns the scenario code: 1 = scenario 1 (closest approach < m_xtpc_dmax,
+        // tight/self-vetoing), 2 = scenario 2 (a half truncated AND conn,dir0,dir1 mutually
+        // collinear < m_xtpc_angle_max AND d < m_xtpc_dmax2), 0 = not consistent.
+        struct XtpcMC {
+            TimingTPCBundle* b;
+            WireCell::Clus::Facade::Cluster* c;
+            double off, dy, dz;
+            bool wt;
+        };
+        int xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const;
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

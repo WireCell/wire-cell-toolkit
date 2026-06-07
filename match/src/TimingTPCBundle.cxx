@@ -111,7 +111,10 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
         if (opdet_mask[j] == 0) continue;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + std::pow(pe_err[j], 2));
+        const double perr = m_qp.pe_err_on_pred
+            ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
+            : pe_err[j];
+        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
     }
 
     if ((candidate_ks_dis < ks_dis || candidate_chi2 < chi2) &&
@@ -198,17 +201,53 @@ bool TimingTPCBundle::examine_bundle()
     chi2 = 0;
     ndf  = 0;
     int nvalidopdets = 0;
+    double max_chi2 = -1; int max_bin = -1;
     for (int j = 0; j < m_nchan; ++j) {
         if (opdet_mask[j] == 0) continue;
         ++nvalidopdets;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + std::pow(pe_err[j], 2));
+        const double perr = m_qp.pe_err_on_pred
+            ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
+            : pe_err[j];
+        double denom = pe[j] + perr * perr;
+        // Prototype close-to-PMT relaxation: a big measured excess near the PMTs widens
+        // the denominator (near-PMT over-response is not a real charge/light mismatch).
+        if (m_qp.chi2_relax && flag_close_to_PMT &&
+            pe[j] - pred_pe[j] > m_qp.chi2_pmt_excess &&
+            pe[j] > m_qp.chi2_pmt_ratio * pred_pe[j])
+            denom += std::pow(pe[j] * m_qp.chi2_pmt_inflate, 2);
+        const double cur = std::pow(pred_pe[j] - pe[j], 2) / denom;
+        chi2 += cur;
+        if (cur > max_chi2) { max_chi2 = cur; max_bin = j; }
     }
+    // Prototype one-inefficient-PMT tolerance: drop the single worst channel when it is a
+    // dead/inefficient PMT (measured 0 but light predicted).
+    if (m_qp.chi2_relax && max_bin >= 0 && pe[max_bin] == 0 && pred_pe[max_bin] > 0)
+        chi2 -= max_chi2 - 1;
 
     flag_high_consistent = false;
-    if (ks_dis < m_qp.highconsist_ks_max && ndf >= m_qp.highconsist_min_ndf &&
-        chi2 < ndf * nvalidopdets)
-        flag_high_consistent = true;
+    if (!m_qp.highconsist_ladder) {
+        if (ks_dis < m_qp.highconsist_ks_max && ndf >= m_qp.highconsist_min_ndf &&
+            chi2 < ndf * nvalidopdets)
+            flag_high_consistent = true;
+    }
+    else if (ndf > 0) {
+        // Flag-aware multi-branch ladder (prototype-structured, SBND-tuned). KS is the
+        // purity lever; the chi2/ndf ceilings only fence the tail. The B4 boundary/near-PMT/
+        // window-truncated branch relaxes chi2 (missing charge) but keeps KS tight.
+        const double c2n = chi2 / ndf;
+        const bool miss = flag_at_x_boundary || flag_close_to_PMT || flag_window_truncated;
+        if (ndf >= m_qp.highconsist_min_ndf && ks_dis < m_qp.hc_clean_ks && c2n < m_qp.hc_clean_c2)
+            flag_high_consistent = true;                                        // B1 clean very-good
+        else if (ndf >= m_qp.highconsist_min_ndf && ks_dis < m_qp.hc_good_ks && c2n < m_qp.hc_good_c2)
+            flag_high_consistent = true;                                        // B2 general good
+        else if (flag_two_boundary && ndf >= m_qp.highconsist_min_ndf &&
+                 ks_dis < m_qp.hc_tb_ks && c2n < m_qp.hc_tb_c2)
+            flag_high_consistent = true;                                        // B3 two_boundary
+        else if (miss && ndf >= m_qp.hc_miss_min_ndf &&
+                 ks_dis < m_qp.hc_miss_ks && c2n < m_qp.hc_miss_c2)
+            flag_high_consistent = true;                                        // B4 x-bnd/PMT/trunc
+    }
     return flag_high_consistent;
 }

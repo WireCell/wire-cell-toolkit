@@ -27,6 +27,38 @@ namespace WireCell::Match {
         bool   mask_ks = false;           // also apply opdet_mask to the KS shape metric
                                           // (the chi2/LASSO paths always mask). Default OFF
                                           // so existing configs are bit-identical; SBND-on.
+        // Per-PMT light-error model for the bundle chi2. When pe_err_on_pred is true the
+        // chi2's per-opdet error is PE_err = (pred < knee ? floor : frac*pred) computed from
+        // the PREDICTED pe (not the measured-based flash->get_PE_err); sigma^2 = meas + PE_err^2.
+        // Default off + floor/frac/knee = 0.3/0.3/1.0 reproduce the measured-based chi2.
+        double pe_err_floor = 0.3;
+        double pe_err_frac  = 0.3;
+        double pe_err_knee  = 1.0;
+        bool   pe_err_on_pred = false;
+        // Flag-aware multi-branch "high-consistent" ladder (ported from the MicroBooNE
+        // prototype FlashTPCBundle, re-tuned for the SBND post-recipe chi2 scale from the
+        // 10 hand-scan data events). When highconsist_ladder is false the single-branch
+        // (highconsist_ks_max/min_ndf) logic above is used -> bit-identical. SBND-on.
+        // Branches (OR), c2n = chi2/ndf: B1 clean very-good; B2 general good; B3 two_boundary;
+        // B4 x-boundary/close-PMT/window-truncated (ks-led, chi2 relaxed for missing charge).
+        bool   highconsist_ladder = false;
+        double hc_clean_ks = 0.06;  double hc_clean_c2 = 6.0;   // B1
+        double hc_good_ks  = 0.09;  double hc_good_c2  = 4.0;   // B2
+        double hc_tb_ks    = 0.10;  double hc_tb_c2    = 8.0;   // B3
+        double hc_miss_ks  = 0.08;  double hc_miss_c2  = 60.0;  // B4
+        int    hc_miss_min_ndf = 5;                             // B4 ndf floor (B1-B3 use highconsist_min_ndf)
+        // Per-bundle chi2 relaxation ported from the prototype FlashTPCBundle.cxx:480-502
+        // (default off -> bit-identical; SBND-on). Two behaviors, on the toolkit's
+        // (meas + perr^2) Poisson base: (1) when flag_close_to_PMT and a channel shows a
+        // big measured excess (pe-pred > chi2_pmt_excess && pe > chi2_pmt_ratio*pred),
+        // widen its denominator by (pe*chi2_pmt_inflate)^2 (softens near-PMT over-
+        // response); (2) tolerate one inefficient PMT -- if the single worst-chi2 channel
+        // is (pe==0 && pred>0), subtract (max_chi2 - 1) from the total. chi2_pmt_excess is
+        // absolute PE -> re-tuned for SBND (prototype 350 is a MicroBooNE light-yield value).
+        bool   chi2_relax = false;
+        double chi2_pmt_excess  = 350.0;   // measured-excess PE threshold (RE-TUNE for SBND)
+        double chi2_pmt_ratio   = 1.3;     // measured/predicted ratio threshold
+        double chi2_pmt_inflate = 0.5;     // fraction of pe added in quadrature to the denom
     };
 
     class TimingTPCBundle {
@@ -37,6 +69,12 @@ namespace WireCell::Match {
         TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
                         int flash_index_id, int cluster_index_id);
         ~TimingTPCBundle();
+        // Member-wise copy is safe: the Cluster*/Opflash* members are non-owning
+        // (the destructor is =default and frees nothing) and the rest are values.
+        // QLMatching deep-copies matched bundles before the discarded organize pass
+        // so its in-place merge cannot corrupt the live flash_bundles_map.
+        TimingTPCBundle(const TimingTPCBundle&) = default;
+        TimingTPCBundle& operator=(const TimingTPCBundle&) = default;
 
         void set_flag_close_to_PMT(bool v) { flag_close_to_PMT = v; }
         void set_flag_at_x_boundary(bool v) { flag_at_x_boundary = v; }
@@ -95,6 +133,18 @@ namespace WireCell::Match {
         // (calib dump); nothing in the matching path reads it. Default false.
         void set_flag_two_boundary(bool v) { flag_two_boundary = v; }
         bool get_flag_two_boundary() const { return flag_two_boundary; }
+        // Cross-TPC cathode-crossing confirmation (post-matching): the matched main
+        // cluster connects geometrically, across the cathode, to the coincident other
+        // TPC's matched main cluster. Confirm-stamp only; nothing in the matching path
+        // reads it. Default false. See QLMatching::flag_cross_tpc_consistency.
+        void set_flag_xtpc_consistent(bool v) { flag_xtpc_consistent = v; }
+        bool get_flag_xtpc_consistent() const { return flag_xtpc_consistent; }
+        // Subset of flag_xtpc_consistent: the cross-TPC pair passed scenario 1 (both
+        // cathode ends present, closest approach < xtpc_dmax — a tight, self-vetoing
+        // match). Drives the xtpc-PRIORITY cull (a scenario-1 crosser half overrides a
+        // cluster's high-consistent bundle on a different flash). Default false.
+        void set_flag_xtpc_scenario1(bool v) { flag_xtpc_scenario1 = v; }
+        bool get_flag_xtpc_scenario1() const { return flag_xtpc_scenario1; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -118,6 +168,8 @@ namespace WireCell::Match {
         bool flag_high_consistent;
         bool flag_contained;
         bool flag_two_boundary;
+        bool flag_xtpc_consistent{false};
+        bool flag_xtpc_scenario1{false};
 
         double ks_dis;
         double chi2;

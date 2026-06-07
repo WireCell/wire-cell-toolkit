@@ -209,6 +209,17 @@ namespace WireCell::PointCloud::Tree {
         const ScopedBase* get_scoped(const Scope& scope) const;
         ScopedBase* get_scoped(const Scope& scope);
 
+        // Return a stable pointer to a scope's "indices valid" flag, or nullptr
+        // if no scoped view is cached for the scope yet.  on_insert/on_remove
+        // clear this flag whenever the tree changes, and scoped_view() restores
+        // it.  A caller that already holds a scoped-view reference can read
+        // *flag to cheaply tell whether that view's k-d tree is still current
+        // and re-resolve via scoped_view() only when it is false -- skipping the
+        // per-call Scope hash-lookup.  The pointer (like the view) is stable
+        // until an in-scope node is removed, which erases the view (see
+        // on_remove); only use it where the scope is known not to be removed.
+        const bool* scoped_indices_valid(const Scope& scope) const;
+
         // Return representation of this as a string.  By default this recurs
         // into children.  The "level" is used to provide indentation.
         std::string as_string(bool recur=true, int level=0) const;

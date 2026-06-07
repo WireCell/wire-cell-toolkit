@@ -20,6 +20,13 @@
     units, different native input unit. "error" is 0 (the SBND dump carries no
     per-channel error; any PE_err convention is applied downstream by the matcher).
 
+    Optional per-frame time offset: if the port-1 tensor-set metadata carries a
+    scalar key "frame_apply_at_caf" (ns) and "correct_flash_time" is enabled
+    (default), that offset is added to every flash/light time so downstream code
+    sees only the corrected time. If the key is absent, or correction is disabled,
+    the verbatim matrix time is used. This is a generic metadata-driven offset (no
+    detector-specific physics) and keeps the converter detector-agnostic.
+
     This converter is detector-agnostic (no SBND physics): it only reshapes a
     [nflash, 1+nchan] matrix into the canonical PCs, so it lives in aux alongside
     the generic Aux::AttachPointCloudToTree.
@@ -57,6 +64,9 @@ namespace WireCell::Aux {
         std::string m_inpath{"pointtrees/%d"};
         // Number of optical-detector channels; the matrix must have ncol == nchan+1.
         int m_nchan{312};
+        // If set, add the port-1 tensor-set metadata "frame_apply_at_caf" (ns) to
+        // every flash/light time. No-op when the key is absent.
+        bool m_correct_flash_time{true};
 
         const int m_multiplicity{2};
         std::size_t m_count{0};

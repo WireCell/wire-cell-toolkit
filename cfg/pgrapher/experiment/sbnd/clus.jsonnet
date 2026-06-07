@@ -16,13 +16,38 @@ local wc = import 'wirecell.jsonnet';
 local g = import 'pgraph.jsonnet';
 local f = import 'pgrapher/common/funcs.jsonnet';
 local clus = import 'pgrapher/common/clus.jsonnet';
+local dead_regions = import 'pgrapher/experiment/sbnd/dead_regions.jsonnet';
 
 local time_offset = -205 * wc.us;  // = -tick0_time (cfg/.../sbnd/params.jsonnet sim.tick0_time)
 local drift_speed = 1.563 * wc.mm / wc.us;
 local bee_dir = 'data';
 
 local common_coords = ['x', 'y', 'z'];
-local common_corr_coords = ['x_t0cor', 'y', 'z'];
+
+// Per-TPC transverse (Y,Z) position offset, materialized in the post-QLMatching
+// scope by T0Correction as y_cor/z_cor (see match/docs/cathode-offset-correction.md).
+// One toggle drives BOTH the metadata injection (which the C++ keys on for the
+// y_cor/z_cor scope) and the corrected-coords names below, so jsonnet and C++ stay
+// in lockstep.  pos_offset_on=true is the SBND committed state going forward; flip
+// to false to recover the pre-offset {x_t0cor,y,z} scope (bit-identical) for
+// validation.  x component is 0 (drift stays with the t0/flash_x_offset term).
+// Values = symmetric split of the measured T_yz=(-0.22,+1.34) cm cathode gap.
+local pos_offset_on = true;
+local pos_offset_a0 = [0, -0.11 * wc.cm, 0.67 * wc.cm];   // TPC0 (East, x<0)
+local pos_offset_a1 = [0, 0.11 * wc.cm, -0.67 * wc.cm];   // TPC1 (West, x>=0)
+
+local common_corr_coords =
+    if pos_offset_on then ['x_t0cor', 'y_cor', 'z_cor'] else ['x_t0cor', 'y', 'z'];
+
+// SBND cathode-crossing connector: connect the two halves of a cathode-crossing
+// cosmic that the generic all-APA merge passes leave unmerged (their closest-point
+// distance lands just over the 3 cm lenient-merge cap; see
+// clus/docs/cathode-crossing-clustering.md).  Narrow cathode-specific cut set
+// (collinear + close + opposite TPCs + both ends at the cathode), so it cannot fire
+// within a single TPC.  SBND committed ON; set false to recover the pre-connector
+// all-APA pipeline (bit-identical).  Retire (flip false) when the pos_offset / SCE
+// transverse calibration tightens enough that the generic 3 cm path catches these.
+local cathode_connect_on = true;
 
 // FV = sbnd-wires-geometry-v0206 bbox - 1 cm inset on every face.
 // X anode = W (collection) plane; X inner = data CPA face (DENT-gap geometry, ±1.5 cm).
@@ -67,11 +92,11 @@ local dvm = {
         FV_ymax_margin: $.overall.FV_ymax_margin,
         FV_zmin_margin: $.overall.FV_zmin_margin,
         FV_zmax_margin: $.overall.FV_zmax_margin,
-    },
+    } + (if pos_offset_on then { pos_offset: pos_offset_a0 } else {}),
     a1f0pA: $.a0f0pA + {
         FV_xmin:    2.5  * wc.cm,  // data CPA face (+1.5) + 1 cm toward TPC1 interior
         FV_xmax:  201.05 * wc.cm,  // W plane (+202.05) - 1 cm
-    },
+    } + (if pos_offset_on then { pos_offset: pos_offset_a1 } else {}),  // override a0's
 };
 
 local anodes_name(anodes, face='') =
@@ -136,6 +161,10 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
             anode: wc.tn(anode),
             face: face,
             detector_volumes: wc.tn(dv),
+            // Hand-declared dead winds at the known-bad Y-Z region (W dead + U/V
+            // distorted) so examine_bundles' relaxed-graph bridge crosses it
+            // instead of fragmenting a single track.  Per-anode (TPC0/TPC1).
+            inject_dead_winds: [dead_regions.region(anode.data.ident)],
         },
     }, nin=2, nout=1, uses=[bsl, bsd, dv]),
     local cluster2pct = ptb,
@@ -157,8 +186,13 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // Raise the convex-hull point cap (default 10000) so full-detector
         // multi-track overclusters (>10k points) are still considered for
         // separation; otherwise get_hull returns empty and separation is skipped.
-        cm.separate(use_ctpc=true, max_hull_points=100000),
-        cm.connect1(),
+        cm.separate(use_ctpc=true, max_hull_points=100000, sbnd_boundary_tag=true),
+        // SBND: cap the isochronous-relaxed connection on the real closest-point
+        // distance.  Without it, connect1 merges two genuinely-separate isochronous
+        // cosmics (e.g. evt 183888, ~7.3 cm apart in drift) on the misleadingly small
+        // infinite-line distance.  5 cm < the 7.3 cm real gap, above SBND broken-track
+        // gaps.  Default OFF (-1) elsewhere keeps production bit-identical.
+        cm.connect1(iso_max_dis=5 * wc.cm),
         // MicroBooNE-style clustering tail: produce cluster groups (one main +
         // associated small clusters) carried as the "isolated"/"perblob" per-blob
         // array (main blobs tagged -1). examine_bundles MUST follow neutrino/isolated,
@@ -168,7 +202,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         cm.examine_x_boundary(),
         cm.protect_overclustering(),
         cm.neutrino(),
-        cm.isolated(),
+        // SBND: tighten the isolated small/big length_cut from the 20 cm default
+        // to 15 cm so a ~16 cm EM (gamma) blob is no longer auto-classified
+        // "small" and absorbed into a nearby long cosmic track by the
+        // angle-less 80 cm small->big merge.  See sbnd_xin/docs/
+        // overclustering-evt11-gamma.md.  range_cut left at its 150 default.
+        cm.isolated(length_cut=15 * wc.cm),
         cm.examine_bundles(),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
@@ -275,6 +314,12 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         cm.parallel_prolong(length_cut=35 * wc.cm, use_flash_t0=true),
         cm.close(length_cut=1.2 * wc.cm, use_flash_t0=true),
         cm.extend_loop(num_try=3, use_flash_t0=true),
+    ]
+    // Cathode-crossing connector: after the generic merge passes (so it only ADDS
+    // merges they missed) and before examine_bundles (so a connected crosser is one
+    // cluster before the flash-bundle collapse).  SBND-on; off => list unchanged.
+    + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, flash_t0_window=800*wc.ns)] else [])
+    + [
         cm.examine_bundles(use_flash_t0=true),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
@@ -335,7 +380,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     detector: 'sbnd',
                     algorithm: 'clustering',
                     pcname: '3d',
-                    coords: ['x_t0cor', 'y', 'z'],
+                    // Same corrected coords as the clustering scope, so the Bee
+                    // display reflects the transverse shift when it is on (makes the
+                    // separate Bee-zip transverse shift redundant -- pick one).
+                    coords: common_corr_coords,
                     individual: false,
                 },
             ],

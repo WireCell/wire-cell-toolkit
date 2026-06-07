@@ -28,7 +28,9 @@ void Aux::FlashTensorToOpticalPCs::configure(const WireCell::Configuration& cfg)
 {
     m_inpath = get(cfg, "inpath", m_inpath);
     m_nchan  = get(cfg, "nchan", m_nchan);
-    log->debug("FlashTensorToOpticalPCs: inpath={} nchan={}", m_inpath, m_nchan);
+    m_correct_flash_time = get(cfg, "correct_flash_time", m_correct_flash_time);
+    log->debug("FlashTensorToOpticalPCs: inpath={} nchan={} correct_flash_time={}",
+               m_inpath, m_nchan, m_correct_flash_time);
 }
 
 WireCell::Configuration Aux::FlashTensorToOpticalPCs::default_configuration() const
@@ -36,6 +38,7 @@ WireCell::Configuration Aux::FlashTensorToOpticalPCs::default_configuration() co
     Configuration cfg;
     cfg["inpath"] = m_inpath;
     cfg["nchan"]  = m_nchan;
+    cfg["correct_flash_time"] = m_correct_flash_time;
     return cfg;
 }
 
@@ -77,6 +80,19 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
     std::vector<double> lt, lq, lerr;
     std::vector<int>    fl_flash, fl_light;
 
+    // Optional per-frame time offset: add the tensor-set metadata
+    // "frame_apply_at_caf" (ns) to every flash/light time so downstream code sees
+    // only the corrected time. No-op when the key is absent or correction is off.
+    double t_offset = 0.0;
+    if (m_correct_flash_time) {
+        const auto dmd = data_ts->metadata();
+        if (dmd.isMember("frame_apply_at_caf")) {
+            t_offset = dmd["frame_apply_at_caf"].asDouble();
+        }
+    }
+    log->debug("FlashTensorToOpticalPCs: ident {} correct_flash_time={} frame_apply_at_caf offset={} ns",
+               ident, m_correct_flash_time, t_offset);
+
     const auto& data_tens = data_ts->tensors();
     if (data_tens && !data_tens->empty()) {
         const auto& ten = data_tens->at(0);
@@ -91,7 +107,7 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
         const double* M = (const double*) ten->data(); // row-major [nflash][ncol]
 
         for (size_t r = 0; r < nflash; ++r) {
-            const double time = M[r * ncol + 0];
+            const double time = M[r * ncol + 0] + t_offset;
             double sum = 0;
             for (int c = 0; c < m_nchan; ++c) {
                 const double pe = M[r * ncol + 1 + c];
