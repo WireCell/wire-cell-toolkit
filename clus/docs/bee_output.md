@@ -133,6 +133,20 @@ odd APAs at x0=+358). The group's first APA is used as the representative
 per-(apa,face) output, just merged into fewer instances. `dead_apa_groups`
 empty → per-(apa,face) output unchanged.
 
+### Detector usage
+
+The grouping is driven entirely by the jsonnet `apas` lists, so it generalises
+to any detector. Two are wired up today, both splitting by drift side into two
+instances:
+
+| Detector | Anodes | Groups |
+|---|---|---|
+| `protodunehd` (`pdhd/clus.jsonnet`) | 0–3 | `group02` = {0,2} (x0=−358), `group13` = {1,3} (x0=+358) |
+| `protodunevd` (`pdvd/clus.jsonnet`) | 0–7 | `group0123` = {0,1,2,3} (bottom, x0=−341.5), `group4567` = {4,5,6,7} (top, x0=+341.5) |
+
+Routing is per-anode (`wpid.apa()`), so on PDVD each anode's two faces fold into
+its drift-side group automatically.
+
 ### `fill_bee_points_from_pr_graph(name, grouping)`
 
 Reads the PR graph from the grouping instead of raw point clouds. For each
