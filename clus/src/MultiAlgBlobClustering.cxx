@@ -92,7 +92,11 @@ static std::string format_flag_names(const std::set<std::string>& flag_names)
     return ss.str();
 }
 
-static void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const std::string& grouping_name, int ident)
+// NOT static: the larwirecell QLMatching plugin links against this symbol,
+// forward-declaring it as WireCell::Clus::Facade::normalize_cluster_flags
+// (no installed header carries it), so define it in that namespace.
+namespace WireCell::Clus::Facade {
+void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const std::string& grouping_name, int ident)
 {
     std::set<std::string> flag_names;
     for (const auto* cluster : grouping.children()) {
@@ -124,6 +128,7 @@ static void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const
     SPDLOG_LOGGER_DEBUG(log, "normalize_cluster_flags: ident={} grouping={} added={} missing flag values",
                         ident, grouping_name, nmissing);
 }
+}  // namespace WireCell::Clus::Facade
 
 
 void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
