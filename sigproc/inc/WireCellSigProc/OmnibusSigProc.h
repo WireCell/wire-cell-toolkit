@@ -151,6 +151,13 @@ namespace WireCell {
             double m_r_fake_signal_high_th_ind_factor{1.0};
             int m_r_pad{5};
             int m_r_break_roi_loop{2};
+            // Optional per-plane (size 3, indexed by plane/slot) overrides for the
+            // three refinement knobs above.  Empty (default) => the scalar value
+            // is used for every plane (bit-identical legacy behaviour).  Used to
+            // confine a tune to a single plane (e.g. PDHD APA0 W = slot 1).
+            std::vector<float> m_r_th_factor_planes;
+            std::vector<int> m_r_pad_planes;
+            std::vector<int> m_r_break_roi_loop_planes;
             double m_r_th_peak{3.0};
             double m_r_sep_peak{6.0};
             double m_r_low_peak_sep_threshold_pre{1200};

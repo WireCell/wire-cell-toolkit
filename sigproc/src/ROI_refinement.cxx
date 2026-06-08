@@ -320,7 +320,7 @@ void ROI_refinement::load_data(int plane, const Array::array_xxf &r_data, ROI_fo
         for (size_t i = 0; i != uboone_rois.size(); i++) {
             SignalROI *tight_roi =
                 new SignalROI(plane, irow + offset, uboone_rois.at(i).first, uboone_rois.at(i).second, signal);
-            float threshold = plane_rms.at(irow) * th_factor;
+            float threshold = plane_rms.at(irow) * get_th_factor(plane);
             if (tight_roi->get_above_threshold(threshold).size() == 0) {
                 delete tight_roi;
                 continue;
@@ -494,7 +494,7 @@ void ROI_refinement::load_data(int plane, const Array::array_xxf &r_data, ROI_fo
             for (size_t i = 0; i != uboone_rois.size(); i++) {
                 SignalROI *loose_roi =
                     new SignalROI(plane, chid, uboone_rois.at(i).first, uboone_rois.at(i).second, signal);
-                float threshold = plane_rms.at(irow) * th_factor;
+                float threshold = plane_rms.at(irow) * get_th_factor(plane);
                 if (loose_roi->get_above_threshold(threshold).size() == 0) {
                     delete loose_roi;
                     continue;
@@ -1190,7 +1190,7 @@ void ROI_refinement::CheckROIs(int plane, ROI_formation &roi_form)
                 SignalROI *roi = *it;
                 int chid = roi->get_chid();
                 float th;
-                th = th_factor * rms_u.at(chid);
+                th = get_th_factor(plane) * rms_u.at(chid);
 
                 if (front_rois.find(roi) != front_rois.end()) {
                     SignalROISelection temp_rois;
@@ -1200,7 +1200,7 @@ void ROI_refinement::CheckROIs(int plane, ROI_formation &roi_form)
                         // std::cout << "F " << i << " " << rois_u_loose.size() << " " << roi1 << " " << chid << " " <<
                         // chid1 << std::endl;
                         float th1;
-                        th1 = th_factor * rms_u.at(chid1);
+                        th1 = get_th_factor(plane) * rms_u.at(chid1);
                         if (roi->overlap(roi1, th, th1)) {
                         }
                         else {
@@ -1220,7 +1220,7 @@ void ROI_refinement::CheckROIs(int plane, ROI_formation &roi_form)
                         int chid1 = roi1->get_chid();
                         // std::cout << "B " << roi1 << " " << chid << " " << chid1 << std::endl;
                         float th1;
-                        th1 = th_factor * rms_u.at(chid1);
+                        th1 = get_th_factor(plane) * rms_u.at(chid1);
                         if (roi->overlap(roi1, th, th1)) {
                         }
                         else {
@@ -1243,14 +1243,14 @@ void ROI_refinement::CheckROIs(int plane, ROI_formation &roi_form)
                 SignalROI *roi = *it;
                 int chid = roi->get_chid() - nwire_u;
                 float th;
-                th = th_factor * rms_v.at(chid);
+                th = get_th_factor(plane) * rms_v.at(chid);
                 if (front_rois.find(roi) != front_rois.end()) {
                     SignalROISelection temp_rois;
                     for (auto it1 = front_rois[roi].begin(); it1 != front_rois[roi].end(); it1++) {
                         SignalROI *roi1 = *it1;
                         int chid1 = roi1->get_chid() - nwire_u;
                         float th1;
-                        th1 = th_factor * rms_v.at(chid1);
+                        th1 = get_th_factor(plane) * rms_v.at(chid1);
                         if (roi->overlap(roi1, th, th1)) {
                         }
                         else {
@@ -1269,7 +1269,7 @@ void ROI_refinement::CheckROIs(int plane, ROI_formation &roi_form)
                         SignalROI *roi1 = *it1;
                         int chid1 = roi1->get_chid() - nwire_u;
                         float th1;
-                        th1 = th_factor * rms_v.at(chid1);
+                        th1 = get_th_factor(plane) * rms_v.at(chid1);
                         if (roi->overlap(roi1, th, th1)) {
                         }
                         else {
@@ -1622,10 +1622,10 @@ void ROI_refinement::ShrinkROI(SignalROI *roi, ROI_formation &roi_form)
 
     float threshold1 = 0;
     if (plane == 0) {
-        threshold1 = roi_form.get_uplane_rms().at(chid) * th_factor;
+        threshold1 = roi_form.get_uplane_rms().at(chid) * get_th_factor(plane);
     }
     else if (plane == 1) {
-        threshold1 = roi_form.get_vplane_rms().at(chid - nwire_u) * th_factor;
+        threshold1 = roi_form.get_vplane_rms().at(chid - nwire_u) * get_th_factor(plane);
     }
 
     int channel_save = 1240;
@@ -1668,10 +1668,10 @@ void ROI_refinement::ShrinkROI(SignalROI *roi, ROI_formation &roi_form)
             int plane1 = next_roi->get_plane();
             float threshold = 0;
             if (plane1 == 0) {
-                threshold = roi_form.get_uplane_rms().at(chid1) * th_factor;
+                threshold = roi_form.get_uplane_rms().at(chid1) * get_th_factor(plane1);
             }
             else if (plane1 == 1) {
-                threshold = roi_form.get_vplane_rms().at(chid1 - nwire_u) * th_factor;
+                threshold = roi_form.get_vplane_rms().at(chid1 - nwire_u) * get_th_factor(plane1);
             }
             std::vector<std::pair<int, int>> contents_above_threshold = next_roi->get_above_threshold(threshold);
             for (size_t i = 0; i != contents_above_threshold.size(); i++) {
@@ -1701,10 +1701,10 @@ void ROI_refinement::ShrinkROI(SignalROI *roi, ROI_formation &roi_form)
             int plane1 = prev_roi->get_plane();
             float threshold = 0;
             if (plane1 == 0) {
-                threshold = roi_form.get_uplane_rms().at(chid1) * th_factor;
+                threshold = roi_form.get_uplane_rms().at(chid1) * get_th_factor(plane1);
             }
             else if (plane1 == 1) {
-                threshold = roi_form.get_vplane_rms().at(chid1 - nwire_u) * th_factor;
+                threshold = roi_form.get_vplane_rms().at(chid1 - nwire_u) * get_th_factor(plane1);
             }
             std::vector<std::pair<int, int>> contents_above_threshold = prev_roi->get_above_threshold(threshold);
             for (size_t i = 0; i != contents_above_threshold.size(); i++) {
@@ -1750,8 +1750,8 @@ void ROI_refinement::ShrinkROI(SignalROI *roi, ROI_formation &roi_form)
             break;
         }
     }
-    new_start_bin -= pad;
-    new_end_bin += pad;
+    new_start_bin -= get_pad(plane);
+    new_end_bin += get_pad(plane);
     if (new_start_bin < start_bin) new_start_bin = start_bin;
     if (new_end_bin > end_bin) new_end_bin = end_bin;
 
@@ -1879,6 +1879,7 @@ void ROI_refinement::BreakROI(SignalROI *roi, float rms)
     // main algorithm
     int start_bin = roi->get_start_bin();
     int end_bin = roi->get_end_bin();
+    int plane = roi->get_plane();
 
     if (start_bin < 0 || end_bin < 0) return;
 
@@ -2215,11 +2216,11 @@ void ROI_refinement::BreakROI(SignalROI *roi, float rms)
         // Now we should go through the system again and re-adjust the content
         std::vector<std::pair<int, int>> bins;
         for (int i = 0; i < int(temp_signal.size()); i++) {
-            if (temp_signal.at(i) < th_factor * rms) {
+            if (temp_signal.at(i) < get_th_factor(plane) * rms) {
                 int start = i;
                 int end = i;
                 for (int j = i + 1; j < int(temp_signal.size()); j++) {
-                    if (temp_signal.at(j) < th_factor * rms) {
+                    if (temp_signal.at(j) < get_th_factor(plane) * rms) {
                         end = j;
                     }
                     else {

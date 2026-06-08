@@ -111,6 +111,20 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         get(config, "r_fake_signal_high_th_ind_factor", m_r_fake_signal_high_th_ind_factor);
     m_r_pad = get(config, "r_pad", m_r_pad);
     m_r_break_roi_loop = get(config, "r_break_roi_loop", m_r_break_roi_loop);
+    // Optional per-plane overrides (arrays of size 3, indexed by plane/slot).
+    // Absent => empty => the scalar knobs above apply to every plane.
+    if (config.isMember("r_th_factor_planes")) {
+        m_r_th_factor_planes.clear();
+        for (auto v : config["r_th_factor_planes"]) m_r_th_factor_planes.push_back(v.asFloat());
+    }
+    if (config.isMember("r_pad_planes")) {
+        m_r_pad_planes.clear();
+        for (auto v : config["r_pad_planes"]) m_r_pad_planes.push_back(v.asInt());
+    }
+    if (config.isMember("r_break_roi_loop_planes")) {
+        m_r_break_roi_loop_planes.clear();
+        for (auto v : config["r_break_roi_loop_planes"]) m_r_break_roi_loop_planes.push_back(v.asInt());
+    }
     m_r_th_peak = get(config, "r_th_peak", m_r_th_peak);
     m_r_sep_peak = get(config, "r_sep_peak", m_r_sep_peak);
     m_r_low_peak_sep_threshold_pre = get(config, "r_low_peak_sep_threshold_pre", m_r_low_peak_sep_threshold_pre);
@@ -1843,6 +1857,10 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_r_th_factor, m_r_fake_signal_low_th, m_r_fake_signal_high_th,
         m_r_fake_signal_low_th_ind_factor, m_r_fake_signal_high_th_ind_factor, m_r_pad, m_r_break_roi_loop, m_r_th_peak,
         m_r_sep_peak, m_r_low_peak_sep_threshold_pre, m_r_max_npeaks, m_r_sigma, m_r_th_percent, m_isWrapped);  //
+    // Apply optional per-plane refinement overrides (empty => no-op => scalar
+    // knobs used for every plane, bit-identical legacy behaviour).
+    if (!m_r_th_factor_planes.empty()) roi_refine.set_th_factor_planes(m_r_th_factor_planes);
+    if (!m_r_pad_planes.empty()) roi_refine.set_pad_planes(m_r_pad_planes);
 
     const std::vector<float>* perplane_thresholds[3] = {&roi_form.get_uplane_rms(), &roi_form.get_vplane_rms(),
                                                         &roi_form.get_wplane_rms()};
@@ -1990,7 +2008,10 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
 
             const std::vector<float>& perwire_rmses = *perplane_thresholds[iplane];
 
-            for (int qx = 0; qx != m_r_break_roi_loop; qx++) {
+            const int break_roi_loop = m_r_break_roi_loop_planes.empty()
+                                           ? m_r_break_roi_loop
+                                           : m_r_break_roi_loop_planes.at(iplane);
+            for (int qx = 0; qx != break_roi_loop; qx++) {
                 roi_refine.BreakROIs(iplane, roi_form);
                 roi_refine.CheckROIs(iplane, roi_form);
                 roi_refine.CleanUpROIs(iplane);
