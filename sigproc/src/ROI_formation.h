@@ -58,6 +58,12 @@ namespace WireCell {
                 }
             }
 
+            // Per-plane ROI-class remap (mirrors OmnibusSigProc plane2layer).
+            // The ROI threshold class for plane p is collection iff
+            // m_roi_plane2layer[p] == 2, else induction.  Default {0,1,2} keeps
+            // the historical per-plane behavior (U,V induction; W collection).
+            void set_roi_plane2layer(const std::vector<int>& m) { m_roi_plane2layer = m; }
+
             std::vector<float>& get_uplane_rms() { return uplane_rms; };
             std::vector<float>& get_vplane_rms() { return vplane_rms; };
             std::vector<float>& get_wplane_rms() { return wplane_rms; };
@@ -82,6 +88,9 @@ namespace WireCell {
             float th_factor_ind, th_factor_col;
             int pad;
             float asy;
+
+            // Per-plane ROI-class remap; see set_roi_plane2layer().
+            std::vector<int> m_roi_plane2layer{0, 1, 2};
 
             // loose ROI things
             int rebin;

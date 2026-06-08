@@ -441,19 +441,21 @@ void ROI_formation::find_ROI_by_decon_itself(int plane, const Array::array_xxf& 
                 signal2.at(icol) = r_data_tight(irow, icol);
             }
         }
-        // do threshold and fill rms
+        // do threshold and fill rms.  The threshold CLASS follows the ROI-class
+        // remap (collection iff m_roi_plane2layer[plane]==2), while the rms
+        // STORAGE stays keyed on the physical plane (it feeds downstream
+        // refinement by physical index).  Default remap {0,1,2} reproduces the
+        // historical behavior exactly.
         double rms = cal_RMS(signal);
-        double threshold = 0;
+        const bool is_collection = (m_roi_plane2layer.at(plane) == 2);
+        double threshold = (is_collection ? th_factor_col : th_factor_ind) * rms + 1;
         if (plane == 0) {
-            threshold = th_factor_ind * rms + 1;
             uplane_rms.at(irow) = rms;
         }
         else if (plane == 1) {
-            threshold = th_factor_ind * rms + 1;
             vplane_rms.at(irow) = rms;
         }
         else if (plane == 2) {
-            threshold = th_factor_col * rms + 1;
             wplane_rms.at(irow) = rms;
         }
 
