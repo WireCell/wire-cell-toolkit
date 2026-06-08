@@ -43,9 +43,18 @@ function(params, tools, override = {}) {
                // original donor).  Set 1 to recover the pre-2026-05-03
                // single-hop behaviour (donors must be originally-triggered).
                l1sp_pd_adj_max_hops=3,
+               // APA0 W-plane (induction-path) ROI-refinement tune.  Default
+               // false => bit-identical production.  When true (APA0 only), the
+               // induction-path refinement is loosened to recover the gap-prone
+               // W signal: no BreakROI split, wider ShrinkROI pad, lower
+               // refinement threshold.  Applies to APA0's whole induction path
+               // (U + W); V/collection is untouched.  See sp-apa0-plane2.md §7.
+               apa0_w_roi_tune=false,
                dump_rawdecon=false)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
+    // Gate the tuned induction-refinement knobs to APA0 only.
+    local roi_tune = apa0_w_roi_tune && anode.data.ident == 0;
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -75,7 +84,9 @@ function(params, tools, override = {}) {
       lroi_th_factor1: 0.7, // default 0.7
       lroi_jump_one_bin: 1, // default 0
 
-      r_th_factor: if anode.data.ident==0 then 2.5 else 3.0,  // default 3
+      r_th_factor: if roi_tune then 1.5 else if anode.data.ident==0 then 2.5 else 3.0,  // default 3
+      r_pad: if roi_tune then 20 else 5,  // default 5 (cxx); tune widens ShrinkROI margin
+      r_break_roi_loop: if roi_tune then 0 else 2,  // default 2 (cxx); tune disables BreakROI split
       r_fake_signal_low_th: 375,  // default 500
       r_fake_signal_high_th: 750,  // default 1000
       r_fake_signal_low_th_ind_factor: 1.0,  // default 1
