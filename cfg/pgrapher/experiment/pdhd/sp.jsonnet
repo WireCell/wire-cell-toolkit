@@ -44,12 +44,13 @@ function(params, tools, override = {}) {
                // single-hop behaviour (donors must be originally-triggered).
                l1sp_pd_adj_max_hops=3,
                // APA0 W-plane (induction-path) ROI-refinement tune.  Default
-               // false => bit-identical production.  When true (APA0 only), the
-               // induction-path refinement is loosened to recover the gap-prone
-               // W signal: no BreakROI split, wider ShrinkROI pad, lower
-               // refinement threshold.  Applies to APA0's whole induction path
-               // (U + W); V/collection is untouched.  See sp-apa0-plane2.md §7.
-               apa0_w_roi_tune=false,
+               // true (APA0 only): the W-plane (slot 1) induction refinement is
+               // loosened to recover the gap-prone W signal — no BreakROI split,
+               // wider ShrinkROI pad, lower refinement threshold — via per-plane
+               // arrays that touch ONLY W; U and V keep their defaults.  Set
+               // false to recover the pre-tune APA0 W SP behaviour.
+               // See sp-apa0-plane2.md §7.
+               apa0_w_roi_tune=true,
                dump_rawdecon=false)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
