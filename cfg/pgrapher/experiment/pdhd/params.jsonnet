@@ -123,8 +123,11 @@ base {
     elecs: [
       super.elec {
         // The FE amplifier gain in units of Voltage/Charge.
-        // Override with: wire-cell -V elecGain=7.8 ...
-        gain : std.extVar("elecGain")*wc.mV/wc.fC,
+        // Override with: wire-cell -V elecGain=7.8 ...  (string ext-var) or
+        // --ext-code elecGain=7.8 (number, e.g. from dunesw).  Accept both:
+        // parseJson only a string; a number passes through unchanged.
+        gain : (local g = std.extVar("elecGain");
+                if std.isString(g) then std.parseJson(g) else g)*wc.mV/wc.fC,
 
         // The shaping (aka peaking) time of the amplifier shaper.
         shaping : 2.2*wc.us,
