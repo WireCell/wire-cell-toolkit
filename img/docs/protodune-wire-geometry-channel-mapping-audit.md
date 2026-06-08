@@ -168,6 +168,57 @@ unconfirmed** and is the thing to settle.
 
 ---
 
+## 4b. PDVD follow-up: geometry vs channel-mapping, and the v4 test (2026-06-07)
+
+Driven by a real symptom: **PDVD *data* imaging shows gaps** — fired U/V/W wires
+that should cross don't, so blobs break up. That is the signature of either a
+channel→wire mapping error or a wire-geometry inconsistency. We separated the two.
+
+### Geometry: v3 is built from v4 GDML; v5 moved the bottom CRPs
+- The toolkit `…-v3.json.bz2` reproduces the **v4** GDML to ~µm (matched wire-by-wire
+  by exact position: 6 µm match, 7.2 mm to next-nearest → unambiguous bijection).
+- The **v5** GDML (`protodunevd_v5_ggd.gdml`) repositions wires: **bottom CRPs
+  (anodes 0–3) shift ~5.5 mm in W and ~2.5 mm in U/V; top CRPs (4–7) unchanged.**
+  Within each CRP this is **near-rigid** (best-fit translation, residual ~0.2 mm).
+  Wire **angles** (U 30°, V 150°, W 90°) and counts/wrapping are identical v3↔v5.
+- Method caveat learned here: **rank/perp-matching is unreliable for wrapped
+  induction.** It invented a 2.3 mm PDHD-U "shift" that **channel-identity matching
+  showed was 8 µm**. Only channel-matched (or exact-position-matched) comparisons
+  are trusted below. (PDHD is separately confirmed **bit-consistent with v8 GDML** —
+  all 22208 wires within 8 µm.)
+
+### The v4 file (exact, no approximation)
+Built `wire-cell-data/protodunevd-wires-larsoft-v4.json.bz2` = **v3's channel
+assignment + the exact v5 GDML wire positions**. Construction is exact: each v3
+wire is matched to its v4-geometry counterpart by exact position (6 µm, unique),
+then given the corresponding v5 endpoints (regen-v4↔regen-v5 correspond 1:1 by
+ident/channel/segment). Verified: channel/ident/segment identical to v3; positions
+equal v5 to 0.00000 mm and differ from v3 by up to 5.700 mm; channel↔plane still
+matches the official map 100%.
+
+### Result: geometry is NOT the gap cause
+Re-imaged + re-clustered run 39324 evts 0–4 with v4. **Imaging is essentially
+identical to v3** — blob counts agree to within 0–5 per anode (e.g. anode0
+2681→2678, anode4 13572→13572). A near-rigid per-CRP shift *moves* each CRP's image
+without filling gaps, exactly as predicted. **So updating to v5 geometry does not
+close the PDVD gaps.** Bee link (v4, evts 0–4):
+`https://www.phy.bnl.gov/twister/bee/set/3fa7822a-52d0-4143-8267-922e33571fbd`.
+
+### Where that leaves it
+The gap cause is **not** the wire positions (v4/v5) — it is the **within-plane
+channel→wire mapping**. What is established: v3's channel→**plane** assignment and
+channel count match `PD2VDTPCChannelMap_v2` **100%**, and the v1→v2 update did not
+touch channel→wire (electronics-only). What remains **unverified** is the
+within-plane channel→wire ordering, which **cannot be settled from files alone**
+(wrapped induction + 2-D collection defeat position-rank methods; the converter
+renumbers channels so there's nothing to channel-match against). The definitive
+test is a **LArSoft `PD2VDChannelMapService` wire-dump** (`channel tpc plane wire
+x y z`) — with it, a channel-matched comparison gives a yes/no in seconds (as it
+did for PDHD). The production config remains on **v3** (v4 changes nothing); v4 is
+left in `wire-cell-data` for further testing.
+
+---
+
 ## 5. Why HD reproduces but VD doesn't
 
 - **HD** channels reproduce exactly because `build_hd_channel_map` is the same tool
