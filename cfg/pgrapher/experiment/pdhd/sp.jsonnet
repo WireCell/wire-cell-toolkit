@@ -27,14 +27,6 @@ function(params, tools, override = {}) {
   //   null (default): APA0 → [0] (U only; V anomalous), APA1-3 → [0,1] (U+V).
   //   explicit list: overrides the per-APA default.
   make_sigproc(anode, name=null,
-               // Per-plane ROI-class remap for OmnibusSigProc (default null =>
-               // C++ default [0,1,2], byte-identical to historical behavior).
-               // Independent of plane2layer (which remaps only the decon
-               // kernel).  Set e.g. [0,2,1] to route a plane through the other
-               // ROI path — for APA0 this sends the now-inducting W plane
-               // (index 2) through the induction ROI path and V (index 1)
-               // through the collection path.  See pdhd/docs/sp-apa0-plane2.md.
-               roi_plane2layer=null,
                l1sp_pd_mode='process',
                l1sp_pd_dump_path='',
                l1sp_pd_wf_dump_path='',
@@ -118,10 +110,6 @@ function(params, tools, override = {}) {
       isWrapped: false,
       // process_planes: if anode.data.ident==0 then [0, 1] else [0, 1, 2],
       plane2layer: if anode.data.ident==0 then [0,2,1] else [0,1,2],
-
-      // ROI-class remap; emitted only when explicitly requested so the default
-      // config is byte-identical (C++ default is [0,1,2]).  See make_sigproc arg.
-      [if roi_plane2layer != null then 'roi_plane2layer']: roi_plane2layer,
 
       Wiener_tight_filters: if anode.data.ident==0
                             then ["Wiener_tight_U_APA1", "Wiener_tight_W_APA1", "Wiener_tight_V_APA1"] // ind, ind, col

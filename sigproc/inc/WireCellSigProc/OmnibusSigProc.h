@@ -177,18 +177,6 @@ namespace WireCell {
             // https://github.com/WireCell/wire-cell-toolkit/issues/322
             std::vector<int> m_plane2layer{0,1,2};
 
-            // Per-plane ROI-class remap, independent of m_plane2layer (which
-            // only remaps the field-response/deconvolution kernel).  This one
-            // remaps which ROI-FORMATION path a plane takes: plane p is treated
-            // as the collection plane (single tight pass, no LF, th_col) iff
-            // m_roi_plane2layer[p]==2, otherwise as an induction plane (3-step
-            // tighter+tight+loose, LF filters, th_ind).  Default {0,1,2}
-            // reproduces the historical hard-coded behavior byte-for-byte.
-            // Example: APA0 with the V<->W kernel swap can set {0,2,1} so the
-            // now-inducting W plane (index 2) takes the induction ROI path.
-            std::vector<int> m_roi_plane2layer{0,1,2};
-            bool is_roi_collection(int plane) const { return m_roi_plane2layer[plane] == 2; }
-
             // MP threshold feature_val method, 0: ThreePointCheck, 1: MaxPointCheck
             int m_MP_feature_val_method{0};
 
