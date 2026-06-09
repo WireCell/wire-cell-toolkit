@@ -177,7 +177,7 @@ base {
     },
 
     files: {
-        wires: "protodunevd-wires-larsoft-v3.json.bz2",
+        wires: "protodunevd-wires-larsoft-v5.json.bz2",
         strip_length: "PDVD_strip_length.json.bz2",
 
         fields: [
