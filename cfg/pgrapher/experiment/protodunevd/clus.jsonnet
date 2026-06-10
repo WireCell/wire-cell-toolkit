@@ -32,11 +32,12 @@ local index = std.parseInt(initial_index);
 local common_coords = ["x", "y", "z"];
 local common_corr_coords = ["x_t0cor", "y", "z"];
 
-// Drift-side Bee display groups: anodes 0-3 (bottom drift, x0=-341.5cm) and
-// anodes 4-7 (top drift, x0=+341.5cm).  Each anode's two faces fold into its
-// group automatically (routing is per-anode via wpid.apa()).  Shared by the
-// clustering points and the dead-area output in the all-APA dump so each drift
-// side shows as a single Bee instance.
+// Drift-side groups: anodes 0-3 (bottom drift, x0=-341.5cm) and anodes 4-7
+// (top drift, x0=+341.5cm).  Each anode's two faces fold into its group
+// automatically (routing is per-anode via wpid.apa()).  These define both the
+// stage-3 per-drift-group clustering scope (clus_per_group) and the Bee
+// display groups (clustering points + dead-area output in the all-TPC dump),
+// so each drift side shows as a single Bee instance.
 local apa_drift_groups = [
     { name: "group0123", apas: [0, 1, 2, 3] },
     { name: "group4567", apas: [4, 5, 6, 7] },
@@ -240,7 +241,7 @@ local clus_per_face (
         cm.parallel_prolong(length_cut=35*wc.cm),
         cm.close(length_cut=1.2*wc.cm),
         cm.extend_loop(num_try=3),
-        cm.separate(use_ctpc=true),
+        // separate moved to the per-drift-group stage (stage 3)
         cm.connect1(),
         // cm.isolated(),
         // cm.retile(cut_time_low=3*wc.us, cut_time_high=5*wc.us, anodes=[anode], samplers=[clus.sampler(bsl, apa=anode.data.ident, face=face)]),
@@ -346,7 +347,7 @@ local clus_per_apa (
                                        pc_transforms=pcts,
                                        coords=common_coords),
     local cm_pipeline = [
-        // cm.deghost(),
+        cm.deghost(),
         cm.protect_overclustering(),
     ],
 
@@ -415,8 +416,14 @@ local clus_per_apa (
     ),
 }.ret;
 
-local clus_all_apa (
+// Stage 3: per drift-side group (anodes 0-3 bottom drift, anodes 4-7 top
+// drift), raw x,y,z coordinates.  Runs the long-range merge family across the
+// four CRPs of one drift side, then the topology passes (separate moved here
+// from the per-face stage; examine_x_boundary requires all wpids in the group
+// to share the same FV_x metadata, true within one drift side).
+local clus_per_group (
     anodes,
+    group_name,
     dump = true,
     bee_dir = "data",
     runNo = 1,
@@ -426,13 +433,115 @@ local clus_all_apa (
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
-        name: "clus_all_apa",
+        name: "clus_per_group-%s"%group_name,
         data:  {
             multiplicity: nanodes,
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
+            tolerate_missing: true,
         }
     }, nin=nanodes, nout=1),
+
+    local dv = detector_volumes(anodes),
+    local pcts = pctransforms(dv),
+
+    local cm = clus.clustering_methods(prefix=group_name,
+                                       detector_volumes=dv,
+                                       pc_transforms=pcts,
+                                       coords=common_coords),
+    local cm_pipeline = [
+        cm.extend(flag=4, length_cut=60*wc.cm, num_try=0, length_2_cut=15*wc.cm, num_dead_try=1),
+        cm.regular(name="1", length_cut=60*wc.cm, flag_enable_extend=false),
+        cm.regular(name="2", length_cut=30*wc.cm, flag_enable_extend=true),
+        cm.parallel_prolong(length_cut=35*wc.cm),
+        cm.close(length_cut=1.2*wc.cm),
+        cm.extend_loop(num_try=3),
+        cm.separate(use_ctpc=true),
+        cm.examine_x_boundary(),
+        cm.neutrino(),
+        cm.isolated(),
+        cm.examine_bundles(),
+    ],
+
+    local mabc = g.pnode({
+        type: "MultiAlgBlobClustering",
+        name: "clus_per_group-%s"%group_name,
+        data:  {
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+            perf: true,
+            bee_dir: bee_dir, // "data/0/0", // not used
+            bee_zip: "%s/mabc-%s.zip"%[bee_dir, group_name],
+            bee_detector: "protodunevd",
+            initial_index: index,   // New RSE configuration
+            use_config_rse: true,  // Enable use of configured RSE
+            runNo: runNo,
+            subRunNo: subRunNo,
+            eventNo: eventNo,
+            save_deadarea: true,
+            dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PDVD anode face
+            anodes: [wc.tn(a) for a in anodes],
+            detector_volumes: wc.tn(dv),
+            bee_points_sets: [
+                {
+                    name: "clustering",
+                    detector: "protodunevd",
+                    algorithm: "clustering",
+                    pcname: "3d",
+                    coords: ["x", "y", "z"],
+                    individual: false,
+                }
+            ],
+            pipeline: wc.tns(cm_pipeline),
+        }
+    }, nin=1, nout=1, uses=anodes+[dv, pcts]+cm_pipeline),
+
+    local sink = g.pnode({
+        type: "TensorFileSink",
+        name: "clus_per_group-%s"%group_name,
+        data: {
+            outname: "%s/trash-%s.tar.gz"%[bee_dir, group_name],
+            prefix: "clustering_", // json, numpy, dummy
+            dump_mode: true,
+        }
+    }, nin=1, nout=0),
+
+    local end = if dump
+    then g.pipeline([mabc, sink])
+    else g.pipeline([mabc]),
+
+    ret :: g.intern(
+        innodes = [pcmerging],
+        centernodes = [],
+        outnodes = [end],
+        edges = [
+            g.edge(pcmerging, end, 0, 0),
+        ]
+    ),
+}.ret;
+
+// Stage 4: all-TPC, merging the two drift-side groups.  switch_scope applies
+// the per-cluster T0 correction (x_t0cor; with no flash matching on PDVD this
+// is the apparent x) and its containment scope filter.
+local clus_all_tpc (
+    anodes,
+    ngroups = 2,
+    dump = true,
+    bee_dir = "data",
+    runNo = 1,
+    subRunNo = 1,
+    eventNo = 1,
+    ) = {
+    local pcmerging = g.pnode({
+        type: "PointTreeMerging",
+        name: "clus_all_tpc",
+        data:  {
+            multiplicity: ngroups,
+            inpath: "pointtrees/%d",
+            outpath: "pointtrees/%d",
+            tolerate_missing: true,
+        }
+    }, nin=ngroups, nout=1),
 
     local dv = detector_volumes(anodes),
     local pcts = pctransforms(dv),
@@ -450,37 +559,22 @@ local clus_all_apa (
                                        coords=common_corr_coords),
 
     local cm_pipeline = [
-        // cm_old.examine_x_boundary(),
         cm_old.switch_scope(),
 
-        cm.extend(flag=4, length_cut=60*wc.cm, num_try=0, length_2_cut=15*wc.cm, num_dead_try= 1),
-        cm.regular(name="1", length_cut=60*wc.cm, flag_enable_extend=false),
-        cm.regular(name="2", length_cut=30*wc.cm, flag_enable_extend=true),
-        cm.parallel_prolong(length_cut=35*wc.cm),
-        cm.close(length_cut=1.2*wc.cm),
-        cm.extend_loop(num_try=3),
-        cm.separate(use_ctpc=true),
-        cm.neutrino(),
-        cm.isolated(),
-        cm.examine_bundles(),
-        // cm.retile(cut_time_low=3*wc.us,
-        //           cut_time_high=5*wc.us,
-        //           anodes=anodes,
-        //           samplers=[
-        //               clus.sampler(bs_rt_face(0,0), apa=0, face=0),
-        //               clus.sampler(bs_rt_face(0,1), apa=0, face=1),
-        //               clus.sampler(bs_rt_face(1,0), apa=1, face=0),
-        //               clus.sampler(bs_rt_face(1,1), apa=1, face=1),
-        //               clus.sampler(bs_rt_face(2,0), apa=2, face=0),
-        //               clus.sampler(bs_rt_face(2,1), apa=2, face=1),
-        //               clus.sampler(bs_rt_face(3,0), apa=3, face=0),
-        //               clus.sampler(bs_rt_face(3,1), apa=3, face=1),
-        //           ]),
+        // Cathode-crossing connector (SBND-tuned parameters as placeholder;
+        // PDVD central cathode is at x=0, the C++ default cathode_x — the
+        // sensitive volumes end at -+25.4mm so cathode_x_cut=5cm spans the
+        // |x|<2.54cm gap).  use_flash_t0=false because PDVD has no flash
+        // matching (the flash-coincidence gate would veto every pair).
+        // Commented out for now; uncomment to enable.
+        // cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
+        //                    min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
+        //                    conn_short_cut=30.0, use_flash_t0=false),
     ],
 
     local mabc = g.pnode({
         type: "MultiAlgBlobClustering",
-        name: "clus_all_apa",
+        name: "clus_all_tpc",
         data:  {
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
@@ -509,10 +603,11 @@ local clus_all_apa (
                     individual: false            // Output individual APA/Face
                 },
             {
-                    // name "img" dumps the live grouping BEFORE the all-APA
-                    // pipeline -> the per-anode clustering result, grouped by
-                    // drift side: clustering-group0123 / clustering-group4567.
-                    // The "clustering" set above (end dump) gives
+                    // name "img" dumps the live grouping BEFORE the all-TPC
+                    // pipeline -> the per-drift-group clustering result (stage
+                    // 3, post group merging), grouped by drift side:
+                    // clustering-group0123 / clustering-group4567.  The
+                    // "clustering" set above (end dump) gives
                     // clustering-global (full-detector clustering).
                     name: "img",
                     detector: "protodunevd",
@@ -529,7 +624,7 @@ local clus_all_apa (
 
     local sink = g.pnode({
         type: "TensorFileSink",
-        name: "clus_all_apa",
+        name: "clus_all_tpc",
         data: {
             outname: "%s/trash-all-apa.tar.gz"%[bee_dir],
             prefix: "clustering_", // json, numpy, dummy
@@ -554,5 +649,6 @@ local clus_all_apa (
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
-    all_apa(anodes, dump=true) :: clus_all_apa(anodes, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    all_tpc(anodes, ngroups=2, dump=true) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
 }
