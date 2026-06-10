@@ -186,13 +186,315 @@ static bool JudgeSeparateDec_SBND_boundary(const Cluster* cluster,
 }
 
 
+// ----------------------------------------------------------------------------
+// Knob-gated refinements applied to the "family" of clusters produced by
+// separating one original cluster (default OFF; gated by collinear_recover /
+// band_recarve).  Tunables are hard-coded in the style of the rest of this
+// file, pinned against PDVD run 39324 evt 0 group4567 -- see
+// clus/docs/clustering-separate-refine.md.
+// ----------------------------------------------------------------------------
+
+// Step A (collinear_recover): recover stranded collinear track tips.
+// Separate_1 carves its "path" cluster by 2D proximity to a graph shortest
+// path, so a track tip sitting beyond a real imaging gap larger than
+// Separate_2's 5 cm relink never joins the path and is left in the leftover
+// cluster.  For each long, thin, non-isochronous family member T, move blobs
+// from sibling members that continue T's PCA axis beyond its endpoints (small
+// perpendicular offset, collinear local direction, contiguous axial run) into
+// T.  Dead family entries are nulled in place, never erased.
+static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& scope,
+                                   std::vector<Cluster*>& family)
+{
+    const double TRACK_LEN_MIN   = 50 * units::cm;  // T must be a long ...
+    const double TRACK_RATIO_MAX = 0.15;            // ... thin (pca eval1/eval0) track
+    const double BAND_EXCL_ANG   = 15.;             // skip T near-isochronous (deg from perp-to-drift):
+                                                    // wide bands are mutually near-collinear and would
+                                                    // steal each other's far blobs
+    const double PERP_MAX        = 4 * units::cm;   // blob center to T-axis distance
+    const double GAP_MAX         = 15 * units::cm;  // max axial gap, endpoint->blob and blob->blob
+    const double DIR_ANG_MAX     = 15.;             // blob local dir vs T axis (deg, sign-free)
+
+    const geo_point_t drift_dir(1, 0, 0);
+
+    for (size_t ti = 0; ti != family.size(); ti++) {
+        Cluster* track = family.at(ti);
+        if (!track) continue;
+        if (track->get_length() < TRACK_LEN_MIN) continue;
+        const auto& pca = track->get_pca();
+        if (pca.axis.size() < 2 || pca.values.at(0) <= 0) continue;
+        if (pca.values.at(1) / pca.values.at(0) >= TRACK_RATIO_MAX) continue;
+        geo_point_t axis(pca.axis.at(0).x(), pca.axis.at(0).y(), pca.axis.at(0).z());
+        if (fabs(axis.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. < BAND_EXCL_ANG) continue;
+
+        const geo_point_t center = pca.center;
+        const auto ends = track->get_main_axis_points();
+        const double t_end1 = (ends.first - center).dot(axis);
+        const double t_end2 = (ends.second - center).dot(axis);
+        const double t_lo = std::min(t_end1, t_end2);
+        const double t_hi = std::max(t_end1, t_end2);
+
+        // Collect candidate blobs beyond either endpoint -- queries only,
+        // against the frozen family; mutations happen below.
+        struct Cand { size_t oi; int bi; double t; };
+        std::vector<Cand> cands;
+        for (size_t oi = 0; oi != family.size(); oi++) {
+            if (oi == ti) continue;
+            Cluster* donor = family.at(oi);
+            if (!donor) continue;
+            const auto& blobs = donor->children();
+            for (int bi = 0; bi != (int) blobs.size(); bi++) {
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                const geo_point_t rel = bc - center;
+                const double t = rel.dot(axis);
+                if (t >= t_lo && t <= t_hi) continue;  // only beyond the endpoints
+                const geo_point_t perp = rel - axis * t;
+                if (perp.magnitude() >= PERP_MAX) continue;
+                geo_point_t ldir = donor->vhough_transform(bc, 15 * units::cm);
+                double ang = axis.angle(ldir) / 3.1415926 * 180.;
+                if (ang > 90.) ang = 180. - ang;
+                if (ang >= DIR_ANG_MAX) continue;
+                cands.push_back({oi, bi, t});
+            }
+        }
+        if (cands.empty()) continue;
+
+        // Contiguity: walk outward from each endpoint, accepting candidates
+        // while the axial gap stays within GAP_MAX.  Sort by axial coordinate
+        // with (family index, blob index) tie-breaks for determinism.
+        std::map<size_t, std::vector<int>> moves;  // family idx -> blob indices
+        auto walk = [&](bool high_end) {
+            std::vector<const Cand*> side;
+            for (const auto& c : cands)
+                if (high_end ? c.t > t_hi : c.t < t_lo) side.push_back(&c);
+            std::sort(side.begin(), side.end(), [&](const Cand* a, const Cand* b) {
+                const double ta = high_end ? a->t : -a->t;
+                const double tb = high_end ? b->t : -b->t;
+                if (ta != tb) return ta < tb;
+                if (a->oi != b->oi) return a->oi < b->oi;
+                return a->bi < b->bi;
+            });
+            double prev = high_end ? t_hi : -t_lo;
+            for (const Cand* c : side) {
+                const double t = high_end ? c->t : -c->t;
+                if (t - prev > GAP_MAX) break;
+                prev = t;
+                moves[c->oi].push_back(c->bi);
+            }
+        };
+        walk(true);
+        walk(false);
+        if (moves.empty()) continue;
+
+        const auto tscope = track->get_default_scope();
+        const auto ttrans = track->get_scope_transform(tscope);
+        for (auto& [oi, bidxs] : moves) {
+            Cluster* donor = family.at(oi);
+            if ((int) bidxs.size() == donor->nchildren()) {
+                // whole donor moves; do not leave a childless husk behind
+                track->take_children(*donor, true);
+                family.at(oi) = nullptr;
+                live_grouping.destroy_child(donor);
+                assert(donor == nullptr);
+            }
+            else {
+                std::vector<int> b2groupid(donor->nchildren(), -1);  // -1 = stay
+                for (int bi : bidxs) b2groupid.at(bi) = 0;
+                auto pieces = live_grouping.separate(donor, b2groupid, false);
+                Cluster* piece = pieces.at(0);
+                track->take_children(*piece, true);
+                live_grouping.destroy_child(piece);
+                assert(piece == nullptr);
+            }
+        }
+        // take_children does not invalidate the facade cache; the
+        // set_default_scope round-trip performs the full clear (see
+        // Facade_Cluster.cxx clear_cache notes).
+        track->set_default_scope(tscope);
+        track->set_scope_filter(tscope, true);
+        track->set_scope_transform(tscope, ttrans);
+
+        size_t nmoved = 0;
+        for (const auto& [oi, bidxs] : moves) nmoved += bidxs.size();
+        std::cout << "Separate collinear_recover: track len " << track->get_length() / units::cm
+                  << " cm claimed " << nmoved << " blobs from " << moves.size() << " donors" << std::endl;
+    }
+}
+
+// Step B (band_recarve): one cluster per crossing isochronous band.  When two
+// wide isochronous bands cross at a shallow angle, the recursion above carves
+// them into a path-tube, arbitrary "saved" slices and a leftover bin -- the
+// final Separate_2 is pure 5 cm connectivity and the touching bands stay
+// arbitrarily mixed.  Pool the touching band-like family members and re-carve
+// them with a k=2 line fit in the (y,z) plane (bands are extended transverse
+// to drift), assigning each blob to the nearer band axis.  Aborts (keeping the
+// existing carve) when no valid seed pair exists or the fit degenerates.
+static void recarve_two_bands(Grouping& live_grouping, const Tree::Scope& scope,
+                              std::vector<Cluster*>& family)
+{
+    const double BAND_PERP_ANG = 10.;            // member axis within this of perp-to-drift (deg)
+    const double BAND_LEN_MIN  = 60 * units::cm;
+    const double TOUCH_MAX     = 2 * units::cm;  // members of one band complex touch
+    const double SEED_ANG_MIN  = 8.;             // yz angle between the two seed axes (deg)
+    const double SEED_ANG_MAX  = 45.;
+    const int    NITER         = 10;             // fixed k=2 line-fit iterations
+    const double MIN_FRAC      = 0.10;           // degeneracy guard (npoints fraction per side)
+
+    const geo_point_t drift_dir(1, 0, 0);
+
+    // 1. band-like family members
+    std::vector<size_t> band;  // indices into family
+    for (size_t i = 0; i != family.size(); i++) {
+        Cluster* c = family.at(i);
+        if (!c) continue;
+        if (c->get_length() < BAND_LEN_MIN) continue;
+        const auto& pca = c->get_pca();
+        if (pca.axis.size() < 1 || pca.values.at(0) <= 0) continue;
+        geo_point_t axis(pca.axis.at(0).x(), pca.axis.at(0).y(), pca.axis.at(0).z());
+        if (fabs(axis.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. >= BAND_PERP_ANG) continue;
+        band.push_back(i);
+    }
+    if (band.size() < 2) return;
+
+    // unit (y,z) projection of a member's main axis
+    auto yz_axis = [&](size_t i) -> std::pair<double, double> {
+        const auto& pca = family.at(i)->get_pca();
+        const double ay = pca.axis.at(0).y(), az = pca.axis.at(0).z();
+        const double n = std::sqrt(ay * ay + az * az);
+        return {ay / n, az / n};
+    };
+    auto yz_angle = [](const std::pair<double, double>& a, const std::pair<double, double>& b) {
+        double dot = fabs(a.first * b.first + a.second * b.second);
+        if (dot > 1.) dot = 1.;
+        return std::acos(dot) / 3.1415926 * 180.;
+    };
+
+    // 2. seed pair: touching members with distinct yz axes; widest angle wins,
+    // ties resolved by smaller family indices (loop order).
+    int s1 = -1, s2 = -1;
+    double best_ang = -1;
+    for (size_t i = 0; i + 1 < band.size(); i++) {
+        for (size_t j = i + 1; j < band.size(); j++) {
+            const double ang = yz_angle(yz_axis(band[i]), yz_axis(band[j]));
+            if (ang < SEED_ANG_MIN || ang > SEED_ANG_MAX) continue;
+            std::tuple<int, int, double> dis = family.at(band[i])->get_closest_points(*family.at(band[j]));
+            if (std::get<2>(dis) >= TOUCH_MAX) continue;
+            if (ang > best_ang) { best_ang = ang; s1 = band[i]; s2 = band[j]; }
+        }
+    }
+    if (s1 < 0) return;
+
+    // 3. pool: grow from the seed pair over band-like members by touch
+    std::vector<size_t> pool = {(size_t) s1, (size_t) s2};
+    bool grown = true;
+    while (grown) {
+        grown = false;
+        for (size_t bi : band) {
+            if (std::find(pool.begin(), pool.end(), bi) != pool.end()) continue;
+            for (size_t pi : pool) {
+                std::tuple<int, int, double> dis = family.at(bi)->get_closest_points(*family.at(pi));
+                if (std::get<2>(dis) < TOUCH_MAX) {
+                    pool.push_back(bi);
+                    grown = true;
+                    break;
+                }
+            }
+        }
+    }
+    std::sort(pool.begin(), pool.end());  // family (creation) order
+
+    // 4. k=2 weighted line fit in (y,z) over pooled blob centers
+    struct Line2 { double cy, cz, dy, dz; };
+    Line2 line[2];
+    for (int k = 0; k != 2; k++) {
+        const size_t si = (k == 0) ? s1 : s2;
+        const auto& pca = family.at(si)->get_pca();
+        const auto a = yz_axis(si);
+        line[k] = {pca.center.y(), pca.center.z(), a.first, a.second};
+    }
+    auto line_dis = [](const Line2& l, double by, double bz) {
+        const double vy = by - l.cy, vz = bz - l.cz;
+        return fabs(vy * l.dz - vz * l.dy);
+    };
+    auto nearer = [&](double by, double bz) {
+        return line_dis(line[0], by, bz) <= line_dis(line[1], by, bz) ? 0 : 1;
+    };
+
+    for (int iter = 0; iter != NITER; iter++) {
+        double sw[2] = {0, 0}, sy[2] = {0, 0}, sz[2] = {0, 0};
+        double syy[2] = {0, 0}, syz[2] = {0, 0}, szz[2] = {0, 0};
+        for (size_t pi : pool) {
+            for (const Blob* blob : family.at(pi)->children()) {
+                const geo_point_t bc = blob->center_pos();
+                const double w = blob->npoints();
+                const int k = nearer(bc.y(), bc.z());
+                sw[k] += w;
+                sy[k] += w * bc.y();
+                sz[k] += w * bc.z();
+                syy[k] += w * bc.y() * bc.y();
+                syz[k] += w * bc.y() * bc.z();
+                szz[k] += w * bc.z() * bc.z();
+            }
+        }
+        if (sw[0] <= 0 || sw[1] <= 0) return;  // one side emptied -> no 2-band structure
+        for (int k = 0; k != 2; k++) {
+            const double my = sy[k] / sw[k], mz = sz[k] / sw[k];
+            const double cyy = syy[k] / sw[k] - my * my;
+            const double cyz = syz[k] / sw[k] - my * mz;
+            const double czz = szz[k] / sw[k] - mz * mz;
+            const double theta = 0.5 * std::atan2(2 * cyz, cyy - czz);
+            line[k] = {my, mz, std::cos(theta), std::sin(theta)};
+        }
+    }
+
+    // 5. final assignment + degeneracy guard, BEFORE any mutation
+    double w_side[2] = {0, 0};
+    for (size_t pi : pool)
+        for (const Blob* blob : family.at(pi)->children()) {
+            const geo_point_t bc = blob->center_pos();
+            w_side[nearer(bc.y(), bc.z())] += blob->npoints();
+        }
+    const double w_tot = w_side[0] + w_side[1];
+    if (w_tot <= 0 || std::min(w_side[0], w_side[1]) / w_tot < MIN_FRAC) return;
+
+    std::cout << "Separate band_recarve: pooled " << pool.size() << " members, seed yz angle "
+              << best_ang << " deg, sides " << w_side[0] << " / " << w_side[1] << " npoints" << std::endl;
+
+    // 6. materialize: pool everything into a fresh cluster, then separate by
+    // nearer band axis.  Scope triple per the junk-bin pattern below
+    // (a fresh make_child cluster is invisible to later passes without it).
+    Cluster& pooled = live_grouping.make_child();
+    pooled.set_default_scope(scope);
+    pooled.set_scope_filter(scope, true);
+    pooled.set_scope_transform(scope, family.at(pool.front())->get_scope_transform(scope));
+    for (size_t pi : pool) {
+        Cluster* member = family.at(pi);
+        pooled.take_children(*member, true);
+        family.at(pi) = nullptr;
+        live_grouping.destroy_child(member);
+        assert(member == nullptr);
+    }
+    std::vector<int> b2groupid;
+    b2groupid.reserve(pooled.nchildren());
+    for (const Blob* blob : pooled.children()) {
+        const geo_point_t bc = blob->center_pos();
+        b2groupid.push_back(nearer(bc.y(), bc.z()));
+    }
+    Cluster* pooled_ptr = &pooled;
+    auto out = live_grouping.separate(pooled_ptr, b2groupid, true);
+    assert(pooled_ptr == nullptr);
+    for (auto& [gid, cl] : out) family.push_back(cl);
+}
+
+
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 IPCTransformSet::pointer pcts,
                                 const Tree::Scope& scope,
                                 const bool use_ctpc,
                                 const int max_hull_points,
-                                const bool sbnd_boundary_tag);
+                                const bool sbnd_boundary_tag,
+                                const bool collinear_recover,
+                                const bool band_recarve);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -213,17 +515,24 @@ public:
         // SBND-only two-track upstream-boundary tag (default OFF => bit-identical
         // to prior behavior).  See JudgeSeparateDec_SBND_boundary.
         sbnd_boundary_tag_ = get(config, "sbnd_boundary_tag", false);
+        // Post-separation refinements (default OFF => bit-identical to prior
+        // behavior).  See recover_collinear_tips / recarve_two_bands.
+        collinear_recover_ = get(config, "collinear_recover", false);
+        band_recarve_ = get(config, "band_recarve", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_);
+        clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_,
+                            collinear_recover_, band_recarve_);
     }
 
 private:
     double use_ctpc_{true};
     int max_hull_points_{-1};
     bool sbnd_boundary_tag_{false};
+    bool collinear_recover_{false};
+    bool band_recarve_{false};
 };
 
 
@@ -239,7 +548,9 @@ static void clustering_separate(
     const Tree::Scope& scope,
     const bool use_ctpc,
     const int max_hull_points,
-    const bool sbnd_boundary_tag)
+    const bool sbnd_boundary_tag,
+    const bool collinear_recover,
+    const bool band_recarve)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -362,6 +673,18 @@ static void clustering_separate(
 
 
             if (flag_proceed) {
+                // Track every output cluster created while separating this
+                // original cluster ("family") for the knob-gated refinement
+                // post-pass.  Consumed intermediates are value-erased; vector
+                // order is creation order (deterministic).
+                std::vector<Cluster *> family;
+                auto family_add = [&family](const std::vector<Cluster *>& cs) {
+                    for (Cluster* c : cs) family.push_back(c);
+                };
+                auto family_erase = [&family](Cluster* c) {
+                    family.erase(std::remove(family.begin(), family.end(), c), family.end());
+                };
+
                 // flag_dec1 was already computed above; reuse it here.
                 if (flag_dec1) {
                     //	  std::cerr << em("sep prepare sep") << std::endl;
@@ -370,7 +693,8 @@ static void clustering_separate(
                     //std::cout << "Separate Cluster with " << orig_nchildren << " blobs (ctpc) length " << cluster_length << std::endl;
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster_length, vertical_dir, beam_dir, dv, pcts, scope);
-                    
+                    family_add(sep_clusters);
+
                     std::cout << "Separate Separate_1 for " << orig_nchildren << " " << " returned " << sep_clusters.size() << " clusters" << std::endl;
 
                     if (sep_clusters.size() >= 2) {  // 1
@@ -388,6 +712,8 @@ static void clustering_separate(
                                                    length_1, fv, max_hull_points)) {
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
+                                family_erase(cluster2);  // consumed by Separate_1
+                                family_add(sep_clusters);
 
                                 if (sep_clusters.size() >= 2) {  // 2
                                     Cluster *cluster4 = sep_clusters.at(1);
@@ -402,6 +728,8 @@ static void clustering_separate(
                                                                length_1, fv, max_hull_points)) {
                                             std::vector<Cluster *> sep_clusters = Separate_1(
                                                 use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
+                                            family_erase(cluster4);  // consumed by Separate_1
+                                            family_add(sep_clusters);
 
                                             if (sep_clusters.size() >= 2) {  // 3
                                                 final_sep_cluster = sep_clusters.at(1);
@@ -430,6 +758,8 @@ static void clustering_separate(
                                 if (independent_points.size() > 0) {
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
+                                    family_erase(final_sep_cluster);  // consumed by Separate_1
+                                    family_add(sep_clusters);
 
                                     if (sep_clusters.size() >= 2) {  // 4
                                         final_sep_cluster = sep_clusters.at(1);
@@ -442,8 +772,10 @@ static void clustering_separate(
 
                             if (final_sep_cluster != 0) {  // 2
                                 const auto b2id = Separate_2(final_sep_cluster, scope);
-                                live_grouping.separate(final_sep_cluster, b2id, true);
+                                family_erase(final_sep_cluster);  // consumed by separate()
+                                auto frags = live_grouping.separate(final_sep_cluster, b2id, true);
                                 assert(final_sep_cluster == nullptr);
+                                for (auto& [gid, cl] : frags) family.push_back(cl);
                             }
                         }
 
@@ -452,14 +784,26 @@ static void clustering_separate(
                 else if (cluster_length < 6 * units::m) {
                     std::vector<Cluster *> sep_clusters =
                         Separate_1(use_ctpc, cluster, boundary_points, independent_points, cluster_length, vertical_dir, beam_dir, dv, pcts, scope);
+                    family_add(sep_clusters);
 
                     if (sep_clusters.size() >= 2) {
                         Cluster *final_sep_cluster = sep_clusters.at(1);
                         const auto b2id = Separate_2(final_sep_cluster, scope);
-                        live_grouping.separate(final_sep_cluster, b2id, true);
+                        family_erase(final_sep_cluster);  // consumed by separate()
+                        auto frags = live_grouping.separate(final_sep_cluster, b2id, true);
                         assert(final_sep_cluster == nullptr);
+                        for (auto& [gid, cl] : frags) family.push_back(cl);
                     }
                 }  // else ...
+
+                // Knob-gated refinement of this cluster's separation outputs
+                // (no-ops when the knobs are OFF, the default).  Tip recovery
+                // first: it pulls collinear track tips out of the leftover bin
+                // before the band re-carve pools band-like members.
+                if (collinear_recover && family.size() >= 2)
+                    recover_collinear_tips(live_grouping, scope, family);
+                if (band_recarve && family.size() >= 2)
+                    recarve_two_bands(live_grouping, scope, family);
             }
         }
     }

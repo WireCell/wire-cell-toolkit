@@ -450,7 +450,7 @@ local clus_per_group (
         // max_hull_points raised from the 10k default (mirrors SBND): a per-drift-group
         // over-merge of crossing tracks easily exceeds 10k points, and get_hull() bailing
         // silently disabled the separation decision on exactly the clusters that need it.
-        cm.separate(use_ctpc=true, max_hull_points=100000),
+        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, band_recarve=true),
         cm.examine_x_boundary(),
         cm.neutrino(),
         cm.isolated(),
