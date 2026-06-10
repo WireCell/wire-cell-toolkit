@@ -134,6 +134,11 @@ namespace WireCell {
             // some parameters for ROI creating
             float m_th_factor_ind{3};
             float m_th_factor_col{5};
+            // MAD-based cal_RMS in ROI_formation (robust against strong
+            // signals occupying >~16% of the waveform, which inflate the
+            // legacy percentile-spread RMS and so the ROI thresholds).
+            // Default false = bit-identical legacy behaviour.
+            bool m_roi_mad_rms{false};
             int m_pad{5};
             float m_asy{0.1};
             int m_rebin{6};

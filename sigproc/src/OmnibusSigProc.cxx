@@ -93,6 +93,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
 
     m_th_factor_ind = get(config, "troi_ind_th_factor", m_th_factor_ind);
     m_th_factor_col = get(config, "troi_col_th_factor", m_th_factor_col);
+    m_roi_mad_rms = get(config, "roi_mad_rms", m_roi_mad_rms);
     m_pad = get(config, "troi_pad", m_pad);
     m_asy = get(config, "troi_asy", m_asy);
     m_rebin = get(config, "lroi_rebin", m_rebin);
@@ -330,6 +331,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
 
     cfg["troi_ind_th_factor"] = m_th_factor_ind;
     cfg["troi_col_th_factor"] = m_th_factor_col;
+    cfg["roi_mad_rms"] = m_roi_mad_rms;
     cfg["troi_pad"] = m_pad;
     cfg["troi_asy"] = m_asy;
     cfg["lroi_rebin"] = m_rebin;
@@ -1853,6 +1855,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
     ROI_formation roi_form(m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_nticks, m_th_factor_ind, m_th_factor_col,
                            m_pad, m_asy, m_rebin, m_l_factor, m_l_max_th, m_l_factor1, m_l_short_length,
                            m_l_jump_one_bin);
+    roi_form.set_mad_rms(m_roi_mad_rms);
     ROI_refinement roi_refine(
         m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_r_th_factor, m_r_fake_signal_low_th, m_r_fake_signal_high_th,
         m_r_fake_signal_low_th_ind_factor, m_r_fake_signal_high_th_ind_factor, m_r_pad, m_r_break_roi_loop, m_r_th_peak,

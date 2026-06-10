@@ -29,6 +29,26 @@ function(params, tools, override = {}) {
                l1sp_pd_planes=[0, 1],
                l1sp_pd_adj_enable=true,
                l1sp_pd_adj_max_hops=3,
+               // Prolonged-W-signal fix (mirrors pdhd/sp.jsonnet; see
+               // pdhd/docs/sp-w-collection-roi-break.md).  A strong
+               // track-along-drift signal occupying >~16% of the waveform
+               // inflates the legacy percentile-spread cal_RMS (~10x on
+               // PDHD run 027409 evts 40920/40924), pushing the tight-ROI
+               // threshold above the signal's own median and fragmenting
+               // the SP output.  Vertical-drift makes such tracks (near-
+               // vertical cosmics) especially common.
+               // Part 1: MAD-based cal_RMS (all planes; C++ default false;
+               // set false for bit-identical legacy thresholds).
+               roi_mad_rms=true,
+               // Part 2: disable BreakROI on the collection plane (slot 2,
+               // [U, V, W] order on every PDVD anode).  With part 1 the
+               // long multi-peak W ROI survives to refinement, where
+               // BreakROI would subtract a valley-to-valley linear
+               // "baseline" that is real track charge (collection decon has
+               // no LF filter, so its baseline needs no such fix).  Set
+               // false => key omitted => scalar r_break_roi_loop applies =>
+               // byte-identical.
+               w_col_break_roi_tune=true,
                dump_rawdecon=false)::
     // Top (_t) vs bottom (_b) anode filter suffix.  Bottom = ident 0..3,
     // top = ident 4..7.  See sp-filters.jsonnet for the registered names.
@@ -102,12 +122,18 @@ function(params, tools, override = {}) {
       ADC_mV: ADC_mV_ratio, // 4096 / (1400.0 * wc.mV), 
       troi_col_th_factor: 5.0,  // default 5
       troi_ind_th_factor: 3.0,  // default 3
+      // MAD-based cal_RMS (see roi_mad_rms arg above); C++ default false.
+      // Key omitted when off => byte-identical pre-fix config.
+      [if roi_mad_rms then 'roi_mad_rms']: true,
       lroi_rebin: 6, // default 6
       lroi_th_factor: 3.5, // default 3.5
       lroi_th_factor1: 0.7, // default 0.7
       lroi_jump_one_bin: 1, // default 0
 
       r_th_factor: 3.0,  // default 3
+      // Collection-plane BreakROI disable ([U, V, W] slot order); see
+      // w_col_break_roi_tune above.  U/V keep the scalar default (2).
+      [if w_col_break_roi_tune then 'r_break_roi_loop_planes']: [2, 2, 0],  // W: 2 -> 0
       r_fake_signal_low_th: 375,  // default 500
       r_fake_signal_high_th: 750,  // default 1000
       r_fake_signal_low_th_ind_factor: 1.0,  // default 1
