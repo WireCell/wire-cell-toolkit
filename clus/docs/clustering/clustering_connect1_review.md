@@ -130,32 +130,37 @@ After the B1 and B5 fixes the function is fully deterministic:
 
 ---
 
-## E. Multi-APA/face (multi-TPC) — known limitation
+## E. Multi-APA/face (multi-TPC) — generalized to drift-group scope (2026-06)
 
-`clustering_connect1` is explicitly single-face (comment at line 54; `ValueError` raised at
-line 61–66 if `wpids().size() > 1`).  Four load-bearing reasons this constraint must remain
-until a deeper refactor:
+`clustering_connect1` was explicitly single-face (`ValueError` on `wpids().size() > 1`).
+It now also accepts a multi-wpid grouping that forms ONE drift volume — validated by
+`validate_drift_group()` (`ClusteringFuncs.cxx`): identical FV_x metadata across all live
+wpids, same face unless `allow_mixed_faces` (PDVD: an anode's faces are the y-halves of one
+CRP).  This enables the per-drift-group (stage-3) instance that PDHD/PDVD run right after
+`separate`, in the MicroBooNE order separate → connect1 → deghost (see
+`clus/docs/clustering-group-connect1-deghost.md`).  The four formerly load-bearing blockers
+were resolved:
 
-1. **`extract_geometry_params`** (`ClusteringFuncs.cxx:12-46`) walks `wpids` and `break`s after
-   the first entry — returns one angle triplet for the whole grouping.
-2. **`make_points_linear_extrapolation`** (`DynamicPointCloud.cxx:855`) hard-codes
-   `*(cluster->grouping()->wpids().begin())` and stamps that single wpid on every synthetic point.
-3. **Dead-wire lookup**: `winds[0][j]` is a raw U wire index with no face/apa tag.  In a
-   multi-face grouping a point from face B would be looked up in face A's `dead_u_index`,
-   silently giving wrong dead-region hits.
-4. **`vhough_transform`** pools all faces into one 3D KD tree — usually fine for direction
-   estimation but imprecise if a cluster straddles faces.
+1. **`extract_geometry_params`** is no longer used here.  Per-volume wire-direction vectors
+   are built from `wpid_params` (`wpid_uvw_dirs`) and the prolonged test is evaluated
+   per cluster against the volumes its blobs occupy (`wpids_blob_set()`), OR-ing the
+   per-volume results.  A single-wpid grouping degenerates to the legacy computation
+   bit-for-bit (same operation order in `eval_prol`).
+2. **`make_points_linear_extrapolation`** takes a new trailing `seed_wpid` (the wpid of the
+   extreme point being extrapolated from).  With a multi-volume `wpid_params` each synthetic
+   point is re-bucketed into the volume containing it (`dv->contained_by`, grid-accelerated),
+   falling back to the seed when the ray exits all sensitive volumes.  The single-volume path
+   is the legacy code verbatim.
+3. **Dead-wire lookup** now uses the deghost pattern: `af_dead_{u,v,w}_index[apa][face]` maps
+   plus per-point `cluster->wire_plane_id(j)` routing, so `winds[plane][j]` is always paired
+   with its own volume's dead map.  The 2D skeleton queries route by the same per-point wpid.
+4. **`vhough_transform`** still pools all faces in 3D — accepted: direction estimation is
+   face-insensitive in practice, exactly as `extend`/`regular` already rely on at this scope.
 
-The **ingest side** is already multi-face-correct:
-- `make_points_cluster` reads `cluster->wire_plane_id(ipt)` per point and routes to the right
-  per-face 2D KD tree.
-- `DynamicPointCloud::get_2d_points_info(..., face, apa)` correctly filters the `(plane,face,apa)`
-  KD tree.
-
-So `DynamicPointCloud` is ready for multi-face, but `clustering_connect1` itself is not.
-The `ValueError` guard is load-bearing — keep it until helpers 1–4 are updated.
-The previously dead `af_dead_u/v/w_index` scaffolding was removed (B4) to avoid implying
-multi-face support that does not exist.
+Cost note: the per-cluster endpoint wpid lookups (2 kd-knn) and the per-point
+`contained_by` calls in extrapolation run only when the grouping is multi-wpid; existing
+single-face instances take fast paths with zero new work (verified byte-identical on SBND
+mc+data, PDHD 027409, PDVD 39324).
 
 ---
 
@@ -163,12 +168,13 @@ multi-face support that does not exist.
 
 | Callee | Location | Finding |
 |--------|----------|---------|
-| `extract_geometry_params` | `ClusteringFuncs.cxx:12-46` | Picks first wpid, break — single-face; safe given caller's guard |
+| `extract_geometry_params` | `ClusteringFuncs.cxx:12-46` | Picks first wpid, break — no longer used by connect1 (per-volume `wpid_uvw_dirs` instead) |
+| `validate_drift_group` | `ClusteringFuncs.cxx` | Multi-wpid drift-group validation (identical FV_x; same face unless `allow_mixed_faces`) |
 | `merge_clusters` | `ClusteringFuncs.cxx:48-120` | Boost `connected_components` + index grouping; correctly equivalent to prototype union-find |
 | `DynamicPointCloud::add_points` | `DynamicPointCloud.cxx:81-187` | Multi-face-correct; per-wpid 2D KD trees |
 | `DynamicPointCloud::get_2d_points_info` | `DynamicPointCloud.cxx:218-267` | Filters by `(plane,face,apa)` correctly |
 | `make_points_cluster` | `DynamicPointCloud.cxx:449-516` | Multi-face-correct; reads `wire_plane_id(ipt)` per point |
-| `make_points_linear_extrapolation` | `DynamicPointCloud.cxx:842-925` | Single-face hard-coded at line 855; safe given caller's single-face guard |
+| `make_points_linear_extrapolation` | `DynamicPointCloud.cxx:842+` | Multi-volume since 2026-06: `seed_wpid` param + per-point `contained_by` bucketing; single-volume path legacy-verbatim |
 | `DynamicPointCloud::vhough_transform` | `DynamicPointCloud.cxx:441-445` | 3D KD tree pools all faces; acceptable for direction, not face-ambiguous in practice |
 | `Cluster::wire_indices()` | `Facade_Cluster.cxx:1084-1091` | Raw wire index, no face tag; single-face-only valid |
 | `ClusterLess` / `cluster_set_t` | `ClusteringFuncs.h:80-86` | Used here for determinism; `cluster_set_t` is an unordered alias — use explicit `ClusterLess` comparator |

@@ -20,7 +20,8 @@ static void clustering_connect1(Grouping& live_grouping,
                                 const Tree::Scope& scope,
                                 bool use_flash_t0 = false,
                                 double flash_t0_window = 80*units::ns,
-                                double iso_max_dis = -1);
+                                double iso_max_dis = -1,
+                                bool allow_mixed_faces = false);
 
 class ClusteringConnect1 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
@@ -37,11 +38,15 @@ public:
         // upper bound on the actual cluster-to-cluster closest-point distance for the
         // isochronous-relaxed connection branch.  See clustering_connect1().
         iso_max_dis_ = get(config, "iso_max_dis", -1.0);
+        // Waive the same-face requirement of the multi-wpid drift-group
+        // validation (PDVD: both faces of a CRP share one drift volume).
+        allow_mixed_faces_ = get(config, "allow_mixed_faces", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_, iso_max_dis_);
+        clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_, iso_max_dis_,
+                            allow_mixed_faces_);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -52,6 +57,7 @@ private:
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
     double iso_max_dis_{-1};
+    bool allow_mixed_faces_{false};
 };
 
 
@@ -66,37 +72,32 @@ private:
 #define LogDebug(x)
 #endif
 
-// This is for only one APA/face
+// This handles a single APA/face, or several wpids that form one drift volume
+// (a drift-side group): x-aligned APAs viewed through the SAME face, or both
+// faces when allow_mixed_faces (PDVD: faces = y-halves of a CRP).
 void clustering_connect1(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     bool use_flash_t0,
     double flash_t0_window,
-    double iso_max_dis)
+    double iso_max_dis,
+    bool allow_mixed_faces)
 {
-    // Check that live_grouping has less than one wpid
+    // Multiple wpids are allowed only when they form one drift volume.
     if (live_grouping.wpids().size() > 1) {
-        for (const auto& wpid : live_grouping.wpids()) {
-            std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
-        }
-        raise<ValueError>("Live %d > 1", live_grouping.wpids().size());
+        validate_drift_group(live_grouping.wpids(), dv, allow_mixed_faces, "clustering_connect1");
     }
-    // Example usage in clustering_parallel_prolong()
-    auto [drift_dir, angle_u, angle_v, angle_w] = extract_geometry_params(live_grouping, dv);
     geo_point_t drift_dir_abs(1,0,0);
-
-    int apa = (*live_grouping.wpids().begin()).apa();
-    int face = (*live_grouping.wpids().begin()).face();
-
-    std::map<int, std::pair<double, double>>& dead_u_index = live_grouping.get_dead_winds(apa, face, 0);
-    std::map<int, std::pair<double, double>>& dead_v_index = live_grouping.get_dead_winds(apa, face, 1);
-    std::map<int, std::pair<double, double>>& dead_w_index = live_grouping.get_dead_winds(apa, face, 2);
 
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
     // Key: WirePlaneId (one per APA/face), Value: drift_dir, angle_u, angle_v, angle_w
     std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    // Per-(apa, face) dead wire maps: apa -> face -> wire index -> (xmin, xmax)
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_u_index;
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_v_index;
+    std::map<int, std::map<int, std::map<int, std::pair<double, double>>>> af_dead_w_index;
 
     for (const auto& wpid : wpids) {
         int apa = wpid.apa();
@@ -122,6 +123,10 @@ void clustering_connect1(
         double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
 
         wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+
+        af_dead_u_index[apa][face] = live_grouping.get_dead_winds(apa, face, 0);
+        af_dead_v_index[apa][face] = live_grouping.get_dead_winds(apa, face, 1);
+        af_dead_w_index[apa][face] = live_grouping.get_dead_winds(apa, face, 2);
     }
 
 
@@ -177,12 +182,45 @@ void clustering_connect1(
     std::map<const Cluster *, geo_point_t, ClusterLess> map_cluster_dir1;
     std::map<const Cluster *, geo_point_t, ClusterLess> map_cluster_dir2;
 
-    geo_point_t U_dir(0,cos(angle_u),sin(angle_u));
-    geo_point_t V_dir(0,cos(angle_v),sin(angle_v));
-    geo_point_t W_dir(0,cos(angle_w),sin(angle_w));
+    // Per-volume wire direction vectors for the prolonged test.
     // geo_point_t U_dir(0, cos(60. / 180. * 3.1415926), sin(60. / 180. * 3.1415926));
     // geo_point_t V_dir(0, cos(60. / 180. * 3.1415926), -sin(60. / 180. * 3.1415926));
     // geo_point_t W_dir(0, 1, 0);
+    std::map<WirePlaneId, std::array<geo_point_t, 3>> wpid_uvw_dirs;
+    for (const auto& [wpid, params] : wpid_params) {
+        const auto& [w_drift_dir, w_angle_u, w_angle_v, w_angle_w] = params;
+        wpid_uvw_dirs[wpid] = {geo_point_t(0, cos(w_angle_u), sin(w_angle_u)),
+                               geo_point_t(0, cos(w_angle_v), sin(w_angle_v)),
+                               geo_point_t(0, cos(w_angle_w), sin(w_angle_w))};
+    }
+
+    // Prolonged test against one volume's wire directions: the direction's
+    // transverse component aligns with the U, V or W wire direction (7.5 deg).
+    // Same operation order as the original single-face U -> V -> W chain.
+    auto eval_prol = [&drift_dir_abs](const geo_point_t& dir, const std::array<geo_point_t, 3>& uvw_dirs) {
+        geo_point_t tempV1(0, dir.y(), dir.z());
+        geo_point_t tempV5;
+        for (size_t pindex = 0; pindex < 3; ++pindex) {
+            double angle1 = tempV1.angle(uvw_dirs[pindex]);
+            tempV5.set(fabs(dir.x()), sqrt(pow(dir.y(), 2) + pow(dir.z(), 2)) * sin(angle1), 0);
+            angle1 = tempV5.angle(drift_dir_abs);
+            if (angle1 < 7.5 / 180. * 3.1415926) return true;
+        }
+        return false;
+    };
+
+    // A cluster is prolonged if its direction is prolonged in ANY volume its
+    // blobs occupy (single-volume groupings degenerate to the legacy test).
+    auto eval_prol_cluster = [&](const Cluster* cluster, const geo_point_t& dir) {
+        for (const auto& bwpid : cluster->wpids_blob_set()) {
+            auto it = wpid_uvw_dirs.find(bwpid);
+            if (it == wpid_uvw_dirs.end()) continue;
+            if (eval_prol(dir, it->second)) return true;
+        }
+        return false;
+    };
+
+    const bool multi_wpid = live_grouping.wpids().size() > 1;
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
         const Cluster *cluster = live_clusters.at(i);
@@ -197,6 +235,16 @@ void clustering_connect1(
         // cluster->Create_point_cloud();
 
         std::pair<geo_point_t, geo_point_t> extreme_points = cluster->get_two_extreme_points();
+        // Volume seeds for the skeleton extrapolations: with a multi-volume
+        // grouping the extrapolated continuation starts from the endpoint's
+        // volume (make_points_linear_extrapolation then re-buckets points
+        // that cross into another volume).  Invalid wpids keep the legacy
+        // single-volume behavior.
+        WirePlaneId ep1_wpid(kUnknownLayer, -1, -1), ep2_wpid(kUnknownLayer, -1, -1);
+        if (multi_wpid) {
+            ep1_wpid = cluster->wpid(extreme_points.first);
+            ep2_wpid = cluster->wpid(extreme_points.second);
+        }
         geo_point_t main_dir(extreme_points.second.x() - extreme_points.first.x(),
                           extreme_points.second.y() - extreme_points.first.y(),
                           extreme_points.second.z() - extreme_points.first.z());
@@ -245,63 +293,14 @@ void clustering_connect1(
             flag_para_1 = true;
         }
         else {
-            geo_point_t tempV1(0, dir1.y(), dir1.z());
-            geo_point_t tempV5;
-            double angle1 = tempV1.angle(U_dir);
-            tempV5.set(fabs(dir1.x()), sqrt(pow(dir1.y(), 2) + pow(dir1.z(), 2)) * sin(angle1), 0);
-            angle1 = tempV5.angle(drift_dir_abs);
-
-            if (angle1 < 7.5 / 180. * 3.1415926) {
-                flag_prol_1 = true;
-            }
-            else {
-                angle1 = tempV1.angle(V_dir);
-                tempV5.set(fabs(dir1.x()), sqrt(pow(dir1.y(), 2) + pow(dir1.z(), 2)) * sin(angle1), 0);
-                angle1 = tempV5.angle(drift_dir_abs);
-
-                if (angle1 < 7.5 / 180. * 3.1415926) {
-                    flag_prol_1 = true;
-                }
-                else {
-                    angle1 = tempV1.angle(W_dir);
-                    tempV5.set(fabs(dir1.x()), sqrt(pow(dir1.y(), 2) + pow(dir1.z(), 2)) * sin(angle1), 0);
-                    angle1 = tempV5.angle(drift_dir_abs);
-
-                    if (angle1 < 7.5 / 180. * 3.1415926) {
-                        flag_prol_1 = true;
-                    }
-                }
-            }
+            flag_prol_1 = eval_prol_cluster(cluster, dir1);
         }
 
         if (fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 7.5 * 3.1415926 / 180.) {
             flag_para_2 = true;
         }
         else {
-            geo_point_t tempV2(0, dir2.y(), dir2.z());
-            geo_point_t tempV6;
-            double angle2 = tempV2.angle(U_dir);
-            tempV6.set(fabs(dir2.x()), sqrt(pow(dir2.y(), 2) + pow(dir2.z(), 2)) * sin(angle2), 0);
-            angle2 = tempV6.angle(drift_dir_abs);
-            if (angle2 < 7.5 / 180. * 3.1415926) {
-                flag_prol_2 = true;
-            }
-            else {
-                angle2 = tempV2.angle(V_dir);
-                tempV6.set(fabs(dir2.x()), sqrt(pow(dir2.y(), 2) + pow(dir2.z(), 2)) * sin(angle2), 0);
-                angle2 = tempV6.angle(drift_dir_abs);
-                if (angle2 < 7.5 / 180. * 3.1415926) {
-                    flag_prol_2 = true;
-                }
-                else {
-                    angle2 = tempV2.angle(W_dir);
-                    tempV6.set(fabs(dir2.x()), sqrt(pow(dir2.y(), 2) + pow(dir2.z(), 2)) * sin(angle2), 0);
-                    angle2 = tempV6.angle(drift_dir_abs);
-                    if (angle2 < 7.5 / 180. * 3.1415926) {
-                        flag_prol_2 = true;
-                    }
-                }
-            }
+            flag_prol_2 = eval_prol_cluster(cluster, dir2);
         }
 
         if ((flag_para_1 || flag_prol_1) && cluster->get_length() < 15 * units::cm) {
@@ -343,32 +342,32 @@ void clustering_connect1(
         if (i == 0) {
             if (flag_para_1 || flag_prol_1) {
                 // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
                 dir1 *= -1;
                 // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
             }
             else {
                 // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
                 dir1 *= -1;
                 // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
             }
 
             if (flag_para_2 || flag_prol_2) {
                 // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
                 dir2 *= -1;
                 // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
             }
             else {
                 // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
                 dir2 *= -1;
                 // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
-                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
             }
         }
         else {
@@ -391,13 +390,14 @@ void clustering_connect1(
                                          const std::map<int, std::pair<double, double>>& dead_index,
                                          int wire_idx, double raw_x,
                                          const geo_point_t& test_point,
+                                         const WirePlaneId& test_wpid,
                                          int& num_unique_ref) {
                     auto dit = dead_index.find(wire_idx);
                     bool flag_dead = (dit != dead_index.end() &&
                                       raw_x >= dit->second.first &&
                                       raw_x <= dit->second.second);
                     auto results = global_skeleton_cloud->get_2d_points_info(
-                        test_point, loose_dis_cut, plane, face, apa);
+                        test_point, loose_dis_cut, plane, test_wpid.face(), test_wpid.apa());
                     bool flag_unique = true;
                     if (!results.empty()) {
                         std::set<const Cluster *, ClusterLess> tmp;
@@ -415,9 +415,15 @@ void clustering_connect1(
                     const auto p3 = cluster->point3d(j);
                     const geo_point_t test_point(p3.x(), p3.y(), p3.z());
                     const double raw_x = cluster->point3d_raw(j).x();
-                    process_plane(0, dead_u_index, winds[0][j], raw_x, test_point, num_unique[0]);
-                    process_plane(1, dead_v_index, winds[1][j], raw_x, test_point, num_unique[1]);
-                    process_plane(2, dead_w_index, winds[2][j], raw_x, test_point, num_unique[2]);
+                    // Route each point through its own volume's dead maps and
+                    // per-(face, apa) 2D KD trees.
+                    const auto test_wpid = cluster->wire_plane_id(j);
+                    const auto& dead_u_index = af_dead_u_index.at(test_wpid.apa()).at(test_wpid.face());
+                    const auto& dead_v_index = af_dead_v_index.at(test_wpid.apa()).at(test_wpid.face());
+                    const auto& dead_w_index = af_dead_w_index.at(test_wpid.apa()).at(test_wpid.face());
+                    process_plane(0, dead_u_index, winds[0][j], raw_x, test_point, test_wpid, num_unique[0]);
+                    process_plane(1, dead_v_index, winds[1][j], raw_x, test_point, test_wpid, num_unique[1]);
+                    process_plane(2, dead_w_index, winds[2][j], raw_x, test_point, test_wpid, num_unique[2]);
                 } // loop over points
                 
 
@@ -641,17 +647,17 @@ void clustering_connect1(
                 // add extension points in ...
                 if (flag_para_1 || flag_prol_1) {
                     // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
                     dir1 *= -1;
                     // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis * 3, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
                 }
                 else {
                     // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
                     dir1 *= -1;
                     // global_skeleton_cloud->add_points(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.first, dir1, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep1_wpid));
                     
                 }
             }
@@ -659,17 +665,17 @@ void clustering_connect1(
             if (flag_add_dir2) {
                 if (flag_para_2 || flag_prol_2) {
                     // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
                     dir2 *= -1;
                     // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis * 3.0, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
                 }
                 else {
                     // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
                     dir2 *= -1;
                     // global_skeleton_cloud->add_points(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle);
-                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params));
+                    global_skeleton_cloud->add_points(make_points_linear_extrapolation(cluster, extreme_points.second, dir2, extending_dis, 1.2 * units::cm, angle, dv, wpid_params, ep2_wpid));
                 }
             }
         }  // not the first cluster ...

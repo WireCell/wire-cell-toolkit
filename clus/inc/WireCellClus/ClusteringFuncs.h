@@ -146,6 +146,20 @@ namespace WireCell::Clus::Facade {
         const Grouping& grouping,
         IDetectorVolumes::pointer dv);
 
+    /**
+     * Validate that a set of wpids forms ONE drift volume: x-aligned APAs
+     * (identical drift-x fiducial metadata) viewed through the SAME face.
+     * allow_mixed_faces waives the same-face requirement (NOT the identical
+     * FV_x one) for detectors where both faces of an anode share one drift
+     * volume (PDVD: faces = y-halves of a CRP).  Raises ValueError naming
+     * `who` on violation.
+     */
+    void validate_drift_group(
+        const std::set<WirePlaneId>& wpids,
+        IDetectorVolumes::pointer dv,
+        bool allow_mixed_faces,
+        const std::string& who);
+
     std::vector<std::pair<geo_point_t, const Blob*>> get_strategic_points(const Cluster& cluster);
 
     //helper function ..

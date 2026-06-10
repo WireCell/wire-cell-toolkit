@@ -130,10 +130,16 @@ namespace WireCell::Clus::Facade {
 
     /// @brief add points from p_test along dir with range and step
     /// @attention: the index_uvw is hacked to store the distance cut
+    /// seed_wpid: drift volume of the extrapolation seed point.  With a
+    /// multi-volume wpid_params each synthetic point is bucketed into the
+    /// volume containing it (dv->contained_by), falling back to seed_wpid
+    /// (or the grouping's first wpid when seed_wpid is invalid) when the ray
+    /// exits all sensitive volumes.
     std::vector<DynamicPointCloud::DPCPoint> make_points_linear_extrapolation(
         const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
         const double step, const double angle, const IDetectorVolumes::pointer dv,
-        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params);
+        const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
+        const WirePlaneId &seed_wpid = WirePlaneId(kUnknownLayer, -1, -1));
 
     void fill_wrap_points(const Cluster *cluster, const geo_point_t &point, const WirePlaneId &wpid_point, std::vector<std::vector<double>>& p_x, std::vector<std::vector<double>>& p_y, std::vector<std::vector<int>>& p_wpid);
 

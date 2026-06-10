@@ -462,9 +462,16 @@ local clus_per_group (
         cm.separate(use_ctpc=true, max_hull_points=1000000, collinear_recover=true, collinear_interior=true,
                     track_repartition=true, band_merge_back=true, band_recarve=true, drift_side_fv_x=true,
                     far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true, dec1_guard_main_angle=45),
+        // MicroBooNE order after separate: connect1 (reconnect dashed-line
+        // fragments, e.g. drift-direction tracks split across the group) then
+        // deghost (remove ghosts that only the group scope can adjudicate).
         // A PDVD drift group mixes faces by construction (an anode's two
         // faces are the y-halves of one CRP, sharing one drift volume and
-        // identical FV_x metadata), so waive the same-face check.
+        // identical FV_x metadata), so waive the same-face check here and in
+        // examine_x_boundary below.
+        // empty_view_unique: required at group scope -- see common clus.jsonnet.
+        cm.connect1(allow_mixed_faces=true),
+        cm.deghost(allow_mixed_faces=true, empty_view_unique=true),
         cm.examine_x_boundary(allow_mixed_faces=true),
         cm.neutrino(),
         cm.isolated(),
