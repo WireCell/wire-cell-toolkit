@@ -184,7 +184,14 @@ namespace WireCell::Clus::Facade {
     //     configured per-(APA,face) FV blocks (full APA even if a face is quiet).
     // Any FV field missing from a per-face block falls back to the "overall" value.
     // vertical_dir / beam_dir are detector-global and are always read from "overall".
-    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv);
+    //
+    // common_face_x (default false, bit-identical): in the multi-APA branch, when
+    // ALL configured faces carry identical FV_xmin/FV_xmax metadata (a drift-side
+    // group: several APAs imaging one common drift side, e.g. PDHD group02 or a
+    // PDVD CRP drift group), use that common x-range (and its margins) instead of
+    // the cryostat overall x.  This makes the no-T0 "out-of-time" apparent-x test
+    // reflect the group's drift volume rather than the union of both drift sides.
+    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x = false);
 
     // These Judge*() functions are used by multiple clustering methods.  They
     // are defined in clustering_separate.cxx.
@@ -196,9 +203,21 @@ namespace WireCell::Clus::Facade {
     /// @param independent_points return the independent points
     /// @param fv scope-appropriate fiducial volume (see select_scope_fv)
     /// @param max_hull_points cap passed to Cluster::get_hull (<0 = use Constants::MaxHullPoints)
+    /// @param far_point_x_cut drift-x deviation that promotes a boundary point to a
+    ///        "far" point in the two-endpoint test.  Default 140 cm reproduces the
+    ///        prototype expression `fabs(dir_3.x()/units::cm) > 14*units::cm` (the
+    ///        cm-number compared against 14*cm internal = 140), which is effectively
+    ///        dead; detectors may set the evidently intended 14 cm.
+    /// @param far_point_mid_dis cap on the distance from the midpoint of the two
+    ///        endpoints to the cluster, above which far points are discarded
+    ///        (default 25 cm = prototype).  Two forking/diverging tracks can hold
+    ///        their endpoint-midpoint in empty space between the prongs; detectors
+    ///        may raise it to keep the far-point evidence for such topologies.
     bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length, const ScopeFV& fv, int max_hull_points = -1);
+                               const double cluster_length, const ScopeFV& fv, int max_hull_points = -1,
+                               double far_point_x_cut = 140 * units::cm,
+                               double far_point_mid_dis = 25 * units::cm);
     
 
 

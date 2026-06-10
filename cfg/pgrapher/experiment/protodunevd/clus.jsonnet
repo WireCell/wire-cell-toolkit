@@ -54,10 +54,10 @@ local dvm = {
     overall: {
         FV_xmin: -3415.5 * wc.mm,
         FV_xmax:  3415.5 * wc.mm,
-        FV_ymin: -3364.0 * wc.mm,
-        FV_ymax:  3364.0 * wc.mm,
-        FV_zmin: 0.5 * wc.mm,
-        FV_zmax: 2992.5 * wc.mm,
+        FV_ymin: -3214.0 * wc.mm,  // active -3364.0 mm + 15 cm inset (see clus/docs/clustering-separate-fv.md)
+        FV_ymax:  3214.0 * wc.mm,  // active 3364.0 mm - 15 cm inset
+        FV_zmin: 150.5 * wc.mm,    // active 0.5 mm + 15 cm inset
+        FV_zmax: 2842.5 * wc.mm,   // active 2992.5 mm - 15 cm inset
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
         FV_ymin_margin: 2.5 * wc.cm,
@@ -459,7 +459,8 @@ local clus_per_group (
         // max_hull_points raised from the 10k default (mirrors SBND): a per-drift-group
         // over-merge of crossing tracks easily exceeds 10k points, and get_hull() bailing
         // silently disabled the separation decision on exactly the clusters that need it.
-        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, band_recarve=true),
+        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, band_recarve=true, drift_side_fv_x=true,
+                    far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true),
         // A PDVD drift group mixes faces by construction (an anode's two
         // faces are the y-halves of one CRP, sharing one drift volume and
         // identical FV_x metadata), so waive the same-face check.

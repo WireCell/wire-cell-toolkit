@@ -57,9 +57,16 @@ Qualifying blobs are moved into `T` (per-donor `Grouping::separate` with
 Gate: ≥2 family members that are band-like (PCA axis within **10°** of
 perpendicular-to-drift, `length > 60 cm`), with a seed pair that **touches**
 (closest points < **2 cm**) and has distinct y–z projected axes (angle in
-**[8°, 45°]**; widest qualifying pair seeds the fit).  The pool grows from the
+**[15°, 45°]**; widest qualifying pair seeds the fit).  The pool grows from the
 seed pair over band-like members by the same 2 cm touch (deterministic BFS in
 family order).
+
+Seed gates (revised with the FV-inset work, see `clustering-separate-fv.md`):
+both seed members must be ribbon-like (rms width across the main axis ≥ 6 cm)
+and the seed angle window is [15°, 45°] — thin crossing line-tracks that
+survive the width gate pair up at ~11° and must never seed the x-blind
+re-carve (PDHD 27409 evt 40900), while genuine two-band seeds sit at 25–39°.
+A `track_recarve` step (same doc) handles crossing thin tracks instead.
 
 Fit: k=2 line fit in the (y,z) plane — isochronous bands are extended
 transverse to drift, so the carve is an x-independent partition.  **10 fixed

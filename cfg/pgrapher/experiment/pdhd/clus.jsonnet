@@ -45,10 +45,10 @@ local dvm = {
     overall: {
         FV_xmin: -3579.85 * wc.mm,
         FV_xmax: 3579.85 * wc.mm,
-        FV_ymin: 76.1 * wc.mm,
-        FV_ymax: 6060.0 * wc.mm,
-        FV_zmin: 2.34345 * wc.mm,
-        FV_zmax: 4622.97 * wc.mm,
+        FV_ymin: 226.1 * wc.mm,    // active 76.1 mm + 15 cm inset (see clus/docs/clustering-separate-fv.md)
+        FV_ymax: 5910.0 * wc.mm,   // active 6060.0 mm - 15 cm inset
+        FV_zmin: 152.34345 * wc.mm, // active 2.34345 mm + 15 cm inset
+        FV_zmax: 4472.97 * wc.mm,  // active 4622.97 mm - 15 cm inset
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
         FV_ymin_margin: 2.5 * wc.cm,
@@ -450,7 +450,8 @@ local clus_per_group (
         // max_hull_points raised from the 10k default (mirrors SBND): a per-drift-group
         // over-merge of crossing tracks easily exceeds 10k points, and get_hull() bailing
         // silently disabled the separation decision on exactly the clusters that need it.
-        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, band_recarve=true),
+        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, band_recarve=true, drift_side_fv_x=true,
+                    far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true),
         cm.examine_x_boundary(),
         cm.neutrino(),
         cm.isolated(),

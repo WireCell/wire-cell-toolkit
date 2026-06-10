@@ -369,7 +369,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // i.e. bit-identical to prior behavior; raise it to let large full-detector
         // overclusters be considered for separation.
         separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false,
-                 collinear_recover=false, band_recarve=false) :: {
+                 collinear_recover=false, band_recarve=false, drift_side_fv_x=false,
+                 far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
@@ -383,6 +384,25 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // Keys omitted when false so existing configs stay bit-identical.
                 [if collinear_recover then 'collinear_recover']: collinear_recover,
                 [if band_recarve then 'band_recarve']: band_recarve,
+                // Drift-side FV x-range for common-face multi-APA scopes (drift
+                // groups): the out-of-time apparent-x test uses the group's drift
+                // side instead of the cryostat overall x.  Key omitted when false
+                // so existing configs stay bit-identical.
+                [if drift_side_fv_x then 'drift_side_fv_x']: drift_side_fv_x,
+                // Drift-x deviation promoting a boundary point to a "far" point in
+                // JudgeSeparateDec_2's two-endpoint test.  null (default) keeps the
+                // prototype-exact 140 cm (effectively dead); PDHD/PDVD set the
+                // evidently intended 14 cm.  Key omitted when null so existing
+                // configs stay bit-identical.
+                [if far_point_x_cut != null then 'far_point_x_cut']: far_point_x_cut,
+                // Midpoint-to-cluster cap in the same far-point test.  null
+                // (default) keeps the prototype-exact 25 cm; raise it so two
+                // diverging/forking tracks keep their far-point evidence.
+                [if far_point_mid_dis != null then 'far_point_mid_dis']: far_point_mid_dis,
+                // Post-separation k=2 3D-line self-split of a member holding two
+                // long crossing track arms (an "X" that pure connectivity cannot
+                // hold apart).  Key omitted when false: bit-identical.
+                [if track_recarve then 'track_recarve']: track_recarve,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },

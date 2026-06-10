@@ -24,7 +24,7 @@ using namespace WireCell::PointCloud::Tree;
 // FV, reproducing the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit.  The
 // scope is read from dv->wpident_faces() (the configured drift volumes), NOT from the
 // live grouping, so all-APA stays "overall" even when only one TPC has activity.
-ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv)
+ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x)
 {
     const Configuration overall = dv->metadata(WirePlaneId(0));
 
@@ -63,6 +63,32 @@ ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv)
         fv.xmin_margin = field(overall, "FV_xmin_margin");  fv.xmax_margin = field(overall, "FV_xmax_margin");
         fv.ymin_margin = field(overall, "FV_ymin_margin");  fv.ymax_margin = field(overall, "FV_ymax_margin");
         fv.zmin_margin = field(overall, "FV_zmin_margin");  fv.zmax_margin = field(overall, "FV_zmax_margin");
+
+        // Drift-side group: several APAs imaging one common drift side carry
+        // identical per-face FV_x metadata -- adopt that x-range so out-of-time
+        // apparent-x (past the cathode / behind the anode) is testable.  Mixed
+        // faces (e.g. an all-APA scope spanning both drift sides) never agree
+        // and keep the overall x.
+        if (common_face_x && !faces.empty()) {
+            bool common = true;
+            double xmin = 0, xmax = 0, xmin_m = 0, xmax_m = 0;
+            for (size_t i = 0; i != faces.size(); i++) {
+                const Configuration blk = dv->metadata(faces[i]);
+                const double bxmin = field(blk, "FV_xmin"), bxmax = field(blk, "FV_xmax");
+                if (i == 0) {
+                    xmin = bxmin;  xmax = bxmax;
+                    xmin_m = field(blk, "FV_xmin_margin");  xmax_m = field(blk, "FV_xmax_margin");
+                }
+                else if (bxmin != xmin || bxmax != xmax) {
+                    common = false;
+                    break;
+                }
+            }
+            if (common) {
+                fv.xmin = xmin;  fv.xmax = xmax;
+                fv.xmin_margin = xmin_m;  fv.xmax_margin = xmax_m;
+            }
+        }
         return fv;
     }
 
@@ -334,8 +360,14 @@ static void recarve_two_bands(Grouping& live_grouping, const Tree::Scope& scope,
     const double BAND_PERP_ANG = 10.;            // member axis within this of perp-to-drift (deg)
     const double BAND_LEN_MIN  = 60 * units::cm;
     const double TOUCH_MAX     = 2 * units::cm;  // members of one band complex touch
-    const double SEED_ANG_MIN  = 8.;             // yz angle between the two seed axes (deg)
+    const double SEED_ANG_MIN  = 15.;            // yz angle between the two seed axes (deg);
+                                                 // crossing thin tracks that survive the width
+                                                 // gate pair up at ~11 deg (PDHD 27409 evt 40900),
+                                                 // genuine two-band seeds at ~25-39 deg (39324)
     const double SEED_ANG_MAX  = 45.;
+    const double SEED_WIDTH_MIN = 6 * units::cm; // rms width across the axis: both seeds must be
+                                                 // ribbon-like (39324 seed pair: 17.1/6.2 cm), not
+                                                 // thin line-track slices (4.6 cm and below)
     const int    NITER         = 10;             // fixed k=2 line-fit iterations
     const double MIN_FRAC      = 0.10;           // degeneracy guard (npoints fraction per side)
 
@@ -362,18 +394,32 @@ static void recarve_two_bands(Grouping& live_grouping, const Tree::Scope& scope,
         const double n = std::sqrt(ay * ay + az * az);
         return {ay / n, az / n};
     };
+
+    // rms width across the main axis (pca values are scatter sums, not
+    // per-point variances).  Distinguishes a wide isochronous ribbon from a
+    // thin line-track that merely lies near-perpendicular to drift.
+    auto rms_width = [&](size_t i) -> double {
+        Cluster* c = family.at(i);
+        const auto& pca = c->get_pca();
+        const int n = c->npoints();
+        if (n < 1 || pca.values.size() < 2) return 0;
+        return std::sqrt(pca.values.at(1) / n);
+    };
     auto yz_angle = [](const std::pair<double, double>& a, const std::pair<double, double>& b) {
         double dot = fabs(a.first * b.first + a.second * b.second);
         if (dot > 1.) dot = 1.;
         return std::acos(dot) / 3.1415926 * 180.;
     };
 
+
     // 2. seed pair: touching members with distinct yz axes; widest angle wins,
     // ties resolved by smaller family indices (loop order).
     int s1 = -1, s2 = -1;
     double best_ang = -1;
     for (size_t i = 0; i + 1 < band.size(); i++) {
+        if (rms_width(band[i]) < SEED_WIDTH_MIN) continue;
         for (size_t j = i + 1; j < band.size(); j++) {
+            if (rms_width(band[j]) < SEED_WIDTH_MIN) continue;
             const double ang = yz_angle(yz_axis(band[i]), yz_axis(band[j]));
             if (ang < SEED_ANG_MIN || ang > SEED_ANG_MAX) continue;
             std::tuple<int, int, double> dis = family.at(band[i])->get_closest_points(*family.at(band[j]));
@@ -486,6 +532,193 @@ static void recarve_two_bands(Grouping& live_grouping, const Tree::Scope& scope,
 }
 
 
+// Step C (track_recarve): split one member holding two long crossing track
+// arms (an "X").  Separate_1's path carve can leave both arms of two crossing
+// cosmics in one piece, and the final Separate_2 (pure 5 cm connectivity)
+// re-links them at the crossing, so no connectivity step can hold them apart.
+// Model the member's blob centers with a k=2 3D line fit and accept the split
+// only when:
+//   - both fitted arms are long (axial extent) and carry a fair share of points,
+//   - both arms are genuinely thin (small rms residual to their line -- a wide
+//     isochronous band never fits two thin lines and is left to band_recarve),
+//   - the two lines CROSS: closest approach within a few cm, located in the
+//     interior of both arms.  A kinked single track (a "V") has its arms meet
+//     at an end and is rejected; near-parallel diverging pairs (no crossing)
+//     are also rejected and left to the carve.
+static void recarve_crossing_tracks(Grouping& live_grouping, const Tree::Scope& scope,
+                                    std::vector<Cluster*>& family)
+{
+    const double LEN_MIN       = 100 * units::cm;  // member length
+    const double RATIO_MIN     = 0.01;             // eval1/eval0: an X opens the 2nd axis
+    const double RATIO_MAX     = 0.5;              // beyond this it is a blob, not 2 arms
+    const int    NITER         = 10;               // fixed assign/refit iterations
+    const double MIN_FRAC      = 0.20;             // npoints fraction per arm
+    const double ARM_LEN_MIN   = 60 * units::cm;   // axial extent of each arm
+    const double CROSS_DIS_MAX = 10 * units::cm;   // fitted lines must approach this close
+    const double CROSS_FRAC_LO = 0.15;             // crossing interior to both arms
+    const double CROSS_FRAC_HI = 0.85;
+    const double RESID_MAX     = 10 * units::cm;   // npoints-weighted rms residual per arm
+                                                   // (blob centers scatter several cm on real
+                                                   // arms; bands are vetoed by the crossing
+                                                   // guard, not by this)
+
+    struct Line3 {
+        geo_point_t c, d;  // point on line, unit direction
+    };
+    auto line_dis = [](const Line3& l, const geo_point_t& p) {
+        geo_point_t v(p.x() - l.c.x(), p.y() - l.c.y(), p.z() - l.c.z());
+        const double t = v.dot(l.d);
+        geo_point_t r(v.x() - t * l.d.x(), v.y() - t * l.d.y(), v.z() - t * l.d.z());
+        return r.magnitude();
+    };
+    // principal direction of a weighted 3x3 covariance via fixed-count power
+    // iteration (deterministic; `start` seeds the iteration).
+    auto principal_dir = [](const double cov[3][3], geo_point_t start) -> geo_point_t {
+        double v[3] = {start.x(), start.y(), start.z()};
+        double n0 = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (n0 <= 0) { v[0] = 1; v[1] = 0; v[2] = 0; n0 = 1; }
+        for (int i = 0; i != 3; i++) v[i] /= n0;
+        for (int it = 0; it != 30; it++) {
+            double w[3] = {0, 0, 0};
+            for (int i = 0; i != 3; i++)
+                for (int j = 0; j != 3; j++) w[i] += cov[i][j] * v[j];
+            const double n = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+            if (n <= 0) break;
+            for (int i = 0; i != 3; i++) v[i] = w[i] / n;
+        }
+        return geo_point_t(v[0], v[1], v[2]);
+    };
+
+    const size_t nfam = family.size();  // snapshot: do not revisit our own outputs
+    for (size_t fi = 0; fi != nfam; fi++) {
+        Cluster* c = family.at(fi);
+        if (!c) continue;
+        if (c->get_length() < LEN_MIN) continue;
+        const auto& pca = c->get_pca();
+        if (pca.values.size() < 2 || pca.values.at(0) <= 0) continue;
+        const double ratio1 = pca.values.at(1) / pca.values.at(0);
+        if (ratio1 < RATIO_MIN || ratio1 > RATIO_MAX) continue;
+
+        geo_point_t axis0(pca.axis.at(0).x(), pca.axis.at(0).y(), pca.axis.at(0).z());
+        geo_point_t axis1(pca.axis.at(1).x(), pca.axis.at(1).y(), pca.axis.at(1).z());
+        const geo_point_t center = pca.center;
+
+        // seed: split blob centers by the sign of their 2nd-axis component
+        // (the X's opening direction), then iterate assign/refit.
+        const auto& blobs = c->children();
+        std::vector<int> side(blobs.size(), 0);
+        for (size_t bi = 0; bi != blobs.size(); bi++) {
+            const geo_point_t bc = blobs.at(bi)->center_pos();
+            geo_point_t v(bc.x() - center.x(), bc.y() - center.y(), bc.z() - center.z());
+            side[bi] = (v.dot(axis1) >= 0) ? 0 : 1;
+        }
+
+        Line3 line[2] = {{center, axis0}, {center, axis0}};
+        bool degenerate = false;
+        for (int iter = 0; iter != NITER + 1; iter++) {
+            // refit each side: weighted mean + principal direction
+            double sw[2] = {0, 0};
+            double mean[2][3] = {{0, 0, 0}, {0, 0, 0}};
+            for (size_t bi = 0; bi != blobs.size(); bi++) {
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                const double w = blobs.at(bi)->npoints();
+                const int k = side[bi];
+                sw[k] += w;
+                mean[k][0] += w * bc.x();  mean[k][1] += w * bc.y();  mean[k][2] += w * bc.z();
+            }
+            if (sw[0] <= 0 || sw[1] <= 0) { degenerate = true; break; }
+            double cov[2][3][3] = {};
+            for (int k = 0; k != 2; k++)
+                for (int i = 0; i != 3; i++) mean[k][i] /= sw[k];
+            for (size_t bi = 0; bi != blobs.size(); bi++) {
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                const double w = blobs.at(bi)->npoints();
+                const int k = side[bi];
+                const double d[3] = {bc.x() - mean[k][0], bc.y() - mean[k][1], bc.z() - mean[k][2]};
+                for (int i = 0; i != 3; i++)
+                    for (int j = 0; j != 3; j++) cov[k][i][j] += w * d[i] * d[j];
+            }
+            for (int k = 0; k != 2; k++) {
+                const geo_point_t dir = principal_dir(cov[k], line[k].d);
+                line[k] = {geo_point_t(mean[k][0], mean[k][1], mean[k][2]), dir};
+            }
+            if (iter == NITER) break;
+            // reassign
+            for (size_t bi = 0; bi != blobs.size(); bi++) {
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                side[bi] = (line_dis(line[0], bc) <= line_dis(line[1], bc)) ? 0 : 1;
+            }
+        }
+        if (degenerate) continue;
+
+        // validation, all BEFORE any mutation
+        double w_side[2] = {0, 0}, resid2[2] = {0, 0};
+        double tmin[2] = {1e18, 1e18}, tmax[2] = {-1e18, -1e18};
+        for (size_t bi = 0; bi != blobs.size(); bi++) {
+            const geo_point_t bc = blobs.at(bi)->center_pos();
+            const double w = blobs.at(bi)->npoints();
+            const int k = side[bi];
+            w_side[k] += w;
+            const double dis = line_dis(line[k], bc);
+            resid2[k] += w * dis * dis;
+            geo_point_t v(bc.x() - line[k].c.x(), bc.y() - line[k].c.y(), bc.z() - line[k].c.z());
+            const double t = v.dot(line[k].d);
+            if (t < tmin[k]) tmin[k] = t;
+            if (t > tmax[k]) tmax[k] = t;
+        }
+        const double w_tot = w_side[0] + w_side[1];
+        if (w_tot <= 0 || std::min(w_side[0], w_side[1]) / w_tot < MIN_FRAC) continue;
+        bool ok = true;
+        for (int k = 0; k != 2; k++) {
+            if (tmax[k] - tmin[k] < ARM_LEN_MIN) ok = false;
+            if (std::sqrt(resid2[k] / w_side[k]) > RESID_MAX) ok = false;
+        }
+        if (!ok) continue;
+
+        // crossing: closest approach of the two fitted (infinite) lines must be
+        // close and interior to both arms.
+        const geo_point_t w0(line[0].c.x() - line[1].c.x(), line[0].c.y() - line[1].c.y(),
+                             line[0].c.z() - line[1].c.z());
+        const double b = line[0].d.dot(line[1].d);
+        const double denom = 1. - b * b;
+        if (denom < 1e-4) continue;  // near-parallel: no crossing
+        const double d0 = line[0].d.dot(w0), d1 = line[1].d.dot(w0);
+        const double t0 = (b * d1 - d0) / denom;
+        const double t1 = (d1 - b * d0) / denom;
+        geo_point_t p0(line[0].c.x() + t0 * line[0].d.x(), line[0].c.y() + t0 * line[0].d.y(),
+                       line[0].c.z() + t0 * line[0].d.z());
+        geo_point_t p1(line[1].c.x() + t1 * line[1].d.x(), line[1].c.y() + t1 * line[1].d.y(),
+                       line[1].c.z() + t1 * line[1].d.z());
+        geo_point_t gap(p0.x() - p1.x(), p0.y() - p1.y(), p0.z() - p1.z());
+        const double f0 = (t0 - tmin[0]) / (tmax[0] - tmin[0]);
+        const double f1 = (t1 - tmin[1]) / (tmax[1] - tmin[1]);
+        if (gap.magnitude() > CROSS_DIS_MAX) continue;
+        // Kink veto: a kinked single track (a "V") meets at the END of both
+        // arms.  Require the crossing to be interior to at least one arm: an
+        // "X" (both interior) or a "T" (one track ends on the other, which it
+        // crosses mid-length) are two distinct tracks and split; a "V" is not.
+        const bool int0 = (f0 >= CROSS_FRAC_LO && f0 <= CROSS_FRAC_HI);
+        const bool int1 = (f1 >= CROSS_FRAC_LO && f1 <= CROSS_FRAC_HI);
+        if (!int0 && !int1) continue;
+        // The non-interior arm's crossing must still lie within the arm (with
+        // slack), else the two lines never actually meet inside the member.
+        if (f0 < -0.1 || f0 > 1.1 || f1 < -0.1 || f1 > 1.1) continue;
+
+        std::cout << "Separate track_recarve: len " << c->get_length() / units::cm
+                  << " cm split into arms " << w_side[0] << " / " << w_side[1]
+                  << " npoints, cross frac " << f0 << " / " << f1
+                  << ", resid " << std::sqrt(resid2[0] / w_side[0]) / units::cm << " / "
+                  << std::sqrt(resid2[1] / w_side[1]) / units::cm << " cm" << std::endl;
+
+        std::vector<int> b2groupid(side.begin(), side.end());
+        auto out = live_grouping.separate(c, b2groupid, true);
+        assert(c == nullptr);
+        family.at(fi) = nullptr;
+        for (auto& [gid, cl] : out) family.push_back(cl);
+    }
+}
+
+
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 IPCTransformSet::pointer pcts,
@@ -494,7 +727,11 @@ static void clustering_separate(Grouping& live_grouping,
                                 const int max_hull_points,
                                 const bool sbnd_boundary_tag,
                                 const bool collinear_recover,
-                                const bool band_recarve);
+                                const bool band_recarve,
+                                const bool drift_side_fv_x,
+                                const double far_point_x_cut,
+                                const double far_point_mid_dis,
+                                const bool track_recarve);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -519,12 +756,26 @@ public:
         // behavior).  See recover_collinear_tips / recarve_two_bands.
         collinear_recover_ = get(config, "collinear_recover", false);
         band_recarve_ = get(config, "band_recarve", false);
+        // Drift-side FV x-range for multi-APA common-face scopes (default OFF =>
+        // bit-identical to prior behavior).  See select_scope_fv(common_face_x).
+        drift_side_fv_x_ = get(config, "drift_side_fv_x", false);
+        // Drift-x deviation that promotes a boundary point to a "far" point in
+        // JudgeSeparateDec_2's two-endpoint test.  Default 140 cm == the prototype
+        // expression (effectively dead); set 14 cm for the evidently intended cut.
+        far_point_x_cut_ = get(config, "far_point_x_cut", 140 * units::cm);
+        // Midpoint-to-cluster cap in the same far-point test (default 25 cm ==
+        // prototype).  Raise it so diverging track pairs keep their far points.
+        far_point_mid_dis_ = get(config, "far_point_mid_dis", 25 * units::cm);
+        // Post-separation k=2 3D-line self-split of a member holding two long
+        // crossing track arms (default OFF => bit-identical).
+        track_recarve_ = get(config, "track_recarve", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_,
-                            collinear_recover_, band_recarve_);
+                            collinear_recover_, band_recarve_, drift_side_fv_x_, far_point_x_cut_,
+                            far_point_mid_dis_, track_recarve_);
     }
 
 private:
@@ -533,6 +784,10 @@ private:
     bool sbnd_boundary_tag_{false};
     bool collinear_recover_{false};
     bool band_recarve_{false};
+    bool drift_side_fv_x_{false};
+    double far_point_x_cut_{140 * units::cm};
+    double far_point_mid_dis_{25 * units::cm};
+    bool track_recarve_{false};
 };
 
 
@@ -550,7 +805,11 @@ static void clustering_separate(
     const int max_hull_points,
     const bool sbnd_boundary_tag,
     const bool collinear_recover,
-    const bool band_recarve)
+    const bool band_recarve,
+    const bool drift_side_fv_x,
+    const double far_point_x_cut,
+    const double far_point_mid_dis,
+    const bool track_recarve)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -567,8 +826,10 @@ static void clustering_separate(
     });
 
     // Scope-aware fiducial volume: per-APA stages use that drift volume's FV;
-    // multi-APA (all-APA) stages use the cryostat envelope.  See select_scope_fv.
-    const ScopeFV fv = select_scope_fv(dv);
+    // multi-APA (all-APA) stages use the cryostat envelope, except that with
+    // drift_side_fv_x a common-face multi-APA scope (drift group) keeps its
+    // drift side's x-range.  See select_scope_fv.
+    const ScopeFV fv = select_scope_fv(dv, drift_side_fv_x);
     const double det_FV_ymax = fv.ymax;
     const geo_point_t beam_dir = fv.beam_dir;
     const geo_point_t vertical_dir = fv.vertical_dir;
@@ -591,12 +852,14 @@ static void clustering_separate(
             // JudgeSeparateDec_2 populates boundary_points / independent_points;
             // cache the return value so we don't re-run it below.
             bool flag_dec2 =
-                JudgeSeparateDec_2(cluster, drift_dir_abs, boundary_points, independent_points, cluster_length, fv, max_hull_points);
+                JudgeSeparateDec_2(cluster, drift_dir_abs, boundary_points, independent_points, cluster_length, fv,
+                                   max_hull_points, far_point_x_cut, far_point_mid_dis);
             // JudgeSeparateDec_1 is cheap compared to Dec_2 but still calls PCA —
             // cache for the second call inside flag_proceed block.
             bool flag_dec1 = JudgeSeparateDec_1(cluster, drift_dir_abs, cluster_length);
 
             bool flag_proceed = flag_dec2;
+
 
             if (!flag_proceed && flag_dec1 && independent_points.size() > 0) {
                 bool flag_top = false;
@@ -659,7 +922,6 @@ static void clustering_separate(
                         flag_proceed = true;
                     }
                 }
-                //	std::cout << flag_top << " " << flag_proceed << std::endl;
 
                 // SBND-only: catch two beam-inclined cosmics that merged into one
                 // cluster and whose PCA looks single-track (so the angle gates above
@@ -709,7 +971,7 @@ static void clustering_separate(
 
                             if (JudgeSeparateDec_1(cluster2, drift_dir_abs, length_1) &&
                                 JudgeSeparateDec_2(cluster2, drift_dir_abs, boundary_points, independent_points,
-                                                   length_1, fv, max_hull_points)) {
+                                                   length_1, fv, max_hull_points, far_point_x_cut, far_point_mid_dis)) {
                                 std::vector<Cluster *> sep_clusters =
                                     Separate_1(use_ctpc, cluster2, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
                                 family_erase(cluster2);  // consumed by Separate_1
@@ -725,7 +987,7 @@ static void clustering_separate(
                                         independent_points.clear();
                                         if (JudgeSeparateDec_1(cluster4, drift_dir_abs, length_1) &&
                                             JudgeSeparateDec_2(cluster4, drift_dir_abs, boundary_points, independent_points,
-                                                               length_1, fv, max_hull_points)) {
+                                                               length_1, fv, max_hull_points, far_point_x_cut, far_point_mid_dis)) {
                                             std::vector<Cluster *> sep_clusters = Separate_1(
                                                 use_ctpc, cluster4, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
                                             family_erase(cluster4);  // consumed by Separate_1
@@ -754,7 +1016,7 @@ static void clustering_separate(
                                 independent_points.clear();
                                 JudgeSeparateDec_1(final_sep_cluster, drift_dir_abs, length_1);
                                 JudgeSeparateDec_2(final_sep_cluster, drift_dir_abs, boundary_points, independent_points,
-                                                   length_1, fv, max_hull_points);
+                                                   length_1, fv, max_hull_points, far_point_x_cut, far_point_mid_dis);
                                 if (independent_points.size() > 0) {
                                     std::vector<Cluster *> sep_clusters = Separate_1(
                                         use_ctpc, final_sep_cluster, boundary_points, independent_points, length_1, vertical_dir, beam_dir, dv, pcts, scope);
@@ -804,6 +1066,8 @@ static void clustering_separate(
                     recover_collinear_tips(live_grouping, scope, family);
                 if (band_recarve && family.size() >= 2)
                     recarve_two_bands(live_grouping, scope, family);
+                if (track_recarve && !family.empty())
+                    recarve_crossing_tracks(live_grouping, scope, family);
             }
         }
     }
@@ -868,7 +1132,8 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
 
 bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir_abs,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length, const ScopeFV& fv, int max_hull_points)
+                               const double cluster_length, const ScopeFV& fv, int max_hull_points,
+                               double far_point_x_cut, double far_point_mid_dis)
 {
     // Scope-aware fiducial volume (see select_scope_fv): in a per-APA pass this is
     // the FV of the drift volume being clustered, so "exiting" means leaving that
@@ -1276,7 +1541,9 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ge
             // std::cout << dir_3.Mag()/units::cm << " " << fabs(angle_3-3.1415926/2.)/3.1415926*180. << " " <<
             // fabs(dir_3.X()/units::cm) << std::endl;
             if (fabs(angle_3 - 3.1415926 / 2.) / 3.1415926 * 180. < 7.5) {
-                if (fabs(dir_3.x() / units::cm) > 14 * units::cm) num_far_points++;
+                // Default far_point_x_cut (140 cm) keeps the prototype expression
+                // `fabs(dir_3.x()/units::cm) > 14*units::cm` bit-for-bit.
+                if (fabs(dir_3.x()) > far_point_x_cut) num_far_points++;
                 if (fabs(dir_1.angle(drift_dir_abs) - 3.1415926 / 2.) / 3.1415926 * 180. > 15) {
                     if (dir_3.magnitude() > 20 * units::cm) num_far_points++;
                 }
@@ -1292,7 +1559,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ge
                                  (independent_points.at(1).z() + independent_points.at(0).z()) / 2.);
         double middle_dis = cluster->get_closest_dis(middle_point);
         // std::cout << middle_dis/units::cm << " " << num_far_points << std::endl;
-        if (middle_dis > 25 * units::cm) {
+        if (middle_dis > far_point_mid_dis) {
             num_far_points = 0;
         }
     }
@@ -1325,6 +1592,7 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ge
         independent_points.clear();
         return false;
     }
+
 
     if ((num_outside_points > 1 && independent_surfaces.size() > 1 ||
          num_outside_points > 2 && cluster_length > 250 * units::cm || num_outx_points > 0) &&
