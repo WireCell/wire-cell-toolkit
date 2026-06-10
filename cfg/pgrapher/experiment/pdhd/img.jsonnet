@@ -1,6 +1,12 @@
 function(cfg={})
 local config = {
     use_dnn_img: false,
+    // Per-plane slicing activity threshold in units of channel RMS.
+    // Default 3.6 sigma.  To slice on any positive charge use 1e-6: a
+    // literal 0 would trip MaskSlice's `if(threshold==0)` fallback to a
+    // default threshold (a HIGH MicroBooNE bar), so 1e-6 is the charge>0
+    // surrogate (used by the standalone pdhd chain, see pdhd/wct-img-all.jsonnet).
+    nthreshold: [3.6, 3.6, 3.6],
 } + cfg;
 
 local wc = import "wirecell.jsonnet";
@@ -127,8 +133,7 @@ local img = {
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
-                // nthreshold: [1e-6, 1e-6, 1e-6],
-                nthreshold: [3.6, 3.6, 3.6],
+                nthreshold: config.nthreshold,
             },
         }, nin=1, nout=1, uses=[anode]),
     }.ret,
