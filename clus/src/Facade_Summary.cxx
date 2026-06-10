@@ -9,7 +9,7 @@ Clus::Facade::json_summary(const Clus::Facade::Grouping& grp)
 {
     Configuration ret;
     ret["type"] = "Grouping";
-    ret["hash"] = grp.hash();
+    ret["hash"] = (Json::UInt64)grp.hash();
     ret["nproj_centers"] = (int)grp.proj_centers().size();
     ret["npitch_mags"] = (int)grp.pitch_mags().size();
     ret["ndead_winds"] = (int)grp.all_dead_winds().size();
@@ -25,7 +25,7 @@ Configuration Clus::Facade::json_summary(const Clus::Facade::Cluster& cls)
     Configuration ret;
     // this is too huge to be exhaustive
     ret["type"] = "Cluster";
-    ret["hash"] = cls.hash();
+    ret["hash"] = (Json::UInt64)cls.hash();
     ret["length"] = cls.get_length();
     // ret["num_slices"] = cls.get_num_time_slices();
     ret["value"] = WireCell::PointCloud::json_summary(cls.value(), false);
@@ -39,7 +39,7 @@ Configuration Clus::Facade::json_summary(const Clus::Facade::Blob& blb)
 {
     Configuration ret;
     ret["type"] = "Blob";
-    ret["hash"] = blb.hash();
+    ret["hash"] = (Json::UInt64)blb.hash();
     ret["face"] = blb.wpid().face();
     ret["npoints"] = blb.npoints();
     ret["charge"] = blb.charge();
