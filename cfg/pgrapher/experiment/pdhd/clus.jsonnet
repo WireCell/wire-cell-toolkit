@@ -10,10 +10,14 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     BlobSampler when converting slice time to drift x
 //     (x = xorig + dirx*(t_slice + time_offset)*drift_speed) and recorded in
 //     the DetectorVolumes metadata used by T0Correction (x_t0cor scope).
-//     Readout tick0 sits at -250us relative to the trigger, so -250us places
-//     trigger-time activity at its true x.
+//     Readout tick0 sits at -250us relative to the trigger, so -250us would
+//     place trigger-time activity at its true x -- but PDHD has no per-event
+//     T0 determination, so the default is 0 (250us = 40cm at 1.6 mm/us): no
+//     activity maps behind the anode and the points stay consistent with the
+//     (offset-free) imaging frame.  Restore a real value once a T0
+//     measurement exists.
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
-          time_offset=-250 * wc.us)
+          time_offset=0 * wc.us)
 
 local drift_speed = 1.6 * wc.mm / wc.us;
 
