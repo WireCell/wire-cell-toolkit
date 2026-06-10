@@ -53,7 +53,7 @@ TEST_CASE("coord region scalar")
 static std::vector<double> uniform_values(size_t seed, size_t number = 3, 
                                           double vmin=-1.0, double vmax=1.0)
 {
-    std::default_random_engine re{seed};
+    std::default_random_engine re{static_cast<std::default_random_engine::result_type>(seed)};
     std::uniform_real_distribution<double> dist(vmin, vmax);
 
     std::vector<double> vals(number);
