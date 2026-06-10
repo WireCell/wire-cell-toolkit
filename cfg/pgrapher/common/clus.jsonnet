@@ -369,7 +369,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // i.e. bit-identical to prior behavior; raise it to let large full-detector
         // overclusters be considered for separation.
         separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false,
-                 collinear_recover=false, collinear_interior=false, band_recarve=false,
+                 collinear_recover=false, collinear_interior=false,
+                 track_repartition=false, band_merge_back=false, band_recarve=false,
                  drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
                  dec1_guard_main_angle=null) :: {
@@ -390,6 +391,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // of one track into the other's cluster; reclaim it.  Only effective
                 // when collinear_recover is also on.  Key omitted when false.
                 [if collinear_interior then 'collinear_interior']: collinear_interior,
+                // Pairwise k=2 3D repartition of two crossing thin-track family
+                // members: fixes a mid-track segment of one track fused into the
+                // other's cluster at the crossing.  Key omitted when false.
+                [if track_repartition then 'track_repartition']: track_repartition,
+                // Re-assemble a single isochronous band that the carve hatched
+                // into interleaved pieces (keeps distinct parallel and genuinely
+                // crossing bands apart).  Key omitted when false.
+                [if band_merge_back then 'band_merge_back']: band_merge_back,
                 [if band_recarve then 'band_recarve']: band_recarve,
                 // Drift-side FV x-range for common-face multi-APA scopes (drift
                 // groups): the out-of-time apparent-x test uses the group's drift

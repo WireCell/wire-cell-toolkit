@@ -412,6 +412,393 @@ static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& s
     }
 }
 
+// Step A3 (band_merge_back): re-assemble a single isochronous band that the
+// carve hatched into interleaved pieces.  With separation firing on band-
+// topology clusters (FV insets), Separate_1's path carve can cut ONE wide band
+// into 2+ clusters of alternating chunks (PDVD 39324 evts 339870/339930/
+// 339990/340010) -- no recarve seed exists (the pieces are mutually near-
+// collinear) so nothing re-assembles them.  Pool the touching band-like
+// family members and merge the ones consistent with one band, discriminating
+// against the two cases that must stay apart (both measured on 39324):
+//  - two distinct parallel bands touching side-by-side (evt 339850: offset
+//    means 94.5 cm / 2.27 (sigma_i+sigma_j) apart; hatched single-band pieces
+//    read <= 47.4 cm / 1.26),
+//  - two genuine bands crossing as an X: the union's residual about a single
+//    line GROWS toward the axial ends (outer/inner rms ~2.0 synthetic; the
+//    worst single-band case reads 1.48).
+static void merge_back_bands(Grouping& live_grouping, const Tree::Scope& scope,
+                             std::vector<Cluster*>& family)
+{
+    const double BAND_PERP_ANG  = 10.;             // member axis within this of perp-to-drift (deg)
+    const double BAND_LEN_MIN   = 60 * units::cm;
+    const double BAND_WIDTH_MIN = 6 * units::cm;   // rms width: thin track pieces must not pool
+    const double TOUCH_MAX      = 2 * units::cm;   // pieces of one hatched band touch
+    const double PAR_SEP_ABS    = 85 * units::cm;  // offset-mean gap: above = distinct parallel bands
+                                                   // (hatched-piece gaps measure <= 67 cm, genuine
+                                                   // parallel-band anchors 130 cm -- 39324)
+    const double PAR_SEP_NSIG   = 1.7;             // ... in units of (sigma_i + sigma_j)
+    const double CROSS_GROW_MAX = 1.75;            // union outer/inner rms: above = crossing bands
+
+    const geo_point_t drift_dir(1, 0, 0);
+
+    // 1. band-like family members, two tiers: wide members (the recarve band
+    // test + its seed width gate) can anchor a band; thin band-aligned DEBRIS
+    // (a short narrow chunk shed by the carve) may join a pool and merge into
+    // a nearby anchor but can never anchor or merge on its own (the width gate
+    // is what keeps thin crossing-track pieces from forming bands).  Debris
+    // must also be SHORT: a long thin iso-aligned member is a track, not a
+    // chunk (PDHD 27409 evt 40908: 318/503 cm tracks at 9.5 deg, width 2-3.5).
+    const double DEBRIS_WIDTH_MIN = 2 * units::cm;
+    const double DEBRIS_LEN_MAX   = 100 * units::cm;
+    std::vector<size_t> band;       // indices into family
+    std::vector<char> wide;         // parallel to `band`
+    for (size_t i = 0; i != family.size(); i++) {
+        Cluster* c = family.at(i);
+        if (!c) continue;
+        if (c->get_length() < BAND_LEN_MIN) continue;
+        const auto& pca = c->get_pca();
+        if (pca.axis.size() < 1 || pca.values.size() < 2 || pca.values.at(0) <= 0) continue;
+        geo_point_t axis(pca.axis.at(0).x(), pca.axis.at(0).y(), pca.axis.at(0).z());
+        const double perp_ang = fabs(axis.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180.;
+        const int n = c->npoints();
+        const double width = (n >= 1) ? std::sqrt(pca.values.at(1) / n) : 0;
+        if (sep_debug())
+            std::cout << "SEPDBG bandtest m" << i << " len=" << c->get_length() / units::cm
+                      << " perp_ang=" << perp_ang << " width=" << width / units::cm
+                      << " npts=" << n << std::endl;
+        if (perp_ang >= BAND_PERP_ANG) continue;
+        if (n < 1 || width < DEBRIS_WIDTH_MIN) continue;
+        if (width < BAND_WIDTH_MIN && c->get_length() >= DEBRIS_LEN_MAX) continue;
+        band.push_back(i);
+        wide.push_back(width >= BAND_WIDTH_MIN);
+    }
+    if (band.size() < 2) return;
+
+    // 2. pools: connected components of the touch relation (deterministic BFS
+    // in family order)
+    std::vector<int> pool_id(band.size(), -1);
+    int npool = 0;
+    for (size_t i = 0; i != band.size(); i++) {
+        if (pool_id[i] >= 0) continue;
+        pool_id[i] = npool;
+        std::vector<size_t> queue = {i};
+        while (!queue.empty()) {
+            const size_t qi = queue.back();
+            queue.pop_back();
+            for (size_t j = 0; j != band.size(); j++) {
+                if (pool_id[j] >= 0) continue;
+                std::tuple<int, int, double> dis =
+                    family.at(band[qi])->get_closest_points(*family.at(band[j]));
+                if (std::get<2>(dis) >= TOUCH_MAX) continue;
+                pool_id[j] = npool;
+                queue.push_back(j);
+            }
+        }
+        npool++;
+    }
+
+    for (int pid = 0; pid != npool; pid++) {
+        std::vector<size_t> pool;  // indices into family, ascending
+        std::vector<char> pwide;   // parallel to `pool`
+        for (size_t i = 0; i != band.size(); i++)
+            if (pool_id[i] == pid) {
+                pool.push_back(band[i]);
+                pwide.push_back(wide[i]);
+            }
+        if (pool.size() < 2) continue;
+
+        // 3. single-line fit of the pool union in (y,z), npoints-weighted blob
+        // centers (bands are extended transverse to drift)
+        double sw = 0, sy = 0, sz = 0, syy = 0, syz = 0, szz = 0;
+        for (size_t pi : pool) {
+            for (const Blob* blob : family.at(pi)->children()) {
+                const geo_point_t bc = blob->center_pos();
+                const double w = blob->npoints();
+                sw += w;
+                sy += w * bc.y();
+                sz += w * bc.z();
+                syy += w * bc.y() * bc.y();
+                syz += w * bc.y() * bc.z();
+                szz += w * bc.z() * bc.z();
+            }
+        }
+        if (sw <= 0) continue;
+        const double my = sy / sw, mz = sz / sw;
+        const double cyy = syy / sw - my * my;
+        const double cyz = syz / sw - my * mz;
+        const double czz = szz / sw - mz * mz;
+        const double theta = 0.5 * std::atan2(2 * cyz, cyy - czz);
+        const double uy = std::cos(theta), uz = std::sin(theta);  // along the band
+        const double ny = -uz, nz = uy;                           // across the band
+
+        // per-member signed transverse offset mean/sigma + weight; union axial coords
+        std::vector<double> mu(pool.size(), 0), sig(pool.size(), 0), w_mem(pool.size(), 0);
+        std::vector<double> ts;  // unweighted blob axial coords, for quartiles
+        for (size_t k = 0; k != pool.size(); k++) {
+            double w_i = 0, sp = 0, spp = 0;
+            for (const Blob* blob : family.at(pool[k])->children()) {
+                const geo_point_t bc = blob->center_pos();
+                const double w = blob->npoints();
+                const double p = (bc.y() - my) * ny + (bc.z() - mz) * nz;
+                w_i += w;
+                sp += w * p;
+                spp += w * p * p;
+                ts.push_back((bc.y() - my) * uy + (bc.z() - mz) * uz);
+            }
+            w_mem[k] = w_i;
+            if (w_i <= 0) continue;
+            mu[k] = sp / w_i;
+            const double var = spp / w_i - mu[k] * mu[k];
+            sig[k] = var > 0 ? std::sqrt(var) : 0;
+        }
+
+        // crossing guard: residual about the single line must not grow toward
+        // the axial ends (inner = middle two t-quartiles)
+        std::sort(ts.begin(), ts.end());
+        const double q1 = ts.at(ts.size() / 4);
+        const double q3 = ts.at((3 * ts.size()) / 4);
+        double w_in = 0, r2_in = 0, w_out = 0, r2_out = 0;
+        for (size_t pi : pool) {
+            for (const Blob* blob : family.at(pi)->children()) {
+                const geo_point_t bc = blob->center_pos();
+                const double w = blob->npoints();
+                const double p = (bc.y() - my) * ny + (bc.z() - mz) * nz;
+                const double t = (bc.y() - my) * uy + (bc.z() - mz) * uz;
+                if (t >= q1 && t <= q3) { w_in += w; r2_in += w * p * p; }
+                else { w_out += w; r2_out += w * p * p; }
+            }
+        }
+        if (w_in <= 0 || w_out <= 0) continue;
+        const double inner_rms = std::sqrt(r2_in / w_in);
+        const double outer_rms = std::sqrt(r2_out / w_out);
+
+        if (sep_debug()) {
+            std::cout << "SEPDBG mergeback pool";
+            for (size_t k = 0; k != pool.size(); k++)
+                std::cout << " m" << pool[k] << "(mu=" << mu[k] / units::cm
+                          << ",sig=" << sig[k] / units::cm
+                          << ",w=" << w_mem[k] << ")";
+            std::cout << " inner=" << inner_rms / units::cm
+                      << " outer=" << outer_rms / units::cm << std::endl;
+        }
+        if (inner_rms > 0 && outer_rms / inner_rms > CROSS_GROW_MAX) continue;
+
+        // 4. anchor-based grouping by transverse offset.  Big pieces (the band
+        // cores) group via the strict parallel-separation gates; small debris
+        // joins the nearest anchor group when plausibly of the same band.
+        // (Plain single-linkage over all pieces chains two parallel bands
+        // together through their overlap-region debris -- 39324 evt 339850.)
+        const double ANCHOR_FRAC = 0.20;  // of pool npoints
+        double w_pool = 0;
+        int k_big = -1;  // largest WIDE member; thin debris can never anchor
+        for (size_t k = 0; k != pool.size(); k++) {
+            w_pool += w_mem[k];
+            if (pwide[k] && (k_big < 0 || w_mem[k] > w_mem[k_big])) k_big = (int) k;
+        }
+        if (k_big < 0) continue;  // pool is all debris: nothing to assemble around
+        std::vector<bool> is_anchor(pool.size(), false);
+        for (size_t k = 0; k != pool.size(); k++)
+            is_anchor[k] = pwide[k] && (((int) k == k_big) || (w_mem[k] >= ANCHOR_FRAC * w_pool));
+        std::vector<int> grp(pool.size());
+        for (size_t k = 0; k != pool.size(); k++) grp[k] = (int) k;
+        auto root = [&](int k) {
+            while (grp[k] != k) k = grp[k] = grp[grp[k]];
+            return k;
+        };
+        // anchors: single-linkage with both gates (anchors are few, so the
+        // debris-chaining failure mode cannot recur)
+        for (size_t a = 0; a + 1 < pool.size(); a++) {
+            if (!is_anchor[a]) continue;
+            for (size_t b = a + 1; b < pool.size(); b++) {
+                if (!is_anchor[b]) continue;
+                const double dmu = fabs(mu[a] - mu[b]);
+                if (dmu >= PAR_SEP_ABS) continue;
+                if (dmu >= PAR_SEP_NSIG * (sig[a] + sig[b])) continue;
+                const int ra = root(a), rb = root(b);
+                if (ra != rb) grp[std::max(ra, rb)] = std::min(ra, rb);
+            }
+        }
+        // debris: nearest anchor by offset, absolute gate only (debris sigmas
+        // are unreliable); too-far debris stays its own cluster
+        for (size_t k = 0; k != pool.size(); k++) {
+            if (is_anchor[k]) continue;
+            double best = PAR_SEP_ABS;
+            int ka = -1;
+            for (size_t a = 0; a != pool.size(); a++) {
+                if (!is_anchor[a]) continue;
+                const double dmu = fabs(mu[k] - mu[a]);
+                if (dmu < best) { best = dmu; ka = (int) a; }
+            }
+            if (ka < 0) continue;
+            const int rk = root((int) k), ra = root(ka);
+            if (rk != ra) grp[std::max(rk, ra)] = std::min(rk, ra);
+        }
+
+        // 5. merge each multi-member group into its lowest-family-index member
+        for (size_t a = 0; a != pool.size(); a++) {
+            if (root(a) != (int) a) continue;  // not a group leader
+            std::vector<size_t> members;       // pool-local indices, ascending
+            for (size_t b = a; b < pool.size(); b++)
+                if (root(b) == (int) a) members.push_back(b);
+            if (members.size() < 2) continue;
+
+            Cluster* target = family.at(pool[members.front()]);
+            const auto tscope = target->get_default_scope();
+            const auto ttrans = target->get_scope_transform(tscope);
+            size_t nmerged = 0;
+            for (size_t k = 1; k != members.size(); k++) {
+                Cluster* donor = family.at(pool[members[k]]);
+                target->take_children(*donor, true);
+                family.at(pool[members[k]]) = nullptr;
+                live_grouping.destroy_child(donor);
+                assert(donor == nullptr);
+                nmerged++;
+            }
+            // full cache clear via the scope round-trip (see collinear_recover)
+            target->set_default_scope(tscope);
+            target->set_scope_filter(tscope, true);
+            target->set_scope_transform(tscope, ttrans);
+
+            std::cout << "Separate band_merge_back: merged " << nmerged + 1
+                      << " band pieces, len " << target->get_length() / units::cm
+                      << " cm, inner/outer rms " << inner_rms / units::cm << " / "
+                      << outer_rms / units::cm << " cm" << std::endl;
+        }
+    }
+
+    // 6. band interior steal: a chunk of a band can stay FUSED inside a
+    // non-band sibling (e.g. a crossing drift-angled track -- Separate_2's
+    // relink glues them where they touch; 39324 evt 339930).  The member-level
+    // merge above cannot take it without dragging the track into the band.
+    // For each band-like member B, steal from each long non-band sibling H the
+    // grown run of blobs that sit far off H's own main line yet touch B.
+    {
+        const double H_LEN_MIN        = 100 * units::cm;
+        const double STEAL_OFF_MIN    = 15 * units::cm;  // blob center off H's main line
+        const double STEAL_SEED_TOUCH = 5 * units::cm;   // run must touch B
+        const double STEAL_GROW       = 15 * units::cm;  // growth radius within the off-line set
+        const double STEAL_RUN_MIN    = 15 * units::cm;  // moved run spatial extent
+
+        // refresh band-like members: the group merges above changed them
+        std::vector<size_t> bands2;
+        for (size_t i = 0; i != family.size(); i++) {
+            Cluster* c = family.at(i);
+            if (!c) continue;
+            if (c->get_length() < BAND_LEN_MIN) continue;
+            const auto& pca = c->get_pca();
+            if (pca.axis.size() < 1 || pca.values.size() < 2 || pca.values.at(0) <= 0) continue;
+            geo_point_t axis(pca.axis.at(0).x(), pca.axis.at(0).y(), pca.axis.at(0).z());
+            if (fabs(axis.angle(drift_dir) - 3.1415926 / 2.) / 3.1415926 * 180. >= BAND_PERP_ANG) continue;
+            const int n = c->npoints();
+            if (n < 1 || std::sqrt(pca.values.at(1) / n) < BAND_WIDTH_MIN) continue;
+            bands2.push_back(i);
+        }
+        for (size_t bi : bands2) {
+            for (size_t hi = 0; hi != family.size(); hi++) {
+                if (hi == bi) continue;
+                if (std::find(bands2.begin(), bands2.end(), hi) != bands2.end()) continue;
+                Cluster* H = family.at(hi);
+                if (!H) continue;
+                if (H->get_length() < H_LEN_MIN) continue;
+                const auto& hpca = H->get_pca();
+                if (hpca.axis.empty() || hpca.values.at(0) <= 0) continue;
+                geo_point_t haxis(hpca.axis.at(0).x(), hpca.axis.at(0).y(), hpca.axis.at(0).z());
+                const geo_point_t hcen = hpca.center;
+                Cluster* B = family.at(bi);
+
+                // candidates: H blobs far off H's own main line
+                const auto& blobs = H->children();
+                std::vector<int> cand;
+                std::vector<geo_point_t> cpos;
+                for (int k = 0; k != (int) blobs.size(); k++) {
+                    const geo_point_t bc = blobs.at(k)->center_pos();
+                    const geo_point_t rel = bc - hcen;
+                    const geo_point_t perp = rel - haxis * rel.dot(haxis);
+                    if (perp.magnitude() < STEAL_OFF_MIN) continue;
+                    cand.push_back(k);
+                    cpos.push_back(bc);
+                }
+                if (cand.empty()) {
+                    if (sep_debug())
+                        std::cout << "SEPDBG bandsteal B=" << bi << " H=" << hi
+                                  << " ncand=0" << std::endl;
+                    continue;
+                }
+                // seeds: candidates touching B; grow within the candidate set
+                std::vector<char> sel(cand.size(), 0);
+                std::vector<size_t> queue;
+                for (size_t k = 0; k != cand.size(); k++) {
+                    geo_point_t tp(cpos[k].x(), cpos[k].y(), cpos[k].z());
+                    if (B->nnearby(tp, STEAL_SEED_TOUCH) > 0) {
+                        sel[k] = 1;
+                        queue.push_back(k);
+                    }
+                }
+                if (queue.empty()) {
+                    if (sep_debug())
+                        std::cout << "SEPDBG bandsteal B=" << bi << " H=" << hi
+                                  << " ncand=" << cand.size() << " nseed=0" << std::endl;
+                    continue;
+                }
+                while (!queue.empty()) {
+                    const size_t qk = queue.back();
+                    queue.pop_back();
+                    for (size_t j = 0; j != cand.size(); j++) {
+                        if (sel[j]) continue;
+                        if ((cpos[j] - cpos[qk]).magnitude() < STEAL_GROW) {
+                            sel[j] = 1;
+                            queue.push_back(j);
+                        }
+                    }
+                }
+                // spatial extent of the selected run
+                geo_point_t lo(1e18, 1e18, 1e18), hi_p(-1e18, -1e18, -1e18);
+                size_t nsel = 0;
+                for (size_t k = 0; k != cand.size(); k++) {
+                    if (!sel[k]) continue;
+                    nsel++;
+                    lo = geo_point_t(std::min(lo.x(), cpos[k].x()), std::min(lo.y(), cpos[k].y()),
+                                     std::min(lo.z(), cpos[k].z()));
+                    hi_p = geo_point_t(std::max(hi_p.x(), cpos[k].x()), std::max(hi_p.y(), cpos[k].y()),
+                                       std::max(hi_p.z(), cpos[k].z()));
+                }
+                const double run = (hi_p - lo).magnitude();
+                if (sep_debug())
+                    std::cout << "SEPDBG bandsteal B=" << bi << " H=" << hi
+                              << " ncand=" << cand.size() << " nsel=" << nsel
+                              << " run=" << run / units::cm << std::endl;
+                if (run < STEAL_RUN_MIN) continue;
+
+                const auto bscope = B->get_default_scope();
+                const auto btrans = B->get_scope_transform(bscope);
+                if (nsel == blobs.size()) {
+                    B->take_children(*H, true);
+                    family.at(hi) = nullptr;
+                    live_grouping.destroy_child(H);
+                    assert(H == nullptr);
+                }
+                else {
+                    std::vector<int> b2groupid(H->nchildren(), -1);  // -1 = stay
+                    for (size_t k = 0; k != cand.size(); k++)
+                        if (sel[k]) b2groupid.at(cand[k]) = 0;
+                    auto pieces = live_grouping.separate(H, b2groupid, false);
+                    Cluster* piece = pieces.at(0);
+                    B->take_children(*piece, true);
+                    live_grouping.destroy_child(piece);
+                    assert(piece == nullptr);
+                }
+                B->set_default_scope(bscope);
+                B->set_scope_filter(bscope, true);
+                B->set_scope_transform(bscope, btrans);
+
+                std::cout << "Separate band_merge_back: band stole " << nsel
+                          << " blobs (run " << run / units::cm << " cm) from sibling "
+                          << hi << std::endl;
+            }
+        }
+    }
+}
+
 // Step B (band_recarve): one cluster per crossing isochronous band.  When two
 // wide isochronous bands cross at a shallow angle, the recursion above carves
 // them into a path-tube, arbitrary "saved" slices and a leftover bin -- the
@@ -786,6 +1173,252 @@ static void recarve_crossing_tracks(Grouping& live_grouping, const Tree::Scope& 
 }
 
 
+// Step A2 (track_repartition): fix an interior segment swap between two
+// crossing thin tracks ALREADY split into two family members.  At a crossing
+// the carve + Separate_2 relink can fuse a mid-track chunk of track B into
+// track A's cluster (PDVD 39324 evt 339990 group0123: a 48 cm chunk of one
+// track, 26 cm off the host's axis, embedded in the other's cluster).
+// collinear_interior cannot reach it -- it moves whole sibling fragments and
+// this chunk is fused into the host.  Pool the pair's blobs, refit a k=2 3D
+// line model seeded by the current membership (machinery and validation
+// duplicated from recarve_crossing_tracks above) and reassign by nearer line.
+// A surgical no-op guard skips the pair when the would-be moves are only
+// crossing-region dribble: mutate only if the moved blobs include a run far
+// from the host line with substantial axial extent.
+static void repartition_crossing_tracks(Grouping& live_grouping, const Tree::Scope& scope,
+                                        std::vector<Cluster*>& family)
+{
+    const double LEN_MIN        = 100 * units::cm;  // each member
+    const double THIN_RATIO_MAX = 0.15;             // pca eval1/eval0 per member
+    const int    NITER          = 10;
+    const double MIN_FRAC       = 0.20;
+    const double ARM_LEN_MIN    = 60 * units::cm;
+    const double CROSS_DIS_MAX  = 10 * units::cm;
+    const double CROSS_FRAC_LO  = 0.15;
+    const double CROSS_FRAC_HI  = 0.85;
+    const double RESID_MAX      = 10 * units::cm;
+    const double MOVE_PERP_MIN  = 15 * units::cm;   // moved run: distance from host line
+    const double MOVE_RUN_MIN   = 15 * units::cm;   // ... and axial extent (the 339990
+                                                    // chunk reads 48 cm at 20-40 cm)
+
+    struct Line3 {
+        geo_point_t c, d;  // point on line, unit direction
+    };
+    auto line_dis = [](const Line3& l, const geo_point_t& p) {
+        geo_point_t v(p.x() - l.c.x(), p.y() - l.c.y(), p.z() - l.c.z());
+        const double t = v.dot(l.d);
+        geo_point_t r(v.x() - t * l.d.x(), v.y() - t * l.d.y(), v.z() - t * l.d.z());
+        return r.magnitude();
+    };
+    auto principal_dir = [](const double cov[3][3], geo_point_t start) -> geo_point_t {
+        double v[3] = {start.x(), start.y(), start.z()};
+        double n0 = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (n0 <= 0) { v[0] = 1; v[1] = 0; v[2] = 0; n0 = 1; }
+        for (int i = 0; i != 3; i++) v[i] /= n0;
+        for (int it = 0; it != 30; it++) {
+            double w[3] = {0, 0, 0};
+            for (int i = 0; i != 3; i++)
+                for (int j = 0; j != 3; j++) w[i] += cov[i][j] * v[j];
+            const double n = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+            if (n <= 0) break;
+            for (int i = 0; i != 3; i++) v[i] = w[i] / n;
+        }
+        return geo_point_t(v[0], v[1], v[2]);
+    };
+
+    const size_t nfam = family.size();  // snapshot: do not revisit our own outputs
+    for (size_t fi = 0; fi + 1 < nfam; fi++) {
+        Cluster* a = family.at(fi);
+        if (!a) continue;
+        if (a->get_length() < LEN_MIN) continue;
+        const auto& pca_a = a->get_pca();
+        if (pca_a.values.size() < 2 || pca_a.values.at(0) <= 0) continue;
+        if (pca_a.values.at(1) / pca_a.values.at(0) >= THIN_RATIO_MAX) continue;
+
+        for (size_t fj = fi + 1; fj < nfam; fj++) {
+            Cluster* b = family.at(fj);
+            if (!b) continue;
+            if (b->get_length() < LEN_MIN) continue;
+            const auto& pca_b = b->get_pca();
+            if (pca_b.values.size() < 2 || pca_b.values.at(0) <= 0) continue;
+            if (pca_b.values.at(1) / pca_b.values.at(0) >= THIN_RATIO_MAX) continue;
+
+            // the members' pca main lines must genuinely cross
+            Line3 host[2] = {
+                {pca_a.center, geo_point_t(pca_a.axis.at(0).x(), pca_a.axis.at(0).y(), pca_a.axis.at(0).z())},
+                {pca_b.center, geo_point_t(pca_b.axis.at(0).x(), pca_b.axis.at(0).y(), pca_b.axis.at(0).z())}};
+            const geo_point_t w0(host[0].c.x() - host[1].c.x(), host[0].c.y() - host[1].c.y(),
+                                 host[0].c.z() - host[1].c.z());
+            const double bb = host[0].d.dot(host[1].d);
+            const double denom = 1. - bb * bb;
+            if (denom < 1e-4) continue;  // near-parallel
+            const double d0 = host[0].d.dot(w0), d1 = host[1].d.dot(w0);
+            const double tc0 = (bb * d1 - d0) / denom;
+            const double tc1 = (d1 - bb * d0) / denom;
+            geo_point_t p0(host[0].c.x() + tc0 * host[0].d.x(), host[0].c.y() + tc0 * host[0].d.y(),
+                           host[0].c.z() + tc0 * host[0].d.z());
+            geo_point_t p1(host[1].c.x() + tc1 * host[1].d.x(), host[1].c.y() + tc1 * host[1].d.y(),
+                           host[1].c.z() + tc1 * host[1].d.z());
+            geo_point_t gap(p0.x() - p1.x(), p0.y() - p1.y(), p0.z() - p1.z());
+            if (gap.magnitude() > CROSS_DIS_MAX) continue;
+            // axial extents from blob centers, crossing interior to >=1 member
+            double hmin[2] = {1e18, 1e18}, hmax[2] = {-1e18, -1e18};
+            Cluster* mem[2] = {a, b};
+            for (int k = 0; k != 2; k++)
+                for (const Blob* blob : mem[k]->children()) {
+                    const geo_point_t bc = blob->center_pos();
+                    geo_point_t v(bc.x() - host[k].c.x(), bc.y() - host[k].c.y(), bc.z() - host[k].c.z());
+                    const double t = v.dot(host[k].d);
+                    if (t < hmin[k]) hmin[k] = t;
+                    if (t > hmax[k]) hmax[k] = t;
+                }
+            const double cf0 = (tc0 - hmin[0]) / (hmax[0] - hmin[0]);
+            const double cf1 = (tc1 - hmin[1]) / (hmax[1] - hmin[1]);
+            const bool int0 = (cf0 >= CROSS_FRAC_LO && cf0 <= CROSS_FRAC_HI);
+            const bool int1 = (cf1 >= CROSS_FRAC_LO && cf1 <= CROSS_FRAC_HI);
+            if (!int0 && !int1) continue;
+            if (cf0 < -0.1 || cf0 > 1.1 || cf1 < -0.1 || cf1 > 1.1) continue;
+
+            // pool the pair's blobs; side seeded by current membership
+            std::vector<const Blob*> blobs;
+            std::vector<int> side, member_of;
+            for (int k = 0; k != 2; k++)
+                for (const Blob* blob : mem[k]->children()) {
+                    blobs.push_back(blob);
+                    side.push_back(k);
+                    member_of.push_back(k);
+                }
+
+            Line3 line[2] = {host[0], host[1]};
+            bool degenerate = false;
+            for (int iter = 0; iter != NITER + 1; iter++) {
+                double sw[2] = {0, 0};
+                double mean[2][3] = {{0, 0, 0}, {0, 0, 0}};
+                for (size_t bi = 0; bi != blobs.size(); bi++) {
+                    const geo_point_t bc = blobs.at(bi)->center_pos();
+                    const double w = blobs.at(bi)->npoints();
+                    const int k = side[bi];
+                    sw[k] += w;
+                    mean[k][0] += w * bc.x();  mean[k][1] += w * bc.y();  mean[k][2] += w * bc.z();
+                }
+                if (sw[0] <= 0 || sw[1] <= 0) { degenerate = true; break; }
+                double cov[2][3][3] = {};
+                for (int k = 0; k != 2; k++)
+                    for (int i = 0; i != 3; i++) mean[k][i] /= sw[k];
+                for (size_t bi = 0; bi != blobs.size(); bi++) {
+                    const geo_point_t bc = blobs.at(bi)->center_pos();
+                    const double w = blobs.at(bi)->npoints();
+                    const int k = side[bi];
+                    const double d[3] = {bc.x() - mean[k][0], bc.y() - mean[k][1], bc.z() - mean[k][2]};
+                    for (int i = 0; i != 3; i++)
+                        for (int j = 0; j != 3; j++) cov[k][i][j] += w * d[i] * d[j];
+                }
+                for (int k = 0; k != 2; k++) {
+                    const geo_point_t dir = principal_dir(cov[k], line[k].d);
+                    line[k] = {geo_point_t(mean[k][0], mean[k][1], mean[k][2]), dir};
+                }
+                if (iter == NITER) break;
+                for (size_t bi = 0; bi != blobs.size(); bi++) {
+                    const geo_point_t bc = blobs.at(bi)->center_pos();
+                    side[bi] = (line_dis(line[0], bc) <= line_dis(line[1], bc)) ? 0 : 1;
+                }
+            }
+            if (degenerate) continue;
+
+            // final assignment from the final fitted lines -- also recomputed
+            // per pooled child at materialization below, so it must be a pure
+            // function of the lines (not of blob order or pointer identity)
+            for (size_t bi = 0; bi != blobs.size(); bi++) {
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                side[bi] = (line_dis(line[0], bc) <= line_dis(line[1], bc)) ? 0 : 1;
+            }
+
+            // validation (same gates as recarve_crossing_tracks), before mutation
+            double w_side[2] = {0, 0}, resid2[2] = {0, 0};
+            double tmin[2] = {1e18, 1e18}, tmax[2] = {-1e18, -1e18};
+            for (size_t bi = 0; bi != blobs.size(); bi++) {
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                const double w = blobs.at(bi)->npoints();
+                const int k = side[bi];
+                w_side[k] += w;
+                const double dis = line_dis(line[k], bc);
+                resid2[k] += w * dis * dis;
+                geo_point_t v(bc.x() - line[k].c.x(), bc.y() - line[k].c.y(), bc.z() - line[k].c.z());
+                const double t = v.dot(line[k].d);
+                if (t < tmin[k]) tmin[k] = t;
+                if (t > tmax[k]) tmax[k] = t;
+            }
+            const double w_tot = w_side[0] + w_side[1];
+            if (w_tot <= 0 || std::min(w_side[0], w_side[1]) / w_tot < MIN_FRAC) continue;
+            bool ok = true;
+            for (int k = 0; k != 2; k++) {
+                if (tmax[k] - tmin[k] < ARM_LEN_MIN) ok = false;
+                if (std::sqrt(resid2[k] / w_side[k]) > RESID_MAX) ok = false;
+            }
+            if (!ok) continue;
+
+            // surgical no-op guard: among the blobs that change membership,
+            // require a run sitting far from its HOST's line with substantial
+            // axial extent along its NEW line.  Crossing-region dribble (close
+            // to both lines by construction) never qualifies.
+            double run_tmin[2] = {1e18, 1e18}, run_tmax[2] = {-1e18, -1e18};
+            size_t nmoved = 0;
+            for (size_t bi = 0; bi != blobs.size(); bi++) {
+                if (side[bi] == member_of[bi]) continue;
+                nmoved++;
+                const geo_point_t bc = blobs.at(bi)->center_pos();
+                if (line_dis(host[member_of[bi]], bc) < MOVE_PERP_MIN) continue;
+                const int k = side[bi];
+                geo_point_t v(bc.x() - line[k].c.x(), bc.y() - line[k].c.y(), bc.z() - line[k].c.z());
+                const double t = v.dot(line[k].d);
+                if (t < run_tmin[k]) run_tmin[k] = t;
+                if (t > run_tmax[k]) run_tmax[k] = t;
+            }
+            const bool substantial = (run_tmax[0] - run_tmin[0] >= MOVE_RUN_MIN) ||
+                                     (run_tmax[1] - run_tmin[1] >= MOVE_RUN_MIN);
+            if (sep_debug())
+                std::cout << "SEPDBG repart pair " << fi << "/" << fj
+                          << " cross_dis=" << gap.magnitude() / units::cm
+                          << " cf=" << cf0 << "/" << cf1 << " nmoved=" << nmoved
+                          << " run=" << (run_tmax[0] - run_tmin[0]) / units::cm << "/"
+                          << (run_tmax[1] - run_tmin[1]) / units::cm
+                          << " substantial=" << substantial << std::endl;
+            if (nmoved == 0 || !substantial) continue;
+
+            std::cout << "Separate track_repartition: pair lens "
+                      << a->get_length() / units::cm << " / " << b->get_length() / units::cm
+                      << " cm, moved " << nmoved << " blobs, sides "
+                      << w_side[0] << " / " << w_side[1] << " npoints" << std::endl;
+
+            // materialize: pool into a fresh cluster, separate by final side
+            Cluster& pooled = live_grouping.make_child();
+            pooled.set_default_scope(scope);
+            pooled.set_scope_filter(scope, true);
+            pooled.set_scope_transform(scope, a->get_scope_transform(scope));
+            pooled.take_children(*a, true);
+            family.at(fi) = nullptr;
+            live_grouping.destroy_child(a);
+            assert(a == nullptr);
+            pooled.take_children(*b, true);
+            family.at(fj) = nullptr;
+            live_grouping.destroy_child(b);
+            assert(b == nullptr);
+            std::vector<int> b2groupid;
+            b2groupid.reserve(pooled.nchildren());
+            for (const Blob* blob : pooled.children()) {
+                const geo_point_t bc = blob->center_pos();
+                b2groupid.push_back((line_dis(line[0], bc) <= line_dis(line[1], bc)) ? 0 : 1);
+            }
+            Cluster* pooled_ptr = &pooled;
+            auto out = live_grouping.separate(pooled_ptr, b2groupid, true);
+            assert(pooled_ptr == nullptr);
+            for (auto& [gid, cl] : out) family.push_back(cl);
+            break;  // fi consumed; next fi
+        }
+    }
+}
+
+
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
                                 IPCTransformSet::pointer pcts,
@@ -795,6 +1428,8 @@ static void clustering_separate(Grouping& live_grouping,
                                 const bool sbnd_boundary_tag,
                                 const bool collinear_recover,
                                 const bool collinear_interior,
+                                const bool track_repartition,
+                                const bool band_merge_back,
                                 const bool band_recarve,
                                 const bool drift_side_fv_x,
                                 const double far_point_x_cut,
@@ -828,6 +1463,13 @@ public:
         // bit-identical); only effective when collinear_recover is also on.
         // See recover_collinear_tips(interior_reclaim).
         collinear_interior_ = get(config, "collinear_interior", false);
+        // Pairwise k=2 3D repartition of two crossing thin-track members
+        // (default OFF => bit-identical).  See repartition_crossing_tracks.
+        track_repartition_ = get(config, "track_repartition", false);
+        // Re-assemble a single isochronous band hatched into interleaved
+        // pieces by the carve (default OFF => bit-identical).  See
+        // merge_back_bands.
+        band_merge_back_ = get(config, "band_merge_back", false);
         band_recarve_ = get(config, "band_recarve", false);
         // Drift-side FV x-range for multi-APA common-face scopes (default OFF =>
         // bit-identical to prior behavior).  See select_scope_fv(common_face_x).
@@ -851,7 +1493,8 @@ public:
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_,
-                            collinear_recover_, collinear_interior_, band_recarve_, drift_side_fv_x_,
+                            collinear_recover_, collinear_interior_, track_repartition_, band_merge_back_,
+                            band_recarve_, drift_side_fv_x_,
                             far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_);
     }
 
@@ -861,6 +1504,8 @@ private:
     bool sbnd_boundary_tag_{false};
     bool collinear_recover_{false};
     bool collinear_interior_{false};
+    bool track_repartition_{false};
+    bool band_merge_back_{false};
     bool band_recarve_{false};
     bool drift_side_fv_x_{false};
     double far_point_x_cut_{140 * units::cm};
@@ -885,6 +1530,8 @@ static void clustering_separate(
     const bool sbnd_boundary_tag,
     const bool collinear_recover,
     const bool collinear_interior,
+    const bool track_repartition,
+    const bool band_merge_back,
     const bool band_recarve,
     const bool drift_side_fv_x,
     const double far_point_x_cut,
@@ -1168,6 +1815,10 @@ static void clustering_separate(
                 // before the band re-carve pools band-like members.
                 if (collinear_recover && family.size() >= 2)
                     recover_collinear_tips(live_grouping, scope, family, collinear_interior);
+                if (track_repartition && family.size() >= 2)
+                    repartition_crossing_tracks(live_grouping, scope, family);
+                if (band_merge_back && family.size() >= 2)
+                    merge_back_bands(live_grouping, scope, family);
                 if (band_recarve && family.size() >= 2)
                     recarve_two_bands(live_grouping, scope, family);
                 if (track_recarve && !family.empty())

@@ -1,14 +1,19 @@
-# Post-separation refinement: collinear tip recovery + two-band re-carve
+# Post-separation refinement: collinear recovery, repartition, band merge-back, re-carve
 
-Two knob-gated refinement steps in `ClusteringSeparate`
+Knob-gated refinement steps in `ClusteringSeparate`
 (`clus/src/clustering_separate.cxx`), applied to the "family" of clusters
-produced by separating one original cluster.  Both default **OFF** (existing
-configs are bit-identical); PDVD and PDHD enable both.
+produced by separating one original cluster.  All default **OFF** (existing
+configs are bit-identical); PDVD and PDHD enable all of them.
 
 ```jsonnet
-cm.separate(use_ctpc=true, max_hull_points=100000,
-            collinear_recover=true, band_recarve=true)
+cm.separate(use_ctpc=true, max_hull_points=1000000,
+            collinear_recover=true, collinear_interior=true,
+            track_repartition=true, band_merge_back=true, band_recarve=true)
 ```
+
+Run order within one family: `collinear_recover` (+`collinear_interior`) →
+`track_repartition` → `band_merge_back` → `band_recarve` →
+`track_recarve` (the last in `clustering-separate-fv.md`).
 
 ## Motivation (PDVD run 39324 evt 0, drift group 4567)
 
@@ -80,6 +85,82 @@ donor-spine gate) never fires because a carve fragment IS its own spine.
 Donors already claimed by the tip walk are skipped.  The OFF-check (knob
 absent) is byte-identical by construction and was verified empirically
 (old-vs-new binary content-identical mabc zips on 27409 evt 40908).
+
+## Step A2 — `track_repartition` (repartition_crossing_tracks)
+
+At a crossing, the carve + `Separate_2`'s 5 cm relink can fuse a mid-track
+segment of track B INTO track A's cluster (PDVD 39324 evt 339990 group0123: a
+48 cm chunk of one crosser, 26 cm off the host's axis, embedded in the other's
+cluster; the genuine crossing is at 49.6°, closest approach 3.7 cm).
+`collinear_interior` cannot reach it — it moves whole sibling fragments, and
+this chunk is fused into the host.
+
+For each PAIR of family members that are both thin (`eval1/eval0 < 0.15`) and
+long (>100 cm) and whose pca main lines genuinely cross (closest approach
+<10 cm, interior [0.15, 0.85] to ≥1 member, within [−0.1, 1.1] of both): pool
+the pair's blobs, seed `side` by current membership, run the same fixed-count
+k=2 3D line assign/refit and validation gates as `track_recarve` (arm ≥20 %
+npoints and ≥60 cm, rms residual ≤10 cm, crossing interior), then reassign
+each blob to the nearer fitted line.
+
+**Surgical no-op guard**: the would-be moves are computed first and the pair
+is mutated ONLY if the moved blobs include a run with ≥15 cm axial extent
+sitting >15 cm off its host's line.  Crossing-region dribble (close to both
+lines by construction) never qualifies — on the five verified PDHD 27409
+separation events the guard skips 5 of 8 candidate pairs and the three that
+fire move genuine misplaced runs (73–110 cm extents); all five user-point
+checks still pass.
+
+## Step A3 — `band_merge_back` (merge_back_bands)
+
+With separation firing on band-topology clusters (the FV-inset round),
+`Separate_1`'s path carve can hatch ONE wide isochronous band into 2+ clusters
+of interleaved alternating chunks (PDVD 39324 evts 339870/339930/339990/340010
+— six user-flagged over-separations; verified visually and by the common
+x-slab).  The pieces are mutually near-collinear so no recarve seed exists,
+and nothing re-assembles them.
+
+Pool the touching (<2 cm, transitive) band-like family members, in two tiers:
+
+- **wide members** (axis within 10° of ⊥-drift, len >60 cm, rms width ≥6 cm —
+  the recarve band test + its seed width gate) can ANCHOR a band;
+- **thin debris** (width 2–6 cm, len 60–100 cm, same axis gate) may join a
+  pool and merge into a nearby anchor but can never anchor or merge on its
+  own.  The width gate is what keeps thin crossing-track pieces from forming
+  bands, and the 100 cm debris length cap is what keeps long thin iso-aligned
+  TRACKS out (PDHD 27409 evt 40908: 318/503 cm tracks at 9.5° off-⊥, width
+  2–3.5 cm, were briefly eaten without the cap).
+
+For each pool, fit ONE line in (y,z) to the npoints-weighted blob centers and
+characterize each member by its signed transverse offset mean μ and rms σ:
+
+- **crossing guard**: if the union residual GROWS toward the axial ends
+  (outer/inner rms > 1.75 over the t-quartiles) the pool is skipped — two
+  genuine bands crossing as an X read ~2.0, the worst hatched single band
+  1.48.
+- **anchor grouping**: anchors single-link iff |Δμ| < 85 cm AND
+  |Δμ| < 1.7·(σᵢ+σⱼ).  Hatched-piece anchor gaps measure ≤67 cm; the two
+  genuine side-by-side parallel bands of evt 339850 (which touch at 0.8 cm and
+  must stay TWO clusters) sit 130 cm / 2.27·(σᵢ+σⱼ) apart.  Plain
+  single-linkage over all pieces is the wrong shape: overlap-region debris
+  chains the two parallel bands together (this re-merged 339850 in the first
+  iteration).
+- **debris assignment**: each non-anchor joins the nearest anchor by |Δμ|
+  (absolute gate only — debris σ is unreliable); too-far debris stays its own
+  cluster.
+
+Each multi-member group merges into its lowest-family-index member
+(`take_children` + the scope round-trip cache clear).
+
+**Band interior steal** (same knob): a chunk of a band can stay FUSED inside a
+non-band sibling — e.g. a crossing drift-angled track (evt 339930: a ~70 cm
+band chunk rode in a 248 cm track member whose overall PCA is 48° off-⊥, so
+the member-level merge can never take it without dragging the track along).
+For each band-like member B and each long (>100 cm) non-band sibling H: take
+H's blobs sitting >15 cm off H's own main line, seed with those touching B
+(<5 cm), grow within the off-line set (15 cm radius), and move the grown run
+into B when its spatial extent is ≥15 cm.  Blobs on H's line — including the
+genuine crossing region — never move.
 
 ## Step B — `band_recarve` (recarve_two_bands)
 
