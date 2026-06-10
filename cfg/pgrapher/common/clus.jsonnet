@@ -369,7 +369,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // i.e. bit-identical to prior behavior; raise it to let large full-detector
         // overclusters be considered for separation.
         separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false,
-                 collinear_recover=false, band_recarve=false, drift_side_fv_x=false,
+                 collinear_recover=false, collinear_interior=false, band_recarve=false,
+                 drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
                  dec1_guard_main_angle=null) :: {
             type: "ClusteringSeparate",
@@ -384,6 +385,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // collinear track tips / re-carve two crossing isochronous bands.
                 // Keys omitted when false so existing configs stay bit-identical.
                 [if collinear_recover then 'collinear_recover']: collinear_recover,
+                // Interior-bite reclaim extension of collinear_recover: at a track
+                // crossing, Separate_2's 5 cm relink can absorb an interior segment
+                // of one track into the other's cluster; reclaim it.  Only effective
+                // when collinear_recover is also on.  Key omitted when false.
+                [if collinear_interior then 'collinear_interior']: collinear_interior,
                 [if band_recarve then 'band_recarve']: band_recarve,
                 // Drift-side FV x-range for common-face multi-APA scopes (drift
                 // groups): the out-of-time apparent-x test uses the group's drift

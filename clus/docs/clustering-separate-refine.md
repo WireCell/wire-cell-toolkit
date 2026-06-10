@@ -52,6 +52,35 @@ Qualifying blobs are moved into `T` (per-donor `Grouping::separate` with
 — `take_children` does not invalidate the facade PCA/length cache; the
 `set_default_scope` round-trip performs the full `clear_cache()`).
 
+### Interior fragment reclaim (`collinear_interior`, default OFF)
+
+A separate knob (only effective when `collinear_recover` is also on; PDHD and
+PDVD enable it).  At a track crossing, `Separate_1`'s carve can shed small
+mid-track fragments of `T` — interior bites, not tips — which the later
+proximity merge passes then attach to the WRONG track (PDHD 27409 evt 40900
+with DNN-SP imaging: a ~24 cm chunk of one crossing track, holding the
+user-flagged point, rode away with the other track's cluster).  The tip walk
+cannot reach them (interior to `T`'s span) and `track_recarve` cannot either
+(arms must be ≥20 %/60 cm).
+
+For each qualifying track `T` (same gates as tip recovery), absorb whole
+SHORT sibling fragments lying along `T`'s axis inside its span:
+
+- fragment `length < 50 cm` (claimers are ≥ `TRACK_LEN_MIN` = 50 cm, so
+  claimer/claimee sets are disjoint and mutual claiming is impossible),
+- EVERY fragment blob center within **8 cm** perpendicular of `T`'s axis and
+  axially interior to `T`'s span,
+- fragment main PCA axis within **30°** of `T`'s axis when the fragment is
+  ≥ 6 cm long (the evt-40900 chunk reads ~19°); below 6 cm the pca direction
+  is noise and the geometry gates alone decide.
+
+Fragment-level tests only — per-blob `vhough_transform` directions on a 20 cm
+fragment are noise, and a per-blob variant either leaks crumbs or (with a
+donor-spine gate) never fires because a carve fragment IS its own spine.
+Donors already claimed by the tip walk are skipped.  The OFF-check (knob
+absent) is byte-identical by construction and was verified empirically
+(old-vs-new binary content-identical mabc zips on 27409 evt 40908).
+
 ## Step B — `band_recarve` (recarve_two_bands)
 
 Gate: ≥2 family members that are band-like (PCA axis within **10°** of

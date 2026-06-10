@@ -155,10 +155,15 @@ complex = exactly 2 clusters, vertical track whole) still pass.
 
 ```jsonnet
 cm.separate(use_ctpc=true, max_hull_points=100000,
-            collinear_recover=true, band_recarve=true, drift_side_fv_x=true,
+            collinear_recover=true, collinear_interior=true,
+            band_recarve=true, drift_side_fv_x=true,
             far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm,
-            track_recarve=true),
+            track_recarve=true, dec1_guard_main_angle=45),
 ```
+
+(`collinear_interior` — interior fragment reclaim, added when the DNN-SP
+imaging inputs exposed a mid-track bite on 27409 evt 40900; see
+`clustering-separate-refine.md`.)
 
 All new keys use the `[if flag/value]` omit-when-default pattern: existing
 configs are bit-identical (verified: new binary + old configs reproduce

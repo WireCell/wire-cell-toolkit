@@ -237,8 +237,12 @@ static bool JudgeSeparateDec_SBND_boundary(const Cluster* cluster,
 // from sibling members that continue T's PCA axis beyond its endpoints (small
 // perpendicular offset, collinear local direction, contiguous axial run) into
 // T.  Dead family entries are nulled in place, never erased.
+// With interior_reclaim (collinear_interior knob) additionally claim sibling
+// blobs sitting ON T's axis *inside* its span: at a track crossing the final
+// Separate_2 connectivity relink can absorb an interior segment of T into the
+// other track's cluster (the crossing region touches at <5 cm).
 static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& scope,
-                                   std::vector<Cluster*>& family)
+                                   std::vector<Cluster*>& family, bool interior_reclaim = false)
 {
     const double TRACK_LEN_MIN   = 50 * units::cm;  // T must be a long ...
     const double TRACK_RATIO_MAX = 0.15;            // ... thin (pca eval1/eval0) track
@@ -291,7 +295,7 @@ static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& s
                 cands.push_back({oi, bi, t});
             }
         }
-        if (cands.empty()) continue;
+        if (cands.empty() && !interior_reclaim) continue;
 
         // Contiguity: walk outward from each endpoint, accepting candidates
         // while the axial gap stays within GAP_MAX.  Sort by axial coordinate
@@ -318,6 +322,59 @@ static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& s
         };
         walk(true);
         walk(false);
+
+        // Interior reclaim: absorb whole SHORT sibling fragments lying along
+        // T's axis inside its span.  Separate_1's carve can shed small
+        // mid-track fragments of T (a crossing track's relink region pulls
+        // them away) that later proximity merges then attach to the WRONG
+        // track.  Fragment-level tests only -- per-blob local directions on a
+        // 20 cm fragment are noise.  Tips are handled by the walk above.
+        if (interior_reclaim) {
+            const double FRAG_LEN_MAX     = 50 * units::cm;  // only short fragments move (claimers
+                                                             // are >= TRACK_LEN_MIN, so disjoint)
+            const double FRAG_PERP_MAX    = 8 * units::cm;   // every blob center near T's axis
+            const double FRAG_DIR_ANG_MAX = 30.;             // fragment main axis vs T axis; the PDHD
+                                                             // 27409 evt 40900 chunk reads ~19 deg
+            const double FRAG_DIR_LEN_MIN = 6 * units::cm;   // below this the fragment pca direction
+                                                             // is noise; geometry gates alone decide
+            for (size_t oi = 0; oi != family.size(); oi++) {
+                if (oi == ti) continue;
+                if (moves.count(oi)) continue;  // tip walk already claims from this donor
+                Cluster* donor = family.at(oi);
+                if (!donor) continue;
+                const double dlen = donor->get_length();
+                if (dlen >= FRAG_LEN_MAX) continue;
+                const auto& blobs = donor->children();
+                if (blobs.empty()) continue;
+                double max_perp = 0;
+                bool in_span = true;
+                for (const auto* b : blobs) {
+                    const geo_point_t rel = geo_point_t(b->center_pos()) - center;
+                    const double t = rel.dot(axis);
+                    if (t <= t_lo || t >= t_hi) { in_span = false; break; }
+                    const geo_point_t perp = rel - axis * t;
+                    max_perp = std::max(max_perp, perp.magnitude());
+                }
+                double dang = -1;
+                if (in_span && max_perp < FRAG_PERP_MAX && dlen >= FRAG_DIR_LEN_MIN) {
+                    const auto& dpca = donor->get_pca();
+                    if (!dpca.axis.empty() && dpca.values.at(0) > 0) {
+                        geo_point_t daxis(dpca.axis.at(0).x(), dpca.axis.at(0).y(), dpca.axis.at(0).z());
+                        dang = axis.angle(daxis) / 3.1415926 * 180.;
+                        if (dang > 90.) dang = 180. - dang;
+                    }
+                }
+                if (sep_debug())
+                    std::cout << "SEPDBG intclaim T=" << ti << " donor=" << oi
+                              << " len=" << dlen / units::cm << " nblob=" << blobs.size()
+                              << " in_span=" << in_span << " max_perp=" << max_perp / units::cm
+                              << " ang=" << dang << std::endl;
+                if (!in_span || max_perp >= FRAG_PERP_MAX) continue;
+                if (dang >= FRAG_DIR_ANG_MAX) continue;  // dang<0 (too short / degenerate pca) passes
+                for (int bi = 0; bi != (int) blobs.size(); bi++) moves[oi].push_back(bi);
+            }
+        }
+
         if (moves.empty()) continue;
 
         const auto tscope = track->get_default_scope();
@@ -737,6 +794,7 @@ static void clustering_separate(Grouping& live_grouping,
                                 const int max_hull_points,
                                 const bool sbnd_boundary_tag,
                                 const bool collinear_recover,
+                                const bool collinear_interior,
                                 const bool band_recarve,
                                 const bool drift_side_fv_x,
                                 const double far_point_x_cut,
@@ -766,6 +824,10 @@ public:
         // Post-separation refinements (default OFF => bit-identical to prior
         // behavior).  See recover_collinear_tips / recarve_two_bands.
         collinear_recover_ = get(config, "collinear_recover", false);
+        // Interior-bite reclaim extension of collinear_recover (default OFF =>
+        // bit-identical); only effective when collinear_recover is also on.
+        // See recover_collinear_tips(interior_reclaim).
+        collinear_interior_ = get(config, "collinear_interior", false);
         band_recarve_ = get(config, "band_recarve", false);
         // Drift-side FV x-range for multi-APA common-face scopes (default OFF =>
         // bit-identical to prior behavior).  See select_scope_fv(common_face_x).
@@ -789,8 +851,8 @@ public:
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_,
-                            collinear_recover_, band_recarve_, drift_side_fv_x_, far_point_x_cut_,
-                            far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_);
+                            collinear_recover_, collinear_interior_, band_recarve_, drift_side_fv_x_,
+                            far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_);
     }
 
 private:
@@ -798,6 +860,7 @@ private:
     int max_hull_points_{-1};
     bool sbnd_boundary_tag_{false};
     bool collinear_recover_{false};
+    bool collinear_interior_{false};
     bool band_recarve_{false};
     bool drift_side_fv_x_{false};
     double far_point_x_cut_{140 * units::cm};
@@ -821,6 +884,7 @@ static void clustering_separate(
     const int max_hull_points,
     const bool sbnd_boundary_tag,
     const bool collinear_recover,
+    const bool collinear_interior,
     const bool band_recarve,
     const bool drift_side_fv_x,
     const double far_point_x_cut,
@@ -1103,7 +1167,7 @@ static void clustering_separate(
                 // first: it pulls collinear track tips out of the leftover bin
                 // before the band re-carve pools band-like members.
                 if (collinear_recover && family.size() >= 2)
-                    recover_collinear_tips(live_grouping, scope, family);
+                    recover_collinear_tips(live_grouping, scope, family, collinear_interior);
                 if (band_recarve && family.size() >= 2)
                     recarve_two_bands(live_grouping, scope, family);
                 if (track_recarve && !family.empty())

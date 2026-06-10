@@ -459,7 +459,7 @@ local clus_per_group (
         // max_hull_points raised from the 10k default (mirrors SBND): a per-drift-group
         // over-merge of crossing tracks easily exceeds 10k points, and get_hull() bailing
         // silently disabled the separation decision on exactly the clusters that need it.
-        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, band_recarve=true, drift_side_fv_x=true,
+        cm.separate(use_ctpc=true, max_hull_points=100000, collinear_recover=true, collinear_interior=true, band_recarve=true, drift_side_fv_x=true,
                     far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true, dec1_guard_main_angle=45),
         // A PDVD drift group mixes faces by construction (an anode's two
         // faces are the y-halves of one CRP, sharing one drift volume and
