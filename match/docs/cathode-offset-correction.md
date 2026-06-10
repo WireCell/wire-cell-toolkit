@@ -1,16 +1,28 @@
 # Applying a per-TPC (Y,Z) position offset in SBND Q/L matching
 
-**Status: IMPLEMENTED (scope route).** The recommendation below was adopted as written:
+**Status: IMPLEMENTED (scope route), DATA-ONLY.** The recommendation below was adopted as written:
 the per-TPC `(Δy,Δz)` lives in the DetectorVolumes metadata (single source of truth) and is
 materialized **after** QLMatching by the existing `T0Correction`/`switch_scope` rail as the
-`{x_t0cor, y_cor, z_cor}` corrected scope. SBND runs with it ON (`pos_offset_on=true`).
+`{x_t0cor, y_cor, z_cor}` corrected scope.
+
+**Data-only gating (since the `reality` gate).** This offset is an empirical *data* calibration:
+it was measured from data cathode-crossers (data transverse ~1.4 cm vs MC ~0). MC carries no such
+misalignment, so applying it to MC would inject a spurious shift. `pos_offset_on` is therefore no
+longer a hard-coded boolean — it is derived from the `reality` parameter of
+`cfg/pgrapher/experiment/sbnd/clus.jsonnet`: `reality='data'` → ON, `reality='sim'` (MC) → OFF.
+The clus maker's callers thread `reality` through: `wcls-img-clus.jsonnet` (LArSoft production,
+`std.extVar('reality')`), `sbnd_xin/wct-clus-matching-perevt.jsonnet` and
+`sbnd_xin/wct-clus-matching-standalone.jsonnet` (the standalone dev chains, from the `mc|data` run
+arg). The default is `reality='data'`, so the **data path stays byte-identical** to the previous
+always-on state (verified by full-graph diff); only the MC path changes (offset now absent).
 
 What was built (see *Files that would change* at the bottom for the exact sites):
 
 1. **Common place** — `cfg/pgrapher/experiment/sbnd/clus.jsonnet` adds a `pos_offset` array to the
-   `a0f0pA`/`a1f0pA` DetectorVolumes metadata blocks (gated by one `pos_offset_on` toggle). The
-   SAME `detector_volumes()` helper feeds both the per-APA DV given to QLMatching and the all-anode
-   DV given to `switch_scope`, so one entry reaches both consumers via `m_dv->metadata(wpid)`.
+   `a0f0pA`/`a1f0pA` DetectorVolumes metadata blocks (gated by `pos_offset_on`, which is now
+   `reality == 'data'` — see the data-only note above). The SAME `detector_volumes()` helper feeds
+   both the per-APA DV given to QLMatching and the all-anode DV given to `switch_scope`, so one
+   entry reaches both consumers via `m_dv->metadata(wpid)`.
 2. **QLMatching reads it in (read-only for now)** — `ApaRun::dy/dz` are populated in
    `compute_geometry()` from `pos_offset` and logged, but **not yet consumed** (no inline
    `corrected_point`, no photon-model/active-volume change). They are parked for the forthcoming
