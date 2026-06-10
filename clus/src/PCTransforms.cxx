@@ -98,14 +98,15 @@ public:
 
     virtual bool filter(const Point &pos_corr, double clustser_t0, int face,
                         int apa) const override        {
+        // Relaxed mode (no-T0 detectors): accept every point.  Without an
+        // event T0 the apparent x of out-of-time activity is unreliable in
+        // both directions — early activity lands between the wire planes and
+        // the sensitive-volume boundary, late activity past the cathode (gap
+        // or opposite volume) — so any apparent-x containment test wrongly
+        // excludes whole clusters from corrected-scope passes.
+        if (m_relax_containment_filter) return true;
         auto wpid = m_dv->contained_by(pos_corr);
         if (!wpid.valid()) return false;
-        // Relaxed mode (no-T0 detectors): a point counts as contained when it
-        // lands in ANY sensitive volume.  Without an event T0 the apparent x of
-        // out-of-time activity can drift past the cathode into the opposite
-        // volume; requiring the point's own (apa,face) would then exclude the
-        // whole cluster from corrected-scope passes.
-        if (m_relax_containment_filter) return true;
         if (wpid.apa() != apa || wpid.face() != face) return false;
         return true;
         //  return ().valid() ? true : false;
@@ -160,6 +161,13 @@ public:
     virtual Dataset filter(const Dataset &pc_corr, const std::vector<std::string>& arr_cor_names, double clustser_t0, int face,
                            int apa) const override        {
         std::vector<int> arr_filter(pc_corr.size_major());
+        // See the Point overload: relaxed mode accepts every point.
+        if (m_relax_containment_filter) {
+            std::fill(arr_filter.begin(), arr_filter.end(), 1);
+            Dataset ds;
+            ds.add("filter", Array(arr_filter));
+            return ds;
+        }
         const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
         const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
         const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
@@ -167,8 +175,7 @@ public:
             arr_filter[i] = false;
             auto wpid = m_dv->contained_by(Point(arr_x[i], arr_y[i], arr_z[i]));
             if (wpid.valid()) {
-                // See the Point overload: relaxed mode accepts any volume.
-                if (m_relax_containment_filter || (wpid.apa() == apa && wpid.face() == face)) {
+                if (wpid.apa() == apa && wpid.face() == face) {
                     arr_filter[i] = true;
                 }
             }
@@ -207,7 +214,8 @@ private:
     // True iff any face declared a "pos_offset"; flips the corrected scope/stored
     // arrays to carry y_cor/z_cor.  False => OFF => bit-identical.
     bool m_has_pos_offset{false};
-    // Relax filter() to any-volume containment (for no-T0 detectors, e.g. PDVD).
+    // Disable filter() entirely — accept every point (for no-T0 detectors,
+    // e.g. PDVD, where apparent x makes any containment test unreliable).
     // False => own-(apa,face) containment required => production bit-identical.
     bool m_relax_containment_filter{false};
 };
