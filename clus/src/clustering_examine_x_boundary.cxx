@@ -39,20 +39,14 @@ public:
 };
 
 
-// This function only handles Single APA/Face!
+// This function handles a single APA/Face, or several that share the same
+// drift-x fiducial volume (e.g. a PDHD drift-side group {APA0,APA2}).
 static void clustering_examine_x_boundary(
-    Grouping& live_grouping, 
+    Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
     const Tree::Scope& scope
     )
 {
-    // Check that live_grouping has less than one wpid
-    if (live_grouping.wpids().size() > 1) {
-        for (const auto& wpid : live_grouping.wpids()) {
-            std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
-        }
-        raise<ValueError>("Live %d > 1", live_grouping.wpids().size());
-    }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
     // sort the clusters by length using a lambda function
@@ -68,10 +62,29 @@ static void clustering_examine_x_boundary(
     // std::cout << "Test: " << tp.FV_xmin << " " << tp.FV_xmax << " " << tp.FV_xmin_margin << " " << tp.FV_xmax_margin << std::endl;
     // std::cout << "Test: " << dv->metadata(*live_grouping.wpids().begin())["FV_xmin"].asDouble() << " " << dv->metadata(*live_grouping.wpids().begin())["FV_xmax"].asDouble() << " " << dv->metadata(*live_grouping.wpids().begin())["FV_xmin_margin"].asDouble() << " " << dv->metadata(*live_grouping.wpids().begin())["FV_xmax_margin"].asDouble() << std::endl;
 
-    double FV_xmin = dv->metadata(*live_grouping.wpids().begin())["FV_xmin"].asDouble() ;
-    double FV_xmax = dv->metadata(*live_grouping.wpids().begin())["FV_xmax"].asDouble() ;
-    double FV_xmin_margin = dv->metadata(*live_grouping.wpids().begin())["FV_xmin_margin"].asDouble() ;
-    double FV_xmax_margin = dv->metadata(*live_grouping.wpids().begin())["FV_xmax_margin"].asDouble() ;
+    const auto& wpids = live_grouping.wpids();
+    if (wpids.empty()) return;
+
+    auto wit = wpids.begin();
+    double FV_xmin = dv->metadata(*wit)["FV_xmin"].asDouble() ;
+    double FV_xmax = dv->metadata(*wit)["FV_xmax"].asDouble() ;
+    double FV_xmin_margin = dv->metadata(*wit)["FV_xmin_margin"].asDouble() ;
+    double FV_xmax_margin = dv->metadata(*wit)["FV_xmax_margin"].asDouble() ;
+
+    // Multiple wpids are allowed only when they all share the same drift-x
+    // fiducial metadata (true within one drift side, e.g. a0f0pA == a2f0pA).
+    for (++wit; wit != wpids.end(); ++wit) {
+        const auto md = dv->metadata(*wit);
+        if (md["FV_xmin"].asDouble() != FV_xmin || md["FV_xmax"].asDouble() != FV_xmax ||
+            md["FV_xmin_margin"].asDouble() != FV_xmin_margin ||
+            md["FV_xmax_margin"].asDouble() != FV_xmax_margin) {
+            for (const auto& wpid : wpids) {
+                std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
+            }
+            raise<ValueError>("Live grouping has %d wpids with differing FV x metadata",
+                              wpids.size());
+        }
+    }
 
     // std::vector<PR3DCluster *> new_clusters;
     // std::vector<PR3DCluster *> del_clusters;

@@ -322,11 +322,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // vector must align with the track within conn_far_cut (rejects parallel-offset
         // cosmics).  Cannot fire within a single TPC, so it is safe to add to the all-APA
         // pipeline only.  cathode_x is the cathode position in the T0-corrected frame.
+        // use_flash_t0 (default true) gates pairs on flash-time coincidence; set false
+        // on detectors without flash matching (e.g. PDHD) where the gate would veto
+        // every pair.
         cathode_connect(name="", drift_cut=5*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
                         angle_cut=10.0, conn_far_cut=30.0, cathode_x=0.0,
                         cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
                         min_length=10*wc.cm, min_length_short=null,
-                        short_dir_len=null, conn_short_cut=30.0, flash_t0_window=80*wc.ns) :: {
+                        short_dir_len=null, conn_short_cut=30.0,
+                        use_flash_t0=true, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringCathodeConnect",
             name: prefix+name,
             data: {
@@ -344,6 +348,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // null => C++ defaults short_dir_len to 0 (short-stub prolongation OFF)
                 [if short_dir_len != null then "short_dir_len"]: short_dir_len,
                 conn_short_cut: conn_short_cut,
+                use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
             } + scope_cfg,
         },
