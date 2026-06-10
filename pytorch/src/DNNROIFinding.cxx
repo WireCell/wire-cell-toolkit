@@ -313,22 +313,47 @@ bool Pytorch::DNNROIFinding::operator()(const IFrame::pointer& inframe, IFrame::
     // up to the next multiple of tick_per_slice so the downsample/upsample
     // cycle is exactly divisible.  The output is cropped back to input_ticks
     // before traces are emitted.
-    int input_ticks = m_cfg.nticks;
+    //
+    // Use the maximum trace extent (tbin + size) so SPARSE input frames are
+    // handled correctly: taking the first trace's size (old behavior) under
+    // sparse input set the window to one arbitrary ROI's length and silently
+    // truncated everything later in drift time.  For dense input the max
+    // extent equals the old first-trace size.
+    //
+    // Probe ALL input tags plus the decon-charge tag: a single tag does not
+    // bound the others, and traces of any of them beyond the probed extent
+    // would be silently truncated by traces_to_eigen()/the output crop.
+    int input_ticks = 0;
     {
-        auto probe = Aux::tagged_traces(inframe, m_cfg.intags.front());
-        for (const auto& tr : probe) {
-            const int n = static_cast<int>(tr->charge().size());
-            if (n > 0) { input_ticks = n; break; }
+        std::vector<std::string> probe_tags = m_cfg.intags;
+        probe_tags.push_back(m_cfg.decon_charge_tag);
+        for (const auto& tag : probe_tags) {
+            for (const auto& tr : Aux::tagged_traces(inframe, tag)) {
+                // Aux::fill (traces_to_eigen) places charge at array column
+                // tbin - tick0, so the extent is measured in the same
+                // array-column units the output crop (leftCols) uses. With the
+                // default tick0=0 this is identical to tbin + size.
+                const int extent = tr->tbin() + static_cast<int>(tr->charge().size()) - m_cfg.tick0;
+                input_ticks = std::max(input_ticks, extent);
+            }
         }
+    }
+    if (input_ticks <= 0) {
+        input_ticks = m_cfg.nticks;
     }
     const int tps = m_cfg.tick_per_slice;
     const int pad_mult = m_cfg.tick_pad_multiple > 0 ? m_cfg.tick_pad_multiple : tps;
     const int model_ticks = ((input_ticks + pad_mult - 1) / pad_mult) * pad_mult;
     log->debug("call={} input_ticks={} model_ticks={} pad_mult={} cfg.nticks={}",
                m_save_count, input_ticks, model_ticks, pad_mult, m_cfg.nticks);
-    if (input_ticks > m_cfg.nticks && m_save_count == 0) {
-        log->info("input_ticks={} exceeds configured nticks={}, using input-driven size",
-                  input_ticks, m_cfg.nticks);
+    // The model array is sized to the largest trace extent across all probed
+    // tags, so a single far-out (e.g. noise) ROI inflates model_ticks for the
+    // whole plane. There is no clamp by design (clamping would re-truncate);
+    // surface the first oversize so the cost is at least visible.
+    if (input_ticks > m_cfg.nticks && !m_warned_oversize) {
+        log->info("call={} input_ticks={} exceeds configured nticks={}, using input-driven size",
+                  m_save_count, input_ticks, m_cfg.nticks);
+        m_warned_oversize = true;
     }
 
     // frame to eigen

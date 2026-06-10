@@ -111,6 +111,20 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         get(config, "r_fake_signal_high_th_ind_factor", m_r_fake_signal_high_th_ind_factor);
     m_r_pad = get(config, "r_pad", m_r_pad);
     m_r_break_roi_loop = get(config, "r_break_roi_loop", m_r_break_roi_loop);
+    // Optional per-plane overrides (arrays of size 3, indexed by plane/slot).
+    // Absent => empty => the scalar knobs above apply to every plane.
+    if (config.isMember("r_th_factor_planes")) {
+        m_r_th_factor_planes.clear();
+        for (auto v : config["r_th_factor_planes"]) m_r_th_factor_planes.push_back(v.asFloat());
+    }
+    if (config.isMember("r_pad_planes")) {
+        m_r_pad_planes.clear();
+        for (auto v : config["r_pad_planes"]) m_r_pad_planes.push_back(v.asInt());
+    }
+    if (config.isMember("r_break_roi_loop_planes")) {
+        m_r_break_roi_loop_planes.clear();
+        for (auto v : config["r_break_roi_loop_planes"]) m_r_break_roi_loop_planes.push_back(v.asInt());
+    }
     m_r_th_peak = get(config, "r_th_peak", m_r_th_peak);
     m_r_sep_peak = get(config, "r_sep_peak", m_r_sep_peak);
     m_r_low_peak_sep_threshold_pre = get(config, "r_low_peak_sep_threshold_pre", m_r_low_peak_sep_threshold_pre);
@@ -213,6 +227,18 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
        }
     }
     m_rebase_nbins = get(config, "rebase_nbins", m_rebase_nbins);
+    {
+        std::string method = get<std::string>(config, "rebase_method", "sigmask");
+        if (method == "median") m_rebase_method = RB_MEDIAN;
+        else if (method == "sigmask") m_rebase_method = RB_SIGMASK;
+        else {
+            // "mean" was removed: a signal pulse inside a window biases the
+            // plain-mean anchor and tilts the whole channel.
+            THROW(ValueError() << errmsg{"OmnibusSigProc: unknown rebase_method \"" + method +
+                                         "\" (expect median|sigmask)"});
+        }
+    }
+    m_rebase_nsigma = get(config, "rebase_nsigma", m_rebase_nsigma);
 
     m_isWrapped = get<bool>(config, "isWrapped", m_isWrapped);
 
@@ -361,7 +387,9 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["mp_th2"] = m_mp_th2;
     cfg["mp_tick_resolution"] = m_mp_tick_resolution;
     
-    cfg["rebase_nbins"] = m_rebase_nbins;    
+    cfg["rebase_nbins"] = m_rebase_nbins;
+    cfg["rebase_method"] = "sigmask";  // median|sigmask
+    cfg["rebase_nsigma"] = m_rebase_nsigma;
 
     cfg["isWrapped"] = m_isWrapped;  // default false
 
@@ -416,7 +444,8 @@ void OmnibusSigProc::load_data(const input_pointer& in, int plane)
     }
     //rebase for this plane
     if (std::find(m_rebase_planes.begin(), m_rebase_planes.end(), plane) != m_rebase_planes.end()) {
-        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {}", plane, m_rebase_nbins);
+        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {} method = {} (0=median,1=sigmask)",
+                   plane, m_rebase_nbins, (int) m_rebase_method);
         auto m_r_data_ref = m_r_data[plane].block(0, 0, m_r_data[plane].rows(), m_nticks);
         rebase_waveform(m_r_data_ref,m_rebase_nbins);
     }
@@ -1036,25 +1065,88 @@ void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int&
             }
 
             signal.resize(ncount);
-	    Waveform::realseq_t front_sig(n_bins);
-	    Waveform::realseq_t back_sig(n_bins);
-            
-	    for (int j = 0; j < n_bins; ++j) {
-                front_sig.at(j) = signal.at(j);
-	        back_sig.at(j) = signal.at(arr.cols()-j-1);
+
+            // Estimate the baseline anchors of the first/last n_bins windows
+            // and the (mean) time at which each anchor sits.  Both methods
+            // are signal-safe against large peaks inside the windows; the
+            // historical plain-mean anchor was removed for being biased by
+            // any in-window signal.
+            double t1 = n_bins/2.0;
+            double t2 = m_nticks - n_bins/2.0;
+            float front_base = 0;
+            float back_base = 0;
+
+            if (m_rebase_method == RB_SIGMASK) {
+                // robust per-row scale from 16/50/84 percentiles (signal
+                // occupies few samples so it barely moves the percentiles)
+                const float p16 = WireCell::Waveform::percentile_binned(signal, 0.5 - 0.34);
+                const float p50 = WireCell::Waveform::percentile_binned(signal, 0.5);
+                const float p84 = WireCell::Waveform::percentile_binned(signal, 0.5 + 0.34);
+                const float sigma = sqrt((pow(p84 - p50, 2) + pow(p50 - p16, 2)) / 2.);
+                const float cut = m_rebase_nsigma * sigma;
+                const int min_count = n_bins / 4;
+
+                // mean of non-signal samples in a window, widening the window
+                // inward (2x, 4x) when signal leaves too few clean samples.
+                // front: j0=0 going forward; back: j0=m_nticks-1 going backward.
+                auto masked_anchor = [&](int j0, int dir, double& tout) {
+                    for (int widen = 1; widen <= 4; widen *= 2) {
+                        const int nwin = std::min(n_bins * widen, m_nticks);
+                        double sum = 0, tsum = 0;
+                        int count = 0;
+                        for (int k = 0; k < nwin; ++k) {
+                            const int j = j0 + dir * k;
+                            const float v = signal.at(j);
+                            if (fabs(v - p50) < cut) {
+                                sum += v;
+                                tsum += j;
+                                count++;
+                            }
+                        }
+                        if (count >= min_count || nwin == m_nticks) {
+                            if (count > 0) {
+                                tout = tsum / count;
+                                return (float) (sum / count);
+                            }
+                            break;
+                        }
+                    }
+                    // hopeless window (all signal): fall back to the row median
+                    return p50;
+                };
+
+                front_base = masked_anchor(0, +1, t1);
+                back_base = masked_anchor(m_nticks - 1, -1, t2);
+            }
+            else {  // RB_MEDIAN
+                Waveform::realseq_t front_sig(n_bins);
+                Waveform::realseq_t back_sig(n_bins);
+
+                for (int j = 0; j < n_bins; ++j) {
+                    front_sig.at(j) = signal.at(j);
+                    back_sig.at(j) = signal.at(arr.cols()-j-1);
+                }
+
+                front_base = WireCell::Waveform::median(front_sig);
+                back_base = WireCell::Waveform::median(back_sig);
             }
 
-	    float front_base = WireCell::Waveform::mean_rms(front_sig).first;
-	    float back_base = WireCell::Waveform::mean_rms(back_sig).first;
-	    double t1 = n_bins/2.0;
-	    double t2 = m_nticks - n_bins/2.0;
-	    double m = (back_base - front_base)/(t2-t1);
-	    double b = back_base - m*t2;
+	    double m = 0;
+	    double b = 0;
+	    if (t2 - t1 > 1.0) {
+	        m = (back_base - front_base)/(t2-t1);
+	        b = back_base - m*t2;
+	    }
+	    else {
+	        // degenerate anchors (both windows widened to the full
+	        // waveform): subtract a constant, no tilt.
+	        b = 0.5*(front_base + back_base);
+	    }
 
 	    for (int j = 0; j < m_nticks; ++j) {
 	        double corr = m*j+b;
 	        arr(i,j) -= corr;
-	    }	
+	    }
         }
 }
 
@@ -1765,6 +1857,10 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_r_th_factor, m_r_fake_signal_low_th, m_r_fake_signal_high_th,
         m_r_fake_signal_low_th_ind_factor, m_r_fake_signal_high_th_ind_factor, m_r_pad, m_r_break_roi_loop, m_r_th_peak,
         m_r_sep_peak, m_r_low_peak_sep_threshold_pre, m_r_max_npeaks, m_r_sigma, m_r_th_percent, m_isWrapped);  //
+    // Apply optional per-plane refinement overrides (empty => no-op => scalar
+    // knobs used for every plane, bit-identical legacy behaviour).
+    if (!m_r_th_factor_planes.empty()) roi_refine.set_th_factor_planes(m_r_th_factor_planes);
+    if (!m_r_pad_planes.empty()) roi_refine.set_pad_planes(m_r_pad_planes);
 
     const std::vector<float>* perplane_thresholds[3] = {&roi_form.get_uplane_rms(), &roi_form.get_vplane_rms(),
                                                         &roi_form.get_wplane_rms()};
@@ -1912,7 +2008,10 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
 
             const std::vector<float>& perwire_rmses = *perplane_thresholds[iplane];
 
-            for (int qx = 0; qx != m_r_break_roi_loop; qx++) {
+            const int break_roi_loop = m_r_break_roi_loop_planes.empty()
+                                           ? m_r_break_roi_loop
+                                           : m_r_break_roi_loop_planes.at(iplane);
+            for (int qx = 0; qx != break_roi_loop; qx++) {
                 roi_refine.BreakROIs(iplane, roi_form);
                 roi_refine.CheckROIs(iplane, roi_form);
                 roi_refine.CleanUpROIs(iplane);

@@ -144,10 +144,10 @@ bool OmnibusNoiseFilter::operator()(const input_pointer& inframe, output_pointer
         ++m_count;
         return true;
     }
-
-    if (! m_nticks) {
+    const size_t this_nticks = traces.at(0)->charge().size();
+    if (this_nticks != m_nticks) {
         // Warning: this implicitly assumes a dense frame (ie, all tbin=0 and all waveforms same size).
-        m_nticks = traces.at(0)->charge().size();
+        m_nticks = this_nticks;
         // Push actual frame size to chndb so frequency-domain spectra (freqmasks, rcrc, …)
         // are rebuilt to match the real FFT length.  Only OmniChannelNoiseDB supports this.
         if (auto* db = dynamic_cast<OmniChannelNoiseDB*>(m_noisedb.get())) {

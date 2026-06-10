@@ -6,7 +6,13 @@ local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local anodes = tools.anodes;
 
-local img = {
+// Parameterized imaging toolbox.
+//  nthreshold: per-plane slicing activity threshold in units of channel RMS.
+//    Default 3.6 sigma.  To slice on any positive charge use 1e-6: a literal 0
+//    would trip MaskSlice's `if(threshold==0) -> default_threshold` fallback
+//    (a HIGH MicroBooNE bar), so 1e-6 is the charge>0 surrogate.
+//  output_dir: directory for the dump() cluster files ('' = current directory).
+local img_maker = function(nthreshold=[3.6, 3.6, 3.6], output_dir='') {
     // IFrame -> IFrame
     pre_proc :: function(anode, aname = "") {
 
@@ -112,8 +118,7 @@ local img = {
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
-                // nthreshold: [1e-6, 1e-6, 1e-6],
-                nthreshold: [3.6, 3.6, 3.6],
+                nthreshold: nthreshold,
             },
         }, nin=1, nout=1, uses=[anode]),
     }.ret,
@@ -287,11 +292,13 @@ local img = {
     }.ret,
 
     dump :: function(anode, aname, drift_speed) {
+        local outname = if output_dir == '' then "clusters-apa-"+aname+".tar.gz"
+                        else output_dir+"/clusters-apa-"+aname+".tar.gz",
         local cs = g.pnode({
             type: "ClusterFileSink",
             name: "clustersink-"+aname,
             data: {
-                outname: "clusters-apa-"+aname+".tar.gz",
+                outname: outname,
                 format: "json", // json, numpy, dummy
             }
         }, nin=1, nout=0),
@@ -299,7 +306,8 @@ local img = {
     }.ret,
 };
 
-function() {
+function(output_dir='', nthreshold=[3.6, 3.6, 3.6]) {
+    local img = img_maker(nthreshold, output_dir),
     local imgpipe (anode, multi_slicing) =
     if multi_slicing == "single"
     then g.pipeline([

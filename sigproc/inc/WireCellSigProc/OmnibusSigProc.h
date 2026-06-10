@@ -151,6 +151,13 @@ namespace WireCell {
             double m_r_fake_signal_high_th_ind_factor{1.0};
             int m_r_pad{5};
             int m_r_break_roi_loop{2};
+            // Optional per-plane (size 3, indexed by plane/slot) overrides for the
+            // three refinement knobs above.  Empty (default) => the scalar value
+            // is used for every plane (bit-identical legacy behaviour).  Used to
+            // confine a tune to a single plane (e.g. PDHD APA0 W = slot 1).
+            std::vector<float> m_r_th_factor_planes;
+            std::vector<int> m_r_pad_planes;
+            std::vector<int> m_r_break_roi_loop_planes;
             double m_r_th_peak{3.0};
             double m_r_sep_peak{6.0};
             double m_r_low_peak_sep_threshold_pre{1200};
@@ -260,9 +267,23 @@ namespace WireCell {
             double m_mp_th2{500.};
             int m_mp_tick_resolution{4};
 
-	    //Rebase waveforms for each channel of spesific wire-plane. 
-	    std::vector<int> m_rebase_planes{0,1,2}; 
+	    //Rebase waveforms for each channel of spesific wire-plane.
+	    std::vector<int> m_rebase_planes{0,1,2};
             int m_rebase_nbins=200;
+
+            // How the front/back baseline anchors of rebase_waveform are
+            // estimated ("rebase_method" config).  The historical plain-mean
+            // anchor was removed: any signal pulse inside a window biased it
+            // and tilted the whole channel.
+            //   RB_MEDIAN - median of the window (safe while signal occupies
+            //               < 50% of the window)
+            //   RB_SIGMASK- mean of window samples after masking
+            //               |x - median| > rebase_nsigma * sigma outliers
+            //               (sigma from 16/50/84 percentiles); window widens
+            //               inward if too few clean samples survive.
+            enum RebaseMethod { RB_MEDIAN, RB_SIGMASK };
+            RebaseMethod m_rebase_method{RB_SIGMASK};
+            double m_rebase_nsigma{4.0};
 
             bool m_isWrapped{false};
 

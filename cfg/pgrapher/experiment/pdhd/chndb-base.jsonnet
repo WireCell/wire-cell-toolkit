@@ -3,7 +3,8 @@
 // See chndb.jsonnet
 
 local handmade = import 'chndb-resp.jsonnet';
-local femb_params = import 'femb-negpulse-groups-shifted_v2.jsonnet';
+local coh_groups = import 'pdhd-coh-groups.jsonnet';
+local femb_params = import 'pdhd-femb-negpulse-groups.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
 // TODO (follow-up): decon_limit, decon_limit1, adc_limit, min_adc_limit and
@@ -12,7 +13,7 @@ local wc = import 'wirecell.jsonnet';
 // are not yet re-optimised for PDHD.  Re-tune empirically once NF runs with
 // the new kernel.
 
-function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shift=3)
+function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
   // ADC-domain thresholds (adc_limit, min/max_rms_cut) are tuned at 14 mV/fC
   // and scale with gain_scale for other gains.  Deconvolved-domain thresholds
   // (decon_limit, decon_limit1) operate on the gain-normalised output and do
@@ -36,22 +37,13 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true, coh_group_shif
     // waveforms have the same number of ticks.  This must be non-zero.
     nsamples: params.nf.nsamples,
 
-    // coh_group_shift: cyclic offset (in offline channels) applied to U and V
-    // group boundaries.  Set to 0 to recover the original (pre-fix) definition.
-    // Default magnitude 3 corrects the FEMB-edge misassignment identified in
-    // the 027409-evt0-apa0 coherent-noise audit (U/V only; W is unchanged).
-    // Sign flips by anode: +shift on anodes 0 & 2, -shift on anodes 1 & 3.
-    local shift = if n == 0 || n == 2 then coh_group_shift
-                  else if n == 1 || n == 3 then -coh_group_shift
-                  else 0,
-    local u_group(u) = std.map(function(j) n * 2560 + std.mod(40 * u + shift + j, 800),
-                               std.range(0, 39)),
-    local v_group(v) = std.map(function(j) n * 2560 + 800 + std.mod(40 * v + shift + j, 800),
-                               std.range(0, 39)),
-    local w_group(w) = std.range(n * 2560 + 1600 + 48 * w, n * 2560 + 1600 + 48 * (w + 1) - 1),
-    groups: [u_group(u) for u in std.range(0, 19)]
-            + [v_group(v) for v in std.range(0, 19)]
-            + [w_group(w) for w in std.range(0, 19)],
+    // Coherent-noise groups: 60 per anode (20 U-FEMB + 20 V-FEMB + 20 W-FEMB),
+    // derived directly from PD2HDChannelMap_WIBEth_visiblewires_v1.txt
+    // (DUNE/duneprototypes commit c8f43809).  The per-APA +/-3 wire rotation
+    // is already baked into the channel map (the June 30 2025 sign fix on
+    // the cathode-crossing correction), so no `coh_group_shift` parameter
+    // is needed here.  See pdhd-coh-groups.jsonnet.
+    groups: coh_groups.groups[n],
 
     femb_negpulse_groups: femb_params.groups,
 

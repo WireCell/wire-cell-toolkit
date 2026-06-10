@@ -41,6 +41,7 @@ struct BeePointsConfig {
     double dQdx_offset{0.0};
     bool use_associate_points{false}; // use dpcloud("associate_points") + shower charge
     bool use_graph_vertices{false};   // dump PR::Vertex positions instead of PC
+    std::vector<ApaGroup> apa_groups; // drift-side grouping (empty = off), see below
 };
 ```
 
@@ -65,7 +66,86 @@ Iterates all clusters in `grouping`. For each cluster calls
 
 If `individual=true`, points are bucketed per APA+face combination so Bee can
 display one readout plane at a time. If `individual=false`, all points go into
-a single global `Bee::Points` object.
+a single global `Bee::Points` object. If `apa_groups` is set (see below), each
+cluster is routed by its APA into one bucket per group instead.
+
+---
+
+## APA grouping (drift-side display)
+
+For multi-APA detectors the default output produces one Bee instance per APA
+(or per APA/face), which can be more images than wanted. The `apa_groups`
+feature collapses several APAs into a single Bee instance, keeping the
+clustering computation unchanged — it only changes how a dump is bucketed.
+
+### Clustering points
+
+A point set that carries `apa_groups` routes each cluster (by its APA, via
+`Cluster::wpids_blob_set()`) into the first group that owns one of those APAs,
+and dumps one `Bee::Points` per group named `"<algorithm>-<group name>"` (e.g.
+`clustering-group02`). `apa_groups` empty → behavior unchanged (byte-identical).
+`enumerate_idents()` has run before any dump, so cluster ids are globally
+unique and the groups partition the clusters with no color collisions.
+
+The dump *timing* (set by the `name`/`visitor` fields, see "Trigger timing")
+selects *which* clustering stage is grouped. On the all-APA MABC node the PDHD
+config uses two sets, giving the natural per-stage views:
+
+```jsonnet
+bee_points_sets: [
+    // (c) full-detector clustering: end-of-pipeline global dump
+    { name:"clustering", detector:"protodunehd", algorithm:"clustering",
+      pcname:"3d", coords:["x","y","z"], individual:false },             // -> clustering-global
+    // (b) per-APA clustering: name "img" dumps the live grouping BEFORE the
+    //     all-APA pipeline (= the merged per-APA result), grouped by drift side
+    { name:"img", detector:"protodunehd", algorithm:"clustering",
+      pcname:"3d", coords:["x","y","z"], individual:false,
+      apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ] },
+                                            // -> clustering-group02 / clustering-group13
+]
+```
+
+The special name `"img"` dumps the live grouping *before* the pipeline runs;
+on the all-APA node that input is exactly the merged per-APA clustering, so the
+`img` + `apa_groups` set yields the per-APA result grouped by drift side, while
+the plain `clustering` set (end dump) yields the full-detector `clustering-global`.
+
+### Dead area
+
+The same grouping is applied to the dead-area patches via the node-level
+`dead_apa_groups` config:
+
+```jsonnet
+MultiAlgBlobClustering: { ..., save_deadarea: true, dead_area_version: 2,
+    dead_apa_groups: [ {name:"group02", apas:[0,2]}, {name:"group13", apas:[1,3]} ] }
+```
+
+Each dead blob is routed by APA into one `Bee::Patches` per group, named
+`channel-deadarea-<group name>`, replacing the per-(apa,face) dead files.
+
+The v2 dead wrapper carries a single `tpc` index that the Bee viewer
+(`wire-cell-bee3`) uses only to place the slab's anode-face **X** (drift
+direction); the polygons themselves carry global Y,Z. Grouping is therefore
+only valid when every APA in a group shares the same anode-X and drift
+direction — which is exactly the drift-side split (PDHD even APAs at x0=−358,
+odd APAs at x0=+358). The group's first APA is used as the representative
+`tpc`, so the grouped dead area is **positionally identical** to the old
+per-(apa,face) output, just merged into fewer instances. `dead_apa_groups`
+empty → per-(apa,face) output unchanged.
+
+### Detector usage
+
+The grouping is driven entirely by the jsonnet `apas` lists, so it generalises
+to any detector. Two are wired up today, both splitting by drift side into two
+instances:
+
+| Detector | Anodes | Groups |
+|---|---|---|
+| `protodunehd` (`pdhd/clus.jsonnet`) | 0–3 | `group02` = {0,2} (x0=−358), `group13` = {1,3} (x0=+358) |
+| `protodunevd` (`pdvd/clus.jsonnet`) | 0–7 | `group0123` = {0,1,2,3} (bottom, x0=−341.5), `group4567` = {4,5,6,7} (top, x0=+341.5) |
+
+Routing is per-anode (`wpid.apa()`), so on PDVD each anode's two faces fold into
+its drift-side group automatically.
 
 ### `fill_bee_points_from_pr_graph(name, grouping)`
 

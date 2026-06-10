@@ -92,7 +92,11 @@ static std::string format_flag_names(const std::set<std::string>& flag_names)
     return ss.str();
 }
 
-static void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const std::string& grouping_name, int ident)
+// NOT static: the larwirecell QLMatching plugin links against this symbol,
+// forward-declaring it as WireCell::Clus::Facade::normalize_cluster_flags
+// (no installed header carries it), so define it in that namespace.
+namespace WireCell::Clus::Facade {
+void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const std::string& grouping_name, int ident)
 {
     std::set<std::string> flag_names;
     for (const auto* cluster : grouping.children()) {
@@ -124,6 +128,7 @@ static void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const
     SPDLOG_LOGGER_DEBUG(log, "normalize_cluster_flags: ident={} grouping={} added={} missing flag values",
                         ident, grouping_name, nmissing);
 }
+}  // namespace WireCell::Clus::Facade
 
 
 void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
@@ -247,6 +252,20 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
 
+            // Optional drift-side / APA grouping (additive; absent -> unchanged)
+            if (bps.isMember("apa_groups")) {
+                for (const auto& grp : bps["apa_groups"]) {
+                    ApaGroup ag;
+                    ag.name = get<std::string>(grp, "name", "");
+                    if (grp.isMember("apas")) {
+                        for (const auto& a : grp["apas"]) {
+                            ag.apas.insert(a.asInt());
+                        }
+                    }
+                    bpc.apa_groups.push_back(ag);
+                }
+            }
+
             m_bee_points_configs.push_back(bpc);
             
             
@@ -267,6 +286,12 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                         // std::cout << "Test: Individual: " << algo_name << std::endl;
                         m_bee_points[bpc.name].by_apa_face[apa][face] =  Bee::Points(bpc.detector, algo_name);
                     }
+                }
+            }else if (!bpc.apa_groups.empty()) { // one bee instance per APA group
+                for (const auto& grp : bpc.apa_groups) {
+                    m_bee_points[bpc.name].by_group[grp.name] =
+                        Bee::Points(bpc.detector,
+                                    String::format("%s-%s", bpc.algorithm.c_str(), grp.name.c_str()));
                 }
             }else{
                 m_bee_points[bpc.name].global.detector(bpc.detector);
@@ -313,6 +338,30 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                 int tpc = (m_dead_area_version >= 2) ? apa : -1;
                 m_bee_dead_patches[apa].insert({face,Bee::Patches(name, 1*units::mm, 3, tpc)}); // Same parameters as the global one
             }
+        }
+    }
+
+    // Optional dead-area drift-side grouping (mirrors the clustering grouping).
+    if (cfg.isMember("dead_apa_groups")) {
+        for (const auto& grp : cfg["dead_apa_groups"]) {
+            ApaGroup ag;
+            ag.name = get<std::string>(grp, "name", "");
+            if (grp.isMember("apas")) {
+                for (const auto& a : grp["apas"]) {
+                    ag.apas.insert(a.asInt());
+                }
+            }
+            m_dead_apa_groups.push_back(ag);
+        }
+    }
+    if (m_save_deadarea && !m_dead_apa_groups.empty()) {
+        for (const auto& ag : m_dead_apa_groups) {
+            std::string name = String::format("channel-deadarea-%s", ag.name.c_str());
+            // All APAs in a group share the same anode-x / drift direction, so
+            // any member's tpc index places the v2 slab correctly; use the first.
+            int tpc = -1;
+            if (m_dead_area_version >= 2 && !ag.apas.empty()) tpc = *ag.apas.begin();
+            m_bee_dead_groups.insert({ag.name, Bee::Patches(name, 1*units::mm, 3, tpc)});
         }
     }
 }
@@ -405,7 +454,8 @@ void MultiAlgBlobClustering::flush(int ident)
                               [&the_name](const BeePointsConfig& cfg) { return cfg.name == the_name; });
         
         bool individual = (it != m_bee_points_configs.end()) ? it->individual : false;
-        
+        bool grouped = (it != m_bee_points_configs.end()) ? !it->apa_groups.empty() : false;
+
         if (individual) {
             // Write individual bee points
             for (auto& [anode_id, face_map] : apa_bpts.by_apa_face) {
@@ -420,6 +470,19 @@ void MultiAlgBlobClustering::flush(int ident)
                         }
                         bpts.reset(evt, 0, run);
                     }
+                }
+            }
+        } else if (grouped) {
+            // Write one bee instance per APA group
+            for (auto& [gname, bpts] : apa_bpts.by_group) {
+                if (!bpts.empty()) {
+                    write_obj(bpts);
+                    int run = 0, evt = 0;
+                    if (ident > 0) {
+                        run = (ident >> 16) & 0x7fff;
+                        evt = (ident) & 0xffff;
+                    }
+                    bpts.reset(evt, 0, run);
                 }
             }
         } else {
@@ -445,13 +508,24 @@ void MultiAlgBlobClustering::flush(int ident)
     // }
     if (m_save_deadarea) {
 
-        // Flush individual patches
-        for (auto& [apa, face_map] : m_bee_dead_patches) {
-            for (auto& [face, patches] : face_map) {
+        if (!m_dead_apa_groups.empty()) {
+            // Flush one dead-area patch set per drift-side group
+            for (auto& [gname, patches] : m_bee_dead_groups) {
                 if (patches.size()) {
                     patches.flush();
                     write_obj(patches);
                     patches.clear();
+                }
+            }
+        } else {
+            // Flush individual patches
+            for (auto& [apa, face_map] : m_bee_dead_patches) {
+                for (auto& [face, patches] : face_map) {
+                    if (patches.size()) {
+                        patches.flush();
+                        write_obj(patches);
+                        patches.clear();
+                    }
                 }
             }
         }
@@ -522,6 +596,9 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 bpts.rse(m_runNo, m_subRunNo, m_eventNo);
             }
         }
+        for (auto& [gname, bpts] : apa_bpts.by_group) {
+            bpts.rse(m_runNo, m_subRunNo, m_eventNo);
+        }
     } else {
         // Use the default approach with ident
         int run = 0, evt = 0;
@@ -535,8 +612,11 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 bpts.reset(evt, 0, run);
             }
         }
+        for (auto& [gname, bpts] : apa_bpts.by_group) {
+            bpts.reset(evt, 0, run);
+        }
     }
-    
+
     auto wpids = grouping.wpids();
 
 
@@ -553,6 +633,26 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                         fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter);
                     }
                 }
+            }
+        }
+    }else if (!config.apa_groups.empty()){ // route each cluster to its APA group
+        for (const auto* cluster : grouping.children()) {
+            // Collect the APA(s) this cluster's blobs live on.
+            std::set<int> capas;
+            for (const auto& w : cluster->wpids_blob_set()) {
+                capas.insert(w.apa());
+            }
+            // Route the whole cluster to the first group that owns one of its
+            // APAs (a rare cross-group cluster lands wholly in one group).
+            for (const auto& grp : config.apa_groups) {
+                bool match = false;
+                for (int a : capas) { if (grp.apas.count(a)) { match = true; break; } }
+                if (!match) continue;
+                auto it = apa_bpts.by_group.find(grp.name);
+                if (it != apa_bpts.by_group.end()) {
+                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter);
+                }
+                break;
             }
         }
     }else{ // fill in the global
@@ -1565,52 +1665,64 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
         int face = wpid.face();
 
 
-        auto it_apa = m_bee_dead_patches.find(apa);
-        if (it_apa != m_bee_dead_patches.end()) {
-            auto it_face = it_apa->second.find(face);
-            if (it_face != it_apa->second.end()) {
-                auto & patches = it_face->second;
-
-                // Access the local point clouds in the node
-                const auto& lpcs = bnode->value.local_pcs();
-                
-                // Get the scalar PC to find the slice index
-                if (lpcs.find("scalar") == lpcs.end()) {
-                    continue;  // Skip if no scalar PC
+        // Select the destination patches: a drift-side group bucket when dead
+        // grouping is enabled, otherwise the per-(apa,face) bucket.
+        Bee::Patches* patches = nullptr;
+        if (!m_dead_apa_groups.empty()) {
+            for (const auto& ag : m_dead_apa_groups) {
+                if (ag.apas.count(apa)) {
+                    auto it = m_bee_dead_groups.find(ag.name);
+                    if (it != m_bee_dead_groups.end()) patches = &it->second;
+                    break;
                 }
-                const auto& pc_scalar = lpcs.at("scalar");
-                
-                // Get slice_index_min
-                if (!pc_scalar.get("slice_index_min")) {
-                    continue;  // Skip if no slice_index_min
-                }
-                int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
-                
-                // Set first_slice if not already set
-                if (first_slice < 0) {
-                    first_slice = slice_index_min;
-                }
-                
-                // Skip blobs not on the first slice
-                if (slice_index_min != first_slice) continue;
-                
-                // Access the corner point cloud
-                if (lpcs.find("corner") == lpcs.end()) {
-                    continue;  // Skip if no corner PC
-                }
-                const auto& pc_corner = lpcs.at("corner");
-                
-                // Get y and z coordinates
-                if (!pc_corner.get("y") || !pc_corner.get("z")) {
-                    continue;  // Skip if missing y or z
-                }
-                const auto& y = pc_corner.get("y")->elements<double>();
-                const auto& z = pc_corner.get("z")->elements<double>();
-                
-                // Add to patches
-                patches.append(y.begin(), y.end(), z.begin(), z.end());
             }
-        }        
+        } else {
+            auto it_apa = m_bee_dead_patches.find(apa);
+            if (it_apa != m_bee_dead_patches.end()) {
+                auto it_face = it_apa->second.find(face);
+                if (it_face != it_apa->second.end()) patches = &it_face->second;
+            }
+        }
+        if (!patches) continue;
+
+        // Access the local point clouds in the node
+        const auto& lpcs = bnode->value.local_pcs();
+
+        // Get the scalar PC to find the slice index
+        if (lpcs.find("scalar") == lpcs.end()) {
+            continue;  // Skip if no scalar PC
+        }
+        const auto& pc_scalar = lpcs.at("scalar");
+
+        // Get slice_index_min
+        if (!pc_scalar.get("slice_index_min")) {
+            continue;  // Skip if no slice_index_min
+        }
+        int slice_index_min = pc_scalar.get("slice_index_min")->elements<int>()[0];
+
+        // Set first_slice if not already set
+        if (first_slice < 0) {
+            first_slice = slice_index_min;
+        }
+
+        // Skip blobs not on the first slice
+        if (slice_index_min != first_slice) continue;
+
+        // Access the corner point cloud
+        if (lpcs.find("corner") == lpcs.end()) {
+            continue;  // Skip if no corner PC
+        }
+        const auto& pc_corner = lpcs.at("corner");
+
+        // Get y and z coordinates
+        if (!pc_corner.get("y") || !pc_corner.get("z")) {
+            continue;  // Skip if missing y or z
+        }
+        const auto& y = pc_corner.get("y")->elements<double>();
+        const auto& z = pc_corner.get("z")->elements<double>();
+
+        // Add to patches
+        patches->append(y.begin(), y.end(), z.begin(), z.end());
     }
 }
 

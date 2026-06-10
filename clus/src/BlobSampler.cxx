@@ -720,11 +720,17 @@ struct Stepped : public BlobSampler::Sampler
 
     double tolerance{0.03};
 
+    // If true, a blob for which the stepped grid yields no accepted point
+    // (small blobs whose single wire-crossing candidate falls outside the
+    // third view's strip window) is given one point at the blob center.
+    bool center_fallback{false};
+
     virtual void configure(const Configuration& cfg)
     {
         min_step_size = get(cfg, "min_step_size", min_step_size);
         max_step_fraction = get(cfg, "max_step_fraction", max_step_fraction);
         offset = get(cfg, "offset", offset);
+        center_fallback = get(cfg, "center_fallback", center_fallback);
     }
 
 
@@ -866,12 +872,19 @@ struct Stepped : public BlobSampler::Sampler
 
         // if (points.empty()) {
         //     int ident = iblob->ident();
-        //     SPDLOG_LOGGER_WARN(log, "Blob {} unsampled: minsiz={} maxsiz={} nwiresmin={} nwiresmax={} nrel={} npre={}.", 
+        //     SPDLOG_LOGGER_WARN(log, "Blob {} unsampled: minsiz={} maxsiz={} nwiresmin={} nwiresmax={} nrel={} npre={}.",
         //               ident, nmin, nmax, min_wires_set.size(), max_wires_set.size(), nrel_missed, npre_missed);
         //     for (const auto& strip : strips) {
         //         SPDLOG_LOGGER_WARN(log, "Blob {} strip: {}", ident, strip);
         //     }
         // }
+
+        if (points.empty() && center_fallback) {
+            const auto& corners = iblob->shape().corners();
+            if (!corners.empty()) {
+                points.push_back(center_point(corners));
+            }
+        }
 
         intern(ds, points);
 

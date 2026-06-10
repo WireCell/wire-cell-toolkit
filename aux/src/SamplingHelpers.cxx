@@ -1,4 +1,5 @@
 #include "WireCellAux/SamplingHelpers.h"
+#include "WireCellAux/SimpleBlob.h"
 
 using namespace WireCell;
 using WireCell::PointCloud::Dataset;
@@ -170,6 +171,27 @@ Point Aux::calc_blob_center(const Dataset& ds)
 Dataset Aux::make_corner_dataset(const IBlob& iblob)
 {
     using float_t = double;
+
+    // If the blob carries its original imaging-time corners (restored on load by
+    // ClusterLoader restore_corners), use them directly.  The reloaded RayGrid
+    // shape omits the boundary layers, so its re-derived corners can run past the
+    // wire boundary for 2-view (dead) blobs; the stored corners are correct.
+    // This affects only the dead-area "corner" point cloud, never the shape.
+    if (const auto* sblob = dynamic_cast<const SimpleBlob*>(&iblob)) {
+        const auto& stored = sblob->stored_corners();
+        if (!stored.empty()) {
+            Dataset sds;
+            std::vector<float_t> sx, sy, sz;
+            sx.reserve(stored.size()); sy.reserve(stored.size()); sz.reserve(stored.size());
+            for (const auto& p : stored) {
+                sx.push_back(p.x()); sy.push_back(p.y()); sz.push_back(p.z());
+            }
+            sds.add("x", Array(sx));
+            sds.add("y", Array(sy));
+            sds.add("z", Array(sz));
+            return sds;
+        }
+    }
 
     Dataset ds;
     const auto& shape = iblob.shape();

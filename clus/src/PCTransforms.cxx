@@ -37,8 +37,9 @@ public:
 
     virtual ~T0Correction() = default;
     
-    T0Correction(IDetectorVolumes::pointer dv)
-        : m_dv(dv) {
+    T0Correction(IDetectorVolumes::pointer dv, bool relax_containment_filter = false)
+        : m_dv(dv)
+        , m_relax_containment_filter(relax_containment_filter) {
         
         for (const auto& [wfid, _] : m_dv->wpident_faces()) {
             WirePlaneId wpid(wfid);
@@ -97,9 +98,16 @@ public:
 
     virtual bool filter(const Point &pos_corr, double clustser_t0, int face,
                         int apa) const override        {
+        // Relaxed mode (no-T0 detectors): accept every point.  Without an
+        // event T0 the apparent x of out-of-time activity is unreliable in
+        // both directions — early activity lands between the wire planes and
+        // the sensitive-volume boundary, late activity past the cathode (gap
+        // or opposite volume) — so any apparent-x containment test wrongly
+        // excludes whole clusters from corrected-scope passes.
+        if (m_relax_containment_filter) return true;
         auto wpid = m_dv->contained_by(pos_corr);
         if (!wpid.valid()) return false;
-        if (wpid.apa() != apa || wpid.face() != face) return false;    
+        if (wpid.apa() != apa || wpid.face() != face) return false;
         return true;
         //  return ().valid() ? true : false;
     }
@@ -153,6 +161,13 @@ public:
     virtual Dataset filter(const Dataset &pc_corr, const std::vector<std::string>& arr_cor_names, double clustser_t0, int face,
                            int apa) const override        {
         std::vector<int> arr_filter(pc_corr.size_major());
+        // See the Point overload: relaxed mode accepts every point.
+        if (m_relax_containment_filter) {
+            std::fill(arr_filter.begin(), arr_filter.end(), 1);
+            Dataset ds;
+            ds.add("filter", Array(arr_filter));
+            return ds;
+        }
         const auto &arr_x = pc_corr.get(arr_cor_names[0])->elements<double>();
         const auto &arr_y = pc_corr.get(arr_cor_names[1])->elements<double>();
         const auto &arr_z = pc_corr.get(arr_cor_names[2])->elements<double>();
@@ -164,7 +179,7 @@ public:
                     arr_filter[i] = true;
                 }
             }
-            // if (wpid.apa() != apa || wpid.face() != face) return false;   
+            // if (wpid.apa() != apa || wpid.face() != face) return false;
             //   ().valid() ? 1 : 0;
         }
         Dataset ds;
@@ -199,6 +214,10 @@ private:
     // True iff any face declared a "pos_offset"; flips the corrected scope/stored
     // arrays to carry y_cor/z_cor.  False => OFF => bit-identical.
     bool m_has_pos_offset{false};
+    // Disable filter() entirely — accept every point (for no-T0 detectors,
+    // e.g. PDVD, where apparent x makes any containment test unreliable).
+    // False => own-(apa,face) containment required => production bit-identical.
+    bool m_relax_containment_filter{false};
 };
 
 class PCTransformSet : public WireCell::Clus::IPCTransformSet,
@@ -209,15 +228,17 @@ public:
     PCTransformSet() {}
     virtual ~PCTransformSet() {}
     
-    virtual Configuration default_configuration() const { 
+    virtual Configuration default_configuration() const {
         Configuration cfg;
         cfg["detector_volumes"] = "DetectorVolumes";
+        cfg["relax_containment_filter"] = false;
         return cfg;
     }
     virtual void configure(const Configuration& cfg) {
         std::string dvtn = get<std::string>(cfg, "detector_volumes", "DetectorVolumes");
         auto dv = Factory::find_tn<WireCell::IDetectorVolumes>(dvtn);
-        m_pcts["T0Correction"] = std::make_shared<T0Correction>(dv);
+        const bool relax = get(cfg, "relax_containment_filter", false);
+        m_pcts["T0Correction"] = std::make_shared<T0Correction>(dv, relax);
         // ...
     }
 

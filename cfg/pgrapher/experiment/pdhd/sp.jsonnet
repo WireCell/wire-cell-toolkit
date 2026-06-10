@@ -43,9 +43,19 @@ function(params, tools, override = {}) {
                // original donor).  Set 1 to recover the pre-2026-05-03
                // single-hop behaviour (donors must be originally-triggered).
                l1sp_pd_adj_max_hops=3,
+               // APA0 W-plane (induction-path) ROI-refinement tune.  Default
+               // true (APA0 only): the W-plane (slot 1) induction refinement is
+               // loosened to recover the gap-prone W signal — no BreakROI split,
+               // wider ShrinkROI pad, lower refinement threshold — via per-plane
+               // arrays that touch ONLY W; U and V keep their defaults.  Set
+               // false to recover the pre-tune APA0 W SP behaviour.
+               // See sp-apa0-plane2.md §7.
+               apa0_w_roi_tune=true,
                dump_rawdecon=false)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
+    // Gate the tuned induction-refinement knobs to APA0 only.
+    local roi_tune = apa0_w_roi_tune && anode.data.ident == 0;
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -76,6 +86,14 @@ function(params, tools, override = {}) {
       lroi_jump_one_bin: 1, // default 0
 
       r_th_factor: if anode.data.ident==0 then 2.5 else 3.0,  // default 3
+      // APA0 W-only ROI tune.  W is slot 1 (induction role); these per-plane
+      // arrays loosen ONLY slot 1, leaving slot 0 (U) and slot 2 (V/collection)
+      // at the production values (so U/V refinement is byte-identical to off).
+      // Omitted entirely when the tune is off => scalar knobs apply => the
+      // config compiles bit-identical to prior production.  [U, W, V/col]:
+      [if roi_tune then 'r_th_factor_planes']: [2.5, 1.5, 2.5],  // W: 2.5 -> 1.5
+      [if roi_tune then 'r_pad_planes']: [5, 20, 5],             // W: 5 -> 20
+      [if roi_tune then 'r_break_roi_loop_planes']: [2, 0, 2],   // W: 2 -> 0 (no BreakROI)
       r_fake_signal_low_th: 375,  // default 500
       r_fake_signal_high_th: 750,  // default 1000
       r_fake_signal_low_th_ind_factor: 1.0,  // default 1

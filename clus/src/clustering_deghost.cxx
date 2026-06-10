@@ -214,6 +214,12 @@ static void clustering_deghost(
         int best_val = 0;
         int best_idx = INT_MAX;
         for (const auto& [c, cnt] : m) {
+            // A null cluster key means "no live cluster at this 2D projection"
+            // (e.g. get_closest_2d_point_info on an empty per-face plane index,
+            // which can happen once dead/masked blobs populate a face whose
+            // plane has no live points).  It is not a real overlap and is absent
+            // from map_cluster_index, so skip it rather than at()-throwing.
+            if (!c) continue;
             int idx = map_cluster_index.at(c);
             if (cnt > best_val || (cnt == best_val && idx < best_idx)) {
                 best_val = cnt;

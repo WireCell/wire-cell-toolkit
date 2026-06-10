@@ -61,6 +61,15 @@ namespace WireCell {
             void BreakROI(SignalROI* roi, float rms);
             void BreakROI1(SignalROI* roi);
 
+            // Optional per-plane overrides for the refinement threshold and
+            // ShrinkROI pad.  Empty (default) => the scalar th_factor / pad is
+            // used for every plane (bit-identical legacy behaviour).  When set
+            // (size 3, indexed by plane), the per-plane value is used instead.
+            // Used to confine a tune to one plane (e.g. PDHD APA0 W = slot 1)
+            // without perturbing the other induction plane.
+            void set_th_factor_planes(const std::vector<float>& v) { th_factor_v = v; }
+            void set_pad_planes(const std::vector<int>& v) { pad_v = v; }
+
             void ExtendROIs(int plane);
 
             void TestROIs();
@@ -84,6 +93,12 @@ namespace WireCell {
             float fake_signal_high_th_ind_factor;
             int pad;
             int break_roi_loop;
+
+            // Per-plane overrides (empty => fall back to the scalars above).
+            std::vector<float> th_factor_v;
+            std::vector<int> pad_v;
+            float get_th_factor(int plane) const { return th_factor_v.empty() ? th_factor : th_factor_v.at(plane); }
+            int get_pad(int plane) const { return pad_v.empty() ? pad : pad_v.at(plane); }
             float th_peak;
             float sep_peak;
             float low_peak_sep_threshold_pre;

@@ -46,6 +46,7 @@ WireCell::Configuration ClusterFileSource::default_configuration() const
     cfg["inname"] = m_inname;
     cfg["prefix"] = m_prefix;
     cfg["anodes"] = Json::arrayValue;
+    cfg["restore_corners"] = m_restore_corners;
 
     return cfg;
 }
@@ -232,7 +233,7 @@ ICluster::pointer ClusterFileSource::load_numpy(int ident)
     //     return nullptr;
     // }
 
-    auto graph = to_cluster(nas, eas, m_anodes);
+    auto graph = to_cluster(nas, eas, m_anodes, 1e-3 /*default nudge*/, m_restore_corners);
     return std::make_shared<SimpleCluster>(graph, ident);
 }
 
@@ -254,6 +255,13 @@ void ClusterFileSource::configure(const WireCell::Configuration& cfg)
         THROW(ValueError() << errmsg{"ClusterFileSource: no anodes given"});
     }
     m_json_loader = std::make_unique<ClusterLoader>(m_anodes);
+    // Carry the original per-blob corners from the cluster file onto the loaded
+    // blobs so the dead-area bee patch uses the imaging-time corners (which
+    // respect the wire boundary) rather than re-deriving them from the
+    // boundary-less reloaded shape.  Default true (dead-corner display only;
+    // live/reco output unaffected); set restore_corners:false to opt out.
+    m_restore_corners = get(cfg, "restore_corners", m_restore_corners);
+    m_json_loader->set_restore_corners(m_restore_corners);
 }
 
 

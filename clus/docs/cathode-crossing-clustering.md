@@ -502,6 +502,40 @@ and the tight geometric conjunction, not on a demonstrated rejection. The 617 ns
 flash-reco artifact worth fixing upstream (cf. the evt12 cross-TPC "wrong flash" diagnosis); widening the
 connector window recovers the crosser in the meantime without disturbing the rest of the sample.
 
+## 6. PDHD / PDVD enablement (no-flash detectors)
+
+The pass is now also enabled in the PDHD and PDVD all-TPC stages
+(`cfg/pgrapher/experiment/{pdhd,protodunevd}/clus.jsonnet`), with the SBND-tuned cuts as
+placeholders and one essential difference: **`use_flash_t0=false`**. Neither detector has
+Q/L matching, so no cluster carries a matched flash and the flash-coincidence gate would
+veto every pair; with the gate off, pairing rests entirely on the geometric conjunction
+(different TPCs + both ends at the cathode + same drift depth + collinearity).
+
+- **Cathode position is a config knob, not hardcoded**: `cathode_x` (C++ default `0.0`,
+  threaded through `cathode_connect()` in `pgrapher/common/clus.jsonnet`). All three
+  detectors have their central cathode at x=0 in the clustering frame, so the default is
+  used everywhere.
+- **No-T0 caveat**: PDHD/PDVD cluster at apparent x (preset T0 = trigger). A crosser's
+  cathode tips appear at |x| ≈ t0·v_drift on the *opposite* sides of x=0, so only
+  near-trigger-time crossers fall inside `cathode_x_cut` (5 cm) / `drift_cut` (8 cm). A
+  trigger-coincident crosser's tips sit at the sensitive-volume edges (PDVD ±2.54 cm) and
+  pass; out-of-time cosmics do not. The pass is therefore safe-but-conservative until a
+  per-cluster T0 exists.
+- **PDVD prerequisite — `allow_mixed_faces`**: the same-face requirement added to
+  `ClusteringExamineXBoundary` (commit 9a41546a, correct for PDHD where opposite faces
+  bound different drift volumes) raises on PDVD's per-drift-group groupings, because a
+  PDVD anode's two faces are the *y-halves of one CRP* — same drift volume, identical
+  FV_x metadata. The new `allow_mixed_faces` option (C++ default `false` = prior strict
+  behavior; emitted by the jsonnet helper only when `true`; set on PDVD's per-group
+  `examine_x_boundary`) waives only the face check, keeping the identical-FV_x requirement.
+- **Verification (2026-06-09)**: SBND production graph compiles byte-identical; PDHD
+  compiled-graph delta is only the added `ClusteringCathodeConnect` node, and a one-event
+  rerun (run 027409 evt 0) is content-identical with the pass on (no qualifying pair);
+  PDVD runs clean on both locally imaged events (run 039252 art event 298567, run 039253
+  art event 49686) with
+  global cluster count = sum of drift-group counts (no merges fired, as expected for
+  out-of-time cosmics; repeat runs hash-identical).
+
 ## Artifacts
 
 - Implementation: `clus/src/clustering_cathode_connect.cxx`, `cathode_connect()` in

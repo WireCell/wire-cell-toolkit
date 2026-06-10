@@ -157,6 +157,7 @@ namespace WireCell {
                                                   bool sparcify);
 
             int m_save_count;  // count frames saved
+            bool m_warned_oversize{false};  // log input_ticks>nticks once per node lifetime
         };
     }  // namespace Pytorch
 }  // namespace WireCell

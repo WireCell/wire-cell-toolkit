@@ -6,9 +6,38 @@ local wc = import 'wirecell.jsonnet';
 // multiple MagnifySink
 // tagn (n = 0, 1, ... 5) for anode[n]
 // FrameFanin tags configured in sim.jsonnet
-function(tools, outputfile) {
+// runinfo (optional, used only by decon_trun_pipe): {runNo, subRunNo, eventNo,
+// total_time_bin} injected into the first sink's Trun tree; null skips Trun
+// writing.  anodeNo is added automatically from the anode's ident.
+function(tools, outputfile, runinfo=null) {
 
   local nanodes = std.length(tools.anodes),
+
+  // Trun-aware decon sink (used by pdvd/wct-sp-to-magnify.jsonnet): first sink
+  // RECREATEs the file, the rest UPDATE it; only the first carries runinfo to
+  // avoid duplicate Trun cycles.
+  local mksink_trun(n, anode) = g.pnode({
+    type: 'MagnifySink',
+    name: 'magdecon%d' % anode.data.ident,
+    data: {
+      output_filename: outputfile,
+      root_file_mode: if n == 0 then 'RECREATE' else 'UPDATE',
+      // 'rawdecon%d' is a special-mode tag (off in production);
+      // MagnifySink silently skips tags absent from the input frame.
+      frames: ['gauss%d' % anode.data.ident, 'wiener%d' % anode.data.ident,
+               'rawdecon%d' % anode.data.ident],
+      // Retagger (inserted upstream) copies wiener<N> → threshold<N>, so
+      // summaries get written as h[uvw]_threshold<N> as Magnify expects.
+      summaries: ['threshold%d' % anode.data.ident],
+      summary_operator: { ['threshold%d' % anode.data.ident]: 'set' },
+      cmmtree: [['bad', 'T_bad%d' % anode.data.ident]],
+      trace_has_tag: true,
+      anode: wc.tn(anode),
+    } + (if n == 0 && runinfo != null
+         then { runinfo: runinfo { anodeNo: anode.data.ident },
+                geo_tree: 'T_geo%d' % anode.data.ident }
+         else {}),
+  }, nin=1, nout=1, uses=[anode]),
 
   local magorig = [
     g.pnode({
@@ -145,6 +174,7 @@ function(tools, outputfile) {
     orig_pipe: [g.pipeline([magorig[n]], name='magorigpipe%d' % n) for n in std.range(0, nanodes - 1)],
     raw_pipe: [g.pipeline([magraw[n]], name='magrawpipe%d' % n) for n in std.range(0, nanodes - 1)],
     decon_pipe: [g.pipeline([magdecon[n]], name='magdeconpipe%d' % n) for n in std.range(0, nanodes - 1)],
+    decon_trun_pipe: [g.pipeline([mksink_trun(n, tools.anodes[n])], name='magpipe%d' % n) for n in std.range(0, nanodes - 1)],
     dnndecon_pipe: [g.pipeline([magdnndecon[n]], name='magdnndeconpipe%d' % n) for n in std.range(0, nanodes - 1)],
     debug_pipe: [g.pipeline([magdebug[n]], name='magdebugpipe%d' % n) for n in std.range(0, nanodes - 1)],
     threshold_pipe: [g.pipeline([magthr[n]], name='magthrpipe%d' % n) for n in std.range(0, nanodes - 1)],

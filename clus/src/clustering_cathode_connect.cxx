@@ -41,8 +41,9 @@
 //     conn_far_cut, which rejects parallel-offset cosmics (connection ~perpendicular,
 //     >=50 deg) while passing a real crosser (a few deg to ~20 deg).
 // plus the all-APA flash-time gate (same matched flash group), so only coincident
-// clusters are paired.  It runs after the generic merge passes, so it can only ADD
-// merges they missed; it is the same logic QLMatching uses to flag cross-TPC pairs
+// clusters are paired.  The gate is configurable (use_flash_t0, default on) so the
+// pass can act on detectors without flash matching (e.g. PDHD).  It runs after the
+// generic merge passes, so it can only ADD merges they missed; it is the same logic QLMatching uses to flag cross-TPC pairs
 // (flag_xtpc_consistent / cull_cross_tpc), here used to connect rather than flag.
 //
 // The misalignment it compensates is a calibration artifact: when the pos_offset /
@@ -82,6 +83,7 @@ static void clustering_cathode_connect(
     double min_length_short, // the shorter member only needs this (admits a bridge fragment)
     double short_dir_len,    // below this a half's own direction is untrusted (prolong instead)
     double conn_short_cut,   // degrees; short-stub anchor->stub connection vs anchor direction
+    bool use_flash_t0,
     double flash_t0_window);
 
 class ClusteringCathodeConnect : public IConfigurable, public Clus::IEnsembleVisitor, private NeedScope {
@@ -108,6 +110,10 @@ public:
         // byte-identical to the pre-prolongation behaviour unless explicitly set.
         short_dir_len_   = get(config, "short_dir_len", 0.0);
         conn_short_cut_  = get(config, "conn_short_cut", 30.0);     // degrees
+        // default true: keep the flash-time coincidence gate (the original
+        // behaviour).  Set false on detectors without flash matching, where no
+        // cluster carries a matched flash and the gate would veto every pair.
+        use_flash_t0_    = get(config, "use_flash_t0", true);
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
     }
     virtual Configuration default_configuration() const {
@@ -120,7 +126,7 @@ public:
         clustering_cathode_connect(live, m_scope, drift_cut_, dis_cut_, max_dis_, angle_cut_,
                                    conn_far_cut_, cathode_x_, cathode_x_cut_, hough_radius_,
                                    min_length_, min_length_short_, short_dir_len_, conn_short_cut_,
-                                   flash_t0_window_);
+                                   use_flash_t0_, flash_t0_window_);
     }
 
 private:
@@ -136,6 +142,7 @@ private:
     double min_length_short_{10*units::cm};
     double short_dir_len_{0.0};
     double conn_short_cut_{30.0};
+    bool use_flash_t0_{true};
     double flash_t0_window_{80*units::ns};
 };
 
@@ -302,6 +309,7 @@ static void clustering_cathode_connect(
     double min_length_short,
     double short_dir_len,
     double conn_short_cut,
+    bool use_flash_t0,
     double flash_t0_window)
 {
     // prepare graph ... (same skeleton as the other merge passes)
@@ -312,8 +320,12 @@ static void clustering_cathode_connect(
     auto live_clusters = live_grouping.children();
 
     // Cross-TPC connection only makes sense for clusters coincident in flash time;
-    // unmatched clusters get unique singleton groups (never linked).
-    std::map<const Cluster*, int> flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window);
+    // unmatched clusters get unique singleton groups (never linked).  When flash
+    // matching is unavailable (use_flash_t0 false), skip the gate entirely.
+    std::map<const Cluster*, int> flash_t0_group;
+    if (use_flash_t0) {
+        flash_t0_group = assign_flash_t0_groups(live_clusters, flash_t0_window);
+    }
 
     // Vertex index in children() order (merge_clusters dereferences against children()).
     for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
@@ -340,7 +352,7 @@ static void clustering_cathode_connect(
             // crosser) while forbidding short<->short pairs.  With min_length_short ==
             // min_length (the default) this is the original "both >= min_length" gate.
             if (std::max(cluster_1->get_length(), cluster_2->get_length()) < min_length) continue;
-            if (flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
+            if (use_flash_t0 && flash_t0_group.at(cluster_1) != flash_t0_group.at(cluster_2)) continue;
             if (is_cathode_crossing_pair(*cluster_1, *cluster_2,
                                          cluster_1->get_length(), cluster_2->get_length(),
                                          drift_cut, dis_cut, max_dis, angle_cut, conn_far_cut,

@@ -8,6 +8,9 @@
 #include "WireCellIface/ISlice.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellUtil/RayGrid.h"
+#include "WireCellUtil/Point.h"
+
+#include <vector>
 
 namespace WireCell::Aux {
 
@@ -38,6 +41,15 @@ namespace WireCell::Aux {
 
         const RayGrid::Blob& shape() const { return m_shape; }
 
+        // Original blob corners (x,y,z) as sampled at imaging time and
+        // persisted in the cluster file.  Empty unless restored on load
+        // (ClusterLoader restore_corners).  When present, make_corner_dataset
+        // builds the dead-area "corner" point cloud from these true corners
+        // instead of re-deriving them from the reloaded shape, whose RayGrid
+        // boundary layers are not reconstructed (see ClusterHelpersLoader).
+        const std::vector<Point>& stored_corners() const { return m_stored_corners; }
+        void set_stored_corners(std::vector<Point> corners) { m_stored_corners = std::move(corners); }
+
        private:
         int m_ident;
         float m_value;
@@ -45,6 +57,7 @@ namespace WireCell::Aux {
         RayGrid::Blob m_shape;
         ISlice::pointer m_slice;
         IAnodeFace::pointer m_face;
+        std::vector<Point> m_stored_corners;
     };
 
     class SimpleBlobSet : public IBlobSet {

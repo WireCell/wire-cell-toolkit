@@ -18,6 +18,9 @@
 #include "WireCellUtil/Bee.h"
 
 #include <vector>
+#include <set>
+#include <map>
+#include <string>
 
 namespace WireCell::Clus {
 
@@ -53,6 +56,15 @@ namespace WireCell::Clus {
         bool m_use_shared_sink{false};
         size_t m_bee_event_index{0};
         
+        // Drift-side / APA grouping shared by the clustering bee output and the
+        // dead-area output.  When configured, each cluster (or dead blob) is
+        // routed by its APA into the matching group and dumped as a single bee
+        // instance named "<algorithm>-<group name>".  Unset -> behavior unchanged.
+        struct ApaGroup {
+            std::string name;       // bee instance suffix, e.g. "group02"
+            std::set<int> apas;     // APA idents that belong to this group
+        };
+
         // Replace the existing bee points structures with a more flexible approach
         struct BeePointsConfig {
             // special name "img" dumps "live" before clustering
@@ -69,6 +81,10 @@ namespace WireCell::Clus {
             double dQdx_offset{0.0};
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
             bool use_graph_vertices{false};    // dump graph vertices; charge=15000 for main (kNeutrinoVertex), 0 otherwise
+
+            // Optional per-set drift-side / APA grouping (see ApaGroup above).
+            // Non-empty -> route this set's clusters into group buckets.
+            std::vector<ApaGroup> apa_groups;
         };
 
         // Vector to store configurations for multiple bee points sets
@@ -86,7 +102,10 @@ namespace WireCell::Clus {
             // Individual points (used when individual == true)
             // Key is "anode_id-face_id" string
             std::map<int, std::map<int , Bee::Points> > by_apa_face; // apa, face
-            
+
+            // Grouped points (used when apa_groups is non-empty).
+            // Key is the group name.
+            std::map<std::string, Bee::Points> by_group;
         };
     
         Facade::Grouping& load_grouping(
@@ -127,6 +146,13 @@ namespace WireCell::Clus {
 
         std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
         // Bee::Patches m_bee_dead; // dead region ...
+
+        // Dead-area drift-side grouping (mirrors the clustering grouping).  When
+        // m_dead_apa_groups is non-empty, dead blobs are routed by APA into one
+        // Bee::Patches per group ("channel-deadarea-<group name>") instead of one
+        // per (apa,face).  Empty -> per-(apa,face) output (unchanged).
+        std::vector<ApaGroup> m_dead_apa_groups;
+        std::map<std::string, Bee::Patches> m_bee_dead_groups;
 
         // ---- Optical flash / charge-light "op" Bee dump ----
         // When m_save_opflash is set, the merged-grouping root carries a
