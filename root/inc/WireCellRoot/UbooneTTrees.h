@@ -361,8 +361,11 @@ namespace WireCell::Root {
             std::vector<double> ftime(nflashes), ftmin(nflashes), ftmax(nflashes), fval(nflashes);
             std::vector<int> fident(nflashes), ftype(nflashes);
 
-            // TDM light
-            std::vector<double> lid, lt, lq, ldq;
+            // TDM light.  lid holds OpDet channel numbers and must be int:
+            // Grouping::flash_at() reads it as get_pcarray<int>("ident","light")
+            // (and the SBND writer FlashTensorToOpticalPCs stores it as int).
+            std::vector<int> lid;
+            std::vector<double> lt, lq, ldq;
 
             // TDM flashlight
             std::vector<int> fl_flash, fl_light;
