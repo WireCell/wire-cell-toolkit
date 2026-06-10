@@ -370,7 +370,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // overclusters be considered for separation.
         separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false,
                  collinear_recover=false, band_recarve=false, drift_side_fv_x=false,
-                 far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false) :: {
+                 far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
+                 dec1_guard_main_angle=null) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
@@ -403,6 +404,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // long crossing track arms (an "X" that pure connectivity cannot
                 // hold apart).  Key omitted when false: bit-identical.
                 [if track_recarve then 'track_recarve']: track_recarve,
+                // Dec_1 drift-aligned protection guard applies only when the
+                // cluster MAIN axis is within this angle (deg) of drift.  null
+                // (default) keeps the legacy unconditional guard, which wide
+                // isochronous/multi-track complexes trip by accident.
+                [if dec1_guard_main_angle != null then 'dec1_guard_main_angle']: dec1_guard_main_angle,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },

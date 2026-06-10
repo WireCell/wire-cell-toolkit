@@ -24,6 +24,15 @@ using namespace WireCell::PointCloud::Tree;
 // FV, reproducing the legacy dv->metadata(WirePlaneId(0)) reads bit-for-bit.  The
 // scope is read from dv->wpident_faces() (the configured drift volumes), NOT from the
 // live grouping, so all-APA stays "overall" even when only one TPC has activity.
+// Env-gated gate tracing (set WCT_SEP_DEBUG=1): prints per-cluster separation
+// gate quantities.  Kept permanently because separation triggers depend on
+// detector FV tuning and re-diagnosing them needs these numbers.
+static bool sep_debug()
+{
+    static const bool v = (getenv("WCT_SEP_DEBUG") != nullptr);
+    return v;
+}
+
 ScopeFV WireCell::Clus::Facade::select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x)
 {
     const Configuration overall = dv->metadata(WirePlaneId(0));
@@ -550,7 +559,8 @@ static void recarve_crossing_tracks(Grouping& live_grouping, const Tree::Scope& 
 {
     const double LEN_MIN       = 100 * units::cm;  // member length
     const double RATIO_MIN     = 0.01;             // eval1/eval0: an X opens the 2nd axis
-    const double RATIO_MAX     = 0.5;              // beyond this it is a blob, not 2 arms
+    const double RATIO_MAX     = 0.8;              // beyond this it is a blob, not 2 arms
+                                                   // (a wide-opening X reaches ~0.56)
     const int    NITER         = 10;               // fixed assign/refit iterations
     const double MIN_FRAC      = 0.20;             // npoints fraction per arm
     const double ARM_LEN_MIN   = 60 * units::cm;   // axial extent of each arm
@@ -731,7 +741,8 @@ static void clustering_separate(Grouping& live_grouping,
                                 const bool drift_side_fv_x,
                                 const double far_point_x_cut,
                                 const double far_point_mid_dis,
-                                const bool track_recarve);
+                                const bool track_recarve,
+                                const double dec1_guard_main_angle);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -769,13 +780,17 @@ public:
         // Post-separation k=2 3D-line self-split of a member holding two long
         // crossing track arms (default OFF => bit-identical).
         track_recarve_ = get(config, "track_recarve", false);
+        // Dec_1 drift-aligned guard: require the MAIN axis within this angle
+        // (deg) of drift for the guard to apply (default <0 = unconditional,
+        // bit-identical).  See JudgeSeparateDec_1.
+        dec1_guard_main_angle_ = get(config, "dec1_guard_main_angle", -1.0);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_separate(live, m_dv, m_pcts, m_scope, use_ctpc_, max_hull_points_, sbnd_boundary_tag_,
                             collinear_recover_, band_recarve_, drift_side_fv_x_, far_point_x_cut_,
-                            far_point_mid_dis_, track_recarve_);
+                            far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_);
     }
 
 private:
@@ -788,6 +803,7 @@ private:
     double far_point_x_cut_{140 * units::cm};
     double far_point_mid_dis_{25 * units::cm};
     bool track_recarve_{false};
+    double dec1_guard_main_angle_{-1.0};
 };
 
 
@@ -809,7 +825,8 @@ static void clustering_separate(
     const bool drift_side_fv_x,
     const double far_point_x_cut,
     const double far_point_mid_dis,
-    const bool track_recarve)
+    const bool track_recarve,
+    const double dec1_guard_main_angle)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -856,10 +873,22 @@ static void clustering_separate(
                                    max_hull_points, far_point_x_cut, far_point_mid_dis);
             // JudgeSeparateDec_1 is cheap compared to Dec_2 but still calls PCA —
             // cache for the second call inside flag_proceed block.
-            bool flag_dec1 = JudgeSeparateDec_1(cluster, drift_dir_abs, cluster_length);
+            bool flag_dec1 = JudgeSeparateDec_1(cluster, drift_dir_abs, cluster_length, dec1_guard_main_angle);
 
             bool flag_proceed = flag_dec2;
 
+            if (sep_debug()) {
+                const auto& pca_dbg = cluster->get_pca();
+                geo_point_t md(pca_dbg.axis.at(0).x(), pca_dbg.axis.at(0).y(), pca_dbg.axis.at(0).z());
+                std::cout << "SEPDBG gate ident=" << cluster->ident() << " len=" << cluster_length / units::cm
+                          << " nblob=" << cluster->nchildren()
+                          << " dec1=" << flag_dec1 << " dec2=" << flag_dec2
+                          << " nindep=" << independent_points.size()
+                          << " r1=" << pca_dbg.values.at(1) / pca_dbg.values.at(0)
+                          << " r2=" << pca_dbg.values.at(2) / pca_dbg.values.at(0)
+                          << " angbeam=" << fabs(md.angle(beam_dir) - 3.1415926 / 2.) / 3.1415926 * 180.
+                          << std::endl;
+            }
 
             if (!flag_proceed && flag_dec1 && independent_points.size() > 0) {
                 bool flag_top = false;
@@ -933,6 +962,17 @@ static void clustering_separate(
                 }
             }
 
+            // Two crossing tracks whose arms end INSIDE the volume expose at
+            // most one surface contact, so neither Dec_2 nor the angle ladders
+            // can ever fire on them.  Offer such non-proceeding clusters
+            // directly to the k=2 3D-line splitter -- its own validation
+            // (two long thin arms, fair point shares, interior crossing) does
+            // the actual discrimination, so the trigger here is loose.
+            if (!flag_proceed && track_recarve) {
+                std::vector<Cluster *> self = {cluster};
+                recarve_crossing_tracks(live_grouping, scope, self);
+                continue;  // on a split `cluster` was consumed (dangling)
+            }
 
             if (flag_proceed) {
                 // Track every output cluster created while separating this
@@ -969,7 +1009,7 @@ static void clustering_separate(
                             boundary_points.clear();
                             independent_points.clear();
 
-                            if (JudgeSeparateDec_1(cluster2, drift_dir_abs, length_1) &&
+                            if (JudgeSeparateDec_1(cluster2, drift_dir_abs, length_1, dec1_guard_main_angle) &&
                                 JudgeSeparateDec_2(cluster2, drift_dir_abs, boundary_points, independent_points,
                                                    length_1, fv, max_hull_points, far_point_x_cut, far_point_mid_dis)) {
                                 std::vector<Cluster *> sep_clusters =
@@ -985,7 +1025,7 @@ static void clustering_separate(
                                     if (length_1 > 100 * units::cm) {
                                         boundary_points.clear();
                                         independent_points.clear();
-                                        if (JudgeSeparateDec_1(cluster4, drift_dir_abs, length_1) &&
+                                        if (JudgeSeparateDec_1(cluster4, drift_dir_abs, length_1, dec1_guard_main_angle) &&
                                             JudgeSeparateDec_2(cluster4, drift_dir_abs, boundary_points, independent_points,
                                                                length_1, fv, max_hull_points, far_point_x_cut, far_point_mid_dis)) {
                                             std::vector<Cluster *> sep_clusters = Separate_1(
@@ -1014,7 +1054,7 @@ static void clustering_separate(
                             if (length_1 > 60 * units::cm) {
                                 boundary_points.clear();
                                 independent_points.clear();
-                                JudgeSeparateDec_1(final_sep_cluster, drift_dir_abs, length_1);
+                                JudgeSeparateDec_1(final_sep_cluster, drift_dir_abs, length_1, dec1_guard_main_angle);
                                 JudgeSeparateDec_2(final_sep_cluster, drift_dir_abs, boundary_points, independent_points,
                                                    length_1, fv, max_hull_points, far_point_x_cut, far_point_mid_dis);
                                 if (independent_points.size() > 0) {
@@ -1092,7 +1132,8 @@ static void clustering_separate(
 }
 
 /// @brief PCA based, drift_dir +x, -x the same ...
-bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length)
+bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir_abs, const double length,
+                                                double guard_main_angle)
 {
     // get the main axis — cache PCA result to avoid repeated calls
     const auto& pca = cluster->get_pca();
@@ -1120,7 +1161,13 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_1(const Cluster* cluster, const ge
     // reconstruction — separating them would be wrong.  The ratio thresholds
     // below would falsely trigger on such tracks because the PCA is dominated by
     // the long drift direction.
-    if (angle1 < 5 && ratio2 < 0.05 && length > 300*units::cm) return false;
+    if (angle1 < 5 && ratio2 < 0.05 && length > 300*units::cm) {
+        if (guard_main_angle < 0) return false;  // legacy: unconditional guard
+        // Knob-gated: only protect clusters whose MAIN axis is actually
+        // drift-aligned (the through-going-cosmic topology the guard is for).
+        const double main_ang = acos(std::min(1.0, fabs(dir1.dot(drift_dir_abs)))) / 3.1415926 * 180.;
+        if (main_ang < guard_main_angle) return false;
+    }
 
     if (ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(angle1, 1. / 3.)) - 2.2) ||
         ratio1 > pow(10, exp(1.38115 - 1.19312 * pow(temp_angle1, 1. / 3.)) - 2.2) ||
@@ -1593,6 +1640,17 @@ bool WireCell::Clus::Facade::JudgeSeparateDec_2(const Cluster* cluster, const ge
         return false;
     }
 
+
+    if (sep_debug()) {
+        std::cout << "SEPDBG dec2 ident=" << cluster->ident() << " len=" << cluster_length / units::cm
+                  << " nout=" << num_outside_points << " noutx=" << num_outx_points
+                  << " nsurf=" << independent_surfaces.size() << " nindep=" << independent_points.size()
+                  << " nfar=" << num_far_points << " outx=" << flag_outx
+                  << " hy=" << hy_points.at(0).y() / units::cm << " ly=" << ly_points.at(0).y() / units::cm
+                  << " hz=" << hz_points.at(0).z() / units::cm << " lz=" << lz_points.at(0).z() / units::cm
+                  << " hx=" << hx_points.at(0).x() / units::cm << " lx=" << lx_points.at(0).x() / units::cm
+                  << std::endl;
+    }
 
     if ((num_outside_points > 1 && independent_surfaces.size() > 1 ||
          num_outside_points > 2 && cluster_length > 250 * units::cm || num_outx_points > 0) &&

@@ -197,7 +197,15 @@ namespace WireCell::Clus::Facade {
     // are defined in clustering_separate.cxx.
 
     // time_slice_length is length span for a slice
-    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length);
+    // guard_main_angle (deg): the long/thin/drift-aligned protection guard
+    // (toolkit addition e28db401; not in the prototype) additionally requires
+    // the cluster MAIN axis within this angle of the drift axis.  Default <0
+    // keeps the guard unconditional (bit-identical).  The guard's angle1 tests
+    // the 2nd axis against perp-to-drift, which wide isochronous complexes
+    // satisfy trivially -- without the main-axis requirement it vetoes exactly
+    // the multi-track over-clusters separation exists for.
+    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length,
+                            double guard_main_angle = -1);
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points

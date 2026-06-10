@@ -108,6 +108,33 @@ On 27409 evt 40908 this fires exactly once (the t1/t3 X: arms 2584/8352
 npoints, cross fractions 0.93/0.42, residuals 5.3/8.7 cm).  It fires nowhere
 else in the PDHD/PDVD regression set.
 
+## Fix 5 — `dec1_guard_main_angle` (knob, default = legacy)
+
+`JudgeSeparateDec_1` carries a toolkit-added protection guard (e28db401, not
+in the prototype): `angle1 < 5 && ratio2 < 0.05 && length > 300 cm` returns
+false to protect long thin drift-aligned through-going cosmics.  But `angle1`
+tests the **2nd** PCA axis against perpendicular-to-drift, which a wide
+isochronous complex satisfies trivially — a signal-processing rerun nudged the
+PDHD floor-to-top giant to r2 = 0.031 and the PDVD band complex (which lost
+its out-of-time appendage to slightly different imaging) into the guard's
+window, silently vetoing exactly the multi-track over-clusters separation
+exists for.  With `dec1_guard_main_angle` set (degrees), the guard
+additionally requires the cluster MAIN axis within that angle of the drift
+axis (the actual through-goer topology).  Default <0 keeps the unconditional
+legacy guard bit-for-bit; PDHD/PDVD set 45.
+
+## track_recarve standalone trigger
+
+Two crossing tracks whose arms end INSIDE the volume expose at most one
+surface contact, so neither Dec_2 nor the angle ladders can ever fire on them
+(27409 evt 40908 after the SP rerun: the X host had one upstream contact,
+r1 = 0.556, 46° from ⊥-beam).  When `track_recarve` is on, non-proceeding
+clusters >100 cm are offered directly to the k=2 3D-line splitter — its own
+validation (two long thin arms, fair shares, interior crossing) does the
+actual discrimination, so the loose trigger is safe: on the full PDHD+PDVD
+regression it fires only on the genuine X/T topologies.  RATIO_MAX is 0.8
+(a wide-opening X reaches ~0.56).
+
 ## band_recarve seed gates (revision)
 
 With separation now firing on track-topology events, `recarve_two_bands`
