@@ -16,9 +16,10 @@ using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
 static void clustering_examine_x_boundary(
-    Grouping& live_grouping, 
+    Grouping& live_grouping,
     IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope
+    const Tree::Scope& scope,
+    bool allow_mixed_faces
     );
 
 class ClusteringExamineXBoundary : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -29,13 +30,22 @@ public:
     void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         NeedScope::configure(config);
+        // default false: multi-wpid groupings must be same-face (PDHD-style
+        // drift-side groups, where opposite faces bound different drift
+        // volumes).  Set true on detectors where the two faces of one anode
+        // share a single drift volume (PDVD: faces are the y-halves of one
+        // CRP), so a group legitimately mixes faces; the identical-FV_x
+        // metadata requirement still applies.
+        allow_mixed_faces_ = get(config, "allow_mixed_faces", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
-        clustering_examine_x_boundary(live, m_dv, m_scope);
+        clustering_examine_x_boundary(live, m_dv, m_scope, allow_mixed_faces_);
     }
-    
+
+private:
+    bool allow_mixed_faces_{false};
 };
 
 
@@ -43,11 +53,14 @@ public:
 // volume: x-aligned APAs viewed through the SAME face (e.g. a PDHD drift-side
 // group {APA0 face0, APA2 face0}).  Mixed faces or differing drift-x ranges
 // are rejected: opposite faces of aligned APAs bound DIFFERENT drift volumes,
-// so a single FV_x window cannot apply to both.
+// so a single FV_x window cannot apply to both.  allow_mixed_faces waives the
+// same-face requirement (NOT the identical-FV_x one) for detectors where both
+// faces of an anode share one drift volume (PDVD: faces = y-halves of a CRP).
 static void clustering_examine_x_boundary(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
-    const Tree::Scope& scope
+    const Tree::Scope& scope,
+    bool allow_mixed_faces
     )
 {
 
@@ -80,7 +93,7 @@ static void clustering_examine_x_boundary(
     // SAME face (e.g. a0f0pA == a2f0pA).
     for (++wit; wit != wpids.end(); ++wit) {
         const auto md = dv->metadata(*wit);
-        if (wit->face() != common_face ||
+        if ((!allow_mixed_faces && wit->face() != common_face) ||
             md["FV_xmin"].asDouble() != FV_xmin || md["FV_xmax"].asDouble() != FV_xmax ||
             md["FV_xmin_margin"].asDouble() != FV_xmin_margin ||
             md["FV_xmax_margin"].asDouble() != FV_xmax_margin) {

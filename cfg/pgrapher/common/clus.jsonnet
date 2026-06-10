@@ -432,10 +432,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        examine_x_boundary(name="") :: {
+        // allow_mixed_faces (default false): waive the same-face requirement on
+        // multi-wpid groupings (NOT the identical-FV_x-metadata one) for
+        // detectors where both faces of an anode share one drift volume
+        // (PDVD: faces are the y-halves of one CRP).  Key emitted only when
+        // true so existing compiled configs stay byte-identical.
+        examine_x_boundary(name="", allow_mixed_faces=false) :: {
             type: "ClusteringExamineXBoundary",
             name: prefix+name,
-            data: dv_cfg + scope_cfg,
+            data: dv_cfg + scope_cfg + {
+                [if allow_mixed_faces then "allow_mixed_faces"]: true,
+            },
             uses: [detector_volumes],
         },
 

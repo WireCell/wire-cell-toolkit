@@ -457,7 +457,10 @@ local clus_per_group (
         cm.close(length_cut=1.2*wc.cm),
         cm.extend_loop(num_try=3),
         cm.separate(use_ctpc=true),
-        cm.examine_x_boundary(),
+        // A PDVD drift group mixes faces by construction (an anode's two
+        // faces are the y-halves of one CRP, sharing one drift volume and
+        // identical FV_x metadata), so waive the same-face check.
+        cm.examine_x_boundary(allow_mixed_faces=true),
         cm.neutrino(),
         cm.isolated(),
         cm.examine_bundles(),
@@ -566,10 +569,9 @@ local clus_all_tpc (
         // sensitive volumes end at -+25.4mm so cathode_x_cut=5cm spans the
         // |x|<2.54cm gap).  use_flash_t0=false because PDVD has no flash
         // matching (the flash-coincidence gate would veto every pair).
-        // Commented out for now; uncomment to enable.
-        // cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
-        //                    min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
-        //                    conn_short_cut=30.0, use_flash_t0=false),
+        cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
+                           min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
+                           conn_short_cut=30.0, use_flash_t0=false),
     ],
 
     local mabc = g.pnode({

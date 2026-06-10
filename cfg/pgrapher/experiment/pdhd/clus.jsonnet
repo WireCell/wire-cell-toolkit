@@ -556,10 +556,10 @@ local clus_all_tpc (
         // PDHD central cathode is at x=0, the C++ default cathode_x —
         // dimensions to be confirmed).  use_flash_t0=false because PDHD has
         // no flash matching (the flash-coincidence gate would veto every
-        // pair).  Commented out for now; uncomment to enable.
-        // cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
-        //                    min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
-        //                    conn_short_cut=30.0, use_flash_t0=false),
+        // pair).
+        cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
+                           min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
+                           conn_short_cut=30.0, use_flash_t0=false),
         #cm.retile(cut_time_low=3*wc.us,
         #          cut_time_high=5*wc.us,
         #          anodes=anodes,

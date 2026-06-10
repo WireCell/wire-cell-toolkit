@@ -214,7 +214,7 @@ is worth flagging as a likely regression/oversight relative to PDHD and SBND.
 | 8 | `separate` | ✗ | ✓ `use_ctpc` | ✓ `use_ctpc` |
 | 9 | `neutrino` | ✗ | ✓ | ✓ |
 | 10 | `isolated` | ✗ | ✓ | ✓ |
-| 11 | `cathode_connect` | ✓ (cross-TPC, all-APA only) | ✗ | ✗ |
+| 11 | `cathode_connect` | ✓ (cross-TPC, all-APA only) | ✓ (`use_flash_t0=false`, 2026-06-09) | ✓ (`use_flash_t0=false`, 2026-06-09) |
 | 12 | `examine_bundles` | `use_flash_t0=true` | default | default |
 
 Source: SBND `cfg/.../sbnd/clus.jsonnet:309-323`; PDHD `pdhd/clus.jsonnet:407-420`; PDVD
@@ -281,8 +281,12 @@ This is the difference that matters most for the user's "validate before matchin
 4. **Consider a PD dead-gap registry** analog to SBND `dead_regions.jsonnet` if PD has a
    systematic dead wire column worth bridging.
 5. **Defer** the flash-gated all-APA machinery (`use_flash_t0=true` on merges,
-   `cathode_connect`, `pos_offset`) until Q/L matching provides per-cluster T0. Until then,
+   `pos_offset`) until Q/L matching provides per-cluster T0. Until then,
    PD all-APA is valid for prompt activity and approximate for out-of-time cosmics.
+   *(Update 2026-06-09: `cathode_connect` is now enabled on PDHD/PDVD with
+   `use_flash_t0=false` — the geometric conjunction alone gates pairing, which only
+   admits near-trigger-time crossers on a no-T0 detector; see
+   `clus/docs/cathode-crossing-clustering.md` §6.)*
 
 ### Validation harness (already present per detector)
 
