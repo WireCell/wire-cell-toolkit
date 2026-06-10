@@ -28,13 +28,16 @@ local index = std.parseInt(initial_index);
 local common_coords = ["x", "y", "z"];
 local common_corr_coords = ["x_t0cor", "y", "z"];
 
-// Drift-side groups: APA0+APA2 (face0, drift -x) and APA1+APA3 (face1, drift
-// +x).  These define both the stage-3 per-drift-group clustering scope
+// Drift-side groups: x-aligned APAs viewed through a COMMON face, i.e. one
+// drift volume: APA0+APA2 face0 (drift -x) and APA1+APA3 face1 (drift +x).
+// These define both the stage-3 per-drift-group clustering scope
 // (clus_per_group) and the Bee display groups (clustering points + dead-area
 // output in the all-TPC dump), so each pair shows as a single Bee instance.
+// The opposite-face groups (APA0+APA2 face1, APA1+APA3 face0) are PDHD wall
+// faces that do not image, so they carry no data and are not wired.
 local apa_drift_groups = [
-    { name: "group02", apas: [0, 2] },
-    { name: "group13", apas: [1, 3] },
+    { name: "group02", apas: [0, 2], face: 0 },
+    { name: "group13", apas: [1, 3], face: 1 },
 ];
 
 
@@ -88,6 +91,14 @@ local anodes_name(anodes, face="") =
     std.join("-", [std.toString(a.data.ident) for a in anodes]) + if face == "" then "" else "-" + std.toString(face);
 
 
+// The face argument scopes the NAME only (e.g. dv-apa0-2-0 = the {APA0,APA2}
+// face-0 drift volume).  The metadata always carries BOTH faces of every
+// anode: Grouping::fill_dv_cache reads the drift parameters (time_offset,
+// drift_speed, tick, nticks_live_slice) for every geometry face of the
+// configured anodes, so dropping the off-scope face's entry would silently
+// zero those cache values.  The off-scope entries are inert for clustering
+// decisions -- no data wpid carries them, and examine_x_boundary enforces
+// same-face/aligned-x on the wpids actually present.
 local detector_volumes(anodes, face="") = {
     "type": "DetectorVolumes",
     "name": "dv-apa" + anodes_name(anodes, face),
@@ -392,14 +403,18 @@ local clus_per_apa (
     ),
 }.ret;
 
-// Stage 3: per drift-side group ({APA0,APA2} drift -x, {APA1,APA3} drift +x),
-// raw x,y,z coordinates.  Runs the long-range merge family across the two
-// stacked APAs of one drift side, then the topology passes (separate moved
-// here from the per-face stage; examine_x_boundary requires all wpids in the
-// group to share the same FV_x metadata, true within one drift side).
+// Stage 3: per drift-side group = x-aligned APAs viewed through a COMMON
+// face, i.e. one drift volume ({APA0,APA2} face0 drift -x, {APA1,APA3} face1
+// drift +x), raw x,y,z coordinates.  Runs the long-range merge family across
+// the two stacked APAs of one drift side, then the topology passes (separate
+// moved here from the per-face stage; examine_x_boundary requires all wpids
+// in the group's data to be same-face with the same FV_x metadata -- the C++
+// raises on mixed faces or differing drift-x ranges, so a wrongly-composed
+// group fails loudly instead of applying a wrong FV window).
 local clus_per_group (
     anodes,
     group_name,
+    face,
     dump = true,
     bee_dir = "data",
     runNo = 1,
@@ -418,7 +433,7 @@ local clus_per_group (
         }
     }, nin=nanodes, nout=1),
 
-    local dv = detector_volumes(anodes),
+    local dv = detector_volumes(anodes, face),
     local pcts = pctransforms(dv),
 
     local cm = clus.clustering_methods(prefix=group_name,
@@ -645,6 +660,6 @@ local clus_all_tpc (
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     all_tpc(anodes, ngroups=2, dump=true) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
 }

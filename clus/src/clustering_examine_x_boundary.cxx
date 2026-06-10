@@ -39,8 +39,11 @@ public:
 };
 
 
-// This function handles a single APA/Face, or several that share the same
-// drift-x fiducial volume (e.g. a PDHD drift-side group {APA0,APA2}).
+// This function handles a single APA/Face, or several that form one drift
+// volume: x-aligned APAs viewed through the SAME face (e.g. a PDHD drift-side
+// group {APA0 face0, APA2 face0}).  Mixed faces or differing drift-x ranges
+// are rejected: opposite faces of aligned APAs bound DIFFERENT drift volumes,
+// so a single FV_x window cannot apply to both.
 static void clustering_examine_x_boundary(
     Grouping& live_grouping,
     const IDetectorVolumes::pointer dv,
@@ -66,22 +69,25 @@ static void clustering_examine_x_boundary(
     if (wpids.empty()) return;
 
     auto wit = wpids.begin();
+    const int common_face = wit->face();
     double FV_xmin = dv->metadata(*wit)["FV_xmin"].asDouble() ;
     double FV_xmax = dv->metadata(*wit)["FV_xmax"].asDouble() ;
     double FV_xmin_margin = dv->metadata(*wit)["FV_xmin_margin"].asDouble() ;
     double FV_xmax_margin = dv->metadata(*wit)["FV_xmax_margin"].asDouble() ;
 
-    // Multiple wpids are allowed only when they all share the same drift-x
-    // fiducial metadata (true within one drift side, e.g. a0f0pA == a2f0pA).
+    // Multiple wpids are allowed only when they form one drift volume:
+    // x-aligned APAs (identical drift-x fiducial metadata) viewed through the
+    // SAME face (e.g. a0f0pA == a2f0pA).
     for (++wit; wit != wpids.end(); ++wit) {
         const auto md = dv->metadata(*wit);
-        if (md["FV_xmin"].asDouble() != FV_xmin || md["FV_xmax"].asDouble() != FV_xmax ||
+        if (wit->face() != common_face ||
+            md["FV_xmin"].asDouble() != FV_xmin || md["FV_xmax"].asDouble() != FV_xmax ||
             md["FV_xmin_margin"].asDouble() != FV_xmin_margin ||
             md["FV_xmax_margin"].asDouble() != FV_xmax_margin) {
             for (const auto& wpid : wpids) {
                 std::cout << "Live grouping wpid: " << wpid.name() << std::endl;
             }
-            raise<ValueError>("Live grouping has %d wpids with differing FV x metadata",
+            raise<ValueError>("Live grouping has %d wpids with mixed faces or differing FV x metadata",
                               wpids.size());
         }
     }
