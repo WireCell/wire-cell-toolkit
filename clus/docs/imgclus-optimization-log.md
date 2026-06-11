@@ -535,6 +535,59 @@ Beyond byte-identical work, the largest remaining levers are the
 density, `full_deghost`, slicing threshold) — those need physics review
 rather than engineering.
 
+## Round 3 (2026-06-11): deployment defaults, masked-span coarsening, kd-query reduction
+
+### 14. Per-anode sequential imaging is now the default (script-level)
+
+`run_img_evt.sh` (PDHD + PDVD, wcp-porting-validation `a1ad4b2`): the round-1
+`-P` mode (entry 1, output-identical, peak RSS = busiest anode instead of
+sum) is now the default; `-1` reverts to the old single-process mode, `-P`
+is kept as a back-compat no-op.  Re-validated incidentally by entry 15's
+6-event regeneration: all 32 active archives byte-identical to the
+single-process baseline.
+
+### 15. Masked-fork slicing span 100/500 → 1500 ticks (**RESULT-CHANGING, approved**)
+
+- `cfg/pgrapher/experiment/protodunevd/img.jsonnet` (production "both"
+  branch): masked 2-view span 100 → **1500** ticks.
+- `cfg/pgrapher/experiment/pdhd/img.jsonnet`: 500 → **1500**.
+
+The masked fork carries only dead-region geometry (no charge solving), so
+its slicing granularity is a memory/time knob with low physics
+sensitivity.  PDVD's span=100 made 15x more masked slices than PDHD's 500
+with no documented physics justification.  User approved coarsening both
+to 1500.
+
+Measured on the 6-event set (snapshot `span1500`, includes the entry-14
+per-anode default; vs the round-2 closing numbers):
+
+| Event | img wall (s) | img RSS (MB) | clus wall (s) |
+|---|---|---|---|
+| hd-typ  027409/0  | 59 → 41 | 670 → 643 | 20 → 19 |
+| hd-typ2 027980/3  | 62 → 44 | 794 → 694 | 22 → 21 |
+| hd-busy 028084/18 | 163 → **143** | 3339 → 3382 | 207 → 204 |
+| hd-max  027305/0  | 322 → **288** | 6078 → 6190 | 314 → 308 |
+| vd-typ  039349/0  | 135 → **40** | 486 → 419 | 20 → 15 |
+| vd-busy 039252/5  | 264 → **105** | 1569 → 1227 | 105 → 90 |
+
+The big PDVD imaging wins are the 15x masked-slice reduction (the masked
+fork dominated PDVD imaging); PDHD moves less (3x on a smaller share).
+hd-busy/hd-max imaging RSS is unchanged because the active fork on the
+busiest anode dominates the per-anode peak.
+
+Verification of the blast radius:
+- **Active fork untouched**: all 32 `*-ms-active.tar.gz` archives
+  byte-identical to the old-span baseline.
+- **Masked archives**: PDVD ~6-7x smaller, PDHD ~1.3-1.6x.
+- **Downstream clustering**: 6/6 events rc=0.  Per-pass cluster counts
+  are identical on 5/6 events; hd-busy differs in two mid-chain passes
+  (61→60, 164→162) and converges to the **same final count (184)**.
+  `mabc-*.zip` payloads differ on all events as expected (the dead/masked
+  blob geometry is part of the payload).
+
+Snapshot `span1500` is the new A/B baseline for subsequent byte-identical
+work (the old `imgr2`/`fastg` baselines predate the span change).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

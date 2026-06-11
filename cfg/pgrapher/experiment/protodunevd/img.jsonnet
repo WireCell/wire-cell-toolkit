@@ -352,7 +352,7 @@ function(output_dir='', nthreshold=[3.6, 3.6, 3.6]) {
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),
         ]),
         local masked_fork = g.pipeline([
-            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 100), // 109, 1744 (total 9592)
+            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 1500), // was 100 (hist. 109); masked fork carries geometry only (no charge solving), coarse span cuts masked blob count/memory ~15x
             img.clustering(anode, anode.name+"-ms-masked"),
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),
         ]),
