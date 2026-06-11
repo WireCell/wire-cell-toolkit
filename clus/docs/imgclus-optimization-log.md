@@ -1071,6 +1071,27 @@ change, byte-identical by construction.
   hd-max 6190→4667 (−25%), hd-busy 3382→2173 (−36%), vd-busy
   1162→755 (−35%).
 
+### 27. LASSO Gram build: compute the symmetric half, mirror the rest
+
+`LassoModel::Fit` built the Gram matrix with `X.col(i).dot(X.col(j))`
+over ALL (i,j) although XdX is symmetric (round-5 finding 2).  Now
+computes the diagonal + upper triangle and pushes the mirrored triplet
+for the lower.  Bit-identical: X is a dense `MatrixXd`; swapping dense
+dot operands runs the same kernel with the same accumulation order over
+commutative multiplies, and no duplicate triplets are produced so
+`setFromTriplets` is insensitive to list order.  `test_ress` /
+`test_util_ress` unit tests pass.
+
+- A/B snapshot `r6gram` vs `r6bsscope`: **178/178 byte-identical,
+  PASS.**
+- Imaging wall: hd-max 266→**251 s** (−5.6%, the LASSO-bound event);
+  hd-busy 128→126 s, vd-busy 95→94 s (small, solve share is 4-11%
+  there); typicals flat.  RSS unchanged.
+- Cumulative round-6 so far (items 25-27) vs round-4 close: hd-max
+  imaging 284→**251 s** (−12%) at 6190→**4667 MB** (−25%); hd-busy
+  141→**126 s** (−11%) at 3382→**2173 MB** (−36%); vd-busy
+  101→**94 s** (−7%) at 1162→**755 MB** (−35%).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

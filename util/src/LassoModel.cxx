@@ -89,12 +89,24 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         typedef Eigen::Triplet<double> T;
         std::vector<T> tripletList;
         tripletList.reserve(estimated_nonzeros);
+        // XdX is symmetric and dot() is element-wise commutative (identical
+        // multiply/accumulate sequence under operand swap), so compute each
+        // off-diagonal dot once and mirror it -- bit-identical to the full
+        // i,j loop at half the cost.  No duplicate triplets are produced, so
+        // setFromTriplets() yields the same matrix regardless of list order.
         for (int i = 0; i < nbeta; i++) {
             ydX(i) = y.dot(X.col(i));
-            for (int j = 0; j < nbeta; j++) {
-                double value = X.col(i).dot(X.col(j));
+            {
+                double value = X.col(i).dot(X.col(i));
                 if (value != 0)
+                    tripletList.push_back(T(i,i,value));
+            }
+            for (int j = i + 1; j < nbeta; j++) {
+                double value = X.col(i).dot(X.col(j));
+                if (value != 0) {
                     tripletList.push_back(T(i,j,value));
+                    tripletList.push_back(T(j,i,value));
+                }
                 // sum_non_zeros += value;
             }
             // if ( nbeta == 5582) {
