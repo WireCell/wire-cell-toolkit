@@ -1092,6 +1092,30 @@ commutative multiplies, and no duplicate triplets are produced so
   141→**126 s** (−11%) at 3382→**2173 MB** (−36%); vd-busy
   101→**94 s** (−7%) at 1162→**755 MB** (−35%).
 
+### 28. Bee::Points compact columns; JSON materialized at write
+
+Round-5 heap profiling put the Bee display buffers at 45% (1.35 GB) of
+the hd-max clustering peak: every point cost six `Json::Value` array
+elements (~300 B) and every live Points object (all-apa + per-apa +
+per-face + hooks) held its DOM until the end-of-event zip write.
+`Bee::Points` now stores six plain column vectors (~44 B/point); a new
+virtual `Object::asJson()` materializes the JSON DOM only at
+serialization, and `Bee::Sink::write` uses it instead of deep-copying
+`obj.data()` (this also removes a pre-existing whole-DOM copy per
+write for every object type).  JSON bytes are unchanged: same key set
+(jsoncpp emits object keys sorted), same stored doubles/ints, same RSE
+stamping, and empty Points still emit the six empty arrays.
+
+- A/B snapshot `r6beecol` vs `r6gram`: **178/178 byte-identical, PASS**
+  (the mabc zips are exactly the JSON under test).  Porting bats 5/5
+  ok (covers the qlport/MicroBooNE Bee path); `wcdoctest-util` Bee
+  case passes.
+- Clustering peak RSS: hd-max 3090→**2051 MB** (−34%), vd-busy
+  1405→**1134 MB** (−19%), hd-typ 659→**475 MB** (−28%), vd-typ
+  481→**414 MB** (−14%).  hd-busy flat (its peak sits in the
+  load_grouping/DPC phase where Bee held only 14.5%).  Walls
+  unchanged.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

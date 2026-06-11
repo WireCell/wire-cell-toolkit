@@ -53,6 +53,13 @@ namespace WireCell::Bee {
 
     public:
 
+        virtual ~Object() = default;
+
+        /// Return the full JSON DOM for serialization.  Subclasses that hold
+        /// bulk content outside of m_data (eg Points) override this to
+        /// materialize it on demand.
+        virtual Configuration asJson() const { return m_data; }
+
         /// Return self as a JSON string
         std::string json() const;
 
@@ -63,16 +70,27 @@ namespace WireCell::Bee {
         /// identifies a Bee class of data (eg "clusters").
         std::string name() const { return m_name; }
 
-        // Method to get JSON data
+        // Method to get JSON data.  Note: for Points this holds only the
+        // metadata; the point arrays appear via asJson().
         Configuration& data() { return m_data; }
         const Configuration& data() const { return m_data; }
     };
 
     /// A Bee "object" represents a set of 3D points with attributes.  It maps
     /// to one Bee JSON file.  The "type" is used as the Object name.
+    ///
+    /// Points are held in compact columns; the JSON arrays are materialized
+    /// only by asJson() (ie, at serialization time).  A Json::Value costs
+    /// ~300 B per point vs ~44 B here, and busy events hold millions of
+    /// points across many live Points objects.
     class Points : public Object {
 
+        std::vector<double> m_x, m_y, m_z, m_q;
+        std::vector<int> m_clid, m_real_clid;
+
     public:
+
+        Configuration asJson() const override;
 
         /// Default constructor sets geom and type to empty.  This will not make
         /// Bee happy but it is okay if this Points is an intermediate object
