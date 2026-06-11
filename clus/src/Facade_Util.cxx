@@ -150,23 +150,23 @@ Facade::Simple3DPointCloud::results_type Facade::Simple3DPointCloud::get_closest
 }
 std::pair<size_t, geo_point_t> Facade::Simple3DPointCloud::get_closest_wcpoint(const geo_point_t& p) const {
     // global_counter_get_closest_wcpoint++;
-    const auto knn_res = kd().knn(1, p);
-    if (knn_res.size() != 1) {
+    size_t ind = 0;
+    double metric = 0;
+    if (!kd().knn1(p, ind, metric)) {
         raise<ValueError>("no points found");
     }
-    const auto ind = knn_res[0].first;
     geo_point_t pt = {points()[0][ind], points()[1][ind], points()[2][ind]};
-    // std::cout << "get_closest_wcpoint: " << p << " " << ind << " " << pt << " " << knn_res[0].second << std::endl;
     return std::make_pair(ind, pt);
 }
 
 double Facade::Simple3DPointCloud::get_closest_dis(const geo_point_t& p) const {
-    const auto knn_res = kd().knn(1, p);
-    if (knn_res.size() != 1) {
+    size_t ind = 0;
+    double metric = 0;
+    if (!kd().knn1(p, ind, metric)) {
         raise<ValueError>("no points found");
     }
     // KD-tree returns squared distance, so take sqrt for linear distance
-    return std::sqrt(knn_res[0].second);
+    return std::sqrt(metric);
 }
 
 std::vector<std::pair<size_t, geo_point_t>> Facade::Simple3DPointCloud::get_closest_wcpoints_radius(const geo_point_t& p, const double radius) const{

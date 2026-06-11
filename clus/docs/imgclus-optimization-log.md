@@ -399,6 +399,12 @@ byte-identical). Wall effect is noise-level on the gate run (hd-max
 removes had become cheap; kept as the right primitive for these hot
 paths.
 
+Follow-up in the same vein: `Simple3DPointCloud::get_closest_wcpoint` /
+`get_closest_dis` (8.5% cumulative in the round-2 closing profile, the
+inner queries of `Simple3DPointCloud::get_closest_points`) converted to
+`knn1` as well — **PASS** (snapshot `s3knn1` vs `fastg`), ~1%
+(hd-max 314→311 s, hd-busy 207→204 s).
+
 ### 12. Cluster::sv3d() scoped-view memo (clustering)
 
 A fresh hd-max profile in the final mode (tcmalloc, JSON config, 92446
@@ -437,6 +443,57 @@ still throws at the same `m_anodes.at()` as before).
 **A/B verdict: PASS** (snapshot `fastg` vs `svmemo`, all archives
 byte-identical). Clustering wall: hd-max 330→**314 s**, hd-busy
 222→**207 s**, vd-busy 111→105 s.
+
+### Round-2 closing
+
+Final state of the 6-event set (6-way load; img = snapshot `imgr2`,
+clus = snapshot `fastg`), vs the original `base1` baseline:
+
+| Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+|---|---|---|---|---|
+| hd-typ  027409/0  | 66 → 59 | 703 → 670 | 28 → **20** | 704 → 789 |
+| hd-typ2 027980/3  | 70 → 62 | 691 → 794 | 31 → **22** | 769 → 706 |
+| hd-busy 028084/18 | 656 → **163** | 7180 → **3339** | 338 → **207** | 2833 → 2964 |
+| hd-max  027305/0  | 1028 → **322** | 10113 → **6078** | 530 → **314** | 3284 → 3030 |
+| vd-typ  039349/0  | 140 → 135 (50 with `-P`) | 441 → 486 | 26 → **20** | 745 → 637 |
+| vd-busy 039252/5  | 327 → **264** | 1918 → **1569** | 145 → **105** | 1879 → 1825 |
+
+(Round-2 clustering walls include the entry-8 tcmalloc adoption; round-2
+imaging RSS includes the entry-9 eviction. Clustering outputs since
+entry 8 are deterministic but differ from the original baseline on 3
+PDHD events — see entry 8.)
+
+**Crash-mitigation soak**: 12 repetitions of hd-max clustering in the
+final mode (pure-JSON config, `GOGC=off`, tcmalloc): 12/12 rc=0 and all
+12 `mabc-all-apa.zip` payload-identical. The Go-GC crash vector is
+removed by construction; the soak exercises the formerly crash-prone
+path without incident.
+
+**Fresh hd-max clustering profile after round 2** (78.7k samples,
+~315 s): the chain is now kd-geometry-bound —
+nanoflann searchLevel/findNeighbors ~22-26% (irreducible),
+`is_good_point` 25.3% (mostly `exists_within` kd descent),
+`hough_transform` 13.4% (boost::histogram + trig on cluster points),
+`Simple3DPointCloud::get_closest_points` 10.2%,
+`Find_Closest_Points` 7.6%, DPC `add_points`+`DPCPoint` ctor ~7%.
+Previously-listed targets now retired: `scoped_view` 13.9→1.5%,
+`get_closest_point_blob` 12.7→6.0%.
+
+Remaining (deferred) targets, in payoff order:
+1. **DynamicPointCloud SoA restructure** (~7% now, was ~9-12% pre-
+   tcmalloc): DPCPoint carries 5 nested vectors; flattening to columnar
+   storage is byte-identity-achievable but touches every
+   `make_points_*` builder and ~10 consumer files including the
+   neutrino-porting code — deliberately not attempted at the tail of
+   this round.
+2. `hough_transform` 13.4%: bin accumulation is content-bound; a
+   possible lever is replacing boost::histogram with a flat 2-D array +
+   manual binning (same FP order required for byte-identity).
+3. `Simple3DPointCloud::get_closest_points` (10.2%) — same
+   alternating-projection pattern as `Find_Closest_Points`; would
+   benefit from the same knn1 treatment if its inner queries allocate.
+4. nanoflann kd descent (~25%) is genuine geometry — only algorithmic
+   changes (fewer queries) move it.
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 

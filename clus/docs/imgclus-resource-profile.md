@@ -1,5 +1,25 @@
 # PDHD / PDVD imaging + clustering resource profile
 
+> **2026-06-11 round-2 update:** a second optimization round (entries
+> 7-13 in [imgclus-optimization-log.md](imgclus-optimization-log.md))
+> further cut clustering wall ~30-35% and busy-event imaging RSS ~50%:
+> tcmalloc for clustering (unlocked by fixing a pointer-order-dependent
+> merge — note: clustering outputs since that fix are deterministic but
+> differ from the old baseline on 3 of 6 A/B events by single tie-break
+> merge flips), `Cluster::sv3d` scoped-view memo, `Grouping::fastgeom`
+> dense cache, knn1 allocation-free queries, ProjectionDeghosting
+> projection-cache eviction, and pure-JSON + `GOGC=off` clustering
+> configs (removes the intermittent gojsonnet Go-GC crash; 12/12 hd-max
+> soak clean). Round-2 state (6-way load):
+>
+> | Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+> |---|---|---|---|---|
+> | PDHD 027305/0 (worst) | 322 | 10113 → **6078** | 454 → **314** | 3030 |
+> | PDHD 028084/18 (busy) | 163 | 7180 → **3339** | 298 → **207** | 2964 |
+> | PDVD 039252/5 (busy)  | 264 | 1918 → **1569** | 134 → **105** | 1825 |
+> | PDHD 027409/0 (typ.)  | 59  | 670 | 28 → **20** | 789 |
+> | PDVD 039349/0 (typ.)  | 135 (50 with `-P`) | 486 | 26 → **20** | 637 |
+
 > **2026-06-11 update:** the optimization round documented in
 > [imgclus-optimization-log.md](imgclus-optimization-log.md) has landed
 > (byte-identical outputs, verified per change on a 6-event A/B set plus a
