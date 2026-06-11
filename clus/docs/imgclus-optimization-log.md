@@ -488,42 +488,52 @@ Previously-listed targets now retired: `scoped_view` 13.9→1.5%,
 
 Remaining targets for a round 3, in suggested order (shares from the
 post-round-2 hd-max profile; the chain is now kd-geometry-bound, so
-expect smaller, harder wins than rounds 1-2):
+expect smaller, harder wins than rounds 1-2).  **Status annotations
+added after round 3** — see the Round 3 section for the entries:
 
-1. **Reduce kd query *counts* in the good-point tests** —
-   `is_good_point` is 25.3% (almost all `has_closest_point` →
-   `exists_within` kd descent, called per point per plane per pass under
-   Separate/Deghost). nanoflann itself is irreducible; the lever is
-   issuing fewer queries: (a) memoize `is_good_point` verdicts per
-   (rounded time/wire key) within a pass — many trajectory points map to
-   the same (tind, wind) cell, and the verdict is a pure function of the
-   ctpc cloud, so a cell-keyed cache is byte-identical; (b) hoist the
-   per-plane early-out ordering so the cheapest-to-fail plane is tested
-   first (verdict-identical, order-of-evaluation only). Needs a
-   call-site census first (clus/src/ClusteringFuncsMixins / Grouping).
-2. **`Cluster::hough_transform` 13.4%** (dense hough over cluster
-   points): per point it does `acos`/`atan2` + boost::histogram fill;
-   the candidate lever is a flat 2-D bin array with hand-rolled binning.
-   Byte-identity requires reproducing boost::histogram's exact bin-edge
-   arithmetic and the same accumulation order — doable but must be gated
-   carefully; the trig itself (~3-4%) is content-bound.
+1. **Reduce kd query *counts* in the good-point tests** — ✅ **DONE in
+   round 3 (entry 16)** via the plane short-circuit (the cheap share of
+   this item: with `allowed_bad=1` both decided-early extremes skip the
+   third plane's descent).  hd-max 308→288 s.  The cell-keyed verdict
+   memo variant was NOT implemented — it would need a duplicate-query
+   census first and is only worth a dedicated follow-up if a future
+   profile still shows `is_good_point` dominant.
+   *(original notes)* `is_good_point` is 25.3% (almost all
+   `has_closest_point` → `exists_within` kd descent, called per point
+   per plane per pass under Separate/Deghost); the lever is issuing
+   fewer queries, e.g. memoize verdicts per (rounded time/wire key)
+   within a pass.
+2. **`Cluster::hough_transform` 13.4%** — ✅ **DONE in round 3 (entry
+   17)**: it was already sparse-map (not boost::histogram as written
+   below); round 3 replaced the map with a generation-stamped scratch
+   grid and dropped the intermediate `pts`/`blobs` vectors.  hd-max
+   288→281 s.  The residual cost is the `kd_radius` descent + trig,
+   which is content-bound — retired as a target.
 3. **DynamicPointCloud SoA restructure** (~7% now, was ~9-12% pre-
-   tcmalloc): DPCPoint carries 5 nested vectors; flattening to columnar
-   storage is byte-identity-achievable but touches every
-   `make_points_*` builder and ~10 consumer files including the
-   neutrino-porting code. Biggest single remaining structural item, but
-   do it as a dedicated change with the full gate, not opportunistically.
-4. **Imaging graph-rebuild remainder**: the `copy_graph` sites and a
-   `CS::prune` no-prune fast path (skip the rebuild when nothing is
-   pruned — must verify the copied graph's edge iteration order matches
-   the rebuilt one before claiming byte-identity). Imaging is now
-   ~PD 25% / ChargeSolving 22% by pass; each item is a few %.
-5. **SBND follow-through (no PDHD/PDVD gain, but high value)**: A/B the
-   entry-8 BlobLess fix on SBND — it likely resolves the long-standing
-   `clus_all_apa` run-to-run nondeterminism, and would unlock tcmalloc
-   for SBND clustering the same way.
+   tcmalloc) — ⏳ **OPEN, needs a dedicated session**: DPCPoint carries
+   5 nested vectors; flattening to columnar storage is
+   byte-identity-achievable but touches every `make_points_*` builder
+   and ~10 consumer files including the neutrino-porting code.  Biggest
+   single remaining structural item; do it as a dedicated change with
+   the full gate, not opportunistically.
+4. **Imaging graph-rebuild remainder** — ⏳ **OPEN**: the `copy_graph`
+   sites and a `CS::prune` no-prune fast path (skip the rebuild when
+   nothing is pruned — must verify the copied graph's edge iteration
+   order matches the rebuilt one before claiming byte-identity).
+   Imaging is now ~PD 25% / ChargeSolving 22% by pass; each item is a
+   few %.  Note the round-3 masked-span change (entry 15) already took
+   the large PDVD imaging win, so the residual upside here is smaller
+   than when this list was written.
+5. **SBND follow-through** — 🔶 **PARTIAL (round 3)**: an 8-pass soak of
+   the historically ~50-70%-crashing SBND local-imaging stream under the
+   post-BlobLess code is part of round 3 (see entry 18).  The
+   determinism A/B (BlobLess old-vs-new on SBND outputs) and the SBND
+   tcmalloc enablement decision remain open — they belong with the SBND
+   production-config owner since `sbnd/clus.jsonnet` is shared with
+   LArSoft production.
 6. nanoflann kd descent (~25%) is genuine geometry — only fewer queries
-   (item 1) move it.
+   (item 1) move it.  Still true after round 3; with the short-circuit
+   landed, further reduction needs the memo/census route.
 
 Retired from the previous target list: `scoped_view`/sv3d (13.9→1.5%,
 entry 12), `get_closest_point_blob` (12.7→6.0%, entry 11),
@@ -635,6 +645,24 @@ the materialization of `pts`/`blobs` vectors per call.  Now:
 
 **A/B**: 6-event clustering gate vs the entry-16 snapshot — all archives
 PASS (byte-identical).  Wall: hd-busy 190→**182** s, hd-max 288→**281** s.
+
+### 18. SBND `clus_all_apa` heisenbug: 8-pass soak clean under round-3 code
+
+The SBND local-imaging stream (file 1 of lan-reco2,
+`/home/xqian/tmp/lanrepro2/f1/config.json`) historically crashed with an
+intermittent heap corruption on ~50-70% of runs (2026-06-05 trail in
+`clustering-timing-profile.md` §0).  Re-soaked with the current toolkit
+(BlobLess pointer-order fix + rounds 2-3 changes), 8 sequential passes
+via `/home/xqian/tmp/lanrepro2/soak_r3.sh`: 4 plain glibc + 4 with
+`MALLOC_PERTURB_=85 MALLOC_CHECK_=3` (perturbed free fills surface latent
+corruption a lucky layout hides).  **8/8 rc=0, zero corruption
+signatures**, stdout structure identical to the known-clean June-5 pass.
+At the historical 50% floor, 8 clean runs has p≈0.4% — the bug no longer
+reproduces under current code.  Which change removed it cannot be
+pinpointed (the BlobLess re-keying also shifts allocation patterns);
+operationally the SBND local-imaging benchmarking path is unblocked.
+Bonus datum: each pass now takes ~260 s vs ~630 s on June 5 — the round
+2-3 clustering speedups carry over to SBND unchanged.
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
