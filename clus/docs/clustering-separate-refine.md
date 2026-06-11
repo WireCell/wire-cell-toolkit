@@ -1,4 +1,4 @@
-# Post-separation refinement: collinear recovery, repartition, band merge-back, re-carve
+# Post-separation refinement: collinear recovery/rejoin, repartition, band merge-back, re-carve, slab split
 
 Knob-gated refinement steps in `ClusteringSeparate`
 (`clus/src/clustering_separate.cxx`), applied to the "family" of clusters
@@ -8,12 +8,15 @@ configs are bit-identical); PDVD and PDHD enable all of them.
 ```jsonnet
 cm.separate(use_ctpc=true, max_hull_points=1000000,
             collinear_recover=true, collinear_interior=true,
-            track_repartition=true, band_merge_back=true, band_recarve=true)
+            collinear_member_merge=true,
+            track_repartition=true, band_merge_back=true, band_recarve=true,
+            iso_slab_split=true)
 ```
 
 Run order within one family: `collinear_recover` (+`collinear_interior`) →
-`track_repartition` → `band_merge_back` → `band_recarve` →
-`track_recarve` (the last in `clustering-separate-fv.md`).
+`collinear_member_merge` → `track_repartition` → `band_merge_back` →
+`band_recarve` → `track_recarve` (in `clustering-separate-fv.md`) →
+`iso_slab_split`.
 
 ## Motivation (PDVD run 39324 evt 0, drift group 4567)
 
@@ -86,6 +89,35 @@ Donors already claimed by the tip walk are skipped.  The OFF-check (knob
 absent) is byte-identical by construction and was verified empirically
 (old-vs-new binary content-identical mabc zips on 27409 evt 40908).
 
+## Step A1b — `collinear_member_merge` (merge_collinear_members)
+
+The carve can cut ONE straight cosmic into two (or more) long thin pieces
+that nothing rejoins: `collinear_recover` claims *blobs* (a ≥50 cm sibling is
+never an interior-reclaim donor, and the 4 cm tip-walk gate loses a
+slightly-bent cosmic within a couple of metres), and the downstream
+`connect1` does not always reach across (PDHD 27409 evt 40924: two pieces of
+one cosmic — axes 6.5° apart, *touching* at 0.3 cm — stayed two clusters).
+Worse, the leftover fragments around such breaks can mislead `connect1` into
+merging two *different* cosmics (evt 40920's over-merge disappeared once the
+fragments were rejoined into their proper tracks first).
+
+Merge a pair of family members when ALL hold (iterated until no pair merges —
+a track cut into three needs two rounds):
+
+- both long (≥100 cm) and thin (pca eval1/eval0 ≤ 0.05), touching (≤5 cm),
+- main-axis angle ≤ 10°, each centroid ≤ 15 cm perpendicular from the OTHER's
+  pca main line,
+- the union (npoints-weighted blob centers) is still one thin straight track:
+  perp rms about its own 3D principal line ≤ **7 cm** and eigenvalue ratio
+  ≤ 0.010.
+
+Measured operating point: across the full PDHD+PDVD regression suite every
+genuine one-cosmic rejoin reads union rms ≤ 5.7 cm (12 firings, angles up to
+8.9°); the one pair that must NOT rejoin — two fork-adjacent (kinked) pieces
+in 27409 evt 40904, whose rejoin caused the downstream `connect1` to fuse the
+two full fork prongs — reads 8.1 cm.  The 7 cm gate splits the two
+populations with margin on both sides.
+
 ## Step A2 — `track_repartition` (repartition_crossing_tracks)
 
 At a crossing, the carve + `Separate_2`'s 5 cm relink can fuse a mid-track
@@ -139,17 +171,27 @@ characterize each member by its signed transverse offset mean μ and rms σ:
   genuine bands crossing as an X read ~2.0, the worst hatched single band
   1.48.
 - **anchor grouping**: anchors single-link iff |Δμ| < 85 cm AND
-  |Δμ| < 1.7·(σᵢ+σⱼ).  Hatched-piece anchor gaps measure ≤67 cm; the two
-  genuine side-by-side parallel bands of evt 339850 (which touch at 0.8 cm and
-  must stay TWO clusters) sit 130 cm / 2.27·(σᵢ+σⱼ) apart.  Plain
-  single-linkage over all pieces is the wrong shape: overlap-region debris
-  chains the two parallel bands together (this re-merged 339850 in the first
-  iteration).
-- **debris assignment**: each non-anchor joins the nearest anchor by |Δμ|
-  (absolute gate only — debris σ is unreliable); too-far debris stays its own
-  cluster.
+  |Δμ| < 1.7·(σᵢ+σⱼ) AND |Δx̄| < 20 cm.  Hatched-piece anchor gaps measure
+  ≤67 cm; the two genuine side-by-side parallel bands of evt 339850 (which
+  touch at 0.8 cm and must stay TWO clusters) sit 130 cm / 2.27·(σᵢ+σⱼ)
+  apart.  Plain single-linkage over all pieces is the wrong shape:
+  overlap-region debris chains the two parallel bands together (this
+  re-merged 339850 in the first iteration).  The **x-slab gate** (|Δx̄|,
+  npoints-weighted blob-center x means) exists because the y-z fit is
+  x-blind: pieces of ONE hatched band share its ~12 cm drift-time slab, while
+  two bands whose y-z projections overlap can sit 50 cm apart in x (39324
+  evt 339890) and must never link.
+- **debris assignment**: each non-anchor joins the nearest *same-slab* anchor
+  by |Δμ| (absolute gate only — debris σ is unreliable); too-far debris stays
+  its own cluster.
+- **union-rms cap**: before mutating, each multi-member group's own y-z line
+  is refit and its npoints-weighted transverse rms must stay band-sized
+  (≤ 50 cm).  A genuine re-assembled band reads 17–43 cm across the suite;
+  two distinct same-slab complexes that the μ-gates wrongly grouped read
+  57–64 cm (27409 evt 40900 — a regression caught in round 5 — and 39324
+  evt 339890).  Rejected groups print `rejected group of N (union rms ...)`.
 
-Each multi-member group merges into its lowest-family-index member
+Each surviving multi-member group merges into its lowest-family-index member
 (`take_children` + the scope round-trip cache clear).
 
 **Band interior steal** (same knob): a chunk of a band can stay FUSED inside a
@@ -160,7 +202,12 @@ For each band-like member B and each long (>100 cm) non-band sibling H: take
 H's blobs sitting >15 cm off H's own main line, seed with those touching B
 (<5 cm), grow within the off-line set (15 cm radius), and move the grown run
 into B when its spatial extent is ≥15 cm.  Blobs on H's line — including the
-genuine crossing region — never move.
+genuine crossing region — never move.  **x-gate** (round 5): the selected run
+must live in B's x-slab — run x-extent ≤ 20 cm AND run x-mean within 20 cm of
+B's x-mean.  A genuinely fused band chunk is isochronous (x-narrow); a
+drift-track run is not (39324 evt 339990: a 193 cm run spanning 66 cm in x
+was a real drift track, wrongly stolen into the band — both of that event's
+steals are now rejected and the track stays whole).
 
 ## Step B — `band_recarve` (recarve_two_bands)
 
@@ -190,6 +237,52 @@ during iteration; or the final npoints-weighted minority side is below **10%**
 of the pool (degeneracy guard, checked *before* any mutation).  On success the
 pooled members are merged into a fresh cluster and re-separated into exactly
 two clusters by nearer-line blob assignment.
+
+## Step C — `iso_slab_split` (split_iso_slabs)
+
+An isochronous band lives at ONE drift time — a narrow, dense x-slab — while
+a drift-direction track spans x and can touch several bands.  The final
+`Separate_2` (pure 5 cm connectivity) then chains band–track–band into one
+cluster FOREVER: every y-z-projected mechanism above is x-blind, and a drift
+track nearly vanishes in the y-z projection.  PDVD 39324 evt 339890 group4567
+(the round-4 "known residual"): a 44.7k-pt member holding TWO bands at
+x-slabs 50 cm apart (24k pts at x∈[59,67], 14k at x∈[115,123]) plus three
+drift tracks; evt 339990: one band plus a drift track fused by the carve
+itself (not by the steal — verified by rejecting the steal and watching the
+fusion persist).
+
+Partition each family member (≥100 cm, ≥20 blobs, ≥8 x-bins of extent) by
+x-slab occupancy:
+
+1. **slabs**: weighted blob-center x histogram (4 cm bins); a slab is a
+   contiguous run of bins each holding > 5× the uniform density, total width
+   ≤ 25 cm, ≥ 20% of member npoints, spanning ≥ 60 cm in (y,z) (band-sized).
+2. **tracks**: out-of-slab blobs form connected components (10 cm);
+   components with 3D extent ≥ 30 cm AND x-extent ≥ 20 cm (the drift
+   signature — band shoulders just outside the slab core read ≤ 12 cm in x)
+   seed tracks; collinear seeds (angle ≤ 15°, mutual line offset ≤ 10 cm)
+   join — a track pierced by a slab reappears beyond it.
+3. **assignment**: track-component blobs keep their track; any other blob
+   within 6 cm of a track line joins that track (the track's continuation
+   THROUGH a band); remaining in-slab blobs form one band cluster per slab;
+   leftover debris joins the nearest slab in x.
+
+Fires only when ≥1 valid slab AND ≥1 track exist, so a pure band, a pure
+track, an isochronous *track* (a slab with no crossers) and a band plus
+dribble are all structural no-ops — verified across the full regression
+suite, where it fires exactly five times: 39324 evt 339890 (4 tracks +
+2 bands — all five user-flagged structures land in distinct clusters), evt
+339990 (1+1), evt 340010 (1+1), 27409 evt 40900 (1+1, peeling a drift track
+off the band complex) and 27380 evt 1 (1+1).
+
+One systematic side effect, by design of the downstream chain: a structure
+freed from a big track cluster is now judged on its own by the group-stage
+deghost/isolated passes, where previously it hid inside the big cluster.
+Display point counts can therefore change beyond the immediate split
+(largest observed: 27380 evt 1 drops a 5.5k-pt single-drift-time sheet
+spanning the full y-z face — the classic ghost signature; 27409 evt 40920's
+event gains back 1.2k points that used to be dropped).  On the user-scanned
+runs the net deltas are ≤0.2%.
 
 ## Ordering and determinism
 

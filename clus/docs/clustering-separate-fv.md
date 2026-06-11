@@ -156,20 +156,24 @@ complex = exactly 2 clusters, vertical track whole) still pass.
 ```jsonnet
 cm.separate(use_ctpc=true, max_hull_points=1000000,
             collinear_recover=true, collinear_interior=true,
+            collinear_member_merge=true,
             track_repartition=true, band_merge_back=true,
             band_recarve=true, drift_side_fv_x=true,
             far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm,
-            track_recarve=true, dec1_guard_main_angle=45),
+            track_recarve=true, dec1_guard_main_angle=45,
+            iso_slab_split=true),
 ```
 
 (`collinear_interior` — interior fragment reclaim, added when the DNN-SP
 imaging inputs exposed a mid-track bite on 27409 evt 40900;
 `track_repartition` / `band_merge_back` — crossing-track segment swap fix and
-hatched-band re-assembly, added for the PDVD 39324 over-separation round; see
-`clustering-separate-refine.md`.  `max_hull_points` was raised 100k → 1M after
-a 102,129-pt giant in 39324 evt 339890 slipped past the 100k cap and silently
-skipped separation — the same silent-skip failure the knob was introduced
-for.)
+hatched-band re-assembly, added for the PDVD 39324 over-separation round;
+`collinear_member_merge` / `iso_slab_split` — rejoin a carve-cut straight
+cosmic and x-slab-split mixed band+drift-track clusters, added in round 5;
+see `clustering-separate-refine.md`.  `max_hull_points` was raised 100k → 1M
+after a 102,129-pt giant in 39324 evt 339890 slipped past the 100k cap and
+silently skipped separation — the same silent-skip failure the knob was
+introduced for.)
 
 All new keys use the `[if flag/value]` omit-when-default pattern: existing
 configs are bit-identical (verified: new binary + old configs reproduce

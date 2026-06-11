@@ -370,10 +370,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // overclusters be considered for separation.
         separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false,
                  collinear_recover=false, collinear_interior=false,
+                 collinear_member_merge=false,
                  track_repartition=false, band_merge_back=false, band_recarve=false,
                  drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
-                 dec1_guard_main_angle=null) :: {
+                 dec1_guard_main_angle=null, iso_slab_split=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
@@ -391,6 +392,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // of one track into the other's cluster; reclaim it.  Only effective
                 // when collinear_recover is also on.  Key omitted when false.
                 [if collinear_interior then 'collinear_interior']: collinear_interior,
+                // Rejoin a single straight track the carve cut into long thin
+                // touching collinear pieces.  Key omitted when false.
+                [if collinear_member_merge then 'collinear_member_merge']: collinear_member_merge,
                 // Pairwise k=2 3D repartition of two crossing thin-track family
                 // members: fixes a mid-track segment of one track fused into the
                 // other's cluster at the crossing.  Key omitted when false.
@@ -424,6 +428,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // (default) keeps the legacy unconditional guard, which wide
                 // isochronous/multi-track complexes trip by accident.
                 [if dec1_guard_main_angle != null then 'dec1_guard_main_angle']: dec1_guard_main_angle,
+                // x-slab-aware split of a member mixing isochronous bands (one
+                // dense narrow x-slab each) with drift-direction tracks that
+                // chain them together under pure connectivity.  Key omitted
+                // when false: bit-identical.
+                [if iso_slab_split then 'iso_slab_split']: iso_slab_split,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
