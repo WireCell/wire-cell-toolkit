@@ -113,8 +113,13 @@ local img_maker = function(nthreshold=[3.6, 3.6, 3.6], output_dir='') {
                 charge_tag: "gauss%d" % anode.data.ident,
                 error_tag: "gauss_error%d" % anode.data.ident,
                 anode: wc.tn(anode),
+                // Both 0 = MaskSlice auto-derives the window from the input
+                // frame.  PDVD readout length varies by run (6400 / 8000 /
+                // 10000 ticks); a hard max_tbin=8000 dropped the last 2000
+                // ticks of 10000-tick runs (see
+                // pdvd/docs/sp-img-readout-window-truncation.md).
                 min_tbin: 0,
-                max_tbin: 8000,
+                max_tbin: 0,
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,

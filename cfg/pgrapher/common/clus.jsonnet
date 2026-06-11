@@ -368,7 +368,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // (Cluster::get_hull). -1 (default) uses Constants::MaxHullPoints (10000),
         // i.e. bit-identical to prior behavior; raise it to let large full-detector
         // overclusters be considered for separation.
-        separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false) :: {
+        separate(name="", use_ctpc=true, max_hull_points=-1, sbnd_boundary_tag=false,
+                 collinear_recover=false, collinear_interior=false,
+                 collinear_member_merge=false,
+                 track_repartition=false, band_merge_back=false, band_recarve=false,
+                 drift_side_fv_x=false,
+                 far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
+                 dec1_guard_main_angle=null, iso_slab_split=false, tag_family=false,
+                 collinear_global_merge=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
@@ -377,6 +384,64 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // SBND-only two-track upstream-boundary tag; key omitted when false
                 // so existing (non-SBND) configs stay bit-identical.
                 [if sbnd_boundary_tag then 'sbnd_boundary_tag']: sbnd_boundary_tag,
+                // Post-separation refinements (PDVD/PDHD): recover stranded
+                // collinear track tips / re-carve two crossing isochronous bands.
+                // Keys omitted when false so existing configs stay bit-identical.
+                [if collinear_recover then 'collinear_recover']: collinear_recover,
+                // Interior-bite reclaim extension of collinear_recover: at a track
+                // crossing, Separate_2's 5 cm relink can absorb an interior segment
+                // of one track into the other's cluster; reclaim it.  Only effective
+                // when collinear_recover is also on.  Key omitted when false.
+                [if collinear_interior then 'collinear_interior']: collinear_interior,
+                // Rejoin a single straight track the carve cut into long thin
+                // touching collinear pieces.  Key omitted when false.
+                [if collinear_member_merge then 'collinear_member_merge']: collinear_member_merge,
+                // Pairwise k=2 3D repartition of two crossing thin-track family
+                // members: fixes a mid-track segment of one track fused into the
+                // other's cluster at the crossing.  Key omitted when false.
+                [if track_repartition then 'track_repartition']: track_repartition,
+                // Re-assemble a single isochronous band that the carve hatched
+                // into interleaved pieces (keeps distinct parallel and genuinely
+                // crossing bands apart).  Key omitted when false.
+                [if band_merge_back then 'band_merge_back']: band_merge_back,
+                [if band_recarve then 'band_recarve']: band_recarve,
+                // Drift-side FV x-range for common-face multi-APA scopes (drift
+                // groups): the out-of-time apparent-x test uses the group's drift
+                // side instead of the cryostat overall x.  Key omitted when false
+                // so existing configs stay bit-identical.
+                [if drift_side_fv_x then 'drift_side_fv_x']: drift_side_fv_x,
+                // Drift-x deviation promoting a boundary point to a "far" point in
+                // JudgeSeparateDec_2's two-endpoint test.  null (default) keeps the
+                // prototype-exact 140 cm (effectively dead); PDHD/PDVD set the
+                // evidently intended 14 cm.  Key omitted when null so existing
+                // configs stay bit-identical.
+                [if far_point_x_cut != null then 'far_point_x_cut']: far_point_x_cut,
+                // Midpoint-to-cluster cap in the same far-point test.  null
+                // (default) keeps the prototype-exact 25 cm; raise it so two
+                // diverging/forking tracks keep their far-point evidence.
+                [if far_point_mid_dis != null then 'far_point_mid_dis']: far_point_mid_dis,
+                // Post-separation k=2 3D-line self-split of a member holding two
+                // long crossing track arms (an "X" that pure connectivity cannot
+                // hold apart).  Key omitted when false: bit-identical.
+                [if track_recarve then 'track_recarve']: track_recarve,
+                // Dec_1 drift-aligned protection guard applies only when the
+                // cluster MAIN axis is within this angle (deg) of drift.  null
+                // (default) keeps the legacy unconditional guard, which wide
+                // isochronous/multi-track complexes trip by accident.
+                [if dec1_guard_main_angle != null then 'dec1_guard_main_angle']: dec1_guard_main_angle,
+                // x-slab-aware split of a member mixing isochronous bands (one
+                // dense narrow x-slab each) with drift-direction tracks that
+                // chain them together under pure connectivity.  Key omitted
+                // when false: bit-identical.
+                [if iso_slab_split then 'iso_slab_split']: iso_slab_split,
+                // Stamp final family members with a "sep_family" cluster scalar
+                // so a later same-stage pass (connect1 respect_separate_family)
+                // can decline to undo the split.  Key omitted when false.
+                [if tag_family then 'tag_family']: tag_family,
+                // Grouping-wide end-to-end stitch of two long thin collinear
+                // clusters (same gates as collinear_member_merge, applied
+                // beyond one separation family).  Key omitted when false.
+                [if collinear_global_merge then 'collinear_global_merge']: collinear_global_merge,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
@@ -385,23 +450,39 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // actual cluster-to-cluster closest-point distance for the isochronous-relaxed
         // connection branch, which otherwise merges two separated isochronous tracks on
         // the (misleadingly small) infinite-line distance.  SBND sets a finite value.
-        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, iso_max_dis=null) :: {
+        // allow_mixed_faces (default null == same-face required): waive the same-face
+        // requirement of the multi-wpid drift-group validation when running at the
+        // per-drift-group scope (PDVD: both faces of a CRP share one drift volume).
+        // respect_separate_family (default false == byte-identical): refuse to
+        // reconnect two clusters that a same-stage separate(tag_family=true)
+        // deliberately split apart.
+        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, iso_max_dis=null, allow_mixed_faces=null, respect_separate_family=false) :: {
             type: "ClusteringConnect1",
             name: prefix+name,
             data: {
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
                 [if iso_max_dis != null then 'iso_max_dis']: iso_max_dis,
+                [if allow_mixed_faces != null then 'allow_mixed_faces']: allow_mixed_faces,
+                [if respect_separate_family then 'respect_separate_family']: respect_separate_family,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
 
-        deghost(name="", use_ctpc=true, length_cut=0) :: {
+        // allow_mixed_faces: as for connect1() above.
+        // empty_view_unique (default null/OFF == byte-identical): group-stage
+        // semantics for empty per-(face,apa) 2D indices — a point whose view holds
+        // no other cluster counts as unique evidence instead of a bogus overlap
+        // (else the first cluster of each not-yet-seeded volume is wrongly
+        // destroyed).  Set true on per-drift-group instances.
+        deghost(name="", use_ctpc=true, length_cut=0, allow_mixed_faces=null, empty_view_unique=null) :: {
             type: "ClusteringDeghost",
             name: prefix+name,
             data: {
                 use_ctpc: use_ctpc,
                 length_cut: length_cut,
+                [if allow_mixed_faces != null then 'allow_mixed_faces']: allow_mixed_faces,
+                [if empty_view_unique != null then 'empty_view_unique']: empty_view_unique,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
@@ -453,13 +534,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // protect_iso_band (default false == byte-identical): decline to merge
+        // an isochronous band (narrow drift slab, large y-z footprint) with a
+        // non-band cluster unless the two genuinely touch — the extended-cloud
+        // prolongations otherwise bridge tens of cm.
+        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns, protect_iso_band=false) :: {
             type: "ClusteringNeutrino",
             name: prefix+name,
             data: {
                 num_try: num_try,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
+                [if protect_iso_band then 'protect_iso_band']: protect_iso_band,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },

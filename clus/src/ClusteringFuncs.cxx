@@ -45,6 +45,36 @@ WireCell::Clus::Facade::extract_geometry_params(
     return std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
 }
 
+void WireCell::Clus::Facade::validate_drift_group(
+    const std::set<WirePlaneId>& wpids,
+    const IDetectorVolumes::pointer dv,
+    bool allow_mixed_faces,
+    const std::string& who)
+{
+    if (wpids.empty()) return;
+
+    auto wit = wpids.begin();
+    const int common_face = wit->face();
+    double FV_xmin = dv->metadata(*wit)["FV_xmin"].asDouble();
+    double FV_xmax = dv->metadata(*wit)["FV_xmax"].asDouble();
+    double FV_xmin_margin = dv->metadata(*wit)["FV_xmin_margin"].asDouble();
+    double FV_xmax_margin = dv->metadata(*wit)["FV_xmax_margin"].asDouble();
+
+    for (++wit; wit != wpids.end(); ++wit) {
+        const auto md = dv->metadata(*wit);
+        if ((!allow_mixed_faces && wit->face() != common_face) ||
+            md["FV_xmin"].asDouble() != FV_xmin || md["FV_xmax"].asDouble() != FV_xmax ||
+            md["FV_xmin_margin"].asDouble() != FV_xmin_margin ||
+            md["FV_xmax_margin"].asDouble() != FV_xmax_margin) {
+            for (const auto& wpid : wpids) {
+                std::cout << who << " wpid: " << wpid.name() << std::endl;
+            }
+            raise<ValueError>("%s: grouping has %d wpids with mixed faces or differing FV x metadata",
+                              who, wpids.size());
+        }
+    }
+}
+
 std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,

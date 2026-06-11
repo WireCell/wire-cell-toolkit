@@ -47,9 +47,11 @@ examine_bundles (use_flash_t0)
 
 - `switch_scope` (`clustering_switch_scope.cxx`) rewrites both TPCs into one common
   T0-corrected frame, so a cathode-crosser's two halves meet near x≈0. The frame is
-  `common_corr_coords` = `{x_t0cor, y_cor, z_cor}` with `pos_offset_on=true` (SBND default):
-  the rigid per-TPC transverse correction (±(−0.11,+0.67) cm, from
-  `sbnd_xin/docs/cathode-crossing-diagnostic.md`) is **already applied** in this frame.
+  `common_corr_coords` = `{x_t0cor, y_cor, z_cor}` when `pos_offset_on` is true (i.e.
+  `reality='data'`; the offset is a data-only calibration, OFF for MC — see
+  `match/docs/cathode-offset-correction.md`): the rigid per-TPC transverse correction
+  (±(−0.11,+0.67) cm, from `sbnd_xin/docs/cathode-crossing-diagnostic.md`) is **already applied**
+  in this data frame. For MC the frame is the uncorrected `{x_t0cor, y, z}`.
 - The merge passes (`extend`/`regular`/`parallel_prolong`/`close`/`extend_loop`) each build a
   graph: for every pair of clusters **in the same flash-T0 group** (`assign_flash_t0_groups`,
   ±80 ns) and above an internal length cut (15 cm), a geometric test decides an edge, then

@@ -146,6 +146,20 @@ namespace WireCell::Clus::Facade {
         const Grouping& grouping,
         IDetectorVolumes::pointer dv);
 
+    /**
+     * Validate that a set of wpids forms ONE drift volume: x-aligned APAs
+     * (identical drift-x fiducial metadata) viewed through the SAME face.
+     * allow_mixed_faces waives the same-face requirement (NOT the identical
+     * FV_x one) for detectors where both faces of an anode share one drift
+     * volume (PDVD: faces = y-halves of a CRP).  Raises ValueError naming
+     * `who` on violation.
+     */
+    void validate_drift_group(
+        const std::set<WirePlaneId>& wpids,
+        IDetectorVolumes::pointer dv,
+        bool allow_mixed_faces,
+        const std::string& who);
+
     std::vector<std::pair<geo_point_t, const Blob*>> get_strategic_points(const Cluster& cluster);
 
     //helper function ..
@@ -184,21 +198,48 @@ namespace WireCell::Clus::Facade {
     //     configured per-(APA,face) FV blocks (full APA even if a face is quiet).
     // Any FV field missing from a per-face block falls back to the "overall" value.
     // vertical_dir / beam_dir are detector-global and are always read from "overall".
-    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv);
+    //
+    // common_face_x (default false, bit-identical): in the multi-APA branch, when
+    // ALL configured faces carry identical FV_xmin/FV_xmax metadata (a drift-side
+    // group: several APAs imaging one common drift side, e.g. PDHD group02 or a
+    // PDVD CRP drift group), use that common x-range (and its margins) instead of
+    // the cryostat overall x.  This makes the no-T0 "out-of-time" apparent-x test
+    // reflect the group's drift volume rather than the union of both drift sides.
+    ScopeFV select_scope_fv(IDetectorVolumes::pointer dv, bool common_face_x = false);
 
     // These Judge*() functions are used by multiple clustering methods.  They
     // are defined in clustering_separate.cxx.
 
     // time_slice_length is length span for a slice
-    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length);
+    // guard_main_angle (deg): the long/thin/drift-aligned protection guard
+    // (toolkit addition e28db401; not in the prototype) additionally requires
+    // the cluster MAIN axis within this angle of the drift axis.  Default <0
+    // keeps the guard unconditional (bit-identical).  The guard's angle1 tests
+    // the 2nd axis against perp-to-drift, which wide isochronous complexes
+    // satisfy trivially -- without the main-axis requirement it vetoes exactly
+    // the multi-track over-clusters separation exists for.
+    bool JudgeSeparateDec_1(const Cluster* cluster, const geo_point_t& drift_dir, const double length,
+                            double guard_main_angle = -1);
     /// @attention contains hard-coded distance cuts
     /// @param boundary_points return the boundary points
     /// @param independent_points return the independent points
     /// @param fv scope-appropriate fiducial volume (see select_scope_fv)
     /// @param max_hull_points cap passed to Cluster::get_hull (<0 = use Constants::MaxHullPoints)
+    /// @param far_point_x_cut drift-x deviation that promotes a boundary point to a
+    ///        "far" point in the two-endpoint test.  Default 140 cm reproduces the
+    ///        prototype expression `fabs(dir_3.x()/units::cm) > 14*units::cm` (the
+    ///        cm-number compared against 14*cm internal = 140), which is effectively
+    ///        dead; detectors may set the evidently intended 14 cm.
+    /// @param far_point_mid_dis cap on the distance from the midpoint of the two
+    ///        endpoints to the cluster, above which far points are discarded
+    ///        (default 25 cm = prototype).  Two forking/diverging tracks can hold
+    ///        their endpoint-midpoint in empty space between the prongs; detectors
+    ///        may raise it to keep the far-point evidence for such topologies.
     bool JudgeSeparateDec_2(const Cluster* cluster, const geo_point_t& drift_dir,
                                std::vector<geo_point_t>& boundary_points, std::vector<geo_point_t>& independent_points,
-                               const double cluster_length, const ScopeFV& fv, int max_hull_points = -1);
+                               const double cluster_length, const ScopeFV& fv, int max_hull_points = -1,
+                               double far_point_x_cut = 140 * units::cm,
+                               double far_point_mid_dis = 25 * units::cm);
     
 
 

@@ -243,21 +243,29 @@ face, apa)` (L273, 286, 332, 353, 386, 400). Dead-wire lookups use
 `af_dead_u_index.at(test_wpid.apa()).at(test_wpid.face())` (L261, 306, 375).
 Multi-face within one APA is handled correctly.
 
-### 7-C. Multi-APA guard
+### 7-C. Multi-APA guard — relaxed to drift-group validation (2026-06)
 
-The function enforces `apas.size() == 1` at L172-174 with `raise<ValueError>`.
-The module comment at L118 says "This can handle entire APA (including all
-faces)" but does not mention the multi-APA rejection. This is intentional:
-the algorithm is applied globally over one APA's live clusters at a time.
-Since `SBND` (and UBoone) have one APA, this is not limiting now.
+The original `apas.size() == 1` hard raise is now a conditional validation:
+multi-APA groupings are accepted when the LIVE wpids form one drift volume —
+`validate_drift_group()` (identical FV_x metadata; same face unless the
+`allow_mixed_faces` knob, true for PDVD whose anode faces are y-halves of one
+CRP).  Single-APA groupings keep the legacy unvalidated acceptance, so all
+existing stage-2 instances are untouched.  NB the validation deliberately uses
+`live_grouping.wpids()`, not `dv_wpids()`: a face-restricted drift-group
+DetectorVolumes still reports both faces of its anodes, whose opposite faces
+legitimately carry different FV_x.
 
-The `visit()` method (L96-99) does not loop over APAs — it passes the whole
-`live` grouping. If a future detector provides multi-APA groupings to this
-function, the guard will throw. The needed change would be either:
-(a) iterate per-APA in `visit()`, or (b) remove the guard after verifying
-cross-APA cluster matching is safe.
-
-**Updated comment in code** to clarify the single-APA restriction.
+This enables the per-drift-group (stage-3) deghost that PDHD/PDVD now run
+after `separate` + `connect1`.  One semantic addition was REQUIRED at that
+scope, gated by the default-OFF `empty_view_unique` knob: an empty
+per-(plane,face,apa) 2D index returns distance −1, which satisfies the
+`<= dis_cut` comparisons and tallies a bogus `nullptr` "overlap" — without the
+knob, the first (longest) cluster of every not-yet-seeded volume counts zero
+unique points and is wrongly destroyed.  With `empty_view_unique=true` such a
+point counts as unique evidence, the longest cluster per volume self-seeds the
+clouds, and the volume thereafter behaves exactly like the single-APA case.
+Default OFF is byte-identical (verified SBND mc+data, PDHD, PDVD).  See
+`clus/docs/clustering-group-connect1-deghost.md`.
 
 ### 7-D. `merge_clusters` is APA-agnostic
 

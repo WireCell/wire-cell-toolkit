@@ -51,11 +51,42 @@ function(params, tools, override = {}) {
                // false to recover the pre-tune APA0 W SP behaviour.
                // See sp-apa0-plane2.md §7.
                apa0_w_roi_tune=true,
+               // Prolonged-W-signal fix, part 1: MAD-based cal_RMS in ROI
+               // finding (OmnibusSigProc roi_mad_rms; C++ default false).
+               // A strong track-along-drift W signal occupying >~16% of the
+               // waveform corrupts the legacy (16,50,84)-percentile RMS
+               // estimate (~10x inflation measured on run 027409 evts
+               // 40920/40924: rms 1594/1769 vs 170/186 signal-free), pushing
+               // the tight-ROI threshold (5*rms+1) above the signal's own
+               // median so only the tallest dE/dx peaks form ROIs and the
+               // SP output fragments.  MAD stays robust to 50% occupancy.
+               // Applies to all planes/APAs (the estimator is generic).
+               // Set false for bit-identical legacy thresholds.  See
+               // pdhd/docs/sp-w-collection-roi-break.md.
+               roi_mad_rms=true,
+               // Prolonged-W-signal fix, part 2: APA1-3 W-plane (collection
+               // -path) BreakROI disable.  Default true: with part 1 in
+               // place the long multi-peak W ROI survives to refinement,
+               // where BreakROI would subtract a valley-to-valley linear
+               // "baseline" that is actually real track charge (collection
+               // decon has no LF filter, so its baseline needs no such fix),
+               // re-fragmenting the signal into per-peak islands.  Disabling
+               // BreakROI on slot 2 (W/collection) keeps the long ROI whole;
+               // U and V keep the production 2 break loops.  Set false to
+               // recover the pre-tune behaviour (key omitted => scalar
+               // r_break_roi_loop applies => byte-identical).  APA0 is
+               // excluded (its swapped slot order is handled by
+               // apa0_w_roi_tune above, which already disables BreakROI on
+               // its W).  See pdhd/docs/sp-w-collection-roi-break.md.
+               w_col_break_roi_tune=true,
                dump_rawdecon=false)::
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
                         else if anode.data.ident == 0 then [0] else [0, 1];
     // Gate the tuned induction-refinement knobs to APA0 only.
     local roi_tune = apa0_w_roi_tune && anode.data.ident == 0;
+    // Gate the collection-path BreakROI disable to APA1-3 (standard
+    // [U, V, W] slot order; W = slot 2).
+    local col_break_tune = w_col_break_roi_tune && anode.data.ident != 0;
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -80,6 +111,9 @@ function(params, tools, override = {}) {
       ADC_mV: ADC_mV_ratio, // 4096 / (1400.0 * wc.mV), 
       troi_col_th_factor: 5.0,  // default 5
       troi_ind_th_factor: 3.0,  // default 3
+      // MAD-based cal_RMS (see roi_mad_rms arg above); C++ default false.
+      // Key omitted when off => byte-identical pre-fix config.
+      [if roi_mad_rms then 'roi_mad_rms']: true,
       lroi_rebin: 6, // default 6
       lroi_th_factor: 3.5, // default 3.5
       lroi_th_factor1: 0.7, // default 0.7
@@ -94,6 +128,9 @@ function(params, tools, override = {}) {
       [if roi_tune then 'r_th_factor_planes']: [2.5, 1.5, 2.5],  // W: 2.5 -> 1.5
       [if roi_tune then 'r_pad_planes']: [5, 20, 5],             // W: 5 -> 20
       [if roi_tune then 'r_break_roi_loop_planes']: [2, 0, 2],   // W: 2 -> 0 (no BreakROI)
+      // APA1-3 collection-path BreakROI disable ([U, V, W] slot order); see
+      // w_col_break_roi_tune above.  Mutually exclusive with roi_tune (APA0).
+      [if col_break_tune then 'r_break_roi_loop_planes']: [2, 2, 0],  // W: 2 -> 0 (no BreakROI)
       r_fake_signal_low_th: 375,  // default 500
       r_fake_signal_high_th: 750,  // default 1000
       r_fake_signal_low_th_ind_factor: 1.0,  // default 1

@@ -45,10 +45,10 @@ local dvm = {
     overall: {
         FV_xmin: -3579.85 * wc.mm,
         FV_xmax: 3579.85 * wc.mm,
-        FV_ymin: 76.1 * wc.mm,
-        FV_ymax: 6060.0 * wc.mm,
-        FV_zmin: 2.34345 * wc.mm,
-        FV_zmax: 4622.97 * wc.mm,
+        FV_ymin: 226.1 * wc.mm,    // active 76.1 mm + 15 cm inset (see clus/docs/clustering-separate-fv.md)
+        FV_ymax: 5910.0 * wc.mm,   // active 6060.0 mm - 15 cm inset
+        FV_zmin: 152.34345 * wc.mm, // active 2.34345 mm + 15 cm inset
+        FV_zmax: 4472.97 * wc.mm,  // active 4622.97 mm - 15 cm inset
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
         FV_ymin_margin: 2.5 * wc.cm,
@@ -447,9 +447,22 @@ local clus_per_group (
         cm.parallel_prolong(length_cut=35*wc.cm),
         cm.close(length_cut=1.2*wc.cm),
         cm.extend_loop(num_try=3),
-        cm.separate(use_ctpc=true),
+        // max_hull_points raised from the 10k default: get_hull() bailing silently
+        // disabled the separation decision on exactly the clusters that need it
+        // (a 102k-pt giant in PDVD 39324 evt 339890 slipped past the earlier 100k).
+        cm.separate(use_ctpc=true, max_hull_points=1000000, collinear_recover=true, collinear_interior=true,
+                    collinear_member_merge=true,
+                    track_repartition=true, band_merge_back=true, band_recarve=true, drift_side_fv_x=true,
+                    far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true, dec1_guard_main_angle=45,
+                    iso_slab_split=true, tag_family=true, collinear_global_merge=true),
+        // MicroBooNE order after separate: connect1 (reconnect dashed-line
+        // fragments, e.g. drift-direction tracks split across the group) then
+        // deghost (remove ghosts that only the group scope can adjudicate).
+        // empty_view_unique: required at group scope -- see common clus.jsonnet.
+        cm.connect1(respect_separate_family=true),
+        cm.deghost(empty_view_unique=true),
         cm.examine_x_boundary(),
-        cm.neutrino(),
+        cm.neutrino(protect_iso_band=true),
         cm.isolated(),
         cm.examine_bundles(),
     ],

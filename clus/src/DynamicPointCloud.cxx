@@ -842,7 +842,8 @@ Clus::Facade::make_points_cluster_skeleton(
 std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrapolation(
     const Cluster *cluster, const geo_point_t &p_test, const geo_point_t &dir_unmorm, const double range,
     const double step, const double angle, const IDetectorVolumes::pointer dv,
-    const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params)
+    const std::map<WirePlaneId, std::tuple<geo_point_t, double, double, double>> &wpid_params,
+    const WirePlaneId &seed_wpid)
 {
     std::vector<DynamicPointCloud::DPCPoint> dpc_points;
 
@@ -851,9 +852,10 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrap
         return dpc_points;
     }
 
-    // Get wpid once from the grouping
-    const auto wpid = *(cluster->grouping()->wpids().begin());
-    
+    // Fallback wpid: the extrapolation seed's volume if given, else the
+    // grouping's first wpid (legacy single-volume behavior).
+    const auto wpid = (seed_wpid.apa() >= 0) ? seed_wpid : *(cluster->grouping()->wpids().begin());
+
     // Check wpid early
     if (wpid_params.find(wpid) == wpid_params.end()) {
         raise<RuntimeError>("make_points_cluster: missing wpid params for wpid %s", wpid.name());
@@ -881,21 +883,46 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrap
     const auto [drift_dir, angle_u, angle_v, angle_w] = wpid_params.at(wpid);
     const double cos_angle_uvw[3] = {cos(angle_u), cos(angle_v), cos(angle_w)};
     const double sin_angle_uvw[3] = {sin(angle_u), sin(angle_v), sin(angle_w)};
-    
+
+    // Multi-volume groupings (drift-side groups): bucket each synthetic point
+    // into the volume containing it so it lands in the correct per-(face,apa)
+    // 2D KD trees; out-of-volume points keep the seed wpid.  Per-wpid
+    // projection constants are cached on first use.
+    const bool multi_volume = (wpid_params.size() > 1) && dv;
+    std::map<int, std::array<double, 6>> trig_cache;  // wpid ident -> cos_uvw, sin_uvw
+
     // Resize once
     dpc_points.resize(num_points);
-    
+
     for (int k = 0; k < num_points; k++) {
         // Calculate position once
         double k_dis = k * dis_seg;
         double x = p_test.x() + k * dx_step;
         double y = p_test.y() + k * dy_step;
         double z = p_test.z() + k * dz_step;
-        
+
         // Calculate distance cut
         const double dis_cut = std::floor(std::min(std::max(MIN_DIS_CUT, k_dis * sin_angle_rad), MAX_DIS_CUT));
         // int dis_cut_int = static_cast<int>(dis_cut);
-        
+
+        WirePlaneId pt_wpid = wpid;
+        const double* cos_uvw = cos_angle_uvw;
+        const double* sin_uvw = sin_angle_uvw;
+        if (multi_volume) {
+            const auto vol = dv->contained_by(Point(x, y, z));
+            if (vol.face() >= 0) {
+                const WirePlaneId cand(kAllLayers, vol.face(), vol.apa());
+                if (wpid_params.find(cand) != wpid_params.end()) pt_wpid = cand;
+            }
+            auto [tit, fresh] = trig_cache.try_emplace(pt_wpid.ident());
+            if (fresh) {
+                const auto& [dd, au, av, aw] = wpid_params.at(pt_wpid);
+                tit->second = {cos(au), cos(av), cos(aw), sin(au), sin(av), sin(aw)};
+            }
+            cos_uvw = tit->second.data();
+            sin_uvw = tit->second.data() + 3;
+        }
+
         // Set up point
         DynamicPointCloud::DPCPoint& point = dpc_points[k];
         point.cluster = cluster;
@@ -903,21 +930,21 @@ std::vector<DynamicPointCloud::DPCPoint> Clus::Facade::make_points_linear_extrap
         point.x = x;
         point.y = y;
         point.z = z;
-        point.wpid = wpid.ident();
-        
+        point.wpid = pt_wpid.ident();
+
         // Initialize arrays
-        point.x_2d.resize(3); 
+        point.x_2d.resize(3);
         point.y_2d.resize(3);
         point.wpid_2d.resize(3);
         point.wind = wind_bogus;
         //point.dist_cut = {dis_cut_int, dis_cut_int, dis_cut_int};
         point.dist_cut = {dis_cut, dis_cut, dis_cut};
-        
+
         // Calculate 2D projections
         for (size_t pindex = 0; pindex < 3; ++pindex) {
             point.x_2d[pindex].push_back(x);
-            point.y_2d[pindex].push_back(cos_angle_uvw[pindex] * z - sin_angle_uvw[pindex] * y);
-            point.wpid_2d[pindex].push_back(wpid.ident());
+            point.y_2d[pindex].push_back(cos_uvw[pindex] * z - sin_uvw[pindex] * y);
+            point.wpid_2d[pindex].push_back(pt_wpid.ident());
         }
     }
 

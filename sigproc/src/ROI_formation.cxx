@@ -365,12 +365,28 @@ double ROI_formation::cal_RMS(const Waveform::realseq_t& signal)
 {
     double result = 0;
     if (signal.size() > 0) {
+        float rms = 0;
+        if (use_mad_rms) {
+            // Median absolute deviation: robust to a strong signal occupying
+            // up to half the waveform (the percentile-spread estimate below
+            // breaks down past ~16% occupancy).  1.4826 converts MAD to the
+            // Gaussian-equivalent sigma so the downstream 5*rms cut and
+            // th_factor thresholds keep their meaning.
+            const float med = WireCell::Waveform::percentile(signal, 0.5);
+            Waveform::realseq_t absdev(signal.size());
+            for (size_t i = 0; i != signal.size(); i++) {
+                absdev.at(i) = fabs(signal.at(i) - med);
+            }
+            rms = 1.4826 * WireCell::Waveform::percentile(absdev, 0.5);
+        }
+        else {
         // do quantile ...
         float par[3];
         par[0] = WireCell::Waveform::percentile(signal, 0.5 - 0.34);
         par[1] = WireCell::Waveform::percentile(signal, 0.5);
         par[2] = WireCell::Waveform::percentile(signal, 0.5 + 0.34);
-        float rms = sqrt((pow(par[2] - par[1], 2) + pow(par[1] - par[0], 2)) / 2.);
+        rms = sqrt((pow(par[2] - par[1], 2) + pow(par[1] - par[0], 2)) / 2.);
+        }
 
         float rms2 = 0;
         float rms1 = 0;
