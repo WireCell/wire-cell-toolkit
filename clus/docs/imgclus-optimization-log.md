@@ -342,6 +342,45 @@ This very likely also resolves (or at least stabilizes) the
 long-standing SBND `clus_all_apa` run-to-run nondeterminism family —
 worth a dedicated SBND A/B before relying on it there.
 
+### 9. ProjectionDeghosting: evict projection matrices after last use (imaging memory)
+
+Implements option (b) from the memory ideas: the 3.7 GB live peak on the
+worst anode was the per-cluster Eigen sparse projection cache
+(`id2lproj`) holding every cluster's 3 layer matrices for the whole
+pass. The exact liveness rule exploited
+(`img/src/ProjectionDeghosting.cxx`):
+
+- Every cache entry is created when its cluster is the *current* vertex
+  of the main loop (later accesses at the judge sites only ever touch
+  clusters that are still **keys** of a per-layer `clus_2D_3D_map`, and
+  keys are only ever added when current).
+- Everything after the secondary judge loop (`m_saved_flag` summing, the
+  final per-cluster cut, `remove_blobs`) reads only the scalar metadata,
+  which survives eviction.
+
+So: clear `m_layer_proj` (keep the metadata struct) as soon as a cluster
+has been processed and is not a key of any layer map — ghosts/duplicates
+die during the main loop, erased map entries die at erasure, and the
+whole cache is cleared after the secondary loop, *before* `remove_blobs`
+allocates the output graph it used to coexist with.
+
+**A/B verdict: PASS** (snapshot `imgr2`, all 64 imaging archives
+byte-identical vs `opt3`; downstream clustering unaffected by
+construction). Peak RSS: hd-max 8862→**6078 MB**, hd-busy
+6855→**3339 MB** (−51%), vd-busy 1768→1569 MB; wall unchanged within
+noise.
+
+### 10. remove_blobs / CS::prune: old2new remap unordered_map → vector (imaging)
+
+The graph-rebuild remap in `ProjectionDeghosting::remove_blobs` and
+`CS::prune` keyed an `unordered_map` by vecS vertex descriptors — which
+are dense indices. Replaced with a flat `std::vector` (sentinel =
+`max`), removing a hash insert+find per vertex/edge of every rebuilt
+graph. Same insertion order, byte-identical by construction; gated in
+the same `imgr2` snapshot as entry 9. Wall effect small (a few % of the
+rebuild sites), bundled here as the safest of the graph-rebuild
+reductions; the `copy_graph` sites remain on the target list.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

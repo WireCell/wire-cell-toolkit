@@ -6,6 +6,8 @@
 
 #include "spdlog/spdlog.h"
 
+#include <limits>
+
 using namespace WireCell;
 using namespace WireCell::Img;
 using namespace WireCell::Img::CS;
@@ -224,7 +226,10 @@ graph_t CS::prune(const graph_t& csg, float threshold)
     csg_out[boost::graph_bundle] = csg[boost::graph_bundle];
     
     size_t nblobs = 0;
-    std::unordered_map<vdesc_t, vdesc_t> old2new;
+    // vecS vertex descriptors are dense indices: a flat vector remap beats a
+    // hash map here.  "max" marks a pruned (unmapped) vertex.
+    constexpr vdesc_t unmapped = std::numeric_limits<vdesc_t>::max();
+    std::vector<vdesc_t> old2new(boost::num_vertices(csg), unmapped);
     for (auto oldv : vertex_range(csg)) {
         const auto& node = csg[oldv];
         if (node.kind == node_t::blob) {
@@ -235,7 +240,7 @@ graph_t CS::prune(const graph_t& csg, float threshold)
         }
         old2new[oldv] = boost::add_vertex(node, csg_out);
     }
-    
+
     if (!nblobs) {
         return csg_out;
     }
@@ -244,16 +249,16 @@ graph_t CS::prune(const graph_t& csg, float threshold)
         auto old_tail = boost::source(edge, csg);
         auto old_head = boost::target(edge, csg);
 
-        auto old_tit = old2new.find(old_tail);
-        if (old_tit == old2new.end()) {
+        const auto new_tail = old2new[old_tail];
+        if (new_tail == unmapped) {
             continue;
         }
-        auto old_hit = old2new.find(old_head);
-        if (old_hit == old2new.end()) {
+        const auto new_head = old2new[old_head];
+        if (new_head == unmapped) {
             continue;
         }
-        boost::add_edge(old_tit->second, old_hit->second, csg_out);
-    }    
+        boost::add_edge(new_tail, new_head, csg_out);
+    }
     return csg_out;
 }
 
