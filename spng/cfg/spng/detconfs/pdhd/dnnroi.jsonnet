@@ -15,15 +15,14 @@ local detectors = import "detectors.jsonnet";
 local detname = "pdhd";
 local det = detectors[detname];  // me
 
-function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=10, nchunks=1)
+function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=10, nchunks=1,device="cpu")
     local ts = {
         type: "TorchService",
         name: "dnnroi",
         data: {
-            // where is htis one?
-            // model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
-            model: "unet-l23-cosmic500-e50.ts",
-            device: "cpu", // "gpucpu",
+            // where is this one?
+            model: "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+            device: device, // "gpucpu",
             concurrency: 1,
         },
     };

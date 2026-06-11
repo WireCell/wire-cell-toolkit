@@ -11,7 +11,7 @@ local pdhd_badAPA1 = import "spng/detconfs/pdhd_badAPA1.jsonnet";
     /// Return the detector configuration object, reduced by listed tpcids.  If
     /// tpcids is not empty it selects a subset of TPCs to include, o.w. all are
     /// included.
-    get(detname, tpcids=[])::
-        detector.subset(self[detname], tpcids),
+    get(detname, tpcids=[],device="cpu")::
+        detector.subset(self[detname], tpcids,device), 
 
 }

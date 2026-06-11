@@ -11,10 +11,10 @@ local sp_mod = import "sp.jsonnet";
 local dnnroi_mod = import "dnnroi.jsonnet";
 
 // return OSP + DNNROI subgraph
-function(tpc) {
+function(tpc, device="cpu") {
     
     local sp = sp_mod(tpc),
-    local dnnroi = dnnroi_mod(tpc),
+    local dnnroi = dnnroi_mod(tpc, device=device),
     sp: sp, 
     dnnroi: dnnroi,
     osp: pg.pipeline([sp, dnnroi])

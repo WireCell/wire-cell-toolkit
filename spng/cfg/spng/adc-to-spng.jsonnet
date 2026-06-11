@@ -85,7 +85,7 @@ function(input,
     local all_views = wc.iota(std.length(crossed_views));
     local rebin = 4;
 
-    local dnnroi_model_file = "unet-l23-cosmic500-e50.ts";
+    local dnnroi_model_file = "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts";
     // local dnnroi_model_file = "/nfs/data/1/calcuttj/wire-cell-python/test_dnnroi_thresh_10epochs_tru0.05.ts";
 
     local source = io.frame_array_source(input);

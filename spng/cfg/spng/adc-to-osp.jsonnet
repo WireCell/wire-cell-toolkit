@@ -35,7 +35,7 @@ function(input,
          device='cpu')
     
     local controls = control_js(device=device);
-    local det = detconf.get(detname, [wc.numberify(tpcid)]);
+    local det = detconf.get(detname, [wc.numberify(tpcid)],device);
     local tpc = det.tpcs[0];
 
     local source = io.frame_array_source(input);

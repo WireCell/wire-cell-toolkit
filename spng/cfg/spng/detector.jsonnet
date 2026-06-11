@@ -514,10 +514,13 @@ local known_detectors = import "detectors.jsonnet";
     },
 
     /// Return a detector with a subset of TPCs selected by ID numbers.
-    subset(det, tpc_idents)::
-        if std.length(tpc_idents) == 0
-        then det
-        else det { tpcs: [det.tpc[$.tpc_name(ident)] for ident in tpc_idents] },
+    /// The device parameter is forwarded to osp_subgraphs (e.g. for TorchService).
+    subset(det, tpc_idents, device="cpu")::
+        local selected = if std.length(tpc_idents) == 0
+                         then det.tpcs
+                         else [det.tpc[$.tpc_name(ident)] for ident in tpc_idents];
+        local patched = [t { osp_subgraphs: t._osp_subgraphs(t, device) } for t in selected];
+        det { tpcs: patched },
 
 
     // /// Some components accept various control parameters.  This bundles them.
