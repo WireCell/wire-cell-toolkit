@@ -1358,6 +1358,33 @@ this run's 3389 reading); wall neutral** — the round-7 6-9%
 "BlobShadow scan" CPU share was dominated by the walk itself, not the
 copy; the copy was mostly transient memory.  Clustering untouched.
 
+### 34. LASSO Gram tripletList reserve: nbeta²/2 → nbeta² (round-7 item 5)
+
+The entry-27 halved Gram loop pushes up to `nbeta` diagonal + 2
+mirrored triplets per off-diagonal pair = `nbeta²` total, but the
+reserve estimated `nbeta*(nbeta/2)` — guaranteeing one growth-doubling
+realloc (copying ~0.5 GB of triplets at hd-max `nbeta`) whenever
+density exceeds half.  Now reserves the exact upper bound in `size_t`
+arithmetic (the old `int` product would overflow beyond
+`nbeta = 46340`).
+
+**A/B verdict: PASS** (snapshot `r8trip` vs `r8bsdir`): 178/178
+byte-identical.  **Wall/VmHWM neutral** — the realloc transient sat
+below the job's high-water mark (which lives in
+ProjectionDeghosting), so this removes allocation churn and a latent
+overflow hazard rather than moving the headline numbers.
+
+### Round-8 closing
+
+Queue items 1, 2, 3, 5 from round 7 are dispositioned: 1 (entry 31,
+**−9..−12% imaging wall**), 3 (entry 33, **−9% hd-max imaging RSS**)
+and 5 (entry 34, neutral-but-correct) shipped; 2 (entry 32) tried and
+rejected with evidence.  Item 4 (LASSO restructure) remains
+result-changing/physics-review; item 6 (clustering data-bound
+levers) and item 7 (per-APA threading) remain documented-only.
+Cumulative imaging hd-max since round-4 close: 284→233 s wall,
+6190→3077 MB RSS.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

@@ -84,11 +84,14 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     // triplet
     {
         // std::cout << " triplet method " << std::endl;
-        const size_t estimated_nonzeros = nbeta * (nbeta / 2);
         XdX.reserve(Eigen::VectorXi::Constant(nbeta, nbeta/2));
         typedef Eigen::Triplet<double> T;
         std::vector<T> tripletList;
-        tripletList.reserve(estimated_nonzeros);
+        // Worst case is nbeta diagonal + 2 mirrored per off-diagonal
+        // pair = nbeta^2 triplets; the former nbeta^2/2 estimate forced
+        // one ~0.5 GB growth-doubling realloc at hd-max sizes.  size_t
+        // arithmetic: int nbeta*nbeta overflows beyond 46340.
+        tripletList.reserve(size_t(nbeta) * size_t(nbeta));
         // XdX is symmetric and dot() is element-wise commutative (identical
         // multiply/accumulate sequence under operand swap), so compute each
         // off-diagonal dot once and mirror it -- bit-identical to the full
