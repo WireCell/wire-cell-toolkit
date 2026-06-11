@@ -469,6 +469,13 @@ final mode (pure-JSON config, `GOGC=off`, tcmalloc): 12/12 rc=0 and all
 removed by construction; the soak exercises the formerly crash-prone
 path without incident.
 
+**Closing verification**: (a) clustering determinism double-run with the
+final code (`s3knn1` vs `s3knn1b`) — all archives identical; (b)
+22-event imaging spot check (`spotr2` vs round-1 `spotbase`) — **all 256
+imaging archives byte-identical**, confirming the round-2 imaging
+changes (eviction, old2new) across every profiled run, with broadly
+lower wall and RSS.
+
 **Fresh hd-max clustering profile after round 2** (78.7k samples,
 ~315 s): the chain is now kd-geometry-bound —
 nanoflann searchLevel/findNeighbors ~22-26% (irreducible),
