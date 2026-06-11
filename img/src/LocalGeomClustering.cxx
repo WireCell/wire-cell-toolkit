@@ -51,7 +51,7 @@ bool LocalGeomClustering::operator()(const input_pointer& in, output_pointer& ou
         log->debug("EOS");
         return true;
     }
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     // dumps() serializes the whole graph to JSON; it is a log->debug ARGUMENT (always
     // evaluated), so guard it behind the level check to avoid the cost at -L info.
     if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));

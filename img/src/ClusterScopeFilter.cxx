@@ -52,7 +52,7 @@ bool ClusterScopeFilter::operator()(const input_pointer& in, output_pointer& out
 
     TimeKeeper tk(fmt::format("ClusterScopeFilter"));
 
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     log->debug("in_graph: {}", dumps(in_graph));
 
     log->debug(tk(fmt::format("start delete some blobs")));

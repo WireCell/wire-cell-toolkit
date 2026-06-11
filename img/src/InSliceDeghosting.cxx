@@ -739,7 +739,7 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
 
     TimeKeeper tk(fmt::format("InSliceDeghosting"));
 
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));
 
     // blob desc -> quality tag

@@ -161,7 +161,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         return true;
     }
 
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     log->debug("in_graph: {}", dumps(in_graph));
     // blob shadow ... vertex = blob, edge --> wire/channel, plane
     BlobShadow::graph_t bsgraph = BlobShadow::shadow(in_graph, 'w');  // or 'c'

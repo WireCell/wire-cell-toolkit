@@ -71,7 +71,7 @@ bool GlobalGeomClustering::operator()(const input_pointer& in, output_pointer& o
         log->debug("EOS");
         return true;
     }
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
 
     /// DEBUGONLY: count input clusters
     using Filtered =

@@ -1028,6 +1028,28 @@ summation order changes); pool allocator for `setS` edge sets
 passes (wall-clock only, scheduling surgery); reuse of PD projections
 across full_deghost passes (staleness risk).
 
+## Round 6 (2026-06-11): the round-5 queue, items 1-3
+
+### 25. Reference-bind the per-stage input graph (`const auto` → `const auto&`)
+
+`const auto in_graph = in->graph();` deduces `cluster_graph_t` *by
+value*, full-copying the input graph once per stage call (round-5
+finding 1).  Changed to `const auto&` at all 8 sites: `ChargeSolving`,
+`ProjectionDeghosting`, `InSliceDeghosting`, `LocalGeomClustering`,
+`GlobalGeomClustering`, `ClusterScopeFilter`, `LCBlobRemoval`,
+`TestClusterShadow` (test-only).  Safe: `ICluster::graph()` returns a
+const ref owned by the input `ICluster`, which outlives the stage call;
+every site reads only.
+
+- A/B snapshot `r6graphref` vs `scmove1` (img) / `dpcsoa1` (clus):
+  **178/178 archives byte-identical, PASS.**
+- Imaging wall: hd-max 284→**263 s** (−7%), hd-busy 141→**126 s**
+  (−11%), vd-busy 101→**94 s** (−7%), typicals −2 s.
+- Imaging peak RSS: hd-max 6190→**5425 MB** (−12%), hd-busy
+  3382→**2884 MB** (−15%), vd-busy 1162→**994 MB** (−15%).
+- Clustering walls drifted −3% — noise; this change does not touch
+  clustering code paths.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

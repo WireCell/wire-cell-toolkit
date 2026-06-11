@@ -258,7 +258,7 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
     // Separate the big graph spanning the whole frame into connected
     // b-m subgraphs with all the info needed for solving each round.
     graph_vector_t sgs;
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     if (log->level() <= spdlog::level::debug) {
         dump_cg(in_graph, log);
     }
