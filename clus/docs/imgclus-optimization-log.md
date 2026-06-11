@@ -524,13 +524,12 @@ added after round 3** — see the Round 3 section for the entries:
    few %.  Note the round-3 masked-span change (entry 15) already took
    the large PDVD imaging win, so the residual upside here is smaller
    than when this list was written.
-5. **SBND follow-through** — 🔶 **PARTIAL (round 3)**: an 8-pass soak of
-   the historically ~50-70%-crashing SBND local-imaging stream under the
-   post-BlobLess code is part of round 3 (see entry 18).  The
-   determinism A/B (BlobLess old-vs-new on SBND outputs) and the SBND
-   tcmalloc enablement decision remain open — they belong with the SBND
-   production-config owner since `sbnd/clus.jsonnet` is shared with
-   LArSoft production.
+5. **SBND follow-through** — ✅ **DONE in round 3 (entries 18-19)**: the
+   heisenbug soak is clean 8/8 (entry 18), SBND clustering is verified
+   run-to-run deterministic AND glibc==tcmalloc byte-identical (entry
+   19), and tcmalloc + JSON-precompile + GOGC=off are enabled in
+   `sbnd_xin/run_clus_evt.sh`.  No `sbnd/clus.jsonnet` change was
+   needed (all changes are environment-level).
 6. nanoflann kd descent (~25%) is genuine geometry — only fewer queries
    (item 1) move it.  Still true after round 3; with the short-circuit
    landed, further reduction needs the memo/census route.
@@ -663,6 +662,28 @@ pinpointed (the BlobLess re-keying also shifts allocation patterns);
 operationally the SBND local-imaging benchmarking path is unblocked.
 Bonus datum: each pass now takes ~260 s vs ~630 s on June 5 — the round
 2-3 clustering speedups carry over to SBND unchanged.
+
+### 19. SBND determinism A/B + tcmalloc enablement (round-2 item 5 follow-through)
+
+Determinism/allocator A/B on 5 SBND events (data 138670 — the event
+whose all-APA output historically differed run-to-run — plus data
+139220, 137680 and MC evt11, evt12), driving `sbnd_xin`'s clustering
+graph directly: per event, two glibc runs (run-to-run determinism) and
+one tcmalloc-preloaded run (allocator independence).  **All 15 archives
+(3 mabc zips × 5 events) byte-identical across all three runs** — the
+entry-8 BlobLess fix resolves the SBND `clus_all_apa` nondeterminism,
+exactly as predicted.
+
+Enablement (`sbnd_xin/run_clus_evt.sh`, wcp-porting-validation
+`ecef431`, mirroring the pdhd/pdvd pattern): tcmalloc preload
+(`WCT_TCMALLOC=off` reverts), wcsonnet pre-compile to pure JSON +
+`GOGC=off` (removes the Go-GC SIGABRT vector).  The updated script path
+re-verified byte-identical on evt12.  **No `sbnd/clus.jsonnet` change
+was needed** — everything is environment-level; the config compiles
+unchanged.  The QL/matching scripts were deliberately left alone:
+QLMatching has known marginal FP ties at `m_strength_cutoff` that an
+allocator change could flip, so its tcmalloc adoption should be its own
+gated decision.
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
