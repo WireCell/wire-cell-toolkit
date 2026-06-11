@@ -99,6 +99,113 @@ Take-aways:
   work below, not by process splitting.
 - `-P` is opt-in; default behavior of the scripts is unchanged.
 
-## Result-changing ideas (NOT applied — for review)
+### 2. BlobGrouping: per-wire channel cache (imaging)
 
-Collected as encountered; see end of file.
+`img/src/BlobGrouping.cxx` `doit()`: the blob→wire→channel traversal
+iterated each wire's full `setS` adjacency set — dominated by the *other
+blobs* sharing the wire — to find the wire's channel(s), for every
+(blob, wire) pair: cost ∝ Σ deg(wire) per blob ⇒ quadratic in blob count
+(65% of total CPU on the worst PDHD anode, see Phase-2 findings). Now the
+wire's adjacent channels are cached per wire on first visit, in the same
+adjacency iteration order, and replayed afterwards — the visit sequence is
+provably identical (wires never gain edges during `doit`; only measure
+edges to blobs/channels are added).
+
+**A/B verdict: PASS** (snapshot `opt1`, all archives both stages).
+
+| Event | img wall (s) | clus wall (s) |
+|---|---|---|
+| hd-max  | 1028 → **439** | 530 → 503 |
+| hd-busy | 656 → **247**  | 338 → 318 |
+| vd-busy | 327 → **281**  | 145 → 136 |
+| hd-typ / hd-typ2 / vd-typ | unchanged | unchanged |
+
+(The clustering deltas in this table come from entry 3, run in the same
+A/B round; imaging RSS unchanged as predicted — the live peak is the
+projection cache + graph, not BlobGrouping.)
+
+## Phase-2 profiling findings (PDHD/PDVD-specific)
+
+CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
+gperftools, 154835 samples):
+
+- **`BlobGrouping::doit` is 77.8% of the whole imaging job.** 65% of ALL CPU
+  is `std::_Rb_tree_increment`, and 99.3% of those samples come from the
+  blob→wire→channel traversal in `img/src/BlobGrouping.cxx`: for every
+  (blob, wire) pair it iterated the wire's full `setS` adjacency set — which
+  contains every *other blob* sharing that wire — to find the wire's single
+  channel. Cost ∝ Σ_(b,w) deg(w) → quadratic in blob count. This, not
+  ProjectionDeghosting (9.5% here), is the PDHD/PDVD busy-anode hotspot —
+  a different balance than the SBND profile in
+  `img/docs/imaging-timing-profile.md`.
+- Remaining imaging stages on this anode: ProjectionDeghosting 9.5%,
+  BlobClustering 2.4%, ChargeSolving 2.2%, InSliceDeghosting 1.2%,
+  LocalGeomClustering 1.0%, GridTiling 0.3%.
+- **Imaging RSS is an early plateau, not a leak**: the profiled anode jumps
+  to 4.1 GB at ~30 s, 7.16 GB at ~60 s (slicing/tiling/graph build), then
+  stays flat to the end.
+- **Heap profile (tcmalloc) of the same anode**: peak *live* heap is
+  5.9 GB; cumulative allocation churn is ~140 GB. So roughly 1.2 GB of the
+  glibc 7.16 GB plateau is allocator retention/fragmentation of the churn
+  (glibc never returns it; live drops to ~1 GB later in the job while RSS
+  stays at the high-water mark). The live peak splits as:
+  - **3.7 GB (63%): `Eigen::SparseMatrix<float>::resize`** — the
+    per-shadow-cluster 2-D projection matrices that `ProjectionDeghosting`
+    memoizes in `id2lproj` for *every* cluster for the duration of each
+    pass (`img/src/ProjectionDeghosting.cxx:186`). Each cluster holds 3
+    layer matrices dimensioned (nchan × nslice); the dense outer-index
+    array (~nslice × 4 B each) dominates when busy events have O(10⁴⁻⁵)
+    shadow clusters.
+  - ~1.3 GB: boost `setS` adjacency edge trees + `stored_vertex` vectors
+    of the cluster graph(s).
+
+Clustering profile (hd-busy full clustering, 86296 samples), cumulative:
+
+- MABC pass split (from the always-on `perf` logs, busy events):
+  **Separate 32-35%**, Deghost 9-18%, ExamineBundles 10-15%, then
+  Close/Connect1/ProtectOverclustering ~5% each. Typical events: Deghost
+  ~20%, Connect1 ~11%, ExamineBundles ~9%.
+- Inside Separate: `connect_graph_ctpc` 22.5% → `Grouping::is_good_point`
+  20.4% → `has_closest_point` 14.4% (kd2d knn) + `get_closest_dead_chs`
+  9.4% + `convert_3Dpoint_time_ch` 8.3%.
+- `convert_3Dpoint_time_ch` did, per call: a heap `std::vector` for 3
+  angles, a by-value `IAnodePlane::faces()` vector copy, and ~10 nested
+  `std::map`/`unordered_map` `.at()` chain lookups — visible in the profile
+  as `_Vector_impl_data` 5.3%, `_M_lower_bound` 4.8%, malloc/free ~20%.
+- nanoflann `searchLevel`+`evalMetric` ~19% (genuine k-d geometry,
+  irreducible), `DynamicPointCloud` point construction ~12%.
+
+## Ideas not yet applied — for review
+
+### Memory (imaging tail), in suggested order of attack
+
+1. **Bound or restructure the `ProjectionDeghosting` projection cache**
+   (3.7 GB live on the worst anode). Options, in increasing risk:
+   (a) shrink each matrix's dense outer dimension by storing projections
+   with a global slice-offset (helps only if activity does not span the
+   readout — busy events likely do); (b) evict cache entries once a
+   cluster's last cs_graph neighbor has been visited (exact, byte-identical,
+   needs a pre-pass to count uses; recompute-on-miss is also byte-identical
+   since projections are pure functions of the graph); (c) replace the
+   Eigen sparse layer matrices with hash/CSR keyed only on occupied
+   (channel, slice) — touches `judge_coverage`, byte-identity risk, last
+   resort.
+2. **tcmalloc deployment** (`LD_PRELOAD` in run scripts): with ~140 GB of
+   churn, glibc retains the high-water mark forever while live memory drops
+   to ~1 GB; tcmalloc returns freed pages. Helps the *sustained* footprint
+   under 16-way concurrency (not VmHWM of the early peak). Must pass the
+   full A/B gate first (allocator changes can flip pointer-keyed iteration
+   order if any exists).
+3. `malloc_trim(0)` after each `ClusterFileSink` write (glibc-only, helps
+   between anodes in all-anode mode; mostly superseded by `-P`).
+
+### Result-changing ideas (NOT applied)
+
+- Reduce stepped sampling density of blob point clouds (clustering input
+  size) — changes point clouds, needs physics review.
+- `full_deghost=false` or `pipe_type="single"` imaging variants — large
+  CPU/memory savings but changes blob content.
+- Raising the slicing threshold (`nthreshold`) on busy/incomplete-readout
+  events — directly reduces blob combinatorics; changes imaging output.
+- `setS`→`hash_setS` edge container for `cluster_graph_t` — rejected
+  previously (changes physics output, iterator invalidation).
