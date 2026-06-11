@@ -1,5 +1,29 @@
 # PDHD / PDVD imaging + clustering resource profile
 
+> **2026-06-11 round-3 update:** entries 14-21 in
+> [imgclus-optimization-log.md](imgclus-optimization-log.md): per-anode
+> imaging is the script default; masked-fork slicing span → 1500 ticks
+> (**result-changing, approved** — the big PDVD imaging win); good-point
+> short-circuit + hough scratch-grid (byte-identical); cluster files now
+> written as **numpy** instead of JSON (byte-identical outputs; removes
+> the jsoncpp DOM that dominated the live clustering heap; fixed a
+> latent custard tar 512-padding reader bug and an empty-cluster numpy
+> desync found on the way); SBND clustering verified deterministic and
+> glibc==tcmalloc (tcmalloc enabled there too); the SBND `clus_all_apa`
+> heisenbug no longer reproduces (8/8 soak).  Round-3 state (6-way
+> load):
+>
+> | Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+> |---|---|---|---|---|
+> | PDHD 027305/0 (worst) | 322 → **288** | 6078 | 314 → **272** | 3016 |
+> | PDHD 028084/18 (busy) | 163 → **141** | 3304 | 207 → **176** | 3091 |
+> | PDVD 039252/5 (busy)  | 264 → **101** | 1569 → **1136** | 105 → **79** | 2497 |
+> | PDHD 027409/0 (typ.)  | 59 → **40** | 670 → **400** | 20 → **17** | 702 |
+> | PDVD 039349/0 (typ.)  | 135 → **38** | 486 → **236** | 20 → **12** | 510 |
+>
+> Cumulative from the original baseline: hd-max imaging 1028→288 s /
+> 10.1→6.0 GB; hd-max clustering 530→272 s; vd-busy imaging 327→101 s.
+
 > **2026-06-11 round-2 update:** a second optimization round (entries
 > 7-13 in [imgclus-optimization-log.md](imgclus-optimization-log.md))
 > further cut clustering wall ~30-35% and busy-event imaging RSS ~50%:
