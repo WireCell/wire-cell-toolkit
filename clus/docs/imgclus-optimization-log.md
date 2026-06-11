@@ -1172,6 +1172,86 @@ relied on it (build proves it).
   heap slice predicted); others flat — their peaks sit at the pc-tree
   load moment, not kd indexing.  Walls unchanged.
 
+## Round 7 (2026-06-11): post-round-6 profiling — the remaining floor
+
+Measurement-only.  Profiling targets were **re-selected from the full
+283-event re-sweep** (`sweep/r6full`) since the old picks pre-dated six
+rounds of changes: pdhd 027305/0 (still the global worst on every
+axis), **pdhd 027305/11** (new #2 — clustering 265 s nearly matches the
+worst; never profiled before), pdhd 028084/18 (clustering-RSS leader),
+**pdvd 039252/8** (new PDVD worst, displacing 039252/5), pdhd 027409/0
+(typical).  Same methodology as round 5 (tcmalloc CPU, jemalloc
+sampled heap); profiles `/home/xqian/tmp/r7_*.prof`, dumps
+`/home/xqian/tmp/r7_heap/`.
+
+### Imaging CPU (solo, per heaviest anode)
+
+| | hd-max a0 (163 s) | 027305/11 a0 (104 s) | vd-busy 039252/8 a6 (37 s) |
+|---|---|---|---|
+| ChargeSolving | **44.5%** (solve 33.0%) | **43.9%** (solve 31.9%) | 32.2% (solve 19.0%) |
+| ProjectionDeghosting | 22.5% | 20.3% | 20.2% |
+| `boost::add_edge` (setS, cum) | 20.1% | 20.9% | 21.7% |
+| BlobShadow scan (`shadow_list`) | 9.3% | 8.1% | 6.0% |
+| other stages | 5-7% each | | |
+
+- `LassoModel::Fit`'s coordinate-descent loop (22.8% flat on hd-max)
+  is now the single biggest imaging item; the run-027305 tail is
+  solver-bound, not graph-bound.  The round-6 Gram halving is visible:
+  Eigen dot share 12.5%→7.3%.
+- Graph copies (`copy_impl`) fell 13-20%→8.0% — what remains is
+  ClusterArrays output staging and CS-internal packing, both
+  load-bearing.
+- The `setS` add-edge churn (~20-22% everywhere) is the per-stage
+  cluster-graph rebuild floor.
+
+### Clustering CPU
+
+Structurally unchanged from round 5 (rounds 5-6 were memory rounds):
+clustering_separate/ctpc 22-45% (027305/11 the most separate-bound at
+44.9%), `is_good_point` 23-27%, examine_bundles 13-17%, hough 13-16%,
+deghost ~9-10%.  Still at its result-preserving floor.
+
+### Heap peaks (jemalloc sampled)
+
+- **Imaging hd-max a0** (interval peak 2.1 GB attributed; VmHWM
+  3.4 GB): ProjectionDeghosting 55.9% (1.19 GB — projections + cs +
+  scan transients; was 5.1 GB in round 5) and **BlobClustering::flush
+  38.3% (0.82 GB)** — a whole-graph `copy_impl` still fires in the
+  flush→SimpleCluster path despite round-4 entry 23's move conversion.
+  Top new lead.
+- **Clustering hd-max / hd-busy** (1.85 / 1.98 GB): pc-tree load +
+  `Dataset::slice/add` = **84-88%** — clustering memory is now bound
+  by the event data itself.  Bee buffers are down to 4% (entry 28
+  worked); TensorDM output staging ~6%; DPC kd <2%.
+
+### Round-8 suggestions (ranked)
+
+1. **BlobClustering flush copy** (~0.8 GB live + a few % wall on busy
+   imaging): find why `copy_impl` persists in the flush path and
+   complete the move.  Byte-identity expected trivial.
+2. **Pool/arena allocator for the `setS` out-edge sets** of
+   `cluster_graph_t`: attacks the ~20% add_edge + the Rb-tree flat
+   shares across every imaging stage.  Set ordering is by value, so an
+   allocator change preserves iteration order — byte-identity
+   plausible but the type change is invasive; full gate decides.
+3. **Avoid `type_directed` full directed copy** inside
+   `BlobShadow::shadow_list` (per PD call): iterate the undirected
+   cgraph with code()-directional filtering instead.  Part of the
+   remaining PD heap + the 6-9% scan share; order-preservation needs
+   care.
+4. **LASSO Fit is at the byte-identity floor** — only result-changing
+   restructures remain (active-set Gram pruning, warm starts across
+   strategies, SpGEMM Gram).  Physics review required to go further on
+   the 027305 tail.
+5. Micro: `tripletList.reserve` underestimates 2× (`nbeta*nbeta/2` vs
+   up to `nbeta²` triplets) — one avoidable ~0.5 GB realloc at hd-max
+   sizes.
+6. Clustering is data-bound: remaining levers are result-changing
+   (float32 point columns) or structural (per-APA pc-tree streaming) —
+   documented, not recommended without review.
+7. Wall-clock only: per-APA threading of the imaging/clustering
+   pipelines (outputs unchanged, scheduling surgery).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
