@@ -104,7 +104,7 @@ bool LocalGeomClustering::operator()(const input_pointer& in, output_pointer& ou
         log->debug("out: {}", dumps(cg_new_bb));
     }
 
-    out = std::make_shared<Aux::SimpleCluster>(cg_new_bb, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(cg_new_bb), in->ident());
     if (m_dryrun) {
         out = std::make_shared<Aux::SimpleCluster>(in_graph, in->ident());
     }

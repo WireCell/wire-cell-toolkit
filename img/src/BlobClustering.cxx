@@ -120,7 +120,7 @@ void Img::BlobClustering::flush(output_queue& clusters)
         ++bsit;
     }
 
-    auto cluster = std::make_shared<Aux::SimpleCluster>(grind.graph(), cur_ident());
+    auto cluster = std::make_shared<Aux::SimpleCluster>(std::move(grind.graph()), cur_ident());
     log->debug("flushing at call={}: ident={} graph: {}", m_count, cluster->ident(), Aux::dumps(cluster->graph()));
 
     // 3) pack and clear

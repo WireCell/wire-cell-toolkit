@@ -9,6 +9,15 @@ namespace WireCell::Aux {
         {
             boost::copy_graph(g, m_graph);
         }
+        // Move overload: a caller whose graph is dead after construction
+        // avoids the full copy_graph + destruction of the source (one
+        // whole-graph copy per pipeline stage).  Iteration-order safe:
+        // the moved graph is the very object the copy would reproduce.
+        SimpleCluster(cluster_graph_t&& g, int ident = 0)
+          : m_ident(ident)
+          , m_graph(std::move(g))
+        {
+        }
         virtual int ident() const { return m_ident; }
         virtual ~SimpleCluster() {}
         const cluster_graph_t& graph() const { return m_graph; }

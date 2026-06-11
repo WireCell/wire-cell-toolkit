@@ -153,7 +153,7 @@ ICluster::pointer ClusterFileSource::load_json(int ident)
     std::istringstream ss(buffer);
     ss >> jobj;
     cluster_graph_t cgraph = m_json_loader->load(jobj); // can throw
-    return std::make_shared<SimpleCluster>(cgraph, ident);
+    return std::make_shared<SimpleCluster>(std::move(cgraph), ident);
 }
 
 ICluster::pointer ClusterFileSource::load_numpy(int ident)
@@ -234,7 +234,7 @@ ICluster::pointer ClusterFileSource::load_numpy(int ident)
     // }
 
     auto graph = to_cluster(nas, eas, m_anodes, 1e-3 /*default nudge*/, m_restore_corners);
-    return std::make_shared<SimpleCluster>(graph, ident);
+    return std::make_shared<SimpleCluster>(std::move(graph), ident);
 }
 
 void ClusterFileSource::configure(const WireCell::Configuration& cfg)

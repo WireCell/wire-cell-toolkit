@@ -80,7 +80,7 @@ bool DeadLiveMerging::operator()(const input_vector& in, output_pointer& out)
     // out = in.front();
     // make SimpleCluster from merged graph
     /// FIXME: which ident to use?
-    out = std::make_shared<Aux::SimpleCluster>(merged_graph, 0);
+    out = std::make_shared<Aux::SimpleCluster>(std::move(merged_graph), 0);
     log->debug("Output: {}", Aux::dumps(out->graph()));
     return true;
 }

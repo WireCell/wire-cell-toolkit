@@ -217,7 +217,7 @@ bool Img::BlobGrouping::operator()(const input_pointer& in, output_pointer& out)
                boost::num_vertices(outgr),
                boost::num_edges(outgr));
 
-    out = std::make_shared<Aux::SimpleCluster>(outgr, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(outgr), in->ident());
     ++m_count;
     return true;
 

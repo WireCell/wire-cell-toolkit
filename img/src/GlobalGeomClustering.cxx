@@ -115,6 +115,6 @@ bool GlobalGeomClustering::operator()(const input_pointer& in, output_pointer& o
         dump_cg(cg_new_bb, log);
     }
 
-    out = std::make_shared<Aux::SimpleCluster>(cg_new_bb, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(cg_new_bb), in->ident());
     return true;
 }

@@ -516,14 +516,14 @@ added after round 3** — see the Round 3 section for the entries:
    and ~10 consumer files including the neutrino-porting code.  Biggest
    single remaining structural item; do it as a dedicated change with
    the full gate, not opportunistically.
-4. **Imaging graph-rebuild remainder** — ⏳ **OPEN**: the `copy_graph`
-   sites and a `CS::prune` no-prune fast path (skip the rebuild when
-   nothing is pruned — must verify the copied graph's edge iteration
-   order matches the rebuilt one before claiming byte-identity).
-   Imaging is now ~PD 25% / ChargeSolving 22% by pass; each item is a
-   few %.  Note the round-3 masked-span change (entry 15) already took
-   the large PDVD imaging win, so the residual upside here is smaller
-   than when this list was written.
+4. **Imaging graph-rebuild remainder** — ✅ **DONE in round 4 (entries
+   22-23)**: `CS::prune` no-prune fast path (entry 22, fires ~100% with
+   the default threshold) and the `copy_graph` reduction via the
+   `SimpleCluster` move constructor (entry 23, one whole-graph
+   copy+destroy per stage removed).  Both byte-identical; both
+   wall-neutral under tcmalloc — the residual upside this item carried
+   was priced at glibc-malloc rates.  The remaining filtered
+   `copy_graph` sites (~1.5% combined) are closed as not-worth-it.
 5. **SBND follow-through** — ✅ **DONE in round 3 (entries 18-19)**: the
    heisenbug soak is clean 8/8 (entry 18), SBND clustering is verified
    run-to-run deterministic AND glibc==tcmalloc byte-identical (entry
@@ -776,6 +776,41 @@ Wall and RSS unchanged within noise (hd-max img 288→288 s) — the
 subgraphs are small, so the skipped rebuild was allocator churn rather
 than measurable wall.  Kept as the correct semantics: the per-subgraph
 copy now happens zero times instead of once per strategy.
+
+### 23. SimpleCluster move constructor — graph rebuild remainder closed
+
+A fresh hd-busy anode2 CPU profile (glibc malloc, 23478 samples) put
+`SimpleCluster::SimpleCluster` at **7.3% cumulative**: the constructor
+ran `boost::copy_graph(g, m_graph)`, a full redundant copy (plus later
+destruction of the source) of the cluster graph at the end of *every*
+imaging stage.  All other `copy_graph` sites combined (the filtered
+copies in Local/GlobalGeomClustering, InSliceDeghosting rounds 2/3,
+BlobGrouping, ClusterScopeFilter) measured only ~1.5%.
+
+Added a `SimpleCluster(cluster_graph_t&&)` move overload and converted
+the 15 call sites whose graph is dead after construction (img: all
+stage tails incl. BlobClustering/BlobSolving via the indexed graph's
+non-const accessor; sio: `ClusterFileSource` JSON+numpy loads; aux:
+`TensorDMcluster`).  Iteration-order safe: the moved graph is the very
+object the copy would have reproduced (vecS vertices; setS out-edges
+ordered by target).  The dryrun paths keep the copying ctor.
+
+**A/B verdict: PASS** (snapshot `scmove1` vs `npfmt2`): all archives
+byte-identical on the 6-event set.  **Wall/RSS: no measurable change**
+— the profile above was taken under glibc malloc, but production
+imaging runs under tcmalloc (round-1 adoption), where the copy's
+allocation churn is far cheaper; the same lesson as entry 11.  Kept as
+the structurally right thing: one whole-graph copy+destroy per pipeline
+stage now simply does not happen, and the win applies to any future
+allocator/regime change.
+
+The remaining filtered `copy_graph` sites are **closed as
+not-worth-it**: ~1.5% combined under the glibc profile (less under
+tcmalloc), each requiring a manual order-preserving rebuild to replace
+a one-line `copy_graph` — poor risk/benefit against the byte-identity
+gate.  This closes round-2 follow-up item 4 (imaging graph-rebuild
+remainder); both sub-items (CS::prune fast path = entry 22, copy_graph
+sites = this entry) are done.
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 

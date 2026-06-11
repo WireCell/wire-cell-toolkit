@@ -317,7 +317,7 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
                boost::num_vertices(packed),
                boost::num_edges(packed));
 
-    out = std::make_shared<Aux::SimpleCluster>(packed, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(packed), in->ident());
     ++m_count;
     return true;
 }
