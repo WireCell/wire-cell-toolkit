@@ -280,6 +280,38 @@ namespace WireCell::NFKDVec {
             return ret;
         }
 
+        // Result set for exists_within(): terminates the k-d tree search at
+        // the first point strictly inside the squared radius.  Subtree
+        // pruning uses worstDist() == r2, identical to a radius() query, and
+        // the strict '<' matches both RadiusResultSet collection and the
+        // knn(1)-based existence test (res[0].second < radius^2).
+        struct exists_result_set_t {
+            distance_type r2;
+            bool found{false};
+            explicit exists_result_set_t(distance_type r2_) : r2(r2_) {}
+            bool full() const { return found; }
+            bool addPoint(distance_type dist, size_t /*index*/) {
+                if (dist < r2) { found = true; return false; }
+                return true;
+            }
+            distance_type worstDist() const { return r2; }
+        };
+
+        // Return true iff any point lies strictly within squared distance
+        // rad of the query point.  Boolean-identical to
+        // knn(1, q)[0].second < rad, but the search stops at the first
+        // in-radius point instead of resolving the true nearest neighbor.
+        template<typename VectorLike>
+        bool exists_within(distance_type rad, const VectorLike& query_point) const {
+            if (rad==0 || !npoints() || query_point.size() != ndim()) {
+                return false;
+            }
+            this->prepquery<nfkdindex_type>();
+            exists_result_set_t rs(rad);
+            m_nfkdindex->findNeighbors(rs, query_point.data());
+            return rs.found;
+        }
+
         // nanoflann API.  Total number of points.
         inline size_t kdtree_get_point_count() const {
             return npoints();

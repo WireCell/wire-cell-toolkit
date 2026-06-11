@@ -475,15 +475,13 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
     const double angle = fastgeom(apa, face).angle[pind];
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     const auto& skd = kd2d(apa, face, pind);
-    // Equivalent to get_closest_points(...).size() > 0 but cheaper: the radius query
-    // collects every in-radius point, while the good-point callers only need existence.
-    // knn(1) returns the single nearest point; nanoflann's RadiusResultSet keeps points
-    // with dist < radius^2 (strict <), so use the same strict comparison here.  Distances
-    // are squared (L2), matching the radius^2 argument get_closest_points passes.
-    // Stack query (std::array) to avoid a 2-element heap vector on this hot path.
+    // Existence-only query: boolean-identical to knn(1) + strict dist <
+    // radius^2 test (and to !get_closest_points(...).empty()), but the
+    // k-d search terminates at the first in-radius point instead of
+    // resolving the true nearest neighbor.  Distances are squared (L2).
+    // Stack query (std::array) to avoid a 2-element heap vector.
     const std::array<double, 2> query{x, y};
-    const auto res = skd.knn(1, query);
-    return !res.empty() && res[0].second < radius * radius;
+    return skd.exists_within(radius * radius, query);
 }
 
 bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {
