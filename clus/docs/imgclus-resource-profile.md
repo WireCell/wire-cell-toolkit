@@ -1,5 +1,18 @@
 # PDHD / PDVD imaging + clustering resource profile
 
+> **2026-06-11 round-4 update:** entries 22-24 in
+> [imgclus-optimization-log.md](imgclus-optimization-log.md), all
+> byte-identical: `CS::prune` no-prune fast path and the
+> `SimpleCluster` move constructor close the imaging graph-rebuild
+> remainder (wall-neutral under tcmalloc); the **DynamicPointCloud SoA
+> restructure** (DPCPoint → columnar DPCBatch) cuts clustering peak RSS
+> on busy events — vd-busy **2497 → 1373 MB (−45%)**, hd-busy
+> 3092 → 2666 MB (−14%), typicals −7..−9% — and clustering wall
+> hd-max 272 → **260 s**, hd-busy 176 → **168 s**, vd-busy 79 → **76 s**.
+> Gated additionally on the MicroBooNE qlport full chain, SBND
+> clustering, and the 5-test porting bats suite.  Cumulative from the
+> original baseline: hd-max clustering 530 → **260 s**.
+
 > **2026-06-11 round-3 update:** entries 14-21 in
 > [imgclus-optimization-log.md](imgclus-optimization-log.md): per-anode
 > imaging is the script default; masked-fork slicing span → 1500 ticks
