@@ -1331,6 +1331,33 @@ ABI-wide type changes: every installed lib goes stale at once (all
 `cluster_graph_t` mangled names change), so tests fail to link
 against `local/lib` until a `./wcb install --notests` refresh.
 
+### 33. shadow_list walks the cluster graph directly — type_directed copy removed
+
+Round-7 lead 3.  `BlobShadow::shadow_list` began with
+`cluster::directed::type_directed(cgraph)` — a full directed rebuild
+(all vertices + one `add_edge` per edge into fresh `setS` sets) of the
+cluster graph, twice per ProjectionDeghosting pass ('w' and 'c'), only
+so the b→w(→c) walk could not crawl back up.  But every hop in the
+walk already filters its target by type code, which subsumes the
+direction restriction.
+
+Equivalence argument (why byte-identical was expected, not hoped):
+type_directed preserves vertex descriptors; with order "sbmwc" every
+s-edge becomes an out-edge of s, every b-w edge points b→w and every
+w-c edge w→c, so each filtered target set is the same set; and both
+graphs use setS out-edge containers ordered by target descriptor, so
+each filtered sequence is the same sequence.  The walk now takes
+`cgraph` directly; `connected_leaves` was retyped accordingly, and
+the long-dead BFS `LeafVisitor` + breadth_first_search include (whose
+last reference was a comment deleted here) went with it.
+`type_directed` itself remains in ClusterHelpers (tests use it).
+
+**A/B verdict: PASS** (snapshot `r8bsdir` vs `r8move`): 178/178
+byte-identical.  **Imaging RSS: hd-max 3474→3079 MB region (−9% on
+this run's 3389 reading); wall neutral** — the round-7 6-9%
+"BlobShadow scan" CPU share was dominated by the walk itself, not the
+copy; the copy was mostly transient memory.  Clustering untouched.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
