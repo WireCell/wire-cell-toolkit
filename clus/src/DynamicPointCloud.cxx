@@ -82,33 +82,50 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
     if (points.empty()) {
         return;
     }
-    
-    // Preallocate memory and get original size
     size_t original_size = m_points.size();
     m_points.reserve(original_size + points.size());
-    
-    // Move the points instead of copying
+    m_points.insert(m_points.end(), points.begin(), points.end());
+    index_new_points(original_size);
+}
+
+void DynamicPointCloud::add_points(std::vector<DPCPoint> &&points) {
+    if (points.empty()) {
+        return;
+    }
+    size_t original_size = m_points.size();
+    m_points.reserve(original_size + points.size());
+    // Genuinely move: the old const& path used make_move_iterator over a
+    // const range, which silently deep-copied every DPCPoint (5 nested
+    // vectors each).  Callers passing temporaries now avoid those copies.
     m_points.insert(m_points.end(),
                    std::make_move_iterator(points.begin()),
                    std::make_move_iterator(points.end()));
-    
+    index_new_points(original_size);
+}
+
+// Index m_points[original_size..end) into the 3D and per-plane 2D k-d
+// trees.  Reads from m_points (NOT the caller's vector, which may have
+// been moved from).
+void DynamicPointCloud::index_new_points(size_t original_size) {
+    const size_t nnew = m_points.size() - original_size;
+
     // Process 3D KD tree
     auto &kd3d = this->kd3d();
-    
+
     // Prepare batch data for 3D KD tree
     NFKDVec::Tree<double>::points_type pts3d(3);
     for (size_t i = 0; i < 3; ++i) {
-        pts3d[i].reserve(points.size());
+        pts3d[i].reserve(nnew);
     }
-    
+
     // Prepare maps to store 2D points for each plane and track local-to-global mappings
     std::map<int, NFKDVec::Tree<double>::points_type> planes_pts;
     std::map<int, std::vector<size_t>> planes_global_indices;
-    
+
     // Extract data and prepare for batch processing
-    for (size_t i = 0; i < points.size(); ++i) {
+    for (size_t i = 0; i < nnew; ++i) {
         size_t global_idx = original_size + i;
-        const auto &pt = points[i];
+        const auto &pt = m_points[global_idx];
         
         // Add to 3D points
         pts3d[0].push_back(pt.x);
@@ -140,9 +157,9 @@ void DynamicPointCloud::add_points(const std::vector<DPCPoint> &points) {
                 // Initialize plane data structures if not exists
                 if (planes_pts.find(key) == planes_pts.end()) {
                     planes_pts[key] = NFKDVec::Tree<double>::points_type(2);
-                    planes_pts[key][0].reserve(points.size());
-                    planes_pts[key][1].reserve(points.size());
-                    planes_global_indices[key].reserve(points.size());
+                    planes_pts[key][0].reserve(nnew);
+                    planes_pts[key][1].reserve(nnew);
+                    planes_global_indices[key].reserve(nnew);
                 }
                 planes_pts[key][0].push_back(pt.x_2d[pindex][j]);
                 planes_pts[key][1].push_back(pt.y_2d[pindex][j]);

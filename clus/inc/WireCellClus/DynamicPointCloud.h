@@ -49,6 +49,10 @@ namespace WireCell::Clus::Facade {
         ~DynamicPointCloud() = default;
 
         void add_points(const std::vector<DPCPoint> &points);
+        // Rvalue overload: genuinely moves the points.  (The const& overload
+        // copies; its previous make_move_iterator over a const range was a
+        // silent deep copy of every DPCPoint.)
+        void add_points(std::vector<DPCPoint> &&points);
         const std::vector<DPCPoint>& get_points() const { return m_points; }
 
         DynamicPointCloud::nfkd_t &kd3d() const;
@@ -97,6 +101,9 @@ namespace WireCell::Clus::Facade {
         geo_point_t vhough_transform(const geo_point_t &origin, const double dis) const;
 
        private:
+        // Index m_points[original_size..end) into the 3D/2D k-d trees.
+        void index_new_points(size_t original_size);
+
         // main data
         std::vector<DPCPoint> m_points;
 

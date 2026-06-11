@@ -162,6 +162,59 @@ cluster's blob-descriptor set) and `Slice::activity()` map copies were
 hd-max img 1028→**408 s**, hd-busy img 656→**216 s** (3.0x), vd-busy img
 327→275 s; typical events unchanged.
 
+### 5. tcmalloc for the imaging stage (deployment, run scripts)
+
+With the algorithmic fixes in, imaging is allocator-bound (malloc/free
+~50% + `setS` Rb_tree ops ~25% of the busy anode, spread over all passes
+— the graph build/copy/teardown lifecycle). `LD_PRELOAD`ing
+`libtcmalloc_minimal` was A/B'd over all 6 events, both stages
+(snapshot `opt2tc`, vs `base1`):
+
+- **Imaging: all archives byte-identical**, large wins:
+  hd-max 1028→**308 s**, hd-busy 656→**163 s** (4.0x vs baseline), and
+  busy-event RSS down (10113→8862 MB, 7180→6857 MB).
+- **Clustering: FAILED the gate on hd-typ** → tcmalloc stays OFF for
+  clustering (see finding below).
+
+Adopted in `run_img_evt.sh` (both detectors, wcp-porting-validation):
+imaging runs under tcmalloc by default; `WCT_TCMALLOC=off` reverts.
+
+### 6. kd existence query early-exit + DynamicPointCloud real move (clustering)
+
+- `NFKDVec::Tree::exists_within(r2, q)`: terminates the k-d search at the
+  first point strictly inside the squared radius (nanoflann `addPoint`
+  returning false). Used by `Grouping::has_closest_point` — the hottest
+  clustering leaf (21.6% cumulative on hd-max; previously knn(1) resolved
+  the true nearest neighbor only to compare against the radius). Boolean-
+  identical by construction.
+- `DynamicPointCloud::add_points` "moved" its input through
+  `make_move_iterator` over a **const** range — a silent deep copy of
+  every DPCPoint (5 nested vectors each; DPCPoint ctor was 7.2% flat).
+  Added a genuine rvalue overload (all hot callers pass temporaries) and
+  re-pointed the kd-indexing tail to read from `m_points`, which also
+  removes a latent read-after-move had the move ever become real.
+
+**A/B verdict: PASS** (snapshot `opt3`, includes entry-5 tcmalloc imaging).
+Clustering wall vs baseline: hd-max 530→**454 s**, hd-busy 338→**298 s**,
+vd-busy 145→134 s. Imaging vs baseline (with tcmalloc): hd-max
+1028→**304 s**, hd-busy 656→**161 s**, vd-busy 327→247 s.
+
+### FINDING: clustering has a pointer-order-dependent merge decision
+
+Under tcmalloc, hd-typ (027409/0) per-face clustering of apa2-face0
+produced **119 clusters instead of 120** — same total points, same
+charges, but a different partition (one merge decision flipped), which
+then cascades through group02 / all-apa outputs. So the chain is NOT
+allocator-independent: some container keyed/ordered by heap pointers
+(e.g. `Cluster*`/`Blob*` sets or maps, or a pointer tie-break in a sort)
+steers a merge. Under glibc the outcome is reproducible run-to-run only
+because the allocation sequence happens to be identical. This is very
+likely the same family as the long-standing SBND `clus_all_apa`
+nondeterminism. Worth hunting and fixing for robustness (and it would
+unlock tcmalloc for clustering too): instrument with
+`LD_PRELOAD=libtcmalloc` A/B on a small event and bisect by stage
+(per-face → per-APA → group) to find the first pass whose output flips.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
