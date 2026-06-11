@@ -399,6 +399,31 @@ byte-identical). Wall effect is noise-level on the gate run (hd-max
 removes had become cheap; kept as the right primitive for these hot
 paths.
 
+### 12. Cluster::sv3d() scoped-view memo (clustering)
+
+A fresh hd-max profile in the final mode (tcmalloc, JSON config, 92446
+samples) put `Points::scoped_view` at **13.9% cumulative**, almost all
+via `Cluster::sv3d()`: every `kd3d()`/`point3d()`/`points()` call in the
+hot loops re-resolved the view — a Scope hash (boost::hash_range over
+the name strings, ~3.5%) plus hashtable find with string-compare
+equality (`__memcmp` 3.8%).
+
+Memoized the resolved view pointer in the Cluster facade together with
+the `Points::scoped_indices_valid()` flag pointer (added previously for
+exactly this pattern):
+
+- Fast path: memo set and `*valid` → return the view directly.
+- Node *insert* only drops the validity flag (view object is stable):
+  the slow path re-calls `scoped_view()`, which re-syncs and restores it.
+- Node *removal* erases the view object, so `Cluster::on_remove` (and
+  `on_insert`, for safety) reset the memo before any reuse —
+  `FacadeParent` already receives these tree notifications.
+- `set_default_scope()` resets the memo (scope changed).
+
+**A/B verdict: PASS** (snapshot `svmemo` vs `knn1`, all archives
+byte-identical). Clustering wall: hd-max 366→**330 s**, hd-busy
+245→**222 s**, typical events −10-13%.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

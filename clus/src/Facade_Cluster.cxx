@@ -77,6 +77,10 @@ void Cluster::set_default_scope(const Tree::Scope& scope)
 
     m_default_scope = scope;
 
+    // The memoized default-scope view follows the scope.
+    m_sv3d_memo = nullptr;
+    m_sv3d_valid = nullptr;
+
     // Clear caches that depend on the scope
     clear_cache(); // Why is this here???  It does not do what the comment says.
                    // It clears all cache.  This side-effect is needed even if
@@ -825,7 +829,16 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
 }
 
 const Cluster::sv3d_t& Cluster::sv3d() const {
-    return sv(); //  m_node->value.scoped_view(m_default_scope);
+    // Memoized: see m_sv3d_memo in the header.  When the validity flag has
+    // dropped (node insert), scoped_view() re-syncs the same view object and
+    // restores the flag; node removal resets the memo via on_remove().
+    if (m_sv3d_memo && m_sv3d_valid && *m_sv3d_valid) {
+        return *m_sv3d_memo;
+    }
+    const auto& view = sv();  //  m_node->value.scoped_view(m_default_scope);
+    m_sv3d_memo = &view;
+    m_sv3d_valid = m_node->value.scoped_indices_valid(m_default_scope);
+    return view;
 }
 const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
