@@ -124,6 +124,23 @@ edges to blobs/channels are added).
 A/B round; imaging RSS unchanged as predicted — the live peak is the
 projection cache + graph, not BlobGrouping.)
 
+### 3. Grouping::fastgeom — per-(apa,face) conversion-constant memo (clustering)
+
+`clus/src/Facade_Grouping.cxx`: `convert_3Dpoint_time_ch()` did, per call:
+a heap `std::vector` for the 3 wire angles, a by-value
+`IAnodePlane::faces()` vector copy, and ~10 nested `.at()` map-chain
+lookups; `has_closest_point()`/`get_closest_points()` repeated the
+wire-angle chains. These run per point per plane inside the good-point
+tests under Separate/Deghost/connect passes. New `fastgeom(apa,face)` memo
+(pattern follows the existing `m_kd2d_scope_cache`) holds copies of the
+constants + the `IAnodeFace` pointer; `convert_time_wire_2Dpoint()` also
+converted. Values are identical by construction.
+
+**A/B verdict: PASS** (same `opt1` round as entry 2). Clustering wall:
+hd-max 530→503 s, hd-busy 338→318 s, vd-busy 145→136 s (~5-6% on busy
+events; the remaining Separate cost is kd-tree geometry and
+DynamicPointCloud construction).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

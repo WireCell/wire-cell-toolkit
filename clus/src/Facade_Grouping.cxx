@@ -459,9 +459,8 @@ Grouping::kd_results_t Grouping::get_closest_points(const geo_point_t& point, co
                                                     int pind) const
 {
     double x = point[0];
-    const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
-    const std::array<double, 3> angles = {angle_u, angle_v, angle_w};
-    double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
+    const double angle = fastgeom(apa, face).angle[pind];
+    double y = cos(angle) * point[2] - sin(angle) * point[1];
     const auto& skd = kd2d(apa, face, pind);
     // Stack query (std::array) instead of a 2-element heap vector; this helper
     // runs per-point-per-plane in the clustering good-point tests.
@@ -473,9 +472,8 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
                                  int pind) const
 {
     double x = point[0];
-    const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
-    const std::array<double, 3> angles = {angle_u, angle_v, angle_w};
-    double y = cos(angles[pind]) * point[2] - sin(angles[pind]) * point[1];
+    const double angle = fastgeom(apa, face).angle[pind];
+    double y = cos(angle) * point[2] - sin(angle) * point[1];
     const auto& skd = kd2d(apa, face, pind);
     // Equivalent to get_closest_points(...).size() > 0 but cheaper: the radius query
     // collects every in-radius point, while the good-point callers only need existence.
@@ -520,65 +518,55 @@ bool Grouping::in_dead_gap(const geo_point_t& point, const int ch_range, const i
     return false;
 }
 
-std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const {
+const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) const
+{
+    const int key = apa * 2 + face;
+    auto it = m_fastgeom.find(key);
+    if (it != m_fastgeom.end()) return it->second;
+
     if (m_anodes.size()==0) {
         raise<ValueError>("Anode is null");
     }
-    const auto iface = m_anodes.at(apa)->faces()[face];
-    if (iface == nullptr) {
+    fastgeom_t fg;
+    fg.iface = m_anodes.at(apa)->faces()[face];
+    if (fg.iface == nullptr) {
         raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
     }
-
     const auto [angle_u,angle_v,angle_w] = wire_angles(apa, face);
-    std::vector<double> angles = {angle_u, angle_v, angle_w};
-    const double angle = angles[pind];
-    const double pitch = pitch_mags().at(apa).at(face).at(pind);
-    const double center = proj_centers().at(apa).at(face).at(pind);
+    fg.angle = {angle_u, angle_v, angle_w};
+    for (int pind = 0; pind < 3; ++pind) {
+        fg.pitch[pind] = pitch_mags().at(apa).at(face).at(pind);
+        fg.center[pind] = proj_centers().at(apa).at(face).at(pind);
+    }
+    fg.time_offset = cache().map_time_offset.at(apa).at(face);
+    fg.drift_speed = cache().map_drift_speed.at(apa).at(face);
+    fg.tick = cache().map_tick.at(apa).at(face);
+    return m_fastgeom.emplace(key, fg).first->second;
+}
 
-    // std::cout << "Test: " << pitch/units::cm << " " << center/units::cm << std::endl;
+std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const {
+    const auto& fg = fastgeom(apa, face);
 
-    const int wind = point2wind(point, angle, pitch, center);
+    const int wind = point2wind(point, fg.angle[pind], fg.pitch[pind], fg.center[pind]);
 
-    // const auto params = get_params();
-    double time_offset = cache().map_time_offset.at(apa).at(face);
-    double drift_speed = cache().map_drift_speed.at(apa).at(face);
-    double tick = cache().map_tick.at(apa).at(face);
-
-    //std::cout << "Test: " << params.time_offset/units::us << " " << params.drift_speed/(units::mm/units::us) << " " << point[0] << std::endl;
-
-    const double time = drift2time(iface, time_offset, drift_speed, point[0]);
-    const int tind = std::round(time / tick);
+    const double time = drift2time(fg.iface, fg.time_offset, fg.drift_speed, point[0]);
+    const int tind = std::round(time / fg.tick);
 
     return {tind, wind};
 }
 
-std::pair<double,double> Grouping::convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const 
+std::pair<double,double> Grouping::convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const
 {
-    if (m_anodes.size() == 0) {
-        raise<ValueError>("Anode is null");
-    }
-    const auto iface = m_anodes.at(apa)->faces()[face];
-    if (iface == nullptr) {
-        raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
-    }
     const int nplanes = 3;
-    // const auto params = get_params();
-    const auto& pitch_mags = this->pitch_mags();
-    const auto& proj_centers = this->proj_centers();
-    
-    double time_offset = cache().map_time_offset.at(apa).at(face);
-    double drift_speed = cache().map_drift_speed.at(apa).at(face);
-    double tick = cache().map_tick.at(apa).at(face);
+    const auto& fg = fastgeom(apa, face);
 
     // Convert time to x position
-    const double x = time2drift(iface, time_offset, drift_speed, timeslice * tick);
-    
+    const double x = time2drift(fg.iface, fg.time_offset, fg.drift_speed, timeslice * fg.tick);
+
     // Get y position based on channel and plane
     double y;
     if (plane >= 0 && plane < nplanes) {
-        const double pitch = pitch_mags.at(apa).at(face).at(plane);
-        const double center = proj_centers.at(apa).at(face).at(plane);
-        y = pitch * (wire+0.5) + center;
+        y = fg.pitch[plane] * (wire+0.5) + fg.center[plane];
     }
     else {
         raise<ValueError>("invalid plane index %d", plane);

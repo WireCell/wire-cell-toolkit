@@ -103,6 +103,23 @@ namespace WireCell::Clus::Facade {
         };
         mutable std::map<int, std::map<int, std::map<int, kd2d_cache_t>>> m_kd2d_scope_cache;
 
+        // Memoized per-(apa,face) conversion constants.  These copy values out
+        // of the GroupingCache nested maps (wire angles, pitch, projection
+        // center, time offset, drift speed, tick) plus the IAnodeFace pointer,
+        // all of which are fixed for the lifetime of this grouping.
+        // convert_3Dpoint_time_ch() and has_closest_point() run per point per
+        // plane inside the good-point tests, where the nested .at() map chains,
+        // a per-call std::vector for the angles and the by-value
+        // IAnodePlane::faces() vector dominated their cost.  Output-identical:
+        // the memo holds exactly the values those lookups return.
+        struct fastgeom_t {
+            std::array<double, 3> angle, pitch, center;
+            double time_offset, drift_speed, tick;
+            IAnodeFace::pointer iface;
+        };
+        mutable std::unordered_map<int, fastgeom_t> m_fastgeom;  // key: apa*2+face
+        const fastgeom_t& fastgeom(const int apa, const int face) const;
+
         /// TODO: remove these in the future
         // IAnodePlane::pointer m_anode{nullptr};
         // TPCParams m_tp{};  // use default value by default.
