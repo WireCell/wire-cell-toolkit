@@ -1296,6 +1296,41 @@ the per-stage copy+destroy churn.  Clustering wall/RSS unchanged
 2004–2665 MB across all round-6 snapshots under the 6-slot parallel
 harness — variance, not signal).
 
+### 32. Pool allocator for setS out-edge sets — byte-identical but REGRESSION, reverted
+
+Round-7 lead 2: attack the ~20-22% `boost::add_edge` share with a
+segregated pool for the out-edge Rb-tree nodes.  Implemented as a
+custom `pool_setS` OutEdgeList selector (`boost::container_gen`
+specialization mapping to `std::set` with
+`boost::fast_pool_allocator`, plus `parallel_edge_traits` =
+disallow), applied in lockstep to `cluster_graph_t` (ICluster.h) and
+`IndexedGraph::graph_t` (they must match or BlobClustering's flush
+move degrades to a cross-type `copy_graph`).
+
+**A/B verdict: PASS but reverted** (snapshot `r8pool` vs `r8move`):
+178/178 byte-identical — set ordering is by value, as predicted — but
+the metrics went the wrong way on every axis:
+
+| event | img wall | img RSS | clus RSS |
+|---|---|---|---|
+| hd-max | 233→235 s | 3389→3871 MB (+14%) | 1998→2766 MB (+38%) |
+| hd-busy | 114→117 s | 1935→2391 MB (+24%) | 2483→2650 MB |
+| vd-busy | 85→88 s | 698→971 MB (+39%) | 1113→1298 MB (+17%) |
+| typicals | ±1 s | +27..+35% | +5..+20% |
+
+Two compounding reasons: (a) `fast_pool_allocator`'s singleton pool
+never returns freed nodes to the allocator, so every transient graph's
+out-edge nodes ratchet the footprint (exactly the high-water retention
+tcmalloc was deployed to avoid); (b) its mutex-guarded free-list is
+not faster than tcmalloc's thread-cache fast path, so there was no
+wall win to trade.  Conclusion: under tcmalloc the add_edge share is
+comparison/rebalance work plus minimum unavoidable node churn, not
+malloc overhead.  **Closed as tried-and-rejected; do not revisit
+while tcmalloc is the production allocator.**  Build note for future
+ABI-wide type changes: every installed lib goes stale at once (all
+`cluster_graph_t` mangled names change), so tests fail to link
+against `local/lib` until a `./wcb install --notests` refresh.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
