@@ -1312,46 +1312,46 @@ Cluster::const_blob_point_map_t Cluster::get_closest_blob(const geo_point_t& poi
 
 std::pair<geo_point_t, const Blob*> Cluster::get_closest_point_blob(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    // Hot path (Find_Closest_Points convergence loops): resolve the scoped
+    // view once and use the allocation-free single-NN query.
+    const auto& skd = kd3d();
+    size_t point_index = 0;
+    double metric = 0;
+    if (!skd.knn1(point, point_index, metric)) {
         return std::make_pair(geo_point_t(), nullptr);
     }
-
-    const auto& [point_index, _] = results[0];
-    return std::make_pair(point3d(point_index), blob_with_point(point_index));
+    return std::make_pair(skd.point3d(point_index), blob_with_point(point_index));
 }
 
 std::pair<size_t, geo_point_t> Cluster::get_closest_wcpoint(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    const auto& skd = kd3d();
+    size_t point_index = 0;
+    double metric = 0;
+    if (!skd.knn1(point, point_index, metric)) {
         return std::make_pair(-1, nullptr);
     }
-
-    const auto& [point_index, _] = results[0];
-    return std::make_pair(point_index, point3d(point_index));
+    return std::make_pair(point_index, skd.point3d(point_index));
 }
 
 size_t Cluster::get_closest_point_index(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    size_t point_index = 0;
+    double metric = 0;
+    if (!kd3d().knn1(point, point_index, metric)) {
         raise<ValueError>("no points in cluster");
     }
-
-    const auto& [point_index, _] = results[0];
     return point_index;
 }
 
 double Cluster::get_closest_dis(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    size_t point_index = 0;
+    double metric = 0;
+    if (!kd3d().knn1(point, point_index, metric)) {
         raise<ValueError>("no points in cluster");
     }
-
-    const auto& [_, dis] = results[0];
-    return sqrt(dis);
+    return sqrt(metric);
 }
 
 std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) const{

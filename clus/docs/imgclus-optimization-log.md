@@ -381,6 +381,24 @@ the same `imgr2` snapshot as entry 9. Wall effect small (a few % of the
 rebuild sites), bundled here as the safest of the graph-rebuild
 reductions; the `copy_graph` sites remain on the target list.
 
+### 11. NFKDVec::knn1 — allocation-free single-NN query (clustering)
+
+`get_closest_point_blob` (12.5% of hd-max clustering, the inner call of
+`Find_Closest_Points`' alternating-projection loops) heap-allocated a
+one-element result vector per query via `knn(1)` and resolved the scoped
+view twice (once for the query, again inside `point3d`). Added
+`NFKDVec::Tree::knn1(query, index, metric)` (stack scalars, identical
+nanoflann search) and re-pointed the four single-NN `Cluster` wrappers
+(`get_closest_point_blob`, `get_closest_wcpoint`,
+`get_closest_point_index`, `get_closest_dis`) at it, resolving the
+scoped view once.
+
+**A/B verdict: PASS** (snapshot `knn1` vs `pofixtc`, all archives
+byte-identical). Wall effect is noise-level on the gate run (hd-max
+372→366 s) — with tcmalloc already adopted the malloc share this
+removes had become cheap; kept as the right primitive for these hot
+paths.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
@@ -469,12 +487,17 @@ clustering: hd-max ~510 s):
    Eigen sparse layer matrices with hash/CSR keyed only on occupied
    (channel, slice) — touches `judge_coverage`, byte-identity risk, last
    resort.
+   **(b) DONE in round-2 entry 9** (map-key-membership liveness instead of
+   a use-count pre-pass; hd-busy imaging RSS −51%). (a)/(c) remain
+   unattempted and likely unnecessary now.
 2. **tcmalloc deployment** (`LD_PRELOAD` in run scripts): with ~140 GB of
    churn, glibc retains the high-water mark forever while live memory drops
    to ~1 GB; tcmalloc returns freed pages. Helps the *sustained* footprint
    under 16-way concurrency (not VmHWM of the early peak). Must pass the
    full A/B gate first (allocator changes can flip pointer-keyed iteration
    order if any exists).
+   **DONE for both stages** (imaging in round-1 entry 5; clustering in
+   round-2 entry 8 after the pointer-order fix).
 3. `malloc_trim(0)` after each `ClusterFileSink` write (glibc-only, helps
    between anodes in all-anode mode; mostly superseded by `-P`).
 

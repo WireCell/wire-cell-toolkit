@@ -259,6 +259,29 @@ namespace WireCell::NFKDVec {
         }
 
 
+        // Single-nearest-neighbor query without the result-vector heap
+        // allocation of knn(1).  Returns true and fills index/metric when a
+        // neighbor exists; the search and results are identical to knn(1).
+        template<typename VectorLike>
+        bool knn1(const VectorLike& query_point, size_t& index, distance_type& metric) const {
+            if (!npoints() || query_point.size() != ndim()) {
+                return false;
+            }
+            this->prepquery<nfkdindex_type>();
+            size_t idx = 0;
+            distance_type dist = 0;
+            nanoflann::KNNResultSet<element_type> nf(1);
+            nf.init(&idx, &dist);
+            m_nfkdindex->findNeighbors(nf, query_point.data(),
+                                       nanoflann::SearchParameters());
+            if (nf.size() == 0) {
+                return false;
+            }
+            index = idx;
+            metric = dist;
+            return true;
+        }
+
         template<typename VectorLike>
         results_type radius(distance_type rad, const VectorLike& query_point) const {
             results_type ret;
