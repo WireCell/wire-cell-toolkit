@@ -199,6 +199,35 @@ Clustering wall vs baseline: hd-max 530→**454 s**, hd-busy 338→**298 s**,
 vd-busy 145→134 s. Imaging vs baseline (with tcmalloc): hd-max
 1028→**304 s**, hd-busy 656→**161 s**, vd-busy 327→247 s.
 
+## Closing validation
+
+- **22-event spot check** (`spot_events.txt`, spans every profiled run,
+  both detectors): optimized code + tcmalloc imaging vs pre-optimization
+  baseline — **all 706 output archives byte-identical** (snapshots
+  `spotbase` vs `spotopt`).
+- **Determinism re-run** (`opt3` vs `opt3b`, full 6-event set twice with
+  final code): all archives identical (hd-max clustering needed a re-run
+  in the second pass — see crash finding below).
+
+### FINDING: intermittent clustering crash is the gojsonnet Go runtime
+
+During the determinism re-run, hd-max (027305/0) clustering aborted
+(rc=134) with `fatal error: traceback did not unwind completely` raised
+by the **embedded Go runtime** (gojsonnet's GC threads, which keep
+running after config parsing). The identical binary+input passed
+byte-identically an hour earlier, and the pre-optimization 283-event
+batch had a similar 027305 segfault — this is the long-standing
+intermittent "clus heisenbug", now with a concrete signature: it is the
+Go GC crashing, not (necessarily) the clustering C++.
+
+**Mitigation to try:** pre-compile the clustering config with `wcsonnet`
+and feed `wire-cell` pure JSON (as `-P` imaging mode already does). If
+the Go runtime is only initialized when jsonnet is actually parsed, this
+removes the Go GC from the production process entirely; it also takes
+the jsonnet compile off the clustering critical path. Needs a check that
+`wire-cell -c cfg.json` does not still spin up Go threads (inspect
+/proc/<pid>/task count or the crash disappearing over many runs).
+
 ### FINDING: clustering has a pointer-order-dependent merge decision
 
 Under tcmalloc, hd-typ (027409/0) per-face clustering of apa2-face0
@@ -265,6 +294,28 @@ Clustering profile (hd-busy full clustering, 86296 samples), cumulative:
   as `_Vector_impl_data` 5.3%, `_M_lower_bound` 4.8%, malloc/free ~20%.
 - nanoflann `searchLevel`+`evalMetric` ~19% (genuine k-d geometry,
   irreducible), `DynamicPointCloud` point construction ~12%.
+
+## Next runtime targets (profiled, not yet attempted)
+
+From the post-fix profiles (imaging: hd-busy anode2 now ~95 s CPU;
+clustering: hd-max ~510 s):
+
+- **Imaging** (now allocator/graph-lifecycle bound, spread across passes:
+  PD 25%, ChargeSolving 22%, BlobClustering 9%, InSliceDeghosting 8%,
+  LocalGeomClustering 8%): remaining structural lever is reducing
+  cluster-graph rebuilds (`remove_blobs` full rebuild, `CS::prune`
+  copy-then-filter ×3 passes, the `copy_graph` sites). Each is a few %;
+  the `old2new` unordered_map→vector remap in `remove_blobs`/`CS::prune`
+  is the safest first step.
+- **Clustering** (hd-max): `Find_Closest_Points` 14.3%,
+  `Cluster::sv3d`/scoped-view lookups under ExamineBundles 13.2%,
+  `get_closest_point_blob` 12.5%, vhough 10.6%, `DynamicPointCloud`
+  construction ~9% (DPCPoint is AoS with 5 nested vectors per point — an
+  SoA restructure is the big-ticket item, byte-identity achievable but a
+  larger surgery), nanoflann searchLevel ~20% (genuine geometry).
+- **Clustering pointer-order dependence** (see FINDING below): fixing it
+  is both a robustness win and unlocks tcmalloc for clustering (~15-20%
+  more, judging by the opt2tc walls).
 
 ## Ideas not yet applied — for review
 

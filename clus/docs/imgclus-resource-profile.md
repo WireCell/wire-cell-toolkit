@@ -1,5 +1,25 @@
 # PDHD / PDVD imaging + clustering resource profile
 
+> **2026-06-11 update:** the optimization round documented in
+> [imgclus-optimization-log.md](imgclus-optimization-log.md) has landed
+> (byte-identical outputs, verified per change on a 6-event A/B set plus a
+> 22-event spot check). Representative effect on this profile's events,
+> measured under the same conditions (6-way concurrency):
+>
+> | Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+> |---|---|---|---|---|
+> | PDHD 027305/0 (worst) | 1028 → **304** | 10113 → 8862 | 530 → **454** | 3284 |
+> | PDHD 028084/18 (busy) | 656 → **161** | 7180 → 6855 | 338 → **298** | 2833 |
+> | PDVD 039252/5 (busy)  | 327 → **247** | 1918 → 1768 | 145 → **134** | 1879 |
+> | PDHD 027409/0 (typ.)  | 66 → **58**   | ~700 | 28 | ~700 |
+> | PDVD 039349/0 (typ.)  | 140 → **132** (50 with `-P`) | 440 | 26 | 745 |
+>
+> Main contributors: BlobGrouping quadratic-scan fix, ISlice::activity()
+> const-ref, ProjectionDeghosting set-copy removal, kd existence-query
+> early exit, DynamicPointCloud real move, tcmalloc for the imaging stage,
+> and the opt-in `-P` per-anode imaging mode. The tables below are the
+> PRE-optimization baseline, kept for reference.
+
 Per-stage wall-clock time and peak resident memory (RSS) for the full **imaging -> clustering** chain run over every event that had a complete DNN-ROI signal-processing output, using the DNN-SP frames as imaging input.
 
 ## Run conditions
