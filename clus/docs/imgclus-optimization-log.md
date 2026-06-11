@@ -1050,6 +1050,27 @@ every site reads only.
 - Clustering walls drifted −3% — noise; this change does not touch
   clustering code paths.
 
+### 26. Scope the BlobShadow graph inside ProjectionDeghosting
+
+Round-5 heap profiling showed the `bsgraph` built at the top of every
+`ProjectionDeghosting` call (3.13 GB live on hd-max a0 — multisetS edge
+nodes + edge-list nodes) is consumed only by `ClusterShadow::shadow`
+yet stayed alive to the end of the pass.  Wrapped build+conversion in a
+block so it is freed before the projection/judge phase.  Pure lifetime
+change, byte-identical by construction.
+
+- A/B snapshot `r6bsscope` vs `r6graphref`: **178/178 byte-identical,
+  PASS.**
+- Imaging peak RSS: hd-max 5425→**4667 MB** (−14%), hd-busy
+  2884→**2173 MB** (−25%), vd-busy 994→**755 MB** (−24%); typicals
+  flat (their bsgraph is small).  Wall unchanged (±2 s noise).
+- hd-max keeps a residual because its peak now sits at the bs-build
+  moment itself, as round 5 predicted; shrinking that needs the
+  multisetS→vecS container change (queue item 5, order-audit required).
+- Cumulative imaging peak RSS from the round-4 baseline (items 25+26):
+  hd-max 6190→4667 (−25%), hd-busy 3382→2173 (−36%), vd-busy
+  1162→755 (−35%).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

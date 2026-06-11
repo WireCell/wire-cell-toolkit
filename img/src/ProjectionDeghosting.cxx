@@ -163,12 +163,17 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
 
     const auto& in_graph = in->graph();
     log->debug("in_graph: {}", dumps(in_graph));
-    // blob shadow ... vertex = blob, edge --> wire/channel, plane
-    BlobShadow::graph_t bsgraph = BlobShadow::shadow(in_graph, 'w');  // or 'c'
 
     // cluster shadow map, blob to cluster map ???
     ClusterShadow::blob_cluster_map_t clusters;
-    auto cs_graph = ClusterShadow::shadow(in_graph, bsgraph, clusters);
+    ClusterShadow::graph_t cs_graph;
+    {
+        // blob shadow ... vertex = blob, edge --> wire/channel, plane.  Only
+        // ClusterShadow::shadow consumes it; scope it so its multi-GB edge
+        // storage is freed before the projection/judge phase below.
+        BlobShadow::graph_t bsgraph = BlobShadow::shadow(in_graph, 'w');  // or 'c'
+        cs_graph = ClusterShadow::shadow(in_graph, bsgraph, clusters);
+    }
 
     // make a cluster -> blob map
     std::unordered_map<ClusterShadow::vdesc_t, std::set<cluster_vertex_t>> c2b;
