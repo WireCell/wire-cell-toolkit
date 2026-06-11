@@ -614,6 +614,28 @@ work (the old `imgr2`/`fastg` baselines predate the span change).
 (byte-identical).  Wall: hd-busy 204→**190** s, hd-max 308→**288** s,
 vd-busy 90→**86** s; typicals unchanged.
 
+### 17. hough_transform: scratch-grid accumulation, no intermediate vectors (clustering)
+
+`clus/src/Facade_Cluster.cxx` `Cluster::hough_transform` (round-3 #2
+target, 13.4% of hd-max).  The histogram was already sparse (an earlier
+session replaced boost::histogram with an unordered_map keyed by the
+linear bin index); the remaining cost was per-fill hashing/allocation and
+the materialization of `pts`/`blobs` vectors per call.  Now:
+
+- accumulation goes into a generation-stamped dense thread-local scratch
+  grid (a bin is live when its stamp matches the call's generation) — no
+  per-call zero-fill of the 64 800-bin grid, no hashing, no allocation
+  after warm-up; the touched-bin list drives the peak scan.  Per-bin sums
+  see the same values in the same order, and the peak criterion (max
+  value, then smallest linear index) is a total order, so the result is
+  bit-identical regardless of visit order.
+- the kd results are iterated directly (`blob_with_point` per index +
+  the scoped-view coordinate arrays) instead of building `pts`/`blobs`
+  vectors first — same per-index values and order.
+
+**A/B**: 6-event clustering gate vs the entry-16 snapshot — all archives
+PASS (byte-identical).  Wall: hd-busy 190→**182** s, hd-max 288→**281** s.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
