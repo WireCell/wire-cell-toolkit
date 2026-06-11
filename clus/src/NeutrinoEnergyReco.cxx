@@ -102,12 +102,12 @@ static double kine_charge_from_maps(
 
             if (plane_sample < 3) {
                 ++plane_sample;
-                auto pcloud1_pts = pcloud1 ? pcloud1->get_points().size() : 0;
+                auto pcloud1_pts = pcloud1 ? pcloud1->npoints() : 0;
                 // Also sample first point in pcloud1 for coordinate comparison
                 double pc_x = 0, pc_y = 0, pc_z = 0;
                 if (pcloud1 && pcloud1_pts > 0) {
-                    const auto& pt0 = pcloud1->get_points()[0];
-                    pc_x = pt0.x; pc_y = pt0.y; pc_z = pt0.z;
+                    const auto pt0 = pcloud1->point3d(0);
+                    pc_x = pt0.x(); pc_y = pt0.y(); pc_z = pt0.z();
                 }
                 SPDLOG_LOGGER_TRACE(s_log,
                     "kine_charge_from_maps:   plane={} ts={} ch={} wire={} apa={} face={}"
@@ -124,9 +124,8 @@ static double kine_charge_from_maps(
             // Returns true if the charge was added.
             auto try_add = [&](std::shared_ptr<Facade::DynamicPointCloud> pc) -> bool {
                 if (!pc || dis >= dis_cut || !closest_cluster) return false;
-                const auto& pts = pc->get_points();
-                if (point_index >= pts.size()) return false;
-                WireCell::Point tp(pts[point_index].x, pts[point_index].y, pts[point_index].z);
+                if (point_index >= pc->npoints()) return false;
+                WireCell::Point tp = pc->point3d(point_index);
                 sums[plane_id] += charge_data.charge * corr_fn(tp);
                 return true;
             };
@@ -319,7 +318,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         SPDLOG_LOGGER_TRACE(s_log,
             "calculate_shower_kinematics:   shower pdg={} nseg={} pcloud1_pts={} pcloud2_pts={}",
             shower->get_particle_type(), shower->get_num_segments(),
-            pcloud1->get_points().size(), pcloud2->get_points().size());
+            pcloud1->npoints(), pcloud2->npoints());
 
         double kine_charge = kine_charge_from_maps(
             pcloud1, pcloud2, fudge_factor, recom_factor,

@@ -414,7 +414,6 @@ void clustering_connect1(
                 // If the point falls in a dead wire region, use a fixed 2/3*loose_dis_cut threshold
                 // (prototype behaviour); otherwise use the per-extrapolation-point dist_cut stored
                 // in the skeleton cloud.  This avoids 3x code duplication across U/V/W planes.
-                const auto& skel_pts = global_skeleton_cloud->get_points();
                 auto process_plane = [&](int plane,
                                          const std::map<int, std::pair<double, double>>& dead_index,
                                          int wire_idx, double raw_x,
@@ -432,7 +431,7 @@ void clustering_connect1(
                         std::set<const Cluster *, ClusterLess> tmp;
                         for (const auto& [dist, cl, gidx] : results) {
                             const double cut = flag_dead ? (loose_dis_cut / 3. * 2.)
-                                                         : skel_pts[gidx].dist_cut[plane];
+                                                         : global_skeleton_cloud->dist_cut(gidx, plane);
                             if (dist < cut) { flag_unique = false; tmp.insert(cl); }
                         }
                         for (const Cluster* cl : tmp) ++map_cluster_num[plane][cl];

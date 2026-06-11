@@ -510,12 +510,11 @@ added after round 3** — see the Round 3 section for the entries:
    288→281 s.  The residual cost is the `kd_radius` descent + trig,
    which is content-bound — retired as a target.
 3. **DynamicPointCloud SoA restructure** (~7% now, was ~9-12% pre-
-   tcmalloc) — ⏳ **OPEN, needs a dedicated session**: DPCPoint carries
-   5 nested vectors; flattening to columnar storage is
-   byte-identity-achievable but touches every `make_points_*` builder
-   and ~10 consumer files including the neutrino-porting code.  Biggest
-   single remaining structural item; do it as a dedicated change with
-   the full gate, not opportunistically.
+   tcmalloc) — ✅ **DONE in round 4 (entry 24)**: DPCPoint replaced
+   wholesale by the columnar `DPCBatch`; byte-identical across the
+   PDHD/PDVD 6-event gate, the MicroBooNE qlport full chain, SBND, and
+   the 5-test porting bats suite.  Clustering RSS −14..−45% on busy
+   events, wall −4..−5%.
 4. **Imaging graph-rebuild remainder** — ✅ **DONE in round 4 (entries
    22-23)**: `CS::prune` no-prune fast path (entry 22, fires ~100% with
    the default threshold) and the `copy_graph` reduction via the
@@ -811,6 +810,64 @@ a one-line `copy_graph` — poor risk/benefit against the byte-identity
 gate.  This closes round-2 follow-up item 4 (imaging graph-rebuild
 remainder); both sub-items (CS::prune fast path = entry 22, copy_graph
 sites = this entry) are done.
+
+### 24. DynamicPointCloud SoA restructure (round-2 item 3, the big one)
+
+`DPCPoint` carried five nested vectors per point (`x_2d`/`y_2d`/
+`wpid_2d` each `vector<vector<...>>` plus `wind`/`dist_cut`) — roughly
+a dozen heap allocations *per point*, megabytes of points per event,
+built and torn down across every `make_points_*` call.  Replaced the
+AoS struct wholesale with a columnar `DPCBatch` (scalar columns +
+CSR-encoded per-plane 2D projections) used both as the builder transfer
+format and as `DynamicPointCloud`'s internal storage:
+
+- builders (`make_points_cluster[_steiner|_skeleton]`,
+  `make_points_direct`, `make_points_linear_extrapolation`,
+  `fill_wrap_points`) append straight into the batch columns — zero
+  per-point allocations;
+- `add_points(DPCBatch&&)` on a fresh cloud is an O(1) column move
+  (the dominant call pattern);
+- consumers migrated from `get_points()[i].field` to
+  `npoints()/point3d(i)/cluster(i)/dist_cut(i,p)/points()` accessors;
+  whole-cloud and row-subset copies (PRShower merge, break_segment
+  redistribution) became `add_points(other[, rows])` column appends.
+
+Values, point order, and kd-tree construction order are bit-identical
+by construction; ~10 consumer files touched including the
+neutrino-porting code (PRShower/PRSegmentFunctions/NeutrinoDeghoster/
+NeutrinoEnergyReco/NeutrinoShowerClustering/TaggerCheckSTM/MABC).
+
+**Verification (all PASS):**
+- PDHD/PDVD 6-event clustering A/B (snapshot `dpcsoa1` vs `npfmt2`):
+  all archives byte-identical.
+- MicroBooNE full chain (qlport `uboone-mabc.jsonnet`, events
+  6501/6505/6512, kind=both incl. pattern recognition + taggers): all
+  3 bee zips byte-identical — this is the path that exercises the
+  PR*/Neutrino* consumers.
+- SBND clustering (sbnd_xin `wct-clustering.jsonnet`, evt 138670 data +
+  evt 12 sim): 6/6 mabc zips byte-identical.
+- Dedicated porting suite `clus/test/test-porting.bats`: **5/5 ok**
+  (qlport, steiner, stm, pdhd, fgval) including historical log-digest
+  diffs.
+
+**Resources** (clustering stage, vs `npfmt2`):
+
+| Event | clus wall (s) | clus peak RSS (MB) |
+|---|---|---|
+| hd-typ  027409/0  | 17 → 17 | 702 → **644** |
+| hd-typ2 027980/3  | 19 → 19 | 753 → **703** |
+| hd-busy 028084/18 | 176 → **168** | 3092 → **2666** |
+| hd-max  027305/0  | 272 → **260** | 3089 → 3087 |
+| vd-typ  039349/0  | 12 → 12 | 510 → **472** |
+| vd-busy 039252/5  | 79 → **76** | 2497 → **1373** |
+
+The headline is memory: vd-busy **−45%**, hd-busy −14%, typicals
+−7..−9% — the nested-vector churn this removes was the allocator-
+retention feeder identified in the round-3 heap profile.  Wall −4..−5%
+on the busy/max events (the projected ~7% was a glibc-profile number;
+under tcmalloc the allocation share is cheaper).  hd-max RSS is flat:
+its peak envelope sits in stages that don't go through
+DynamicPointCloud.  Imaging is untouched by this change.
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
