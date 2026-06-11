@@ -58,7 +58,7 @@ void doit(cluster_graph_t& cgraph)
         }
 
         const auto islice = std::get<ISlice::pointer>(snode.ptr);
-        ISlice::map_t activity = islice->activity();
+        const ISlice::map_t& activity = islice->activity();
 
         // Recieve b and c reached from this s per plane
         std::vector<bcdesc::graph_t> bcs(3); // fixme: hard-code 3 planes
@@ -158,7 +158,11 @@ void doit(cluster_graph_t& cgraph)
                 const auto& node = cgraph[vtx];
                 if (node.code() == 'c') {
                     auto ich = std::get<IChannel::pointer>(node.ptr);
-                    const auto sig = activity[ich];
+                    // find with zero default == previous operator[] on a local
+                    // copy of the activity map (default-inserted {0,0}).
+                    static const ISlice::value_t zero_signal{};
+                    const auto ait = activity.find(ich);
+                    const auto sig = (ait == activity.end()) ? zero_signal : ait->second;
                     const auto wpid = ich->planeid();
                     sm->sig += sig;
                     sm->wpid = wpid;

@@ -107,7 +107,7 @@ namespace {
     }
 
     // run in keep mode if removal_mode is false
-    cluster_graph_t remove_blobs(const cluster_graph_t& cg, std::unordered_set<cluster_vertex_t> blobs,
+    cluster_graph_t remove_blobs(const cluster_graph_t& cg, const std::unordered_set<cluster_vertex_t>& blobs,
                                  bool removal_mode = true)
     {
         cluster_graph_t cg_out;
@@ -216,7 +216,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
 
     // run algorithm ...
     for (auto cs_cluster : GraphTools::mir(boost::vertices(cs_graph))) {
-        auto b_cluster = c2b[cs_cluster];          // cluster_vertex_t
+        const auto& b_cluster = c2b[cs_cluster];          // cluster_vertex_t
         int gid_cluster = cluster2id[cs_cluster];  // cluster id ...
         Projection2D::LayerProjection2DMap& proj_cluster =
             get_projection(id2lproj, cs_cluster, in_graph, b_cluster, m_nchan, m_nslice, m_uncer_cut,
@@ -255,7 +255,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
                     const auto& eobj = cs_graph[cedge];
                     if (layer_cluster != eobj.wpid.layer()) continue;
 
-                    auto b_clust3D = c2b[clust3D];
+                    const auto& b_clust3D = c2b[clust3D];
                     Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                         id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
 
@@ -311,7 +311,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             ClusterShadow::vdesc_t clust3D = it1->first;
             if (find(to_be_removed.begin(), to_be_removed.end(), clust3D) == to_be_removed.end()) {
                 int gid_clust3D = cluster2id[clust3D];
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 Projection2D::Projection2D& proj2D_clust3D = proj_clust3D.m_layer_proj[layer_cluster];
@@ -330,7 +330,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
                         const auto& eobj = cs_graph[cedge];
                         if (layer_cluster != eobj.wpid.layer()) continue;
 
-                        auto b_comp_3Dclus = c2b[comp_3Dclus];
+                        const auto& b_comp_3Dclus = c2b[comp_3Dclus];
                         Projection2D::LayerProjection2DMap& proj_comp_3Dclus =
                             get_projection(id2lproj, comp_3Dclus, in_graph, b_comp_3Dclus, m_nchan, m_nslice,
                                            m_uncer_cut, m_dead_default_charge);
@@ -360,7 +360,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         for (auto it1 = clus_2D_3D_map.begin(); it1 != clus_2D_3D_map.end(); it1++) {
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
                 ClusterShadow::vdesc_t clust3D = *it2;
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 proj_clust3D.m_saved_flag++;
@@ -380,7 +380,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             int max_flag_saved = -1;
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
                 ClusterShadow::vdesc_t clust3D = *it2;
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 if (proj_clust3D.m_saved_flag > max_flag_saved) max_flag_saved = proj_clust3D.m_saved_flag;
@@ -388,7 +388,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
 
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
                 ClusterShadow::vdesc_t clust3D = *it2;
-                auto b_clust3D = c2b[clust3D];
+                const auto& b_clust3D = c2b[clust3D];
                 Projection2D::LayerProjection2DMap& proj_clust3D = get_projection(
                     id2lproj, clust3D, in_graph, b_clust3D, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);
                 if (proj_clust3D.m_saved_flag != max_flag_saved) proj_clust3D.m_saved_flag_1++;
@@ -398,7 +398,7 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
 
     // delete blobs ...
     for (auto cs_cluster : GraphTools::mir(boost::vertices(cs_graph))) {
-        auto b_cluster = c2b[cs_cluster];  // cluster_vertex_t
+        const auto& b_cluster = c2b[cs_cluster];  // cluster_vertex_t
         //       int gid_cluster = cluster2id[cs_cluster];
         Projection2D::LayerProjection2DMap& proj_cluster = get_projection(
             id2lproj, cs_cluster, in_graph, b_cluster, m_nchan, m_nslice, m_uncer_cut, m_dead_default_charge);

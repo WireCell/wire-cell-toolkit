@@ -141,6 +141,27 @@ hd-max 530→503 s, hd-busy 338→318 s, vd-busy 145→136 s (~5-6% on busy
 events; the remaining Separate cost is kd-tree geometry and
 DynamicPointCloud construction).
 
+### 4. ISlice::activity() by const-ref + ProjectionDeghosting set-copy removal (imaging)
+
+Post-entry-2 re-profile made ProjectionDeghosting the imaging leader
+(39.5% of the busy anode); inside it, `std::set` copy-construct/destroy was
+~36% (the eight `auto b_cluster = c2b[...]` statements each copied the
+cluster's blob-descriptor set) and `Slice::activity()` map copies were
+~12% (by-value return, called per slice per cluster in
+`Projection2D::get_projection`; GridTiling called it 3x per slice).
+
+- `ISlice::activity()` now returns `const map_t&` (implementers SimpleSlice
+  and ImgData::Slice store the map; all callers compile unchanged or were
+  bound by const-ref). Call sites that relied on `operator[]`
+  default-insert on a local copy (Projection2D, BlobGrouping) use
+  find-with-zero-default — exactly equivalent.
+- ProjectionDeghosting: `c2b[...]` results bound by const-ref;
+  `remove_blobs` takes the tagged set by const-ref.
+
+**A/B verdict: PASS** (snapshot `opt2`). Cumulative vs baseline:
+hd-max img 1028→**408 s**, hd-busy img 656→**216 s** (3.0x), vd-busy img
+327→275 s; typical events unchanged.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

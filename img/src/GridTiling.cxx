@@ -76,7 +76,7 @@ bool Img::GridTiling::operator()(const input_pointer& slice, output_pointer& out
         return true;
     }
 
-    auto chvs = slice->activity();
+    const auto& chvs = slice->activity();
 
     if (chvs.empty()) {
         log->trace("anode={} face={} slice={}, time={} ms no activity",
@@ -96,14 +96,14 @@ bool Img::GridTiling::operator()(const input_pointer& slice, output_pointer& out
     measures[0].push_back(1);  // assume first two layers in RayGrid::Coordinates
     measures[1].push_back(1);  // are for horiz/vert bounds
 
-    const int nactivities = slice->activity().size();
+    const int nactivities = chvs.size();
     int total_activity = 0;
     if (nactivities < m_face->nplanes()) {
         SPDLOG_LOGGER_TRACE(log, "anode={} face={} slice={} too few activities n={} / nplanes={}", anodeid, faceid, slice->ident(), nactivities, m_face->nplanes());
         return true;
     }
 
-    for (const auto& chv : slice->activity()) {
+    for (const auto& chv : chvs) {
         for (const auto& wire : chv.first->wires()) {
             auto wpid = wire->planeid();
             if (wpid.face() != faceid) {
