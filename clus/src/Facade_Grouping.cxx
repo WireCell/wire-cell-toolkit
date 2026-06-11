@@ -336,6 +336,7 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
+    const int needed = nplanes - allowed_bad;
     int matched_planes = 0;
     for (int pind = 0; pind < nplanes; ++pind) {
         if (has_closest_point(point, radius, apa, face, pind)) {
@@ -343,12 +344,12 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
         } else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes++;
         }
+        // Short-circuit: the per-plane tests are pure queries, so once the
+        // verdict is decided the remaining planes' kd descents can be skipped.
+        if (matched_planes >= needed) return true;
+        if (matched_planes + (nplanes - 1 - pind) < needed) return false;
     }
-    // std::cout << "matched_planes: " << matched_planes << std::endl;
-    if (matched_planes >= nplanes - allowed_bad) {
-        return true;
-    }
-    return false;
+    return matched_planes >= needed;
 }
 
 bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const
@@ -357,9 +358,12 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const i
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
+    const int needed = 4 - allowed_bad;
     int matched_planes = 0;
 
-    // Loop through U,V,W planes
+    // Loop through U,V,W planes.  Weights remaining after each plane: after U
+    // it is V+W = 3, after V it is W = 2.
+    static const int remaining_weight[3] = {3, 2, 0};
     for (int pind = 0; pind < nplanes; pind++) {
         int weight = (pind == 2) ? 2 : 1; // W plane counts double
         if (has_closest_point(point, radius, apa, face, pind)) {
@@ -368,9 +372,12 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const i
         else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes += weight;
         }
+        // Short-circuit on a decided verdict (pure queries, no side effects).
+        if (matched_planes >= needed) return true;
+        if (matched_planes + remaining_weight[pind] < needed) return false;
     }
 
-    return matched_planes >= 4 - allowed_bad;
+    return matched_planes >= needed;
 }
 
 std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int apa, const int face, 
@@ -485,13 +492,16 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
 }
 
 bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {
-    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, pind);
     const auto& ch2xrange = get_dead_winds(apa, face, pind);
-    for (int ch = wind - ch_range; ch <= wind + ch_range; ++ch) {
-        if (ch2xrange.find(ch) ==  ch2xrange.end()) continue;
-        const auto [xmin, xmax] = ch2xrange.at(ch);
+    if (ch2xrange.empty()) return false;
+    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, pind);
+    (void)tind;
+    // One ordered-map descent for the whole [wind-ch_range, wind+ch_range]
+    // window instead of a find() per channel; same ascending visit order.
+    for (auto it = ch2xrange.lower_bound(wind - ch_range);
+         it != ch2xrange.end() && it->first <= wind + ch_range; ++it) {
+        const auto [xmin, xmax] = it->second;
         if (point[0] >= xmin && point[0] <= xmax) {
-            // std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
             return true;
         }
     }

@@ -588,6 +588,32 @@ Verification of the blast radius:
 Snapshot `span1500` is the new A/B baseline for subsequent byte-identical
 work (the old `imgr2`/`fastg` baselines predate the span change).
 
+### 16. Good-point tests: plane short-circuit + dead-chs single map descent (clustering)
+
+`clus/src/Facade_Grouping.cxx`:
+
+- `is_good_point` / `is_good_point_wc`: the per-plane tests are pure
+  queries, so the U/V/W loop now returns as soon as the verdict is
+  decided.  With the hot-path default `allowed_bad=1`, both extremes skip
+  the third plane's kd descent: two matches → early true, two misses →
+  early false (weighted variant analogous, threshold 4 with W=2).  This
+  attacks the round-3 #1 target — `is_good_point` was 25.3% of hd-max
+  clustering, nearly all `exists_within` kd descent — by issuing fewer
+  queries rather than making the descent faster.
+- `get_closest_dead_chs`: one ordered-map `lower_bound` descent for the
+  whole `[wind-ch_range, wind+ch_range]` window instead of a `find()` per
+  channel (3 descents at the default `ch_range=1`), plus an empty-map
+  early-out before the projection arithmetic.  Same ascending visit
+  order, verdict-identical.  (This is the PDHD/PDVD share of the SBND
+  profile's `get_closest_dead_chs` ~9% item; the flat-bitmask variant was
+  rejected because `get_dead_winds` hands out a mutable reference that
+  PointTreeBuilding writes through — a cached flat structure would need
+  invalidation hooks for no extra win over the single descent.)
+
+**A/B**: 6-event clustering gate vs `span1500` — all archives PASS
+(byte-identical).  Wall: hd-busy 204→**190** s, hd-max 308→**288** s,
+vd-busy 90→**86** s; typicals unchanged.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
