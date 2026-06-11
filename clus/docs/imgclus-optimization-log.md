@@ -228,6 +228,8 @@ the jsonnet compile off the clustering critical path. Needs a check that
 `wire-cell -c cfg.json` does not still spin up Go threads (inspect
 /proc/<pid>/task count or the crash disappearing over many runs).
 
+**RESOLVED — see round-2 entry 7** (pure-JSON config + `GOGC=off`).
+
 ### FINDING: clustering has a pointer-order-dependent merge decision
 
 Under tcmalloc, hd-typ (027409/0) per-face clustering of apa2-face0
@@ -243,6 +245,48 @@ nondeterminism. Worth hunting and fixing for robustness (and it would
 unlock tcmalloc for clustering too): instrument with
 `LD_PRELOAD=libtcmalloc` A/B on a small event and bisect by stage
 (per-face → per-APA → group) to find the first pass whose output flips.
+
+**RESOLVED — see round-2 entry 8** (`get_closest_blob` pointer-keyed map).
+
+## Round 2 (2026-06-11): follow-ups
+
+Continuation of the campaign on the three follow-up items picked from the
+findings/ideas above: the Go-runtime crash mitigation, the pointer-order
+merge hunt, and the ProjectionDeghosting projection-cache bound. Same A/B
+methodology and event set. One deliberate exception to the byte-identity
+ground rule is entry 8 (a nondeterminism *fix* necessarily changes the
+arbitrary tie-break it repairs); its output impact is quantified there.
+
+### 7. Clustering config pre-compiled to JSON + `GOGC=off` (crash mitigation, script-level)
+
+`run_clus_evt.sh` (both detectors, wcp-porting-validation) now compiles
+`wct-clustering.jsonnet` with `wcsonnet` and feeds `wire-cell` the pure
+JSON, running the process with `GOGC=off` (the imaging `-P` path got the
+same `GOGC=off` treatment).
+
+What was learned while verifying the original mitigation hypothesis:
+
+- `libgojsonnet.so` is **hard-linked** into `wire-cell` (via
+  WireCellUtil), and merely loading it starts the Go runtime: 5 runtime
+  threads appear at `dlopen` time with no jsonnet evaluated. So a pure
+  JSON config does *not* remove the Go threads.
+- It does remove the Go *heap*: `Persist` only enters the jsonnet VM for
+  `.jsonnet` files, and `GODEBUG=gctrace=1` shows the old mode runs 35 GC
+  cycles during config evaluation inside the production process (64-P Go
+  scheduler, 56 threads total), with the 2-minute *forced* periodic GC
+  continuing for the lifetime of long jobs — which is exactly why only
+  long busy events ever crashed.
+- With pure JSON + `GOGC=off`, the production wire-cell process logs
+  **zero GC cycles** end-to-end and runs 7 threads instead of 56.
+  `GOGC=off` disables the Go collector *including* the periodic forced
+  GC, so the crash vector (GC traceback walking) is removed
+  deterministically rather than made statistically rarer. The jsonnet
+  evaluation (and its Go GC) lives in the short-lived `wcsonnet` process.
+
+**A/B verdict: PASS** — full 6-event set, all clustering archives
+byte-identical vs `opt3` (snapshot `gogc1`); wall/RSS unchanged. A
+repetition run of hd-max clustering exercises the formerly crash-prone
+path (see closing notes of this round).
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
