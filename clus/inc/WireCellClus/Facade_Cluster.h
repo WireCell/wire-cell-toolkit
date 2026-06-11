@@ -356,7 +356,12 @@ namespace WireCell::Clus::Facade {
         // given point.
         //
         // Note: radius must provide a LINEAR distance measure.
-        using const_blob_point_map_t = std::map<const Blob*, geo_point_t>;
+        // Keyed with the content-based BlobLess: consumers iterate this map
+        // and accumulate floating-point sums (calc_ave_pos, calc_dir), so the
+        // iteration order must not depend on heap pointer values or the
+        // results become allocator-dependent (one hough-bin tie then flips a
+        // connect1 merge decision).
+        using const_blob_point_map_t = std::map<const Blob*, geo_point_t, BlobLess>;
         const_blob_point_map_t get_closest_blob(const geo_point_t& point, double radius) const;
         const_blob_point_map_t get_closest_blob(const geo_point_t& point, int N) const;
 

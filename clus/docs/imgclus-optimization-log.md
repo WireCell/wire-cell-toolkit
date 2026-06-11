@@ -288,6 +288,60 @@ byte-identical vs `opt3` (snapshot `gogc1`); wall/RSS unchanged. A
 repetition run of hd-max clustering exercises the formerly crash-prone
 path (see closing notes of this round).
 
+### 8. Pointer-order-dependent merge: found and fixed → tcmalloc ON for clustering
+
+The hunt (hd-typ 027409/0, glibc vs `LD_PRELOAD=libtcmalloc`, per-pass
+TRACE counts + temporary per-decision instrumentation in
+`clustering_connect1`):
+
+- Per-pass cluster counts bisect the flip to **`ClusteringConnect1`**
+  (apa2-face0: identical counts through ExtendLoop, then 120 vs 119).
+- Per-decision dumps showed identical merge-candidate inputs but a
+  flipped angle gate: the *stored* `dir1`/`dir2` of clusters differed
+  between allocators — two mirror hough bins (±0.5° off the drift axis)
+  swapping winners.
+- Full-precision printing then exposed the root: `get_two_extreme_points()`
+  returned coordinates differing in the **last FP bit**. Its
+  `calc_ave_pos()` (and `calc_dir()`) iterate
+  `Cluster::get_closest_blob()` and accumulate `center_pos()*q` —
+  and that map was `std::map<const Blob*, geo_point_t>`, i.e. keyed by
+  **raw heap pointer**, so the floating-point summation order followed
+  the allocator's address assignment. The last-bit difference shifts a
+  near-boundary point into the adjacent hough bin, the bin argmax flips,
+  one connect1 merge flips, and the difference cascades to the
+  group/all-APA outputs.
+
+**Fix:** key `const_blob_point_map_t` with the existing content-based
+`BlobLess` comparator (`clus/inc/WireCellClus/Facade_Cluster.h`). All
+three consumers (`calc_ave_pos` x2, `calc_dir`) now sum in
+content-deterministic order. `blob_less` compares wpid, npoints, charge,
+slice and wire ranges before its documented pointer fallback, so
+distinct-blob ties are practically impossible.
+
+**Verification (snapshots `pofix` glibc / `pofixtc` tcmalloc):**
+
+- **Determinism gate: PASS** — with the fix, glibc and tcmalloc produce
+  byte-identical archives for the full 6-event set (114 archives).
+- **This is the one deliberate not-byte-identical change of the
+  campaign**: repairing the tie-break necessarily re-resolves it.
+  Vs the old baseline, 17/114 clustering archives change, confined to 3
+  PDHD events (hd-max 9, hd-typ 4, hd-typ2 4 — per-face/per-APA zips on
+  the flipped faces plus their group/all-APA descendants); hd-busy and
+  both PDVD events are byte-identical to the old baseline. The changes
+  are single merge-decision flips of the same kind tcmalloc used to
+  induce — arbitrary tie-break resolutions, now stable.
+
+**tcmalloc adopted for clustering** (`run_clus_evt.sh`, both detectors,
+`WCT_TCMALLOC=off` reverts), measured on the gate run (6-way load):
+hd-max 458→**372 s**, hd-busy 303→**238 s**, vd-busy 137→**112 s**,
+typical events ~20% faster; RSS slightly lower on PDHD (vd-busy RSS
+rose 1.9→2.4 GB — tcmalloc trades fragmentation for cache retention;
+acceptable against the 3.3 GB clustering tail).
+
+This very likely also resolves (or at least stabilizes) the
+long-standing SBND `clus_all_apa` run-to-run nondeterminism family —
+worth a dedicated SBND A/B before relying on it there.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

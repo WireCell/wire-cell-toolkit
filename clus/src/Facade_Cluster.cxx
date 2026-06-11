@@ -1251,7 +1251,7 @@ std::vector<const Blob*> Cluster::blobs_with_points(const kd_results_t& res) con
     return ret;
 }
 
-std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& point, double radius) const
+Cluster::const_blob_point_map_t Cluster::get_closest_blob(const geo_point_t& point, double radius) const
 {
     struct Best {
         size_t point_index;
@@ -1273,14 +1273,14 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
             it->second.metric = metric;
         }
     }
-    std::map<const Blob*, geo_point_t> ret;
+    const_blob_point_map_t ret;
     for (const auto& [mi, bb] : best_blob_point) {
         ret[blob_with_point(bb.point_index)] = point3d(bb.point_index);
     }
     return ret;
 }
 
-std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& point, int N) const 
+Cluster::const_blob_point_map_t Cluster::get_closest_blob(const geo_point_t& point, int N) const
 {
     struct Best {
         size_t point_index;
@@ -1303,7 +1303,7 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
         }
     }
 
-    std::map<const Blob*, geo_point_t> ret;
+    const_blob_point_map_t ret;
     for (const auto& [mi, bb] : best_blob_point) {
         ret[blob_with_point(bb.point_index)] = point3d(bb.point_index);
     }
