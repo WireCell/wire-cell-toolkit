@@ -1252,6 +1252,50 @@ deghost ~9-10%.  Still at its result-preserving floor.
 7. Wall-clock only: per-APA threading of the imaging/clustering
    pipelines (outputs unchanged, scheduling surgery).
 
+## Round 8 (2026-06-11): round-7 queue items 1, 2, 3, 5
+
+### 31. SimpleCluster "move" ctor actually moved — boost::adjacency_list has no move members
+
+Round-7 lead 1 asked why a whole-graph `copy_impl` (0.82 GB live at
+the hd-max imaging peak, 38% of the interval dump) still fired in
+`BlobClustering::flush` despite entry 23's move conversion.  Root
+cause: **`boost::adjacency_list` (through at least 1.85) user-declares
+its copy constructor/assignment and has no move members**, so
+`m_graph(std::move(g))` in the `SimpleCluster(cluster_graph_t&&)`
+overload performed overload resolution against the *copy* constructor
+— a silent full `copy_impl` per stage.  Entry 23 measuring
+wall-neutral was the tell: the move never happened.
+
+Fix: new `WireCell::move_graph(dst, src)` helper in
+`util/inc/WireCellUtil/Graph.h` steals the underlying vertex vector
+and edge list directly (`m_vertices`/`m_edges` are public in boost's
+`vec_adj_list_impl`; the once-`protected:` marker is commented out
+upstream).  Container moves do not relocate elements, so the stored
+edge iterators and edge-property pointers inside remain valid and
+vertex/edge iteration order is exactly the source's; graph-level
+properties are not transferred (all WCT cluster-style graphs use
+`no_property`).  `SimpleCluster`'s move ctor now calls it, which
+activates the real move at all 15 entry-23 call sites at once (every
+imaging stage tail, `ClusterFileSource` JSON+numpy loads,
+`TensorDMcluster`).  All call sites re-audited: none touches the
+moved-from graph (the dryrun branches re-wrap `in_graph`, a different
+object).
+
+One naming hazard: the helper first lived in `namespace
+WireCell::Graph`, which is ambiguous against the `Clus::PR::Graph`
+type alias inside `clus` — it now sits directly in `namespace
+WireCell`.
+
+**A/B verdict: PASS** (snapshot `r8move` vs `r6dpckd`): 178/178
+archive payloads byte-identical.  **Imaging wall: hd-max 256→233 s
+(−9%), hd-busy 129→114 s (−12%), vd-busy 94→85 s (−10%), typicals
+−5..−8%.**  Imaging VmHWM unchanged (the high-water mark sits in the
+ProjectionDeghosting/ChargeSolving region, not at flush); the win is
+the per-stage copy+destroy churn.  Clustering wall/RSS unchanged
+(hd-busy clus RSS read 2483 MB this run but that event bounces
+2004–2665 MB across all round-6 snapshots under the 6-slot parallel
+harness — variance, not signal).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
