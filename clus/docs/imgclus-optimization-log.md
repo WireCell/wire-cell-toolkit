@@ -486,21 +486,54 @@ nanoflann searchLevel/findNeighbors ~22-26% (irreducible),
 Previously-listed targets now retired: `scoped_view` 13.9→1.5%,
 `get_closest_point_blob` 12.7→6.0%.
 
-Remaining (deferred) targets, in payoff order:
-1. **DynamicPointCloud SoA restructure** (~7% now, was ~9-12% pre-
+Remaining targets for a round 3, in suggested order (shares from the
+post-round-2 hd-max profile; the chain is now kd-geometry-bound, so
+expect smaller, harder wins than rounds 1-2):
+
+1. **Reduce kd query *counts* in the good-point tests** —
+   `is_good_point` is 25.3% (almost all `has_closest_point` →
+   `exists_within` kd descent, called per point per plane per pass under
+   Separate/Deghost). nanoflann itself is irreducible; the lever is
+   issuing fewer queries: (a) memoize `is_good_point` verdicts per
+   (rounded time/wire key) within a pass — many trajectory points map to
+   the same (tind, wind) cell, and the verdict is a pure function of the
+   ctpc cloud, so a cell-keyed cache is byte-identical; (b) hoist the
+   per-plane early-out ordering so the cheapest-to-fail plane is tested
+   first (verdict-identical, order-of-evaluation only). Needs a
+   call-site census first (clus/src/ClusteringFuncsMixins / Grouping).
+2. **`Cluster::hough_transform` 13.4%** (dense hough over cluster
+   points): per point it does `acos`/`atan2` + boost::histogram fill;
+   the candidate lever is a flat 2-D bin array with hand-rolled binning.
+   Byte-identity requires reproducing boost::histogram's exact bin-edge
+   arithmetic and the same accumulation order — doable but must be gated
+   carefully; the trig itself (~3-4%) is content-bound.
+3. **DynamicPointCloud SoA restructure** (~7% now, was ~9-12% pre-
    tcmalloc): DPCPoint carries 5 nested vectors; flattening to columnar
    storage is byte-identity-achievable but touches every
    `make_points_*` builder and ~10 consumer files including the
-   neutrino-porting code — deliberately not attempted at the tail of
-   this round.
-2. `hough_transform` 13.4%: bin accumulation is content-bound; a
-   possible lever is replacing boost::histogram with a flat 2-D array +
-   manual binning (same FP order required for byte-identity).
-3. `Simple3DPointCloud::get_closest_points` (10.2%) — same
-   alternating-projection pattern as `Find_Closest_Points`; would
-   benefit from the same knn1 treatment if its inner queries allocate.
-4. nanoflann kd descent (~25%) is genuine geometry — only algorithmic
-   changes (fewer queries) move it.
+   neutrino-porting code. Biggest single remaining structural item, but
+   do it as a dedicated change with the full gate, not opportunistically.
+4. **Imaging graph-rebuild remainder**: the `copy_graph` sites and a
+   `CS::prune` no-prune fast path (skip the rebuild when nothing is
+   pruned — must verify the copied graph's edge iteration order matches
+   the rebuilt one before claiming byte-identity). Imaging is now
+   ~PD 25% / ChargeSolving 22% by pass; each item is a few %.
+5. **SBND follow-through (no PDHD/PDVD gain, but high value)**: A/B the
+   entry-8 BlobLess fix on SBND — it likely resolves the long-standing
+   `clus_all_apa` run-to-run nondeterminism, and would unlock tcmalloc
+   for SBND clustering the same way.
+6. nanoflann kd descent (~25%) is genuine geometry — only fewer queries
+   (item 1) move it.
+
+Retired from the previous target list: `scoped_view`/sv3d (13.9→1.5%,
+entry 12), `get_closest_point_blob` (12.7→6.0%, entry 11),
+`Simple3DPointCloud` single-NN wrappers (entry 11 follow-up),
+`fastgeom` lookup (entry 13).
+
+Beyond byte-identical work, the largest remaining levers are the
+**result-changing ideas** listed at the end of this file (sampling
+density, `full_deghost`, slicing threshold) — those need physics review
+rather than engineering.
 
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
@@ -554,6 +587,10 @@ Clustering profile (hd-busy full clustering, 86296 samples), cumulative:
   irreducible), `DynamicPointCloud` point construction ~12%.
 
 ## Next runtime targets (profiled, not yet attempted)
+
+> **Superseded by round 2** — most items below were implemented (entries
+> 8-13) or re-ranked with fresh numbers; the current list is in the
+> "Round-2 closing" section above. Kept for the round-1 record.
 
 From the post-fix profiles (imaging: hd-busy anode2 now ~95 s CPU;
 clustering: hd-max ~510 s):
