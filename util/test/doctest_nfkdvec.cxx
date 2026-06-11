@@ -76,7 +76,7 @@ static points_type make_other_points()
 static points_type random_points(size_t seed, size_t number = 3, size_t ndim = 3,
                                  double xmin=-1.0, double xmax=1.0)
 {
-    std::default_random_engine re{seed};
+    std::default_random_engine re{static_cast<std::default_random_engine::result_type>(seed)};
     std::uniform_real_distribution<double> dist(xmin, xmax);
 
     points_type points(ndim);

@@ -178,6 +178,13 @@ namespace WireCell {
         cfg = val;
     }
 
+    /// Json::Value has no overloads for plain (unsigned) long which on some
+    /// platforms (eg macOS) is distinct from both (unsigned) int and
+    /// Json::{U}Int64, making the assignment above ambiguous.  Route through
+    /// the explicit 64-bit types.
+    inline void assign(Configuration& cfg, long val) { cfg = (Json::Int64)val; }
+    inline void assign(Configuration& cfg, unsigned long val) { cfg = (Json::UInt64)val; }
+
     template <typename T>
     void assign(Configuration& cfg, const std::vector<T>& val)
     {

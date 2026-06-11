@@ -49,8 +49,8 @@ void AnodeDumper::execute()
         auto& janode = sum["anodes"][anode_index++];
 
         janode["ident"] = ianode->ident();
-        janode["nfaces"] = ianode->faces().size();
-        janode["nchannels"] = ianode->channels().size();
+        janode["nfaces"] = (unsigned int)ianode->faces().size();
+        janode["nchannels"] = (unsigned int)ianode->channels().size();
 
         int face_index = 0;
         for (const auto& iface : ianode->faces()) {
@@ -66,8 +66,8 @@ void AnodeDumper::execute()
                 auto& jplane = jface["planes"][plane_index++];
                 jplane["ident"] = iplane->ident();
                 jplane["wpid"] = iplane->planeid().ident();
-                jplane["nchannels"] = iplane->channels().size();
-                jplane["nwires"] = iplane->wires().size();
+                jplane["nchannels"] = (unsigned int)iplane->channels().size();
+                jplane["nwires"] = (unsigned int)iplane->wires().size();
             }
         }
     }

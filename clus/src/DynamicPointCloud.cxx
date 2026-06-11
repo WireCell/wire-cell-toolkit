@@ -430,7 +430,11 @@ std::pair<double, double> DynamicPointCloud::hough_transform(const geo_point_t &
 
     // Use the original max finding approach
     auto indexed = bh::indexed(hist);
-    auto it = std::max_element(indexed.begin(), indexed.end());
+    // Compare cell values explicitly: the accessor's own comparison operators
+    // are ambiguous under Apple clang (boost::histogram detail::operators).
+    auto it = std::max_element(indexed.begin(), indexed.end(), [](const auto& a, const auto& b) {
+        return static_cast<double>(*a) < static_cast<double>(*b);
+    });
     const auto &cell = *it;
     return {cell.bin(0).center(), cell.bin(1).center()};
 }
