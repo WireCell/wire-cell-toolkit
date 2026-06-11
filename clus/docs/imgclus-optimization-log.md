@@ -424,6 +424,20 @@ exactly this pattern):
 byte-identical). Clustering wall: hd-max 366→**330 s**, hd-busy
 245→**222 s**, typical events −10-13%.
 
+### 13. Grouping::fastgeom dense-vector cache (clustering)
+
+The round-1 `fastgeom(apa,face)` memo still paid an `unordered_map`
+hash-find per call (~5% cumulative on the fresh hd-max profile; it is
+called per point per plane inside the good-point tests). The key is
+`apa*2+face` — a tiny dense space — so the map became a
+`std::vector<std::unique_ptr<fastgeom_t>>` indexed by key (`unique_ptr`
+keeps the returned references stable across growth; invalid `apa=-1`
+still throws at the same `m_anodes.at()` as before).
+
+**A/B verdict: PASS** (snapshot `fastg` vs `svmemo`, all archives
+byte-identical). Clustering wall: hd-max 330→**314 s**, hd-busy
+222→**207 s**, vd-busy 111→105 s.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

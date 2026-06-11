@@ -518,14 +518,14 @@ bool Grouping::in_dead_gap(const geo_point_t& point, const int ch_range, const i
 
 const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) const
 {
-    const int key = apa * 2 + face;
-    auto it = m_fastgeom.find(key);
-    if (it != m_fastgeom.end()) return it->second;
+    const size_t key = apa * 2 + face;
+    if (key < m_fastgeom.size() && m_fastgeom[key]) return *m_fastgeom[key];
 
     if (m_anodes.size()==0) {
         raise<ValueError>("Anode is null");
     }
-    fastgeom_t fg;
+    auto fgp = std::make_unique<fastgeom_t>();
+    auto& fg = *fgp;
     fg.iface = m_anodes.at(apa)->faces()[face];
     if (fg.iface == nullptr) {
         raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
@@ -539,7 +539,9 @@ const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) co
     fg.time_offset = cache().map_time_offset.at(apa).at(face);
     fg.drift_speed = cache().map_drift_speed.at(apa).at(face);
     fg.tick = cache().map_tick.at(apa).at(face);
-    return m_fastgeom.emplace(key, fg).first->second;
+    if (key >= m_fastgeom.size()) m_fastgeom.resize(key + 1);
+    m_fastgeom[key] = std::move(fgp);
+    return *m_fastgeom[key];
 }
 
 std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const {
