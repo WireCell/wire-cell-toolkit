@@ -67,7 +67,8 @@ namespace custard {
         // Write cpad to next 512 boundary
         void write_pad(std::ostream& so)
         {
-            size_t pad = 512 - loc%512;
+            // already aligned -> no padding (512-loc%512 would wrongly give 512)
+            size_t pad = loc%512 ? 512 - loc%512 : 0;
             if (pad == 0) {
                 return;
             }
@@ -132,8 +133,11 @@ namespace custard {
         }
         
         void read_pad(std::istream& si) {
-            const size_t jump = 512 - loc%512;
-            si.seekg(jump, si.cur);
+            // already aligned -> no padding (512-loc%512 would wrongly give 512)
+            const size_t jump = loc%512 ? 512 - loc%512 : 0;
+            if (jump) {
+                si.seekg(jump, si.cur);
+            }
         }
 
     };

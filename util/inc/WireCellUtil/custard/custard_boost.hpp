@@ -482,13 +482,18 @@ namespace custard {
                 bodyleft -= put;
                 if (bodyleft == 0) {
                     state = State::filedone;
-                    // slurp padding
-                    const size_t jump = 512 - th.size()%512;
-                    std::string pad(jump, 0);
-                    auto got = boost::iostreams::read(src, &pad[0], jump);
-                    // std::cerr << "padleft: " << jump << " " << got << "\n";
-                    if (got < 0) {
-                        return got;
+                    // slurp padding; a member whose size is an exact multiple
+                    // of 512 has NO padding (jump must be 0, not 512, else the
+                    // next member's tar header block is swallowed).
+                    const size_t extra = th.size()%512;
+                    const size_t jump = extra ? 512 - extra : 0;
+                    if (jump) {
+                        std::string pad(jump, 0);
+                        auto got = boost::iostreams::read(src, &pad[0], jump);
+                        // std::cerr << "padleft: " << jump << " " << got << "\n";
+                        if (got < 0) {
+                            return got;
+                        }
                     }
                 }
                 return put;
