@@ -15,6 +15,7 @@
 #include <iterator>
 #include <chrono>
 #include <fstream>
+#include <limits>
 
 WIRECELL_FACTORY(ProjectionDeghosting, WireCell::Img::ProjectionDeghosting, WireCell::INamed, WireCell::IClusterFilter,
                  WireCell::IConfigurable)
@@ -113,7 +114,10 @@ namespace {
         cluster_graph_t cg_out;
 
         // size_t nblobs = 0;
-        std::unordered_map<cluster_vertex_t, cluster_vertex_t> old2new;
+        // vecS vertex descriptors are dense indices: a flat vector remap
+        // beats a hash map here.  "max" marks a removed (unmapped) vertex.
+        constexpr cluster_vertex_t unmapped = std::numeric_limits<cluster_vertex_t>::max();
+        std::vector<cluster_vertex_t> old2new(boost::num_vertices(cg), unmapped);
         for (const auto& vtx : GraphTools::mir(boost::vertices(cg))) {
             const auto& node = cg[vtx];
             if (node.code() == 'b') {
@@ -133,15 +137,15 @@ namespace {
             auto old_tail = boost::source(edge, cg);
             auto old_head = boost::target(edge, cg);
 
-            auto old_tit = old2new.find(old_tail);
-            if (old_tit == old2new.end()) {
+            const auto new_tail = old2new[old_tail];
+            if (new_tail == unmapped) {
                 continue;
             }
-            auto old_hit = old2new.find(old_head);
-            if (old_hit == old2new.end()) {
+            const auto new_head = old2new[old_head];
+            if (new_head == unmapped) {
                 continue;
             }
-            boost::add_edge(old_tit->second, old_hit->second, cg_out);
+            boost::add_edge(new_tail, new_head, cg_out);
         }
         // (void)nblobs;
         // std::cout << "boost::num_vertices(cg_out): " << boost::num_vertices(cg_out) << std::endl;
@@ -214,6 +218,21 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         wp_2D_3D_clus_map[kWlayer] = w_2D_3D_clus_map;
     }
 
+    // The heavy per-cluster Eigen projections (m_layer_proj) are only ever
+    // judged while their cluster is the current vertex of the main loop or
+    // remains a key of a per-layer clus_2D_3D_map; every later access reads
+    // only the scalar metadata which survives eviction.  Drop the matrices
+    // as soon as neither holds to bound the cache's live size.
+    auto evict_projections = [&](ClusterShadow::vdesc_t id) {
+        for (const auto& wp : wp_2D_3D_clus_map) {
+            if (wp.second.count(id)) return;
+        }
+        auto pit = id2lproj.find(id);
+        if (pit != id2lproj.end()) {
+            pit->second.m_layer_proj.clear();
+        }
+    };
+
     // run algorithm ...
     for (auto cs_cluster : GraphTools::mir(boost::vertices(cs_graph))) {
         const auto& b_cluster = c2b[cs_cluster];          // cluster_vertex_t
@@ -223,7 +242,10 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
                            m_dead_default_charge);  // 3 views are all here ...
 
         // empty ...
-        if (proj_cluster.m_number_slices == 0) continue;
+        if (proj_cluster.m_number_slices == 0) {
+            evict_projections(cs_cluster);
+            continue;
+        }
 
         // loop over each plane ...
         for (auto it = wp_2D_3D_clus_map.begin(); it != wp_2D_3D_clus_map.end(); it++) {
@@ -288,6 +310,9 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
                 clus_2D_3D_map.erase(*it1);
             }
+            for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
+                evict_projections(*it1);
+            }
             if (flag_save) {
                 std::vector<ClusterShadow::vdesc_t> vec_3Dclus;
                 vec_3Dclus.push_back(cs_cluster);
@@ -295,6 +320,8 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
             }
 
         }  // loop over plane
+
+        evict_projections(cs_cluster);
     }
 
     log->debug("2D --> 3D size: {} {} {}", wp_2D_3D_clus_map[kUlayer].size(), wp_2D_3D_clus_map[kVlayer].size(),
@@ -356,6 +383,9 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
             clus_2D_3D_map.erase(*it1);
         }
+        for (auto it1 = to_be_removed.begin(); it1 != to_be_removed.end(); it1++) {
+            evict_projections(*it1);
+        }
 
         for (auto it1 = clus_2D_3D_map.begin(); it1 != clus_2D_3D_map.end(); it1++) {
             for (auto it2 = it1->second.begin(); it2 != it1->second.end(); it2++) {
@@ -368,6 +398,12 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         }
 
     }  // loop over plane
+
+    // All judging is done; everything below (and remove_blobs) reads only
+    // the scalar metadata, so free every remaining projection matrix now.
+    for (auto& pit : id2lproj) {
+        pit.second.m_layer_proj.clear();
+    }
 
     log->debug("2D --> 3D size: {} {} {}", wp_2D_3D_clus_map[kUlayer].size(), wp_2D_3D_clus_map[kVlayer].size(),
                wp_2D_3D_clus_map[kWlayer].size());
