@@ -304,7 +304,7 @@ local img_maker = function(nthreshold=[3.6, 3.6, 3.6], output_dir='') {
             name: "clustersink-"+aname,
             data: {
                 outname: outname,
-                format: "json", // json, numpy, dummy
+                format: "numpy", // json, numpy, dummy; numpy avoids the jsoncpp DOM on load (~90% of clustering live heap, see clus/docs/imgclus-optimization-log.md entry 20)
             }
         }, nin=1, nout=0),
         ret: cs

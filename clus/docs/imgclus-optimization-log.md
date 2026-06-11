@@ -685,6 +685,74 @@ QLMatching has known marginal FP ties at `m_strength_cutoff` that an
 allocator change could flip, so its tcmalloc adoption should be its own
 gated decision.
 
+### 20. hd-max clustering heap profile (tcmalloc HEAPPROFILE)
+
+First heap-level decomposition of the ~3 GB hd-max clustering RSS
+(`HEAPPROFILE` + full `libtcmalloc.so.4`, dumps every 200 MB of in-use
+growth; profiler overhead ~14x on allocation-heavy passes, so the run
+was stopped once the headline was unambiguous; dumps in
+`/home/xqian/tmp/heaprof/`).  Findings:
+
+- **The live heap is much smaller than RSS**: at a point where process
+  RSS exceeded 1 GB, only ~423 MB was live; at the last dump 843 MB live
+  vs ~2 GB RSS.  A large share of clustering "RSS" is
+  allocator-retained/fragmented memory from churn (146M allocations /
+  15.3 GB cumulative by the last dump), not live data.
+- **~90% of the live heap at the sampled points sits under
+  `ClusterFileSource` ingest** — for the JSON cluster files this is the
+  slurped `istringstream` buffer plus the jsoncpp DOM (an Rb_tree node
+  per object member, 40%, + key/value strings, ~42%).  Allocation churn
+  at those points is likewise parse-dominated.
+
+Actionable outcome: stop ingesting JSON → entry 21.
+
+### 21. Cluster files JSON → numpy (`format: "numpy"`), + two latent toolkit bugs
+
+`cfg/pgrapher/experiment/{pdhd,protodunevd}/img.jsonnet`: the
+`ClusterFileSink` in the imaging `dump()` now writes `format: "numpy"`
+(npy members in the same tar.gz, as SBND's npz path has long used)
+instead of JSON.  `ClusterFileSource` dispatches per member, so
+downstream needs no change.
+
+Enabling this exposed two latent toolkit bugs, both fixed:
+
+1. **custard tar reader 512-padding bug** (`custard_boost.hpp:486`,
+   commit `05642fad`): a member whose size is an exact multiple of 512
+   has no padding, but the reader skipped `512 - size%512 = 512` bytes,
+   swallowing the next member's tar header (crash: `stol` on garbage).
+   JSON members (arbitrary sizes) hit this with ~1/512 probability per
+   member; npy arrays (element sizes 4/8) hit it readily.  The tar
+   *writer* was always correct, so all existing archives remain valid.
+   Same expression fixed in the unused `custard_file.hpp` pair.
+2. **`ClusterFileSink::numpify` empty-cluster desync** (commit
+   `a93e696e`): an empty cluster graph produced no members, so the
+   source delivered EOS instead of an empty cluster and the live/dead
+   stream pair into `PointTreeBuilding` desynchronized ("missing 1
+   input tensors", hd-busy/hd-typ2 failed).  Fixed by writing empty
+   clusters as the (tiny) JSON member.
+
+**A/B (snapshot `npfmt2`)**: all **114 clustering archives across the
+6-event set byte-identical** to the JSON-input baseline — the JSON
+writer was full-precision, so the binary round-trip changes nothing.
+
+| Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+|---|---|---|---|---|
+| hd-typ  027409/0  | 41 → 40 | 628 → **400** | 20 → **17** | 644 → 702 |
+| hd-typ2 027980/3  | 44 → 43 | 677 → **400** | 22 → **19** | 702 → 753 |
+| hd-busy 028084/18 | 143 → 141 | 3302 → 3304 | 182 → **176** | 3137 → 3091 |
+| hd-max  027305/0  | 288 → 288 | 6045 → 6046 | 281 → **272** | 3015 → 3016 |
+| vd-typ  039349/0  | 40 → 38 | 408 → **236** | 14 → **12** | 485 → 510 |
+| vd-busy 039252/5  | 105 → 101 | 1198 → 1136 | 85 → **79** | 2219 → 2497 |
+
+Interpretation: clustering wall −3 to −15% (parse cost gone), imaging
+RSS on typical events −35-45% (no JSON serialization buffers), busy-
+event imaging RSS unchanged (in-memory graph dominates).  Clustering
+*peak* RSS is essentially unchanged — consistent with entry 20: the
+ingest DOM dominated the *live heap mid-load*, but the peak RSS envelope
+is set by the clustering stages themselves plus allocator retention.
+(vd-busy clus RSS swings ±10% with concurrent load; treat single-run
+deltas there as noise.)
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
