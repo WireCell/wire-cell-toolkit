@@ -1150,6 +1150,28 @@ by honest A/B numbers:
   6190→**3474 MB** (−44%), hd-busy 3382→**1987 MB** (−41%), vd-busy
   1162→**742 MB** (−36%).
 
+### 30. DPC 3D kd tree reads the SoA columns zero-copy
+
+`index_new_points` copied x/y/z twice per appended batch — a transient
+gather plus `NFKDVec::Tree`'s own column copy (~93% of the
+`index_new_points` heap slice, round-5).  `NFKDVec::Tree` now routes
+all coordinate reads through per-dimension column pointers (`m_cols`,
+owned columns by default — no hot-path branch) and gains
+`bind_external()` / `append_external()`; `DynamicPointCloud::kd3d()`
+binds the DPCBatch x/y/z columns directly (stable member addresses,
+same insertion order ⇒ identical tree).  The 2D per-plane trees keep
+their gather (an indirection adaptor would slow the hottest query
+path).  Tree is now explicitly non-copyable/non-movable — a built
+nanoflann index already referenced the tree as its dataset adaptor, so
+relocation was latently unsafe before this change; no existing holder
+relied on it (build proves it).
+
+- A/B snapshot `r6dpckd` vs `r6bsflat`: **178/178 byte-identical,
+  PASS**; porting bats 5/5; all 837 kd doctest assertions pass.
+- Clustering peak RSS: hd-busy 2291→**2059 MB** (−10%, as the round-5
+  heap slice predicted); others flat — their peaks sit at the pc-tree
+  load moment, not kd indexing.  Walls unchanged.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

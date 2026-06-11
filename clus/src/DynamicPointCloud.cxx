@@ -63,6 +63,10 @@ DynamicPointCloud::nfkd_t &DynamicPointCloud::kd3d() const
 {
     if (!m_kd3d) {
         m_kd3d = std::make_unique<nfkd_t>(3);
+        // Zero-copy: the 3D tree reads the batch columns in place (their
+        // member addresses are stable; vector growth is announced via
+        // append_external in index_new_points).
+        m_kd3d->bind_external({&m_pts.x, &m_pts.y, &m_pts.z});
     }
     return *m_kd3d;
 }
@@ -155,14 +159,9 @@ void DynamicPointCloud::index_new_points(size_t original_size) {
                             m_pts.p2d_off.size(), m_pts.size());
     }
 
-    // Process 3D KD tree
+    // Process 3D KD tree.  The tree is bound to the batch columns
+    // (zero-copy); it only needs to be told how many points arrived.
     auto &kd3d = this->kd3d();
-
-    // Prepare batch data for 3D KD tree
-    NFKDVec::Tree<double>::points_type pts3d(3);
-    pts3d[0].assign(m_pts.x.begin() + original_size, m_pts.x.end());
-    pts3d[1].assign(m_pts.y.begin() + original_size, m_pts.y.end());
-    pts3d[2].assign(m_pts.z.begin() + original_size, m_pts.z.end());
 
     // Prepare maps to store 2D points for each plane and track local-to-global mappings
     std::map<int, NFKDVec::Tree<double>::points_type> planes_pts;
@@ -201,7 +200,7 @@ void DynamicPointCloud::index_new_points(size_t original_size) {
     }
 
     // Batch append 3D points
-    kd3d.append(pts3d);
+    kd3d.append_external(nnew);
 
 
     // Create a reverse mapping from layer to iplane based on the existing iplane2layer array
