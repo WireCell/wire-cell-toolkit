@@ -1116,6 +1116,40 @@ stamping, and empty Points still emit the six empty arrays.
   load_grouping/DPC phase where Bee held only 14.5%).  Walls
   unchanged.
 
+### 29. BlobShadow: flat shadow list replaces the graph in production
+
+Three iterations, two instructive failures — all caught by the gate or
+by honest A/B numbers:
+
+1. multisetS→all-vecS container swap + a dedup hash map holding edge
+   descriptors → **segfault on the two big PDHD events**: with a vecS
+   edge list, boost edge descriptors carry pointers into the edge
+   property *vector*, which reallocates on growth.  (Gate FAIL,
+   `r6bsvec`.)
+2. vecS out-edges with the listS edge list kept (descriptors stable):
+   **byte-identical but RSS-neutral** — the external dedup map costs
+   about what the multisetS Rb-trees did (the multiset *was* the
+   lookup structure), and the remaining listS node + realloc spikes ate
+   the rest.  (`r6bsvec2`: hd-max +2.8%, hd-busy −8%.)
+3. The structural fix: **nothing ever traverses the blob shadow graph**
+   — `ClusterShadow::shadow` only iterates its global edge list.  New
+   `BlobShadow::shadow_list()` returns flat `Shadows`
+   {nodes, first-encounter-ordered edges} (40 B/edge, no boost edge
+   containers), `ClusterShadow::shadow()` gained an overload consuming
+   it (same edge order ⇒ identical cs_graph), and
+   ProjectionDeghosting + ShadowGhosting use the flat path.  The graph
+   API (`BlobShadow::shadow()`, now a materialization of
+   `shadow_list()`) remains for tests/compat.  Dedup is a
+   (pair,layer)→slot hash map replacing the former `edge_range` scan.
+
+- A/B snapshot `r6bsflat` vs `r6beecol`: **178/178 byte-identical,
+  PASS**; `test_blobshadow` passes.
+- Imaging peak RSS: hd-max 4666→**3474 MB** (−26%), hd-busy
+  2174→**1987 MB** (−9%), vd-busy/typicals flat.  Wall unchanged.
+- Cumulative round-6 imaging peak RSS vs round-4 close: hd-max
+  6190→**3474 MB** (−44%), hd-busy 3382→**1987 MB** (−41%), vd-busy
+  1162→**742 MB** (−36%).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

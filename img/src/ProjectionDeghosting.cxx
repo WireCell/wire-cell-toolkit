@@ -168,11 +168,13 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
     ClusterShadow::blob_cluster_map_t clusters;
     ClusterShadow::graph_t cs_graph;
     {
-        // blob shadow ... vertex = blob, edge --> wire/channel, plane.  Only
-        // ClusterShadow::shadow consumes it; scope it so its multi-GB edge
-        // storage is freed before the projection/judge phase below.
-        BlobShadow::graph_t bsgraph = BlobShadow::shadow(in_graph, 'w');  // or 'c'
-        cs_graph = ClusterShadow::shadow(in_graph, bsgraph, clusters);
+        // blob shadows ... vertex = blob, edge --> wire/channel, plane.
+        // Flat form (no boost graph: at busy-event edge counts the edge
+        // containers cost more than the edges).  Only ClusterShadow::shadow
+        // consumes them; scoped so the storage is freed before the
+        // projection/judge phase below.
+        const auto shadows = BlobShadow::shadow_list(in_graph, 'w');  // or 'c'
+        cs_graph = ClusterShadow::shadow(in_graph, shadows, clusters);
     }
 
     // make a cluster -> blob map

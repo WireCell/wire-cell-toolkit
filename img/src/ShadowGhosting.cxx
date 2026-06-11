@@ -52,8 +52,8 @@ bool ShadowGhosting::operator()(const input_pointer& in, output_pointer& out)
         ++m_count;
         return true;
     }
-    auto bsg = BlobShadow::shadow(cgraph, m_shadow_type[0]);
-    log->debug("nblobs={}", boost::num_vertices(bsg));
+    auto bsg = BlobShadow::shadow_list(cgraph, m_shadow_type[0]);
+    log->debug("nblobs={}", bsg.nodes.size());
 
     ClusterShadow::blob_cluster_map_t clusters;
     auto csg = ClusterShadow::shadow(cgraph, bsg, clusters);

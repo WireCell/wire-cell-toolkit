@@ -8,7 +8,6 @@
 #include <boost/graph/breadth_first_search.hpp>
 
 #include <unordered_map>
-#include <optional>
 
 using namespace WireCell;
 using namespace WireCell::GraphTools;
@@ -81,42 +80,41 @@ namespace {
         }
     };
 
-    // find the existing BS edge of the given layer between v1 and v2, if any.
-    // one layer should have at most one edge; returns the first match in
-    // edge_range order (matching the previous insert-then-find semantics).
-    std::optional<BlobShadow::edesc_t> existing_layer_edge(
-        const BlobShadow::graph_t& bsgraph,
-        const BlobShadow::vdesc_t& bs_vtx1,
-        const BlobShadow::vdesc_t& bs_vtx2,
-        WirePlaneLayer_t layer)
+    // Dedup index for (blob pair, layer) -> edge slot.  Replaces the
+    // former edge_range() scan, which required multisetS out-edges and
+    // was linear in the parallel-edge count.  The pair key is
+    // order-normalized; shadows are undirected so direction never
+    // mattered.
+    using layer_edge_key_t = std::pair<uint64_t, int>;
+    using layer_edge_map_t = std::unordered_map<layer_edge_key_t, size_t, pair_hash>;
+
+    layer_edge_key_t layer_edge_key(BlobShadow::vdesc_t v1, BlobShadow::vdesc_t v2,
+                                    WirePlaneLayer_t layer)
     {
-        // for undirected graph (BS), edge_range(0,1) yields edges from
-        // both add_edge(0,1) and add_edge(1,0)
-        // https://onlinegdb.com/u4D6du-Sj
-        for (const auto& edge : mir(boost::edge_range(bs_vtx1, bs_vtx2, bsgraph))) {
-            if (bsgraph[edge].wpid.layer() == layer) {
-                return edge;
-            }
-        }
-        return std::nullopt;
+        if (v2 < v1) { std::swap(v1, v2); }
+        return {(static_cast<uint64_t>(v1) << 32) | static_cast<uint64_t>(v2),
+                static_cast<int>(layer)};
     }
 }  // namespace
 
-BlobShadow::graph_t BlobShadow::shadow(const cluster_graph_t& cgraph, char leaf_code)
+BlobShadow::Shadows BlobShadow::shadow_list(const cluster_graph_t& cgraph, char leaf_code)
 {
     using dvertex_t = cluster::directed::vertex_t;
     // using dedge_t = cluster::directed::edge_t;
 
-    BlobShadow::graph_t bsgraph; // will return
+    BlobShadow::Shadows shadows; // will return
+    shadows.stype = leaf_code;
+    layer_edge_map_t layer_edges;
 
     // Convert to directed so BFS does not "crawl up" from leaves.
     auto dgraph = cluster::directed::type_directed(cgraph);
 
-    // Loop over blobs, to load up output graph, old->new map.
+    // Loop over blobs, to load up output nodes, old->new map.
     std::unordered_map<dvertex_t, BlobShadow::vdesc_t> c2bs;
     for (auto bvtx : mir(boost::vertices(dgraph))) {
         if (dgraph[bvtx].code() == 'b') {
-            c2bs[bvtx] = boost::add_vertex({bvtx}, bsgraph);
+            c2bs[bvtx] = shadows.nodes.size();
+            shadows.nodes.push_back({bvtx});
         }
     }
 
@@ -183,27 +181,40 @@ BlobShadow::graph_t BlobShadow::shadow(const cluster_graph_t& cgraph, char leaf_
                     }
 
                     // if a same-layer edge already exists, refresh its beg-end
-                    auto existing = existing_layer_edge(bsgraph, bs_vtx1, bs_vtx2, wpid.layer());
-                    if (existing) {
-                        Edge& eobj = bsgraph[*existing];
+                    const auto key = layer_edge_key(bs_vtx1, bs_vtx2, wpid.layer());
+                    auto [lit, inserted] = layer_edges.try_emplace(key, shadows.edges.size());
+                    if (!inserted) {
+                        Edge& eobj = shadows.edges[lit->second].prop;
                         eobj.beg = std::min(eobj.beg, index);
                         eobj.end = std::max(eobj.end, index + 1);
                         continue;
                     }
 
-                    // next, if layer -> edge does not exist, add a new edge
-                    auto [edge, added] = boost::add_edge(bs_vtx1, bs_vtx2, bsgraph);
-                    if (!added) {
-                        // this should not happen
-                        THROW(RuntimeError() << errmsg{"edge not added!"});
-                    }
-                    // new edge properties
-                    Edge& eobj = bsgraph[edge];
-                    eobj.wpid = wpid;
-                    eobj.beg = index;
-                    eobj.end = index+1;
+                    // first encounter: a new edge
+                    shadows.edges.push_back({bs_vtx1, bs_vtx2, Edge{index, index + 1, wpid}});
                 }
             }
+        }
+    }
+
+    return shadows;
+}
+
+BlobShadow::graph_t BlobShadow::shadow(const cluster_graph_t& cgraph, char leaf_code)
+{
+    const auto shadows = shadow_list(cgraph, leaf_code);
+
+    BlobShadow::graph_t bsgraph;
+    bsgraph[boost::graph_bundle].stype = shadows.stype;
+    for (const auto& node : shadows.nodes) {
+        boost::add_vertex(node, bsgraph);
+    }
+    // Adding in list order preserves the first-encounter edges() order.
+    for (const auto& er : shadows.edges) {
+        auto [edge, added] = boost::add_edge(er.v1, er.v2, er.prop, bsgraph);
+        if (!added) {
+            // this should not happen
+            THROW(RuntimeError() << errmsg{"edge not added!"});
         }
     }
     return bsgraph;
