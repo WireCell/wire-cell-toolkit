@@ -131,7 +131,7 @@ def configure(cfg):
     # I would like to add "serialization" to assist in writing methods for graph
     # I/O.  The "math" lib could be useful.  But these additions will require
     # changes to wire-cell-spack and perhaps other build methods.
-    cfg.check_boost(lib='system filesystem graph thread program_options iostreams regex')
+    cfg.check_boost(lib='filesystem graph thread program_options iostreams regex')
     haveit('boost')
 
     cfg.check(header_name="dlfcn.h", uselib_store='DYNAMO', lib=['dl'], mandatory=True)
