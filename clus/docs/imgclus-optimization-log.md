@@ -869,6 +869,165 @@ under tcmalloc the allocation share is cheaper).  hd-max RSS is flat:
 its peak envelope sits in stages that don't go through
 DynamicPointCloud.  Imaging is untouched by this change.
 
+## Round 5 (2026-06-11): post-round-4 profiling — remaining wall & RSS targets
+
+Measurement-only round: re-profile after rounds 1-4 to rank what is left,
+on both axes.  No code changes shipped; the ranked list below is the
+round-6 work queue.
+
+### Methodology (two fixes over earlier rounds)
+
+- **CPU profiles now run under the production allocator**:
+  `LD_PRELOAD=libtcmalloc_and_profiler.so.4` (production preloads
+  tcmalloc_minimal; round-4 showed glibc-malloc profiles overstate
+  allocator-heavy attributions).  `abtest/profile_img.sh` /
+  `profile_clus.sh` gained `PROFLIB` / `OUTDIR` / `HEAPOUT` env knobs;
+  the default profiler lib is now tcmalloc_and_profiler.  Profiler
+  overhead measured nil (profiled walls == round-4 baseline walls).
+- **Heap profiling via jemalloc sampling, NOT gperftools HEAPPROFILE.**
+  `HEAPPROFILE` records a stack on *every* alloc/free → ~25× slowdown on
+  this workload (hd-max imaging would have taken hours; killed).
+  `TCMALLOC_SAMPLE_PARAMETER` does not apply to `HEAPPROFILE` (it only
+  feeds the in-process MallocExtension sampler).  Debian's
+  libjemalloc2 5.3 has the profiler compiled in:
+  `MALLOC_CONF=prof:true,lg_prof_sample:19,lg_prof_interval:33,prof_final:true`
+  ≈ zero overhead; analyze with the matching `jeprof` (5.3.0) script.
+  Do NOT use `prof_gdump:true` here — it dumps at every chunk-level VM
+  high-water mark (6105 files in 30 s).  Peak attribution = the interval
+  dump with the largest in-use total (header line 2).
+- Profiled: imaging heaviest anodes (hd-max 027305/0 a0 186 s, hd-busy
+  028084/18 a2 66 s, vd-busy 039252/5 a6 35 s) and full clustering on
+  hd-max / hd-busy / vd-busy.  Profiles in `/home/xqian/tmp/r5_*.prof`,
+  heap dumps in `/home/xqian/tmp/r5_heap/`, jeprof at
+  `/home/xqian/tmp/jeprof`.
+
+### Imaging CPU (per-anode shares, tcmalloc)
+
+| component | hd-max a0 | hd-busy a2 | vd-busy a6 |
+|---|---|---|---|
+| ChargeSolving total | **47.8%** | 20.1% | 27.5% |
+| — of which LASSO `CS::solve` | 35.0% | 4.5% | 11.0% |
+| ProjectionDeghosting | 19.2% | **28.3%** | 20.9% |
+| InSliceDeghosting | 6.7% | 8.4% | 8.6% |
+| LocalGeomClustering | 6.6% | 8.0% | 8.0% |
+| BlobGrouping | 4.9% | 6.9% | 6.6% |
+| BlobClustering | 4.7% | 7.0% | 3.5% |
+| input read (FrameFileSource) | 1.4% | 3.6% | 6.9% |
+
+Cross-cutting (cumulative, overlaps the rows above): `boost::add_edge`
+into `setS` out-edge sets 24.9 / 31.5 / 27.7%, `adjacency_list` dtor
+10-14%, **graph copy (`vec_adj_list_impl::copy_impl`) 13-20%**, tcmalloc
+internals (flat) 10-14%.
+
+Findings:
+
+1. **Hidden by-value graph copies at stage heads** — `const auto
+   in_graph = in->graph();` deduces `cluster_graph_t` *by value* and
+   silently full-copies the input graph once per stage call.  Sites:
+   `ChargeSolving.cxx:261`, `ProjectionDeghosting.cxx:164`,
+   `InSliceDeghosting.cxx:742`, `LocalGeomClustering.cxx:54`,
+   `GlobalGeomClustering.cxx:74`, `ClusterScopeFilter.cxx:55`,
+   `LCBlobRemoval.cxx:118` (+ `TestClusterShadow.cxx:76`, test-only).
+   This is most of the 13-20% copy_impl share plus the matching dtor
+   share, *and* 1.56 GB of hd-max peak RSS (see heap below).  It also
+   explains why round-4's SimpleCluster move-ctor (entry 23) was
+   wall-neutral: the output-side copy was removed but the input-side
+   copy remained.  Fix = `const auto&` (one character per site),
+   byte-identical by construction.
+2. **LASSO Gram build computes the full symmetric matrix**:
+   `LassoModel.cxx:92-104` does `X.col(i).dot(X.col(j))` for ALL (i,j);
+   computing j≥i and mirroring the triplet is bit-identical (sparse dot
+   is element-wise commutative; summation order per dot unchanged; no
+   duplicate triplets so `setFromTriplets` is order-insensitive).
+   Worth ~6% on LASSO-bound events (hd-max), ~1-2% elsewhere.
+3. `setS` add-edge churn (~25-31%) remains the floor of the graph
+   lifecycle: container swap was rejected (output-changing); a custom
+   pool allocator for the edge sets would preserve ordering
+   (set is ordered by value, not address) but is invasive — parked.
+4. ProjectionDeghosting internals (hd-busy): `get_projection` 33%-of-PD,
+   `judge_coverage(+_alt)` ~19%, Blob/ClusterShadow build ~18%, rest
+   add_edge/Rb_tree.
+
+### Clustering CPU (tcmalloc; consistent across all 3 events)
+
+| item | hd-max | hd-busy | vd-busy |
+|---|---|---|---|
+| clustering_separate (ctpc) | 31.5% | 29.2% | 27.0% |
+| ClusteringExamineBundles (relaxed) | 17.1% | 12.0% | 8.6% |
+| ClusteringDeghost | 10.0% | — | 7.3% |
+| nanoflann kd queries (flat, total) | ~32% | ~27% | ~25% |
+| `is_good_point` | 22.6% | 12.3% | — |
+| `get_closest_points` (S3DPC) | — | 15.0% | 17.3% |
+| hough/vhough | 13.2% | 12.9% | 10.5% |
+
+Clustering is near its result-preserving floor: `is_good_point` is
+already memoized + short-circuited (round 3), and
+`Simple3DPointCloud::get_closest_points` is an order-sensitive
+iterative walk (restructuring it changes results).  The remaining CPU
+is genuine kd geometry over O(pairs) sub-cloud comparisons.
+
+### Heap peaks (jemalloc sampled, live bytes at peak dump)
+
+**Imaging hd-max a0: 6.0 GB attributed — 84.5% (5.1 GB) live inside one
+ProjectionDeghosting call:**
+
+| holder | live at peak |
+|---|---|
+| `BlobShadow::shadow` graph (`adjacency_list<multisetS,vecS,undirectedS>`) | **3.13 GB (52%)** — 2.1 GB multiset edge nodes + 1.6 GB edge-list nodes; ~120-150 B container overhead per shadow edge |
+| `in_graph` by-value copy (finding 1 above) | 1.56 GB (26%) |
+| Projection2D Eigen sparse cache (`id2lproj`) | 0.81 GB (13.5%) |
+| SimpleCluster-held cluster graph | 0.80 GB (13.3%) |
+
+**The `bsgraph` lifetime is the cheap 3 GB**: it is consumed only by
+`ClusterShadow::shadow` (`ProjectionDeghosting.cxx:167-171`) and then
+stays alive to the end of the pass.  Scoping it in a block (or
+`std::move`-and-reset) frees it before the projection/judge phase —
+byte-identical, trivial.  After that + the `auto&` fix the hd-max
+imaging peak should drop from ~6.2 GB to ≈ the bs-build moment
+(~4 GB); shrinking further needs the multisetS→vecS container change
+(edge iteration order changes → consumer audit + full A/B required).
+
+**Clustering peaks:**
+
+| holder | hd-max (3.03 GB) | hd-busy (2.27 GB) | vd-busy (1.03 GB) |
+|---|---|---|---|
+| pc-tree load (`as_pctree`/Dataset) | 1.23 GB (41%) | 0.89 GB (39%) | 0.56 GB (54%) |
+| **Bee JSON buffers** (`fill_bee_points` → `Json::Value`) | **1.35 GB (45%)** | 0.33 GB (14.5%) | 0.09 GB (8%) |
+| DPC kd-index arrays (`index_new_points`) | — | 0.43 GB (19%) | 0.17 GB (16%) |
+| cluster graphs (`graph_algorithms`/`give_graph`) | 0.20 GB | 0.36 GB | — |
+
+This resolves round-4's "hd-max RSS flat" puzzle: its peak never was in
+DynamicPointCloud — it is Bee display buffers + the pc-tree.
+`Bee::Points` stores every point as 6 `Json::Value` array elements
+(`util/src/Bee.cxx:103-114`), ~300 B per point for 44 B of payload, and
+all Points objects (all-apa + per-apa + per-face + img/dead hooks) stay
+alive until the end-of-event zip write.  Storing compact columns and
+building/streaming the JSON only at write time would emit identical
+bytes with ~1 GB less hd-max peak.  The pc-tree share is the event data
+itself — irreducible.
+
+### Round-6 work queue (ranked, all byte-identity-gated)
+
+1. `const auto` → `const auto&` at the 8 `in->graph()` sites — ~10-15%
+   imaging wall on busy events + 1.5 GB hd-max peak.  Trivial.
+2. Scope `bsgraph` death before the PD projection phase — ~2-3 GB hd-max
+   imaging peak.  Trivial.
+3. LASSO Gram symmetric halving — ~6% hd-max imaging wall.  Small.
+4. Bee::Points compact columns, serialize at write — ~1.0-1.2 GB hd-max
+   clustering peak (45%).  Medium; byte-identical JSON achievable.
+5. BlobShadow graph edge container multisetS→vecS — ~2 GB + CPU in the
+   bs build; **medium risk** (out-edge iteration order changes; audit
+   `ClusterShadow::shadow` + PD consumers first).
+6. DPC kd zero-copy adaptor (nanoflann reads SoA columns directly,
+   drops `index_new_points` copies) — ~0.4 GB hd-busy clustering.
+   Medium.
+
+Document-only / result-changing: SpGEMM (`X.T*X`) Gram build (FP
+summation order changes); pool allocator for `setS` edge sets
+(byte-identity plausible but invasive); per-APA threaded clustering
+passes (wall-clock only, scheduling surgery); reuse of PD projections
+across full_deghost passes (staleness risk).
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
