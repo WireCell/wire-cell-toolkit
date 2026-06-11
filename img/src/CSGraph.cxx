@@ -218,6 +218,33 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
     return csg_out;
 }
 
+graph_t CS::prune(graph_t&& csg, float threshold)
+{
+    // Fast path: when no blob falls below threshold the rebuild below
+    // is an identity copy -- move the input through instead.  This is
+    // iteration-order safe: out-edge storage is setS (ordered by target
+    // descriptor, insertion-order independent) and vertices are vecS,
+    // so the moved graph and a rebuilt copy iterate identically.  With
+    // the default blob_value_threshold of -1 and non-negative solved
+    // charges this path is taken for every subgraph.
+    bool any_blob = false;
+    for (auto v : vertex_range(csg)) {
+        const auto& node = csg[v];
+        if (node.kind == node_t::blob) {
+            any_blob = true;
+            if (node.value.value() < threshold) {
+                // something to prune: fall back to the rebuild
+                return prune(static_cast<const graph_t&>(csg), threshold);
+            }
+        }
+    }
+    if (!any_blob) {
+        // preserve the rebuild's no-blob semantics (drops all edges)
+        return prune(static_cast<const graph_t&>(csg), threshold);
+    }
+    return std::move(csg);
+}
+
 graph_t CS::prune(const graph_t& csg, float threshold)
 {
     graph_t csg_out;

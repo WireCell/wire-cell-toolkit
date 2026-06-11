@@ -753,6 +753,30 @@ is set by the clustering stages themselves plus allocator retention.
 (vd-busy clus RSS swings ±10% with concurrent load; treat single-run
 deltas there as noise.)
 
+## Round 4 (2026-06-11): imaging graph-rebuild remainder, DPC SoA
+
+### 22. CS::prune no-prune fast path (imaging)
+
+`CS::prune` rebuilt the solved b-m subgraph vertex-by-vertex to drop
+blobs below `blob_value_threshold` — but the production configs leave
+that threshold at its default of **−1**, and LASSO charges are
+non-negative, so *nothing is ever pruned*: the rebuild was a pure
+identity copy of every connected subgraph for every weighting strategy.
+Added an rvalue overload (`img/src/CSGraph.cxx`) that scans the blobs
+once and, when none falls below threshold, moves the input graph
+through unchanged; `ChargeSolving` passes the solve output as rvalue.
+Iteration-order safe by construction: vertices are vecS and out-edges
+setS (ordered by target descriptor, insertion-order independent), so
+the moved graph and a rebuilt copy iterate identically.  Anything
+actually below threshold falls back to the original rebuild.
+
+**A/B verdict: PASS** (snapshot `prune1` vs `npfmt2`): all 162 archives
+across the 6-event set byte-identical (48 imaging + 114 clustering).
+Wall and RSS unchanged within noise (hd-max img 288→288 s) — the
+subgraphs are small, so the skipped rebuild was allocator churn rather
+than measurable wall.  Kept as the correct semantics: the per-subgraph
+copy now happens zero times instead of once per strategy.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;

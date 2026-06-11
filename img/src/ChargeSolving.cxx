@@ -297,7 +297,7 @@ bool Img::ChargeSolving::operator()(const input_pointer& in, output_pointer& out
                            //dump_sg(sg, log);
                            blob_weighter(in_graph, sg, m_good_blob_charge_th);
                            auto tmp_csg = solve(sg, sparams);
-                           return prune(tmp_csg, blob_threshold[ind]);
+                           return prune(std::move(tmp_csg), blob_threshold[ind]);
                        });
     }
     if (log->level() <= spdlog::level::trace) {
