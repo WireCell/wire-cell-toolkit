@@ -463,7 +463,7 @@ local clus_per_group (
                     collinear_member_merge=true,
                     track_repartition=true, band_merge_back=true, band_recarve=true, drift_side_fv_x=true,
                     far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm, track_recarve=true, dec1_guard_main_angle=45,
-                    iso_slab_split=true),
+                    iso_slab_split=true, tag_family=true, collinear_global_merge=true),
         // MicroBooNE order after separate: connect1 (reconnect dashed-line
         // fragments, e.g. drift-direction tracks split across the group) then
         // deghost (remove ghosts that only the group scope can adjudicate).
@@ -472,10 +472,10 @@ local clus_per_group (
         // identical FV_x metadata), so waive the same-face check here and in
         // examine_x_boundary below.
         // empty_view_unique: required at group scope -- see common clus.jsonnet.
-        cm.connect1(allow_mixed_faces=true),
+        cm.connect1(allow_mixed_faces=true, respect_separate_family=true),
         cm.deghost(allow_mixed_faces=true, empty_view_unique=true),
         cm.examine_x_boundary(allow_mixed_faces=true),
-        cm.neutrino(),
+        cm.neutrino(protect_iso_band=true),
         cm.isolated(),
         cm.examine_bundles(),
     ],

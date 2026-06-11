@@ -10,13 +10,35 @@ cm.separate(use_ctpc=true, max_hull_points=1000000,
             collinear_recover=true, collinear_interior=true,
             collinear_member_merge=true,
             track_repartition=true, band_merge_back=true, band_recarve=true,
-            iso_slab_split=true)
+            iso_slab_split=true, tag_family=true, collinear_global_merge=true)
 ```
 
 Run order within one family: `collinear_recover` (+`collinear_interior`) →
 `collinear_member_merge` → `track_repartition` → `band_merge_back` →
 `band_recarve` → `track_recarve` (in `clustering-separate-fv.md`) →
-`iso_slab_split`.
+`iso_slab_split` → `collinear_member_merge` again (slab-split pieces) →
+`tag_family` stamp.  After the per-cluster loop, `collinear_global_merge`
+runs the same member-rejoin over ALL long thin clusters of the grouping
+(see Step A1c).
+
+Two companion guards in OTHER passes protect the separation results
+downstream (both default OFF):
+
+- `connect1(respect_separate_family=true)` — `ClusteringConnect1` refuses to
+  reconnect two clusters carrying the same `sep_family` cluster-scalar stamp
+  (written by `tag_family`) when at least one of them is FAT (pca eval1/eval0
+  ≥ 0.15).  PDHD 27980 evt 24: connect1's skeleton-overlap merge re-glued a
+  fat 80 cm / 900-pt branch (r1=0.31, 67° off-axis) onto the 491 cm cosmic it
+  had just been separated from.  Thin-thin family pairs are exempt — that is
+  connect1's legitimate dashed-line reconnection (PDVD 39324 evt 340010: two
+  ~200 cm halves of one cosmic, 26 cm apart, must reconnect); touching thin
+  pairs are `collinear_member_merge`'s job anyway.
+- `neutrino(protect_iso_band=true)` — `ClusteringNeutrino` declines to merge
+  an isochronous band (blob-center x-extent < max(25 cm, 0.18·length), i.e. a
+  narrow drift slab with a large y-z footprint) with a non-band cluster
+  unless their true closest distance is ≤ 6 cm.  Its extended-cloud
+  prolongations otherwise bridge tens of cm: PDVD 39324 evt 339850 group4567
+  merged a drift-spanning track into a band complex across a 22.9 cm gap.
 
 ## Motivation (PDVD run 39324 evt 0, drift group 4567)
 
@@ -104,8 +126,10 @@ fragments were rejoined into their proper tracks first).
 Merge a pair of family members when ALL hold (iterated until no pair merges —
 a track cut into three needs two rounds):
 
-- both long (≥100 cm) and thin (pca eval1/eval0 ≤ 0.05), touching (≤5 cm),
-- main-axis angle ≤ 10°, each centroid ≤ 15 cm perpendicular from the OTHER's
+- both long (≥100 cm; the grouping-wide stitch lowers the SHORTER piece's
+  floor to 80 cm while keeping a ≥100 cm anchor — see Step A1c) and thin
+  (pca eval1/eval0 ≤ 0.05), touching (≤5 cm),
+- main-axis angle ≤ 12°, each centroid ≤ 30 cm perpendicular from the OTHER's
   pca main line,
 - the union (npoints-weighted blob centers) is still one thin straight track:
   perp rms about its own 3D principal line ≤ **7 cm** and eigenvalue ratio
@@ -117,6 +141,29 @@ genuine one-cosmic rejoin reads union rms ≤ 5.7 cm (12 firings, angles up to
 in 27409 evt 40904, whose rejoin caused the downstream `connect1` to fuse the
 two full fork prongs — reads 8.1 cm.  The 7 cm gate splits the two
 populations with margin on both sides.
+
+The angle/offset gates were 10° / 15 cm in round 5 and relaxed in round 6 for
+PDVD 39252 evt 298637: one cosmic's 321 cm + ~100 cm pieces, touching at
+0.32 cm with local end directions 3.7° apart, read a *global* axis angle of
+10.01° and a 25.5 cm centroid-to-line offset purely from curvature over
+321 cm.  Union rms (5.3 cm) remains the discriminator; the keep-controls fail
+on it regardless of the angle/offset relax (40908's parallel pair: 5.1°,
+offsets 26.9/28.2 — union rms 16 cm).
+
+After `iso_slab_split` the member rejoin runs a second time: the slab split
+can leave one drift-spanning track as 2+ collinear pieces (its seed joining
+is line-offset gated, which over-penalizes long gently-curved tracks).
+
+## Step A1c — `collinear_global_merge` (grouping-wide stitch)
+
+Two long thin clusters that touch end-to-end and form one thin track are
+never merged when they are NOT siblings of one separation family (the
+member-level rejoin only sees a family) and their global axes disagree just
+enough (~10° from curvature) to fail `connect1`'s ≤5° prolongation tests
+(PDVD 39252 evt 298637, the case above: the two pieces came from different
+parents).  After the per-cluster loop, run `merge_collinear_members` over ALL
+scope-passing clusters of the grouping with length ≥ 80 cm (the pair-level
+gates additionally require a ≥ 100 cm anchor; all other gates identical).
 
 ## Step A2 — `track_repartition` (repartition_crossing_tracks)
 

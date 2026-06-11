@@ -21,7 +21,8 @@ static void clustering_connect1(Grouping& live_grouping,
                                 bool use_flash_t0 = false,
                                 double flash_t0_window = 80*units::ns,
                                 double iso_max_dis = -1,
-                                bool allow_mixed_faces = false);
+                                bool allow_mixed_faces = false,
+                                bool respect_separate_family = false);
 
 class ClusteringConnect1 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
@@ -41,12 +42,15 @@ public:
         // Waive the same-face requirement of the multi-wpid drift-group
         // validation (PDVD: both faces of a CRP share one drift volume).
         allow_mixed_faces_ = get(config, "allow_mixed_faces", false);
+        // Decline to re-merge two clusters that a same-stage ClusteringSeparate
+        // (tag_family) just deliberately split (default OFF => byte-identical).
+        respect_separate_family_ = get(config, "respect_separate_family", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_, iso_max_dis_,
-                            allow_mixed_faces_);
+                            allow_mixed_faces_, respect_separate_family_);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -58,6 +62,7 @@ private:
     double flash_t0_window_{80*units::ns};
     double iso_max_dis_{-1};
     bool allow_mixed_faces_{false};
+    bool respect_separate_family_{false};
 };
 
 
@@ -82,13 +87,37 @@ void clustering_connect1(
     bool use_flash_t0,
     double flash_t0_window,
     double iso_max_dis,
-    bool allow_mixed_faces)
+    bool allow_mixed_faces,
+    bool respect_separate_family)
 {
     // Multiple wpids are allowed only when they form one drift volume.
     if (live_grouping.wpids().size() > 1) {
         validate_drift_group(live_grouping.wpids(), dv, allow_mixed_faces, "clustering_connect1");
     }
     geo_point_t drift_dir_abs(1,0,0);
+
+    // With respect_separate_family, refuse to reconnect two clusters that the
+    // same-stage ClusteringSeparate (tag_family) deliberately split apart
+    // (PDHD 27980 evt 24: a fat 80 cm branch, pca eval1/eval0 = 0.31, was
+    // re-glued onto the 491 cm cosmic it had just been separated from).
+    // The veto applies only when at least one piece is FAT (eval1/eval0 >=
+    // 0.15): a pair of thin track pieces is connect1's legitimate dashed-line
+    // reconnection work (PDVD 39324 evt 340010: two ~200 cm halves of one
+    // cosmic, 26 cm apart, must reconnect), and family-internal rejoining of
+    // touching thin pieces is collinear_member_merge's job anyway.
+    auto family_veto = [respect_separate_family](const Cluster* c1, const Cluster* c2) {
+        if (!respect_separate_family || !c1 || !c2) return false;
+        const int f1 = c1->get_scalar<int>("sep_family", 0);
+        if (f1 == 0 || f1 != c2->get_scalar<int>("sep_family", 0)) return false;
+        const double FAT_RATIO = 0.15;
+        for (const Cluster* c : {c1, c2}) {
+            const auto& pca = c->get_pca();
+            if (pca.values.size() >= 2 && pca.values.at(0) > 0 &&
+                pca.values.at(1) / pca.values.at(0) >= FAT_RATIO)
+                return true;
+        }
+        return false;
+    };
 
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -529,8 +558,9 @@ void clustering_connect1(
                             fabs(dir2.angle(map_cluster_dir2[max_cluster]) - 3.1415926 / 2.) >= 70 * 3.1415926 / 180.) {
                             flag_merge = true;
                             // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
-                            boost::add_edge(ilive2desc[map_cluster_index[cluster]],
-                                            ilive2desc[map_cluster_index[max_cluster]], g);
+                            if (!family_veto(cluster, max_cluster))
+                                boost::add_edge(ilive2desc[map_cluster_index[cluster]],
+                                                ilive2desc[map_cluster_index[max_cluster]], g);
                             // std::cout << "Connect 1 1: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                             // curr_cluster = max_cluster;
                         }
@@ -605,8 +635,9 @@ void clustering_connect1(
                                 (angle_diff < 10 || angle_diff > 170) && dis < 0.9 * units::cm &&
                                     dis1 > (cluster->get_length() + max_cluster->get_length()) / 3.) {
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
-                                boost::add_edge(ilive2desc[map_cluster_index[cluster]],
-                                                ilive2desc[map_cluster_index[max_cluster]], g);
+                                if (!family_veto(cluster, max_cluster))
+                                    boost::add_edge(ilive2desc[map_cluster_index[cluster]],
+                                                    ilive2desc[map_cluster_index[max_cluster]], g);
 
                                 // std::cout << "Connect 1 2: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                                 // curr_cluster = max_cluster;
@@ -616,8 +647,9 @@ void clustering_connect1(
                                       (angle_diff < 10 || angle_diff > 170) && dis < 1.2 * units::cm) &&
                                      dis1 > (cluster->get_length() + max_cluster->get_length()) / 3.) {
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
-                                boost::add_edge(ilive2desc[map_cluster_index[cluster]],
-                                                ilive2desc[map_cluster_index[max_cluster]], g);
+                                if (!family_veto(cluster, max_cluster))
+                                    boost::add_edge(ilive2desc[map_cluster_index[cluster]],
+                                                    ilive2desc[map_cluster_index[max_cluster]], g);
 
                                 // std::cout << "Connect 1 3: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                                 flag_merge = true;
@@ -628,8 +660,9 @@ void clustering_connect1(
                                 (max_value[0] + max_value[1] + max_value[2]) >
                                     0.7 * (num_total_points + num_total_points + num_total_points)) {
                                 // to_be_merged_pairs.insert(std::make_pair(cluster, max_cluster));
-                                boost::add_edge(ilive2desc[map_cluster_index[cluster]],
-                                                ilive2desc[map_cluster_index[max_cluster]], g);
+                                if (!family_veto(cluster, max_cluster))
+                                    boost::add_edge(ilive2desc[map_cluster_index[cluster]],
+                                                    ilive2desc[map_cluster_index[max_cluster]], g);
                                 // std::cout << "Connect 1 4: " << cluster->get_length()/units::cm << " " << max_cluster->get_length()/units::cm << " " << cluster->get_pca().center << " " << max_cluster->get_pca().center << std::endl;
                                 flag_merge = true;
                             }
@@ -754,8 +787,9 @@ void clustering_connect1(
                      (angle_diff > 80) && angle_diff1 > 80 && angle_diff2 > 80 && dis < 1.2 * units::cm) &&
                     dis1 > (cluster_2->get_length() + cluster_1->get_length()) / 3.) {
                     // to_be_merged_pairs.insert(std::make_pair(cluster_1, cluster_2));
-                    boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-                                    ilive2desc[map_cluster_index[cluster_2]], g2);
+                    if (!family_veto(cluster_1, cluster_2))
+                        boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                                        ilive2desc[map_cluster_index[cluster_2]], g2);
                     // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << pca1.center << " " << pca2.center << std::endl;
                     // flag_merge = true;
                 }
@@ -766,8 +800,9 @@ void clustering_connect1(
                          cluster_1->get_length() > 15 * units::cm &&
                          cluster_2->get_length() + cluster_1->get_length() > 45 * units::cm) {
                     // to_be_merged_pairs.insert(std::make_pair(cluster_1, cluster_2));
-                    boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
-                                    ilive2desc[map_cluster_index[cluster_2]], g2);
+                    if (!family_veto(cluster_1, cluster_2))
+                        boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
+                                        ilive2desc[map_cluster_index[cluster_2]], g2);
                     // std::cout << "Connect 2: " << cluster_1->get_length()/units::cm << " " << cluster_2->get_length()/units::cm << " " << pca1.center << " " << pca2.center << std::endl;
                     // flag_merge = true;
                 }

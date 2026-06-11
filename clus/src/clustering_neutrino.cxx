@@ -24,7 +24,8 @@ static void clustering_neutrino(
     IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     bool use_flash_t0 = false,
-    double flash_t0_window = 80*units::ns
+    double flash_t0_window = 80*units::ns,
+    bool protect_iso_band = false
     );
 
 class ClusteringNeutrino :  public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -39,12 +40,16 @@ public:
         num_try_ = get(config, "num_try", 1);
         use_flash_t0_ = get(config, "use_flash_t0", false);
         flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
+        // Decline to merge an isochronous band (narrow drift slab, large y-z
+        // footprint) with a non-band cluster unless the two genuinely touch
+        // (default OFF => byte-identical).  See iso_band_like().
+        protect_iso_band_ = get(config, "protect_iso_band", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         for (int i = 0; i != num_try_; i++) {
-            clustering_neutrino(live, i, m_dv, m_scope, use_flash_t0_, flash_t0_window_);
+            clustering_neutrino(live, i, m_dv, m_scope, use_flash_t0_, flash_t0_window_, protect_iso_band_);
         }
     }
 
@@ -52,11 +57,30 @@ private:
     int num_try_{1};
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
+    bool protect_iso_band_{false};
 };
 
 // The original developers do not care.
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wparentheses"
+
+// An isochronous band lives in ONE narrow drift slab while spanning a large
+// y-z footprint; a real track of comparable length also spans drift x.  Used
+// by the protect_iso_band veto (PDVD 39324 evt 339850: a 23 cm distant
+// drift-spanning track was merged into a band complex via the extended-cloud
+// prolongations).
+static bool iso_band_like(const Cluster* c)
+{
+    const double len = c->get_length();
+    if (len < 80 * units::cm) return false;
+    double xmin = 1e300, xmax = -1e300;
+    for (const Blob* b : c->children()) {
+        const double x = b->center_pos().x();
+        xmin = std::min(xmin, x);
+        xmax = std::max(xmax, x);
+    }
+    return (xmax - xmin) < std::max(25 * units::cm, 0.18 * len);
+}
 
 // handle all APA/Face
 static void clustering_neutrino(
@@ -65,7 +89,8 @@ static void clustering_neutrino(
     IDetectorVolumes::pointer dv,
     const Tree::Scope& scope,
     bool use_flash_t0,
-    double flash_t0_window)
+    double flash_t0_window,
+    bool protect_iso_band)
 {
     // Get all the wire plane IDs from the grouping
     const auto& wpids = live_grouping.wpids();
@@ -973,6 +998,13 @@ static void clustering_neutrino(
     for (auto [cluster1, cluster2] : to_be_merged_pairs) {
         // std::cout <<cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center << " " << cluster2->get_pca().center << std::endl;
         if (use_flash_t0 && flash_t0_group.at(cluster1) != flash_t0_group.at(cluster2)) continue;
+        // Band/non-band pairs may only merge when they genuinely touch: the
+        // extended clouds above bridge tens of cm, gluing drift-spanning
+        // tracks onto isochronous bands.
+        if (protect_iso_band && iso_band_like(cluster1) != iso_band_like(cluster2)) {
+            const auto res = cluster1->get_closest_points(*cluster2);
+            if (std::get<2>(res) > 6 * units::cm) continue;
+        }
         boost::add_edge(map_cluster_index[cluster1], map_cluster_index[cluster2], g);
     }
 

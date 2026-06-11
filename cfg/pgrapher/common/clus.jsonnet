@@ -374,7 +374,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  track_repartition=false, band_merge_back=false, band_recarve=false,
                  drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
-                 dec1_guard_main_angle=null, iso_slab_split=false) :: {
+                 dec1_guard_main_angle=null, iso_slab_split=false, tag_family=false,
+                 collinear_global_merge=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
@@ -433,6 +434,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // chain them together under pure connectivity.  Key omitted
                 // when false: bit-identical.
                 [if iso_slab_split then 'iso_slab_split']: iso_slab_split,
+                // Stamp final family members with a "sep_family" cluster scalar
+                // so a later same-stage pass (connect1 respect_separate_family)
+                // can decline to undo the split.  Key omitted when false.
+                [if tag_family then 'tag_family']: tag_family,
+                // Grouping-wide end-to-end stitch of two long thin collinear
+                // clusters (same gates as collinear_member_merge, applied
+                // beyond one separation family).  Key omitted when false.
+                [if collinear_global_merge then 'collinear_global_merge']: collinear_global_merge,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },
@@ -444,7 +453,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // allow_mixed_faces (default null == same-face required): waive the same-face
         // requirement of the multi-wpid drift-group validation when running at the
         // per-drift-group scope (PDVD: both faces of a CRP share one drift volume).
-        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, iso_max_dis=null, allow_mixed_faces=null) :: {
+        // respect_separate_family (default false == byte-identical): refuse to
+        // reconnect two clusters that a same-stage separate(tag_family=true)
+        // deliberately split apart.
+        connect1(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, iso_max_dis=null, allow_mixed_faces=null, respect_separate_family=false) :: {
             type: "ClusteringConnect1",
             name: prefix+name,
             data: {
@@ -452,6 +464,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 flash_t0_window: flash_t0_window,
                 [if iso_max_dis != null then 'iso_max_dis']: iso_max_dis,
                 [if allow_mixed_faces != null then 'allow_mixed_faces']: allow_mixed_faces,
+                [if respect_separate_family then 'respect_separate_family']: respect_separate_family,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },
@@ -521,13 +534,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // protect_iso_band (default false == byte-identical): decline to merge
+        // an isochronous band (narrow drift slab, large y-z footprint) with a
+        // non-band cluster unless the two genuinely touch — the extended-cloud
+        // prolongations otherwise bridge tens of cm.
+        neutrino(name="", num_try=1, use_flash_t0=false, flash_t0_window=80*wc.ns, protect_iso_band=false) :: {
             type: "ClusteringNeutrino",
             name: prefix+name,
             data: {
                 num_try: num_try,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
+                [if protect_iso_band then 'protect_iso_band']: protect_iso_band,
             } + dv_cfg + scope_cfg,
             uses: [detector_volumes],
         },

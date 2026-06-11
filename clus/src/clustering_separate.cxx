@@ -427,13 +427,27 @@ static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& s
 //  - 27409 evt 40908's separated parallel tracks (tightest control, 5.1 deg):
 //    offsets 26.9/28.2 cm, union rms 16.0 cm, ratio 0.014.
 static void merge_collinear_members(Grouping& live_grouping, const Tree::Scope& scope,
-                                    std::vector<Cluster*>& family)
+                                    std::vector<Cluster*>& family,
+                                    const double len_min_short = -1)
 {
-    const double LEN_MIN        = 100 * units::cm;  // each piece
+    const double LEN_MIN        = 100 * units::cm;  // longer piece (anchor)
+    // Shorter piece's floor: default (<0) keeps the symmetric 100 cm gate;
+    // the grouping-wide stitch lowers it (anchor + bridge, cathode_connect's
+    // min_length_short pattern) -- PDVD 39252 evt 298637's 104 cm (display)
+    // piece reads just under 100 cm by get_length().
+    const double SHORT_MIN      = len_min_short > 0 ? len_min_short : LEN_MIN;
     const double THIN_RATIO_MAX = 0.05;             // pca eval1/eval0 per piece
     const double TOUCH_MAX      = 5 * units::cm;    // pieces of one cut track touch
-    const double ANG_MAX        = 10.;              // main-axis angle (deg)
-    const double OFF_MAX        = 15 * units::cm;   // each centroid off the other's line
+    const double ANG_MAX        = 12.;              // main-axis angle (deg); a genuine
+                                                    // one-track pair reads 10.01 (PDVD
+                                                    // 39252 evt 298637) while the keep
+                                                    // controls sit at 20 (fork) and 5.1
+                                                    // (parallel pair, killed by rms)
+    const double OFF_MAX        = 30 * units::cm;   // each centroid off the other's line;
+                                                    // a long (321 cm) slightly-curved
+                                                    // track puts its centroid 25.5 cm off
+                                                    // its continuation's line -- union rms
+                                                    // is the real discriminator
     const double UNION_RMS_MAX  = 7 * units::cm;    // union perp rms about its own 3D line:
                                                     // genuine one-cosmic rejoins read <=5.7
                                                     // across the PDHD+PDVD suite; the one
@@ -449,7 +463,7 @@ static void merge_collinear_members(Grouping& live_grouping, const Tree::Scope& 
         for (size_t fi = 0; fi + 1 < family.size() && !merged_any; fi++) {
             Cluster* a = family.at(fi);
             if (!a) continue;
-            if (a->get_length() < LEN_MIN) continue;
+            if (a->get_length() < SHORT_MIN) continue;
             const auto& pca_a = a->get_pca();
             if (pca_a.axis.size() < 1 || pca_a.values.size() < 2 || pca_a.values.at(0) <= 0) continue;
             if (pca_a.values.at(1) / pca_a.values.at(0) >= THIN_RATIO_MAX) continue;
@@ -459,7 +473,9 @@ static void merge_collinear_members(Grouping& live_grouping, const Tree::Scope& 
             for (size_t fj = fi + 1; fj < family.size(); fj++) {
                 Cluster* b = family.at(fj);
                 if (!b) continue;
-                if (b->get_length() < LEN_MIN) continue;
+                if (b->get_length() < SHORT_MIN) continue;
+                // at least one piece must be a long anchor
+                if (a->get_length() < LEN_MIN && b->get_length() < LEN_MIN) continue;
                 const auto& pca_b = b->get_pca();
                 if (pca_b.axis.size() < 1 || pca_b.values.size() < 2 || pca_b.values.at(0) <= 0) continue;
                 if (pca_b.values.at(1) / pca_b.values.at(0) >= THIN_RATIO_MAX) continue;
@@ -1976,7 +1992,9 @@ static void clustering_separate(Grouping& live_grouping,
                                 const double far_point_mid_dis,
                                 const bool track_recarve,
                                 const double dec1_guard_main_angle,
-                                const bool iso_slab_split);
+                                const bool iso_slab_split,
+                                const bool tag_family,
+                                const bool collinear_global_merge);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -2036,6 +2054,14 @@ public:
         // drift-direction tracks (default OFF => bit-identical).  See
         // split_iso_slabs.
         iso_slab_split_ = get(config, "iso_slab_split", false);
+        // Stamp every final family member with a "sep_family" cluster scalar
+        // (the parent cluster's ident) so a later pass can decline to undo the
+        // split (see ClusteringConnect1 respect_separate_family).  Default OFF
+        // => no scalar is written, bit-identical.
+        tag_family_ = get(config, "tag_family", false);
+        // Grouping-wide end-to-end stitch of two long thin collinear clusters
+        // via merge_collinear_members (default OFF => bit-identical).
+        collinear_global_merge_ = get(config, "collinear_global_merge", false);
     }
 
     void visit(Ensemble& ensemble) const {
@@ -2045,7 +2071,7 @@ public:
                             track_repartition_, band_merge_back_,
                             band_recarve_, drift_side_fv_x_,
                             far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_,
-                            iso_slab_split_);
+                            iso_slab_split_, tag_family_, collinear_global_merge_);
     }
 
 private:
@@ -2064,6 +2090,8 @@ private:
     bool track_recarve_{false};
     double dec1_guard_main_angle_{-1.0};
     bool iso_slab_split_{false};
+    bool tag_family_{false};
+    bool collinear_global_merge_{false};
 };
 
 
@@ -2091,7 +2119,9 @@ static void clustering_separate(
     const double far_point_mid_dis,
     const bool track_recarve,
     const double dec1_guard_main_angle,
-    const bool iso_slab_split)
+    const bool iso_slab_split,
+    const bool tag_family,
+    const bool collinear_global_merge)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -2240,6 +2270,9 @@ static void clustering_separate(
             }
 
             if (flag_proceed) {
+                // The parent is consumed by Separate_1 below; capture its
+                // ident now for the tag_family stamp on the final members.
+                const int parent_ident = cluster->ident();
                 // Track every output cluster created while separating this
                 // original cluster ("family") for the knob-gated refinement
                 // post-pass.  Consumed intermediates are value-erased; vector
@@ -2381,8 +2414,52 @@ static void clustering_separate(
                     recarve_crossing_tracks(live_grouping, scope, family);
                 if (iso_slab_split && !family.empty())
                     split_iso_slabs(live_grouping, scope, family);
+                // The slab split can leave one drift-spanning track as 2+
+                // collinear family pieces (its seed joining is line-offset
+                // gated, which over-penalizes long gently-curved tracks);
+                // give the member-level rejoin a second look at the final
+                // family (PDVD 39252 evt 298637).
+                if (collinear_member_merge && iso_slab_split && family.size() >= 2)
+                    merge_collinear_members(live_grouping, scope, family);
+                // Stamp the surviving family members so a later same-stage
+                // pass can decline to re-merge what was just deliberately
+                // split (PDHD 27980 evt 24: connect1 re-glued a fat 80 cm
+                // branch onto the 491 cm cosmic it was separated from).
+                if (tag_family) {
+                    int nsurv = 0;
+                    for (Cluster* m : family)
+                        if (m) nsurv++;
+                    if (nsurv >= 2)
+                        for (Cluster* m : family)
+                            if (m) m->set_scalar<int>("sep_family", parent_ident + 1);
+                }
             }
         }
+    }
+
+    // Grouping-wide collinear stitch (collinear_global_merge): two long thin
+    // clusters that touch end-to-end and form one thin track were never
+    // merged when they are NOT siblings of one separation family (the
+    // member-level rejoin above only sees a family) and their global axes
+    // disagree just enough (~10 deg from curvature) to fail connect1's <=5 deg
+    // prolongation tests.  PDVD 39252 evt 298637: 321 cm + 104 cm pieces of
+    // one cosmic, touching at 0.32 cm, local end directions 3.7 deg apart.
+    // Reuses merge_collinear_members and its measured gates unchanged.
+    if (collinear_global_merge) {
+        const double GLOBAL_SHORT_MIN = 80 * units::cm;  // anchor >=100 cm enforced inside
+        std::vector<Cluster*> candidates;
+        for (Cluster* c : live_grouping.children()) {
+            if (!c->get_scope_filter(scope)) continue;
+            if (c->get_length() < GLOBAL_SHORT_MIN) continue;
+            if (c->get_default_scope().hash() != scope.hash()) c->set_default_scope(scope);
+            candidates.push_back(c);
+        }
+        std::sort(candidates.begin(), candidates.end(), [](const Cluster* c1, const Cluster* c2) {
+            if (c1->get_length() != c2->get_length()) return c1->get_length() > c2->get_length();
+            return c1->ident() < c2->ident();
+        });
+        if (candidates.size() >= 2)
+            merge_collinear_members(live_grouping, scope, candidates, GLOBAL_SHORT_MIN);
     }
 
 

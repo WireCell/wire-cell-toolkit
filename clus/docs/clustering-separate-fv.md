@@ -161,7 +161,9 @@ cm.separate(use_ctpc=true, max_hull_points=1000000,
             band_recarve=true, drift_side_fv_x=true,
             far_point_x_cut=14*wc.cm, far_point_mid_dis=60*wc.cm,
             track_recarve=true, dec1_guard_main_angle=45,
-            iso_slab_split=true),
+            iso_slab_split=true, tag_family=true, collinear_global_merge=true),
+cm.connect1(respect_separate_family=true),
+cm.neutrino(protect_iso_band=true),
 ```
 
 (`collinear_interior` — interior fragment reclaim, added when the DNN-SP
@@ -170,10 +172,13 @@ imaging inputs exposed a mid-track bite on 27409 evt 40900;
 hatched-band re-assembly, added for the PDVD 39324 over-separation round;
 `collinear_member_merge` / `iso_slab_split` — rejoin a carve-cut straight
 cosmic and x-slab-split mixed band+drift-track clusters, added in round 5;
-see `clustering-separate-refine.md`.  `max_hull_points` was raised 100k → 1M
-after a 102,129-pt giant in 39324 evt 339890 slipped past the 100k cap and
-silently skipped separation — the same silent-skip failure the knob was
-introduced for.)
+`tag_family` + `respect_separate_family`, `protect_iso_band` and
+`collinear_global_merge` — round 6: stop downstream connect1/neutrino merges
+from undoing or polluting separation results, and stitch end-to-end touching
+collinear track pieces grouping-wide; see `clustering-separate-refine.md`.
+`max_hull_points` was raised 100k → 1M after a 102,129-pt giant in 39324 evt
+339890 slipped past the 100k cap and silently skipped separation — the same
+silent-skip failure the knob was introduced for.)
 
 All new keys use the `[if flag/value]` omit-when-default pattern: existing
 configs are bit-identical (verified: new binary + old configs reproduce
