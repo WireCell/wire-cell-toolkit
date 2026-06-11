@@ -128,8 +128,13 @@ local img = {
                 charge_tag: tags.signal % anode.data.ident,
                 error_tag: tags.error_tag % anode.data.ident,
                 anode: wc.tn(anode),
+                // Both 0 = MaskSlice auto-derives the window from the input
+                // frame.  A hard max_tbin beyond the readout fabricates
+                // phantom dead slices past the frame end, and one below a
+                // longer readout truncates real activity (see
+                // pdvd/docs/sp-img-readout-window-truncation.md).
                 min_tbin: 0,
-                max_tbin: 8500,
+                max_tbin: 0,
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
