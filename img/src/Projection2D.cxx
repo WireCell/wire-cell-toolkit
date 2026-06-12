@@ -145,9 +145,14 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
         }
     }
 
+    // Default (zero) signal for channels absent from a slice's activity map.
+    // Matches the previous behavior where operator[] on a local copy of the
+    // map default-inserted a {0,0} value.
+    static const ISlice::value_t zero_signal{};
+
     for (const auto& [slice, bdescs] : map_s2vb) {
         int start = slice->start() / slice->span();
-        auto activity = slice->activity();
+        const auto& activity = slice->activity();
 
         for (const auto& bdesc : bdescs) {
             std::unordered_map<WirePlaneLayer_t, double> layer_charge;
@@ -160,8 +165,10 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
                 const auto& chan = std::get<channel_t>(cg[chan_desc].ptr);
                 WirePlaneLayer_t layer = chan->planeid().layer();
                 int cident = chan->index();
-                auto charge = activity[chan].value();
-                auto unc = activity[chan].uncertainty();
+                const auto ait = activity.find(chan);
+                const auto& sig = (ait == activity.end()) ? zero_signal : ait->second;
+                auto charge = sig.value();
+                auto unc = sig.uncertainty();
                 // TODO: make this configurable and robust
                 if (unc > uncer_cut) {
                     charge = dead_default_charge;

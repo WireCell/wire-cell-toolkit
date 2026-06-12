@@ -141,6 +141,1271 @@ hd-max 530→503 s, hd-busy 338→318 s, vd-busy 145→136 s (~5-6% on busy
 events; the remaining Separate cost is kd-tree geometry and
 DynamicPointCloud construction).
 
+### 4. ISlice::activity() by const-ref + ProjectionDeghosting set-copy removal (imaging)
+
+Post-entry-2 re-profile made ProjectionDeghosting the imaging leader
+(39.5% of the busy anode); inside it, `std::set` copy-construct/destroy was
+~36% (the eight `auto b_cluster = c2b[...]` statements each copied the
+cluster's blob-descriptor set) and `Slice::activity()` map copies were
+~12% (by-value return, called per slice per cluster in
+`Projection2D::get_projection`; GridTiling called it 3x per slice).
+
+- `ISlice::activity()` now returns `const map_t&` (implementers SimpleSlice
+  and ImgData::Slice store the map; all callers compile unchanged or were
+  bound by const-ref). Call sites that relied on `operator[]`
+  default-insert on a local copy (Projection2D, BlobGrouping) use
+  find-with-zero-default — exactly equivalent.
+- ProjectionDeghosting: `c2b[...]` results bound by const-ref;
+  `remove_blobs` takes the tagged set by const-ref.
+
+**A/B verdict: PASS** (snapshot `opt2`). Cumulative vs baseline:
+hd-max img 1028→**408 s**, hd-busy img 656→**216 s** (3.0x), vd-busy img
+327→275 s; typical events unchanged.
+
+### 5. tcmalloc for the imaging stage (deployment, run scripts)
+
+With the algorithmic fixes in, imaging is allocator-bound (malloc/free
+~50% + `setS` Rb_tree ops ~25% of the busy anode, spread over all passes
+— the graph build/copy/teardown lifecycle). `LD_PRELOAD`ing
+`libtcmalloc_minimal` was A/B'd over all 6 events, both stages
+(snapshot `opt2tc`, vs `base1`):
+
+- **Imaging: all archives byte-identical**, large wins:
+  hd-max 1028→**308 s**, hd-busy 656→**163 s** (4.0x vs baseline), and
+  busy-event RSS down (10113→8862 MB, 7180→6857 MB).
+- **Clustering: FAILED the gate on hd-typ** → tcmalloc stays OFF for
+  clustering (see finding below).
+
+Adopted in `run_img_evt.sh` (both detectors, wcp-porting-validation):
+imaging runs under tcmalloc by default; `WCT_TCMALLOC=off` reverts.
+
+### 6. kd existence query early-exit + DynamicPointCloud real move (clustering)
+
+- `NFKDVec::Tree::exists_within(r2, q)`: terminates the k-d search at the
+  first point strictly inside the squared radius (nanoflann `addPoint`
+  returning false). Used by `Grouping::has_closest_point` — the hottest
+  clustering leaf (21.6% cumulative on hd-max; previously knn(1) resolved
+  the true nearest neighbor only to compare against the radius). Boolean-
+  identical by construction.
+- `DynamicPointCloud::add_points` "moved" its input through
+  `make_move_iterator` over a **const** range — a silent deep copy of
+  every DPCPoint (5 nested vectors each; DPCPoint ctor was 7.2% flat).
+  Added a genuine rvalue overload (all hot callers pass temporaries) and
+  re-pointed the kd-indexing tail to read from `m_points`, which also
+  removes a latent read-after-move had the move ever become real.
+
+**A/B verdict: PASS** (snapshot `opt3`, includes entry-5 tcmalloc imaging).
+Clustering wall vs baseline: hd-max 530→**454 s**, hd-busy 338→**298 s**,
+vd-busy 145→134 s. Imaging vs baseline (with tcmalloc): hd-max
+1028→**304 s**, hd-busy 656→**161 s**, vd-busy 327→247 s.
+
+## Closing validation
+
+- **22-event spot check** (`spot_events.txt`, spans every profiled run,
+  both detectors): optimized code + tcmalloc imaging vs pre-optimization
+  baseline — **all 706 output archives byte-identical** (snapshots
+  `spotbase` vs `spotopt`).
+- **Determinism re-run** (`opt3` vs `opt3b`, full 6-event set twice with
+  final code): all archives identical (hd-max clustering needed a re-run
+  in the second pass — see crash finding below).
+
+### FINDING: intermittent clustering crash is the gojsonnet Go runtime
+
+During the determinism re-run, hd-max (027305/0) clustering aborted
+(rc=134) with `fatal error: traceback did not unwind completely` raised
+by the **embedded Go runtime** (gojsonnet's GC threads, which keep
+running after config parsing). The identical binary+input passed
+byte-identically an hour earlier, and the pre-optimization 283-event
+batch had a similar 027305 segfault — this is the long-standing
+intermittent "clus heisenbug", now with a concrete signature: it is the
+Go GC crashing, not (necessarily) the clustering C++.
+
+**Mitigation to try:** pre-compile the clustering config with `wcsonnet`
+and feed `wire-cell` pure JSON (as `-P` imaging mode already does). If
+the Go runtime is only initialized when jsonnet is actually parsed, this
+removes the Go GC from the production process entirely; it also takes
+the jsonnet compile off the clustering critical path. Needs a check that
+`wire-cell -c cfg.json` does not still spin up Go threads (inspect
+/proc/<pid>/task count or the crash disappearing over many runs).
+
+**RESOLVED — see round-2 entry 7** (pure-JSON config + `GOGC=off`).
+
+### FINDING: clustering has a pointer-order-dependent merge decision
+
+Under tcmalloc, hd-typ (027409/0) per-face clustering of apa2-face0
+produced **119 clusters instead of 120** — same total points, same
+charges, but a different partition (one merge decision flipped), which
+then cascades through group02 / all-apa outputs. So the chain is NOT
+allocator-independent: some container keyed/ordered by heap pointers
+(e.g. `Cluster*`/`Blob*` sets or maps, or a pointer tie-break in a sort)
+steers a merge. Under glibc the outcome is reproducible run-to-run only
+because the allocation sequence happens to be identical. This is very
+likely the same family as the long-standing SBND `clus_all_apa`
+nondeterminism. Worth hunting and fixing for robustness (and it would
+unlock tcmalloc for clustering too): instrument with
+`LD_PRELOAD=libtcmalloc` A/B on a small event and bisect by stage
+(per-face → per-APA → group) to find the first pass whose output flips.
+
+**RESOLVED — see round-2 entry 8** (`get_closest_blob` pointer-keyed map).
+
+## Round 2 (2026-06-11): follow-ups
+
+Continuation of the campaign on the three follow-up items picked from the
+findings/ideas above: the Go-runtime crash mitigation, the pointer-order
+merge hunt, and the ProjectionDeghosting projection-cache bound. Same A/B
+methodology and event set. One deliberate exception to the byte-identity
+ground rule is entry 8 (a nondeterminism *fix* necessarily changes the
+arbitrary tie-break it repairs); its output impact is quantified there.
+
+### 7. Clustering config pre-compiled to JSON + `GOGC=off` (crash mitigation, script-level)
+
+`run_clus_evt.sh` (both detectors, wcp-porting-validation) now compiles
+`wct-clustering.jsonnet` with `wcsonnet` and feeds `wire-cell` the pure
+JSON, running the process with `GOGC=off` (the imaging `-P` path got the
+same `GOGC=off` treatment).
+
+What was learned while verifying the original mitigation hypothesis:
+
+- `libgojsonnet.so` is **hard-linked** into `wire-cell` (via
+  WireCellUtil), and merely loading it starts the Go runtime: 5 runtime
+  threads appear at `dlopen` time with no jsonnet evaluated. So a pure
+  JSON config does *not* remove the Go threads.
+- It does remove the Go *heap*: `Persist` only enters the jsonnet VM for
+  `.jsonnet` files, and `GODEBUG=gctrace=1` shows the old mode runs 35 GC
+  cycles during config evaluation inside the production process (64-P Go
+  scheduler, 56 threads total), with the 2-minute *forced* periodic GC
+  continuing for the lifetime of long jobs — which is exactly why only
+  long busy events ever crashed.
+- With pure JSON + `GOGC=off`, the production wire-cell process logs
+  **zero GC cycles** end-to-end and runs 7 threads instead of 56.
+  `GOGC=off` disables the Go collector *including* the periodic forced
+  GC, so the crash vector (GC traceback walking) is removed
+  deterministically rather than made statistically rarer. The jsonnet
+  evaluation (and its Go GC) lives in the short-lived `wcsonnet` process.
+
+**A/B verdict: PASS** — full 6-event set, all clustering archives
+byte-identical vs `opt3` (snapshot `gogc1`); wall/RSS unchanged. A
+repetition run of hd-max clustering exercises the formerly crash-prone
+path (see closing notes of this round).
+
+### 8. Pointer-order-dependent merge: found and fixed → tcmalloc ON for clustering
+
+The hunt (hd-typ 027409/0, glibc vs `LD_PRELOAD=libtcmalloc`, per-pass
+TRACE counts + temporary per-decision instrumentation in
+`clustering_connect1`):
+
+- Per-pass cluster counts bisect the flip to **`ClusteringConnect1`**
+  (apa2-face0: identical counts through ExtendLoop, then 120 vs 119).
+- Per-decision dumps showed identical merge-candidate inputs but a
+  flipped angle gate: the *stored* `dir1`/`dir2` of clusters differed
+  between allocators — two mirror hough bins (±0.5° off the drift axis)
+  swapping winners.
+- Full-precision printing then exposed the root: `get_two_extreme_points()`
+  returned coordinates differing in the **last FP bit**. Its
+  `calc_ave_pos()` (and `calc_dir()`) iterate
+  `Cluster::get_closest_blob()` and accumulate `center_pos()*q` —
+  and that map was `std::map<const Blob*, geo_point_t>`, i.e. keyed by
+  **raw heap pointer**, so the floating-point summation order followed
+  the allocator's address assignment. The last-bit difference shifts a
+  near-boundary point into the adjacent hough bin, the bin argmax flips,
+  one connect1 merge flips, and the difference cascades to the
+  group/all-APA outputs.
+
+**Fix:** key `const_blob_point_map_t` with the existing content-based
+`BlobLess` comparator (`clus/inc/WireCellClus/Facade_Cluster.h`). All
+three consumers (`calc_ave_pos` x2, `calc_dir`) now sum in
+content-deterministic order. `blob_less` compares wpid, npoints, charge,
+slice and wire ranges before its documented pointer fallback, so
+distinct-blob ties are practically impossible.
+
+**Verification (snapshots `pofix` glibc / `pofixtc` tcmalloc):**
+
+- **Determinism gate: PASS** — with the fix, glibc and tcmalloc produce
+  byte-identical archives for the full 6-event set (114 archives).
+- **This is the one deliberate not-byte-identical change of the
+  campaign**: repairing the tie-break necessarily re-resolves it.
+  Vs the old baseline, 17/114 clustering archives change, confined to 3
+  PDHD events (hd-max 9, hd-typ 4, hd-typ2 4 — per-face/per-APA zips on
+  the flipped faces plus their group/all-APA descendants); hd-busy and
+  both PDVD events are byte-identical to the old baseline. The changes
+  are single merge-decision flips of the same kind tcmalloc used to
+  induce — arbitrary tie-break resolutions, now stable.
+
+**tcmalloc adopted for clustering** (`run_clus_evt.sh`, both detectors,
+`WCT_TCMALLOC=off` reverts), measured on the gate run (6-way load):
+hd-max 458→**372 s**, hd-busy 303→**238 s**, vd-busy 137→**112 s**,
+typical events ~20% faster; RSS slightly lower on PDHD (vd-busy RSS
+rose 1.9→2.4 GB — tcmalloc trades fragmentation for cache retention;
+acceptable against the 3.3 GB clustering tail).
+
+This very likely also resolves (or at least stabilizes) the
+long-standing SBND `clus_all_apa` run-to-run nondeterminism family —
+worth a dedicated SBND A/B before relying on it there.
+
+### 9. ProjectionDeghosting: evict projection matrices after last use (imaging memory)
+
+Implements option (b) from the memory ideas: the 3.7 GB live peak on the
+worst anode was the per-cluster Eigen sparse projection cache
+(`id2lproj`) holding every cluster's 3 layer matrices for the whole
+pass. The exact liveness rule exploited
+(`img/src/ProjectionDeghosting.cxx`):
+
+- Every cache entry is created when its cluster is the *current* vertex
+  of the main loop (later accesses at the judge sites only ever touch
+  clusters that are still **keys** of a per-layer `clus_2D_3D_map`, and
+  keys are only ever added when current).
+- Everything after the secondary judge loop (`m_saved_flag` summing, the
+  final per-cluster cut, `remove_blobs`) reads only the scalar metadata,
+  which survives eviction.
+
+So: clear `m_layer_proj` (keep the metadata struct) as soon as a cluster
+has been processed and is not a key of any layer map — ghosts/duplicates
+die during the main loop, erased map entries die at erasure, and the
+whole cache is cleared after the secondary loop, *before* `remove_blobs`
+allocates the output graph it used to coexist with.
+
+**A/B verdict: PASS** (snapshot `imgr2`, all 64 imaging archives
+byte-identical vs `opt3`; downstream clustering unaffected by
+construction). Peak RSS: hd-max 8862→**6078 MB**, hd-busy
+6855→**3339 MB** (−51%), vd-busy 1768→1569 MB; wall unchanged within
+noise.
+
+### 10. remove_blobs / CS::prune: old2new remap unordered_map → vector (imaging)
+
+The graph-rebuild remap in `ProjectionDeghosting::remove_blobs` and
+`CS::prune` keyed an `unordered_map` by vecS vertex descriptors — which
+are dense indices. Replaced with a flat `std::vector` (sentinel =
+`max`), removing a hash insert+find per vertex/edge of every rebuilt
+graph. Same insertion order, byte-identical by construction; gated in
+the same `imgr2` snapshot as entry 9. Wall effect small (a few % of the
+rebuild sites), bundled here as the safest of the graph-rebuild
+reductions; the `copy_graph` sites remain on the target list.
+
+### 11. NFKDVec::knn1 — allocation-free single-NN query (clustering)
+
+`get_closest_point_blob` (12.5% of hd-max clustering, the inner call of
+`Find_Closest_Points`' alternating-projection loops) heap-allocated a
+one-element result vector per query via `knn(1)` and resolved the scoped
+view twice (once for the query, again inside `point3d`). Added
+`NFKDVec::Tree::knn1(query, index, metric)` (stack scalars, identical
+nanoflann search) and re-pointed the four single-NN `Cluster` wrappers
+(`get_closest_point_blob`, `get_closest_wcpoint`,
+`get_closest_point_index`, `get_closest_dis`) at it, resolving the
+scoped view once.
+
+**A/B verdict: PASS** (snapshot `knn1` vs `pofixtc`, all archives
+byte-identical). Wall effect is noise-level on the gate run (hd-max
+372→366 s) — with tcmalloc already adopted the malloc share this
+removes had become cheap; kept as the right primitive for these hot
+paths.
+
+Follow-up in the same vein: `Simple3DPointCloud::get_closest_wcpoint` /
+`get_closest_dis` (8.5% cumulative in the round-2 closing profile, the
+inner queries of `Simple3DPointCloud::get_closest_points`) converted to
+`knn1` as well — **PASS** (snapshot `s3knn1` vs `fastg`), ~1%
+(hd-max 314→311 s, hd-busy 207→204 s).
+
+### 12. Cluster::sv3d() scoped-view memo (clustering)
+
+A fresh hd-max profile in the final mode (tcmalloc, JSON config, 92446
+samples) put `Points::scoped_view` at **13.9% cumulative**, almost all
+via `Cluster::sv3d()`: every `kd3d()`/`point3d()`/`points()` call in the
+hot loops re-resolved the view — a Scope hash (boost::hash_range over
+the name strings, ~3.5%) plus hashtable find with string-compare
+equality (`__memcmp` 3.8%).
+
+Memoized the resolved view pointer in the Cluster facade together with
+the `Points::scoped_indices_valid()` flag pointer (added previously for
+exactly this pattern):
+
+- Fast path: memo set and `*valid` → return the view directly.
+- Node *insert* only drops the validity flag (view object is stable):
+  the slow path re-calls `scoped_view()`, which re-syncs and restores it.
+- Node *removal* erases the view object, so `Cluster::on_remove` (and
+  `on_insert`, for safety) reset the memo before any reuse —
+  `FacadeParent` already receives these tree notifications.
+- `set_default_scope()` resets the memo (scope changed).
+
+**A/B verdict: PASS** (snapshot `svmemo` vs `knn1`, all archives
+byte-identical). Clustering wall: hd-max 366→**330 s**, hd-busy
+245→**222 s**, typical events −10-13%.
+
+### 13. Grouping::fastgeom dense-vector cache (clustering)
+
+The round-1 `fastgeom(apa,face)` memo still paid an `unordered_map`
+hash-find per call (~5% cumulative on the fresh hd-max profile; it is
+called per point per plane inside the good-point tests). The key is
+`apa*2+face` — a tiny dense space — so the map became a
+`std::vector<std::unique_ptr<fastgeom_t>>` indexed by key (`unique_ptr`
+keeps the returned references stable across growth; invalid `apa=-1`
+still throws at the same `m_anodes.at()` as before).
+
+**A/B verdict: PASS** (snapshot `fastg` vs `svmemo`, all archives
+byte-identical). Clustering wall: hd-max 330→**314 s**, hd-busy
+222→**207 s**, vd-busy 111→105 s.
+
+### Round-2 closing
+
+Final state of the 6-event set (6-way load; img = snapshot `imgr2`,
+clus = snapshot `fastg`), vs the original `base1` baseline:
+
+| Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+|---|---|---|---|---|
+| hd-typ  027409/0  | 66 → 59 | 703 → 670 | 28 → **20** | 704 → 789 |
+| hd-typ2 027980/3  | 70 → 62 | 691 → 794 | 31 → **22** | 769 → 706 |
+| hd-busy 028084/18 | 656 → **163** | 7180 → **3339** | 338 → **207** | 2833 → 2964 |
+| hd-max  027305/0  | 1028 → **322** | 10113 → **6078** | 530 → **314** | 3284 → 3030 |
+| vd-typ  039349/0  | 140 → 135 (50 with `-P`) | 441 → 486 | 26 → **20** | 745 → 637 |
+| vd-busy 039252/5  | 327 → **264** | 1918 → **1569** | 145 → **105** | 1879 → 1825 |
+
+(Round-2 clustering walls include the entry-8 tcmalloc adoption; round-2
+imaging RSS includes the entry-9 eviction. Clustering outputs since
+entry 8 are deterministic but differ from the original baseline on 3
+PDHD events — see entry 8.)
+
+**Crash-mitigation soak**: 12 repetitions of hd-max clustering in the
+final mode (pure-JSON config, `GOGC=off`, tcmalloc): 12/12 rc=0 and all
+12 `mabc-all-apa.zip` payload-identical. The Go-GC crash vector is
+removed by construction; the soak exercises the formerly crash-prone
+path without incident.
+
+**Closing verification**: (a) clustering determinism double-run with the
+final code (`s3knn1` vs `s3knn1b`) — all archives identical; (b)
+22-event imaging spot check (`spotr2` vs round-1 `spotbase`) — **all 256
+imaging archives byte-identical**, confirming the round-2 imaging
+changes (eviction, old2new) across every profiled run, with broadly
+lower wall and RSS.
+
+**Fresh hd-max clustering profile after round 2** (78.7k samples,
+~315 s): the chain is now kd-geometry-bound —
+nanoflann searchLevel/findNeighbors ~22-26% (irreducible),
+`is_good_point` 25.3% (mostly `exists_within` kd descent),
+`hough_transform` 13.4% (boost::histogram + trig on cluster points),
+`Simple3DPointCloud::get_closest_points` 10.2%,
+`Find_Closest_Points` 7.6%, DPC `add_points`+`DPCPoint` ctor ~7%.
+Previously-listed targets now retired: `scoped_view` 13.9→1.5%,
+`get_closest_point_blob` 12.7→6.0%.
+
+Remaining targets for a round 3, in suggested order (shares from the
+post-round-2 hd-max profile; the chain is now kd-geometry-bound, so
+expect smaller, harder wins than rounds 1-2).  **Status annotations
+added after round 3** — see the Round 3 section for the entries:
+
+1. **Reduce kd query *counts* in the good-point tests** — ✅ **DONE in
+   round 3 (entry 16)** via the plane short-circuit (the cheap share of
+   this item: with `allowed_bad=1` both decided-early extremes skip the
+   third plane's descent).  hd-max 308→288 s.  The cell-keyed verdict
+   memo variant was NOT implemented — it would need a duplicate-query
+   census first and is only worth a dedicated follow-up if a future
+   profile still shows `is_good_point` dominant.
+   *(original notes)* `is_good_point` is 25.3% (almost all
+   `has_closest_point` → `exists_within` kd descent, called per point
+   per plane per pass under Separate/Deghost); the lever is issuing
+   fewer queries, e.g. memoize verdicts per (rounded time/wire key)
+   within a pass.
+2. **`Cluster::hough_transform` 13.4%** — ✅ **DONE in round 3 (entry
+   17)**: it was already sparse-map (not boost::histogram as written
+   below); round 3 replaced the map with a generation-stamped scratch
+   grid and dropped the intermediate `pts`/`blobs` vectors.  hd-max
+   288→281 s.  The residual cost is the `kd_radius` descent + trig,
+   which is content-bound — retired as a target.
+3. **DynamicPointCloud SoA restructure** (~7% now, was ~9-12% pre-
+   tcmalloc) — ✅ **DONE in round 4 (entry 24)**: DPCPoint replaced
+   wholesale by the columnar `DPCBatch`; byte-identical across the
+   PDHD/PDVD 6-event gate, the MicroBooNE qlport full chain, SBND, and
+   the 5-test porting bats suite.  Clustering RSS −14..−45% on busy
+   events, wall −4..−5%.
+4. **Imaging graph-rebuild remainder** — ✅ **DONE in round 4 (entries
+   22-23)**: `CS::prune` no-prune fast path (entry 22, fires ~100% with
+   the default threshold) and the `copy_graph` reduction via the
+   `SimpleCluster` move constructor (entry 23, one whole-graph
+   copy+destroy per stage removed).  Both byte-identical; both
+   wall-neutral under tcmalloc — the residual upside this item carried
+   was priced at glibc-malloc rates.  The remaining filtered
+   `copy_graph` sites (~1.5% combined) are closed as not-worth-it.
+5. **SBND follow-through** — ✅ **DONE in round 3 (entries 18-19)**: the
+   heisenbug soak is clean 8/8 (entry 18), SBND clustering is verified
+   run-to-run deterministic AND glibc==tcmalloc byte-identical (entry
+   19), and tcmalloc + JSON-precompile + GOGC=off are enabled in
+   `sbnd_xin/run_clus_evt.sh`.  No `sbnd/clus.jsonnet` change was
+   needed (all changes are environment-level).
+6. nanoflann kd descent (~25%) is genuine geometry — only fewer queries
+   (item 1) move it.  Still true after round 3; with the short-circuit
+   landed, further reduction needs the memo/census route.
+
+Retired from the previous target list: `scoped_view`/sv3d (13.9→1.5%,
+entry 12), `get_closest_point_blob` (12.7→6.0%, entry 11),
+`Simple3DPointCloud` single-NN wrappers (entry 11 follow-up),
+`fastgeom` lookup (entry 13).
+
+Beyond byte-identical work, the largest remaining levers are the
+**result-changing ideas** listed at the end of this file (sampling
+density, `full_deghost`, slicing threshold) — those need physics review
+rather than engineering.
+
+## Round 3 (2026-06-11): deployment defaults, masked-span coarsening, kd-query reduction
+
+### 14. Per-anode sequential imaging is now the default (script-level)
+
+`run_img_evt.sh` (PDHD + PDVD, wcp-porting-validation `a1ad4b2`): the round-1
+`-P` mode (entry 1, output-identical, peak RSS = busiest anode instead of
+sum) is now the default; `-1` reverts to the old single-process mode, `-P`
+is kept as a back-compat no-op.  Re-validated incidentally by entry 15's
+6-event regeneration: all 32 active archives byte-identical to the
+single-process baseline.
+
+### 15. Masked-fork slicing span 100/500 → 1500 ticks (**RESULT-CHANGING, approved**)
+
+- `cfg/pgrapher/experiment/protodunevd/img.jsonnet` (production "both"
+  branch): masked 2-view span 100 → **1500** ticks.
+- `cfg/pgrapher/experiment/pdhd/img.jsonnet`: 500 → **1500**.
+
+The masked fork carries only dead-region geometry (no charge solving), so
+its slicing granularity is a memory/time knob with low physics
+sensitivity.  PDVD's span=100 made 15x more masked slices than PDHD's 500
+with no documented physics justification.  User approved coarsening both
+to 1500.
+
+Measured on the 6-event set (snapshot `span1500`, includes the entry-14
+per-anode default; vs the round-2 closing numbers):
+
+| Event | img wall (s) | img RSS (MB) | clus wall (s) |
+|---|---|---|---|
+| hd-typ  027409/0  | 59 → 41 | 670 → 643 | 20 → 19 |
+| hd-typ2 027980/3  | 62 → 44 | 794 → 694 | 22 → 21 |
+| hd-busy 028084/18 | 163 → **143** | 3339 → 3382 | 207 → 204 |
+| hd-max  027305/0  | 322 → **288** | 6078 → 6190 | 314 → 308 |
+| vd-typ  039349/0  | 135 → **40** | 486 → 419 | 20 → 15 |
+| vd-busy 039252/5  | 264 → **105** | 1569 → 1227 | 105 → 90 |
+
+The big PDVD imaging wins are the 15x masked-slice reduction (the masked
+fork dominated PDVD imaging); PDHD moves less (3x on a smaller share).
+hd-busy/hd-max imaging RSS is unchanged because the active fork on the
+busiest anode dominates the per-anode peak.
+
+Verification of the blast radius:
+- **Active fork untouched**: all 32 `*-ms-active.tar.gz` archives
+  byte-identical to the old-span baseline.
+- **Masked archives**: PDVD ~6-7x smaller, PDHD ~1.3-1.6x.
+- **Downstream clustering**: 6/6 events rc=0.  Per-pass cluster counts
+  are identical on 5/6 events; hd-busy differs in two mid-chain passes
+  (61→60, 164→162) and converges to the **same final count (184)**.
+  `mabc-*.zip` payloads differ on all events as expected (the dead/masked
+  blob geometry is part of the payload).
+
+Snapshot `span1500` is the new A/B baseline for subsequent byte-identical
+work (the old `imgr2`/`fastg` baselines predate the span change).
+
+### 16. Good-point tests: plane short-circuit + dead-chs single map descent (clustering)
+
+`clus/src/Facade_Grouping.cxx`:
+
+- `is_good_point` / `is_good_point_wc`: the per-plane tests are pure
+  queries, so the U/V/W loop now returns as soon as the verdict is
+  decided.  With the hot-path default `allowed_bad=1`, both extremes skip
+  the third plane's kd descent: two matches → early true, two misses →
+  early false (weighted variant analogous, threshold 4 with W=2).  This
+  attacks the round-3 #1 target — `is_good_point` was 25.3% of hd-max
+  clustering, nearly all `exists_within` kd descent — by issuing fewer
+  queries rather than making the descent faster.
+- `get_closest_dead_chs`: one ordered-map `lower_bound` descent for the
+  whole `[wind-ch_range, wind+ch_range]` window instead of a `find()` per
+  channel (3 descents at the default `ch_range=1`), plus an empty-map
+  early-out before the projection arithmetic.  Same ascending visit
+  order, verdict-identical.  (This is the PDHD/PDVD share of the SBND
+  profile's `get_closest_dead_chs` ~9% item; the flat-bitmask variant was
+  rejected because `get_dead_winds` hands out a mutable reference that
+  PointTreeBuilding writes through — a cached flat structure would need
+  invalidation hooks for no extra win over the single descent.)
+
+**A/B**: 6-event clustering gate vs `span1500` — all archives PASS
+(byte-identical).  Wall: hd-busy 204→**190** s, hd-max 308→**288** s,
+vd-busy 90→**86** s; typicals unchanged.
+
+### 17. hough_transform: scratch-grid accumulation, no intermediate vectors (clustering)
+
+`clus/src/Facade_Cluster.cxx` `Cluster::hough_transform` (round-3 #2
+target, 13.4% of hd-max).  The histogram was already sparse (an earlier
+session replaced boost::histogram with an unordered_map keyed by the
+linear bin index); the remaining cost was per-fill hashing/allocation and
+the materialization of `pts`/`blobs` vectors per call.  Now:
+
+- accumulation goes into a generation-stamped dense thread-local scratch
+  grid (a bin is live when its stamp matches the call's generation) — no
+  per-call zero-fill of the 64 800-bin grid, no hashing, no allocation
+  after warm-up; the touched-bin list drives the peak scan.  Per-bin sums
+  see the same values in the same order, and the peak criterion (max
+  value, then smallest linear index) is a total order, so the result is
+  bit-identical regardless of visit order.
+- the kd results are iterated directly (`blob_with_point` per index +
+  the scoped-view coordinate arrays) instead of building `pts`/`blobs`
+  vectors first — same per-index values and order.
+
+**A/B**: 6-event clustering gate vs the entry-16 snapshot — all archives
+PASS (byte-identical).  Wall: hd-busy 190→**182** s, hd-max 288→**281** s.
+
+### 18. SBND `clus_all_apa` heisenbug: 8-pass soak clean under round-3 code
+
+The SBND local-imaging stream (file 1 of lan-reco2,
+`/home/xqian/tmp/lanrepro2/f1/config.json`) historically crashed with an
+intermittent heap corruption on ~50-70% of runs (2026-06-05 trail in
+`clustering-timing-profile.md` §0).  Re-soaked with the current toolkit
+(BlobLess pointer-order fix + rounds 2-3 changes), 8 sequential passes
+via `/home/xqian/tmp/lanrepro2/soak_r3.sh`: 4 plain glibc + 4 with
+`MALLOC_PERTURB_=85 MALLOC_CHECK_=3` (perturbed free fills surface latent
+corruption a lucky layout hides).  **8/8 rc=0, zero corruption
+signatures**, stdout structure identical to the known-clean June-5 pass.
+At the historical 50% floor, 8 clean runs has p≈0.4% — the bug no longer
+reproduces under current code.  Which change removed it cannot be
+pinpointed (the BlobLess re-keying also shifts allocation patterns);
+operationally the SBND local-imaging benchmarking path is unblocked.
+Bonus datum: each pass now takes ~260 s vs ~630 s on June 5 — the round
+2-3 clustering speedups carry over to SBND unchanged.
+
+### 19. SBND determinism A/B + tcmalloc enablement (round-2 item 5 follow-through)
+
+Determinism/allocator A/B on 5 SBND events (data 138670 — the event
+whose all-APA output historically differed run-to-run — plus data
+139220, 137680 and MC evt11, evt12), driving `sbnd_xin`'s clustering
+graph directly: per event, two glibc runs (run-to-run determinism) and
+one tcmalloc-preloaded run (allocator independence).  **All 15 archives
+(3 mabc zips × 5 events) byte-identical across all three runs** — the
+entry-8 BlobLess fix resolves the SBND `clus_all_apa` nondeterminism,
+exactly as predicted.
+
+Enablement (`sbnd_xin/run_clus_evt.sh`, wcp-porting-validation
+`ecef431`, mirroring the pdhd/pdvd pattern): tcmalloc preload
+(`WCT_TCMALLOC=off` reverts), wcsonnet pre-compile to pure JSON +
+`GOGC=off` (removes the Go-GC SIGABRT vector).  The updated script path
+re-verified byte-identical on evt12.  **No `sbnd/clus.jsonnet` change
+was needed** — everything is environment-level; the config compiles
+unchanged.  The QL/matching scripts were deliberately left alone:
+QLMatching has known marginal FP ties at `m_strength_cutoff` that an
+allocator change could flip, so its tcmalloc adoption should be its own
+gated decision.
+
+### 20. hd-max clustering heap profile (tcmalloc HEAPPROFILE)
+
+First heap-level decomposition of the ~3 GB hd-max clustering RSS
+(`HEAPPROFILE` + full `libtcmalloc.so.4`, dumps every 200 MB of in-use
+growth; profiler overhead ~14x on allocation-heavy passes, so the run
+was stopped once the headline was unambiguous; dumps in
+`/home/xqian/tmp/heaprof/`).  Findings:
+
+- **The live heap is much smaller than RSS**: at a point where process
+  RSS exceeded 1 GB, only ~423 MB was live; at the last dump 843 MB live
+  vs ~2 GB RSS.  A large share of clustering "RSS" is
+  allocator-retained/fragmented memory from churn (146M allocations /
+  15.3 GB cumulative by the last dump), not live data.
+- **~90% of the live heap at the sampled points sits under
+  `ClusterFileSource` ingest** — for the JSON cluster files this is the
+  slurped `istringstream` buffer plus the jsoncpp DOM (an Rb_tree node
+  per object member, 40%, + key/value strings, ~42%).  Allocation churn
+  at those points is likewise parse-dominated.
+
+Actionable outcome: stop ingesting JSON → entry 21.
+
+### 21. Cluster files JSON → numpy (`format: "numpy"`), + two latent toolkit bugs
+
+`cfg/pgrapher/experiment/{pdhd,protodunevd}/img.jsonnet`: the
+`ClusterFileSink` in the imaging `dump()` now writes `format: "numpy"`
+(npy members in the same tar.gz, as SBND's npz path has long used)
+instead of JSON.  `ClusterFileSource` dispatches per member, so
+downstream needs no change.
+
+Enabling this exposed two latent toolkit bugs, both fixed:
+
+1. **custard tar reader 512-padding bug** (`custard_boost.hpp:486`,
+   commit `05642fad`): a member whose size is an exact multiple of 512
+   has no padding, but the reader skipped `512 - size%512 = 512` bytes,
+   swallowing the next member's tar header (crash: `stol` on garbage).
+   JSON members (arbitrary sizes) hit this with ~1/512 probability per
+   member; npy arrays (element sizes 4/8) hit it readily.  The tar
+   *writer* was always correct, so all existing archives remain valid.
+   Same expression fixed in the unused `custard_file.hpp` pair.
+2. **`ClusterFileSink::numpify` empty-cluster desync** (commit
+   `a93e696e`): an empty cluster graph produced no members, so the
+   source delivered EOS instead of an empty cluster and the live/dead
+   stream pair into `PointTreeBuilding` desynchronized ("missing 1
+   input tensors", hd-busy/hd-typ2 failed).  Fixed by writing empty
+   clusters as the (tiny) JSON member.
+
+**A/B (snapshot `npfmt2`)**: all **114 clustering archives across the
+6-event set byte-identical** to the JSON-input baseline — the JSON
+writer was full-precision, so the binary round-trip changes nothing.
+
+| Event | img wall (s) | img RSS (MB) | clus wall (s) | clus RSS (MB) |
+|---|---|---|---|---|
+| hd-typ  027409/0  | 41 → 40 | 628 → **400** | 20 → **17** | 644 → 702 |
+| hd-typ2 027980/3  | 44 → 43 | 677 → **400** | 22 → **19** | 702 → 753 |
+| hd-busy 028084/18 | 143 → 141 | 3302 → 3304 | 182 → **176** | 3137 → 3091 |
+| hd-max  027305/0  | 288 → 288 | 6045 → 6046 | 281 → **272** | 3015 → 3016 |
+| vd-typ  039349/0  | 40 → 38 | 408 → **236** | 14 → **12** | 485 → 510 |
+| vd-busy 039252/5  | 105 → 101 | 1198 → 1136 | 85 → **79** | 2219 → 2497 |
+
+Interpretation: clustering wall −3 to −15% (parse cost gone), imaging
+RSS on typical events −35-45% (no JSON serialization buffers), busy-
+event imaging RSS unchanged (in-memory graph dominates).  Clustering
+*peak* RSS is essentially unchanged — consistent with entry 20: the
+ingest DOM dominated the *live heap mid-load*, but the peak RSS envelope
+is set by the clustering stages themselves plus allocator retention.
+(vd-busy clus RSS swings ±10% with concurrent load; treat single-run
+deltas there as noise.)
+
+## Round 4 (2026-06-11): imaging graph-rebuild remainder, DPC SoA
+
+### 22. CS::prune no-prune fast path (imaging)
+
+`CS::prune` rebuilt the solved b-m subgraph vertex-by-vertex to drop
+blobs below `blob_value_threshold` — but the production configs leave
+that threshold at its default of **−1**, and LASSO charges are
+non-negative, so *nothing is ever pruned*: the rebuild was a pure
+identity copy of every connected subgraph for every weighting strategy.
+Added an rvalue overload (`img/src/CSGraph.cxx`) that scans the blobs
+once and, when none falls below threshold, moves the input graph
+through unchanged; `ChargeSolving` passes the solve output as rvalue.
+Iteration-order safe by construction: vertices are vecS and out-edges
+setS (ordered by target descriptor, insertion-order independent), so
+the moved graph and a rebuilt copy iterate identically.  Anything
+actually below threshold falls back to the original rebuild.
+
+**A/B verdict: PASS** (snapshot `prune1` vs `npfmt2`): all 162 archives
+across the 6-event set byte-identical (48 imaging + 114 clustering).
+Wall and RSS unchanged within noise (hd-max img 288→288 s) — the
+subgraphs are small, so the skipped rebuild was allocator churn rather
+than measurable wall.  Kept as the correct semantics: the per-subgraph
+copy now happens zero times instead of once per strategy.
+
+### 23. SimpleCluster move constructor — graph rebuild remainder closed
+
+A fresh hd-busy anode2 CPU profile (glibc malloc, 23478 samples) put
+`SimpleCluster::SimpleCluster` at **7.3% cumulative**: the constructor
+ran `boost::copy_graph(g, m_graph)`, a full redundant copy (plus later
+destruction of the source) of the cluster graph at the end of *every*
+imaging stage.  All other `copy_graph` sites combined (the filtered
+copies in Local/GlobalGeomClustering, InSliceDeghosting rounds 2/3,
+BlobGrouping, ClusterScopeFilter) measured only ~1.5%.
+
+Added a `SimpleCluster(cluster_graph_t&&)` move overload and converted
+the 15 call sites whose graph is dead after construction (img: all
+stage tails incl. BlobClustering/BlobSolving via the indexed graph's
+non-const accessor; sio: `ClusterFileSource` JSON+numpy loads; aux:
+`TensorDMcluster`).  Iteration-order safe: the moved graph is the very
+object the copy would have reproduced (vecS vertices; setS out-edges
+ordered by target).  The dryrun paths keep the copying ctor.
+
+**A/B verdict: PASS** (snapshot `scmove1` vs `npfmt2`): all archives
+byte-identical on the 6-event set.  **Wall/RSS: no measurable change**
+— the profile above was taken under glibc malloc, but production
+imaging runs under tcmalloc (round-1 adoption), where the copy's
+allocation churn is far cheaper; the same lesson as entry 11.  Kept as
+the structurally right thing: one whole-graph copy+destroy per pipeline
+stage now simply does not happen, and the win applies to any future
+allocator/regime change.
+
+The remaining filtered `copy_graph` sites are **closed as
+not-worth-it**: ~1.5% combined under the glibc profile (less under
+tcmalloc), each requiring a manual order-preserving rebuild to replace
+a one-line `copy_graph` — poor risk/benefit against the byte-identity
+gate.  This closes round-2 follow-up item 4 (imaging graph-rebuild
+remainder); both sub-items (CS::prune fast path = entry 22, copy_graph
+sites = this entry) are done.
+
+### 24. DynamicPointCloud SoA restructure (round-2 item 3, the big one)
+
+`DPCPoint` carried five nested vectors per point (`x_2d`/`y_2d`/
+`wpid_2d` each `vector<vector<...>>` plus `wind`/`dist_cut`) — roughly
+a dozen heap allocations *per point*, megabytes of points per event,
+built and torn down across every `make_points_*` call.  Replaced the
+AoS struct wholesale with a columnar `DPCBatch` (scalar columns +
+CSR-encoded per-plane 2D projections) used both as the builder transfer
+format and as `DynamicPointCloud`'s internal storage:
+
+- builders (`make_points_cluster[_steiner|_skeleton]`,
+  `make_points_direct`, `make_points_linear_extrapolation`,
+  `fill_wrap_points`) append straight into the batch columns — zero
+  per-point allocations;
+- `add_points(DPCBatch&&)` on a fresh cloud is an O(1) column move
+  (the dominant call pattern);
+- consumers migrated from `get_points()[i].field` to
+  `npoints()/point3d(i)/cluster(i)/dist_cut(i,p)/points()` accessors;
+  whole-cloud and row-subset copies (PRShower merge, break_segment
+  redistribution) became `add_points(other[, rows])` column appends.
+
+Values, point order, and kd-tree construction order are bit-identical
+by construction; ~10 consumer files touched including the
+neutrino-porting code (PRShower/PRSegmentFunctions/NeutrinoDeghoster/
+NeutrinoEnergyReco/NeutrinoShowerClustering/TaggerCheckSTM/MABC).
+
+**Verification (all PASS):**
+- PDHD/PDVD 6-event clustering A/B (snapshot `dpcsoa1` vs `npfmt2`):
+  all archives byte-identical.
+- MicroBooNE full chain (qlport `uboone-mabc.jsonnet`, events
+  6501/6505/6512, kind=both incl. pattern recognition + taggers): all
+  3 bee zips byte-identical — this is the path that exercises the
+  PR*/Neutrino* consumers.
+- SBND clustering (sbnd_xin `wct-clustering.jsonnet`, evt 138670 data +
+  evt 12 sim): 6/6 mabc zips byte-identical.
+- Dedicated porting suite `clus/test/test-porting.bats`: **5/5 ok**
+  (qlport, steiner, stm, pdhd, fgval) including historical log-digest
+  diffs.
+
+**Resources** (clustering stage, vs `npfmt2`):
+
+| Event | clus wall (s) | clus peak RSS (MB) |
+|---|---|---|
+| hd-typ  027409/0  | 17 → 17 | 702 → **644** |
+| hd-typ2 027980/3  | 19 → 19 | 753 → **703** |
+| hd-busy 028084/18 | 176 → **168** | 3092 → **2666** |
+| hd-max  027305/0  | 272 → **260** | 3089 → 3087 |
+| vd-typ  039349/0  | 12 → 12 | 510 → **472** |
+| vd-busy 039252/5  | 79 → **76** | 2497 → **1373** |
+
+The headline is memory: vd-busy **−45%**, hd-busy −14%, typicals
+−7..−9% — the nested-vector churn this removes was the allocator-
+retention feeder identified in the round-3 heap profile.  Wall −4..−5%
+on the busy/max events (the projected ~7% was a glibc-profile number;
+under tcmalloc the allocation share is cheaper).  hd-max RSS is flat:
+its peak envelope sits in stages that don't go through
+DynamicPointCloud.  Imaging is untouched by this change.
+
+## Round 5 (2026-06-11): post-round-4 profiling — remaining wall & RSS targets
+
+Measurement-only round: re-profile after rounds 1-4 to rank what is left,
+on both axes.  No code changes shipped; the ranked list below is the
+round-6 work queue.
+
+### Methodology (two fixes over earlier rounds)
+
+- **CPU profiles now run under the production allocator**:
+  `LD_PRELOAD=libtcmalloc_and_profiler.so.4` (production preloads
+  tcmalloc_minimal; round-4 showed glibc-malloc profiles overstate
+  allocator-heavy attributions).  `abtest/profile_img.sh` /
+  `profile_clus.sh` gained `PROFLIB` / `OUTDIR` / `HEAPOUT` env knobs;
+  the default profiler lib is now tcmalloc_and_profiler.  Profiler
+  overhead measured nil (profiled walls == round-4 baseline walls).
+- **Heap profiling via jemalloc sampling, NOT gperftools HEAPPROFILE.**
+  `HEAPPROFILE` records a stack on *every* alloc/free → ~25× slowdown on
+  this workload (hd-max imaging would have taken hours; killed).
+  `TCMALLOC_SAMPLE_PARAMETER` does not apply to `HEAPPROFILE` (it only
+  feeds the in-process MallocExtension sampler).  Debian's
+  libjemalloc2 5.3 has the profiler compiled in:
+  `MALLOC_CONF=prof:true,lg_prof_sample:19,lg_prof_interval:33,prof_final:true`
+  ≈ zero overhead; analyze with the matching `jeprof` (5.3.0) script.
+  Do NOT use `prof_gdump:true` here — it dumps at every chunk-level VM
+  high-water mark (6105 files in 30 s).  Peak attribution = the interval
+  dump with the largest in-use total (header line 2).
+- Profiled: imaging heaviest anodes (hd-max 027305/0 a0 186 s, hd-busy
+  028084/18 a2 66 s, vd-busy 039252/5 a6 35 s) and full clustering on
+  hd-max / hd-busy / vd-busy.  Profiles in `/home/xqian/tmp/r5_*.prof`,
+  heap dumps in `/home/xqian/tmp/r5_heap/`, jeprof at
+  `/home/xqian/tmp/jeprof`.
+
+### Imaging CPU (per-anode shares, tcmalloc)
+
+| component | hd-max a0 | hd-busy a2 | vd-busy a6 |
+|---|---|---|---|
+| ChargeSolving total | **47.8%** | 20.1% | 27.5% |
+| — of which LASSO `CS::solve` | 35.0% | 4.5% | 11.0% |
+| ProjectionDeghosting | 19.2% | **28.3%** | 20.9% |
+| InSliceDeghosting | 6.7% | 8.4% | 8.6% |
+| LocalGeomClustering | 6.6% | 8.0% | 8.0% |
+| BlobGrouping | 4.9% | 6.9% | 6.6% |
+| BlobClustering | 4.7% | 7.0% | 3.5% |
+| input read (FrameFileSource) | 1.4% | 3.6% | 6.9% |
+
+Cross-cutting (cumulative, overlaps the rows above): `boost::add_edge`
+into `setS` out-edge sets 24.9 / 31.5 / 27.7%, `adjacency_list` dtor
+10-14%, **graph copy (`vec_adj_list_impl::copy_impl`) 13-20%**, tcmalloc
+internals (flat) 10-14%.
+
+Findings:
+
+1. **Hidden by-value graph copies at stage heads** — `const auto
+   in_graph = in->graph();` deduces `cluster_graph_t` *by value* and
+   silently full-copies the input graph once per stage call.  Sites:
+   `ChargeSolving.cxx:261`, `ProjectionDeghosting.cxx:164`,
+   `InSliceDeghosting.cxx:742`, `LocalGeomClustering.cxx:54`,
+   `GlobalGeomClustering.cxx:74`, `ClusterScopeFilter.cxx:55`,
+   `LCBlobRemoval.cxx:118` (+ `TestClusterShadow.cxx:76`, test-only).
+   This is most of the 13-20% copy_impl share plus the matching dtor
+   share, *and* 1.56 GB of hd-max peak RSS (see heap below).  It also
+   explains why round-4's SimpleCluster move-ctor (entry 23) was
+   wall-neutral: the output-side copy was removed but the input-side
+   copy remained.  Fix = `const auto&` (one character per site),
+   byte-identical by construction.
+2. **LASSO Gram build computes the full symmetric matrix**:
+   `LassoModel.cxx:92-104` does `X.col(i).dot(X.col(j))` for ALL (i,j);
+   computing j≥i and mirroring the triplet is bit-identical (sparse dot
+   is element-wise commutative; summation order per dot unchanged; no
+   duplicate triplets so `setFromTriplets` is order-insensitive).
+   Worth ~6% on LASSO-bound events (hd-max), ~1-2% elsewhere.
+3. `setS` add-edge churn (~25-31%) remains the floor of the graph
+   lifecycle: container swap was rejected (output-changing); a custom
+   pool allocator for the edge sets would preserve ordering
+   (set is ordered by value, not address) but is invasive — parked.
+4. ProjectionDeghosting internals (hd-busy): `get_projection` 33%-of-PD,
+   `judge_coverage(+_alt)` ~19%, Blob/ClusterShadow build ~18%, rest
+   add_edge/Rb_tree.
+
+### Clustering CPU (tcmalloc; consistent across all 3 events)
+
+| item | hd-max | hd-busy | vd-busy |
+|---|---|---|---|
+| clustering_separate (ctpc) | 31.5% | 29.2% | 27.0% |
+| ClusteringExamineBundles (relaxed) | 17.1% | 12.0% | 8.6% |
+| ClusteringDeghost | 10.0% | — | 7.3% |
+| nanoflann kd queries (flat, total) | ~32% | ~27% | ~25% |
+| `is_good_point` | 22.6% | 12.3% | — |
+| `get_closest_points` (S3DPC) | — | 15.0% | 17.3% |
+| hough/vhough | 13.2% | 12.9% | 10.5% |
+
+Clustering is near its result-preserving floor: `is_good_point` is
+already memoized + short-circuited (round 3), and
+`Simple3DPointCloud::get_closest_points` is an order-sensitive
+iterative walk (restructuring it changes results).  The remaining CPU
+is genuine kd geometry over O(pairs) sub-cloud comparisons.
+
+### Heap peaks (jemalloc sampled, live bytes at peak dump)
+
+**Imaging hd-max a0: 6.0 GB attributed — 84.5% (5.1 GB) live inside one
+ProjectionDeghosting call:**
+
+| holder | live at peak |
+|---|---|
+| `BlobShadow::shadow` graph (`adjacency_list<multisetS,vecS,undirectedS>`) | **3.13 GB (52%)** — 2.1 GB multiset edge nodes + 1.6 GB edge-list nodes; ~120-150 B container overhead per shadow edge |
+| `in_graph` by-value copy (finding 1 above) | 1.56 GB (26%) |
+| Projection2D Eigen sparse cache (`id2lproj`) | 0.81 GB (13.5%) |
+| SimpleCluster-held cluster graph | 0.80 GB (13.3%) |
+
+**The `bsgraph` lifetime is the cheap 3 GB**: it is consumed only by
+`ClusterShadow::shadow` (`ProjectionDeghosting.cxx:167-171`) and then
+stays alive to the end of the pass.  Scoping it in a block (or
+`std::move`-and-reset) frees it before the projection/judge phase —
+byte-identical, trivial.  After that + the `auto&` fix the hd-max
+imaging peak should drop from ~6.2 GB to ≈ the bs-build moment
+(~4 GB); shrinking further needs the multisetS→vecS container change
+(edge iteration order changes → consumer audit + full A/B required).
+
+**Clustering peaks:**
+
+| holder | hd-max (3.03 GB) | hd-busy (2.27 GB) | vd-busy (1.03 GB) |
+|---|---|---|---|
+| pc-tree load (`as_pctree`/Dataset) | 1.23 GB (41%) | 0.89 GB (39%) | 0.56 GB (54%) |
+| **Bee JSON buffers** (`fill_bee_points` → `Json::Value`) | **1.35 GB (45%)** | 0.33 GB (14.5%) | 0.09 GB (8%) |
+| DPC kd-index arrays (`index_new_points`) | — | 0.43 GB (19%) | 0.17 GB (16%) |
+| cluster graphs (`graph_algorithms`/`give_graph`) | 0.20 GB | 0.36 GB | — |
+
+This resolves round-4's "hd-max RSS flat" puzzle: its peak never was in
+DynamicPointCloud — it is Bee display buffers + the pc-tree.
+`Bee::Points` stores every point as 6 `Json::Value` array elements
+(`util/src/Bee.cxx:103-114`), ~300 B per point for 44 B of payload, and
+all Points objects (all-apa + per-apa + per-face + img/dead hooks) stay
+alive until the end-of-event zip write.  Storing compact columns and
+building/streaming the JSON only at write time would emit identical
+bytes with ~1 GB less hd-max peak.  The pc-tree share is the event data
+itself — irreducible.
+
+### Round-6 work queue (ranked, all byte-identity-gated)
+
+1. `const auto` → `const auto&` at the 8 `in->graph()` sites — ~10-15%
+   imaging wall on busy events + 1.5 GB hd-max peak.  Trivial.
+2. Scope `bsgraph` death before the PD projection phase — ~2-3 GB hd-max
+   imaging peak.  Trivial.
+3. LASSO Gram symmetric halving — ~6% hd-max imaging wall.  Small.
+4. Bee::Points compact columns, serialize at write — ~1.0-1.2 GB hd-max
+   clustering peak (45%).  Medium; byte-identical JSON achievable.
+5. BlobShadow graph edge container multisetS→vecS — ~2 GB + CPU in the
+   bs build; **medium risk** (out-edge iteration order changes; audit
+   `ClusterShadow::shadow` + PD consumers first).
+6. DPC kd zero-copy adaptor (nanoflann reads SoA columns directly,
+   drops `index_new_points` copies) — ~0.4 GB hd-busy clustering.
+   Medium.
+
+Document-only / result-changing: SpGEMM (`X.T*X`) Gram build (FP
+summation order changes); pool allocator for `setS` edge sets
+(byte-identity plausible but invasive); per-APA threaded clustering
+passes (wall-clock only, scheduling surgery); reuse of PD projections
+across full_deghost passes (staleness risk).
+
+## Round 6 (2026-06-11): the round-5 queue, items 1-3
+
+### 25. Reference-bind the per-stage input graph (`const auto` → `const auto&`)
+
+`const auto in_graph = in->graph();` deduces `cluster_graph_t` *by
+value*, full-copying the input graph once per stage call (round-5
+finding 1).  Changed to `const auto&` at all 8 sites: `ChargeSolving`,
+`ProjectionDeghosting`, `InSliceDeghosting`, `LocalGeomClustering`,
+`GlobalGeomClustering`, `ClusterScopeFilter`, `LCBlobRemoval`,
+`TestClusterShadow` (test-only).  Safe: `ICluster::graph()` returns a
+const ref owned by the input `ICluster`, which outlives the stage call;
+every site reads only.
+
+- A/B snapshot `r6graphref` vs `scmove1` (img) / `dpcsoa1` (clus):
+  **178/178 archives byte-identical, PASS.**
+- Imaging wall: hd-max 284→**263 s** (−7%), hd-busy 141→**126 s**
+  (−11%), vd-busy 101→**94 s** (−7%), typicals −2 s.
+- Imaging peak RSS: hd-max 6190→**5425 MB** (−12%), hd-busy
+  3382→**2884 MB** (−15%), vd-busy 1162→**994 MB** (−15%).
+- Clustering walls drifted −3% — noise; this change does not touch
+  clustering code paths.
+
+### 26. Scope the BlobShadow graph inside ProjectionDeghosting
+
+Round-5 heap profiling showed the `bsgraph` built at the top of every
+`ProjectionDeghosting` call (3.13 GB live on hd-max a0 — multisetS edge
+nodes + edge-list nodes) is consumed only by `ClusterShadow::shadow`
+yet stayed alive to the end of the pass.  Wrapped build+conversion in a
+block so it is freed before the projection/judge phase.  Pure lifetime
+change, byte-identical by construction.
+
+- A/B snapshot `r6bsscope` vs `r6graphref`: **178/178 byte-identical,
+  PASS.**
+- Imaging peak RSS: hd-max 5425→**4667 MB** (−14%), hd-busy
+  2884→**2173 MB** (−25%), vd-busy 994→**755 MB** (−24%); typicals
+  flat (their bsgraph is small).  Wall unchanged (±2 s noise).
+- hd-max keeps a residual because its peak now sits at the bs-build
+  moment itself, as round 5 predicted; shrinking that needs the
+  multisetS→vecS container change (queue item 5, order-audit required).
+- Cumulative imaging peak RSS from the round-4 baseline (items 25+26):
+  hd-max 6190→4667 (−25%), hd-busy 3382→2173 (−36%), vd-busy
+  1162→755 (−35%).
+
+### 27. LASSO Gram build: compute the symmetric half, mirror the rest
+
+`LassoModel::Fit` built the Gram matrix with `X.col(i).dot(X.col(j))`
+over ALL (i,j) although XdX is symmetric (round-5 finding 2).  Now
+computes the diagonal + upper triangle and pushes the mirrored triplet
+for the lower.  Bit-identical: X is a dense `MatrixXd`; swapping dense
+dot operands runs the same kernel with the same accumulation order over
+commutative multiplies, and no duplicate triplets are produced so
+`setFromTriplets` is insensitive to list order.  `test_ress` /
+`test_util_ress` unit tests pass.
+
+- A/B snapshot `r6gram` vs `r6bsscope`: **178/178 byte-identical,
+  PASS.**
+- Imaging wall: hd-max 266→**251 s** (−5.6%, the LASSO-bound event);
+  hd-busy 128→126 s, vd-busy 95→94 s (small, solve share is 4-11%
+  there); typicals flat.  RSS unchanged.
+- Cumulative round-6 so far (items 25-27) vs round-4 close: hd-max
+  imaging 284→**251 s** (−12%) at 6190→**4667 MB** (−25%); hd-busy
+  141→**126 s** (−11%) at 3382→**2173 MB** (−36%); vd-busy
+  101→**94 s** (−7%) at 1162→**755 MB** (−35%).
+
+### 28. Bee::Points compact columns; JSON materialized at write
+
+Round-5 heap profiling put the Bee display buffers at 45% (1.35 GB) of
+the hd-max clustering peak: every point cost six `Json::Value` array
+elements (~300 B) and every live Points object (all-apa + per-apa +
+per-face + hooks) held its DOM until the end-of-event zip write.
+`Bee::Points` now stores six plain column vectors (~44 B/point); a new
+virtual `Object::asJson()` materializes the JSON DOM only at
+serialization, and `Bee::Sink::write` uses it instead of deep-copying
+`obj.data()` (this also removes a pre-existing whole-DOM copy per
+write for every object type).  JSON bytes are unchanged: same key set
+(jsoncpp emits object keys sorted), same stored doubles/ints, same RSE
+stamping, and empty Points still emit the six empty arrays.
+
+- A/B snapshot `r6beecol` vs `r6gram`: **178/178 byte-identical, PASS**
+  (the mabc zips are exactly the JSON under test).  Porting bats 5/5
+  ok (covers the qlport/MicroBooNE Bee path); `wcdoctest-util` Bee
+  case passes.
+- Clustering peak RSS: hd-max 3090→**2051 MB** (−34%), vd-busy
+  1405→**1134 MB** (−19%), hd-typ 659→**475 MB** (−28%), vd-typ
+  481→**414 MB** (−14%).  hd-busy flat (its peak sits in the
+  load_grouping/DPC phase where Bee held only 14.5%).  Walls
+  unchanged.
+
+### 29. BlobShadow: flat shadow list replaces the graph in production
+
+Three iterations, two instructive failures — all caught by the gate or
+by honest A/B numbers:
+
+1. multisetS→all-vecS container swap + a dedup hash map holding edge
+   descriptors → **segfault on the two big PDHD events**: with a vecS
+   edge list, boost edge descriptors carry pointers into the edge
+   property *vector*, which reallocates on growth.  (Gate FAIL,
+   `r6bsvec`.)
+2. vecS out-edges with the listS edge list kept (descriptors stable):
+   **byte-identical but RSS-neutral** — the external dedup map costs
+   about what the multisetS Rb-trees did (the multiset *was* the
+   lookup structure), and the remaining listS node + realloc spikes ate
+   the rest.  (`r6bsvec2`: hd-max +2.8%, hd-busy −8%.)
+3. The structural fix: **nothing ever traverses the blob shadow graph**
+   — `ClusterShadow::shadow` only iterates its global edge list.  New
+   `BlobShadow::shadow_list()` returns flat `Shadows`
+   {nodes, first-encounter-ordered edges} (40 B/edge, no boost edge
+   containers), `ClusterShadow::shadow()` gained an overload consuming
+   it (same edge order ⇒ identical cs_graph), and
+   ProjectionDeghosting + ShadowGhosting use the flat path.  The graph
+   API (`BlobShadow::shadow()`, now a materialization of
+   `shadow_list()`) remains for tests/compat.  Dedup is a
+   (pair,layer)→slot hash map replacing the former `edge_range` scan.
+
+- A/B snapshot `r6bsflat` vs `r6beecol`: **178/178 byte-identical,
+  PASS**; `test_blobshadow` passes.
+- Imaging peak RSS: hd-max 4666→**3474 MB** (−26%), hd-busy
+  2174→**1987 MB** (−9%), vd-busy/typicals flat.  Wall unchanged.
+- Cumulative round-6 imaging peak RSS vs round-4 close: hd-max
+  6190→**3474 MB** (−44%), hd-busy 3382→**1987 MB** (−41%), vd-busy
+  1162→**742 MB** (−36%).
+
+### 30. DPC 3D kd tree reads the SoA columns zero-copy
+
+`index_new_points` copied x/y/z twice per appended batch — a transient
+gather plus `NFKDVec::Tree`'s own column copy (~93% of the
+`index_new_points` heap slice, round-5).  `NFKDVec::Tree` now routes
+all coordinate reads through per-dimension column pointers (`m_cols`,
+owned columns by default — no hot-path branch) and gains
+`bind_external()` / `append_external()`; `DynamicPointCloud::kd3d()`
+binds the DPCBatch x/y/z columns directly (stable member addresses,
+same insertion order ⇒ identical tree).  The 2D per-plane trees keep
+their gather (an indirection adaptor would slow the hottest query
+path).  Tree is now explicitly non-copyable/non-movable — a built
+nanoflann index already referenced the tree as its dataset adaptor, so
+relocation was latently unsafe before this change; no existing holder
+relied on it (build proves it).
+
+- A/B snapshot `r6dpckd` vs `r6bsflat`: **178/178 byte-identical,
+  PASS**; porting bats 5/5; all 837 kd doctest assertions pass.
+- Clustering peak RSS: hd-busy 2291→**2059 MB** (−10%, as the round-5
+  heap slice predicted); others flat — their peaks sit at the pc-tree
+  load moment, not kd indexing.  Walls unchanged.
+
+## Round 7 (2026-06-11): post-round-6 profiling — the remaining floor
+
+Measurement-only.  Profiling targets were **re-selected from the full
+283-event re-sweep** (`sweep/r6full`) since the old picks pre-dated six
+rounds of changes: pdhd 027305/0 (still the global worst on every
+axis), **pdhd 027305/11** (new #2 — clustering 265 s nearly matches the
+worst; never profiled before), pdhd 028084/18 (clustering-RSS leader),
+**pdvd 039252/8** (new PDVD worst, displacing 039252/5), pdhd 027409/0
+(typical).  Same methodology as round 5 (tcmalloc CPU, jemalloc
+sampled heap); profiles `/home/xqian/tmp/r7_*.prof`, dumps
+`/home/xqian/tmp/r7_heap/`.
+
+### Imaging CPU (solo, per heaviest anode)
+
+| | hd-max a0 (163 s) | 027305/11 a0 (104 s) | vd-busy 039252/8 a6 (37 s) |
+|---|---|---|---|
+| ChargeSolving | **44.5%** (solve 33.0%) | **43.9%** (solve 31.9%) | 32.2% (solve 19.0%) |
+| ProjectionDeghosting | 22.5% | 20.3% | 20.2% |
+| `boost::add_edge` (setS, cum) | 20.1% | 20.9% | 21.7% |
+| BlobShadow scan (`shadow_list`) | 9.3% | 8.1% | 6.0% |
+| other stages | 5-7% each | | |
+
+- `LassoModel::Fit`'s coordinate-descent loop (22.8% flat on hd-max)
+  is now the single biggest imaging item; the run-027305 tail is
+  solver-bound, not graph-bound.  The round-6 Gram halving is visible:
+  Eigen dot share 12.5%→7.3%.
+- Graph copies (`copy_impl`) fell 13-20%→8.0% — what remains is
+  ClusterArrays output staging and CS-internal packing, both
+  load-bearing.
+- The `setS` add-edge churn (~20-22% everywhere) is the per-stage
+  cluster-graph rebuild floor.
+
+### Clustering CPU
+
+Structurally unchanged from round 5 (rounds 5-6 were memory rounds):
+clustering_separate/ctpc 22-45% (027305/11 the most separate-bound at
+44.9%), `is_good_point` 23-27%, examine_bundles 13-17%, hough 13-16%,
+deghost ~9-10%.  Still at its result-preserving floor.
+
+### Heap peaks (jemalloc sampled)
+
+- **Imaging hd-max a0** (interval peak 2.1 GB attributed; VmHWM
+  3.4 GB): ProjectionDeghosting 55.9% (1.19 GB — projections + cs +
+  scan transients; was 5.1 GB in round 5) and **BlobClustering::flush
+  38.3% (0.82 GB)** — a whole-graph `copy_impl` still fires in the
+  flush→SimpleCluster path despite round-4 entry 23's move conversion.
+  Top new lead.
+- **Clustering hd-max / hd-busy** (1.85 / 1.98 GB): pc-tree load +
+  `Dataset::slice/add` = **84-88%** — clustering memory is now bound
+  by the event data itself.  Bee buffers are down to 4% (entry 28
+  worked); TensorDM output staging ~6%; DPC kd <2%.
+
+### Round-8 suggestions (ranked)
+
+1. **BlobClustering flush copy** (~0.8 GB live + a few % wall on busy
+   imaging): find why `copy_impl` persists in the flush path and
+   complete the move.  Byte-identity expected trivial.
+2. **Pool/arena allocator for the `setS` out-edge sets** of
+   `cluster_graph_t`: attacks the ~20% add_edge + the Rb-tree flat
+   shares across every imaging stage.  Set ordering is by value, so an
+   allocator change preserves iteration order — byte-identity
+   plausible but the type change is invasive; full gate decides.
+3. **Avoid `type_directed` full directed copy** inside
+   `BlobShadow::shadow_list` (per PD call): iterate the undirected
+   cgraph with code()-directional filtering instead.  Part of the
+   remaining PD heap + the 6-9% scan share; order-preservation needs
+   care.
+4. **LASSO Fit is at the byte-identity floor** — only result-changing
+   restructures remain (active-set Gram pruning, warm starts across
+   strategies, SpGEMM Gram).  Physics review required to go further on
+   the 027305 tail.
+5. Micro: `tripletList.reserve` underestimates 2× (`nbeta*nbeta/2` vs
+   up to `nbeta²` triplets) — one avoidable ~0.5 GB realloc at hd-max
+   sizes.
+6. Clustering is data-bound: remaining levers are result-changing
+   (float32 point columns) or structural (per-APA pc-tree streaming) —
+   documented, not recommended without review.
+7. Wall-clock only: per-APA threading of the imaging/clustering
+   pipelines (outputs unchanged, scheduling surgery).
+
+## Round 8 (2026-06-11): round-7 queue items 1, 2, 3, 5
+
+### 31. SimpleCluster "move" ctor actually moved — boost::adjacency_list has no move members
+
+Round-7 lead 1 asked why a whole-graph `copy_impl` (0.82 GB live at
+the hd-max imaging peak, 38% of the interval dump) still fired in
+`BlobClustering::flush` despite entry 23's move conversion.  Root
+cause: **`boost::adjacency_list` (through at least 1.85) user-declares
+its copy constructor/assignment and has no move members**, so
+`m_graph(std::move(g))` in the `SimpleCluster(cluster_graph_t&&)`
+overload performed overload resolution against the *copy* constructor
+— a silent full `copy_impl` per stage.  Entry 23 measuring
+wall-neutral was the tell: the move never happened.
+
+Fix: new `WireCell::move_graph(dst, src)` helper in
+`util/inc/WireCellUtil/Graph.h` steals the underlying vertex vector
+and edge list directly (`m_vertices`/`m_edges` are public in boost's
+`vec_adj_list_impl`; the once-`protected:` marker is commented out
+upstream).  Container moves do not relocate elements, so the stored
+edge iterators and edge-property pointers inside remain valid and
+vertex/edge iteration order is exactly the source's; graph-level
+properties are not transferred (all WCT cluster-style graphs use
+`no_property`).  `SimpleCluster`'s move ctor now calls it, which
+activates the real move at all 15 entry-23 call sites at once (every
+imaging stage tail, `ClusterFileSource` JSON+numpy loads,
+`TensorDMcluster`).  All call sites re-audited: none touches the
+moved-from graph (the dryrun branches re-wrap `in_graph`, a different
+object).
+
+One naming hazard: the helper first lived in `namespace
+WireCell::Graph`, which is ambiguous against the `Clus::PR::Graph`
+type alias inside `clus` — it now sits directly in `namespace
+WireCell`.
+
+**A/B verdict: PASS** (snapshot `r8move` vs `r6dpckd`): 178/178
+archive payloads byte-identical.  **Imaging wall: hd-max 256→233 s
+(−9%), hd-busy 129→114 s (−12%), vd-busy 94→85 s (−10%), typicals
+−5..−8%.**  Imaging VmHWM unchanged (the high-water mark sits in the
+ProjectionDeghosting/ChargeSolving region, not at flush); the win is
+the per-stage copy+destroy churn.  Clustering wall/RSS unchanged
+(hd-busy clus RSS read 2483 MB this run but that event bounces
+2004–2665 MB across all round-6 snapshots under the 6-slot parallel
+harness — variance, not signal).
+
+### 32. Pool allocator for setS out-edge sets — byte-identical but REGRESSION, reverted
+
+Round-7 lead 2: attack the ~20-22% `boost::add_edge` share with a
+segregated pool for the out-edge Rb-tree nodes.  Implemented as a
+custom `pool_setS` OutEdgeList selector (`boost::container_gen`
+specialization mapping to `std::set` with
+`boost::fast_pool_allocator`, plus `parallel_edge_traits` =
+disallow), applied in lockstep to `cluster_graph_t` (ICluster.h) and
+`IndexedGraph::graph_t` (they must match or BlobClustering's flush
+move degrades to a cross-type `copy_graph`).
+
+**A/B verdict: PASS but reverted** (snapshot `r8pool` vs `r8move`):
+178/178 byte-identical — set ordering is by value, as predicted — but
+the metrics went the wrong way on every axis:
+
+| event | img wall | img RSS | clus RSS |
+|---|---|---|---|
+| hd-max | 233→235 s | 3389→3871 MB (+14%) | 1998→2766 MB (+38%) |
+| hd-busy | 114→117 s | 1935→2391 MB (+24%) | 2483→2650 MB |
+| vd-busy | 85→88 s | 698→971 MB (+39%) | 1113→1298 MB (+17%) |
+| typicals | ±1 s | +27..+35% | +5..+20% |
+
+Two compounding reasons: (a) `fast_pool_allocator`'s singleton pool
+never returns freed nodes to the allocator, so every transient graph's
+out-edge nodes ratchet the footprint (exactly the high-water retention
+tcmalloc was deployed to avoid); (b) its mutex-guarded free-list is
+not faster than tcmalloc's thread-cache fast path, so there was no
+wall win to trade.  Conclusion: under tcmalloc the add_edge share is
+comparison/rebalance work plus minimum unavoidable node churn, not
+malloc overhead.  **Closed as tried-and-rejected; do not revisit
+while tcmalloc is the production allocator.**  Build note for future
+ABI-wide type changes: every installed lib goes stale at once (all
+`cluster_graph_t` mangled names change), so tests fail to link
+against `local/lib` until a `./wcb install --notests` refresh.
+
+### 33. shadow_list walks the cluster graph directly — type_directed copy removed
+
+Round-7 lead 3.  `BlobShadow::shadow_list` began with
+`cluster::directed::type_directed(cgraph)` — a full directed rebuild
+(all vertices + one `add_edge` per edge into fresh `setS` sets) of the
+cluster graph, twice per ProjectionDeghosting pass ('w' and 'c'), only
+so the b→w(→c) walk could not crawl back up.  But every hop in the
+walk already filters its target by type code, which subsumes the
+direction restriction.
+
+Equivalence argument (why byte-identical was expected, not hoped):
+type_directed preserves vertex descriptors; with order "sbmwc" every
+s-edge becomes an out-edge of s, every b-w edge points b→w and every
+w-c edge w→c, so each filtered target set is the same set; and both
+graphs use setS out-edge containers ordered by target descriptor, so
+each filtered sequence is the same sequence.  The walk now takes
+`cgraph` directly; `connected_leaves` was retyped accordingly, and
+the long-dead BFS `LeafVisitor` + breadth_first_search include (whose
+last reference was a comment deleted here) went with it.
+`type_directed` itself remains in ClusterHelpers (tests use it).
+
+**A/B verdict: PASS** (snapshot `r8bsdir` vs `r8move`): 178/178
+byte-identical.  **Imaging RSS: hd-max 3474→3079 MB region (−9% on
+this run's 3389 reading); wall neutral** — the round-7 6-9%
+"BlobShadow scan" CPU share was dominated by the walk itself, not the
+copy; the copy was mostly transient memory.  Clustering untouched.
+
+### 34. LASSO Gram tripletList reserve: nbeta²/2 → nbeta² (round-7 item 5)
+
+The entry-27 halved Gram loop pushes up to `nbeta` diagonal + 2
+mirrored triplets per off-diagonal pair = `nbeta²` total, but the
+reserve estimated `nbeta*(nbeta/2)` — guaranteeing one growth-doubling
+realloc (copying ~0.5 GB of triplets at hd-max `nbeta`) whenever
+density exceeds half.  Now reserves the exact upper bound in `size_t`
+arithmetic (the old `int` product would overflow beyond
+`nbeta = 46340`).
+
+**A/B verdict: PASS** (snapshot `r8trip` vs `r8bsdir`): 178/178
+byte-identical.  **Wall/VmHWM neutral** — the realloc transient sat
+below the job's high-water mark (which lives in
+ProjectionDeghosting), so this removes allocation churn and a latent
+overflow hazard rather than moving the headline numbers.
+
+### 35. cs_graph assignment in ProjectionDeghosting: copy → move_graph
+
+Follow-on from entry 31's discovery: graph move-*assignment* also
+silently copies (boost::adjacency_list has copy `operator=` only), so
+the round-6 `cs_graph = ClusterShadow::shadow(...)` in
+ProjectionDeghosting copy-assigned the returned cluster-shadow graph
+and destroyed the temporary, twice per event per anode pipeline ('w'
+pass; the InSliceDeghosting 'c' path builds its own).  Now lands in a
+named temporary and `move_graph`s into `cs_graph`.  `move_graph` was
+extended to swap the graph-level property bundle (`m_property` is
+public in boost, same commented-out-`protected:` story) —
+load-bearing here, since `ClusterShadow::graph_t` carries
+`Graph{stype}` which `shadow()` sets; SimpleCluster's `no_property`
+use is unaffected.
+
+**A/B verdict: PASS** (snapshot `r8csmove` vs `r8trip`): 178/178
+byte-identical.  **Wall −1..−2% on busy imaging (hd-max 233→228 s),
+RSS flat** — the CS graph is far smaller than the cluster graph, as
+expected; taken as the structural close-out of the no-move-members
+class of copies.
+
+### Round-8 closing
+
+Queue items 1, 2, 3, 5 from round 7 are dispositioned: 1 (entry 31,
+**−9..−12% imaging wall**), 3 (entry 33, **−9% hd-max imaging RSS**)
+and 5 (entry 34, neutral-but-correct) shipped; 2 (entry 32) tried and
+rejected with evidence.  Item 4 (LASSO restructure) remains
+result-changing/physics-review; item 6 (clustering data-bound
+levers) and item 7 (per-APA threading) remain documented-only.
+Cumulative imaging hd-max since round-4 close: 284→233 s wall,
+6190→3077 MB RSS.
+
 ## Phase-2 profiling findings (PDHD/PDVD-specific)
 
 CPU profile of the pathological anode (hd-busy 028084/18 anode2, 465 s solo;
@@ -192,6 +1457,32 @@ Clustering profile (hd-busy full clustering, 86296 samples), cumulative:
 - nanoflann `searchLevel`+`evalMetric` ~19% (genuine k-d geometry,
   irreducible), `DynamicPointCloud` point construction ~12%.
 
+## Next runtime targets (profiled, not yet attempted)
+
+> **Superseded by round 2** — most items below were implemented (entries
+> 8-13) or re-ranked with fresh numbers; the current list is in the
+> "Round-2 closing" section above. Kept for the round-1 record.
+
+From the post-fix profiles (imaging: hd-busy anode2 now ~95 s CPU;
+clustering: hd-max ~510 s):
+
+- **Imaging** (now allocator/graph-lifecycle bound, spread across passes:
+  PD 25%, ChargeSolving 22%, BlobClustering 9%, InSliceDeghosting 8%,
+  LocalGeomClustering 8%): remaining structural lever is reducing
+  cluster-graph rebuilds (`remove_blobs` full rebuild, `CS::prune`
+  copy-then-filter ×3 passes, the `copy_graph` sites). Each is a few %;
+  the `old2new` unordered_map→vector remap in `remove_blobs`/`CS::prune`
+  is the safest first step.
+- **Clustering** (hd-max): `Find_Closest_Points` 14.3%,
+  `Cluster::sv3d`/scoped-view lookups under ExamineBundles 13.2%,
+  `get_closest_point_blob` 12.5%, vhough 10.6%, `DynamicPointCloud`
+  construction ~9% (DPCPoint is AoS with 5 nested vectors per point — an
+  SoA restructure is the big-ticket item, byte-identity achievable but a
+  larger surgery), nanoflann searchLevel ~20% (genuine geometry).
+- **Clustering pointer-order dependence** (see FINDING below): fixing it
+  is both a robustness win and unlocks tcmalloc for clustering (~15-20%
+  more, judging by the opt2tc walls).
+
 ## Ideas not yet applied — for review
 
 ### Memory (imaging tail), in suggested order of attack
@@ -207,12 +1498,17 @@ Clustering profile (hd-busy full clustering, 86296 samples), cumulative:
    Eigen sparse layer matrices with hash/CSR keyed only on occupied
    (channel, slice) — touches `judge_coverage`, byte-identity risk, last
    resort.
+   **(b) DONE in round-2 entry 9** (map-key-membership liveness instead of
+   a use-count pre-pass; hd-busy imaging RSS −51%). (a)/(c) remain
+   unattempted and likely unnecessary now.
 2. **tcmalloc deployment** (`LD_PRELOAD` in run scripts): with ~140 GB of
    churn, glibc retains the high-water mark forever while live memory drops
    to ~1 GB; tcmalloc returns freed pages. Helps the *sustained* footprint
    under 16-way concurrency (not VmHWM of the early peak). Must pass the
    full A/B gate first (allocator changes can flip pointer-keyed iteration
    order if any exists).
+   **DONE for both stages** (imaging in round-1 entry 5; clustering in
+   round-2 entry 8 after the pointer-order fix).
 3. `malloc_trim(0)` after each `ClusterFileSink` write (glibc-only, helps
    between anodes in all-anode mode; mostly superseded by `-P`).
 

@@ -779,9 +779,9 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
                 const auto* cl = start_seg->cluster();
                 return cl ? cl->get_cluster_id() * 1000 + sid : sid;
             }();
-            for (const auto& dp : dpc->get_points()) {
-                WireCell::Point point(dp.x, dp.y, dp.z);
-                apa_bpts.global.append(point, charge, cluster_id, shower_cluster_id);
+            const size_t ndp = dpc->npoints();
+            for (size_t ip = 0; ip < ndp; ++ip) {
+                apa_bpts.global.append(dpc->point3d(ip), charge, cluster_id, shower_cluster_id);
             }
         } else {
             // --- default mode: use fitted points with dQdx scale/offset ---

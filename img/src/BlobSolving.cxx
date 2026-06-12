@@ -147,6 +147,6 @@ bool Img::BlobSolving::operator()(const input_pointer& in, output_pointer& out)
     log->debug("send graph with {}",
                boost::num_vertices(grind.graph()));
                               
-    out = std::make_shared<Aux::SimpleCluster>(grind.graph());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(grind.graph()));
     return true;
 }

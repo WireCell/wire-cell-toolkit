@@ -34,10 +34,7 @@ namespace WireCell::Clus::PR {
         const double distance = sqrt(results[0].second);  // KD-tree returns squared distance
         
         // Get the actual point from the point cloud
-        const auto& points = pcloud->get_points();
-        const auto& closest_pt = points[idx];
-        
-        return std::make_pair(distance, WireCell::Point(closest_pt.x, closest_pt.y, closest_pt.z));
+        return std::make_pair(distance, pcloud->point3d(idx));
     }
 
     double shower_get_closest_dis(Shower& shower, SegmentPtr seg, const std::string& cloud_name /* = "fit" */){
@@ -47,13 +44,12 @@ namespace WireCell::Clus::PR {
             return -1.0;
         }
         
-        const auto& seg_points = seg_dpc->get_points();
-        if (seg_points.empty()) {
+        if (seg_dpc->npoints() == 0) {
             return -1.0;
         }
         
         // Use the first point from segment's point cloud
-        WireCell::Point first_point(seg_points.front().x, seg_points.front().y, seg_points.front().z);
+        WireCell::Point first_point = seg_dpc->point3d(0);
         
         // Step 1: Get closest point in shower to the first point of the segment
         WireCell::Point test_p = shower_get_closest_point(shower, first_point, cloud_name).second;
@@ -78,12 +74,11 @@ namespace WireCell::Clus::PR {
             return -1.0;
         }
         
-        const auto& seg_points = seg_dpc->get_points();
-        if (seg_points.empty()) {
+        if (seg_dpc->npoints() == 0) {
             return -1.0;
         }
         
-        WireCell::Point test_p(seg_points.front().x, seg_points.front().y, seg_points.front().z);
+        WireCell::Point test_p = seg_dpc->point3d(0);
         
         // Get the view graph to access segments
         const auto& view = shower.view_graph();

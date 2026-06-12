@@ -1315,13 +1315,8 @@ private:
                 size_t closest_index_front = closest_result_front[0].first;
                 
                 // Access the actual 3D points at the found indices
-                const auto& dpc_points = fit_seg_dpc->get_points();
-                const auto& closest_point_back = dpc_points[closest_index_back];
-                const auto& closest_point_front = dpc_points[closest_index_front];
-                
-                // Access 3D coordinates
-                geo_point_t back_point(closest_point_back.x, closest_point_back.y, closest_point_back.z);
-                geo_point_t front_point(closest_point_front.x, closest_point_front.y, closest_point_front.z);
+                geo_point_t back_point = fit_seg_dpc->point3d(closest_index_back);
+                geo_point_t front_point = fit_seg_dpc->point3d(closest_index_front);
                 
                 geo_point_t p3(0,0,0);
                 if (pow(end_p.x() - back_point.x(), 2) + pow(end_p.y() - back_point.y(), 2) + pow(end_p.z() - back_point.z(), 2) < 

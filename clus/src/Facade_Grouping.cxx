@@ -336,6 +336,7 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
+    const int needed = nplanes - allowed_bad;
     int matched_planes = 0;
     for (int pind = 0; pind < nplanes; ++pind) {
         if (has_closest_point(point, radius, apa, face, pind)) {
@@ -343,12 +344,12 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
         } else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes++;
         }
+        // Short-circuit: the per-plane tests are pure queries, so once the
+        // verdict is decided the remaining planes' kd descents can be skipped.
+        if (matched_planes >= needed) return true;
+        if (matched_planes + (nplanes - 1 - pind) < needed) return false;
     }
-    // std::cout << "matched_planes: " << matched_planes << std::endl;
-    if (matched_planes >= nplanes - allowed_bad) {
-        return true;
-    }
-    return false;
+    return matched_planes >= needed;
 }
 
 bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const
@@ -357,9 +358,12 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const i
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
     const int nplanes = 3;
+    const int needed = 4 - allowed_bad;
     int matched_planes = 0;
 
-    // Loop through U,V,W planes
+    // Loop through U,V,W planes.  Weights remaining after each plane: after U
+    // it is V+W = 3, after V it is W = 2.
+    static const int remaining_weight[3] = {3, 2, 0};
     for (int pind = 0; pind < nplanes; pind++) {
         int weight = (pind == 2) ? 2 : 1; // W plane counts double
         if (has_closest_point(point, radius, apa, face, pind)) {
@@ -368,9 +372,12 @@ bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const i
         else if (get_closest_dead_chs(point, ch_range, apa, face, pind)) {
             matched_planes += weight;
         }
+        // Short-circuit on a decided verdict (pure queries, no side effects).
+        if (matched_planes >= needed) return true;
+        if (matched_planes + remaining_weight[pind] < needed) return false;
     }
 
-    return matched_planes >= 4 - allowed_bad;
+    return matched_planes >= needed;
 }
 
 std::vector<int> Grouping::test_good_point(const geo_point_t& point, const int apa, const int face, 
@@ -475,25 +482,26 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
     const double angle = fastgeom(apa, face).angle[pind];
     double y = cos(angle) * point[2] - sin(angle) * point[1];
     const auto& skd = kd2d(apa, face, pind);
-    // Equivalent to get_closest_points(...).size() > 0 but cheaper: the radius query
-    // collects every in-radius point, while the good-point callers only need existence.
-    // knn(1) returns the single nearest point; nanoflann's RadiusResultSet keeps points
-    // with dist < radius^2 (strict <), so use the same strict comparison here.  Distances
-    // are squared (L2), matching the radius^2 argument get_closest_points passes.
-    // Stack query (std::array) to avoid a 2-element heap vector on this hot path.
+    // Existence-only query: boolean-identical to knn(1) + strict dist <
+    // radius^2 test (and to !get_closest_points(...).empty()), but the
+    // k-d search terminates at the first in-radius point instead of
+    // resolving the true nearest neighbor.  Distances are squared (L2).
+    // Stack query (std::array) to avoid a 2-element heap vector.
     const std::array<double, 2> query{x, y};
-    const auto res = skd.knn(1, query);
-    return !res.empty() && res[0].second < radius * radius;
+    return skd.exists_within(radius * radius, query);
 }
 
 bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {
-    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, pind);
     const auto& ch2xrange = get_dead_winds(apa, face, pind);
-    for (int ch = wind - ch_range; ch <= wind + ch_range; ++ch) {
-        if (ch2xrange.find(ch) ==  ch2xrange.end()) continue;
-        const auto [xmin, xmax] = ch2xrange.at(ch);
+    if (ch2xrange.empty()) return false;
+    const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, pind);
+    (void)tind;
+    // One ordered-map descent for the whole [wind-ch_range, wind+ch_range]
+    // window instead of a find() per channel; same ascending visit order.
+    for (auto it = ch2xrange.lower_bound(wind - ch_range);
+         it != ch2xrange.end() && it->first <= wind + ch_range; ++it) {
+        const auto [xmin, xmax] = it->second;
         if (point[0] >= xmin && point[0] <= xmax) {
-            // std::cout << "ch " << ch << " x " << point[0] << " xmin " << xmin << " xmax " << xmax << std::endl;
             return true;
         }
     }
@@ -520,14 +528,14 @@ bool Grouping::in_dead_gap(const geo_point_t& point, const int ch_range, const i
 
 const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) const
 {
-    const int key = apa * 2 + face;
-    auto it = m_fastgeom.find(key);
-    if (it != m_fastgeom.end()) return it->second;
+    const size_t key = apa * 2 + face;
+    if (key < m_fastgeom.size() && m_fastgeom[key]) return *m_fastgeom[key];
 
     if (m_anodes.size()==0) {
         raise<ValueError>("Anode is null");
     }
-    fastgeom_t fg;
+    auto fgp = std::make_unique<fastgeom_t>();
+    auto& fg = *fgp;
     fg.iface = m_anodes.at(apa)->faces()[face];
     if (fg.iface == nullptr) {
         raise<ValueError>("anode %d has no face %d", m_anodes.at(apa)->ident(), face);
@@ -541,7 +549,9 @@ const Grouping::fastgeom_t& Grouping::fastgeom(const int apa, const int face) co
     fg.time_offset = cache().map_time_offset.at(apa).at(face);
     fg.drift_speed = cache().map_drift_speed.at(apa).at(face);
     fg.tick = cache().map_tick.at(apa).at(face);
-    return m_fastgeom.emplace(key, fg).first->second;
+    if (key >= m_fastgeom.size()) m_fastgeom.resize(key + 1);
+    m_fastgeom[key] = std::move(fgp);
+    return *m_fastgeom[key];
 }
 
 std::tuple<int, int> Grouping::convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const {

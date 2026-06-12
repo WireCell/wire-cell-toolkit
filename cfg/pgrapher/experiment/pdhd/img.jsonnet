@@ -317,7 +317,7 @@ local img = {
             name: "clustersink-"+aname,
             data: {
                 outname: outname,
-                format: "json", // json, numpy, dummy
+                format: "numpy", // json, numpy, dummy; numpy avoids the jsoncpp DOM on load (~90% of clustering live heap, see clus/docs/imgclus-optimization-log.md entry 20)
             }
         }, nin=1, nout=0),
         ret: cs
@@ -355,7 +355,7 @@ local img = {
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed, output_dir),
         ]),
         local masked_fork = g.pipeline([
-            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500),
+            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 1500), // was 500; masked fork carries geometry only (no charge solving), coarse span cuts masked blob count/memory ~3x
             img.clustering(anode, anode.name+"-ms-masked"),
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed, output_dir),
         ]),

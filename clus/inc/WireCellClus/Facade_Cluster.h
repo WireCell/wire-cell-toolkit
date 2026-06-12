@@ -44,6 +44,20 @@ namespace WireCell::Clus::Facade {
 
         void invalidate_cache() {clear_cache();}
 
+        // Blob children changed: the memoized default-scope view (and its
+        // validity-flag pointer) may have been erased by Points::on_remove —
+        // drop the memo before any reuse.  See m_sv3d_memo.
+        virtual bool on_remove(const std::vector<node_type*>& path) {
+            m_sv3d_memo = nullptr;
+            m_sv3d_valid = nullptr;
+            return NaryTree::FacadeParent<Blob, points_t>::on_remove(path);
+        }
+        virtual bool on_insert(const std::vector<node_type*>& path) {
+            m_sv3d_memo = nullptr;
+            m_sv3d_valid = nullptr;
+            return NaryTree::FacadeParent<Blob, points_t>::on_insert(path);
+        }
+
         // return raw pc information ...
         void set_default_scope(const Tree::Scope& scope);
         const Tree::Scope& get_default_scope() const {return m_default_scope;}
@@ -356,7 +370,12 @@ namespace WireCell::Clus::Facade {
         // given point.
         //
         // Note: radius must provide a LINEAR distance measure.
-        using const_blob_point_map_t = std::map<const Blob*, geo_point_t>;
+        // Keyed with the content-based BlobLess: consumers iterate this map
+        // and accumulate floating-point sums (calc_ave_pos, calc_dir), so the
+        // iteration order must not depend on heap pointer values or the
+        // results become allocator-dependent (one hough-bin tie then flips a
+        // connect1 merge decision).
+        using const_blob_point_map_t = std::map<const Blob*, geo_point_t, BlobLess>;
         const_blob_point_map_t get_closest_blob(const geo_point_t& point, double radius) const;
         const_blob_point_map_t get_closest_blob(const geo_point_t& point, int N) const;
 
@@ -674,6 +693,15 @@ namespace WireCell::Clus::Facade {
         Tree::Scope m_default_scope = m_scope_3d_raw;
         std::map<size_t, bool> m_map_scope_filter={{m_scope_3d_raw.hash(), true}};
         std::map<size_t, std::string> m_map_scope_transform={{m_scope_3d_raw.hash(), "Unity"}};
+
+        // Memoized default-scope view: sv3d() is called per point query in
+        // the clustering hot loops and each scoped_view() resolution hashes
+        // and string-compares the Scope.  The view pointer is stable across
+        // node inserts (only its validity flag drops, restored by re-calling
+        // scoped_view()); node removal erases the view, so on_insert and
+        // on_remove reset the memo (as does set_default_scope).
+        mutable const Tree::ScopedView<double>* m_sv3d_memo{nullptr};
+        mutable const bool* m_sv3d_valid{nullptr};
 
         // We handle graph algorithms special as the GA's use graphs that are
         // held in their own cache in the Mixins::Graphs base.

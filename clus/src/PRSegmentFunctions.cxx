@@ -97,7 +97,7 @@ namespace WireCell::Clus::PR {
         }
         
         auto dpc = seg->dpcloud(cloud_name);
-        if (!dpc || dpc->get_points().empty()) {
+        if (!dpc || dpc->npoints() == 0) {
             // Fall back to base_cloud_name (typically "main") if the requested cloud is
             // absent or empty (e.g. fitting produced no valid-index fit points).
             dpc = seg->dpcloud(base_cloud_name);
@@ -107,12 +107,11 @@ namespace WireCell::Clus::PR {
         // other_clusters that share the same graph), treat the segment as infinitely
         // far away rather than crashing.  The caller's minimum-distance search will
         // simply skip this segment.
-        if (!dpc || dpc->get_points().empty()) {
+        if (!dpc || dpc->npoints() == 0) {
             return {min_dist, closest_point};
         }
 
-        const auto& points = dpc->get_points();
-        if (points.empty()) {
+        if (dpc->npoints() == 0) {
             return {min_dist, closest_point};
         }
         
@@ -125,8 +124,7 @@ namespace WireCell::Clus::PR {
             min_dist = std::sqrt(knn_results[0].second); // knn returns squared distance
             
             // Get the actual point from the DynamicPointCloud
-            const auto& dpc_point = points[closest_index];
-            closest_point = WireCell::Point(dpc_point.x, dpc_point.y, dpc_point.z);
+            closest_point = dpc->point3d(closest_index);
         }
         
         return {min_dist, closest_point};
@@ -144,19 +142,18 @@ namespace WireCell::Clus::PR {
         }
 
         auto dpc = seg->dpcloud(cloud_name);
-        if (!dpc || dpc->get_points().empty()) {
+        if (!dpc || dpc->npoints() == 0) {
             // Fall back to "main" cloud if requested cloud is absent or empty
             dpc = seg->dpcloud("main");
         }
 
         // If both clouds are absent or empty, return infinite distances so the
         // caller's minimum-distance search simply skips this segment.
-        if (!dpc || dpc->get_points().empty()) {
+        if (!dpc || dpc->npoints() == 0) {
             return {1e9, 1e9, 1e9};
         }
 
-        const auto& points = dpc->get_points();
-        if (points.empty()) {
+        if (dpc->npoints() == 0) {
             return {1e9, 1e9, 1e9};
         }
         
@@ -178,14 +175,14 @@ namespace WireCell::Clus::PR {
             raise<RuntimeError>("segment_get_closest_2d_distance: invalid segment");
         }
         auto dpc = seg->dpcloud(cloud_name);
-        if (!dpc || dpc->get_points().empty()) {
+        if (!dpc || dpc->npoints() == 0) {
             // Fall back to "main" cloud if requested cloud is absent or empty
             dpc = seg->dpcloud("main");
             if (!dpc) {
                 raise<RuntimeError>("segment_get_closest_2d_distance: segment missing DynamicPointCloud with name " + cloud_name + " and fallback 'main'");
             }
         }
-        if (dpc->get_points().empty()) {
+        if (dpc->npoints() == 0) {
             raise<RuntimeError>("segment_get_closest_2d_distance: DynamicPointCloud has no points");
         }
         return std::get<0>(dpc->get_closest_2d_point_info(point, plane, face, apa));
@@ -607,12 +604,13 @@ namespace WireCell::Clus::PR {
             // This matches WCPPID lines 123-140
             
             auto orig_dpc = seg->dpcloud("associate_points");
-            const auto& orig_points = orig_dpc->get_points();
+            const size_t orig_npts = orig_dpc->npoints();
             
             // Separate points based on which segment they're closer to
-            std::vector<Facade::DynamicPointCloud::DPCPoint> points1, points2;
-            points1.reserve(orig_points.size() / 2);  // estimate
-            points2.reserve(orig_points.size() / 2);
+            // (row indices into orig_dpc; values copied column-wise below)
+            std::vector<size_t> rows1, rows2;
+            rows1.reserve(orig_npts / 2);  // estimate
+            rows2.reserve(orig_npts / 2);
             
             // Determine which cloud to use for distance calculations
             // Prefer "fit" points, but fall back to "main" if "fit" is not available
@@ -626,8 +624,8 @@ namespace WireCell::Clus::PR {
             }
             
             // Iterate through all associated points
-            for (const auto& dpc_point : orig_points) {
-                WireCell::Point point(dpc_point.x, dpc_point.y, dpc_point.z);
+            for (size_t ir = 0; ir < orig_npts; ++ir) {
+                WireCell::Point point = orig_dpc->point3d(ir);
                 
                 // Compute closest distance to seg1 and seg2 using reference cloud
                 auto [dist1, _1] = segment_get_closest_point(seg1, point, ref_cloud_name);
@@ -635,9 +633,9 @@ namespace WireCell::Clus::PR {
                 
                 // Add point to closer segment
                 if (dist1 < dist2) {
-                    points1.push_back(dpc_point);
+                    rows1.push_back(ir);
                 } else {
-                    points2.push_back(dpc_point);
+                    rows2.push_back(ir);
                 }
             }
             
@@ -652,17 +650,17 @@ namespace WireCell::Clus::PR {
             Facade::compute_wireplane_params(wpids, dv, wpid_params, wpid_U_dir, wpid_V_dir, wpid_W_dir, apas);
 
             // Create new DynamicPointClouds for associated points if we have any
-            if (!points1.empty()) {
+            if (!rows1.empty()) {
                 // Create and populate seg1's associate_points cloud
                 auto dpc1 = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
-                dpc1->add_points(points1);
+                dpc1->add_points(*orig_dpc, rows1);
                 seg1->dpcloud("associate_points", dpc1);
             }
             
-            if (!points2.empty()) {
+            if (!rows2.empty()) {
                 // Create and populate seg2's associate_points cloud
                 auto dpc2 = std::make_shared<Facade::DynamicPointCloud>(wpid_params);
-                dpc2->add_points(points2);
+                dpc2->add_points(*orig_dpc, rows2);
                 seg2->dpcloud("associate_points", dpc2);
             }
             
@@ -1806,13 +1804,15 @@ namespace WireCell::Clus::PR {
             seg_dpc_cache[seg] = dpc;
             auto& pts3d     = seg_pts3d[seg];
             auto& pts2d_map = seg_pts2d[seg];
-            for (const auto& pt : dpc->get_points()) {
-                pts3d.push_back({pt.x, pt.y, pt.z});
+            const auto& cols = dpc->points();
+            for (size_t ip = 0; ip < cols.size(); ++ip) {
+                pts3d.push_back({cols.x[ip], cols.y[ip], cols.z[ip]});
                 for (int pind = 0; pind < 3; ++pind) {
-                    for (size_t j = 0; j < pt.x_2d[pind].size(); ++j) {
-                        WirePlaneId wpid_2d(pt.wpid_2d[pind][j]);
+                    const auto [jb, je] = cols.proj_range(ip, pind);
+                    for (size_t j = jb; j < je; ++j) {
+                        WirePlaneId wpid_2d(cols.p2d_wpid[j]);
                         pts2d_map[{pind, wpid_2d.apa(), wpid_2d.face()}]
-                            .push_back({pt.x_2d[pind][j], pt.y_2d[pind][j]});
+                            .push_back({cols.p2d_x[j], cols.p2d_y[j]});
                     }
                 }
             }
@@ -2101,8 +2101,8 @@ namespace WireCell::Clus::PR {
         auto dpcloud_assoc = segment->dpcloud(cloud_name);
         if (!dpcloud_assoc) return false;
         
-        const auto& assoc_points = dpcloud_assoc->get_points();
-        if (assoc_points.empty()) return false;
+        const size_t assoc_npts = dpcloud_assoc->npoints();
+        if (assoc_npts == 0) return false;
         
         // Initialize vectors to store analysis results for each fit point
         std::vector<std::vector<WireCell::Point>> local_points_vec(fits.size());
@@ -2113,8 +2113,8 @@ namespace WireCell::Clus::PR {
         // Build KD-tree index for fit points and associate points with nearest fit point
         auto& kd_tree_fit = dpcloud_fit->kd3d();
         
-        for (const auto& pt : assoc_points) {
-            WireCell::Point test_p(pt.x, pt.y, pt.z);
+        for (size_t ia = 0; ia < assoc_npts; ++ia) {
+            WireCell::Point test_p = dpcloud_assoc->point3d(ia);
             auto results = kd_tree_fit.knn(1, test_p);
             if (!results.empty()) {
                 size_t closest_fit_idx = results.front().first;
@@ -2404,8 +2404,8 @@ namespace WireCell::Clus::PR {
         auto dpcloud_assoc = segment->dpcloud("associate_points");
         if (!dpcloud_assoc) return false;
         
-        const auto& assoc_points = dpcloud_assoc->get_points();
-        if (assoc_points.empty()) return false;
+        const size_t assoc_npts = dpcloud_assoc->npoints();
+        if (assoc_npts == 0) return false;
 
         // Initialize vectors to store analysis results for each fit point
         std::vector<std::vector<WireCell::Point>> local_points_vec(fits.size());
@@ -2415,8 +2415,8 @@ namespace WireCell::Clus::PR {
         // Build KD-tree index for fit points and associate points with nearest fit point
         auto& kd_tree_fit = dpcloud_fit->kd3d();
         
-        for (const auto& pt : assoc_points) {
-            WireCell::Point test_p(pt.x, pt.y, pt.z);
+        for (size_t ia = 0; ia < assoc_npts; ++ia) {
+            WireCell::Point test_p = dpcloud_assoc->point3d(ia);
             auto results = kd_tree_fit.knn(1, test_p);
             if (!results.empty()) {
                 size_t closest_fit_idx = results.front().first;

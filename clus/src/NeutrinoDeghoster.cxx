@@ -382,7 +382,7 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
         }
     }
     
-    if (global_point_cloud->get_points().size() == 0) return;
+    if (global_point_cloud->npoints() == 0) return;
     
     double dis_cut = 1.2 * units::cm;
     
@@ -442,12 +442,12 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
                         auto results = global_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
                         if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
 
-                        if (global_steiner_point_cloud->get_points().size() != 0) {
+                        if (global_steiner_point_cloud->npoints() != 0) {
                             results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
                             if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
                         }
 
-                        if (global_skeleton_cloud->get_points().size() != 0) {
+                        if (global_skeleton_cloud->npoints() != 0) {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 0, face, apa);
                             if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
                         }
@@ -465,12 +465,12 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
                         auto results = global_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
                         if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
 
-                        if (global_steiner_point_cloud->get_points().size() != 0) {
+                        if (global_steiner_point_cloud->npoints() != 0) {
                             results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
                             if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
                         }
 
-                        if (global_skeleton_cloud->get_points().size() != 0) {
+                        if (global_skeleton_cloud->npoints() != 0) {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 1, face, apa);
                             if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
                         }
@@ -488,12 +488,12 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
                         auto results = global_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
                         if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
 
-                        if (global_steiner_point_cloud->get_points().size() != 0) {
+                        if (global_steiner_point_cloud->npoints() != 0) {
                             results = global_steiner_point_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
                             if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 2. / 3.) flag_in = true;
                         }
 
-                        if (global_skeleton_cloud->get_points().size() != 0) {
+                        if (global_skeleton_cloud->npoints() != 0) {
                             results = global_skeleton_cloud->get_closest_2d_point_info(test_point, 2, face, apa);
                             if (std::get<0>(results) >= 0 && std::get<0>(results) <= dis_cut * 3. / 4.) flag_in = true;
                         }

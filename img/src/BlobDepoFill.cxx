@@ -181,7 +181,7 @@ ICluster::pointer make_cluster(const ICluster::pointer& icluster,
             gr[vdesc].ptr = bnew;
         }
     }
-    return std::make_shared<Aux::SimpleCluster>(gr, icluster->ident());
+    return std::make_shared<Aux::SimpleCluster>(std::move(gr), icluster->ident());
 }
 
 

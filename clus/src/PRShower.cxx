@@ -117,7 +117,7 @@ namespace WireCell::Clus::PR {
                     // F14: merge wpid_params so the shower DPC can answer queries for
                     // all (apa,face) pairs present in any constituent segment's DPC.
                     shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);
-                    shower_dpc_fit->add_points(seg_dpc_fit->get_points());
+                    shower_dpc_fit->add_points(*seg_dpc_fit);
                 }
             }
         }
@@ -130,7 +130,7 @@ namespace WireCell::Clus::PR {
                     this->dpcloud(cloud_name_associate, seg_dpc_associate);
                 } else {
                     shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);
-                    shower_dpc_associate->add_points(seg_dpc_associate->get_points());
+                    shower_dpc_associate->add_points(*seg_dpc_associate);
                 }
             }
         }
@@ -169,7 +169,7 @@ namespace WireCell::Clus::PR {
                     this->dpcloud(cloud_name_fit, seg_dpc_fit);
                 } else {
                     shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);  // F14
-                    shower_dpc_fit->add_points(seg_dpc_fit->get_points());
+                    shower_dpc_fit->add_points(*seg_dpc_fit);
                 }
             }
         }
@@ -182,7 +182,7 @@ namespace WireCell::Clus::PR {
                     this->dpcloud(cloud_name_associate, seg_dpc_associate);
                 } else {
                     shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);  // F14
-                    shower_dpc_associate->add_points(seg_dpc_associate->get_points());
+                    shower_dpc_associate->add_points(*seg_dpc_associate);
                 }
             }
         }
@@ -216,9 +216,8 @@ namespace WireCell::Clus::PR {
         // Batch-collect all points before adding to avoid repeated vector reallocations.
         // For each cloud: the first segment sets the shower's cloud pointer; all subsequent
         // segments' points are gathered into a single vector and appended in one call.
-        using DPCPoint = Facade::DynamicPointCloud::DPCPoint;
-        std::vector<DPCPoint> batch_fit;
-        std::vector<DPCPoint> batch_associate;
+        Facade::DPCBatch batch_fit;
+        Facade::DPCBatch batch_associate;
 
         for (auto edesc : shower.edges()) {
             SegmentPtr seg = m_full_graph[edesc].segment;
@@ -236,8 +235,7 @@ namespace WireCell::Clus::PR {
                         // F14: merge wpid_params before batching so the shower DPC
                         // serves queries for all (apa,face) pairs across all segments.
                         this->dpcloud(cloud_name_fit)->merge_wpid_params(*seg_dpc);
-                        const auto& pts = seg_dpc->get_points();
-                        batch_fit.insert(batch_fit.end(), pts.begin(), pts.end());
+                        batch_fit.append(seg_dpc->points());
                     }
                 }
             }
@@ -249,8 +247,7 @@ namespace WireCell::Clus::PR {
                         this->dpcloud(cloud_name_associate, seg_dpc);
                     } else {
                         this->dpcloud(cloud_name_associate)->merge_wpid_params(*seg_dpc);
-                        const auto& pts = seg_dpc->get_points();
-                        batch_associate.insert(batch_associate.end(), pts.begin(), pts.end());
+                        batch_associate.append(seg_dpc->points());
                     }
                 }
             }
@@ -258,10 +255,10 @@ namespace WireCell::Clus::PR {
 
         // Single bulk add_points call per cloud instead of one per segment
         if (!batch_fit.empty()) {
-            if (auto dpc = this->dpcloud(cloud_name_fit)) dpc->add_points(batch_fit);
+            if (auto dpc = this->dpcloud(cloud_name_fit)) dpc->add_points(std::move(batch_fit));
         }
         if (!batch_associate.empty()) {
-            if (auto dpc = this->dpcloud(cloud_name_associate)) dpc->add_points(batch_associate);
+            if (auto dpc = this->dpcloud(cloud_name_associate)) dpc->add_points(std::move(batch_associate));
         }
 
     }
@@ -311,7 +308,7 @@ namespace WireCell::Clus::PR {
                                     if (!shower_dpc_fit) {
                                         this->dpcloud(cloud_name_fit, seg_dpc_fit);
                                     } else {
-                                        shower_dpc_fit->add_points(seg_dpc_fit->get_points());
+                                        shower_dpc_fit->add_points(*seg_dpc_fit);
                                     }
                                 }
                             }
@@ -323,7 +320,7 @@ namespace WireCell::Clus::PR {
                                     if (!shower_dpc_associate) {
                                         this->dpcloud(cloud_name_associate, seg_dpc_associate);
                                     } else {
-                                        shower_dpc_associate->add_points(seg_dpc_associate->get_points());
+                                        shower_dpc_associate->add_points(*seg_dpc_associate);
                                     }
                                 }
                             }
@@ -938,7 +935,7 @@ namespace WireCell::Clus::PR {
                         m_start_vertex->fit().point.z()/units::cm,
                         sgcp_dis/units::cm,
                         sgcp_pt.x()/units::cm, sgcp_pt.y()/units::cm, sgcp_pt.z()/units::cm,
-                        this->dpcloud("fit") ? (int)this->dpcloud("fit")->get_points().size() : -1);
+                        this->dpcloud("fit") ? (int)this->dpcloud("fit")->npoints() : -1);
                     data.start_point = sgcp_pt;
                     // Fallback: if "fit" pcloud is absent or empty, use fits directly (same as conn_type==1)
                     if (data.start_point.x() == 0 && data.start_point.y() == 0 && data.start_point.z() == 0) {

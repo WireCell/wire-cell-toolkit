@@ -865,8 +865,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             
             const size_t idx = results[0].first;
             const double dis = std::sqrt(results[0].second);  // KD-tree returns squared distance
-            const auto& closest_pt_data = pcloud->get_points()[idx];
-            WireCell::Point closest_pt(closest_pt_data.x, closest_pt_data.y, closest_pt_data.z);
+            const WireCell::Point closest_pt = pcloud->point3d(idx);
             
             WireCell::Vector v1(closest_pt.x() - vtx_pt.x(),
                                closest_pt.y() - vtx_pt.y(),

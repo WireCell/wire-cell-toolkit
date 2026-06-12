@@ -52,7 +52,7 @@ bool ClusterScopeFilter::operator()(const input_pointer& in, output_pointer& out
 
     TimeKeeper tk(fmt::format("ClusterScopeFilter"));
 
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     log->debug("in_graph: {}", dumps(in_graph));
 
     log->debug(tk(fmt::format("start delete some blobs")));
@@ -73,6 +73,6 @@ bool ClusterScopeFilter::operator()(const input_pointer& in, output_pointer& out
     log->debug("in_graph: {}", dumps(in_graph));
     log->debug("out_graph: {}", dumps(out_graph));
 
-    out = std::make_shared<Aux::SimpleCluster>(out_graph, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(out_graph), in->ident());
     return true;
 }

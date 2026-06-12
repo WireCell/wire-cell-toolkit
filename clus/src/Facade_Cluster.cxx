@@ -77,6 +77,10 @@ void Cluster::set_default_scope(const Tree::Scope& scope)
 
     m_default_scope = scope;
 
+    // The memoized default-scope view follows the scope.
+    m_sv3d_memo = nullptr;
+    m_sv3d_valid = nullptr;
+
     // Clear caches that depend on the scope
     clear_cache(); // Why is this here???  It does not do what the comment says.
                    // It clears all cache.  This side-effect is needed even if
@@ -825,7 +829,16 @@ std::pair<geo_point_t, double> Cluster::get_closest_point_along_vec(geo_point_t&
 }
 
 const Cluster::sv3d_t& Cluster::sv3d() const {
-    return sv(); //  m_node->value.scoped_view(m_default_scope);
+    // Memoized: see m_sv3d_memo in the header.  When the validity flag has
+    // dropped (node insert), scoped_view() re-syncs the same view object and
+    // restores the flag; node removal resets the memo via on_remove().
+    if (m_sv3d_memo && m_sv3d_valid && *m_sv3d_valid) {
+        return *m_sv3d_memo;
+    }
+    const auto& view = sv();  //  m_node->value.scoped_view(m_default_scope);
+    m_sv3d_memo = &view;
+    m_sv3d_valid = m_node->value.scoped_indices_valid(m_default_scope);
+    return view;
 }
 const Cluster::kd3d_t& Cluster::kd3d() const { return sv3d().kd(); }
 const Cluster::kd3d_t& Cluster::kd() const { return kd3d(); }
@@ -1251,7 +1264,7 @@ std::vector<const Blob*> Cluster::blobs_with_points(const kd_results_t& res) con
     return ret;
 }
 
-std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& point, double radius) const
+Cluster::const_blob_point_map_t Cluster::get_closest_blob(const geo_point_t& point, double radius) const
 {
     struct Best {
         size_t point_index;
@@ -1273,14 +1286,14 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
             it->second.metric = metric;
         }
     }
-    std::map<const Blob*, geo_point_t> ret;
+    const_blob_point_map_t ret;
     for (const auto& [mi, bb] : best_blob_point) {
         ret[blob_with_point(bb.point_index)] = point3d(bb.point_index);
     }
     return ret;
 }
 
-std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& point, int N) const 
+Cluster::const_blob_point_map_t Cluster::get_closest_blob(const geo_point_t& point, int N) const
 {
     struct Best {
         size_t point_index;
@@ -1303,7 +1316,7 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
         }
     }
 
-    std::map<const Blob*, geo_point_t> ret;
+    const_blob_point_map_t ret;
     for (const auto& [mi, bb] : best_blob_point) {
         ret[blob_with_point(bb.point_index)] = point3d(bb.point_index);
     }
@@ -1312,46 +1325,46 @@ std::map<const Blob*, geo_point_t> Cluster::get_closest_blob(const geo_point_t& 
 
 std::pair<geo_point_t, const Blob*> Cluster::get_closest_point_blob(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    // Hot path (Find_Closest_Points convergence loops): resolve the scoped
+    // view once and use the allocation-free single-NN query.
+    const auto& skd = kd3d();
+    size_t point_index = 0;
+    double metric = 0;
+    if (!skd.knn1(point, point_index, metric)) {
         return std::make_pair(geo_point_t(), nullptr);
     }
-
-    const auto& [point_index, _] = results[0];
-    return std::make_pair(point3d(point_index), blob_with_point(point_index));
+    return std::make_pair(skd.point3d(point_index), blob_with_point(point_index));
 }
 
 std::pair<size_t, geo_point_t> Cluster::get_closest_wcpoint(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    const auto& skd = kd3d();
+    size_t point_index = 0;
+    double metric = 0;
+    if (!skd.knn1(point, point_index, metric)) {
         return std::make_pair(-1, nullptr);
     }
-
-    const auto& [point_index, _] = results[0];
-    return std::make_pair(point_index, point3d(point_index));
+    return std::make_pair(point_index, skd.point3d(point_index));
 }
 
 size_t Cluster::get_closest_point_index(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    size_t point_index = 0;
+    double metric = 0;
+    if (!kd3d().knn1(point, point_index, metric)) {
         raise<ValueError>("no points in cluster");
     }
-
-    const auto& [point_index, _] = results[0];
     return point_index;
 }
 
 double Cluster::get_closest_dis(const geo_point_t& point) const
 {
-    auto results = kd_knn(1, point);
-    if (results.size() == 0) {
+    size_t point_index = 0;
+    double metric = 0;
+    if (!kd3d().knn1(point, point_index, metric)) {
         raise<ValueError>("no points in cluster");
     }
-
-    const auto& [_, dis] = results[0];
-    return sqrt(dis);
+    return sqrt(metric);
 }
 
 std::tuple<int, int, double> Cluster::get_closest_points(const Cluster& other) const{
@@ -1611,28 +1624,6 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
                                                    std::shared_ptr<const Simple3DPointCloud> s3dpc,
                                                    const std::vector<size_t>& global_indices) const
 {
-    std::vector<geo_point_t> pts;
-    std::vector<const Blob*> blobs;
-
-    if (s3dpc == nullptr) {
-        auto results = kd_radius(dis, origin);
-        if (results.size() == 0) {
-            return {0, 0};
-        }
-        blobs = blobs_with_points(results);
-        pts = kd_points(results);
-    } else {
-        if (s3dpc->get_num_points() != global_indices.size()) {
-            raise<ValueError>("global indices size mismatch");
-        }
-        auto results = s3dpc->kd().radius(dis * dis, origin);
-        for (const auto& [point_index, _] : results) {
-            pts.push_back(s3dpc->point(point_index));
-            size_t global_index = global_indices[point_index];
-            blobs.push_back(blob_with_point(global_index));
-        }
-    }
-
     constexpr double pi = 3.141592653589793;
 
     using direction_parameter_function_f = std::function<double(const Vector& dir)>;
@@ -1658,7 +1649,7 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     // in-radius points are ever filled.  Building a dense grid cost a 64 800-double
     // zero-fill on construction plus an O(64 800) std::max_element scan per call (the top
     // clustering hotspot once the kd2d format cost was removed; see
-    // clustering-timing-profile.md §3).  Instead, accumulate the weights into a map keyed
+    // clustering-timing-profile.md §3).  Instead, accumulate the weights sparsely keyed
     // by the inner-bin linear index and take the peak over only the touched bins.
     //
     // Bit-identical to the previous `boost::histogram + bh::indexed + std::max_element`:
@@ -1672,31 +1663,81 @@ std::pair<double, double> Cluster::hough_transform(const geo_point_t& origin, co
     //  - an empty/all-zero grid yields bin (0,0), as max_element over all-equal bins does.
     const bh::axis::regular<> ax1(nbins1, min1, max1);
     const bh::axis::regular<> ax2(nbins2, min2, max2);
-    std::unordered_map<long, double> bins;  // lin = i + (long)j * nbins1  (axis-0 fastest)
 
-    for (size_t ind = 0; ind < blobs.size(); ++ind) {
-        const auto* blob = blobs[ind];
+    // Sparse accumulation, but into a generation-stamped dense scratch grid
+    // instead of an unordered_map: a bin is "live" when its stamp matches the
+    // current call's generation, so there is no per-call zero-fill of the
+    // 64 800-bin grid and no per-fill hashing/allocation.  Per-bin sums see
+    // the same values added in the same order as the map version, and the
+    // peak criterion (max value, then smallest linear index) is a total
+    // order, so the result is bit-identical regardless of how touched bins
+    // are visited.
+    constexpr long ngrid = (long)180 * 360;  // nbins1 * nbins2
+    static thread_local std::vector<double> s_val;
+    static thread_local std::vector<uint32_t> s_gen;
+    static thread_local std::vector<long> s_touched;
+    static thread_local uint32_t s_cur = 0;
+    if (s_val.empty()) {
+        s_val.assign(ngrid, 0.0);
+        s_gen.assign(ngrid, 0u);
+    }
+    if (++s_cur == 0) {  // generation counter wrapped: reset all stamps
+        std::fill(s_gen.begin(), s_gen.end(), 0u);
+        s_cur = 1;
+    }
+    s_touched.clear();
+
+    // Identical per-point work and fill order to the previous version; the
+    // intermediate pts/blobs vectors are gone (iterate the kd results
+    // directly).
+    auto fill = [&](const Blob* blob, const geo_point_t& pt) {
         auto charge = blob->charge();
         // protection against the charge=0 case ...
         if (charge == 0) charge = 1;
-        if (charge <= 0) continue;
+        if (charge <= 0) return;
 
         const auto npoints = blob->npoints();
-        const auto& pt = pts[ind];
-
         const Vector dir = (pt - origin).norm();
 
         const double p1 = theta_param(dir);
         const double p2 = phi_param(dir);
         const int i = ax1.index(p1);
         const int j = ax2.index(p2);
-        if (i < 0 || i >= nbins1 || j < 0 || j >= nbins2) continue;  // inner bins only
-        bins[i + (long)j * nbins1] += charge / npoints;
+        if (i < 0 || i >= nbins1 || j < 0 || j >= nbins2) return;  // inner bins only
+        const long lin = i + (long)j * nbins1;  // axis-0 fastest
+        if (s_gen[lin] != s_cur) {
+            s_gen[lin] = s_cur;
+            s_val[lin] = 0.0;
+            s_touched.push_back(lin);
+        }
+        s_val[lin] += charge / npoints;
+    };
+
+    if (s3dpc == nullptr) {
+        auto results = kd_radius(dis, origin);
+        if (results.size() == 0) {
+            return {0, 0};
+        }
+        const auto& points = this->points();
+        for (const auto& [point_index, _] : results) {
+            const geo_point_t pt(points[0][point_index], points[1][point_index],
+                                 points[2][point_index]);
+            fill(blob_with_point(point_index), pt);
+        }
+    } else {
+        if (s3dpc->get_num_points() != global_indices.size()) {
+            raise<ValueError>("global indices size mismatch");
+        }
+        auto results = s3dpc->kd().radius(dis * dis, origin);
+        for (const auto& [point_index, _] : results) {
+            fill(blob_with_point(global_indices[point_index]), s3dpc->point(point_index));
+        }
     }
 
     long best_lin = 0;       // default bin (0,0) for the empty/all-zero case
     double best_val = 0.0;
-    for (const auto& [lin, val] : bins) {
+    for (const long lin : s_touched) {
+        const double val = s_val[lin];
         if (val > best_val || (val == best_val && lin < best_lin)) {
             best_val = val;
             best_lin = lin;

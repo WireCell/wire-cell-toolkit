@@ -117,7 +117,10 @@ namespace WireCell::Clus::Facade {
             double time_offset, drift_speed, tick;
             IAnodeFace::pointer iface;
         };
-        mutable std::unordered_map<int, fastgeom_t> m_fastgeom;  // key: apa*2+face
+        // Dense by key = apa*2+face (called per point in the good-point
+        // tests; a hash lookup here was ~5% of busy clustering).  unique_ptr
+        // keeps the returned references stable across growth.
+        mutable std::vector<std::unique_ptr<fastgeom_t>> m_fastgeom;
         const fastgeom_t& fastgeom(const int apa, const int face) const;
 
         /// TODO: remove these in the future
