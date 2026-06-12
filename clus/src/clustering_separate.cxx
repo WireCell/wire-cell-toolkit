@@ -381,7 +381,7 @@ static void recover_collinear_tips(Grouping& live_grouping, const Tree::Scope& s
         const auto ttrans = track->get_scope_transform(tscope);
         for (auto& [oi, bidxs] : moves) {
             Cluster* donor = family.at(oi);
-            if ((int) bidxs.size() == donor->nchildren()) {
+            if (bidxs.size() == donor->nchildren()) {
                 // whole donor moves; do not leave a childless husk behind
                 track->take_children(*donor, true);
                 family.at(oi) = nullptr;
