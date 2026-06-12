@@ -1,7 +1,9 @@
 # PDHD Light (Photon Detector) Reconstruction — Design
 
-Status: stage 1 complete (ROOT → WCT conversion, validated on all four example
-runs; see stage1-root-conversion.md).  This document is the living design record for
+Status: stages 1–3 complete — ROOT → WCT conversion
+(stage1-root-conversion.md), WCT-native DUNE-method reconstruction
+(stage2-reconstruction.md), validation vs the LArSoft reference
+(validation.md).  This document is the living design record for
 the toolkit-native PDHD light-signal-processing subsystem.  It will be updated at each
 implementation stage; per-stage details land in sibling documents:
 
