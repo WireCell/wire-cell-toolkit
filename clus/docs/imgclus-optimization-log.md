@@ -1374,6 +1374,27 @@ below the job's high-water mark (which lives in
 ProjectionDeghosting), so this removes allocation churn and a latent
 overflow hazard rather than moving the headline numbers.
 
+### 35. cs_graph assignment in ProjectionDeghosting: copy → move_graph
+
+Follow-on from entry 31's discovery: graph move-*assignment* also
+silently copies (boost::adjacency_list has copy `operator=` only), so
+the round-6 `cs_graph = ClusterShadow::shadow(...)` in
+ProjectionDeghosting copy-assigned the returned cluster-shadow graph
+and destroyed the temporary, twice per event per anode pipeline ('w'
+pass; the InSliceDeghosting 'c' path builds its own).  Now lands in a
+named temporary and `move_graph`s into `cs_graph`.  `move_graph` was
+extended to swap the graph-level property bundle (`m_property` is
+public in boost, same commented-out-`protected:` story) —
+load-bearing here, since `ClusterShadow::graph_t` carries
+`Graph{stype}` which `shadow()` sets; SimpleCluster's `no_property`
+use is unaffected.
+
+**A/B verdict: PASS** (snapshot `r8csmove` vs `r8trip`): 178/178
+byte-identical.  **Wall −1..−2% on busy imaging (hd-max 233→228 s),
+RSS flat** — the CS graph is far smaller than the cluster graph, as
+expected; taken as the structural close-out of the no-move-members
+class of copies.
+
 ### Round-8 closing
 
 Queue items 1, 2, 3, 5 from round 7 are dispositioned: 1 (entry 31,

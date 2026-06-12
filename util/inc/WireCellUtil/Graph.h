@@ -63,14 +63,14 @@ namespace WireCell {
     // vertex and edge containers instead.  Container moves do not
     // relocate elements, so the stored edge iterators and edge-property
     // pointers held inside remain valid and vertex/edge iteration order
-    // is exactly the source's.  Any graph-level property of src is NOT
-    // transferred (WCT cluster-style graphs use no_property).  src is
-    // left empty.
+    // is exactly the source's.  The graph-level property is swapped
+    // into dst (src receives dst's prior one).  src is left empty.
     template <typename AdjacencyList>
     inline void move_graph(AdjacencyList& dst, AdjacencyList& src)
     {
         dst.m_vertices = std::move(src.m_vertices);
         dst.m_edges = std::move(src.m_edges);
+        dst.m_property.swap(src.m_property);
         src.clear();
     }
 }

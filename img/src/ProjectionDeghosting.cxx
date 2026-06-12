@@ -174,7 +174,10 @@ bool Img::ProjectionDeghosting::operator()(const input_pointer& in, output_point
         // consumes them; scoped so the storage is freed before the
         // projection/judge phase below.
         const auto shadows = BlobShadow::shadow_list(in_graph, 'w');  // or 'c'
-        cs_graph = ClusterShadow::shadow(in_graph, shadows, clusters);
+        // plain assignment would invoke adjacency_list's copy operator=
+        // (boost has no move members); steal the temporary instead.
+        auto cs_tmp = ClusterShadow::shadow(in_graph, shadows, clusters);
+        move_graph(cs_graph, cs_tmp);
     }
 
     // make a cluster -> blob map
