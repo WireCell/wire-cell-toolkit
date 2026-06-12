@@ -1,6 +1,7 @@
 # PDHD Light (Photon Detector) Reconstruction — Design
 
-Status: stage 0 (scaffolding + design).  This document is the living design record for
+Status: stage 1 complete (ROOT → WCT conversion, validated on all four example
+runs; see stage1-root-conversion.md).  This document is the living design record for
 the toolkit-native PDHD light-signal-processing subsystem.  It will be updated at each
 implementation stage; per-stage details land in sibling documents:
 
@@ -157,11 +158,15 @@ flashes vs `PerFlashTree`/`flash_opdet`.  Results in `validation.md`.
 
 ## 5. Risks / open items
 
-1. **decoana x-axis semantics** — assumed absolute DTS µs aligned with `rd_timestamp`;
-   pinned in stage 1 by checking `PerOpHitTree.PeakTimeAbs` lands inside matching
-   snippet windows.  Only `PDHDOpWaveformSource` changes if the assumption is wrong.
+1. **decoana x-axis semantics** — RESOLVED in stage 1: the axis low edge encodes
+   the snippet start in 16 ns ticks relative to the event's earliest saved snippet
+   (`t_first`, not recorded in the file; recovered per event from OpHit↔deconv-peak
+   coincidence voting — see stage1-root-conversion.md).  All absolute timestamps in
+   the dump are doubles with a 16-tick ULP, so converted times carry a ±8-tick
+   (±128 ns) quantization.
 2. **Multiple trigger candidates** — nearest-to-250 µs selection is a heuristic;
-   metadata records the choice.  Physics-trigger `tc_type` may need expert input.
+   metadata records the choice.  Physics-trigger `tc_type` may need expert input
+   (run 29107 mixes tc_type 14/29/31; the selection picks 14 and validates).
 3. **opch_map coverage** — present in one file only, 224/256 channels (~54 OpDets).
    Stage-2 flashes will under-populate the 160-OpDet matrix relative to `opflashana`
    on events with unmapped active channels; unmapped channels warn-and-drop.

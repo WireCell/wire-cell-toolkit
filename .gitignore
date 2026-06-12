@@ -59,6 +59,8 @@ ltximg
 *.pdf
 *.json
 !sigproc/test/data/*.json
+!cfg/pgrapher/experiment/pdhd/pdhd-opdet-geom.json
+!cfg/pgrapher/experiment/pdhd/pdhd-opch-map.json
 .snakemake
 *.old
 *.junk
