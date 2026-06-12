@@ -1137,7 +1137,32 @@ WireCell::Waveform::ChannelMaskMap PDHD::FEMBNoiseSub::apply(channel_signals_t& 
     const bool pass_p0 = Is_FEMB_noise(chansig_p0, rois_p0, m_width, m_pad_nticks, m_nsigma);
     const bool pass_p1 = Is_FEMB_noise(chansig_p1, rois_p1, m_width, m_pad_nticks, m_nsigma);
     const bool pass_p2 = Is_FEMB_noise(chansig_p2, rois_p2, m_width, m_pad_nticks, m_nsigma);
-    if (!(pass_p0 && pass_p1 && pass_p2)) {
+    const int npass = int(pass_p0) + int(pass_p1) + int(pass_p2);
+    if (npass < 2) {
+        return ret;
+    }
+
+    if (npass == 2) {
+        // Two of three planes confirm: mask only the two confirming planes,
+        // each over the ROIs found on its own projection.  The plane that
+        // failed confirmation is left untouched.
+        const bool passes[3] = {pass_p0, pass_p1, pass_p2};
+        const channel_signals_t* plane_sigs[3] = {&chansig_p0, &chansig_p1, &chansig_p2};
+        const WireCell::Waveform::BinRangeList* plane_rois[3] = {&rois_p0, &rois_p1, &rois_p2};
+        size_t nchan_marked = 0;
+        for (int p = 0; p < 3; ++p) {
+            if (!passes[p]) continue;
+            for (auto const& cs : *plane_sigs[p]) {
+                for (const auto& br : *plane_rois[p]) {
+                    ret["femb_noise"][cs.first].push_back(br);
+                }
+                ++nchan_marked;
+            }
+        }
+        if (m_log) {
+            m_log->debug("PDHD FEMBNoiseSub: 2/3 planes confirm, marked {} channels on the two passing planes",
+                         nchan_marked);
+        }
         return ret;
     }
 
