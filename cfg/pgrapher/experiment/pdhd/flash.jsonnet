@@ -8,6 +8,7 @@
 // components in root/) need replacing.
 
 local g = import 'pgraph.jsonnet';
+local wc = import 'wirecell.jsonnet';
 
 {
     // PDHD optical channel count: 160 OpDets (4 APAs x 10 bars x 4
@@ -59,4 +60,35 @@ local g = import 'pgraph.jsonnet';
             digitize: false,
         },
     }, nin=1, nout=0),
+
+    // --- WCT-native reconstruction (DUNE-method port, see
+    // flash/docs/stage2-reconstruction.md for fcl correspondence) ---
+
+    // Wiener deconvolution of "raw" snippets -> "decon" traces.
+    // Defaults follow protodunehd_deconvolution; the SPE templates and
+    // channel map live in pdhd-spe-templates.json.
+    local dft = { type: 'FftwDFT' },
+    opdecon(name='')::  g.pnode({
+        type: 'OpDecon',
+        name: name,
+        data: {
+            dft: wc.tn(dft),
+        },
+    }, nin=1, nout=1, uses=[dft]),
+
+    // SlidingWindow hit finding on "decon" traces -> ophits tensor set.
+    ophit(name='')::  g.pnode({
+        type: 'OpHitFinder',
+        name: name,
+        data: {},
+    }, nin=1, nout=1),
+
+    // OpFlashAlg flash assembly -> opflash tensor set (design.md §3.4).
+    opflash_finder(name='')::  g.pnode({
+        type: 'OpFlashFinder',
+        name: name,
+        data: {
+            nchan: $.nchan,
+        },
+    }, nin=1, nout=1),
 }
