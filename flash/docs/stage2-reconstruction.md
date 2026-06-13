@@ -165,9 +165,17 @@ path produces two single-side flashes where all-TPC produces one mixed flash.
 ## Running
 
 ```
-./run_light_evt.sh -m reco  <run> <evt>    # reconstruction only
-./run_light_evt.sh -m both  <run> <evt>    # stage-1 convert + reco
+./run_light_evt.sh -m reco  <run> <evt>            # reconstruction only
+./run_light_evt.sh -m both  <run> <evt>            # stage-1 convert + reco
+./run_light_evt.sh -m reco -e <DAQ_EVENT> <run> <N>  # 0-based work-dir label N,
+                                                     # select DAQ_EVENT from the file
 ```
+
+Input is read from
+`pdhd/input_data_7p8_new_coh_grouping/run<RUN6>/np04hd_raw_run<RUN6>_*.root`.  The
+work-dir label (`<evt>`) is the 0-based index in that dataset; the ROOT file selects
+by DAQ `EventID`, so use `-e <DAQ_EVENT>` when the two differ (map them via the charge
+frame ident in `input_data_.../run<RUN6>/evt_<N>/...-orig-frames-anode0.tar.bz2`).
 
 Outputs in `pdhd/work/<RUN6>_<EVT>/`:
 

@@ -37,8 +37,9 @@ Package layout:
 
 ## 2. Input data (temporary ROOT format)
 
-Example files: `pdhd/example_light_data/*.root` (runs 27305, 27980, 28084, 29107 with
-24–31 events each, plus two single-event files).  Each file holds four TDirectories:
+Example files: `pdhd/input_data_7p8_new_coh_grouping/run<RUN6>/np04hd_raw_run<RUN6>_*.root`
+(runs 27305, 27980, 28084, 29107 with 24–31 events each).  Each file holds four
+TDirectories:
 
 | Directory | Content |
 |---|---|
