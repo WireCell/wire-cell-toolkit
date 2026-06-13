@@ -65,14 +65,17 @@ local wc = import 'wirecell.jsonnet';
     // flash/docs/stage2-reconstruction.md for fcl correspondence) ---
 
     // Wiener deconvolution of "raw" snippets -> "decon" traces.
-    // Defaults follow protodunehd_deconvolution; the SPE templates and
-    // channel map live in pdhd-spe-templates.json.
+    // Defaults follow protodunehd_deconvolution; the run28368 v1
+    // per-channel SPE templates and channel map live in
+    // pdhd-spe-templates.json, the run27950 per-channel noise power
+    // spectra (the production N^2) in pdhd-noise-templates.json.
     local dft = { type: 'FftwDFT' },
     opdecon(name='')::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
             dft: wc.tn(dft),
+            noise_file: 'pgrapher/experiment/pdhd/pdhd-noise-templates.json',
         },
     }, nin=1, nout=1, uses=[dft]),
 

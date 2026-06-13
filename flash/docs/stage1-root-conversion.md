@@ -85,7 +85,11 @@ Results: all checks pass on the four runs.  Notes:
 - the dump caps `decoana` at **400 snippets/event**, so only a subset of hit
   waveforms is present (the check runs snippet→hit, not hit→snippet);
 - busy events show a small (<20%) population of secondary deconv peaks
-  clustered ~±5 µs from the nearest hit (reflections/afterpulses straddled by
-  the LArSoft hit finder) — structured, not an alignment failure;
+  clustered ~±5 µs from the nearest hit — explained in stage 3: the
+  production's OpHit PeakTimeAbs collapses every sub-pulse of a snippet onto
+  the snippet head (DTS-tick TimeStamp + µs offset units mix-up, see
+  `validation.md`), so secondary pulses genuinely sit away from their stamped
+  hit time — structured, not an alignment failure (the t_first vote uses the
+  dominant first-pulse population, which is unaffected);
 - run 29107 carries three trigger types (14/29/31); the nearest-to-250 µs
   selection picks tc_type 14 there and the anchoring checks pass.

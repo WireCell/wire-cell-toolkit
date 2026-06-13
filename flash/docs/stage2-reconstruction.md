@@ -28,12 +28,13 @@ Port of `duneopdet/OpticalDetector/Deconvolution/Deconvolution_module.cc`
 | `Samples` | `samples` | 1024 |
 | `PreTrigger` | `pre_trigger` | 50 |
 | `PedestalBuffer` | `pedestal_buffer` | 30 |
-| `LineNoiseRMS` | `line_noise_rms` | 4.5 |
+| `LineNoiseRMS` | `line_noise_rms` | 4.5 (flat-N² fallback only, see noise templates) |
 | `InputPolarity` | `input_polarity` | -1 |
 | `WfmFilter` = Wiener, `AutoScale: true` | `auto_scale` | true |
 | `ApplyPostfilter`, `WfmPostfilter.Cutoff: 1.5` | `apply_postfilter`, `postfilter_cutoff` | true, 1.5 MHz |
 | `ApplyPostBLCorrection` | `apply_post_blcorr` | true |
 | `SPETemplateFiles` + `SPETemplateMap*` | `spe_file` (JSON) | `pdhd-spe-templates.json` |
+| `NoiseTemplateFiles` + `NoiseTemplateMap*` | `noise_file` (JSON, empty = flat N²) | `pdhd-noise-templates.json` (set by `flash.jsonnet`) |
 
 Algorithm (per snippet, verified bit-equal against an independent numpy
 replication, max |Δ| ~6e-7):
@@ -42,7 +43,8 @@ replication, max |Δ| ~6e-7):
 2. `xv = polarity·(ADC − pedestal)`;
 3. Wiener filter `G = conj(H)·S²/(|H|²·S² + N²)` with `H` = FFT of the
    channel's SPE template, `S² = (max(xv)/SPE_amplitude)²` (the module's
-   δ-function input guess), `N² = LineNoiseRMS²·N`;
+   δ-function input guess), `N²` per frequency bin from the channel's noise
+   power spectrum (`noise_file`; flat `LineNoiseRMS²·N` when unmapped/absent);
 4. auto-scale from the filtered SPE response (integral of the positive region
    around its peak, clamped to ≥1);
 5. baseline of the deconvolved waveform from the first 20 samples (pre
@@ -51,26 +53,34 @@ replication, max |Δ| ~6e-7):
 
 Differences from the module: a shorter-than-`samples` input is zero-padded
 (LArSoft pads with random noise — never triggered for these 1024-tick
-snippets); `kScint` input shape and noise templates are not ported (unused in
-the PDHD configuration).
+snippets); `kScint` input shape is not ported (unused in the PDHD
+configuration).
 
-### SPE templates — known fidelity limit
+### SPE + noise templates (production provenance)
 
-`cfg/pgrapher/experiment/pdhd/pdhd-spe-templates.json`
-(`flash/test/extract_pdhd_spe_templates.py`) carries the two official 2024
-templates `SPE_NP04_{FBK,HPK}_2024_without_pretrigger.dat` (duneopdet
-`config_data/`) with the FBK/HPK channel split of
-`protodunehd_pds_channels_mc` (`dune_opdet_channels.fcl`).
+`cfg/pgrapher/experiment/pdhd/pdhd-spe-templates.json` and
+`pdhd-noise-templates.json` (`flash/test/extract_pdhd_spe_templates_v1.py`)
+carry the exact template set of the LArSoft production that made the
+reference `deconv` (dunesw v10_20_09d00 `protodunehd_deconvolution` →
+`protodunehd_pds_channels_data_v1` → `protodunehd_template_list_v1`):
 
-The in-file reference `deconv` waveforms were however produced with the
-**per-channel run28368 v1 templates** (`protodunehd_template_list_v1`,
-`ProtoDUNE/HD/opdetresponse/v1/run28368_APA4_CH*_Jun2025.txt`), which are not
-available on the accessible cvmfs products.  Consequence (run 27305 evt 150):
-our deconvolution agrees with the reference at correlation 0.99 but with a
-~2-tick peak shift, ~10% amplitude difference and a residual ~0.1 PE/tick
-baseline, which inflates downstream hit areas and counts.  Swapping in the v1
-templates when obtainable only requires regenerating the JSON (the
-channel→template map supports per-channel templates as-is).
+- **SPE**: the 113 per-channel run28368 v1 templates
+  (`run28368_*_Change_Scale_PDHD_Jun2025.txt`, DUNE StashCache
+  `/cvmfs/dune.osgstorage.org/.../ProtoDUNE/HD/opdetresponse/v1/`).
+  Unmapped channels — dead 86,87,97,107,116,117, noisy 3, full-stream
+  120–159 — are skipped, matching the LArSoft `IgnoreChannels`.
+- **Noise**: the two run27950 FFT noise power spectra
+  (`FFT_Noise_Template_run27950_PDHD_VGain2318_sample513_{fbk,hpk}_Dec2024.txt`,
+  `.../opdetresponse/v0/`), mapped to all 160 channels; they replace the
+  flat `LineNoiseRMS²·N` in the Wiener N² (the LArSoft `NoiseTemplateFiles`
+  branch).
+
+With both in place our deconvolution matches the in-file reference exactly
+(shift-aligned correlation 1.0000, peak ratio 1.000, shift 0; see
+`validation.md`).  The earlier 2024 NP04 FBK/HPK average templates
+(`extract_pdhd_spe_templates.py`) gave correlation ~0.97 with a +1–2 tick
+shift and are kept only as the documented fallback for detectors without
+per-channel calibration.
 
 ### `Flash::OpHitFinder` (`IFrameTensorSet`, "decon" → ophits tensor)
 

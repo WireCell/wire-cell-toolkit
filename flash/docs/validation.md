@@ -5,40 +5,46 @@ products against the stage-1-converted LArSoft reference in the same
 `pdhd/work/<RUN6>_<EVT>/`, writes plots to `<workdir>/light_validation/`
 (`decon_compare.png`, `hit_compare.png`, `flash_compare.png`).
 
-Run on one event of each example run (2026-06-12, toolkit @ stage-2 commit):
+Run on one event of each example run (2026-06-12, with the production
+run28368 v1 SPE templates + run27950 noise spectra, see
+`stage2-reconstruction.md`):
 
-| run/evt | decon corr (med) | decon peak ratio | peak shift | hit eff | hit surplus | flash matches (wct/ref) | flash dt med | flash PE ratio* |
+| run/evt | decon corr (med) | decon peak ratio | peak shift | hit exact-pulse match (of ref) | hit surplus (of wct) | flash matches (wct/ref) | flash dt med | flash PE ratio* |
 |---|---|---|---|---|---|---|---|---|
-| 27305/150 | 0.969 | 0.984 | +2 ticks | 401/419 | 736/827 | 16 (55/28) | +4.1 µs | 2.19 |
-| 27980/8 | 0.957 | 0.932 | +1 | 835/1113 | 1624/1907 | 59 (89/265) | +3.3 µs | 1.06 |
-| 28084/74408 | 0.978 | 1.015 | +1 | 1408/1769 | 2782/3205 | 90 (132/444) | +2.7 µs | 0.91 |
-| 29107/983 | 0.971 | 1.031 | +1 | 750/919 | 1539/1744 | 70 (114/396) | +3.2 µs | 0.96 |
+| 27305/150 | 1.0000 | 1.000 | 0 | 417/419 | 87/504 | 16 (46/28) | +4.1 µs | 1.96 |
+| 27980/8 | 1.0000 | 1.000 | 0 | 1081/3828 | 2/1083 | 60 (83/265) | +3.2 µs | 1.00 |
+| 28084/74408 | 1.0000 | 1.000 | 0 | 1755/9685 | 4/1759 | 80 (107/444) | +2.9 µs | 0.92 |
+| 29107/983 | 1.0000 | 1.000 | 0 | 868/8089 | 4/872 | 69 (104/396) | +3.2 µs | 0.95 |
 
 \* PE ratio on channels where both flashes have light, median over matched
 pairs (matching: nearest in time within 10 µs, largest-first).
 
 ## Reading of the numbers
 
-- **Deconvolution**: shift-aligned correlation 0.96–0.98 and peak ratios
-  within a few % everywhere.  The +1–2 tick shift and the residual shape
-  difference are the documented SPE-template provenance issue
-  (`stage2-reconstruction.md`): the reference was deconvolved with the
-  per-channel run28368 v1 templates, which are not retrievable from the
-  accessible cvmfs products; we use the official 2024 NP04 FBK/HPK
-  templates.  The C++ implementation itself reproduces an independent numpy
-  replication of the LArSoft module to ~1e-6.
-- **Hits**: 75–96% of reference hits are found at the same time.  The large
-  surplus (small hits, median ~1 PE) and the inflated matched-hit PE (long
-  pulse trains kept alive by the template-mismatch baseline absorb area that
-  LArSoft splits into several hits) are both downstream symptoms of the same
-  template difference; on the *reference* deconv input the ported sliding
-  window finds 504 pulses vs the 419 PerOpHitTree entries of evt 27305/150.
-- **Flashes**: the matching-relevant quantities are reasonable: on the busy
-  runs the common-channel flash PE agrees at the 5–10% level and y/z
-  centroids track (see plots).  The +3–4 µs PE-weighted time offset follows
-  from the extra late-light hits.  Absolute flash counts are not comparable:
-  the reference flashes use *all* readout channels while the waveform dump is
-  capped at 400 snippets/event, so our chain only sees a subset of the light.
+- **Deconvolution is exact**: with the production v1 per-channel SPE
+  templates and the run27950 noise spectra, every snippet matches the
+  in-file reference at correlation 1.0000, peak ratio 1.000, shift 0
+  (residuals at the 1e-6 float level).
+- **Hits are exact pulse-by-pulse**.  Hits are matched on the exact pulse
+  parameters (channel, width, amplitude, area), because the reference
+  PeakTimeAbs is unusable: the production stamps
+  `TimeStamp + TickPeriod·t_max` where the DAPHNE decoder `TimeStamp()` is
+  in DTS *ticks* while the offset is in *µs*, so every sub-pulse of a
+  snippet collapses onto the snippet head (verified: the collapsed stamps
+  reproduce exactly under the 16-tick double quantization).  Our hit times
+  are the per-pulse times and are *more* correct than the reference.
+  - On busy runs 99.5–99.8% of our hits have an exactly-equal reference
+    pulse (2–4 hits/event differ); the unmatched *reference* hits are the
+    waveforms the 400-snippet/event dump cap never gave us.
+  - On 27305/150 the surplus is concentrated on channels 41/43/44/45/47:
+    LArSoft drops these with "unrecognized channel number" (geometry
+    `IsValidOpChannel` fails); we keep them — they are real OpDets in
+    `opdet_geo` and contribute light to matching.
+- **Flashes**: common-channel flash PE agrees at the 5–10% level on the
+  busy runs and y/z centroids track.  Counts/times are not directly
+  comparable: the reference flashes were assembled from *all* readout
+  channels (no dump cap) using the collapsed hit times above, and the
+  +3–4 µs PE-weighted offset follows from that time structure.
 
 ## Q-L matching contract (smoke check)
 
@@ -56,9 +62,9 @@ PDHD charge-light matching can consume either archive unmodified.
 
 ## Follow-ups recorded
 
-1. Obtain the run28368 per-channel v1 SPE templates (dune_pardata release or
-   collaborator) and regenerate `pdhd-spe-templates.json` — expected to
-   collapse the decon shift/baseline and the hit-level surplus/PE inflation.
+1. ~~Obtain the run28368 per-channel v1 SPE templates~~ — DONE: retrieved
+   from the DUNE StashCache cvmfs (via dunegpvm), together with the
+   run27950 noise spectra; deconvolution now exact.
 2. The trigger-type heuristic (nearest 250 µs) and the 400-snippet dump cap
    are properties of the temporary exchange format; both disappear with the
    future light-data format.

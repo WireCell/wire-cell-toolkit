@@ -140,11 +140,13 @@ Port of the DUNE chain with parameters from
 `/cvmfs/dune.opensciencegrid.org/products/dune/duneopdet/v10_20_09d00/`:
 
 - `Flash::OpDecon` (`IFrameFilter`) — `Deconvolution_module.cc` math: pedestal
-  subtraction, polarity flip, FFT, Wiener filter built from the SPE template
-  (`SPE_NP04_*_2024_without_pretrigger.dat`) and `LineNoiseRMS`, auto-scale,
+  subtraction, polarity flip, FFT, Wiener filter built from the per-channel
+  run28368 v1 SPE templates and the run27950 noise power spectra (the
+  `protodunehd_pds_channels_data_v1` production set; flat `LineNoiseRMS²·N`
+  as fallback when no noise file/channel is mapped), auto-scale,
   Gauss post-filter (cutoff 1.5 MHz), post baseline correction.
   PDHD fcl values: `Samples 1024, Pedestal 8180, PreTrigger 50, PedestalBuffer 30,
-  InputPolarity −1, LineNoiseRMS 4.5`.
+  InputPolarity −1`.
 - `Flash::OpHitFinder` (`IFrameTensorSet`) — `dune_ophit_finder_deco` essentials:
   SlidingWindow hit finding on deconvolved snippets, `HitThreshold 3.0` (Wiener),
   PE = area / `ScalingFactor 100`.
@@ -172,9 +174,12 @@ flashes vs `PerFlashTree`/`flash_opdet`.  Results in `validation.md`.
 3. **opch_map coverage** — present in one file only, 224/256 channels (~54 OpDets).
    Stage-2 flashes will under-populate the 160-OpDet matrix relative to `opflashana`
    on events with unmapped active channels; unmapped channels warn-and-drop.
-4. **SPE-template↔channel mapping** — `protodunehd_pds_channels_data_v1`
-   (`dune_opdet_channels.fcl`) must be carried into the JSON conversion of the
-   templates.
+4. **SPE-template↔channel mapping** — RESOLVED in stage 3: the production
+   `protodunehd_pds_channels_data_v1` set (run28368 v1 per-channel SPE
+   templates + run27950 noise spectra, retrieved from the DUNE StashCache
+   cvmfs) is carried in `pdhd-spe-templates.json` / `pdhd-noise-templates.json`
+   (`extract_pdhd_spe_templates_v1.py`); deconvolution matches the reference
+   exactly.
 5. **`protodune_opflash` parameter fidelity** — exact `dunefd_opflash` values are
    copied at implementation time; tuned only if flash-count comparisons demand.
 6. **Future data format** — when the temporary ROOT format is replaced, only the two

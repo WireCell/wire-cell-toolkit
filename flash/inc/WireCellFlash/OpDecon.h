@@ -37,6 +37,10 @@ namespace WireCell {
             std::string m_outtag{"decon"};
             // JSON file with SPE templates and the channel -> template map.
             std::string m_spe_file{"pgrapher/experiment/pdhd/pdhd-spe-templates.json"};
+            // Optional JSON file with per-channel noise power spectra
+            // (half-spectrum |FFT|^2, LArSoft NoiseTemplateFiles).  Empty
+            // means the flat LineNoiseRMS^2 * Samples default.
+            std::string m_noise_file{""};
             // protodunehd_deconvolution fcl values.
             int m_samples{1024};
             int m_pre_trigger{50};
@@ -61,7 +65,12 @@ namespace WireCell {
             std::map<int, size_t> m_chan2tmpl;
             std::vector<std::complex<float>> m_postfilter;  // full-size spectrum
 
-            std::vector<float> deconvolve(const std::vector<float>& adc, const SPETemplate& spe) const;
+            // Noise power spectra, half-spectrum (samples/2+1) bins.
+            std::vector<std::vector<double>> m_noise_templates;
+            std::map<int, size_t> m_chan2noise;
+
+            std::vector<float> deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
+                                          const std::vector<double>* noise) const;
         };
     }  // namespace Flash
 }  // namespace WireCell

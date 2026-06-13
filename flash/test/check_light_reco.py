@@ -89,39 +89,44 @@ def compare_decon(wct, ref, outdir):
 
 
 def compare_hits(h_wct, h_ref, outdir):
-    eff = tot = 0
-    pe_ratios, dts = [], []
+    # Match on the exact pulse parameters (channel, width, amplitude,
+    # area): the reference PeakTimeAbs collapses every sub-pulse of a
+    # snippet onto the snippet head (the production stamps a DTS-tick
+    # TimeStamp plus a us t_max offset), so hit times cannot be used.
+    # Within a key, pair greedily by nearest time for the dt diagnostic.
+    def key(h):
+        return (int(h[0]), int(round(h[2] / TICK)), round(float(h[4]), 1), round(float(h[3]), 1))
+
+    pool = {}
+    for j, w in enumerate(h_wct):
+        pool.setdefault(key(w), []).append(j)
+    eff = 0
+    dts = []
+    used = set()
     for r in h_ref:
-        ch, t, pe = int(r[0]), r[1], r[5]
-        cand = h_wct[h_wct[:, 0] == ch]
-        if not len(cand):
+        cand = [j for j in pool.get(key(r), []) if j not in used]
+        if not cand:
             continue
-        tot += 1
-        j = np.argmin(np.abs(cand[:, 1] - t))
-        dt = cand[j, 1] - t
-        # 16-tick double-ULP quantization, or inside the hit width.
-        if abs(dt) <= max(16 * TICK, 0.5 * r[2]):
-            eff += 1
-            dts.append(dt / TICK)
-            if pe > 0:
-                pe_ratios.append(cand[j, 5] / pe)
-    surplus = 0
-    for w in h_wct:
-        cand = h_ref[h_ref[:, 0] == int(w[0])]
-        if not len(cand) or np.abs(cand[:, 1] - w[1]).min() > max(16 * TICK, 0.5 * w[2]):
-            surplus += 1
-    pe_ratios, dts = np.array(pe_ratios), np.array(dts)
+        j = min(cand, key=lambda j: abs(h_wct[j, 1] - r[1]))
+        used.add(j)
+        eff += 1
+        dts.append((h_wct[j, 1] - r[1]) / TICK)
+    surplus = len(h_wct) - len(used)
+    surplus_ch = sorted(set(int(h_wct[j, 0]) for j in range(len(h_wct)) if j not in used))
+    dts = np.array(dts)
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
-    axes[0].hist(dts, bins=33, range=(-16.5, 16.5))
-    axes[0].set_xlabel("matched-hit dt [ticks]")
-    axes[1].hist(np.log10(np.clip(pe_ratios, 1e-3, 1e3)), bins=40, range=(-1.5, 2.5))
-    axes[1].set_xlabel("log10(PE wct/ref), matched hits")
-    fig.suptitle(f"OpHitFinder vs PerOpHitTree (eff {eff}/{tot}, surplus {surplus}/{len(h_wct)})")
+    axes[0].hist(dts, bins=64, range=(-512, 512))
+    axes[0].set_xlabel("dt wct-ref [ticks] (ref times collapsed per snippet)")
+    pe_un = [h_wct[j, 5] for j in range(len(h_wct)) if j not in used]
+    axes[1].hist(np.log10(np.clip(pe_un, 1e-2, 1e4)), bins=40, range=(-2, 4))
+    axes[1].set_xlabel("log10(PE) of wct-only hits")
+    fig.suptitle(f"OpHitFinder vs PerOpHitTree (exact-pulse match {eff}/{len(h_ref)} ref, "
+                 f"surplus {surplus}/{len(h_wct)})")
     fig.tight_layout()
     fig.savefig(f"{outdir}/hit_compare.png", dpi=110)
     plt.close(fig)
-    return dict(eff=eff, tot=tot, surplus=surplus, nwct=len(h_wct),
-                pe_ratio_med=np.median(pe_ratios) if len(pe_ratios) else np.nan)
+    return dict(eff=eff, tot=len(h_ref), surplus=surplus, nwct=len(h_wct),
+                surplus_ch=surplus_ch)
 
 
 def compare_flashes(m_wct, s_wct, m_ref, s_ref, outdir):
@@ -177,8 +182,8 @@ def main(workdirs):
         print(f"== {wd}")
         print(f"  decon : {d['n']} snippets, corr med {d['corr_med']:.4f}, "
               f"peak ratio med {d['ratio_med']:.3f}, shift med {d['shift_med']:+.0f} ticks")
-        print(f"  hits  : eff {h['eff']}/{h['tot']}, surplus {h['surplus']}/{h['nwct']}, "
-              f"PE ratio med {h['pe_ratio_med']:.3f}")
+        print(f"  hits  : exact-pulse match {h['eff']}/{h['tot']} ref, "
+              f"surplus {h['surplus']}/{h['nwct']} on channels {h['surplus_ch']}")
         print(f"  flash : matched {f['nmatch']} (wct {f['nwct']} / ref {f['nref']}), "
               f"dt med {f['dt_med_us']:+.2f} us, PE ratio med {f['pe_ratio_med']:.3f}")
 

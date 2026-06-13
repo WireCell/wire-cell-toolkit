@@ -31,6 +31,7 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["intag"] = m_intag;
     cfg["outtag"] = m_outtag;
     cfg["spe_file"] = m_spe_file;
+    cfg["noise_file"] = m_noise_file;
     cfg["samples"] = m_samples;
     cfg["pre_trigger"] = m_pre_trigger;
     cfg["pedestal_buffer"] = m_pedestal_buffer;
@@ -50,6 +51,7 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_intag = get(cfg, "intag", m_intag);
     m_outtag = get(cfg, "outtag", m_outtag);
     m_spe_file = get(cfg, "spe_file", m_spe_file);
+    m_noise_file = get(cfg, "noise_file", m_noise_file);
     m_samples = get(cfg, "samples", m_samples);
     m_pre_trigger = get(cfg, "pre_trigger", m_pre_trigger);
     m_pedestal_buffer = get(cfg, "pedestal_buffer", m_pedestal_buffer);
@@ -86,6 +88,29 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     log->debug("loaded {} SPE templates, {} mapped channels from {}",
                m_templates.size(), m_chan2tmpl.size(), m_spe_file);
 
+    // Optional per-channel noise power spectra (half-spectrum bins,
+    // zero-padded/truncated to samples/2+1 as in the LArSoft module).
+    m_noise_templates.clear();
+    m_chan2noise.clear();
+    if (!m_noise_file.empty()) {
+        auto jnoise = Persist::load(m_noise_file);
+        for (const auto& jt : jnoise["templates"]) {
+            std::vector<double> power;
+            for (const auto& jv : jt["values"]) {
+                power.push_back(jv.asDouble());
+            }
+            power.resize(m_samples / 2 + 1, 0.0);
+            m_noise_templates.push_back(std::move(power));
+        }
+        const auto& jnch = jnoise["channels"];
+        const auto& jnti = jnoise["template_index"];
+        for (Json::ArrayIndex i = 0; i < jnch.size(); ++i) {
+            m_chan2noise[jnch[i].asInt()] = jnti[i].asUInt();
+        }
+        log->debug("loaded {} noise templates, {} mapped channels from {}",
+                   m_noise_templates.size(), m_chan2noise.size(), m_noise_file);
+    }
+
     // Gauss post-filter spectrum, built exactly as
     // Deconvolution::BuildExtraFilter: a normalized time-domain
     // Gaussian at the window center, transformed and phase-shifted
@@ -111,7 +136,8 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     }
 }
 
-std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, const SPETemplate& spe) const
+std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
+                                              const std::vector<double>* noise) const
 {
     const int N = m_samples;
 
@@ -133,14 +159,17 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     // Expected input: delta of SPE_Max p.e. -> flat |S|^2.
     const double spe_max = *std::max_element(xv.begin(), xv.end()) / spe.amplitude;
     const double S2 = spe_max * spe_max;
-    const double N2 = m_line_noise_rms * m_line_noise_rms * N;
+    const double N2_flat = m_line_noise_rms * m_line_noise_rms * N;
 
     // Wiener filter G = conj(H) S2 / (|H|^2 S2 + N2), full spectrum.
+    // N2 per bin from the channel's noise power spectrum (half-spectrum
+    // indexed, mirrored onto the upper bins) when available.
     auto xV = Aux::DftTools::fwd_r2c(m_dft, xv);
     std::vector<std::complex<float>> xG(N), xY(N);
     for (int k = 0; k < N; ++k) {
         const std::complex<double> H = spe.fft[k];
         const double H2 = std::norm(H);
+        const double N2 = noise ? (*noise)[k <= N / 2 ? k : N - k] : N2_flat;
         const std::complex<double> g = std::conj(H) * S2 / (H2 * S2 + N2);
         xG[k] = std::complex<float>(g);
         xY[k] = xG[k] * xV[k];
@@ -208,7 +237,12 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
             ++nskipped;
             continue;
         }
-        auto dec = deconvolve(trace->charge(), m_templates[it->second]);
+        const std::vector<double>* noise = nullptr;
+        auto nit = m_chan2noise.find(chan);
+        if (nit != m_chan2noise.end() and nit->second < m_noise_templates.size()) {
+            noise = &m_noise_templates[nit->second];
+        }
+        auto dec = deconvolve(trace->charge(), m_templates[it->second], noise);
         out_idx.push_back(all_traces.size());
         all_traces.push_back(std::make_shared<Aux::SimpleTrace>(chan, trace->tbin(), dec));
     }
