@@ -42,6 +42,13 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     algo["min_pulse_width"] = 1;
     algo["num_presample"] = 2;
     algo["num_postsample"] = 2;
+    // Overlapping-pulse splitting (post-processing of each found pulse).
+    // Default OFF -> bit-identical to the larana AlgoSlidingWindow output.
+    algo["split_enable"] = false;            // master gate
+    algo["split_min_prominence"] = 0.4;      // valley depth as a fraction of the smaller flanking peak
+    algo["split_min_prominence_abs"] = 0.0;  // absolute valley-depth floor (scaled units); 0 = relative only
+    algo["split_min_peak"] = 3.0;            // both sub-peaks must exceed this (scaled, ped-subtracted)
+    algo["split_min_separation"] = 2;        // min ticks between two accepted maxima (noise guard)
     cfg["algo"] = algo;
     return cfg;
 }
@@ -155,6 +162,110 @@ std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::sliding_window(
     return pulses;
 }
 
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::split_pulse(
+    const std::vector<short>& wf, double ped_mean, const Pulse& pulse,
+    const Configuration& pars)
+{
+    // Disabled, or a degenerate window: pass the pulse through verbatim so
+    // the caller (and the emitted hit row) are bit-identical to the
+    // un-split larana behaviour.  Do NOT recompute any field here.
+    if (!pars["split_enable"].asBool() || pulse.t_end <= pulse.t_start) {
+        return {pulse};
+    }
+    const double frac = pars["split_min_prominence"].asDouble();
+    const double absdepth = pars["split_min_prominence_abs"].asDouble();
+    const double minpk = pars["split_min_peak"].asDouble();
+    const int minsep = pars["split_min_separation"].asInt();
+
+    const int a = pulse.t_start, b = pulse.t_end;
+    auto v = [&](int i) { return double(wf[i]) - ped_mean; };
+
+    // Local maxima over the closed window [a, b].  Samples outside the
+    // window are treated as -inf so the window edges can themselves be
+    // peaks (matching sliding_window, whose t_max may sit at an edge).  A
+    // flat-top run of equal maxima collapses to its centre index.
+    std::vector<int> peaks;
+    for (int i = a; i <= b; ) {
+        const double left = (i > a) ? v(i - 1) : -1e300;
+        if (v(i) < left) { ++i; continue; }
+        int j = i;
+        while (j < b && v(j + 1) == v(i)) ++j;  // plateau run [i, j]
+        const double right = (j < b) ? v(j + 1) : -1e300;
+        if (v(i) >= left && v(i) >= right) {
+            const int c = (i + j) / 2;           // plateau centre
+            if (v(c) > minpk) peaks.push_back(c);
+        }
+        i = j + 1;
+    }
+    if (peaks.size() <= 1) return {pulse};
+
+    // Valley (argmin) on the open interval (p, q).
+    auto valley_between = [&](int p, int q) {
+        int vmin = p + 1;
+        for (int i = p + 1; i < q; ++i) {
+            if (v(i) < v(vmin)) vmin = i;
+        }
+        return vmin;
+    };
+
+    // Adjacent-pair prominence test to a fixed point: a shallow shoulder
+    // between two peaks is not a real second pulse, so merge the pair
+    // (drop the lower peak) and re-evaluate.
+    bool changed = true;
+    while (changed && peaks.size() > 1) {
+        changed = false;
+        for (size_t k = 0; k + 1 < peaks.size(); ++k) {
+            const int p = peaks[k], q = peaks[k + 1];
+            const int val = valley_between(p, q);
+            const double smaller = std::min(v(p), v(q));
+            const double depth = smaller - v(val);
+            // The valley must be deep both relative to the smaller flanking
+            // peak (separates comparable pulses) and in absolute terms (so a
+            // shallow ripple on the slow scintillation tail is not split off
+            // as a spurious hit -- mirrors the prototype's absolute PE margin).
+            const bool prominent = depth >= frac * smaller && depth >= absdepth
+                                   && (q - p) >= minsep;
+            if (!prominent) {
+                peaks.erase(peaks.begin() + (v(p) < v(q) ? k : k + 1));
+                changed = true;
+                break;
+            }
+        }
+    }
+    if (peaks.size() <= 1) return {pulse};
+
+    // Cut at each accepted valley.  The valley sample belongs to the left
+    // sub-pulse; the next sub-pulse starts at valley+1, so the union of the
+    // sub-windows is exactly [t_start, t_end] with no double counting.
+    std::vector<Pulse> subs;
+    int start = a;
+    for (size_t k = 0; k + 1 < peaks.size(); ++k) {
+        const int cut = valley_between(peaks[k], peaks[k + 1]);
+        subs.push_back(Pulse{start, cut, 0, 0.0, 0.0});
+        start = cut + 1;
+    }
+    subs.push_back(Pulse{start, b, 0, 0.0, 0.0});
+
+    // Recompute fields the way operator() consumes them.  area is the
+    // unclamped baseline-subtracted sum over the sub-window (matching the
+    // in-pulse accumulation in sliding_window); it differs from the parent
+    // area only by the parent's presample clamping, which is intentional
+    // (the parent pulse is never emitted when it is split).  t_max is the
+    // first index reaching the max, matching sliding_window's strict-`<`
+    // tie-break.
+    for (auto& s : subs) {
+        s.t_max = s.t_start;
+        s.peak = v(s.t_start);
+        s.area = 0.0;
+        for (int i = s.t_start; i <= s.t_end; ++i) {
+            const double val = v(i);
+            s.area += val;
+            if (s.peak < val) { s.peak = val; s.t_max = i; }
+        }
+    }
+    return subs;
+}
+
 bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out)
 {
     out = nullptr;
@@ -189,19 +300,23 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
         ped_sigma = std::sqrt(ped_sigma / nped);
 
         for (const auto& pulse : sliding_window(wf, ped_mean, ped_sigma, m_algo)) {
-            if (pulse.peak < m_hit_threshold) continue;
-            const double peak_time = t0 + tick * (trace->tbin() + pulse.t_max);
-            const double start_time = t0 + tick * (trace->tbin() + pulse.t_start);
-            const double width = (pulse.t_end - pulse.t_start) * tick;
+          // Split each found pulse at prominent sub-peaks (no-op and
+          // bit-identical when split_enable is false: one sub == pulse).
+          for (const auto& sub : split_pulse(wf, ped_mean, pulse, m_algo)) {
+            if (sub.peak < m_hit_threshold) continue;
+            const double peak_time = t0 + tick * (trace->tbin() + sub.t_max);
+            const double start_time = t0 + tick * (trace->tbin() + sub.t_start);
+            const double width = (sub.t_end - sub.t_start) * tick;
             hits.push_back(trace->channel());
             hits.push_back(peak_time);
             hits.push_back(width);
-            hits.push_back(pulse.area);
-            hits.push_back(pulse.peak);
-            hits.push_back(pulse.area / m_spe_area);
+            hits.push_back(sub.area);
+            hits.push_back(sub.peak);
+            hits.push_back(sub.area / m_spe_area);
             hits.push_back(start_time);
             hits.push_back(-1);  // flash_id, assigned by OpFlashFinder
             hits.push_back(0);   // fast_to_total
+          }
         }
     }
 

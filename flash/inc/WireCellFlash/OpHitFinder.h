@@ -45,6 +45,16 @@ namespace WireCell {
                                                      double ped_mean, double ped_sigma,
                                                      const Configuration& pars);
 
+            // Post-process one (possibly merged) pulse, splitting it at
+            // prominent valleys between sub-peaks so two optical pulses
+            // riding a common elevated scintillation tail become separate
+            // hits.  Returns {pulse} unchanged when splitting is disabled
+            // (pars["split_enable"] false) or nothing qualifies.  Public
+            // and static for unit testing.
+            static std::vector<Pulse> split_pulse(const std::vector<short>& wf,
+                                                  double ped_mean, const Pulse& pulse,
+                                                  const Configuration& pars);
+
           private:
             std::string m_intag{"decon"};
             // dune_ophit_finder_deco values.

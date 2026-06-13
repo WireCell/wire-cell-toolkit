@@ -101,6 +101,22 @@ Port of `OpHitFinderDeco` (`dune_ophit_finder_deco`) essentials:
   `PE = area/SPEArea` (=100); peak/start times in trigger-relative WCT ns via
   the frame time/tick; `flash_id = −1`.
 
+**Overlapping-pulse splitting (extension, not in larana).** A second light pulse
+riding on the first's slow scintillation tail never dips below the (very low)
+tail threshold, so `sliding_window` merges the two into one OpHit and the second
+pulse's PE is absorbed.  `split_pulse()` (public static, post-processes each
+found pulse without touching the state machine) splits a pulse at prominent
+valleys between its sub-peaks — the per-channel analogue of the prototype
+`ToyLightReco` flash-level KS/re-trigger separation.  A valley splits two peaks
+only when it is deep both **relatively** (`split_min_prominence` 0.4 of the
+smaller flanking peak) and **absolutely** (`split_min_prominence_abs`, scaled
+units; PDHD 100 = 1 PE/tick), so a smooth tail is not fragmented; each sub-pulse
+recomputes its own area/peak/times.  Gated by `split_enable` — **component
+default off / bit-identical** to larana (the disabled path returns the pulse
+verbatim; covered by the `split disabled` doctest), **on in PDHD's
+`flash.jsonnet`**.  On run 27305 evt 150: 827 → 852 OpHits, 55 → 60 OpFlashes,
+PE conserved to 0.01 %.  See `pdhd/docs/pdhd-light-raw-data.md` §3.4.
+
 ### `Flash::OpFlashFinder` (`ITensorSetFilter`, ophits → opflash tensor set)
 
 Port of `larana/OpticalDetector/OpFlashAlg.cxx` `RunFlashFinder` with

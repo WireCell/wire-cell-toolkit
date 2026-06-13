@@ -112,7 +112,9 @@ reconstruction) so every downstream consumer is identical:
   (lengths in mm; `abs_time_dts` in 16 ns DTS ticks as double; `nhits = -1` if unknown).
 - tensor 2 (`ophits`, optional): f8, shape `[nhit, 9]`:
   `channel, peak_time_ns, width_ns, area, amplitude, pe, start_time_ns, flash_id, fast_to_total`
-  (`channel` = OpChannel; `flash_id = -1` when unassociated).
+  (`channel` = OpChannel; `flash_id = -1` when unassociated).  With OpHit splitting
+  enabled (PDHD; see `stage2-reconstruction.md`) a row may be one sub-pulse of a
+  merged pulse — the schema is unchanged, there are just more rows.
 - tensor-set metadata: `run, subrun, event, tc_type, tc_time_dts (string),
   rd_timestamp_dts (string), offset_us, producer` (`"opflashana"` for converted
   LArSoft products, `"wct-flash"` for our reconstruction); tensor-set `ident` = event.

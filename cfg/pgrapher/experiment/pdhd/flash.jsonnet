@@ -84,10 +84,24 @@ local wc = import 'wirecell.jsonnet';
     }, nin=1, nout=1, uses=[dft]),
 
     // SlidingWindow hit finding on "decon" traces -> ophits tensor set.
+    // PDHD enables overlapping-pulse splitting: a second flash riding on
+    // the first's scintillation tail is recovered as its own OpHit instead
+    // of being absorbed (the component default is off / bit-identical).
     ophit(name='')::  g.pnode({
         type: 'OpHitFinder',
         name: name,
-        data: {},
+        data: {
+            algo: {
+                split_enable: true,
+                split_min_prominence: 0.4,
+                // absolute valley-depth floor (scaled decon units; 100 = 1
+                // PE/tick) so genuine second pulses split out but ripples on
+                // the slow scintillation tail do not over-fragment.
+                split_min_prominence_abs: 100.0,
+                split_min_peak: 3.0,
+                split_min_separation: 2,
+            },
+        },
     }, nin=1, nout=1),
 
     // OpFlashAlg flash assembly -> opflash tensor set (design.md §3.4).
