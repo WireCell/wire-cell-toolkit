@@ -26,10 +26,12 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           time_offset=0 * wc.us, trigger_offset=0 * wc.us)
 
 // Calibrated from PDHD data (anode->cathode crossing tracks: reconstructed drift
-// x-span vs the U-plane->cathode distance); was 1.6.  1.55 is the data-central
-// value (the field-response/LArSoft value is 1.565, ~1% higher).  See
-// pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
-local drift_speed = 1.55 * wc.mm / wc.us;
+// x-span vs the U-plane->cathode distance); was 1.6.  The span estimate is
+// bracketed by two biases -- over-merge (median-low, ~1.55) and crosser
+// truncation (pile-up-high, ~1.57); 1.565 is the midpoint and equals the
+// dune-garfield-1d565 field response + LArSoft/Walkowiak at 500 V/cm (and the
+// PDVD data ~1.57).  See pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
+local drift_speed = 1.565 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);
