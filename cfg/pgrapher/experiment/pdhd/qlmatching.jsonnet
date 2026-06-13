@@ -30,7 +30,15 @@ local wc = import 'wirecell.jsonnet';
 function(params, trigger_offset=0 * wc.us) {
     // --- PDHD matching constants (matching-only) ---
     local nchan = 160,
-    local ch_mask = [],   // no dead OpDets masked yet
+    // Static optical dead-channel mask (OpChannel == OpDet, 0..159).
+    //   - 3                      noisy (LArSoft IgnoreChannels)
+    //   - 86,87,97,107,116,117   dead  (LArSoft v1 IgnoreChannels; confirmed 0 PE / 115 evts)
+    //   - 120..159               DAPHNE full-stream readout, skipped by the snippet decoder
+    //                            => 0 PE in every event; never enter the WCT opflash.
+    // Run-to-run dead channels (e.g. the x<0 side, instrumented only in run 27980) are
+    // caught per-event by auto_mask below, not statically.  See
+    // pdhd/docs/pds-opchannel-opdet-mapping.md and pdhd-light-raw-data.md.
+    local ch_mask = [3, 86, 87, 97, 107, 116, 117] + std.range(120, 159),
 
     // visibility->PE efficiency.  Uniform placeholder for all 160 X-ARAPUCA windows;
     // VIS unused (reflected light off) but kept the right length for the predictor.
@@ -85,6 +93,18 @@ function(params, trigger_offset=0 * wc.us) {
             trigger_offset: trigger_offset,
             nchan: nchan,
             ch_mask: ch_mask,
+            // Per-event dynamic dead-channel auto-mask: drops a channel that never fires
+            // this event while its nearest live neighbours do -- catches run-dependent
+            // dead channels (x<0 side cabling varies by run) absent from the static
+            // ch_mask above.  Thresholds tuned to PDHD: a live channel reaches >=30 PE
+            // event-max (p1=31.6) while a dead one sits at 0, so pe_low=10 cleanly
+            // separates them (cleared by 99.83% of live channels).  C++ default OFF.
+            auto_mask: true,
+            auto_mask_pe_low: 10,      // event-max PE below this => dead candidate
+            auto_mask_pe_bright: 50,   // neighbour-median PE meaning "light present" (per-flash p75=55)
+            auto_mask_neighbors: 4,
+            auto_mask_min_contrast: 1,
+            auto_mask_min_flash: 3,
             flash_minPE: 50,
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
