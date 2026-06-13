@@ -40,9 +40,12 @@ function(params, trigger_offset=0 * wc.us) {
     // pdhd/docs/pds-opchannel-opdet-mapping.md and pdhd-light-raw-data.md.
     local ch_mask = [3, 86, 87, 97, 107, 116, 117] + std.range(120, 159),
 
-    // visibility->PE efficiency.  Uniform placeholder for all 160 X-ARAPUCA windows;
-    // VIS unused (reflected light off) but kept the right length for the predictor.
-    local vuv_eff = 0.03,
+    // visibility->PE efficiency.  Uniform across all 160 X-ARAPUCA windows; VIS
+    // unused (reflected light off) but kept the right length for the predictor.
+    // 0.023 = first data calibration (run 27305 crosser anchors, lambda=100 cm):
+    // direct-PMT scale ~0.77 x the old 0.03 placeholder.  Provisional (pinned mainly
+    // by one bright crosser); see pdhd/docs/ql-light-normalization-study.md.
+    local vuv_eff = 0.023,
     local VUVEfficiency = std.makeArray(nchan, function(i) vuv_eff),
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
