@@ -288,6 +288,7 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["width_tolerance"] = m_width_tolerance;
     cfg["remove_late_light"] = m_remove_late_light;
     cfg["group_by_side"] = m_group_by_side;
+    cfg["offset_us"] = m_offset_us;
     return cfg;
 }
 
@@ -300,6 +301,7 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_width_tolerance = get(cfg, "width_tolerance", m_width_tolerance);
     m_remove_late_light = get(cfg, "remove_late_light", m_remove_late_light);
     m_group_by_side = get(cfg, "group_by_side", m_group_by_side);
+    m_offset_us = get(cfg, "offset_us", m_offset_us);
 
     auto jgeom = Persist::load(m_geom_file);
     m_opdet_x.assign(m_nchan, 0.0);
@@ -437,6 +439,7 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     Configuration md = in->metadata();
     md["producer"] = "wct-flash";
     md["nchan"] = m_nchan;
+    md["offset_us"] = m_offset_us;   // per-event trigger offset for downstream Q/L
     out = std::make_shared<Aux::SimpleTensorSet>(in->ident(), md,
                                                  ITensor::shared_vector(tensors));
     log->debug("set {}: {} flashes from {} hits", in->ident(), nflash, nhit);

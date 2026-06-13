@@ -16,8 +16,14 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     activity maps behind the anode and the points stay consistent with the
 //     (offset-free) imaging frame.  Restore a real value once a T0
 //     measurement exists.
+//   trigger_offset: per-event readout-vs-trigger offset (the opflash metadata
+//     offset_us, ~250us) applied DOWNSTREAM rather than baked into x_raw -- with
+//     time_offset=0 here the raw imaging x stays offset-free, and T0Correction
+//     (x_t0cor scope) adds (cluster_t0 + trigger_offset) so the flash-matched
+//     charge lands on the trigger time base.  QLMatching folds the same value into
+//     its matching geometry.  Default 0 => x_t0cor unchanged (bit-identical).
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
-          time_offset=0 * wc.us)
+          time_offset=0 * wc.us, trigger_offset=0 * wc.us)
 
 local drift_speed = 1.6 * wc.mm / wc.us;
 
@@ -63,6 +69,7 @@ local dvm = {
         tick: 0.5 * wc.us,  // 0.5 mm per tick
         tick_drift: self.drift_speed * self.tick,
         time_offset: time_offset,
+        trigger_offset: trigger_offset,
         nticks_live_slice: 4,
         FV_xmin: -3579.85 * wc.mm,
         FV_xmax: -25.4 * wc.mm,
@@ -675,4 +682,7 @@ local clus_all_tpc (
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     all_tpc(anodes, ngroups=2, dump=true) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    // Expose the DetectorVolumes node builder so the Q/L matching graph can
+    // reference the SAME per-group DV the clustering uses (deterministic by name).
+    detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
 }

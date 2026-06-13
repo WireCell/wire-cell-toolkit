@@ -21,7 +21,11 @@ The SBND chain runs clustering in two stages:
   `{"3d", {"x_t0cor","y","z"}}` in `PCTransforms.cxx:145-149`).
 
 In the combined stage every cluster's `x` has been shifted by *its own* matched-flash time
-`x_corr = x_raw − dirx · cluster_t0 · drift_speed` (`PCTransforms.cxx:58-64,83-98`). Two clusters
+`x_corr = x_raw − dirx · (cluster_t0 + trigger_offset) · drift_speed` (`PCTransforms.cxx`). The
+`trigger_offset` term (a per-event DV-metadata key, default 0 ⇒ absent ⇒ bit-identical) carries the
+readout-vs-trigger offset for detectors that leave the raw imaging `x` offset-free (`time_offset = 0`,
+e.g. PDHD): it is applied here alongside `cluster_t0` instead of being baked into `x_raw` at imaging
+time. Detectors that bake the offset into `x_raw` (e.g. SBND) leave `trigger_offset` unset. Two clusters
 matched to **different** flashes are therefore shifted by **different** amounts, and their corrected
 geometry is no longer directly comparable. Merging across flashes in this scope can join tracks that
 are not physically coincident.

@@ -125,6 +125,12 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
     m_anode = m_anodes.front();
     m_multiplicity = m_anodes.size();
+    // Optional extra anodes to register on each run's Grouping (for multi-APA
+    // drift-side group trees). Empty => only the run's own anode (SBND-identical).
+    m_grouping_anodes.clear();
+    if (cfg.isMember("grouping_anodes") && cfg["grouping_anodes"].isArray()) {
+        for (const auto& a : cfg["grouping_anodes"]) m_grouping_anodes.push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+    }
     if (cfg.isMember("root_pcs_to_merge") && cfg["root_pcs_to_merge"].isArray()) {
         m_root_pcs_to_merge.clear();
         for (const auto& jname : cfg["root_pcs_to_merge"]) m_root_pcs_to_merge.insert(jname.asString());
@@ -178,8 +184,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
 
     m_QtoL = get(cfg, "QtoL", m_QtoL);
+    m_doReflectedLight = get(cfg, "doReflectedLight", m_doReflectedLight);
+    m_tpc_face = get(cfg, "tpc_face", m_tpc_face);
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
+    m_trigger_offset = get(cfg, "trigger_offset", m_trigger_offset);
     m_nchan = get(cfg, "nchan", m_nchan);
 
     // §A active-volume cushions (see match/docs/improve_progress.md). The raw
@@ -285,7 +294,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     const auto vis_cfg = top["VISHits"];
     const auto geom_cfg = top["Geometry"];
     const auto opdets_cfg = top["OpDets"];
-    if (!vuv_cfg.isObject() || !vis_cfg.isObject() || !geom_cfg.isObject() || !opdets_cfg.isArray()) {
+    // VISHits is only needed when reflected light is computed (m_doReflectedLight);
+    // detectors without a reflected component (PDHD) may omit it or pass empty {}.
+    if (!vuv_cfg.isObject() || !geom_cfg.isObject() || !opdets_cfg.isArray()
+        || (m_doReflectedLight && !vis_cfg.isObject())) {
         raise<ValueError>("QLMatching: semimodel_file '%s' missing required sections", m_semimodel_file);
     }
 
@@ -311,7 +323,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
 
     m_semi_model = std::make_unique<SemiAnalyticalModel>(
-        vuv_cfg, vis_cfg, geom, m_opdets, /*doReflectedLight=*/true);
+        vuv_cfg, vis_cfg, geom, m_opdets, m_doReflectedLight);
 
     log->debug("QLMatching configured: nopdets={}, semimodel_file={}",
                m_opdets.size(), m_semimodel_file);
@@ -351,8 +363,11 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["beam_mintime"]    = m_beam_mintime;
     cfg["beam_maxtime"]    = m_beam_maxtime;
     cfg["QtoL"]            = m_QtoL;
+    cfg["doReflectedLight"] = m_doReflectedLight;
+    cfg["tpc_face"]        = m_tpc_face;
     cfg["strength_cutoff"] = m_strength_cutoff;
     cfg["drift_speed"]     = m_drift_speed;
+    cfg["trigger_offset"]  = m_trigger_offset;
 
     cfg["anode_ext1"]   = m_anode_ext1;
     cfg["anode_ext2"]   = m_anode_ext2;
@@ -658,7 +673,16 @@ void QLMatching::read_flashes(ApaRun& run)
         run.flashes.push_back(flash);
     }
 
-    run.grouping->set_anodes({run.anode});
+    // Register the run's own anode plus any extra group anodes (PDHD drift-side
+    // group spanning >1 APA) so every blob's wpid resolves in get_anode().
+    if (m_grouping_anodes.empty()) {
+        run.grouping->set_anodes({run.anode});
+    }
+    else {
+        std::vector<IAnodePlane::pointer> all = m_grouping_anodes;
+        all.push_back(run.anode);
+        run.grouping->set_anodes(all);
+    }
     run.grouping->set_detector_volumes(m_dv);
 }
 
@@ -751,7 +775,7 @@ void QLMatching::compute_geometry(ApaRun& run)
     const unsigned int tpc = run.anode->ident();
     run.sign_offset  = (tpc == 0) ? -1 : 1;
 
-    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, 0, static_cast<int>(tpc));
+    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, m_tpc_face, static_cast<int>(tpc));
     const BoundingBox bb = m_dv->inner_bounds(wpid);
     if (bb.empty()) {
         raise<ValueError>("QLMatching: empty detector-volume bounds for anode %d", tpc);
@@ -925,7 +949,10 @@ void QLMatching::build_bundles(ApaRun& run)
     std::vector<double> reflected_visibilities;
     for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
-        const double flash_x_offset = run.sign_offset * flash_time * m_drift_speed;
+        // m_trigger_offset folds the per-event readout-vs-trigger offset into the
+        // drift x correction for detectors that don't bake it into the charge x at
+        // imaging time (default 0 => bit-identical). See QLMatching.h.
+        const double flash_x_offset = run.sign_offset * (flash_time + m_trigger_offset) * m_drift_speed;
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
         std::vector<unsigned int> flash_opdet_mask = run.opdet_mask;
@@ -1619,8 +1646,10 @@ void QLMatching::write_opflash_pc(ApaRun& run)
 //
 // Conventions: all spatial quantities in cm, flash time in us, drift speed in
 // cm/us, so the viewer recovers a bundle's T0 x-shift as
-//   dx_cm = sign_offset * flash_time_us * drift_speed_cm_per_us
-// and adds it to the (fixed-box) cluster points. Cluster idents are per-APA, so a
+//   dx_cm = sign_offset * (flash_time_us + trigger_offset_us) * drift_speed_cm_per_us
+// (trigger_offset is the top-level per-event readout-vs-trigger offset, 0 unless the
+// detector applies it downstream) and adds it to the (fixed-box) cluster points.
+// Cluster idents are per-APA, so a
 // globally-unique cluster uid = apa*kFlashGidStride + ident disambiguates the two
 // TPCs (same stride convention as the flash gid).
 void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
@@ -1633,6 +1662,10 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     Json::Value top;
     top["nchan"]        = m_nchan;
     top["drift_speed"]  = v_cm_us;             // cm/us
+    // Per-event trigger offset (us) the viewer must FOLD INTO the per-bundle x-shift:
+    //   dx_cm = sign_offset * (flash_time_us + trigger_offset_us) * drift_speed_cm_per_us
+    // f["time"] below stays the clean (un-shifted) flash time. 0 => bit-identical.
+    top["trigger_offset"] = m_trigger_offset / us;   // us
     top["count"]        = (Json::UInt64)m_count;
     top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
 
@@ -1868,7 +1901,7 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
         const int apa = (int)run.anode->ident();
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double ft  = flash->get_time();
-            const double off = run.sign_offset * ft * v;
+            const double off = run.sign_offset * (ft + m_trigger_offset) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 ccs.push_back({bundle->get_main_cluster(), apa, off, ft / us});
                 for (auto* oc : bundle->get_other_clusters())
@@ -2065,7 +2098,7 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     for (auto& run : runs) {
         const int apa = (int)run.anode->ident();
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
-            const double off = run.sign_offset * flash->get_time() * v;
+            const double off = run.sign_offset * (flash->get_time() + m_trigger_offset) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated())
                     continue;

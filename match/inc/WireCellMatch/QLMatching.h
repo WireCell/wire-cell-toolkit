@@ -59,6 +59,12 @@ namespace WireCell::Match {
         // canonical PCs (do NOT derive from max channel ident).
         int m_nchan{312};
 
+        // Anode face whose sensitive drift volume defines the per-TPC geometry
+        // (DetectorVolumes::inner_bounds wpid). Default 0 (SBND APAs image through
+        // face 0). PDHD's +x drift side (APA1/APA3 group) images through face 1, so
+        // its matching node sets tpc_face=1; the -x side (APA0/APA2) keeps face 0.
+        int m_tpc_face{0};
+
         // PMTs on vs off (default true => apply the OpDet type mask); see
         // ch_mask for further per-channel disables.
         bool m_pmts{true};
@@ -91,11 +97,25 @@ namespace WireCell::Match {
         double m_beam_mintime{-5 * units::us};
         double m_beam_maxtime{5 * units::us};
         double m_QtoL{0.5};
+        // Compute reflected/VIS light from the semi-analytical model. SBND has
+        // cathode WLS-reflector foils (true => bit-identical). Detectors with no
+        // reflected component (e.g. PDHD, DUNE DoReflectedLight=false) set false:
+        // the model then skips loading the VISHits tables (so an empty VISHits is
+        // allowed) and detectedReflectedVisibilities returns all-zero.
+        bool m_doReflectedLight{true};
         // Drift speed used for the per-flash X correction (flash_x_offset =
         // sign * flash_time * drift_speed). In WCT internal units (length/time,
         // i.e. mm/ns numerically). Default is the historical hard-coded value;
         // configs should pass the common params.lar.drift_speed via jsonnet.
         double m_drift_speed{1.563 * units::mm / units::us};
+        // Per-event trigger offset folded into the per-flash X correction
+        // (flash_x_offset = sign * (flash_time + trigger_offset) * drift_speed).
+        // Detectors that DON'T bake the readout-vs-trigger offset into the charge
+        // x at imaging time (e.g. PDHD, whose BlobSampler time_offset stays 0) pass
+        // the per-event offset_us here so the matching geometry lands on the same
+        // trigger time base as the flash times. In WCT internal time units (ns).
+        // Default 0 => detectors that DO bake it (e.g. SBND) are bit-identical.
+        double m_trigger_offset{0.0};
         // LASSO solution threshold below which a (flash, cluster) bundle is
         // dropped after each matching round. Was hard-coded 0.05 inline; pulled
         // out so it can be widened/narrowed from the jsonnet without rebuild.
@@ -265,6 +285,14 @@ namespace WireCell::Match {
         // independently in its own ApaRun, then the trees are merged.
         std::vector<IAnodePlane::pointer> m_anodes;
         std::size_t m_multiplicity{1};
+        // Anodes registered on each run's Grouping for wpid->anode lookup
+        // (Cluster::get_length etc.). Empty (default) => just the run's own anode,
+        // bit-identical to the historical single-APA path. When one input tree
+        // spans several anodes of a shared drift volume (PDHD drift-side group:
+        // APA0+APA2 / APA1+APA3 merged before the all-TPC stage), list them all
+        // here so blobs from every APA resolve; the run's drift geometry still
+        // uses the single representative "anode".
+        std::vector<IAnodePlane::pointer> m_grouping_anodes;
         // Root-node local PCs concatenated across inputs when merging the per-APA
         // trees (multi-APA path only); mirrors PointTreeMerging. ['opflash'] = the
         // optical-flash display PC; everything else is dropped from non-primary roots.

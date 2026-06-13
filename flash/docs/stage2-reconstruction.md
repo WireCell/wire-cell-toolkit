@@ -131,6 +131,14 @@ Port of `larana/OpticalDetector/OpFlashAlg.cxx` `RunFlashFinder` with
 - `RemoveLateLight` (configurable `remove_late_light`, default true; Argon
   constant 1.6 µs).
 
+`offset_us` config (default 0) is stamped verbatim into the output tensor-set metadata
+(`md["offset_us"]`).  The WCT-native chain can't recover the readout-vs-trigger offset
+from the self-triggered snippets — the frame time is anchored at the recovered snippet
+origin `t_first`, which sits tens of µs inside the readout window (e.g. run27305 evt150:
+`−frame_time ≈ 216 µs` vs the trigoff `offset_us = 249.936 µs`) — so it is supplied by
+config (`run_light_evt.sh` reads the exact value from the ROOT `trigoff` tree) rather
+than derived.  Downstream charge clustering / Q/L matching reads it from the archive.
+
 Not ported: wire-plane centers/widths, Frame/InBeamFrame/OnBeamTime
 bookkeeping (LArSoft frame conventions don't apply).
 

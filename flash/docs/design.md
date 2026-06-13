@@ -73,9 +73,13 @@ All times in WCT products are **ns (WCT units) relative to the event trigger**:
 - Waveform frame: `IFrame::time() = (rd_timestamp − tc_dts) · 16 ns ≈ −250 µs`
   (readout start relative to trigger); each trace `tbin` = snippet start relative to
   `rd_timestamp` in 16 ns ticks; `IFrame::tick() = 16 ns`.
-- Relation to TPC: charge imaging currently runs with `time_offset = 0` (no per-event
-  T0; see `clus.jsonnet`).  A flash-matched T0 from this subsystem is exactly what
-  will eventually justify restoring the −250 µs anchor there.
+- Relation to TPC: charge imaging runs with `time_offset = 0` (the raw `x` scope stays
+  offset-free; see `clus.jsonnet`).  Rather than baking the −250 µs anchor into `x_raw`
+  at imaging time, the per-event `offset_us` is applied **downstream** at Q/L matching:
+  `QLMatching` folds it into the per-flash drift `x` correction (`trigger_offset` config)
+  and `T0Correction` adds it to the `x_t0cor` scope (`trigger_offset` DV-metadata key).
+  Both default 0 ⇒ bit-identical when unused.  See `match/docs/joint-qlmatching-design.md`
+  and `clus/docs/clustering_with_t0.md`.
 
 ### 3.2 Channels
 
@@ -122,6 +126,11 @@ reconstruction) so every downstream consumer is identical:
 - tensor-set metadata: `run, subrun, event, tc_type, tc_time_dts (string),
   rd_timestamp_dts (string), offset_us, producer` (`"opflashana"` for converted
   LArSoft products, `"wct-flash"` for our reconstruction); tensor-set `ident` = event.
+  The stage-1 converter writes the full set; the stage-2 `"wct-flash"` producer writes
+  `event, nchan, producer` plus `offset_us` (the WCT-native reco can't recover the
+  readout-vs-trigger offset from the self-triggered snippets, so `OpFlashFinder` takes
+  it as a config value — supplied by `run_light_evt.sh` from the ROOT `trigoff` tree —
+  and stamps it verbatim).  Downstream Q/L matching reads this `offset_us`.
 - On disk: `TensorFileSink` archive (`opflash_*.tar.gz`, prefix `opflash_`), the same
   convention as SBND's `opflash_apa<n>.tar.gz`, so
   `TensorFileSource → FlashTensorToOpticalPCs{nchan:160} → QLMatching{nchan:160}`

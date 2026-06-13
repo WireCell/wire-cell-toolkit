@@ -46,6 +46,15 @@ namespace WireCell {
             // behaviour), on for PDHD.  See stage2-reconstruction.md.
             bool m_group_by_side{false};
 
+            // Per-event readout-vs-trigger offset (us): (tc - rd_timestamp)*16ns
+            // from the ROOT trigoff tree (~250).  The reconstruction can't recover
+            // this exactly from the self-triggered snippets (their origin sits ~tens
+            // of us inside the readout window), so it is supplied by config and
+            // stamped verbatim into the opflash tensor-set metadata as "offset_us"
+            // for downstream charge clustering / Q-L matching.  0 => key written as
+            // 0 (no offset applied downstream).
+            double m_offset_us{0.0};
+
             std::vector<double> m_opdet_x, m_opdet_y, m_opdet_z;  // [nchan], mm
 
             int m_count{0};

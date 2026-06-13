@@ -110,12 +110,17 @@ local wc = import 'wirecell.jsonnet';
     // is off / all-OpDet.  On the 2024 single-side readout this is
     // bit-identical to all-TPC, but it is the physically correct grouping
     // once both volumes are instrumented.
-    opflash_finder(name='')::  g.pnode({
+    // offset_us: per-event readout-vs-trigger offset (tc - rd_timestamp from the
+    // ROOT trigoff tree, ~250) stamped verbatim into the opflash metadata so the
+    // downstream charge clustering / Q-L matching can place charge on the trigger
+    // time base.  Default 0 (no offset).  run_light_evt.sh supplies the real value.
+    opflash_finder(name='', offset_us=0)::  g.pnode({
         type: 'OpFlashFinder',
         name: name,
         data: {
             nchan: $.nchan,
             group_by_side: true,
+            offset_us: offset_us,
         },
     }, nin=1, nout=1),
 }

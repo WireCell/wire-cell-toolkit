@@ -104,6 +104,7 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `rescue_exponent` | `0.8` | `m_rescue_exponent` | chi2/ndf exponent in the rescue metric (prototype 0.8) |
 | `rescue_boundary_weight` | `0.8` | `m_rescue_boundary_weight` | per-flag rescue down-weight, applied for `at_x_boundary` then `close_to_PMT` (prototype 0.8/0.64) |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
+| `trigger_offset` | `0` | `m_trigger_offset` | per-event readout-vs-trigger offset (WCT ns, ~+250000) folded into **every** flash drift-`x` correction: `flash_x_offset = sign_offset·(flash_time + m_trigger_offset)·drift_speed`. For detectors that leave the raw imaging `x` offset-free (`time_offset = 0`, e.g. PDHD); the partner `T0Correction` adds the same value to `x_t0cor` via its `trigger_offset` DV-metadata key, while `cluster_t0` stays the clean flash time. Default 0 ⇒ detectors that bake the offset into `x_raw` (e.g. SBND) are bit-identical. PDHD passes the opflash `offset_us·wc.us`. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
 | `anode_ext1` | `-2.0 cm` | `m_anode_ext1` | anode-side inclusion / flag-window edge in `u` (`anode_in`); see §4.1a |
 | `anode_ext2` | `4.0 cm` | `m_anode_ext2` | anode flag-window outer edge in `u` (close-to-PMT / x-boundary) |
