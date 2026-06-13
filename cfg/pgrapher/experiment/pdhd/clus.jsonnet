@@ -25,7 +25,11 @@ local clus = import "pgrapher/common/clus.jsonnet";
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           time_offset=0 * wc.us, trigger_offset=0 * wc.us)
 
-local drift_speed = 1.6 * wc.mm / wc.us;
+// Calibrated from PDHD data (anode->cathode crossing tracks: reconstructed drift
+// x-span vs the U-plane->cathode distance); was 1.6, consistent with the
+// dune-garfield-1d565 field response + LArSoft/Walkowiak at 500 V/cm.  See
+// pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
+local drift_speed = 1.565 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);

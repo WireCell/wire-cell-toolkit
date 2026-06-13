@@ -105,6 +105,15 @@ base {
         }
     },
 
+    lar: super.lar {
+        // Calibrated from PDHD data: anode->cathode crossing tracks' reconstructed
+        // drift x-span (both drift volumes, 100+ events) vs the U-plane->cathode
+        // distance gives v ~ 1.55 mm/us; 1.565 (within errors) is adopted to match
+        // the dune-garfield-1d565 field response and LArSoft/Walkowiak at 500 V/cm.
+        // See pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
+        drift_speed: 1.565 * wc.mm / wc.us,  // was 1.6 (pgrapher/common default)
+    },
+
     daq: super.daq {
         tick: 512*wc.ns,
         nticks: 6000,
