@@ -56,31 +56,35 @@ Differences from the module: a shorter-than-`samples` input is zero-padded
 snippets); `kScint` input shape is not ported (unused in the PDHD
 configuration).
 
-### SPE + noise templates (production provenance)
+### SPE + noise templates — default is the 2024 averages (NOT v1)
 
-`cfg/pgrapher/experiment/pdhd/pdhd-spe-templates.json` and
-`pdhd-noise-templates.json` (`flash/test/extract_pdhd_spe_templates_v1.py`)
-carry the exact template set of the LArSoft production that made the
-reference `deconv` (dunesw v10_20_09d00 `protodunehd_deconvolution` →
-`protodunehd_pds_channels_data_v1` → `protodunehd_template_list_v1`):
+Two template sets exist; **the default `pdhd-spe-templates.json` is the 2024
+NP04 FBK/HPK *average* templates** (`extract_pdhd_spe_templates.py`,
+`SPE_NP04_{FBK,HPK}_2024_without_pretrigger.dat`) with **flat Wiener N²**
+(`noise_file: ''`).  This is a deliberate choice over the LArSoft production
+calibration, made after the per-channel study in `pdhd/pics/pd/`:
 
-- **SPE**: the 113 per-channel run28368 v1 templates
-  (`run28368_*_Change_Scale_PDHD_Jun2025.txt`, DUNE StashCache
-  `/cvmfs/dune.osgstorage.org/.../ProtoDUNE/HD/opdetresponse/v1/`).
-  Unmapped channels — dead 86,87,97,107,116,117, noisy 3, full-stream
-  120–159 — are skipped, matching the LArSoft `IgnoreChannels`.
-- **Noise**: the two run27950 FFT noise power spectra
-  (`FFT_Noise_Template_run27950_PDHD_VGain2318_sample513_{fbk,hpk}_Dec2024.txt`,
-  `.../opdetresponse/v0/`), mapped to all 160 channels; they replace the
-  flat `LineNoiseRMS²·N` in the Wiener N² (the LArSoft `NoiseTemplateFiles`
-  branch).
+- the **v1 per-channel** templates (preserved in `pdhd-spe-templates-v1.json`,
+  `extract_pdhd_spe_templates_v1.py`; the 113 run28368
+  `..._Jun2025.txt` from DUNE StashCache
+  `/cvmfs/dune.osgstorage.org/.../ProtoDUNE/HD/opdetresponse/v1/`) reproduce
+  the in-file LArSoft `deconv` **exactly** (correlation 1.0000, peak 1.000,
+  shift 0) — but the LArSoft v1 deconvolution **over-subtracts the slow tail
+  below zero on ~every channel** (their net template area is large-positive,
+  not DC-balanced);
+- the **2024 averages** are DC-balanced (total area ≈ 0) and deconvolve to a
+  **flat tail** (real C++ output: median late-tail ≈ 0 % of peak across the
+  example events), at the cost of a +1–2 tick shift vs the v1/LArSoft peak.
 
-With both in place our deconvolution matches the in-file reference exactly
-(shift-aligned correlation 1.0000, peak ratio 1.000, shift 0; see
-`validation.md`).  The earlier 2024 NP04 FBK/HPK average templates
-(`extract_pdhd_spe_templates.py`) gave correlation ~0.97 with a +1–2 tick
-shift and are kept only as the documented fallback for detectors without
-per-channel calibration.
+So `flash/` deliberately diverges from the LArSoft production deconvolution in
+favour of the physically flat 2024 result.  The optional `noise_file`
+(run27950 per-channel spectra, `pdhd-noise-templates.json`,
+`FFT_Noise_Template_run27950_..._{fbk,hpk}_Dec2024.txt`) is a second-order
+effect and slightly less flat with these templates, so it is off by default.
+A data-driven SPE template extracted from these snippets does **not** beat the
+2024 average (the single-PE pulses sit at the noise floor; see
+`pdhd/pics/pd/README.md`).  Switching sets is a one-line `flash.jsonnet`
+change (`spe_file` / `noise_file`).
 
 ### `Flash::OpHitFinder` (`IFrameTensorSet`, "decon" → ophits tensor)
 

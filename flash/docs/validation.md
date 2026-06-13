@@ -5,6 +5,15 @@ products against the stage-1-converted LArSoft reference in the same
 `pdhd/work/<RUN6>_<EVT>/`, writes plots to `<workdir>/light_validation/`
 (`decon_compare.png`, `hit_compare.png`, `flash_compare.png`).
 
+> **Default-template note (2026-06-12):** the table below is the
+> *v1-template* run (`pdhd-spe-templates-v1.json` + run27950 noise), which is
+> what reproduces the LArSoft reference exactly.  The shipped **default is now
+> the 2024 FBK/HPK average templates** with flat N², which deliberately
+> diverge from LArSoft (correlation ~0.97, +1–2 tick shift) because v1
+> over-subtracts the slow tail — see `stage2-reconstruction.md` and
+> `pdhd/pics/pd/README.md`.  The exact-match numbers here are the validation
+> that our OpDecon *port* is faithful, not an endorsement of v1 for physics.
+
 Run on one event of each example run (2026-06-12, with the production
 run28368 v1 SPE templates + run27950 noise spectra, see
 `stage2-reconstruction.md`):

@@ -65,17 +65,21 @@ local wc = import 'wirecell.jsonnet';
     // flash/docs/stage2-reconstruction.md for fcl correspondence) ---
 
     // Wiener deconvolution of "raw" snippets -> "decon" traces.
-    // Defaults follow protodunehd_deconvolution; the run28368 v1
-    // per-channel SPE templates and channel map live in
-    // pdhd-spe-templates.json, the run27950 per-channel noise power
-    // spectra (the production N^2) in pdhd-noise-templates.json.
+    // Defaults follow protodunehd_deconvolution.  The SPE templates in
+    // pdhd-spe-templates.json default to the 2024 NP04 FBK/HPK *average*
+    // templates: they are DC-balanced and deconvolve to a flat tail,
+    // whereas the run28368 v1 per-channel templates (kept in
+    // pdhd-spe-templates-v1.json) over-subtract the slow tail below zero
+    // (see pdhd/pics/pd/README.md).  Flat Wiener N^2 (noise_file empty);
+    // the run27950 per-channel spectra in pdhd-noise-templates.json are a
+    // second-order effect and slightly less flat with these templates.
     local dft = { type: 'FftwDFT' },
     opdecon(name='')::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
             dft: wc.tn(dft),
-            noise_file: 'pgrapher/experiment/pdhd/pdhd-noise-templates.json',
+            noise_file: '',
         },
     }, nin=1, nout=1, uses=[dft]),
 

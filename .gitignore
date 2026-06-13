@@ -62,6 +62,7 @@ ltximg
 !cfg/pgrapher/experiment/pdhd/pdhd-opdet-geom.json
 !cfg/pgrapher/experiment/pdhd/pdhd-opch-map.json
 !cfg/pgrapher/experiment/pdhd/pdhd-spe-templates.json
+!cfg/pgrapher/experiment/pdhd/pdhd-spe-templates-v1.json
 !cfg/pgrapher/experiment/pdhd/pdhd-noise-templates.json
 .snakemake
 *.old
