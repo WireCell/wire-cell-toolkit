@@ -23,7 +23,10 @@ local clus = import "pgrapher/common/clus.jsonnet";
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
           time_offset=0 * wc.us, relax_containment_filter=true)
 
-local drift_speed = 1.6 * wc.mm / wc.us;
+// Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
+// x-span vs the collection-plane->cathode-surface distance 339.01 cm); was 1.6.
+// See pdvd/docs/clus-workflow.md (drift-velocity calibration).
+local drift_speed = 1.57 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);

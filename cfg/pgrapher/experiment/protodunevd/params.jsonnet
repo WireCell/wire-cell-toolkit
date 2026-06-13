@@ -103,6 +103,15 @@ base {
         }
     },
 
+    lar: super.lar {
+        // Calibrated from PDVD data: anode->cathode crossing tracks' reconstructed
+        // drift x-span (both drift volumes, 142 events) vs the collection-plane ->
+        // cathode-surface distance (339.01 cm) gives v ~ 1.57 mm/us; consistent with
+        // the Walkowiak nominal at the PDVD field.  See pdvd/docs/clus-workflow.md
+        // (drift-velocity calibration).
+        drift_speed: 1.57 * wc.mm / wc.us,  // was 1.6 (pgrapher/common default)
+    },
+
     daq: super.daq {
         nticks: 6000,
     },
