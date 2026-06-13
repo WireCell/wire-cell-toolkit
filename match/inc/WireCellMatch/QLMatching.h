@@ -388,13 +388,15 @@ namespace WireCell::Match {
         // Returns the prototype's flag_good_bundle / TPC-containment verdict: true
         // iff the (post-trim) cluster endpoints fall inside the TPC drift box (the
         // 4-part in-window guard, == ToyMatching.cxx 272-275). Returns false when
-        // the cluster has no 3d points under this anode (it cannot be contained).
+        // the cluster has no 3d points at all (it cannot be contained). The
+        // endpoint walk unions the cluster's slices over EVERY anode it touches (a
+        // PDHD drift group spans two APAs offset in Z), so a cluster living wholly
+        // in the group's second APA is no longer spuriously declared uncontained.
         // The caller discards uncontained bundles when m_require_containment.
         bool compute_endpoint_flags(TimingTPCBundle* bundle,
                                     WireCell::Clus::Facade::Cluster* cluster,
                                     double flash_x_offset,
-                                    double s, double anode_x, double u_cathode,
-                                    int anode_ident) const;
+                                    double s, double anode_x, double u_cathode) const;
 
         // Significant extreme points of a cluster (get_extreme_wcps, flattened),
         // memoized in m_extreme_cache. Used to locate the cathode endpoint.
@@ -487,6 +489,7 @@ namespace WireCell::Match {
         void build_opdet_mask(ApaRun& run);          // base OpDet on/off mask
         void read_flashes(ApaRun& run);              // canonical flash PCs -> Opflash
         void decompose_cluster_groups(ApaRun& run);  // main+associated split, idx maps
+        void recompose_cluster_groups(ApaRun& run);  // undo the split before output (T0-annotation only)
         void compute_geometry(ApaRun& run);          // per-TPC drift geometry, mask cull, opdet idx
         void compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc);  // per-event dead-PMT auto-mask
         void build_bundles(ApaRun& run);             // (flash,group) bundles + predicted light  [Stage 1]

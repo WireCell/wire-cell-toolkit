@@ -529,6 +529,19 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     for (std::size_t k = 0; k < invec.size(); ++k) run_one_apa_fit(runs[k]);
     const double t_fit = ms_since(t_fit0);
 
+    // Hand-scan calibration / cathode diagnostic dumps read the per-APA runs while
+    // the matching decomposition is still materialized (main + associated are
+    // separate Facade clusters), so run them BEFORE recompose restores the merged
+    // grouping. Read-only; never perturb the matching. (Moved up from after output
+    // assembly; the matched tensor output is independent of them.)
+    if (!m_calib_dump.empty()) dump_calib(runs);
+    if (!m_cathode_diag.empty()) dump_cathode_diag(runs);
+
+    // Restore the stage-3 cluster grouping (undo decompose's Grouping::separate)
+    // so QLMatching emits a T0/flash-annotated copy of its INPUT tree rather than
+    // the matching-internal main/associated split. See recompose_cluster_groups().
+    for (std::size_t k = 0; k < invec.size(); ++k) recompose_cluster_groups(runs[k]);
+
     // ---- Build / merge outputs ----
     const auto t_out0 = wallclock::now();
     const int out_ident = runs.front().charge_ident;
@@ -566,10 +579,8 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     }
     out = Aux::TensorDM::as_tensorset(outtens, out_ident);
 
-    // Hand-scan calibration dump (off unless calib_dump is set). Reads the finished
-    // per-APA runs only; never perturbs the matching above.
-    if (!m_calib_dump.empty()) dump_calib(runs);
-    if (!m_cathode_diag.empty()) dump_cathode_diag(runs);
+    // (calib / cathode-diag dumps moved above, before recompose_cluster_groups,
+    // so they still see the matching-internal main/associated split.)
 
     // Per-event timing + memory. `took` is the full operator() wall time. RSS is the
     // resident set of the WHOLE matching process at this point (dominated by the
@@ -763,6 +774,34 @@ void QLMatching::decompose_cluster_groups(ApaRun& run)
 
     for (std::size_t i = 0; i < run.flashes.size(); ++i) run.global_flash_idx_map[run.flashes[i].get()] = i;
     for (std::size_t i = 0; i < run.clusters.size(); ++i) run.global_cluster_idx_map[run.clusters[i]] = i;
+}
+
+// Inverse of decompose_cluster_groups(): merge each match-group's associated
+// sub-clusters back into their main, restoring the stage-3 cluster grouping
+// before the matched tree is serialized. decompose() split via Grouping::separate()
+// ONLY to anchor each bundle's geometry on its main cluster; that split is a
+// matching-internal device and must NOT leak into the emitted cluster tree, where
+// it would land in the downstream all-TPC clustering (PDHD's stage 4 has no
+// flash-T0 merge to re-absorb it, so a single stage-3 cluster came out split —
+// see match/QLMatching split-cluster bug). After this, grouping->children() ==
+// the stage-3 cluster set: each main keeps its original ident and the matched
+// cluster_t0 / flash scalars written by apply_matched_t0s, so QLMatching is a pure
+// T0/flash ANNOTATION step. The matching results are untouched. Groups with no
+// associated sub-clusters (the common / single-component / single-anode case) are
+// a no-op. Must run AFTER dump_calib / dump_cathode_diag (which read the split
+// main+associated clusters) and BEFORE output assembly.
+void QLMatching::recompose_cluster_groups(ApaRun& run)
+{
+    auto* grouping = run.grouping;
+    for (auto& [main_cluster, others] : run.match_groups) {
+        if (others.empty()) continue;
+        // merge(): main adopts every associated cluster's blobs (take_children),
+        // then the emptied associated facades are destroyed (keep=false default).
+        grouping->merge(others.begin(), others.end(), main_cluster);
+    }
+    // run.clusters / global_cluster_idx_map / the bundles now hold dangling pointers
+    // to the destroyed associated clusters; nothing reads them after this point
+    // (output assembly walks the tree via root_live only).
 }
 
 // Active-volume geometry from the IDetectorVolumes service, in a per-TPC drift
@@ -1003,8 +1042,7 @@ void QLMatching::build_bundles(ApaRun& run)
             // from the main cluster's drift endpoints (the group anchor). The
             // return is the prototype flag_good_bundle / TPC-containment verdict.
             const bool contained =
-                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode,
-                                       static_cast<int>(run.anode->ident()));
+                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode);
             bundle->set_contained(contained);   // diagnostic only (calib dump)
             // flag_two_boundary (both PCA ends at a detector edge). The calib dump and the
             // high-consistent ladder's B3 branch consume it; compute it only when one of those
@@ -2207,19 +2245,25 @@ QLMatching::cluster_extreme_points(Cluster* cluster) const
 bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                                         Cluster* cluster,
                                         double flash_x_offset,
-                                        double s, double anode_x, double u_cathode,
-                                        int anode_ident) const
+                                        double s, double anode_x, double u_cathode) const
 {
     // Collect the per-time-slice representative drift coordinate u and blob
-    // count. The toolkit's time_blob_map is nested apa->face->time->BlobSet; the
-    // matched anode has a single active face for SBND but we iterate all faces
-    // under the apa for robustness. We then walk in u-order from each drift end
-    // (anode = min u, cathode = max u). Walking by u rather than the prototype's
-    // strict time order is a faithful adaptation: for a normally drifting track
-    // time and u are monotonic, and the boundary tests are themselves in u.
+    // count. The toolkit's time_blob_map is nested apa->face->time->BlobSet. A
+    // PDHD drift group spans TWO APAs offset in Z (e.g. APA1 z[0,232]cm + APA3
+    // z[232,462]cm share the +x side), and the two APAs share the drift geometry
+    // (anode_x / u_cathode / s) -- so union the slices over EVERY anode the
+    // cluster touches. Keying on a single representative anode (as the SBND-origin
+    // code did) declared any cluster living wholly in the group's second APA
+    // "not contained" (no blobs under that key), hiding it from the matcher's
+    // boundary flags and the calib dump. This mirrors the build_bundles
+    // PE-inclusion box, which already unions grouping_anodes; for single-anode
+    // runs (SBND) the cluster has one key, so the union is identical. We then walk
+    // in u-order from each drift end (anode = min u, cathode = max u). Walking by u
+    // rather than the prototype's strict time order is a faithful adaptation: for a
+    // normally drifting track time and u are monotonic, and the boundary tests are
+    // themselves in u.
     const auto& tbm = cluster->time_blob_map();
-    auto ait = tbm.find(anode_ident);
-    if (ait == tbm.end()) return false;  // no blobs under this anode: cannot be contained
+    if (tbm.empty()) return false;  // no blobs at all: cannot be contained
 
     // Raw readout-window truncation flag (T0-independent, APA-agnostic). The
     // blob slice indices are raw ticks (SamplingHelpers writes slice_index =
@@ -2233,13 +2277,16 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     {
         bool have = false;
         int min_tick = 0, max_tick = 0;
-        for (const auto& [face, slices] : ait->second) {
-            for (const auto& [t, bset] : slices) {
-                if (bset.empty()) continue;
-                const int lo = t;                               // slice_index_min (raw tick)
-                const int hi = (*bset.begin())->slice_index_max();
-                if (!have) { min_tick = lo; max_tick = hi; have = true; }
-                else { if (lo < min_tick) min_tick = lo; if (hi > max_tick) max_tick = hi; }
+        for (const auto& [anode, faces] : tbm) {
+            (void)anode;
+            for (const auto& [face, slices] : faces) {
+                for (const auto& [t, bset] : slices) {
+                    if (bset.empty()) continue;
+                    const int lo = t;                               // slice_index_min (raw tick)
+                    const int hi = (*bset.begin())->slice_index_max();
+                    if (!have) { min_tick = lo; max_tick = hi; have = true; }
+                    else { if (lo < min_tick) min_tick = lo; if (hi > max_tick) max_tick = hi; }
+                }
             }
         }
         if (have) {
@@ -2252,14 +2299,17 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
 
     struct SliceU { double u; int nblobs; };
     std::vector<SliceU> sv;
-    for (const auto& [face, slices] : ait->second) {
-        for (const auto& [t, bset] : slices) {
-            if (bset.empty()) continue;
-            const Blob* b0 = *bset.begin();
-            auto pts = b0->points("3d", {"x", "y", "z"});
-            if (pts.empty()) continue;
-            const double x = pts.at(0).x() + flash_x_offset;
-            sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()) });
+    for (const auto& [anode, faces] : tbm) {
+        (void)anode;
+        for (const auto& [face, slices] : faces) {
+            for (const auto& [t, bset] : slices) {
+                if (bset.empty()) continue;
+                const Blob* b0 = *bset.begin();
+                auto pts = b0->points("3d", {"x", "y", "z"});
+                if (pts.empty()) continue;
+                const double x = pts.at(0).x() + flash_x_offset;
+                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()) });
+            }
         }
     }
     if (sv.empty()) return false;  // no 3d points here: cannot be contained
