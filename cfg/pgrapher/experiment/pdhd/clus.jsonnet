@@ -548,6 +548,7 @@ local clus_all_tpc (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    save_opflash = false,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -618,6 +619,11 @@ local clus_all_tpc (
             subRunNo: subRunNo,
             eventNo: eventNo,
             save_deadarea: true,
+            // Dump the optical "op" bee instance (measured flash PE + Q/L
+            // predicted PE per matched cluster) at the pre-pipeline point.
+            // Needs do_qlmatch (the QLMatching "opflash" root PC); no-op
+            // otherwise.  Default false => bit-identical.
+            save_opflash: save_opflash,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PD anode face
             dead_apa_groups: apa_drift_groups,  // group dead area by drift side -> 2 dead instances
             anodes: [wc.tn(a) for a in anodes],
@@ -687,7 +693,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME per-group DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
