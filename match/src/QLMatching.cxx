@@ -775,8 +775,25 @@ void QLMatching::compute_geometry(ApaRun& run)
     const unsigned int tpc = run.anode->ident();
     run.sign_offset  = (tpc == 0) ? -1 : 1;
 
+    // Active-volume bounds are the UNION of the sensitive boxes of every APA in this
+    // drift-side group. PDHD images two APAs per drift volume, offset in Z (e.g. APA0
+    // z[-1,2306] mm + APA2 z[2320,4626] mm share the -x side); using only the
+    // representative anode's box would gate out all charge in the group's other APA (a
+    // different Z half) from the predicted-light sum at build_bundles. With an empty
+    // grouping list (SBND / single-APA) this reduces to the representative anode's box
+    // => bit-identical. X is identical across same-side APAs, so the drift math
+    // (anode_x / u_cathode / s) is unchanged; only the Y/Z extent widens.
     const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, m_tpc_face, static_cast<int>(tpc));
-    const BoundingBox bb = m_dv->inner_bounds(wpid);
+    const std::vector<IAnodePlane::pointer> group_anodes =
+        m_grouping_anodes.empty() ? std::vector<IAnodePlane::pointer>{run.anode}
+                                  : m_grouping_anodes;
+    BoundingBox bb;
+    for (const auto& a : group_anodes) {
+        const WirePlaneId awpid(WirePlaneLayer_t::kAllLayers, m_tpc_face,
+                                static_cast<int>(a->ident()));
+        const BoundingBox abb = m_dv->inner_bounds(awpid);
+        if (!abb.empty()) bb(abb.bounds());
+    }
     if (bb.empty()) {
         raise<ValueError>("QLMatching: empty detector-volume bounds for anode %d", tpc);
     }
@@ -809,9 +826,9 @@ void QLMatching::compute_geometry(ApaRun& run)
     }
     log->debug("anode {} pos_offset (dy,dz) = ({:.3f},{:.3f}) cm [parked, not yet applied]",
                tpc, run.dy / units::cm, run.dz / units::cm);
-    log->debug("anode {} bbox x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
+    log->debug("anode {} group-bbox ({} apa) x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
                "anode_x {:.2f} cathode_x {:.2f} u_cathode {:.2f} cm s {}",
-               tpc, x_lo / units::cm, x_hi / units::cm,
+               tpc, group_anodes.size(), x_lo / units::cm, x_hi / units::cm,
                bray.first.y() / units::cm, bray.second.y() / units::cm,
                bray.first.z() / units::cm, bray.second.z() / units::cm,
                run.anode_x / units::cm, cathode_x / units::cm, run.u_cathode / units::cm, run.s);
