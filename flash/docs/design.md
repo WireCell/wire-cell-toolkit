@@ -106,7 +106,10 @@ reconstruction) so every downstream consumer is identical:
 
 - tensor 0 (`opflash`): f8, shape `[nflash, 1+160]`, row-major;
   column 0 = flash time (ns, trigger-relative), columns 1..160 = PE per OpDet.
-  This is exactly the `FlashTensorToOpticalPCs` input contract.
+  This is exactly the `FlashTensorToOpticalPCs` input contract.  Flashes may be
+  built per cathode side (`group_by_side`, on for PDHD; see
+  `stage2-reconstruction.md`) — the schema is unchanged, the side is implicit in
+  which OpDet columns carry PE.
 - tensor 1 (`flash_summary`): f8, shape `[nflash, 8]`:
   `flash_id, total_pe, y_center, z_center, y_width, z_width, abs_time_dts, nhits`
   (lengths in mm; `abs_time_dts` in 16 ns DTS ticks as double; `nhits = -1` if unknown).

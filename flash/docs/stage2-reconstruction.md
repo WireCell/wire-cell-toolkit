@@ -134,6 +134,34 @@ Port of `larana/OpticalDetector/OpFlashAlg.cxx` `RunFlashFinder` with
 Not ported: wire-plane centers/widths, Frame/InBeamFrame/OnBeamTime
 bookkeeping (LArSoft frame conventions don't apply).
 
+**Coincidence window is robust at 1 µs (data-checked).** Across the four example
+events the OpHit time spread *within* a reconstructed flash is always < 1 µs (max
+0.96 µs) — a 1 µs bin never splits a real flash — while inter-flash gaps down to
+~0.1 µs are still resolved (the half-bin offset plus the `width_tolerance = 0.5`
+peak-time regroup). So the larana `bin_width = 1 µs` / `width_tolerance = 0.5`
+defaults are kept. This is the flash-level analogue of the prototype
+`ToyLightReco`, which instead bins at 93.75 ns and separates pile-up with a
+Kolmogorov–Smirnov test on the per-PMT *spatial* PE profile — a flash-level tool it
+needs because it has no per-channel OpHit step. Here the "second pulse on a tail"
+case is handled one layer earlier in `OpHitFinder::split_pulse`.
+
+**Per-drift-volume flashes (extension, `group_by_side`).** The PDHD cathode is
+opaque to the 128 nm scintillation light, so the two drift volumes (OpDets at
+x ≈ +3562 mm and x ≈ −3564 mm, cathode at x ≈ 0) are optically independent: a flash
+belongs to exactly one volume, and light is coincident across the cathode only for a
+track that *crosses* it. Assembling all 160 OpDets together would merge two unrelated
+but time-coincident events (one per volume) into a single flash with a PE pattern
+spanning both sides — which QLMatching cannot associate to one charge cluster. With
+`group_by_side` true, `OpFlashFinder` partitions OpDets by the sign of their geometry
+x and runs the whole pipeline (including `RemoveLateLight`) independently per volume;
+the combined flash list is re-sorted by time. The tensor schema is unchanged (the
+side is implicit in the per-OpDet PE vector). It is **off by default** (all-OpDet,
+exactly larana) and **on in PDHD's `flash.jsonnet`** — the physically correct
+grouping, mirroring SBND's per-APA flashes. Because the 2024 readout instruments only
+the +x volume (the −x side is empty in every event), `group_by_side` ON is currently
+**byte-identical** to all-TPC; a synthetic two-side coincidence confirms the split
+path produces two single-side flashes where all-TPC produces one mixed flash.
+
 ## Running
 
 ```

@@ -212,6 +212,63 @@ namespace {
             }
         }
     }
+
+    // Run the full larana flash-finding pipeline over one subset of hits
+    // (given as global indices into `hits`): accumulators -> hit claiming
+    // -> width refinement -> flash construction -> late-light removal.
+    // `out_refined` is returned in the same global hit indices.  Calling
+    // this once with all indices reproduces the original all-OpDet result
+    // exactly; calling it per cathode side builds optically-independent
+    // flashes (see OpFlashFinder::operator()).
+    void find_flashes(const std::vector<Hit>& hits, const std::vector<int>& subset,
+                      double bin_width, double flash_threshold, double width_tolerance,
+                      bool remove_late, int nchan,
+                      const std::vector<double>& opdet_y, const std::vector<double>& opdet_z,
+                      std::vector<FlashSummary>& out_flashes,
+                      std::vector<std::vector<int>>& out_refined)
+    {
+        out_flashes.clear();
+        out_refined.clear();
+        if (subset.empty()) return;
+
+        double min_time = std::numeric_limits<double>::max();
+        for (int r : subset) min_time = std::min(min_time, hits[r].peak_time);
+
+        size_t initial = 6400;
+        std::vector<double> binned1(initial), binned2(initial);
+        std::vector<std::vector<int>> contributors1(initial), contributors2(initial);
+        std::vector<int> flashes1, flashes2;
+        for (int r : subset) {
+            const auto& h = hits[r];
+            const unsigned i1 = unsigned((h.peak_time - min_time) / bin_width);
+            const unsigned i2 = unsigned((h.peak_time - min_time + bin_width / 2.0) / bin_width);
+            if (i2 >= binned1.size()) {
+                const size_t n = i2 * 1.2 + 1;
+                binned1.resize(n);
+                binned2.resize(n);
+                contributors1.resize(n);
+                contributors2.resize(n);
+            }
+            fill_accumulator(i1, r, h.pe, flash_threshold, binned1, contributors1, flashes1);
+            fill_accumulator(i2, r, h.pe, flash_threshold, binned2, contributors2, flashes2);
+        }
+
+        std::vector<std::vector<int>> hits_per_flash;
+        assign_hits_to_flash(flashes1, flashes2, binned1, binned2, contributors1, contributors2,
+                             hits, hits_per_flash, flash_threshold);
+
+        for (const auto& flash_hits : hits_per_flash) {
+            refine_hits_in_flash(flash_hits, hits, out_refined, width_tolerance, flash_threshold);
+        }
+
+        for (const auto& flash_hits : out_refined) {
+            out_flashes.push_back(construct_flash(flash_hits, hits, nchan, opdet_y, opdet_z));
+        }
+
+        if (remove_late) {
+            remove_late_light(out_flashes, out_refined);
+        }
+    }
 }
 
 Flash::OpFlashFinder::OpFlashFinder()
@@ -230,6 +287,7 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["flash_threshold"] = m_flash_threshold;
     cfg["width_tolerance"] = m_width_tolerance;
     cfg["remove_late_light"] = m_remove_late_light;
+    cfg["group_by_side"] = m_group_by_side;
     return cfg;
 }
 
@@ -241,13 +299,16 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_flash_threshold = get(cfg, "flash_threshold", m_flash_threshold);
     m_width_tolerance = get(cfg, "width_tolerance", m_width_tolerance);
     m_remove_late_light = get(cfg, "remove_late_light", m_remove_late_light);
+    m_group_by_side = get(cfg, "group_by_side", m_group_by_side);
 
     auto jgeom = Persist::load(m_geom_file);
+    m_opdet_x.assign(m_nchan, 0.0);
     m_opdet_y.assign(m_nchan, 0.0);
     m_opdet_z.assign(m_nchan, 0.0);
     for (const auto& jod : jgeom["opdets"]) {
         const int od = jod["opdet"].asInt();
         if (od < 0 or od >= m_nchan) continue;
+        m_opdet_x[od] = jod["x"].asDouble();
         m_opdet_y[od] = jod["y"].asDouble();
         m_opdet_z[od] = jod["z"].asDouble();
     }
@@ -282,45 +343,50 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         hits[r] = Hit{int(row[0]), row[1], row[2], row[3], row[4], row[5], row[6], row[8]};
     }
 
-    // Double-offset 1D accumulators over hit peak time.
-    double min_time = std::numeric_limits<double>::max();
-    for (const auto& h : hits) min_time = std::min(min_time, h.peak_time);
-
-    size_t initial = 6400;
-    std::vector<double> binned1(initial), binned2(initial);
-    std::vector<std::vector<int>> contributors1(initial), contributors2(initial);
-    std::vector<int> flashes1, flashes2;
-    for (size_t r = 0; r < nhit; ++r) {
-        const auto& h = hits[r];
-        const unsigned i1 = unsigned((h.peak_time - min_time) / m_bin_width);
-        const unsigned i2 = unsigned((h.peak_time - min_time + m_bin_width / 2.0) / m_bin_width);
-        if (i2 >= binned1.size()) {
-            const size_t n = i2 * 1.2 + 1;
-            binned1.resize(n);
-            binned2.resize(n);
-            contributors1.resize(n);
-            contributors2.resize(n);
-        }
-        fill_accumulator(i1, r, h.pe, m_flash_threshold, binned1, contributors1, flashes1);
-        fill_accumulator(i2, r, h.pe, m_flash_threshold, binned2, contributors2, flashes2);
-    }
-
-    std::vector<std::vector<int>> hits_per_flash;
-    assign_hits_to_flash(flashes1, flashes2, binned1, binned2, contributors1, contributors2,
-                         hits, hits_per_flash, m_flash_threshold);
-
-    std::vector<std::vector<int>> refined;
-    for (const auto& flash_hits : hits_per_flash) {
-        refine_hits_in_flash(flash_hits, hits, refined, m_width_tolerance, m_flash_threshold);
-    }
-
+    // Build flashes either across all OpDets (larana default) or
+    // independently per cathode side (PDHD: the cathode is opaque, so the
+    // two drift volumes are optically independent and a flash belongs to
+    // exactly one of them).  The all-OpDet path is bit-identical to the
+    // original single-pass code.
     std::vector<FlashSummary> flashes;
-    for (const auto& flash_hits : refined) {
-        flashes.push_back(construct_flash(flash_hits, hits, m_nchan, m_opdet_y, m_opdet_z));
+    std::vector<std::vector<int>> refined;
+    if (m_group_by_side) {
+        std::vector<int> sideA, sideB;  // A: x >= 0, B: x < 0
+        for (size_t r = 0; r < nhit; ++r) {
+            const int ch = hits[r].channel;
+            const double x = (ch >= 0 && ch < m_nchan) ? m_opdet_x[ch] : 0.0;
+            (x >= 0.0 ? sideA : sideB).push_back((int) r);
+        }
+        for (const std::vector<int>* sub : {&sideA, &sideB}) {
+            std::vector<FlashSummary> fs;
+            std::vector<std::vector<int>> rf;
+            find_flashes(hits, *sub, m_bin_width, m_flash_threshold, m_width_tolerance,
+                         m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, fs, rf);
+            for (size_t k = 0; k < fs.size(); ++k) {
+                flashes.push_back(std::move(fs[k]));
+                refined.push_back(std::move(rf[k]));
+            }
+        }
+        // Keep flash indices monotonic in time across the two sides
+        // (no-op when one side is empty, as in the 2024 single-side data).
+        std::vector<int> order(flashes.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(),
+                  [&](int a, int b) { return flashes[a].time < flashes[b].time; });
+        std::vector<FlashSummary> sf;
+        std::vector<std::vector<int>> sr;
+        for (int i : order) {
+            sf.push_back(std::move(flashes[i]));
+            sr.push_back(std::move(refined[i]));
+        }
+        flashes = std::move(sf);
+        refined = std::move(sr);
     }
-
-    if (m_remove_late_light) {
-        remove_late_light(flashes, refined);
+    else {
+        std::vector<int> all(nhit);
+        std::iota(all.begin(), all.end(), 0);
+        find_flashes(hits, all, m_bin_width, m_flash_threshold, m_width_tolerance,
+                     m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, flashes, refined);
     }
 
     // Emit the opflash tensor-set schema (design.md §3.4).

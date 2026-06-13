@@ -39,8 +39,14 @@ namespace WireCell {
             double m_flash_threshold{3.5};   // FlashThreshold [PE] (dunefd/protodune)
             double m_width_tolerance{0.5};   // WidthTolerance
             bool m_remove_late_light{true};
+            // Build flashes independently per side of the cathode (one
+            // drift volume each) rather than across all OpDets.  The PDHD
+            // cathode is opaque to scintillation light, so the two volumes
+            // are optically independent; off by default (all-TPC, larana
+            // behaviour), on for PDHD.  See stage2-reconstruction.md.
+            bool m_group_by_side{false};
 
-            std::vector<double> m_opdet_y, m_opdet_z;  // [nchan], mm
+            std::vector<double> m_opdet_x, m_opdet_y, m_opdet_z;  // [nchan], mm
 
             int m_count{0};
         };

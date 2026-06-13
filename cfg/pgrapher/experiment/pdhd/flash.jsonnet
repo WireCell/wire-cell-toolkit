@@ -105,11 +105,17 @@ local wc = import 'wirecell.jsonnet';
     }, nin=1, nout=1),
 
     // OpFlashAlg flash assembly -> opflash tensor set (design.md §3.4).
+    // group_by_side builds flashes per drift volume (the opaque cathode
+    // makes the two volumes optically independent); the component default
+    // is off / all-OpDet.  On the 2024 single-side readout this is
+    // bit-identical to all-TPC, but it is the physically correct grouping
+    // once both volumes are instrumented.
     opflash_finder(name='')::  g.pnode({
         type: 'OpFlashFinder',
         name: name,
         data: {
             nchan: $.nchan,
+            group_by_side: true,
         },
     }, nin=1, nout=1),
 }
