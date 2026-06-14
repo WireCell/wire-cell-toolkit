@@ -46,6 +46,24 @@ namespace WireCell {
             // behaviour), on for PDHD.  See stage2-reconstruction.md.
             bool m_group_by_side{false};
 
+            // Optional post-construction "flash refinement": merge a later,
+            // dim, few-PD flash into an earlier one whose lit OpDets are
+            // physically adjacent -- the same flash over-split by the
+            // per-channel OpHit splitter + 1us accumulators into a bright
+            // primary plus small satellites riding its scintillation tail.
+            // Cascading and per cathode side.  Off by default => bit-identical
+            // to larana (and SBND); on for PDHD via flash.jsonnet.  See
+            // pdhd-light-raw-data.md §4.
+            bool   m_flash_refine{false};
+            double m_refine_window_us{8.0};   // sliding merge window [us]
+            double m_refine_pe_ratio{0.5};    // later_pe <= ratio * earlier_pe (run-27305 tuned)
+            int    m_refine_max_fired{2};     // later flash fired-PD count cap
+            double m_refine_fired_pe{0.5};    // pes[od] >= this counts as "fired" [PE]
+            // Per-OpDet grid coordinate within its cathode side, built once in
+            // configure(): row = y-rank 0..9, col = z-rank 0..7, side = 0 (x>=0)
+            // / 1 (x<0).  Drives the 8-neighbour (Chebyshev<=1) adjacency test.
+            std::vector<int> m_opdet_row, m_opdet_col, m_opdet_side;  // [nchan]
+
             // Per-event readout-vs-trigger offset (us): (tc - rd_timestamp)*16ns
             // from the ROOT trigoff tree (~250).  The reconstruction can't recover
             // this exactly from the self-triggered snippets (their origin sits ~tens

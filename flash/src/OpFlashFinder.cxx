@@ -213,6 +213,109 @@ namespace {
         }
     }
 
+    // Knobs + precomputed per-OpDet grid for the optional refinement pass.
+    struct RefineParams {
+        bool   enabled   = false;
+        double window_ns = 8000.0;   // = m_refine_window_us * 1000 (times are ns)
+        double pe_ratio  = 0.4;      // later_pe <= pe_ratio * earlier_pe
+        int    max_fired = 2;        // later flash fired-PD count cap
+        double fired_pe  = 0.5;      // pes[od] >= fired_pe counts as "fired"
+        // [nchan] grid coords within each cathode side (-1 if unmapped).
+        const std::vector<int>* row  = nullptr;
+        const std::vector<int>* col  = nullptr;
+        const std::vector<int>* side = nullptr;
+    };
+
+    // Optional "flash refinement": merge a later, dim, few-PD flash into an
+    // earlier one whose lit OpDets are physically adjacent.  Walks flashes in
+    // time order and, for each earlier flash i, absorbs any later flash j that
+    // is (1) within the time window, (2) dim relative to i, (3) lit on only a
+    // few OpDets, and (4) every lit OpDet of j is the same as or an 8-neighbour
+    // (Chebyshev<=1, same side) of a lit OpDet of i.  Each merge recomputes i
+    // via construct_flash, so it cascades: a third flash is tested against the
+    // already-grown i.  flashes and refined are kept parallel (same discipline
+    // as remove_late_light).  No-op when !rp.enabled => bit-identical default.
+    void refine_flashes(std::vector<FlashSummary>& flashes,
+                        std::vector<std::vector<int>>& refined,
+                        const std::vector<Hit>& hits, int nchan,
+                        const std::vector<double>& opdet_y,
+                        const std::vector<double>& opdet_z,
+                        const RefineParams& rp)
+    {
+        if (!rp.enabled || flashes.size() < 2) return;
+
+        // Sort flashes (and their hit lists) by time -- the cascade and the
+        // window break both need time order, and this must hold even when
+        // remove_late_light was disabled (then flashes arrive by size).
+        {
+            std::vector<int> order(flashes.size());
+            std::iota(order.begin(), order.end(), 0);
+            std::sort(order.begin(), order.end(),
+                      [&](int a, int b) { return flashes[a].time < flashes[b].time; });
+            std::vector<FlashSummary> sf;
+            std::vector<std::vector<int>> sr;
+            for (int k : order) {
+                sf.push_back(std::move(flashes[k]));
+                sr.push_back(std::move(refined[k]));
+            }
+            flashes = std::move(sf);
+            refined = std::move(sr);
+        }
+
+        const auto& row = *rp.row;
+        const auto& col = *rp.col;
+        const auto& side = *rp.side;
+
+        auto fired_pds = [&](const FlashSummary& f) {
+            std::vector<int> v;
+            for (int od = 0; od < nchan; ++od)
+                if (f.pes[od] >= rp.fired_pe) v.push_back(od);
+            return v;
+        };
+        auto adjacent = [&](int oda, int odb) {  // 8-neighbour, same side
+            return side[oda] >= 0 && side[oda] == side[odb] &&
+                   std::max(std::abs(row[oda] - row[odb]),
+                            std::abs(col[oda] - col[odb])) <= 1;
+        };
+
+        for (size_t i = 0; i < flashes.size(); ++i) {
+            std::vector<int> fired_i = fired_pds(flashes[i]);
+            size_t j = i + 1;
+            while (j < flashes.size()) {
+                if (flashes[j].time - flashes[i].time > rp.window_ns) break;  // sorted => done
+
+                const auto& fj = flashes[j];
+                std::vector<int> fired_j = fired_pds(fj);
+
+                bool ok = (fj.total_pe <= rp.pe_ratio * flashes[i].total_pe)  // dim
+                       && ((int) fired_j.size() >= 1)                         // a real small flash
+                       && ((int) fired_j.size() <= rp.max_fired);             // few PDs
+                if (ok) {
+                    for (int odj : fired_j) {  // every lit j adjacent to some lit i
+                        bool near = false;
+                        for (int odi : fired_i)
+                            if (adjacent(odi, odj)) { near = true; break; }
+                        if (!near) { ok = false; break; }
+                    }
+                }
+
+                if (ok) {
+                    refined[i].insert(refined[i].end(),
+                                      refined[j].begin(), refined[j].end());
+                    flashes[i] = construct_flash(refined[i], hits, nchan, opdet_y, opdet_z);
+                    fired_i = fired_pds(flashes[i]);  // i grew: refresh
+                    flashes.erase(flashes.begin() + j);
+                    refined.erase(refined.begin() + j);
+                    // do NOT advance j: the next flash slides into index j and
+                    // is tested against the grown i (cascade).
+                }
+                else {
+                    ++j;
+                }
+            }
+        }
+    }
+
     // Run the full larana flash-finding pipeline over one subset of hits
     // (given as global indices into `hits`): accumulators -> hit claiming
     // -> width refinement -> flash construction -> late-light removal.
@@ -224,6 +327,7 @@ namespace {
                       double bin_width, double flash_threshold, double width_tolerance,
                       bool remove_late, int nchan,
                       const std::vector<double>& opdet_y, const std::vector<double>& opdet_z,
+                      const RefineParams& rp,
                       std::vector<FlashSummary>& out_flashes,
                       std::vector<std::vector<int>>& out_refined)
     {
@@ -268,6 +372,9 @@ namespace {
         if (remove_late) {
             remove_late_light(out_flashes, out_refined);
         }
+
+        // Optional merge of over-split satellite flashes (no-op if disabled).
+        refine_flashes(out_flashes, out_refined, hits, nchan, opdet_y, opdet_z, rp);
     }
 }
 
@@ -288,6 +395,11 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["width_tolerance"] = m_width_tolerance;
     cfg["remove_late_light"] = m_remove_late_light;
     cfg["group_by_side"] = m_group_by_side;
+    cfg["flash_refine"] = m_flash_refine;
+    cfg["refine_window_us"] = m_refine_window_us;
+    cfg["refine_pe_ratio"] = m_refine_pe_ratio;
+    cfg["refine_max_fired"] = m_refine_max_fired;
+    cfg["refine_fired_pe"] = m_refine_fired_pe;
     cfg["offset_us"] = m_offset_us;
     return cfg;
 }
@@ -301,6 +413,11 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_width_tolerance = get(cfg, "width_tolerance", m_width_tolerance);
     m_remove_late_light = get(cfg, "remove_late_light", m_remove_late_light);
     m_group_by_side = get(cfg, "group_by_side", m_group_by_side);
+    m_flash_refine = get(cfg, "flash_refine", m_flash_refine);
+    m_refine_window_us = get(cfg, "refine_window_us", m_refine_window_us);
+    m_refine_pe_ratio = get(cfg, "refine_pe_ratio", m_refine_pe_ratio);
+    m_refine_max_fired = get(cfg, "refine_max_fired", m_refine_max_fired);
+    m_refine_fired_pe = get(cfg, "refine_fired_pe", m_refine_fired_pe);
     m_offset_us = get(cfg, "offset_us", m_offset_us);
 
     auto jgeom = Persist::load(m_geom_file);
@@ -313,6 +430,38 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
         m_opdet_x[od] = jod["x"].asDouble();
         m_opdet_y[od] = jod["y"].asDouble();
         m_opdet_z[od] = jod["z"].asDouble();
+    }
+
+    // Build the per-OpDet grid (row = y-rank, col = z-rank, side) once, for the
+    // 8-neighbour adjacency test in refine_flashes.  Each cathode side is a
+    // regular 10(y) x 8(z) grid; rank the distinct y/z per side with a 1 mm
+    // tolerance so float noise never splits a rank (real pitch ~600/~500 mm).
+    m_opdet_row.assign(m_nchan, -1);
+    m_opdet_col.assign(m_nchan, -1);
+    m_opdet_side.assign(m_nchan, -1);
+    const double eps = 1.0;  // mm
+    auto add_level = [&](std::vector<double>& lv, double v) {
+        for (double u : lv) if (std::abs(u - v) <= eps) return;
+        lv.push_back(v);
+    };
+    auto rank_of = [&](double v, const std::vector<double>& levels) {
+        for (size_t k = 0; k < levels.size(); ++k)
+            if (std::abs(v - levels[k]) <= eps) return (int) k;
+        return -1;
+    };
+    for (int s = 0; s < 2; ++s) {  // side 0: x >= 0, side 1: x < 0
+        std::vector<int> ods;
+        for (int od = 0; od < m_nchan; ++od)
+            if ((m_opdet_x[od] >= 0.0) == (s == 0)) ods.push_back(od);
+        std::vector<double> ylev, zlev;
+        for (int od : ods) { add_level(ylev, m_opdet_y[od]); add_level(zlev, m_opdet_z[od]); }
+        std::sort(ylev.begin(), ylev.end());
+        std::sort(zlev.begin(), zlev.end());
+        for (int od : ods) {
+            m_opdet_row[od] = rank_of(m_opdet_y[od], ylev);
+            m_opdet_col[od] = rank_of(m_opdet_z[od], zlev);
+            m_opdet_side[od] = s;
+        }
     }
 }
 
@@ -350,6 +499,16 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     // two drift volumes are optically independent and a flash belongs to
     // exactly one of them).  The all-OpDet path is bit-identical to the
     // original single-pass code.
+    RefineParams rp;
+    rp.enabled = m_flash_refine;
+    rp.window_ns = m_refine_window_us * 1000.0;  // us -> WCT ns (cf. bin_width)
+    rp.pe_ratio = m_refine_pe_ratio;
+    rp.max_fired = m_refine_max_fired;
+    rp.fired_pe = m_refine_fired_pe;
+    rp.row = &m_opdet_row;
+    rp.col = &m_opdet_col;
+    rp.side = &m_opdet_side;
+
     std::vector<FlashSummary> flashes;
     std::vector<std::vector<int>> refined;
     if (m_group_by_side) {
@@ -363,7 +522,7 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
             std::vector<FlashSummary> fs;
             std::vector<std::vector<int>> rf;
             find_flashes(hits, *sub, m_bin_width, m_flash_threshold, m_width_tolerance,
-                         m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, fs, rf);
+                         m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, rp, fs, rf);
             for (size_t k = 0; k < fs.size(); ++k) {
                 flashes.push_back(std::move(fs[k]));
                 refined.push_back(std::move(rf[k]));
@@ -388,7 +547,7 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         std::vector<int> all(nhit);
         std::iota(all.begin(), all.end(), 0);
         find_flashes(hits, all, m_bin_width, m_flash_threshold, m_width_tolerance,
-                     m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, flashes, refined);
+                     m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, rp, flashes, refined);
     }
 
     // Emit the opflash tensor-set schema (design.md §3.4).

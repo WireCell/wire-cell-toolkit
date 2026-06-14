@@ -114,6 +114,12 @@ local wc = import 'wirecell.jsonnet';
     // ROOT trigoff tree, ~250) stamped verbatim into the opflash metadata so the
     // downstream charge clustering / Q-L matching can place charge on the trigger
     // time base.  Default 0 (no offset).  run_light_evt.sh supplies the real value.
+    // flash_refine: merge a later, dim, few-PD flash into an earlier one whose
+    // lit OpDets are physically adjacent -- the same flash over-split by the
+    // per-channel OpHit splitter + 1us accumulators into a bright primary plus
+    // small satellites on its scintillation tail.  Component default off
+    // (bit-identical to larana); on for PDHD with the run-27305 data-tuned cuts
+    // (refine_pe_ratio / refine_max_fired; see pdhd-light-raw-data.md §4).
     opflash_finder(name='', offset_us=0)::  g.pnode({
         type: 'OpFlashFinder',
         name: name,
@@ -121,6 +127,11 @@ local wc = import 'wirecell.jsonnet';
             nchan: $.nchan,
             group_by_side: true,
             offset_us: offset_us,
+            flash_refine: true,
+            refine_window_us: 8.0,
+            refine_pe_ratio: 0.5,
+            refine_max_fired: 2,
+            refine_fired_pe: 0.5,
         },
     }, nin=1, nout=1),
 }
