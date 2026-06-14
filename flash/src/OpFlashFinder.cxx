@@ -217,7 +217,7 @@ namespace {
     struct RefineParams {
         bool   enabled   = false;
         double window_ns = 8000.0;   // = m_refine_window_us * 1000 (times are ns)
-        double pe_ratio  = 0.4;      // later_pe <= pe_ratio * earlier_pe
+        double pe_ratio  = 0.5;      // later_pe <= pe_ratio * earlier_pe
         int    max_fired = 2;        // later flash fired-PD count cap
         double fired_pe  = 0.5;      // pes[od] >= fired_pe counts as "fired"
         // [nchan] grid coords within each cathode side (-1 if unmapped).
@@ -307,7 +307,10 @@ namespace {
                     flashes.erase(flashes.begin() + j);
                     refined.erase(refined.begin() + j);
                     // do NOT advance j: the next flash slides into index j and
-                    // is tested against the grown i (cascade).
+                    // is tested against the grown i (cascade).  i stays fixed
+                    // while j advances, so i can absorb a satellite past an
+                    // intervening non-merged flash; the spatial+ratio gates keep
+                    // that benign.
                 }
                 else {
                     ++j;
