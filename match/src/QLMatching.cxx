@@ -1680,7 +1680,11 @@ void QLMatching::write_opflash_pc(ApaRun& run)
         const int gid = run.anode->ident() * kFlashGidStride + static_cast<int>(fi);
         for (int ch = 0; ch < m_nchan; ++ch) {
             op_gid.push_back(gid);
-            op_time.push_back(flash->get_time());
+            // Fold the per-event readout-vs-trigger offset into the displayed flash
+            // time so the Bee red box lands on the (raw-x) charge it matches; the
+            // matching geometry already carries m_trigger_offset (see flash_x_offset).
+            // 0 => bit-identical.
+            op_time.push_back(flash->get_time() + m_trigger_offset);
             op_ch.push_back(ch);
             op_pe.push_back(flash->get_PE(ch));
         }
@@ -1701,9 +1705,10 @@ void QLMatching::write_opflash_pc(ApaRun& run)
 //
 // Conventions: all spatial quantities in cm, flash time in us, drift speed in
 // cm/us, so the viewer recovers a bundle's T0 x-shift as
-//   dx_cm = sign_offset * (flash_time_us + trigger_offset_us) * drift_speed_cm_per_us
-// (trigger_offset is the top-level per-event readout-vs-trigger offset, 0 unless the
-// detector applies it downstream) and adds it to the (fixed-box) cluster points.
+//   dx_cm = sign_offset * flash_time_us * drift_speed_cm_per_us
+// and adds it to the (fixed-box) cluster points. The per-event readout-vs-trigger
+// offset is ALREADY folded into f["time"] below (so the viewer needs no separate
+// trigger term); top["trigger_offset"] is therefore 0 here.
 // Cluster idents are per-APA, so a
 // globally-unique cluster uid = apa*kFlashGidStride + ident disambiguates the two
 // TPCs (same stride convention as the flash gid).
@@ -1717,10 +1722,9 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     Json::Value top;
     top["nchan"]        = m_nchan;
     top["drift_speed"]  = v_cm_us;             // cm/us
-    // Per-event trigger offset (us) the viewer must FOLD INTO the per-bundle x-shift:
-    //   dx_cm = sign_offset * (flash_time_us + trigger_offset_us) * drift_speed_cm_per_us
-    // f["time"] below stays the clean (un-shifted) flash time. 0 => bit-identical.
-    top["trigger_offset"] = m_trigger_offset / us;   // us
+    // The per-event readout-vs-trigger offset is folded into f["time"] below, so the
+    // viewer must NOT re-add it; keep this 0 so a folding viewer stays a no-op.
+    top["trigger_offset"] = 0.0;   // us (already in f["time"])
     top["count"]        = (Json::UInt64)m_count;
     top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
 
@@ -1813,7 +1817,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             f["gid"]      = apa * kFlashGidStride + (int)fi;
             f["id"]       = fl->get_flash_id();
             f["apa"]      = apa;
-            f["time"]     = fl->get_time() / us;     // us
+            f["time"]     = (fl->get_time() + m_trigger_offset) / us;   // us (trigger-folded)
             f["total_PE"] = fl->get_total_PE();
             Json::Value pe(Json::arrayValue), pe_err(Json::arrayValue);
             for (int ch = 0; ch < m_nchan; ++ch) { pe.append(fl->get_PE(ch)); pe_err.append(fl->get_PE_err(ch)); }
