@@ -477,7 +477,21 @@ local clus_per_group (
         cm.examine_x_boundary(),
         cm.neutrino(protect_iso_band=true),
         cm.isolated(),
-        cm.examine_bundles(),
+        // examine_bundles() DISABLED at the per-drift-group stage (2026-06-14).
+        // It rewrites the "isolated"/"perblob" array, splitting a cluster into a
+        // main spine (-1) + associated sub-clusters at connectivity gaps (e.g. where
+        // `separate` carved out a crossing cosmic).  QLMatching then reads that array
+        // and matches/flags on the MAIN sub-cluster only -- so a track whose anode end
+        // sits in an associated sub-cluster (e.g. run27305 evt150 cluster 386) is
+        // never flagged at_x_boundary / close_to_PMT even though the full track reaches
+        // the anode.  With this commented out, the perblob comes from `isolated` (no -1
+        // main), so QLMatching leaves the cluster whole (decompose_cluster_groups: a
+        // perblob with no -1 is a single component -> no split) and computes the
+        // boundary flags over the FULL track.  Cluster grouping is unchanged (at this
+        // stage examine_bundles only rewrites perblob, never cluster membership;
+        // use_flash_t0=false so its flash-time merge is skipped).  Re-enable later in
+        // the all-TPC stage if the main/associated structure is needed there.
+        // cm.examine_bundles(),
     ],
 
     local mabc = g.pnode({

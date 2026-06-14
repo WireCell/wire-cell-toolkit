@@ -480,7 +480,16 @@ local clus_per_group (
         cm.examine_x_boundary(allow_mixed_faces=true),
         cm.neutrino(protect_iso_band=true),
         cm.isolated(),
-        cm.examine_bundles(),
+        // examine_bundles() DISABLED at the per-drift-group stage (2026-06-14),
+        // matching the PDHD chain.  At this stage (use_flash_t0=false) it only
+        // rewrites the "isolated"/"perblob" array (main -1 / associated >=0); it
+        // never changes cluster membership.  PDVD runs no Q/L matching, so that
+        // perblob array is never consumed downstream -- removing this pass leaves
+        // the cluster grouping byte-identical (verified A/B on a PDVD event).  On
+        // PDHD the same change fixes a boundary-flag bug where QLMatching flagged
+        // only the main sub-cluster; see cfg/.../pdhd/clus.jsonnet and
+        // pdhd/docs/clustering-algorithm.md.  Re-enable in all-TPC if needed.
+        // cm.examine_bundles(),
     ],
 
     local mabc = g.pnode({
