@@ -208,9 +208,15 @@ namespace WireCell::Match {
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time
         // slice sits within m_window_edge_ticks of the raw readout window
-        // [0, m_readout_window_ticks]. Inert (no consumer yet); since nothing
-        // reads it, always filling it leaves production output unchanged.
-        int m_readout_window_ticks{3427};  // window end in raw ticks (SBND daq.nticks)
+        // [0, m_readout_window_ticks] (consumed by the ql_scan "wtrunc" label and
+        // the high-consistent ladder's miss branch).
+        //
+        // m_readout_window_ticks is the post-resample frame length in raw ticks.
+        // Detector-dependent: the C++ default is the SBND daq.nticks; PDHD's window
+        // is longer (5999), so its run script reads the real value from the SP frame
+        // and passes it via -S readout_window_ticks (see run_clus_evt.sh) rather
+        // than hard-coding it.
+        int m_readout_window_ticks{3427};
         int m_window_edge_ticks{4};        // edge-proximity threshold (~one slice = nticks_live_slice)
 
         // When true, discard any (flash, cluster) bundle whose cluster is not

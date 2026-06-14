@@ -1727,6 +1727,10 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     top["trigger_offset"] = 0.0;   // us (already in f["time"])
     top["count"]        = (Json::UInt64)m_count;
     top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
+    // Readout window used by the window-truncation flag (raw post-resample ticks).
+    // For PDHD this is the value the run script read from the SP frame and passed
+    // via readout_window_ticks; lets the viewer/validation see the window in use.
+    top["readout_nticks"] = m_readout_window_ticks;
 
     // Quality params / uncertainty model (so the viewer shows the chi2 /
     // flag_high_consistent ingredients and the PE_err rule next to the metrics).
@@ -2276,9 +2280,15 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     // within m_window_edge_ticks of the window end. No flash_x_offset enters:
     // this is a property of the raw window, identical for both reversed-drift
     // APAs. Computed independently of the u-walk below (which skips slices with
-    // no 3d points and can early-return on sv.empty()). Always filled; inert (no
-    // consumer reads it yet), so filling it leaves production output unchanged.
+    // no 3d points and can early-return on sv.empty()).
+    //
+    // The window end is the post-resample frame length, m_readout_window_ticks.
+    // Its default is an SBND number (3427); a detector with a longer window
+    // (PDHD: 5999) would mislabel every mid-drift cluster past tick 3427, so PDHD
+    // feeds the real value (read from the SP frame by its run script) via the
+    // readout_window_ticks config -- see cfg/.../pdhd/qlmatching.jsonnet.
     {
+        const int win = m_readout_window_ticks;
         bool have = false;
         int min_tick = 0, max_tick = 0;
         for (const auto& [anode, faces] : tbm) {
@@ -2296,7 +2306,7 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         if (have) {
             const bool truncated =
                 (min_tick - 0 <= m_window_edge_ticks) ||
-                (m_readout_window_ticks - max_tick <= m_window_edge_ticks);
+                (win - max_tick <= m_window_edge_ticks);
             bundle->set_flag_window_truncated(truncated);
         }
     }

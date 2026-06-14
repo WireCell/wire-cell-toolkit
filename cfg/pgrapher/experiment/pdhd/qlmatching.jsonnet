@@ -27,7 +27,11 @@ local wc = import 'wirecell.jsonnet';
 // ~250us) folded into the matching geometry so the (offset-free, time_offset=0)
 // charge x lands on the same trigger time base as the flash times.  Default 0 =>
 // bit-identical (e.g. SBND, which bakes the offset into x_raw at imaging time).
-function(params, trigger_offset=0 * wc.us) {
+// readout_window_ticks: post-resample frame length used by the window-truncation
+// flag.  PDHD's window (~5999) is far longer than the C++ default (SBND's 3427),
+// so run_clus_evt.sh reads the real value from the SP frame and passes it in; the
+// 6000 default is a sane PDHD fallback if it is not supplied.
+function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
     // --- PDHD matching constants (matching-only) ---
     local nchan = 160,
     // Static optical dead-channel mask (OpChannel == OpDet, 0..159).
@@ -109,6 +113,11 @@ function(params, trigger_offset=0 * wc.us) {
             auto_mask_min_contrast: 1,
             auto_mask_min_flash: 3,
             flash_minPE: 50,
+            // Real PDHD readout window (post-resample SP frame length, ~5999),
+            // supplied by run_clus_evt.sh from the SP frame.  Without it the C++
+            // default (SBND's 3427, below the PDHD cathode at ~4498) would falsely
+            // flag every mid-drift cluster as window-truncated.
+            readout_window_ticks: readout_window_ticks,
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
             VUVEfficiency: VUVEfficiency,
