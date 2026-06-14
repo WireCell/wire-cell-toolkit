@@ -170,6 +170,23 @@ the +x volume (the −x side is empty in every event), `group_by_side` ON is cur
 **byte-identical** to all-TPC; a synthetic two-side coincidence confirms the split
 path produces two single-side flashes where all-TPC produces one mixed flash.
 
+**Flash refinement (extension, `flash_refine`).** The per-channel OpHit splitter
+plus the 1 µs accumulators sometimes fragment one real flash into a bright prompt
+plus dim, few-PD satellites riding its scintillation tail; `RemoveLateLight` only
+drops the magnitude-consistent ones. After `ConstructFlash`/`RemoveLateLight`,
+`refine_flashes` walks each side's flashes in time order and merges a later flash
+`j` into an earlier `i` when ALL of: (1) `t_j − t_i ≤ refine_window_us` (8 µs); (2)
+`total_pe(j) ≤ refine_pe_ratio · total_pe(i)` (0.5); (3) `j` lights
+`1 … refine_max_fired` (2) OpDets (`pe ≥ refine_fired_pe`, 0.5 PE) — **or**, with
+`refine_subset_merge` on, `j` lights only OpDets that `i` already lights (the
+*subset escape*: the tail of a bright, spatially-extended parent spreads over more
+than `max_fired` of the *same* PDs); (4) every lit OpDet of `j` is the same as or an
+8-neighbour of a lit OpDet of `i`, same side. Merges cascade (i is recomputed and
+re-tested) and run per cathode side. All five knobs are **off by default**
+(component reproduces larana byte-for-byte; the subset path is strictly additive
+when on) and tuned on for PDHD in `flash.jsonnet`. See `pdhd-light-raw-data.md`
+§4.4 for the data-driven tuning and the evt150 subset-escape case.
+
 ## Running
 
 ```
