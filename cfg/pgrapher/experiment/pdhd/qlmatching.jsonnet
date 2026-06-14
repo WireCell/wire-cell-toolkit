@@ -113,6 +113,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             auto_mask_min_contrast: 1,
             auto_mask_min_flash: 3,
             flash_minPE: 50,
+            // No candidate-flash time cut: include EVERY flash from the event.
+            // flash->get_time() is the RAW (trigger-relative) flash time.  The
+            // C++/SBND default +-1.5 ms clipped the LATE half of PDHD's ~3 ms
+            // readout; an earlier fix widened the window to the full readout,
+            // but a finite window is still a cut.  Set bounds wider than any
+            // conceivable PDHD readout (+-1 s) so the window can never exclude a
+            // flash -- all flashes reach matching and are ranked there.  (On the
+            // current data this is bit-identical to the full-readout window: 0 of
+            // 707 flashes across the 23-event sample fell outside it.)  The
+            // flash_minPE = 50 floor still applies.  PDHD-only; SBND keeps its
+            // own qlmatching.jsonnet.
+            flash_mintime: -1 * wc.s,
+            flash_maxtime: 1 * wc.s,
             // Real PDHD readout window (post-resample SP frame length, ~5999),
             // supplied by run_clus_evt.sh from the SP frame.  Without it the C++
             // default (SBND's 3427, below the PDHD cathode at ~4498) would falsely
