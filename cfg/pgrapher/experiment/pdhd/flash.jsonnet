@@ -132,6 +132,12 @@ local wc = import 'wirecell.jsonnet';
             refine_pe_ratio: 0.5,
             refine_max_fired: 2,
             refine_fired_pe: 0.5,
+            // subset escape: also merge a later dim flash that lights only PDs
+            // the parent already lights (a tail of a bright extended flash whose
+            // light spreads over >max_fired of the SAME OpDets; e.g. evt150
+            // 818us 10-PD parent + its 6-/5-PD tail fragments). Additive to the
+            // few-PD merges above; see pdhd-light-raw-data.md §4.4.
+            refine_subset_merge: true,
         },
     }, nin=1, nout=1),
 }

@@ -220,6 +220,7 @@ namespace {
         double pe_ratio  = 0.5;      // later_pe <= pe_ratio * earlier_pe
         int    max_fired = 2;        // later flash fired-PD count cap
         double fired_pe  = 0.5;      // pes[od] >= fired_pe counts as "fired"
+        bool   subset_merge = false; // bypass max_fired when lit_j subset of lit_i
         // [nchan] grid coords within each cathode side (-1 if unmapped).
         const std::vector<int>* row  = nullptr;
         const std::vector<int>* col  = nullptr;
@@ -230,7 +231,9 @@ namespace {
     // earlier one whose lit OpDets are physically adjacent.  Walks flashes in
     // time order and, for each earlier flash i, absorbs any later flash j that
     // is (1) within the time window, (2) dim relative to i, (3) lit on only a
-    // few OpDets, and (4) every lit OpDet of j is the same as or an 8-neighbour
+    // few OpDets (or, with subset_merge, lit on only OpDets that i already
+    // lights -- a tail of a bright extended parent), and (4) every lit OpDet of
+    // j is the same as or an 8-neighbour
     // (Chebyshev<=1, same side) of a lit OpDet of i.  Each merge recomputes i
     // via construct_flash, so it cascades: a third flash is tested against the
     // already-grown i.  flashes and refined are kept parallel (same discipline
@@ -287,9 +290,17 @@ namespace {
                 const auto& fj = flashes[j];
                 std::vector<int> fired_j = fired_pds(fj);
 
+                // subset escape: j lights only PDs that i already lights, so it
+                // bypasses the few-PD cap (a tail of an extended bright parent).
+                bool subset = rp.subset_merge;
+                for (int odj : fired_j) {
+                    if (!subset) break;
+                    if (std::find(fired_i.begin(), fired_i.end(), odj) == fired_i.end())
+                        subset = false;
+                }
                 bool ok = (fj.total_pe <= rp.pe_ratio * flashes[i].total_pe)  // dim
                        && ((int) fired_j.size() >= 1)                         // a real small flash
-                       && ((int) fired_j.size() <= rp.max_fired);             // few PDs
+                       && (((int) fired_j.size() <= rp.max_fired) || subset); // few PDs (or subset)
                 if (ok) {
                     for (int odj : fired_j) {  // every lit j adjacent to some lit i
                         bool near = false;
@@ -403,6 +414,7 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["refine_pe_ratio"] = m_refine_pe_ratio;
     cfg["refine_max_fired"] = m_refine_max_fired;
     cfg["refine_fired_pe"] = m_refine_fired_pe;
+    cfg["refine_subset_merge"] = m_refine_subset_merge;
     cfg["offset_us"] = m_offset_us;
     return cfg;
 }
@@ -421,6 +433,7 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_refine_pe_ratio = get(cfg, "refine_pe_ratio", m_refine_pe_ratio);
     m_refine_max_fired = get(cfg, "refine_max_fired", m_refine_max_fired);
     m_refine_fired_pe = get(cfg, "refine_fired_pe", m_refine_fired_pe);
+    m_refine_subset_merge = get(cfg, "refine_subset_merge", m_refine_subset_merge);
     m_offset_us = get(cfg, "offset_us", m_offset_us);
 
     auto jgeom = Persist::load(m_geom_file);
@@ -508,6 +521,7 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     rp.pe_ratio = m_refine_pe_ratio;
     rp.max_fired = m_refine_max_fired;
     rp.fired_pe = m_refine_fired_pe;
+    rp.subset_merge = m_refine_subset_merge;
     rp.row = &m_opdet_row;
     rp.col = &m_opdet_col;
     rp.side = &m_opdet_side;

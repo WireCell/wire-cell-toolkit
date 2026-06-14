@@ -59,6 +59,13 @@ namespace WireCell {
             double m_refine_pe_ratio{0.5};    // later_pe <= ratio * earlier_pe (run-27305 tuned)
             int    m_refine_max_fired{2};     // later flash fired-PD count cap
             double m_refine_fired_pe{0.5};    // pes[od] >= this counts as "fired" [PE]
+            // Subset escape: bypass the few-PD cap when every lit OpDet of the
+            // later flash is also lit in the earlier one (the tail fires only
+            // PMTs the prompt already fired -> unambiguously the same flash).
+            // Catches bright, spatially-extended parents whose tail spreads over
+            // more than max_fired of the SAME PDs.  Strictly additive to the
+            // existing merges.  Off by default; on for PDHD via flash.jsonnet.
+            bool   m_refine_subset_merge{false};
             // Per-OpDet grid coordinate within its cathode side, built once in
             // configure(): row = y-rank 0..9, col = z-rank 0..7, side = 0 (x>=0)
             // / 1 (x<0).  Drives the 8-neighbour (Chebyshev<=1) adjacency test.
