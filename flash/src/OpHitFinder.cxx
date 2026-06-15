@@ -31,6 +31,11 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     cfg["spe_area"] = m_spe_area;
     cfg["hit_threshold"] = m_hit_threshold;
     cfg["ped_nsamples"] = m_ped_nsamples;
+    // Robust per-channel baseline for the continuous full stream (default OFF
+    // -> head method, bit-identical).  See the header / fullstream doc.
+    cfg["robust_baseline"] = m_robust_baseline;
+    cfg["robust_nsigma"] = m_robust_nsigma;
+    cfg["robust_veto_sigma"] = m_robust_veto_sigma;
     // AlgoSlidingWindow parameters, dune_ophit_finder_deco values.
     Configuration algo;
     algo["adc_threshold"] = 3.0;
@@ -61,6 +66,9 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     m_spe_area = get(cfg, "spe_area", m_spe_area);
     m_hit_threshold = get(cfg, "hit_threshold", m_hit_threshold);
     m_ped_nsamples = get(cfg, "ped_nsamples", m_ped_nsamples);
+    m_robust_baseline = get(cfg, "robust_baseline", m_robust_baseline);
+    m_robust_nsigma = get(cfg, "robust_nsigma", m_robust_nsigma);
+    m_robust_veto_sigma = get(cfg, "robust_veto_sigma", m_robust_veto_sigma);
     m_algo = defs["algo"];
     if (cfg.isMember("algo")) {
         for (const auto& key : cfg["algo"].getMemberNames()) {
@@ -291,18 +299,44 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
             wf[i] = static_cast<short>(m_scale * charge[i]);
         }
 
-        // PedAlgoEdges, head method: mean/std of the first samples.
+        // Pedestal and noise.  Default (m_robust_baseline false): PedAlgoEdges
+        // head method (mean/std of the first samples) -- bit-identical to the
+        // self-trigger snippet path and every existing config.
         double ped_mean = 0, ped_sigma = 0;
-        const int nped = std::min<int>(m_ped_nsamples, wf.size());
-        for (int i = 0; i < nped; ++i) ped_mean += wf[i];
-        ped_mean /= nped;
-        for (int i = 0; i < nped; ++i) ped_sigma += (wf[i] - ped_mean) * (wf[i] - ped_mean);
-        ped_sigma = std::sqrt(ped_sigma / nped);
+        Configuration algo = m_algo;
+        if (m_robust_baseline) {
+            // Robust per-channel baseline for the CONTINUOUS full stream, where
+            // the head method is meaningless: ped_mean = median, ped_sigma =
+            // MAD (both over the whole waveform; signal is sparse so the median
+            // is the baseline -- removes a per-channel DC offset).  Channels
+            // whose MAD is far above the noise floor are ringing data-quality
+            // channels and emit no hits.  The start gate is raised to
+            // robust_nsigma * MAD (high for noisy, ~unchanged for clean).  See
+            // pdhd/docs/pdhd-fullstream-light-reco.md.
+            if (wf.empty()) continue;
+            std::vector<short> tmp(wf);
+            const size_t mid = tmp.size() / 2;
+            std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
+            ped_mean = tmp[mid];
+            std::vector<double> dev(wf.size());
+            for (size_t i = 0; i < wf.size(); ++i) dev[i] = std::abs(wf[i] - ped_mean);
+            std::nth_element(dev.begin(), dev.begin() + mid, dev.end());
+            ped_sigma = 1.4826 * dev[mid];
+            if (ped_sigma >= m_robust_veto_sigma) continue;  // veto ringing channel
+            algo["nsigma_threshold"] = m_robust_nsigma;
+        }
+        else {
+            const int nped = std::min<int>(m_ped_nsamples, wf.size());
+            for (int i = 0; i < nped; ++i) ped_mean += wf[i];
+            ped_mean /= nped;
+            for (int i = 0; i < nped; ++i) ped_sigma += (wf[i] - ped_mean) * (wf[i] - ped_mean);
+            ped_sigma = std::sqrt(ped_sigma / nped);
+        }
 
-        for (const auto& pulse : sliding_window(wf, ped_mean, ped_sigma, m_algo)) {
+        for (const auto& pulse : sliding_window(wf, ped_mean, ped_sigma, algo)) {
           // Split each found pulse at prominent sub-peaks (no-op and
           // bit-identical when split_enable is false: one sub == pulse).
-          for (const auto& sub : split_pulse(wf, ped_mean, pulse, m_algo)) {
+          for (const auto& sub : split_pulse(wf, ped_mean, pulse, algo)) {
             if (sub.peak < m_hit_threshold) continue;
             const double peak_time = t0 + tick * (trace->tbin() + sub.t_max);
             const double start_time = t0 + tick * (trace->tbin() + sub.t_start);

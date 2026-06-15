@@ -62,6 +62,18 @@ namespace WireCell {
             double m_spe_area{100.0};    // SPEArea: PE = area / spe_area
             double m_hit_threshold{3.0}; // HitThreshold on pulse peak (scaled units)
             int m_ped_nsamples{3};       // PedAlgoEdges NumSampleFront (head method)
+            // Robust per-channel baseline for the CONTINUOUS full stream, where
+            // the head method (a few leading samples) is meaningless.  Default
+            // OFF -> the head method above, bit-identical to the self-trigger
+            // (snippet) path and every existing config.  When ON: ped_mean =
+            // per-channel median, ped_sigma = per-channel MAD (both over the
+            // whole waveform), the sliding-window start gate is raised to
+            // robust_nsigma * MAD, and channels whose MAD exceeds
+            // robust_veto_sigma (ringing data-quality channels) emit no hits.
+            // See pdhd/docs/pdhd-fullstream-light-reco.md.
+            bool m_robust_baseline{false};
+            double m_robust_nsigma{3.0};       // start-gate nsigma on the robust MAD
+            double m_robust_veto_sigma{10.0};  // veto channel if MAD >= this (scaled units)
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};

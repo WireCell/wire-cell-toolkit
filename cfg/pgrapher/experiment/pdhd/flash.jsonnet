@@ -112,11 +112,21 @@ local wc = import 'wirecell.jsonnet';
     // the decon noise floor (~11, set by the noisier FBK PDs) to reject sub-PE
     // noise excursions -- ~5 sigma also ~ a 1-PE peak (see
     // pdhd-fullstream-light-reco.md).
-    ophit(name='', hit_threshold=3.0)::  g.pnode({
+    // robust_baseline: per-channel median/MAD pedestal for the CONTINUOUS full
+    // stream, where the OpHitFinder head-pedestal (a few leading samples) cannot
+    // track a per-channel DC offset or a ringing channel, so two bad channels
+    // over-produce flashes (opch 121 DC-offset, opch 147 ringing; see
+    // pdhd-fullstream-light-reco.md s6).  Default false -> head method,
+    // bit-identical to the self-trigger snippet path and every existing config.
+    // The full-stream chain turns it on; it removes the DC offset (median ped)
+    // and vetoes ringing channels (MAD above robust_veto_sigma), cutting
+    // full-stream OpHits ~60% (evt 8) while retaining clean-channel real hits.
+    ophit(name='', hit_threshold=3.0, robust_baseline=false)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
             hit_threshold: hit_threshold,
+            robust_baseline: robust_baseline,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,
