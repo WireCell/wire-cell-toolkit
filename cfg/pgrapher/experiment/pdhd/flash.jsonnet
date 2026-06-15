@@ -84,7 +84,12 @@ local wc = import 'wirecell.jsonnet';
     // samples: FFT/record length; 1024 for snippets, 343808 for the full stream.
     fixed_snr:: 0.005,
     local dft = { type: 'FftwDFT' },
-    opdecon(name='', samples=1024, fixed_snr=$.fixed_snr)::  g.pnode({
+    // spe_file: override the SPE-template file.  Default '' keeps the OpDecon.h
+    // default (pdhd-spe-templates.json, 2024 FBK/HPK averages) -> existing
+    // configs stay bit-identical.  Pass pdhd-spe-templates-tuned.json to use the
+    // per-channel TUNED templates for the full-stream FBK channels whose average
+    // template over-subtracts the post-pulse tail (pdhd/docs/pdhd-spe-template-tuning.md).
+    opdecon(name='', samples=1024, fixed_snr=$.fixed_snr, spe_file='')::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
@@ -92,6 +97,7 @@ local wc = import 'wirecell.jsonnet';
             noise_file: '',
             samples: samples,
             fixed_snr: fixed_snr,
+            [if spe_file != '' then 'spe_file']: spe_file,
         },
     }, nin=1, nout=1, uses=[dft]),
 
