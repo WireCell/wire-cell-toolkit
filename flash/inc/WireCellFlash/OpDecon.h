@@ -49,6 +49,13 @@ namespace WireCell {
             int m_input_polarity{-1};
             bool m_auto_scale{true};       // Wiener: scale from filtered SPE response
             double m_scale{1.0};           // used when auto_scale is false
+            // Fixed Wiener signal-to-noise ratio R = S2/N^2.  By default
+            // (<= 0) S2 is taken from each waveform's own peak (adaptive,
+            // signal- and length-dependent).  When > 0, S2 = R * N^2 so the
+            // filter G = conj(H) R / (|H|^2 R + 1) is independent of signal
+            // amplitude AND record length -- the same filter for the 1024-tick
+            // snippets and the 343808-tick full stream.  Assumes flat noise.
+            double m_fixed_snr{-1.0};
             bool m_apply_postfilter{true};
             double m_postfilter_cutoff{1.5};  // MHz, Gauss post-filter
             bool m_apply_post_blcorr{true};

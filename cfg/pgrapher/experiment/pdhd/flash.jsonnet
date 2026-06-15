@@ -73,13 +73,25 @@ local wc = import 'wirecell.jsonnet';
     // (see pdhd/pics/pd/README.md).  Flat Wiener N^2 (noise_file empty);
     // the run27950 per-channel spectra in pdhd-noise-templates.json are a
     // second-order effect and slightly less flat with these templates.
+    // fixed_snr: PDHD uses a FIXED Wiener filter (S2/N^2 = fixed_snr) instead
+    // of the component-default adaptive S2 (taken from each snippet's own peak,
+    // hence signal- and record-length dependent).  Fixing the S2/N^2 ratio makes
+    // the filter independent of pulse amplitude AND record length, so the
+    // 1024-tick self-trigger snippets (ch 0-119) and the 343808-tick full-stream
+    // PDs (ch 120-159) are deconvolved with the *same* filter -- a prerequisite
+    // for comparing their OpHits.  0.005 ~ a 20:1-amplitude reference pulse on the
+    // FBK PDs at the 1024-tick reference (see pdhd-fullstream-light-reco.md).
+    // samples: FFT/record length; 1024 for snippets, 343808 for the full stream.
+    fixed_snr:: 0.005,
     local dft = { type: 'FftwDFT' },
-    opdecon(name='')::  g.pnode({
+    opdecon(name='', samples=1024, fixed_snr=$.fixed_snr)::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
             dft: wc.tn(dft),
             noise_file: '',
+            samples: samples,
+            fixed_snr: fixed_snr,
         },
     }, nin=1, nout=1, uses=[dft]),
 
@@ -87,10 +99,18 @@ local wc = import 'wirecell.jsonnet';
     // PDHD enables overlapping-pulse splitting: a second flash riding on
     // the first's scintillation tail is recovered as its own OpHit instead
     // of being absorbed (the component default is off / bit-identical).
-    ophit(name='')::  g.pnode({
+    // hit_threshold: keep pulses whose deconvolved peak >= this (scaled decon
+    // units, scale=100).  Default 3.0 for the triggered self-trigger snippets,
+    // where every 1024-tick window is placed on a real pulse.  The full-stream
+    // path scans the whole 5.5 ms continuously, so it raises this to ~5 sigma of
+    // the decon noise floor (~11, set by the noisier FBK PDs) to reject sub-PE
+    // noise excursions -- ~5 sigma also ~ a 1-PE peak (see
+    // pdhd-fullstream-light-reco.md).
+    ophit(name='', hit_threshold=3.0)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
+            hit_threshold: hit_threshold,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,

@@ -39,6 +39,7 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["input_polarity"] = m_input_polarity;
     cfg["auto_scale"] = m_auto_scale;
     cfg["scale"] = m_scale;
+    cfg["fixed_snr"] = m_fixed_snr;
     cfg["apply_postfilter"] = m_apply_postfilter;
     cfg["postfilter_cutoff"] = m_postfilter_cutoff;
     cfg["apply_post_blcorr"] = m_apply_post_blcorr;
@@ -59,6 +60,7 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_input_polarity = get(cfg, "input_polarity", m_input_polarity);
     m_auto_scale = get(cfg, "auto_scale", m_auto_scale);
     m_scale = get(cfg, "scale", m_scale);
+    m_fixed_snr = get(cfg, "fixed_snr", m_fixed_snr);
     m_apply_postfilter = get(cfg, "apply_postfilter", m_apply_postfilter);
     m_postfilter_cutoff = get(cfg, "postfilter_cutoff", m_postfilter_cutoff);
     m_apply_post_blcorr = get(cfg, "apply_post_blcorr", m_apply_post_blcorr);
@@ -157,9 +159,19 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     // are always full-length, shorter input is zero-padded.)
 
     // Expected input: delta of SPE_Max p.e. -> flat |S|^2.
-    const double spe_max = *std::max_element(xv.begin(), xv.end()) / spe.amplitude;
-    const double S2 = spe_max * spe_max;
     const double N2_flat = m_line_noise_rms * m_line_noise_rms * N;
+    // Signal level S2.  Adaptive (default): from this waveform's own peak,
+    // so the filter follows the brightest pulse in the window.  Fixed
+    // (m_fixed_snr > 0): S2 = R * N^2 with R the chosen S2/N^2 ratio, giving
+    // a filter independent of signal amplitude and record length.
+    double S2;
+    if (m_fixed_snr > 0.0) {
+        S2 = m_fixed_snr * N2_flat;
+    }
+    else {
+        const double spe_max = *std::max_element(xv.begin(), xv.end()) / spe.amplitude;
+        S2 = spe_max * spe_max;
+    }
 
     // Wiener filter G = conj(H) S2 / (|H|^2 S2 + N2), full spectrum.
     // N2 per bin from the channel's noise power spectrum (half-spectrum
