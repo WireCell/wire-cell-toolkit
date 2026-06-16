@@ -101,6 +101,32 @@ local wc = import 'wirecell.jsonnet';
         },
     }, nin=1, nout=1, uses=[dft]),
 
+    // ROI identification + ROI-based cleaning of the full-stream decon
+    // ("decon" -> "decon_roi"), mirroring the charge SP induction ROI chain.
+    // A high-pass filter H(f) = 1 - exp(-(f/tau)^2) (tau ~ 1/20us, scintillation
+    // is < 20us) finds ROIs above roi_nsigma*MAD (padded); the ROIs are applied
+    // to the ORIGINAL decon -- everything outside is zeroed and each ROI gets a
+    // linear endpoint-zeroing baseline.  Ringing channels (MAD > veto_sigma) are
+    // zeroed entirely.  Only the full-stream path uses this (between OpDecon and
+    // OpHitFinder, with ophit(intag='decon_roi', nonzero_baseline=true)); the
+    // snippet path and every other config never instantiate it.  Defaults are
+    // the prototype-tuned values (pdhd/pd_plot/fullstream_roi_proto.py,
+    // pdhd/docs/pdhd-fullstream-light-reco.md).
+    // OpRoi builds its high-pass spectrum from the actual trace length at
+    // runtime, so (unlike opdecon) it needs no 'samples' parameter.
+    oproi(name='')::  g.pnode({
+        type: 'OpRoi',
+        name: name,
+        data: {
+            dft: wc.tn(dft),
+            hpf_tau_mhz: 0.05,
+            roi_nsigma: 5.0,
+            roi_pad_pre: 50,
+            roi_pad_post: 700,
+            veto_sigma: 0.1,
+        },
+    }, nin=1, nout=1, uses=[dft]),
+
     // SlidingWindow hit finding on "decon" traces -> ophits tensor set.
     // PDHD enables overlapping-pulse splitting: a second flash riding on
     // the first's scintillation tail is recovered as its own OpHit instead
@@ -121,12 +147,20 @@ local wc = import 'wirecell.jsonnet';
     // The full-stream chain turns it on; it removes the DC offset (median ped)
     // and vetoes ringing channels (MAD above robust_veto_sigma), cutting
     // full-stream OpHits ~60% (evt 8) while retaining clean-channel real hits.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false)::  g.pnode({
+    // intag: input trace tag (default 'decon'; the full-stream ROI path passes
+    // 'decon_roi' to read the OpRoi-cleaned traces).  nonzero_baseline: take the
+    // robust median/MAD over the non-zero (in-ROI) samples only -- required when
+    // the input is ROI-cleaned (outside-ROI is exactly 0, which would otherwise
+    // collapse the whole-waveform MAD to 0).  Conditional keys keep the snippet
+    // path and every existing config byte-identical.
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', nonzero_baseline=false)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
             hit_threshold: hit_threshold,
             robust_baseline: robust_baseline,
+            [if intag != 'decon' then 'intag']: intag,
+            [if nonzero_baseline then 'nonzero_baseline']: nonzero_baseline,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,

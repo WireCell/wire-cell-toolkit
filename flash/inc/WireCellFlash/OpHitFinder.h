@@ -74,6 +74,14 @@ namespace WireCell {
             bool m_robust_baseline{false};
             double m_robust_nsigma{3.0};       // start-gate nsigma on the robust MAD
             double m_robust_veto_sigma{10.0};  // veto channel if MAD >= this (scaled units)
+            // When the input is the ROI-cleaned decon (OpRoi: everything outside
+            // ROIs is exactly 0), a whole-waveform median/MAD collapses to 0
+            // (>50% of samples are 0) -> ped_sigma=0 -> the start gate drops to
+            // its absolute floor and the finder goes noise-blind.  With this on,
+            // the robust median/MAD are taken over the NON-ZERO (in-ROI) samples
+            // only, so ped_sigma is the real in-ROI noise.  Default OFF (whole
+            // waveform) -> bit-identical to every existing config.
+            bool m_nonzero_baseline{false};
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};
