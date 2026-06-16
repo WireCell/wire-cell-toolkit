@@ -212,6 +212,55 @@ coordinate-descent Gram-of-Gram is the solve time. Cutting those is **B2** (teac
 consume a sparse `X` — removes both the second dense copy and the dense Gram reconstruction) and
 **C** (a pre-fit cull to shrink `nbeta` at the source); both are follow-ups, not part of A+B.
 
+---
+
+## 7. Remaining headroom after A+B (what's left, and is it result-preserving?)
+
+After A+B evt 1015 is **8.41 GB / ~733 s**, of which **~540 s is `lasso_solve`** and the memory
+floor is the dense `X` (still materialised for the solver) plus the charge point clouds. Measuring
+`lasso_solve` vs `nbeta` across run-29107 events (from the logs, no new runs):
+
+| nbeta | 1429 | 2225 | 3082 | 4119 | 9289 | 12688 |
+|---|--:|--:|--:|--:|--:|--:|
+| solve (s) | 0.4 | 2.1 | 6.1 | 16.9 | 169.8 | 371.7 |
+
+This is **≈ O(nbeta³)** (fit exponent ~2.8–3.1), which fingers the **dense Gram-of-Gram build**
+in `LassoModel::Fit`: `XdX(i,j) = X.col(i).dot(X.col(j))` over all `i ≤ j` runs `nbeta²/2` dot
+products, each over **dense** columns of a matrix `X` that is only ~2 % non-zero. The coordinate-
+descent iterations (over the already-sparse `XdX`, via `InnerIterator`) scale only ~nbeta² and are
+the small term. So essentially all of the remaining solve time is dense arithmetic on ~98 % zeros.
+
+**B2 — feed the solver a sparse `X` (result-preserving, under the existing `sparse_lasso` toggle).**
+The lever: `fit_round1` already has the sparse Gram `Xs` (it currently calls `Xs.toDense()` only to
+satisfy `Ress::solve`'s dense `matrix_t`). If `LassoModel` accepted a sparse `X`, it would (i) never
+materialise the dense `X` (removes the last ~2.7 GB dense matrix and its `_X` copy), and (ii) build
+`XdX` from the sparse pattern — skipping the ~98 % zero dot-products and only visiting column pairs
+that actually overlap. Same non-zero arithmetic → byte-identical modulo the same ULP drift A already
+carries, so it lives under `sparse_lasso` (default OFF, PDHD on) and is validated the same way
+(all-30 mabc byte-identical, calib strength-only). Expected: the ~540 s solve → tens of seconds and
+peak RSS → ~4–5 GB. **This is the single largest remaining result-preserving win.** Cost: it edits
+the shared `LassoModel`/`Ress` interface (add a sparse overload, keep the dense path for imaging),
+so it needs the imaging regression again.
+
+**C — pre-fit cull to shrink `nbeta` (NOT result-preserving → toggle + physics validation).** Orthogonal
+and compounding: `fit_round1` enters with ~12 k candidate bundles vs ~200 survivors. A flash-time /
+drift-x or containment cull (the existing `require_containment` / `reject_overpred` knobs, off for
+PDHD) cuts `nbeta` at the root, and because the solve is O(nbeta³) even a 2× cut is ~8×. But it drops
+candidate matches → it changes physics, so it is a default-OFF toggle validated on MC + `ql_scan`
+hand-scans, *not* a byte-identical change.
+
+**Smaller / not worth it.** Within the current math everything else is minor: `ydX`/`norm` are
+O(nbeta²); the XdX symmetry is already exploited (compute `i≤j`, mirror). The deeper structural note
+(QLMatching hands the solver the pre-formed normal-equations `X = PᵀP` and the solver re-Grams it to
+`XᵀX`) is a genuine redundancy, but undoing it (pass `P`/`M` directly) changes the conditioning the L1
+penalty sees — it is the ported, tuned MicroBooNE convention, so it is **not** result-preserving and
+stays an observation.
+
+**Bottom line:** the one big *result-preserving* lever left is **B2** (sparse `X` through the solver),
+gated by the same `sparse_lasso` flag; **C** is a larger lever still but only as a validated physics
+toggle. A+B already removed the matrix-build cost and ~6 GB; B2 would take the solve from minutes to
+seconds and the memory to a few GB.
+
 ## Reproduce
 
 ```
