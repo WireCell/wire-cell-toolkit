@@ -71,6 +71,16 @@ namespace WireCell {
             // / 1 (x<0).  Drives the 8-neighbour (Chebyshev<=1) adjacency test.
             std::vector<int> m_opdet_row, m_opdet_col, m_opdet_side;  // [nchan]
 
+            // Optional post-construction multiplicity / total-PE quality cut:
+            // drop any flash with fewer than m_min_fired_pds lit OpDets
+            // (pes[od] >= m_refine_fired_pe) or less than m_min_total_pe total
+            // PE.  Removes the single-/few-PD low-PE flood (no nPD cut in the
+            // larana port; cf. the prototype's pe>=6 && mult>=3).  Both 0 by
+            // default => no cut => bit-identical to larana (and SBND); set for
+            // PDHD via flash.jsonnet.  See run27980-processing-status.md §6.
+            int    m_min_fired_pds{0};   // keep flash iff nPD >= this
+            double m_min_total_pe{0.0};  // keep flash iff total_pe >= this
+
             // Per-event readout-vs-trigger offset (us): (tc - rd_timestamp)*16ns
             // from the ROOT trigoff tree (~250).  The reconstruction can't recover
             // this exactly from the self-triggered snippets (their origin sits ~tens

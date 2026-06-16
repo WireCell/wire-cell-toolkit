@@ -221,6 +221,9 @@ namespace {
         int    max_fired = 2;        // later flash fired-PD count cap
         double fired_pe  = 0.5;      // pes[od] >= fired_pe counts as "fired"
         bool   subset_merge = false; // bypass max_fired when lit_j subset of lit_i
+        // Quality cut applied after construction/refinement (both 0 => no cut).
+        int    cut_min_pds = 0;      // drop flash if nPD (>= fired_pe) < this
+        double cut_min_pe  = 0.0;    // drop flash if total_pe < this
         // [nchan] grid coords within each cathode side (-1 if unmapped).
         const std::vector<int>* row  = nullptr;
         const std::vector<int>* col  = nullptr;
@@ -389,6 +392,21 @@ namespace {
 
         // Optional merge of over-split satellite flashes (no-op if disabled).
         refine_flashes(out_flashes, out_refined, hits, nchan, opdet_y, opdet_z, rp);
+
+        // Optional multiplicity / total-PE quality cut (no-op when both 0 =>
+        // bit-identical).  Counts fired OpDets with the same >= fired_pe rule
+        // as the refinement; keeps flashes and refined parallel.
+        if (rp.cut_min_pds > 0 || rp.cut_min_pe > 0.0) {
+            for (int k = (int) out_flashes.size() - 1; k >= 0; --k) {
+                int npd = 0;
+                for (int od = 0; od < nchan; ++od)
+                    if (out_flashes[k].pes[od] >= rp.fired_pe) ++npd;
+                if (npd < rp.cut_min_pds || out_flashes[k].total_pe < rp.cut_min_pe) {
+                    out_flashes.erase(out_flashes.begin() + k);
+                    out_refined.erase(out_refined.begin() + k);
+                }
+            }
+        }
     }
 }
 
@@ -415,6 +433,8 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["refine_max_fired"] = m_refine_max_fired;
     cfg["refine_fired_pe"] = m_refine_fired_pe;
     cfg["refine_subset_merge"] = m_refine_subset_merge;
+    cfg["min_fired_pds"] = m_min_fired_pds;
+    cfg["min_total_pe"] = m_min_total_pe;
     cfg["offset_us"] = m_offset_us;
     return cfg;
 }
@@ -434,6 +454,8 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_refine_max_fired = get(cfg, "refine_max_fired", m_refine_max_fired);
     m_refine_fired_pe = get(cfg, "refine_fired_pe", m_refine_fired_pe);
     m_refine_subset_merge = get(cfg, "refine_subset_merge", m_refine_subset_merge);
+    m_min_fired_pds = get(cfg, "min_fired_pds", m_min_fired_pds);
+    m_min_total_pe = get(cfg, "min_total_pe", m_min_total_pe);
     m_offset_us = get(cfg, "offset_us", m_offset_us);
 
     auto jgeom = Persist::load(m_geom_file);
@@ -522,6 +544,8 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     rp.max_fired = m_refine_max_fired;
     rp.fired_pe = m_refine_fired_pe;
     rp.subset_merge = m_refine_subset_merge;
+    rp.cut_min_pds = m_min_fired_pds;
+    rp.cut_min_pe = m_min_total_pe;
     rp.row = &m_opdet_row;
     rp.col = &m_opdet_col;
     rp.side = &m_opdet_side;

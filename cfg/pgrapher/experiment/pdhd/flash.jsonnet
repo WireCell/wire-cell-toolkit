@@ -242,6 +242,13 @@ local wc = import 'wirecell.jsonnet';
             // 818us 10-PD parent + its 6-/5-PD tail fragments). Additive to the
             // few-PD merges above; see pdhd-light-raw-data.md §4.4.
             refine_subset_merge: true,
+            // Multiplicity / total-PE quality cut: drop single-/few-PD low-PE
+            // flashes (no nPD cut in the larana port; cf. the prototype's
+            // pe>=6 && mult>=3).  Component default 0/0 = no cut = bit-identical;
+            // PDHD keeps flashes with >=5 lit PDs (pes>=refine_fired_pe) AND
+            // >=20 PE.  See run27980-processing-status.md §6.
+            min_fired_pds: 5,
+            min_total_pe: 20.0,
         },
     }, nin=1, nout=1),
 }
