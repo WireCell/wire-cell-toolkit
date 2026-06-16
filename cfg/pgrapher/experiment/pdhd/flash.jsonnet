@@ -189,6 +189,25 @@ local wc = import 'wirecell.jsonnet';
         },
     }, nin=1, nout=1),
 
+    // N-to-1 fan-in that row-concatenates the "ophits" tensors of several
+    // OpHitFinder branches into one, so a single OpFlashFinder builds flashes
+    // across all of them.  Used by the all-PD light reco (single processing):
+    // the self-trigger snippet branch (opch 0-119) and the full-stream branch
+    // (opch 120-159) end in OpHitFinder ophits tensors on the same
+    // trigger-relative clock; merging the hit rows lets OpFlashFinder's 1us
+    // accumulator group them into flashes spanning all 160 PDs (-x flashes over
+    // 80-159, not just one half).  Output ident/metadata copied from meta_port
+    // (port 0 = the snippet branch, which carries the real offset_us).  No
+    // existing config instantiates it.
+    ophit_merge(name='', multiplicity=2, meta_port=0)::  g.pnode({
+        type: 'OpHitMerge',
+        name: name,
+        data: {
+            multiplicity: multiplicity,
+            meta_port: meta_port,
+        },
+    }, nin=multiplicity, nout=1),
+
     // OpFlashAlg flash assembly -> opflash tensor set (design.md §3.4).
     // group_by_side builds flashes per drift volume (the opaque cathode
     // makes the two volumes optically independent); the component default
