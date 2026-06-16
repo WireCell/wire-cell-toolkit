@@ -80,6 +80,15 @@ namespace WireCell {
             // PDHD via flash.jsonnet.  See run27980-processing-status.md §6.
             int    m_min_fired_pds{0};   // keep flash iff nPD >= this
             double m_min_total_pe{0.0};  // keep flash iff total_pe >= this
+            // Per-PD PE threshold used ONLY for the m_min_fired_pds count (a PD
+            // counts as "fired" iff pes[od] >= this).  Default -1 = use
+            // m_refine_fired_pe (0.5), so the count is bit-identical to before
+            // regardless of refine_fired_pe; the refinement-merge logic keeps
+            // using m_refine_fired_pe unchanged.  0.5 PE is sub-single-
+            // photoelectron; PDHD sets 1.0 (= one detected p.e.) via flash.jsonnet
+            // so a PD must really fire to count.  See
+            // run29107-evt1015-light-anomaly.md.
+            double m_min_fired_pe{-1.0};
 
             // Per-event readout-vs-trigger offset (us): (tc - rd_timestamp)*16ns
             // from the ROOT trigoff tree (~250).  The reconstruction can't recover

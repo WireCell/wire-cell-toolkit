@@ -258,6 +258,12 @@ local wc = import 'wirecell.jsonnet';
             // >=20 PE.  See run27980-processing-status.md §6.
             min_fired_pds: 5,
             min_total_pe: 20.0,
+            // Per-PD PE for the min_fired_pds count: a PD counts as "fired" only
+            // at >= 1.0 PE (one detected photoelectron), not the 0.5 PE
+            // refine_fired_pe default (sub-PE noise).  Component default -1 =>
+            // use refine_fired_pe = bit-identical.  See
+            // run29107-evt1015-light-anomaly.md.
+            min_fired_pe: 1.0,
         },
     }, nin=1, nout=1),
 }
