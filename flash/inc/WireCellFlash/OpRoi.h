@@ -38,6 +38,7 @@
 #include "WireCellIface/IDFT.h"
 #include "WireCellAux/Logger.h"
 
+#include <set>
 #include <vector>
 
 namespace WireCell {
@@ -76,6 +77,12 @@ namespace WireCell {
             // MAD cap (decon units) above which a channel is treated as ringing
             // and zeroed entirely (carries the OpHitFinder full-stream veto).
             double m_veto_sigma{0.1};
+            // Hard per-channel veto list (OpChannel ids): these channels are zeroed
+            // unconditionally, independent of the MAD test above.  For known-bad
+            // data-quality channels that a hand scan flags but whose MAD does not
+            // always clear m_veto_sigma.  Default empty -> bit-identical to every
+            // existing config.
+            std::set<int> m_veto_channels{};
             // Per-ROI linear endpoint-zeroing.  When false the in-ROI decon is
             // kept verbatim (only the outside-ROI zeroing applies).
             bool m_apply_baseline{true};

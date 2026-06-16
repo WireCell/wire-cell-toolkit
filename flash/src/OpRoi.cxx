@@ -36,6 +36,7 @@ WireCell::Configuration Flash::OpRoi::default_configuration() const
     cfg["roi_post_peak"] = m_roi_post_peak;
     cfg["veto_sigma"] = m_veto_sigma;
     cfg["apply_baseline"] = m_apply_baseline;
+    cfg["veto_channels"] = Json::arrayValue;
     cfg["dft"] = "FftwDFT";
     return cfg;
 }
@@ -51,6 +52,11 @@ void Flash::OpRoi::configure(const WireCell::Configuration& cfg)
     m_roi_post_peak = get(cfg, "roi_post_peak", m_roi_post_peak);
     m_veto_sigma = get(cfg, "veto_sigma", m_veto_sigma);
     m_apply_baseline = get(cfg, "apply_baseline", m_apply_baseline);
+
+    if (cfg.isMember("veto_channels")) {
+        m_veto_channels.clear();
+        for (const auto& jch : cfg["veto_channels"]) m_veto_channels.insert(jch.asInt());
+    }
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
@@ -166,7 +172,10 @@ bool Flash::OpRoi::operator()(const IFrame::pointer& in, IFrame::pointer& out)
     for (const auto& trace : traces) {
         const auto& d = trace->charge();
         ensure_hpf(d.size());
-        auto cleaned = clean(d);
+        // Hard per-channel veto: zero the trace outright (skip ROI cleaning).
+        auto cleaned = m_veto_channels.count(trace->channel())
+                           ? std::vector<float>(d.size(), 0.0f)
+                           : clean(d);
         out_idx.push_back(all_traces.size());
         all_traces.push_back(std::make_shared<Aux::SimpleTrace>(trace->channel(), trace->tbin(), cleaned));
     }

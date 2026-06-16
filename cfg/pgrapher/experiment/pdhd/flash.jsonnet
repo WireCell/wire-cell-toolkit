@@ -121,7 +121,10 @@ local wc = import 'wirecell.jsonnet';
     // (pdhd/pd_plot/fullstream_roi_proto.py, pdhd/docs/pdhd-fullstream-light-reco.md).
     // OpRoi builds its high-pass spectrum from the actual trace length at
     // runtime, so (unlike opdecon) it needs no 'samples' parameter.
-    oproi(name='')::  g.pnode({
+    // veto_channels: hard per-channel veto (OpChannel ids) zeroed unconditionally,
+    // for known-bad data-quality channels a hand scan flags but whose MAD does not
+    // reliably clear veto_sigma.  Default [] -> bit-identical (only the MAD veto).
+    oproi(name='', veto_channels=[])::  g.pnode({
         type: 'OpRoi',
         name: name,
         data: {
@@ -132,6 +135,7 @@ local wc = import 'wirecell.jsonnet';
             roi_pad_pre: 50,
             roi_post_peak: 300,
             veto_sigma: 0.1,
+            veto_channels: veto_channels,
         },
     }, nin=1, nout=1, uses=[dft]),
 
