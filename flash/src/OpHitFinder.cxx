@@ -37,6 +37,7 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     cfg["robust_nsigma"] = m_robust_nsigma;
     cfg["robust_veto_sigma"] = m_robust_veto_sigma;
     cfg["fixed_ped_sigma"] = m_fixed_ped_sigma;
+    cfg["veto_saturation"] = m_veto_saturation;
     // AlgoSlidingWindow parameters, dune_ophit_finder_deco values.
     Configuration algo;
     algo["adc_threshold"] = 3.0;
@@ -71,6 +72,7 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     m_robust_nsigma = get(cfg, "robust_nsigma", m_robust_nsigma);
     m_robust_veto_sigma = get(cfg, "robust_veto_sigma", m_robust_veto_sigma);
     m_fixed_ped_sigma = get(cfg, "fixed_ped_sigma", m_fixed_ped_sigma);
+    m_veto_saturation = get(cfg, "veto_saturation", m_veto_saturation);
     m_algo = defs["algo"];
     if (cfg.isMember("algo")) {
         for (const auto& key : cfg["algo"].getMemberNames()) {
@@ -291,8 +293,28 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
     auto traces = Aux::tagged_traces(in, m_intag);
     const size_t ncol = 9;
     std::vector<double> hits;
+    // Per-channel saturated tick ranges flagged by OpDecon (empty unless
+    // veto_saturation is on and the upstream detect_saturation produced them).
+    // in->masks() returns by value, so hold a local copy for the loop.
+    Waveform::ChannelMasks sat_masks;
+    if (m_veto_saturation) {
+        const auto mm = in->masks();
+        auto it = mm.find("saturation");
+        if (it != mm.end()) sat_masks = it->second;
+    }
+    int nvetoed = 0;
     for (const auto& trace : traces) {
         const auto& charge = trace->charge();
+
+        // Saturated tick sub-ranges for this channel (empty if none / off).  A
+        // hit overlapping one is dropped below: a clipped flat-top deconvolves
+        // into a broad over-integrated pulse that overlaps the rail, while real
+        // light on the rest of the (possibly full-stream-length) trace survives.
+        const Waveform::BinRangeList* chan_sat = nullptr;
+        if (m_veto_saturation) {
+            auto mit = sat_masks.find(trace->channel());
+            if (mit != sat_masks.end()) chan_sat = &mit->second;
+        }
 
         // Scale and cast to short, as RunHitFinder_deco does before
         // pulse finding (thresholds and areas are in these units).
@@ -348,6 +370,15 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
           // bit-identical when split_enable is false: one sub == pulse).
           for (const auto& sub : split_pulse(wf, ped_mean, pulse, algo)) {
             if (sub.peak < m_hit_threshold) continue;
+            if (chan_sat) {  // drop hits overlapping a saturated tick sub-range
+                const int hs = trace->tbin() + sub.t_start;
+                const int he = trace->tbin() + sub.t_end;
+                bool sat = false;
+                for (const auto& [a, b] : *chan_sat) {
+                    if (a < he && hs < b) { sat = true; break; }
+                }
+                if (sat) { ++nvetoed; continue; }
+            }
             const double peak_time = t0 + tick * (trace->tbin() + sub.t_max);
             const double start_time = t0 + tick * (trace->tbin() + sub.t_start);
             const double width = (sub.t_end - sub.t_start) * tick;
@@ -375,7 +406,7 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
     md["producer"] = "wct-flash";
     out = std::make_shared<Aux::SimpleTensorSet>(in->ident(), md,
                                                  ITensor::shared_vector(tensors));
-    log->debug("frame {}: {} ophits from {} '{}' traces",
-               in->ident(), hits.size() / ncol, traces.size(), m_intag);
+    log->debug("frame {}: {} ophits from {} '{}' traces ({} saturated hits vetoed)",
+               in->ident(), hits.size() / ncol, traces.size(), m_intag, nvetoed);
     return true;
 }

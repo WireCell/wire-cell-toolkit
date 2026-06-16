@@ -85,6 +85,15 @@ namespace WireCell {
             // so no separate veto is needed.  Default 0 (off) -> bit-identical to
             // every existing config.  See pdhd/docs/pdhd-fullstream-light-reco.md.
             double m_fixed_ped_sigma{0.0};
+            // Drop snippets flagged as ADC-saturated by OpDecon (the
+            // "saturation" ChannelMaskMap on the input frame).  A clipped
+            // flat-top deconvolves into a broad plateau that over-integrates
+            // into one giant ~16 us hit and fragments into many spurious wide
+            // hits; skipping the whole saturated snippet removes both at once
+            // (the real bright flash survives via the unsaturated channels).
+            // Default OFF -> reads no masks, bit-identical to every existing
+            // config.  See pdhd/docs/run29107-evt1015-light-anomaly.md.
+            bool m_veto_saturation{false};
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};

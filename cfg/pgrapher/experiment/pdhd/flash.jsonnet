@@ -89,7 +89,7 @@ local wc = import 'wirecell.jsonnet';
     // configs stay bit-identical.  Pass pdhd-spe-templates-tuned.json to use the
     // per-channel TUNED templates for the full-stream FBK channels whose average
     // template over-subtracts the post-pulse tail (pdhd/docs/pdhd-spe-template-tuning.md).
-    opdecon(name='', samples=1024, fixed_snr=$.fixed_snr, spe_file='')::  g.pnode({
+    opdecon(name='', samples=1024, fixed_snr=$.fixed_snr, spe_file='', detect_saturation=false, saturation_pad=0)::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
@@ -98,6 +98,12 @@ local wc = import 'wirecell.jsonnet';
             samples: samples,
             fixed_snr: fixed_snr,
             [if spe_file != '' then 'spe_file']: spe_file,
+            // Flag raw 14-bit ADC saturation (rail at 16383) so OpHitFinder can
+            // drop the over-integrated hits (default off -> no masks,
+            // bit-identical).  saturation_pad widens each railed run by N ticks
+            // to cover the broad over-integration plateau around the clip.
+            [if detect_saturation then 'detect_saturation']: detect_saturation,
+            [if detect_saturation && saturation_pad != 0 then 'saturation_pad']: saturation_pad,
         },
     }, nin=1, nout=1, uses=[dft]),
 
@@ -168,7 +174,7 @@ local wc = import 'wirecell.jsonnet';
     // it).  Ringing channels are already zeroed by OpRoi, so robust_baseline is
     // not needed alongside it.  Conditional keys keep the snippet path and every
     // existing config byte-identical.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0)::  g.pnode({
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
@@ -176,6 +182,9 @@ local wc = import 'wirecell.jsonnet';
             robust_baseline: robust_baseline,
             [if intag != 'decon' then 'intag']: intag,
             [if fixed_ped_sigma > 0 then 'fixed_ped_sigma']: fixed_ped_sigma,
+            // Drop snippets OpDecon flagged as ADC-saturated (default off ->
+            // reads no masks, bit-identical).
+            [if veto_saturation then 'veto_saturation']: veto_saturation,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,

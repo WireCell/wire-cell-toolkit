@@ -180,7 +180,9 @@ bool Flash::OpRoi::operator()(const IFrame::pointer& in, IFrame::pointer& out)
         all_traces.push_back(std::make_shared<Aux::SimpleTrace>(trace->channel(), trace->tbin(), cleaned));
     }
 
-    auto sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick());
+    // Forward any incoming masks (e.g. OpDecon's "saturation" flags) so the
+    // full-stream branch carries them to OpHitFinder.  Empty by default.
+    auto sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick(), in->masks());
     for (const auto& tag : in->frame_tags()) {
         sframe->tag_frame(tag);
     }

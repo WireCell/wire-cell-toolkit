@@ -59,6 +59,24 @@ namespace WireCell {
             bool m_apply_postfilter{true};
             double m_postfilter_cutoff{1.5};  // MHz, Gauss post-filter
             bool m_apply_post_blcorr{true};
+            // 14-bit ADC saturation detection.  Default OFF -> the output frame
+            // carries no masks, bit-identical to every existing config.  When ON:
+            // any input snippet with >= saturation_min_samples raw samples at or
+            // above saturation_adc (the DAPHNE 14-bit rail, 16383) is flagged by
+            // adding its [tbin, tbin+len) range to a "saturation" ChannelMaskMap
+            // on the output frame.  Deconvolving a clipped flat-top yields a broad
+            // plateau that OpHitFinder over-integrates (one ~16 us hit) and
+            // fragments (many spurious wide hits); OpHitFinder's veto_saturation
+            // consumes this mask to drop such snippets.  See
+            // pdhd/docs/run29107-evt1015-light-anomaly.md.
+            bool m_detect_saturation{false};
+            int m_saturation_adc{16383};
+            int m_saturation_min_samples{1};
+            // Pad (ticks) added each side of a railed run.  Deconvolving a
+            // clipped flat-top yields a plateau wider than the clip itself, so
+            // the over-integrated hits extend beyond the railed samples; the pad
+            // widens the vetoed range to cover them.
+            int m_saturation_pad{0};
 
             IDFT::pointer m_dft;
 

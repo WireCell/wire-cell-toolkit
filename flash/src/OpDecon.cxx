@@ -43,6 +43,10 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["apply_postfilter"] = m_apply_postfilter;
     cfg["postfilter_cutoff"] = m_postfilter_cutoff;
     cfg["apply_post_blcorr"] = m_apply_post_blcorr;
+    cfg["detect_saturation"] = m_detect_saturation;
+    cfg["saturation_adc"] = m_saturation_adc;
+    cfg["saturation_min_samples"] = m_saturation_min_samples;
+    cfg["saturation_pad"] = m_saturation_pad;
     cfg["dft"] = "FftwDFT";
     return cfg;
 }
@@ -64,6 +68,10 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_apply_postfilter = get(cfg, "apply_postfilter", m_apply_postfilter);
     m_postfilter_cutoff = get(cfg, "postfilter_cutoff", m_postfilter_cutoff);
     m_apply_post_blcorr = get(cfg, "apply_post_blcorr", m_apply_post_blcorr);
+    m_detect_saturation = get(cfg, "detect_saturation", m_detect_saturation);
+    m_saturation_adc = get(cfg, "saturation_adc", m_saturation_adc);
+    m_saturation_min_samples = get(cfg, "saturation_min_samples", m_saturation_min_samples);
+    m_saturation_pad = get(cfg, "saturation_pad", m_saturation_pad);
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
@@ -242,12 +250,43 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
     ITrace::vector all_traces(in->traces()->begin(), in->traces()->end());
     IFrame::trace_list_t out_idx;
     int nskipped = 0;
+    // Saturation flags collected over the snippets (empty unless enabled).
+    Waveform::ChannelMaskMap cmm;
+    int nsaturated = 0;
     for (const auto& trace : traces) {
         const int chan = trace->channel();
         auto it = m_chan2tmpl.find(chan);
         if (it == m_chan2tmpl.end() or it->second >= m_templates.size()) {
             ++nskipped;
             continue;
+        }
+        if (m_detect_saturation) {
+            // Flag each contiguous run of >= saturation_min_samples raw samples
+            // at/above the rail as a saturated tick sub-range.  Marking the run
+            // (not the whole trace) keeps a long full-stream channel from being
+            // vetoed wholesale on one stray sample: the broad over-integrated
+            // hit a clipped flat-top produces overlaps the run and is dropped,
+            // while real light elsewhere on the trace survives.
+            const auto& q = trace->charge();
+            const int tb = trace->tbin();
+            const int n = (int)q.size();
+            int i = 0;
+            while (i < n) {
+                if (q[i] >= m_saturation_adc) {
+                    int j = i;
+                    while (j < n && q[j] >= m_saturation_adc) ++j;
+                    if (j - i >= m_saturation_min_samples) {
+                        const int lo = std::max(0, i - m_saturation_pad);
+                        const int hi = std::min(n, j + m_saturation_pad);
+                        cmm["saturation"][chan].push_back({tb + lo, tb + hi});
+                        ++nsaturated;
+                    }
+                    i = j;
+                }
+                else {
+                    ++i;
+                }
+            }
         }
         const std::vector<double>* noise = nullptr;
         auto nit = m_chan2noise.find(chan);
@@ -262,7 +301,24 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
         log->warn("frame {}: skipped {} traces with no SPE template", in->ident(), nskipped);
     }
 
-    auto sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick());
+    // When saturation detection is off, build the frame exactly as before
+    // (bit-identical).  When on, forward any incoming masks and add the
+    // collected "saturation" ranges.
+    Aux::SimpleFrame* sframe;
+    if (m_detect_saturation) {
+        Waveform::ChannelMaskMap outcmm = in->masks();
+        for (const auto& [label, chmasks] : cmm) {
+            for (const auto& [chan, ranges] : chmasks) {
+                auto& dst = outcmm[label][chan];
+                dst.insert(dst.end(), ranges.begin(), ranges.end());
+            }
+        }
+        sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick(), outcmm);
+        log->debug("frame {}: {} saturated tick-runs flagged", in->ident(), nsaturated);
+    }
+    else {
+        sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick());
+    }
     for (const auto& tag : in->frame_tags()) {
         sframe->tag_frame(tag);
     }
