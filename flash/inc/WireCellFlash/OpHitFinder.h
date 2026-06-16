@@ -74,14 +74,17 @@ namespace WireCell {
             bool m_robust_baseline{false};
             double m_robust_nsigma{3.0};       // start-gate nsigma on the robust MAD
             double m_robust_veto_sigma{10.0};  // veto channel if MAD >= this (scaled units)
-            // When the input is the ROI-cleaned decon (OpRoi: everything outside
-            // ROIs is exactly 0), a whole-waveform median/MAD collapses to 0
-            // (>50% of samples are 0) -> ped_sigma=0 -> the start gate drops to
-            // its absolute floor and the finder goes noise-blind.  With this on,
-            // the robust median/MAD are taken over the NON-ZERO (in-ROI) samples
-            // only, so ped_sigma is the real in-ROI noise.  Default OFF (whole
-            // waveform) -> bit-identical to every existing config.
-            bool m_nonzero_baseline{false};
+            // Fixed noise floor (scaled units) for ROI-cleaned input (OpRoi).  The
+            // hysteresis ROIs hug each pulse, so the in-ROI samples are
+            // signal-dominated and a median/MAD over them would bias ped_sigma
+            // high and close the start gate (clean-channel hits crater to ~45%).
+            // When > 0 this overrides robust/head: ped_mean = 0 (the ROIs are
+            // endpoint-zeroed) and ped_sigma = this KNOWN clean noise floor (the
+            // HPF rms ~0.02 decon -> ~2 scaled), with the start gate at
+            // robust_nsigma * this.  Ringing channels are already zeroed by OpRoi,
+            // so no separate veto is needed.  Default 0 (off) -> bit-identical to
+            // every existing config.  See pdhd/docs/pdhd-fullstream-light-reco.md.
+            double m_fixed_ped_sigma{0.0};
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};

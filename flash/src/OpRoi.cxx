@@ -30,9 +30,10 @@ WireCell::Configuration Flash::OpRoi::default_configuration() const
     cfg["intag"] = m_intag;
     cfg["outtag"] = m_outtag;
     cfg["hpf_tau_mhz"] = m_hpf_tau_mhz;
-    cfg["roi_nsigma"] = m_roi_nsigma;
+    cfg["roi_seed_nsigma"] = m_roi_seed_nsigma;
+    cfg["roi_ext_nsigma"] = m_roi_ext_nsigma;
     cfg["roi_pad_pre"] = m_roi_pad_pre;
-    cfg["roi_pad_post"] = m_roi_pad_post;
+    cfg["roi_post_peak"] = m_roi_post_peak;
     cfg["veto_sigma"] = m_veto_sigma;
     cfg["apply_baseline"] = m_apply_baseline;
     cfg["dft"] = "FftwDFT";
@@ -44,9 +45,10 @@ void Flash::OpRoi::configure(const WireCell::Configuration& cfg)
     m_intag = get(cfg, "intag", m_intag);
     m_outtag = get(cfg, "outtag", m_outtag);
     m_hpf_tau_mhz = get(cfg, "hpf_tau_mhz", m_hpf_tau_mhz);
-    m_roi_nsigma = get(cfg, "roi_nsigma", m_roi_nsigma);
+    m_roi_seed_nsigma = get(cfg, "roi_seed_nsigma", m_roi_seed_nsigma);
+    m_roi_ext_nsigma = get(cfg, "roi_ext_nsigma", m_roi_ext_nsigma);
     m_roi_pad_pre = get(cfg, "roi_pad_pre", m_roi_pad_pre);
-    m_roi_pad_post = get(cfg, "roi_pad_post", m_roi_pad_post);
+    m_roi_post_peak = get(cfg, "roi_post_peak", m_roi_post_peak);
     m_veto_sigma = get(cfg, "veto_sigma", m_veto_sigma);
     m_apply_baseline = get(cfg, "apply_baseline", m_apply_baseline);
 
@@ -102,17 +104,29 @@ std::vector<float> Flash::OpRoi::clean(const std::vector<float>& decon) const
     const double rms = 1.4826 * vmedian(dev);
     if (rms > m_veto_sigma) return out;  // zeroed channel
 
-    // 4. ROIs: contiguous runs of h > nsigma*rms, padded and merged.
-    const double thr = m_roi_nsigma * rms;
+    // 4. ROIs (hysteresis): contiguous runs of h > ext (low) that reach seed
+    // (high) somewhere inside.  Pad m_roi_pad_pre before the run and extend to at
+    // least m_roi_post_peak ticks past the decon pulse peak (the late-light
+    // window); a brighter tail above ext runs further on its own.  Merge overlaps.
+    const double ext = m_roi_ext_nsigma * rms;
+    const double seed = m_roi_seed_nsigma * rms;
     std::vector<std::pair<int, int>> rois;
     int i = 0;
     while (i < n) {
-        if (h[i] > thr) {
+        if (h[i] > ext) {
             const int s = i;
-            while (i < n && h[i] > thr) ++i;
+            float hmax = h[i];
+            int peak = s;
+            float dpeak = decon[s];
+            while (i < n && h[i] > ext) {
+                if (h[i] > hmax) hmax = h[i];
+                if (decon[i] > dpeak) { dpeak = decon[i]; peak = i; }
+                ++i;
+            }
             const int e = i - 1;
+            if (hmax < seed) continue;   // no real seed inside the run -> drop
             const int ps = std::max(0, s - m_roi_pad_pre);
-            const int pe = std::min(n - 1, e + m_roi_pad_post);
+            const int pe = std::min(n - 1, std::max(e, peak + m_roi_post_peak));
             if (!rois.empty() && ps <= rois.back().second) {
                 rois.back().second = std::max(rois.back().second, pe);
             }

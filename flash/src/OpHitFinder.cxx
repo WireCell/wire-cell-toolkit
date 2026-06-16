@@ -36,7 +36,7 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     cfg["robust_baseline"] = m_robust_baseline;
     cfg["robust_nsigma"] = m_robust_nsigma;
     cfg["robust_veto_sigma"] = m_robust_veto_sigma;
-    cfg["nonzero_baseline"] = m_nonzero_baseline;
+    cfg["fixed_ped_sigma"] = m_fixed_ped_sigma;
     // AlgoSlidingWindow parameters, dune_ophit_finder_deco values.
     Configuration algo;
     algo["adc_threshold"] = 3.0;
@@ -70,7 +70,7 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     m_robust_baseline = get(cfg, "robust_baseline", m_robust_baseline);
     m_robust_nsigma = get(cfg, "robust_nsigma", m_robust_nsigma);
     m_robust_veto_sigma = get(cfg, "robust_veto_sigma", m_robust_veto_sigma);
-    m_nonzero_baseline = get(cfg, "nonzero_baseline", m_nonzero_baseline);
+    m_fixed_ped_sigma = get(cfg, "fixed_ped_sigma", m_fixed_ped_sigma);
     m_algo = defs["algo"];
     if (cfg.isMember("algo")) {
         for (const auto& key : cfg["algo"].getMemberNames()) {
@@ -306,7 +306,15 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
         // self-trigger snippet path and every existing config.
         double ped_mean = 0, ped_sigma = 0;
         Configuration algo = m_algo;
-        if (m_robust_baseline) {
+        if (m_fixed_ped_sigma > 0) {
+            // ROI-cleaned input: baseline is 0 (endpoint-zeroed) and the noise
+            // floor is the known clean value (the in-ROI samples are too
+            // signal-dominated to estimate from).  See the header.
+            ped_mean = 0;
+            ped_sigma = m_fixed_ped_sigma;
+            algo["nsigma_threshold"] = m_robust_nsigma;
+        }
+        else if (m_robust_baseline) {
             // Robust per-channel baseline for the CONTINUOUS full stream, where
             // the head method is meaningless: ped_mean = median, ped_sigma =
             // MAD (both over the whole waveform; signal is sparse so the median
@@ -316,18 +324,7 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
             // robust_nsigma * MAD (high for noisy, ~unchanged for clean).  See
             // pdhd/docs/pdhd-fullstream-light-reco.md.
             if (wf.empty()) continue;
-            // The robust median/MAD are over the whole waveform by default, or
-            // over the NON-ZERO (in-ROI) samples when the input is ROI-cleaned
-            // (m_nonzero_baseline) -- see the header.
-            std::vector<short> tmp;
-            if (m_nonzero_baseline) {
-                tmp.reserve(wf.size());
-                for (short v : wf) if (v != 0) tmp.push_back(v);
-                if (tmp.empty()) continue;  // fully-zeroed (vetoed) channel
-            }
-            else {
-                tmp = wf;
-            }
+            std::vector<short> tmp(wf);
             const size_t mid = tmp.size() / 2;
             std::nth_element(tmp.begin(), tmp.begin() + mid, tmp.end());
             ped_mean = tmp[mid];

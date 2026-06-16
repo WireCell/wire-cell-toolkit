@@ -13,8 +13,13 @@
  *      waveform;
  *   2. subtract its median (baseline);
  *   3. rms = 1.4826 * MAD; channels with rms > veto_sigma (ringing) are zeroed;
- *   4. ROIs = contiguous runs above roi_nsigma * rms, padded (pad_pre, pad_post)
- *      and merged;
+ *   4. ROIs (HYSTERESIS) = contiguous runs above roi_ext_nsigma * rms (low) that
+ *      reach roi_seed_nsigma * rms somewhere inside (high, ~ the hit threshold so
+ *      a real pulse is required), padded roi_pad_pre before the run and extended to
+ *      at least roi_post_peak ticks past the decon pulse peak (the late-light
+ *      window); a brighter tail above the extend threshold runs further on its own
+ *      and overlapping windows merge.  This keeps the slow scintillation tail
+ *      inside the ROI without the 60-75 us ballooning of a fixed blanket pad;
  *   5. apply the ROIs to the ORIGINAL decon: zero everything outside ROIs and,
  *      per ROI [s,e], subtract the line through (s,d[s]),(e,d[e]) so the ROI
  *      starts and ends exactly at zero (linear baseline correction).
@@ -53,12 +58,21 @@ namespace WireCell {
             // High-pass corner of H(f) = 1 - exp(-(f/tau)^2), MHz.  0.05 ~ 1/20us
             // (scintillation is < 20 us; slower wander is removed).
             double m_hpf_tau_mhz{0.05};
-            // ROI start threshold = roi_nsigma * (1.4826 * MAD of the HPF wave).
-            // 5 -> ~0.10 decon at the ~0.02 clean noise floor: low but above the
-            // electronic noise (and ~ the OpHit 0.11 hit threshold).
-            double m_roi_nsigma{5.0};
-            int m_roi_pad_pre{50};     // ticks padded before each ROI (~0.8 us)
-            int m_roi_pad_post{700};   // ticks padded after  each ROI (~11 us tail)
+            // Hysteresis thresholds in units of (1.4826 * MAD of the HPF wave).
+            // seed (high): a run must reach this to be a real ROI; 5 -> ~0.10
+            // decon at the ~0.02 clean noise floor ~ the OpHit 0.11 hit threshold,
+            // so dim ~1-PE pulses still seed but pure noise does not.
+            // ext (low): the ROI spans the contiguous run down to this (3 -> ~0.06
+            // decon), capturing the rise/tail so the linear baseline lands near
+            // true baseline.
+            double m_roi_seed_nsigma{5.0};
+            double m_roi_ext_nsigma{3.0};
+            int m_roi_pad_pre{50};     // pad before the run start (~0.8 us); no early extension
+            // ROI reaches at least this many ticks past the DECON pulse peak (the
+            // late-light window; 300 ~ 4.8 us ~ 3x the 1.6 us LAr late-light tau).
+            // A brighter tail that stays above the extend threshold runs further on
+            // its own; overlapping windows merge adjacent pulses.
+            int m_roi_post_peak{300};
             // MAD cap (decon units) above which a channel is treated as ringing
             // and zeroed entirely (carries the OpHitFinder full-stream veto).
             double m_veto_sigma{0.1};
