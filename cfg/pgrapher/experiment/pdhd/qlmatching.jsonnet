@@ -96,6 +96,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             data: if std.objectHas(params, 'reality') && params.reality == 'sim' then false else true,
             QtoL: 1.0,
             doReflectedLight: false,
+            // Assemble the round-1/2 LASSO matrices sparse (block-sparse P/PF): on the
+            // bright outlier (run 29107 evt 1015, ~440 flashes) the dense path's P/PT
+            // spike and dense Gram build dominate QLMatching's time and memory. Sparse
+            // products change the FP accumulation order, so the diagnostic LASSO strength
+            // can move at the ULP level while every match assignment is unchanged (verified
+            // byte-identical mabc output across all 30 evts of run 29107). C++ default OFF
+            // (dense, byte-identical to history). See match/docs/qlmatching-perf-evt1015-pdhd.md.
+            sparse_lasso: true,
             drift_speed: params.lar.drift_speed,
             trigger_offset: trigger_offset,
             nchan: nchan,

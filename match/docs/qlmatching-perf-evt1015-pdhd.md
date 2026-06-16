@@ -126,6 +126,50 @@ Exact and free *when the graph fragments*, but §2 shows evt 1015 is a single de
 
 The headline correction for the next reader: on this event the LASSO `fit_round1` — its dense Gram build and the solver's dense copies/reserve — is the whole story; `build_bundles` is a sideshow, and splitting the problem into independent pieces does not apply because there is only one.
 
+---
+
+## 5. Implemented — Option A: sparse `P`/`PF` assembly (`match/src/QLMatching.cxx`)
+
+**Re-baseline.** Measured against the updated flash reconstruction (HEAD: ADC-saturation
+veto + per-PD `min_fired_pe`, `min_fired_pds:5`/`min_total_pe:20`). Those cuts barely move evt
+1015 — still **443 flashes** — so it remains the stress case. The dense baseline (this build):
+**14.32 GB / 1148 s**, `fit_round1` matrix_build **420.6 s** + lasso_solve **522.0 s**.
+
+**Change.** `fit_round1`/`fit_round2` now fill `P`/`PF` as `Eigen::Triplet` lists and realise
+them either **dense** (default — `Ress::matrix_t(P_sp.toDense())`, then the *unchanged*
+`X = PᵀP + PFᵀPF` GEMM) or **sparse** (`m_sparse_lasso` — sparse `PᵀP`/`PᵀM`, then `X.toDense()`
+into the unchanged `Ress::solve`). New `sparse_lasso` config flag, **C++ default `false`**
+(SBND / every existing config byte-identical); PDHD `cfg/.../pdhd/qlmatching.jsonnet` sets it
+`true`. Sparse and dense matrix products accumulate FP sums in different orders, so this is a
+toggle per [[feedback_toggleable_behavior_changes]], not an unconditional refactor.
+
+**Validation (all 30 events of run 29107, vs the dense baseline reference):**
+
+| path | mabc production output | calib diagnostic (`strength`) |
+|---|---|---|
+| dense default (`sparse_lasso:false`) | **29/29 byte-identical** | **29/29 byte-identical** |
+| sparse (`sparse_lasso:true`, PDHD) | **30/30 byte-identical** | 25/30 byte-identical; **5/30 strength-only** |
+
+The dense path is byte-identical down to the diagnostic `strength` float → the triplet refactor
+changed nothing. The sparse path leaves every **production** output (cluster t0, matched-flash
+index, `op` predictions) byte-identical on all 30 events; the only movement is ULP-level drift in
+the diagnostic LASSO `strength` of 5 busy events (assignments, flags, KS/chi2 unchanged) — exactly
+the documented reason it is gated.
+
+**Resource win, evt 1015 (sparse vs dense, same build):**
+
+| metric | dense baseline | + Option A (sparse) | Δ |
+|---|--:|--:|--:|
+| `fit_round1` matrix_build (both groups) | 420.6 s | **0.5 s** | **−99.9 %** |
+| `fit_round1` lasso_solve (both groups) | 522.0 s | 524.6 s | ~0 (Option B's target) |
+| peak RSS | 14.32 GB | **11.03 GB** | **−3.3 GB** |
+| total QLMatching wall | 1148 s | **733 s** | **−36 %** |
+
+Option A does exactly what §1/§3-A predicted: the dense `P`/`PT` spike (~3 GB here) and the
+O(nbeta²·nopdet·nflash) Gram build vanish. What remains — the **~11 GB** and the **~520 s
+lasso_solve** — is the dense `X`, its four copies, and the `nbeta²` triplet reserve inside
+`LassoModel`, i.e. **Option B**.
+
 ## Reproduce
 
 ```

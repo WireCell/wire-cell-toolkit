@@ -187,6 +187,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_doReflectedLight = get(cfg, "doReflectedLight", m_doReflectedLight);
     m_tpc_face = get(cfg, "tpc_face", m_tpc_face);
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
+    m_sparse_lasso = get(cfg, "sparse_lasso", m_sparse_lasso);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
     m_trigger_offset = get(cfg, "trigger_offset", m_trigger_offset);
     m_nchan = get(cfg, "nchan", m_nchan);
@@ -366,6 +367,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["doReflectedLight"] = m_doReflectedLight;
     cfg["tpc_face"]        = m_tpc_face;
     cfg["strength_cutoff"] = m_strength_cutoff;
+    cfg["sparse_lasso"]    = m_sparse_lasso;
     cfg["drift_speed"]     = m_drift_speed;
     cfg["trigger_offset"]  = m_trigger_offset;
 
@@ -1308,10 +1310,14 @@ void QLMatching::fit_round1(ApaRun& run)
     for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
 
     Ress::vector_t M = Ress::vector_t::Zero(run.nopdet * nflash);
-    Ress::matrix_t P = Ress::matrix_t::Zero(run.nopdet * nflash, nbundle + nflash);
     Ress::vector_t MF = Ress::vector_t::Zero(ncluster + nflash);
-    Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster + nflash, nbundle + nflash);
     Ress::vector_t weights = Ress::vector_t::Zero(nbundle + nflash);
+    // P (nopdet*nflash x nbundle+nflash) and PF (ncluster+nflash x nbundle+nflash)
+    // are block-sparse; collect their entries as triplets and realise them sparse
+    // (m_sparse_lasso) or dense (default) below.  The (row,col,value) set is the
+    // same either way, so the dense realisation is byte-identical to the historical
+    // dense fill.
+    std::vector<Eigen::Triplet<double>> P_trip, PF_trip;
 
     std::vector<std::pair<Opflash*, Cluster*>> pairs;
     std::size_t i = 0, ik = 0;
@@ -1322,7 +1328,7 @@ void QLMatching::fit_round1(ApaRun& run)
             const double pe = flash->get_PE(opdet_idx);
             const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
             M(i * run.nopdet + j) = pe / pe_err;
-            P(i * run.nopdet + j, nbundle + i) = pe / pe_err;
+            P_trip.emplace_back((int)(i * run.nopdet + j), (int)(nbundle + i), pe / pe_err);
         }
         for (auto bundle : bundles) {
             const auto& pred_flash = bundle->get_pred_flash();
@@ -1330,7 +1336,7 @@ void QLMatching::fit_round1(ApaRun& run)
                 const int opdet_idx = run.opdet_idx_v.at(j);
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                P(i * run.nopdet + j, pairs.size()) = pred_pe / pe_err;
+                P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
             }
             pairs.emplace_back(flash, bundle->get_main_cluster());
             const auto meas_pe_tot = flash->get_total_PE();
@@ -1340,20 +1346,41 @@ void QLMatching::fit_round1(ApaRun& run)
                                     : m_pe_mismatch_floor;
             weights(ik++) = base * lasso_flag_factor(bundle);
         }
-        PF(ncluster + i, nbundle + i) = 1. / delta_light;
+        PF_trip.emplace_back((int)(ncluster + i), (int)(nbundle + i), 1. / delta_light);
         flash_idx_map[flash] = nbundle + i;
         ++i;
     }
     for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = m_bkg_weight;
     for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
     for (std::size_t n = 0; n < pairs.size(); ++n) {
-        PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
+        PF_trip.emplace_back(cluster_idx_map[pairs.at(n).second], (int)n, 1. / delta_charge);
     }
 
-    Ress::matrix_t PT  = P.transpose();
-    Ress::matrix_t PFT = PF.transpose();
-    Ress::vector_t y = PT * M + PFT * MF;
-    Ress::matrix_t X = PT * P + PFT * PF;
+    // Realise P/PF and form the normal equations.  Default: dense (byte-identical
+    // to the historical Ress path).  m_sparse_lasso: sparse products -- removes the
+    // dense P/PT spike and the O(nbeta²·nopdet·nflash) build on busy events (FP
+    // accumulation order differs, so X may move at the ULP level; assignments do not).
+    Eigen::SparseMatrix<double> P_sp((int)(run.nopdet * nflash), (int)(nbundle + nflash));
+    Eigen::SparseMatrix<double> PF_sp((int)(ncluster + nflash), (int)(nbundle + nflash));
+    P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
+    PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
+    Ress::vector_t y;
+    Ress::matrix_t X;
+    if (m_sparse_lasso) {
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        X = Xs.toDense();
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        y = PT * M + PFT * MF;
+        X = PT * P + PFT * PF;
+    }
     Ress::vector_t initial = Ress::vector_t::Zero(nbundle + nflash);
     for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 
@@ -1407,10 +1434,11 @@ void QLMatching::fit_round2(ApaRun& run)
     for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
 
     Ress::vector_t M = Ress::vector_t::Zero(run.nopdet * nflash);
-    Ress::matrix_t P = Ress::matrix_t::Zero(run.nopdet * nflash, nbundle);
     Ress::vector_t MF = Ress::vector_t::Zero(ncluster);
-    Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster, nbundle);
     Ress::vector_t weights = Ress::vector_t::Zero(nbundle);
+    // Block-sparse P (nopdet*nflash x nbundle) / PF (ncluster x nbundle) as triplets;
+    // realised dense (default, byte-identical) or sparse (m_sparse_lasso) below.
+    std::vector<Eigen::Triplet<double>> P_trip, PF_trip;
     std::vector<std::pair<Opflash*, Cluster*>> pairs;
 
     std::size_t i = 0, ik = 0;
@@ -1429,7 +1457,7 @@ void QLMatching::fit_round2(ApaRun& run)
                 const int opdet_idx = run.opdet_idx_v.at(j);
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                P(i * run.nopdet + j, pairs.size()) = pred_pe / pe_err;
+                P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
             }
             pairs.emplace_back(flash, bundle->get_main_cluster());
 
@@ -1444,13 +1472,30 @@ void QLMatching::fit_round2(ApaRun& run)
     }
     for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
     for (std::size_t n = 0; n < pairs.size(); ++n) {
-        PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
+        PF_trip.emplace_back(cluster_idx_map[pairs.at(n).second], (int)n, 1. / delta_charge);
     }
 
-    Ress::matrix_t PT  = P.transpose();
-    Ress::matrix_t PFT = PF.transpose();
-    Ress::vector_t y = PT * M + PFT * MF;
-    Ress::matrix_t X = PT * P + PFT * PF;
+    Eigen::SparseMatrix<double> P_sp((int)(run.nopdet * nflash), (int)nbundle);
+    Eigen::SparseMatrix<double> PF_sp((int)ncluster, (int)nbundle);
+    P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
+    PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
+    Ress::vector_t y;
+    Ress::matrix_t X;
+    if (m_sparse_lasso) {
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        X = Xs.toDense();
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        y = PT * M + PFT * MF;
+        X = PT * P + PFT * PF;
+    }
     Ress::vector_t initial = Ress::vector_t::Zero(nbundle);
     for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 

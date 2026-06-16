@@ -121,6 +121,19 @@ namespace WireCell::Match {
         // out so it can be widened/narrowed from the jsonnet without rebuild.
         double m_strength_cutoff{0.05};
 
+        // Assemble the round-1/2 LASSO response matrices (P, PF) as Eigen sparse
+        // and form the normal-equations X = PᵀP + PFᵀPF / y = PᵀM + PFᵀMF with
+        // sparse products, instead of the dense Eigen path. P/PF are block-sparse
+        // (each bundle column touches only its flash's nopdet-row block), so on a
+        // busy event (e.g. PDHD run 29107 evt 1015, ~440 flashes) the dense path's
+        // P/PT spike (~5 GB) and the O(nbeta²·nopdet·nflash) matrix build dominate
+        // both memory and time. The sparse path removes both. Sparse and dense
+        // matrix products accumulate FP sums in different orders, so X (hence the
+        // diagnostic LASSO strength) can differ at the ULP level while every match
+        // assignment is unchanged -> default OFF (dense, byte-identical to history);
+        // PDHD qlmatching.jsonnet turns it on. See match/docs/qlmatching-perf-evt1015-pdhd.md.
+        bool m_sparse_lasso{false};
+
         // ---- Tuning constants pulled out of the inline code (see
         // match/docs/improve_progress.md). The §B-§G defaults equal the historical
         // hard-coded literals (bit-identical if omitted); the §A cushions below
