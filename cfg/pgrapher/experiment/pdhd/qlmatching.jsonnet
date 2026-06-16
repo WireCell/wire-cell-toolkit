@@ -46,10 +46,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
 
     // visibility->PE efficiency.  Uniform across all 160 X-ARAPUCA windows; VIS
     // unused (reflected light off) but kept the right length for the predictor.
-    // 0.023 = first data calibration (run 27305 crosser anchors, lambda=100 cm):
-    // direct-PMT scale ~0.77 x the old 0.03 placeholder.  Provisional (pinned mainly
-    // by one bright crosser); see pdhd/docs/ql-light-normalization-study.md.
-    local vuv_eff = 0.023,
+    // 0.0145 = data calibration on run 29107 (28 clean two-boundary anode-cathode
+    // crossers, lambda=300 cm): median direct-PMT scale 0.63 x the 0.023 prior.
+    // Supersedes the 27305 tuning (0.023, lambda=100) -- that run had only ~5-7
+    // anchors and over-concentrated the model.  See ql-light-normalization-study.md.
+    local vuv_eff = 0.0145,
     local VUVEfficiency = std.makeArray(nchan, function(i) vuv_eff),
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
