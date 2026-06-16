@@ -4,6 +4,7 @@
 
 using namespace Eigen;
 
+#include <algorithm>
 #include <iostream>
 using namespace std;
 
@@ -43,7 +44,7 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     _active_beta = vector<bool>(nbeta, true);
 
     Eigen::VectorXd y = Gety();
-    Eigen::MatrixXd X = GetX();
+    const Eigen::MatrixXd& X = GetX();   // reference, not a copy of the (GB-scale) Gram
 
     // cooridate decsent
     // int N = y.size();
@@ -83,15 +84,30 @@ std::vector<size_t> WireCell::LassoModel::Fit()
 
     // triplet
     {
-        // std::cout << " triplet method " << std::endl;
-        XdX.reserve(Eigen::VectorXi::Constant(nbeta, nbeta/2));
+        // Right-size the XdX / triplet reservations to the actual sparsity of X.
+        // XdX = X^T X.  For a DENSE X (e.g. the imaging CSGraph response) it is ~dense,
+        // so keep the historical nbeta-scale reservations (no growth reallocs at the
+        // hd-max sizes the author tuned for).  For a block-sparse X (the QL normal-
+        // equations Gram, ~2% full) the nbeta^2 triplet reserve and the nbeta/2-per-
+        // column XdX reserve over-allocate by >10x (multiple GB on run 29107 evt 1015);
+        // detect that case and reserve a small seed, letting both grow (amortized;
+        // transient peak << nbeta^2).  Capacity only -> the assembled XdX, and the fit,
+        // are byte-identical either way.  size_t: int nbeta*nbeta overflows beyond 46340.
+        size_t xnnz = 0;
+        for (int c = 0; c < nbeta; ++c)
+            for (int r = 0; r < X.rows(); ++r)
+                if (X(r, c) != 0.0) ++xnnz;
+        const size_t nb2 = size_t(nbeta) * size_t(nbeta);
+        const bool dense_X = (xnnz * 2 > nb2);
+        const long col_reserve =
+            dense_X ? (long)(nbeta / 2)
+                    : std::max(8L, std::min((long)nbeta, (long)(4 * xnnz / std::max(nbeta, 1))));
+        XdX.reserve(Eigen::VectorXi::Constant(nbeta, (int)col_reserve));
         typedef Eigen::Triplet<double> T;
         std::vector<T> tripletList;
-        // Worst case is nbeta diagonal + 2 mirrored per off-diagonal
-        // pair = nbeta^2 triplets; the former nbeta^2/2 estimate forced
-        // one ~0.5 GB growth-doubling realloc at hd-max sizes.  size_t
-        // arithmetic: int nbeta*nbeta overflows beyond 46340.
-        tripletList.reserve(size_t(nbeta) * size_t(nbeta));
+        // Worst case (dense X) is nbeta diagonal + 2 mirrored per off-diagonal pair =
+        // nbeta^2 triplets; for sparse X size to ~2 per XdX nonzero (mirrored).
+        tripletList.reserve(dense_X ? nb2 : (size_t)(2L * nbeta * col_reserve + nbeta));
         // XdX is symmetric and dot() is element-wise commutative (identical
         // multiply/accumulate sequence under operand swap), so compute each
         // off-diagonal dot once and mirror it -- bit-identical to the full

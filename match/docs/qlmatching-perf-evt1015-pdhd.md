@@ -170,6 +170,48 @@ O(nbeta²·nopdet·nflash) Gram build vanish. What remains — the **~11 GB** an
 lasso_solve** — is the dense `X`, its four copies, and the `nbeta²` triplet reserve inside
 `LassoModel`, i.e. **Option B**.
 
+---
+
+## 6. Implemented — Option B: drop the redundant dense copies + right-size the reserve (`util/`)
+
+**Change (all bit-identical — pure dataflow/storage, no arithmetic touched):**
+- `Ress::solve(matrix_t matrix, …)` → `const matrix_t&` (`util/src/Ress.cxx`,
+  `util/inc/WireCellUtil/Ress.h`): the GB-scale Gram is no longer copied at the call.
+- `LinearModel::SetData`/`SetX` and the `ElasticNetModel::SetX` override → `const Eigen::MatrixXd&`
+  (`util/inc/WireCellUtil/{LinearModel,ElasticNetModel}.h`): the one surviving copy is the `_X`
+  member. `LassoModel::Fit` / `ElasticNetModel::Fit` `Eigen::MatrixXd X = GetX();` →
+  `const Eigen::MatrixXd& X` (`util/src/{LassoModel,ElasticNetModel}.cxx`). Net: the `nbeta²`
+  matrix is copied **once** instead of four times.
+- `LassoModel::Fit` triplet/`XdX` reservations: the `tripletList.reserve(nbeta²)` (~2.7 GB) and
+  `XdX.reserve(nbeta/2 per col)` (~1 GB) are right-sized by a one-pass `nnz(X)` check — a **dense**
+  X (imaging) keeps the historical nbeta-scale reserve unchanged; a **sparse** X (the QL Gram)
+  reserves a small seed and grows. Capacity-only → the assembled `XdX` and the fit are unchanged.
+
+These are **shared util** (used by imaging `CSGraph`/`BlobSolving`), so default-OFF toggling does
+not apply — they must be unconditionally bit-identical, and are.
+
+**Validation:**
+- **Imaging regression** (run 29107 evt idx 9, `wct-img-all`/`run_img_evt.sh -d on`): the four
+  `clusters-apa-apa{0..3}-ms-active` archives are **byte-identical** pre- vs post-B (every inner
+  numpy member) — the shared-util edits do not perturb imaging.
+- **QL** (29 events of run 29107 vs the post-A reference): **29/29 mabc AND calib byte-identical**,
+  including the raw `strength` float — B is numerically a no-op, as intended.
+
+**Resource win, evt 1015:**
+
+| metric | dense baseline | + A (sparse) | + A + B | A+B Δ vs baseline |
+|---|--:|--:|--:|--:|
+| `fit_round1` matrix_build | 420.6 s | 0.5 s | 0.4 s | **−99.9 %** |
+| `fit_round1` lasso_solve | 522.0 s | 524.6 s | 541.5 s | ~0 (compute unchanged) |
+| peak RSS | 14.32 GB | 11.03 GB | **8.41 GB** | **−5.9 GB (−41 %)** |
+
+B removes ~2.6 GB on top of A (three redundant `X` copies + the multi-GB reserves). The **remaining
+~8.4 GB / ~540 s** is structural and outside A+B's scope: the dense `X` still lives twice (the
+`fit_round1` local + the `_X` member) feeding the **unchanged** `Ress::solve`, and the O(nbeta³)
+coordinate-descent Gram-of-Gram is the solve time. Cutting those is **B2** (teach `LassoModel` to
+consume a sparse `X` — removes both the second dense copy and the dense Gram reconstruction) and
+**C** (a pre-fit cull to shrink `nbeta` at the source); both are follow-ups, not part of A+B.
+
 ## Reproduce
 
 ```

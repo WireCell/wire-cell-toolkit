@@ -44,8 +44,9 @@ namespace WireCell {
 
         // Solve m = R*s for s, return s.
         vector_t solve(
-            // matrix R
-            matrix_t response,
+            // matrix R (passed by const ref: the Gram can be GBs on busy QL events,
+            // and solve() only forwards it to the model -- no need to copy it here)
+            const matrix_t& response,
             // measured vector m
             vector_t measured,
             // params

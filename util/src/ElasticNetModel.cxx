@@ -42,7 +42,7 @@ std::vector<size_t> WireCell::ElasticNetModel::Fit()
 
     // use alias for easy notation
     Eigen::VectorXd y = Gety();
-    Eigen::MatrixXd X = GetX();
+    const Eigen::MatrixXd& X = GetX();   // reference, not a copy of the (GB-scale) Gram
 
     // cooridate decsent
 
