@@ -29,6 +29,16 @@ void WireCell::LassoModel::Set_init_values(std::vector<double> values)
     }
 }
 
+void WireCell::LassoModel::SetXsparse(const Eigen::SparseMatrix<double>& X)
+{
+    // Mirror ElasticNetModel::SetX (reset beta + unit lambda weights) but store the
+    // response sparsely; the caller may override the weights afterwards.
+    _Xsp = X;
+    _use_sparse = true;
+    _beta = Eigen::VectorXd::Zero(X.cols());
+    SetLambdaWeight(Eigen::VectorXd::Constant(X.cols(), 1.));
+}
+
 std::vector<size_t> WireCell::LassoModel::Fit()
 {
     std::vector<size_t> below_threshold;
@@ -36,7 +46,7 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     // initialize solution to zero unless user set beta already
     Eigen::VectorXd beta = _beta;
     if (0 == beta.size()) {
-        beta = VectorXd::Zero(_X.cols());
+        beta = VectorXd::Zero(_use_sparse ? _Xsp.cols() : _X.cols());
     }
 
     // initialize active_beta to true
@@ -44,11 +54,31 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     _active_beta = vector<bool>(nbeta, true);
 
     Eigen::VectorXd y = Gety();
+
+    // Build the per-column norm, the X^T y vector (ydX) and the X^T X Gram (XdX) the
+    // coordinate descent needs.  Two paths, identical up to FP accumulation order: the
+    // historical DENSE path over _X (kept verbatim below), and a SPARSE path over _Xsp
+    // that forms ydX/XdX by sparse products -- skipping the ~98% zero work on a block-
+    // sparse response (QLMatching sparse_lasso) and never densifying X.
+    double tol2 = TOL * TOL * nbeta;
+    VectorXd norm(nbeta);
+    Eigen::VectorXd ydX(nbeta);
+    Eigen::SparseMatrix<double> XdX(nbeta, nbeta);
+
+    if (_use_sparse) {
+        const Eigen::SparseMatrix<double>& X = _Xsp;
+        for (int j = 0; j < nbeta; j++) {
+            norm(j) = X.col(j).squaredNorm();
+            if (norm(j) < 1e-6) { below_threshold.push_back(j); norm(j) = 1; }
+        }
+        ydX = X.transpose() * y;   // X^T y  (== y.dot(X.col(i)) per row, sparsely)
+        XdX = X.transpose() * X;   // X^T X  (skips the ~98% zero dot-products)
+    }
+    else {
     const Eigen::MatrixXd& X = GetX();   // reference, not a copy of the (GB-scale) Gram
 
     // cooridate decsent
     // int N = y.size();
-    VectorXd norm(nbeta);
     for (int j = 0; j < nbeta; j++) {
         norm(j) = X.col(j).squaredNorm();
         if (norm(j) < 1e-6) {
@@ -57,13 +87,10 @@ std::vector<size_t> WireCell::LassoModel::Fit()
             norm(j) = 1;
         }
     }
-    double tol2 = TOL * TOL * nbeta;
 
     // const double inner_product_complexity = nbeta * nbeta * X.rows();
 
     // calculate the inner product
-    Eigen::VectorXd ydX(nbeta);
-    Eigen::SparseMatrix<double> XdX(nbeta, nbeta);
     // std::cout << "Lasso begin inner product nbeta "  << nbeta << " X.rows " << X.rows() << " X.cols " << X.cols() << std::endl;
     // double sum_non_zeros = 0;
 
@@ -134,7 +161,8 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         }
         XdX.setFromTriplets(tripletList.begin(), tripletList.end());
     }
-    // std::cout << "Lasso end inner product. sum_non_zeros " << sum_non_zeros << " XdX.nonZeros() " << XdX.nonZeros() 
+    }  // end dense Gram build (the sparse path is handled above)
+    // std::cout << "Lasso end inner product. sum_non_zeros " << sum_non_zeros << " XdX.nonZeros() " << XdX.nonZeros()
     //           << " XdX.rows() " << XdX.rows() << " XdX.cols() " << XdX.cols() << std::endl;
 
     // start interation ...

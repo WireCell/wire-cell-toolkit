@@ -259,7 +259,47 @@ stays an observation.
 **Bottom line:** the one big *result-preserving* lever left is **B2** (sparse `X` through the solver),
 gated by the same `sparse_lasso` flag; **C** is a larger lever still but only as a validated physics
 toggle. A+B already removed the matrix-build cost and ~6 GB; B2 would take the solve from minutes to
-seconds and the memory to a few GB.
+seconds and the memory to a few GB. **B2 is now implemented — see §8.**
+
+---
+
+## 8. Implemented — Option B2: feed the solver a sparse `X` (`util/` + `match/`)
+
+Realises §7. Under `sparse_lasso`, `fit_round1`/`fit_round2` now pass the sparse Gram `Xs` **directly**
+to a new `Ress::solve(const Eigen::SparseMatrix<double>&, …)` overload (no `toDense()`), and
+`LassoModel::Fit` gained a sparse path that builds `norm` / `ydX = Xᵀy` / `XdX = XᵀX` by **sparse
+products** instead of the dense `X.col(i).dot(X.col(j))` loop. The dense path (imaging, SBND, any
+caller of the dense `solve`) is wrapped verbatim in the `else` branch — untouched.
+
+- `util/inc/WireCellUtil/{Ress.h,LassoModel.h}`, `util/src/{Ress.cxx,LassoModel.cxx}`: sparse `solve`
+  overload → `LassoModel::SetXsparse` (stores `_Xsp`, sets `_use_sparse`); `Fit` branches on it.
+- `match/src/QLMatching.cxx`: the `sparse_lasso` branch builds `Xs` and calls the sparse `solve`; the
+  dense branch is byte-for-byte the old code.
+
+**Validation:**
+- **Imaging** (idx 9, 4 anodes) **byte-identical** pre/post — the dense `Fit` path survived the refactor.
+- **QL** (29 events vs the dense baseline): **29/29 mabc production byte-identical**; the diagnostic
+  `strength` float is now strength-only different on all 29 (the sparse `XᵀX` accumulates in a
+  different FP order than the dense dot loop — more events move than under A alone, but still *only*
+  `strength`; every assignment, flag, KS and chi2 is identical). Result-preserving, as intended.
+
+**Resource win, evt 1015 — the full A → B → B2 progression:**
+
+| metric | dense baseline | + A | + A+B | **+ A+B+B2** |
+|---|--:|--:|--:|--:|
+| `fit_round1` matrix_build | 420.6 s | 0.5 s | 0.4 s | **0.14 s** |
+| `fit_round1` lasso_solve | 522 s | 525 s | 541 s | **9.2 s** |
+| peak RSS | 14.32 GB | 11.03 GB | 8.41 GB | **3.94 GB** |
+| total QLMatching wall | 1148 s | 733 s | 748 s | **220 s** |
+
+B2 takes the solve from **~540 s to ~9 s (≈59×)** — group13 170 s→2.7 s, group02 372 s→6.5 s — and
+drops another **4.5 GB** (the dense `X` is gone; `XdX` is built from the sparse pattern). **Combined
+A+B+B2: 1148 s → 220 s (5.2×) and 14.32 GB → 3.94 GB (3.6×) on evt 1015, production byte-identical.**
+
+What's left is now genuinely structural: the ~9 s solve is the coordinate-descent iterations over the
+sparse `XdX` (~O(nbeta²·sweeps)), and the ~4 GB floor is the charge point clouds, not the matcher. The
+only further lever is **C** (shrink `nbeta` with a pre-fit cull) — bigger still, but a physics toggle,
+not result-preserving. For the result-preserving track, A+B+B2 is the end of the line.
 
 ## Reproduce
 

@@ -1364,23 +1364,6 @@ void QLMatching::fit_round1(ApaRun& run)
     Eigen::SparseMatrix<double> PF_sp((int)(ncluster + nflash), (int)(nbundle + nflash));
     P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
     PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
-    Ress::vector_t y;
-    Ress::matrix_t X;
-    if (m_sparse_lasso) {
-        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
-        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
-        y = PT * M + PFT * MF;
-        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
-        X = Xs.toDense();
-    }
-    else {
-        Ress::matrix_t P  = P_sp.toDense();
-        Ress::matrix_t PF = PF_sp.toDense();
-        Ress::matrix_t PT  = P.transpose();
-        Ress::matrix_t PFT = PF.transpose();
-        y = PT * M + PFT * MF;
-        X = PT * P + PFT * PF;
-    }
     Ress::vector_t initial = Ress::vector_t::Zero(nbundle + nflash);
     for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 
@@ -1388,13 +1371,38 @@ void QLMatching::fit_round1(ApaRun& run)
     params.model = Ress::lasso;
     params.lambda = lambda;
     log->debug("solving (round 1)");
-    const double t_build = ms_since(t_build0);
-    const auto t_solve0 = wallclock::now();
-    Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
-    log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
-               "lasso_solve {:.1f} ms (X {}x{})",
-               run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
-               (int)X.rows(), (int)X.cols());
+    const int xdim = (int)(nbundle + nflash);
+    Ress::vector_t solution;
+    if (m_sparse_lasso) {
+        // Sparse normal equations fed straight to the solver (B2): no dense X, and the
+        // solver forms XᵀX / Xᵀy by sparse products -- skipping the ~98% zero work.
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(Xs, y, params, initial, weights);
+        log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   xdim, xdim);
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Ress::matrix_t X = PT * P + PFT * PF;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(X, y, params, initial, weights);
+        log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   (int)X.rows(), (int)X.cols());
+    }
 
     TimingTPCBundleSelection to_be_removed;
     int n = 0;
@@ -1479,23 +1487,6 @@ void QLMatching::fit_round2(ApaRun& run)
     Eigen::SparseMatrix<double> PF_sp((int)ncluster, (int)nbundle);
     P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
     PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
-    Ress::vector_t y;
-    Ress::matrix_t X;
-    if (m_sparse_lasso) {
-        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
-        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
-        y = PT * M + PFT * MF;
-        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
-        X = Xs.toDense();
-    }
-    else {
-        Ress::matrix_t P  = P_sp.toDense();
-        Ress::matrix_t PF = PF_sp.toDense();
-        Ress::matrix_t PT  = P.transpose();
-        Ress::matrix_t PFT = PF.transpose();
-        y = PT * M + PFT * MF;
-        X = PT * P + PFT * PF;
-    }
     Ress::vector_t initial = Ress::vector_t::Zero(nbundle);
     for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 
@@ -1503,13 +1494,37 @@ void QLMatching::fit_round2(ApaRun& run)
     params.model = Ress::lasso;
     params.lambda = lambda;
     log->debug("solving (round 2)");
-    const double t_build = ms_since(t_build0);
-    const auto t_solve0 = wallclock::now();
-    Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
-    log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
-               "lasso_solve {:.1f} ms (X {}x{})",
-               run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
-               (int)X.rows(), (int)X.cols());
+    const int xdim = (int)nbundle;
+    Ress::vector_t solution;
+    if (m_sparse_lasso) {
+        // Sparse normal equations straight to the solver (B2): no dense X.
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(Xs, y, params, initial, weights);
+        log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   xdim, xdim);
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Ress::matrix_t X = PT * P + PFT * PF;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(X, y, params, initial, weights);
+        log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   (int)X.rows(), (int)X.cols());
+    }
 
     TimingTPCBundleSelection to_be_removed;
     int n = 0;

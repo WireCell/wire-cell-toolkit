@@ -15,7 +15,19 @@ namespace WireCell {
         virtual std::vector<size_t> Fit();
         void Set_init_values(std::vector<double> values);
 
+        // Sparse-response path (used by the Ress::solve sparse overload).  When set,
+        // Fit() builds the X^T X Gram and X^T y it needs from this sparse response
+        // matrix instead of the dense _X -- skipping the dense Gram-of-Gram on a
+        // block-sparse X (e.g. the QLMatching sparse_lasso normal equations).  The
+        // dense path (imaging, and any caller of the dense solve) is untouched.
+        // See match/docs/qlmatching-perf-evt1015-pdhd.md.
+        void SetXsparse(const Eigen::SparseMatrix<double>& X);
+
         double chi2_l1();
+
+       private:
+        Eigen::SparseMatrix<double> _Xsp;   // response matrix when _use_sparse
+        bool _use_sparse{false};
     };
 
 }  // namespace WireCell
