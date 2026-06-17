@@ -140,6 +140,46 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // default (SBND's 3427, below the PDHD cathode at ~4498) would falsely
             // flag every mid-drift cluster as window-truncated.
             readout_window_ticks: readout_window_ticks,
+
+            // --- Bundle prefilters (PDHD default ON; C++ defaults OFF, so any config
+            // that does not set these is bit-identical) ----------------------------
+            // (a) Containment: drop a (flash, cluster) bundle whose cluster is not
+            // contained in the TPC drift box once the flash T0 x-offset is applied.
+            // The box is the TWO-APA union (compute_geometry unions inner_bounds over
+            // grouping_anodes above) -- the SAME box used for the at_x_boundary /
+            // two_boundary flag walk -- so on each -x/+x drift side it spans both APAs
+            // (z ~ 0..4.6 m, verified on run 29107: geometry z-span 462 cm). Checked on
+            // the 29107 calib winners: 0 of 2414 auto_selected matches (and 0 of 18
+            // two_boundary anchors) fail containment at the default cathode_ext1=1.2 cm,
+            // so no cushion widening is needed and no current match is removed -- it only
+            // prunes non-contained junk candidates from the pre-LASSO pool.
+            require_containment: true,
+
+            // (b) Over-prediction reject: before the chi2 fit, drop a bundle whose
+            // predicted light hugely exceeds the measured light over the masked PMT set:
+            //   reject if  sum(pred)/sum(meas) > overpred_total_ratio
+            //          or  pred/meas at the brightest predicted PMT > overpred_maxch_ratio
+            // Boundary/window-truncated bundles are EXEMPT (incl. every at_x_boundary
+            // two-boundary light anchor), so this never touches the calibration set.
+            // Both cuts are PRE-LASSO (they prune candidates, triggering a global
+            // re-solve), so their effect is NOT the per-bundle cull count -- on run
+            // 29107 they swap ~44% of the (noise-dominated) matched flashes while keeping
+            // the count flat (1399->1428) and IMPROVING quality (the removed matches had
+            // median best-KS ~0.87 = junk; stable matches held at paired median dKS=0;
+            // strict ks<0.2 two-boundary anchors grew 3->14). See docs/qlmatching-chain.md.
+            // PROVISIONAL ceilings -- PDHD has no Q/L hand-scan ground truth yet (the
+            // run-29107 bee link being produced is what will create it), so unlike SBND
+            // (2.9/4.3, tuned on 10 GT events) these are sized LOOSE, deliberately ABOVE
+            // the rough optical model's own over-prediction range so the cut does not
+            // penalize model roughness while it is still being calibrated: on 29107 the
+            // matched winners have R_total p99=2.9 and R_max p99=21, so (5.0, 25.0) fires
+            // only on egregious >p99 over-prediction (and the ~60 degenerate
+            // zero-measured-light junk matches). Tighten once PDHD hand scans exist. See
+            // ql_light_calib/containment_overpred_check.py.
+            reject_overpred: true,
+            overpred_total_ratio: 5.0,
+            overpred_maxch_ratio: 25.0,
+
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
             VUVEfficiency: VUVEfficiency,
