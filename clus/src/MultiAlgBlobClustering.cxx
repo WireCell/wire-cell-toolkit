@@ -1808,6 +1808,19 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     const auto pe = a_pe->elements<double>();
     const size_t nrow = gid.size();
 
+    // Per-flash physical drift side (TPC 0 = low-x, TPC 1 = high-x), written by
+    // QLMatching from the flash's measured light pattern.  Use it when present;
+    // fall back to the gid-derived side for older dumps that lack the column.
+    // The gid alone encodes the processing node's anode, not the lit volume, so
+    // on the merged root it tags every flash with one side (e.g. all "TPC0").
+    auto a_apa = ds.get("apa");
+    const bool have_apa = (a_apa != nullptr);
+    std::vector<int> apa_col;
+    if (have_apa) {
+        auto ac = a_apa->elements<int>();
+        apa_col.assign(ac.begin(), ac.end());
+    }
+
     // Optional ±80 ns flash-flash grouping across TPC sides, stored on the root
     // by ClusteringSwitchScope (flash_group_window>0).  Absent => no grouping
     // is emitted and the op JSON stays bit-identical to the ungrouped case.
@@ -1824,6 +1837,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     std::vector<int> flash_order;
     std::map<int, double> flash_time;
     std::map<int, int> flash_group;                  // gid -> flash-group id
+    std::map<int, int> flash_apa;                    // gid -> physical drift side
     std::map<int, std::map<int, double>> flash_pe;   // gid -> (ch -> pe)
     for (size_t i = 0; i < nrow; ++i) {
         const int g = gid[i];
@@ -1831,6 +1845,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
             flash_order.push_back(g);
             flash_time[g] = time[i];
             if (have_group) flash_group[g] = group_col[i];
+            if (have_apa) flash_apa[g] = apa_col[i];
         }
         flash_pe[g][ch[i]] = pe[i];
     }
@@ -1862,12 +1877,14 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
 
     // Emit ALL flashes (matched + unmatched). A matched flash emits one row per
     // matched cluster; an unmatched flash emits one row with empty cluster_id.
-    // The global flash id encodes the APA as gid = anode_ident*kFlashGidStride +
-    // idx (see QLMatching.cxx), so apa = gid / kFlashGidStride.
+    // The flash's drift side (apa) comes from the "apa" column when present
+    // (QLMatching derives it from the measured light pattern); otherwise fall
+    // back to the legacy gid encoding gid = anode_ident*kFlashGidStride + idx,
+    // so apa = gid / kFlashGidStride (correct only for single-face anodes).
     constexpr int kFlashGidStride = 1000000;
     std::vector<int> appended_groups;   // one per appended row, same order
     for (const int g : flash_order) {
-        const int apa = g / kFlashGidStride;
+        const int apa = have_apa ? flash_apa[g] : (g / kFlashGidStride);
         const int grp = have_group ? flash_group[g] : -1;
         int maxch = -1;
         for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;

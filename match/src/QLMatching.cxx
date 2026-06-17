@@ -1733,11 +1733,25 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
 // MABC can dump the op/flash Bee display after the per-APA trees are merged.
 void QLMatching::write_opflash_pc(ApaRun& run)
 {
-    std::vector<int> op_gid, op_ch;
+    std::vector<int> op_gid, op_ch, op_apa;
     std::vector<double> op_time, op_pe;
     for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
         const auto& flash = run.flashes[fi];
         const int gid = run.anode->ident() * kFlashGidStride + static_cast<int>(fi);
+        // Physical drift side of the flash (TPC 0 = low-x, TPC 1 = high-x of the
+        // cathode), taken from where its measured light actually is rather than
+        // from the gid: the gid encodes the *processing node's* anode ident, not
+        // the flash's lit volume (the per-side matcher runs against one global
+        // flash list), so the merged-root opflash PC would otherwise tag every
+        // flash with a single side and the Bee op display would read e.g. all
+        // "TPC0".  m_opdets[ch].center.x() is the OpDet position; ties -> side 0.
+        double pe_lo = 0.0, pe_hi = 0.0;
+        for (int ch = 0; ch < m_nchan; ++ch) {
+            const double p = flash->get_PE(ch);
+            if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+            else pe_lo += p;
+        }
+        const int apa = (pe_hi > pe_lo) ? 1 : 0;
         for (int ch = 0; ch < m_nchan; ++ch) {
             op_gid.push_back(gid);
             // Fold the per-event readout-vs-trigger offset into the displayed flash
@@ -1747,12 +1761,14 @@ void QLMatching::write_opflash_pc(ApaRun& run)
             op_time.push_back(flash->get_time() + m_trigger_offset);
             op_ch.push_back(ch);
             op_pe.push_back(flash->get_PE(ch));
+            op_apa.push_back(apa);
         }
     }
     run.grouping->put_pcarray<int>(op_gid, "gid", "opflash");
     run.grouping->put_pcarray<double>(op_time, "time", "opflash");
     run.grouping->put_pcarray<int>(op_ch, "ch", "opflash");
     run.grouping->put_pcarray<double>(op_pe, "pe", "opflash");
+    run.grouping->put_pcarray<int>(op_apa, "apa", "opflash");
 }
 
 // ---------------------------------------------------------------------------
