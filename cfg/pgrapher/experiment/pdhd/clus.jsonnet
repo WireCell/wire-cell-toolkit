@@ -28,11 +28,13 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
 // Calibrated from PDHD data.  1.565 = anode->cathode crossing-track x-span midpoint
 // [~1.55 over-merge, ~1.57 truncation]; 1.585 = first cathode-end pass on two evt-983
 // crossers.  n=4 evt-983 crossers then showed 1.585 over-shoots the cathode (3 of 4
-// ends +0.9..+2.9 cm past it) with no single velocity centering all four; 1.580 centers
-// them (extreme pair symmetric +-1.75 cm) and the +-2 cm per-track residual is absorbed
-// by the QLMatching cathode window (cathode_ext1 1.2->2.5), not the velocity.  MUST match
+// ends +0.9..+2.9 cm past it); the four ends hold a fixed ~3.5 cm spread (irreducible
+// t0/velocity/SCE residual), so v only slides the centroid.  1.576 puts the most-
+// overshooting crosser just INSIDE the cathode (clus62 +0.84 cm), so the QLMatching
+// cathode_ext1 containment edge reverts to ~the C++ default (1.5 cm) and the undershoot
+// residual lands on the benign flag window (cathode_ext2 -2.0->-3.0).  MUST match
 // params.lar.drift_speed (QLMatching + img dump read that).  See pdhd/docs/clustering-algorithm.md.
-local drift_speed = 1.580 * wc.mm / wc.us;
+local drift_speed = 1.576 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);

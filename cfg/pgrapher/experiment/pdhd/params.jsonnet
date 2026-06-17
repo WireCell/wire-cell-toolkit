@@ -110,14 +110,16 @@ base {
         // x-span midpoint [~1.55 over-merge, ~1.57 crosser-truncation]; 1.585 was a
         // first cathode-end-registration pass on two evt-983 crossers.  Adding two
         // more evt-983 cathode crossers (n=4) showed 1.585 systematically OVER-shoots
-        // the cathode (3 of 4 cathode ends land +0.9..+2.9 cm PAST it), and no single
-        // velocity puts all four on the cathode (their per-cluster best-v spans
-        // 1.572..1.588).  1.580 centers the four (mean best-v 1.579) so the extreme
-        // pair sits symmetric at +-1.75 cm; the residual +-2 cm per-track scatter
-        // (degenerate t0 / velocity / SCE drift offset) is absorbed by the QLMatching
-        // cathode flag/containment window, not the velocity (pdhd/qlmatching.jsonnet
-        // cathode_ext1 widened 1.2->2.5).  See pdhd/docs/clustering-algorithm.md.
-        drift_speed: 1.580 * wc.mm / wc.us,  // 1.585 (over-shot cathode), 1.565 (A-C x-span), 1.6 (default)
+        // the cathode (3 of 4 cathode ends land +0.9..+2.9 cm PAST it).  The four ends
+        // hold a fixed ~3.5 cm spread (the irreducible +-2 cm t0/velocity/SCE residual),
+        // so no velocity collapses it; v only slides the centroid.  1.576 puts the most-
+        // overshooting crosser just INSIDE the cathode (clus62 +0.84 cm) instead of past
+        // it, so containment (QLMatching cathode_ext1) reverts to ~the C++ default 1.5 cm
+        // and the undershoot residual lands entirely on the benign flag-only window
+        // (cathode_ext2 widened -2.0->-3.0).  This biases global drift-x ~-0.6 cm vs the
+        // 4-crosser mean (well inside the +-2 cm degenerate band).  See
+        // pdhd/docs/clustering-algorithm.md.
+        drift_speed: 1.576 * wc.mm / wc.us,  // 1.580/1.585 (over-shot cathode), 1.565 (A-C x-span), 1.6 (default)
     },
 
     daq: super.daq {

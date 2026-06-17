@@ -156,18 +156,28 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // prunes non-contained junk candidates from the pre-LASSO pool.
             require_containment: true,
 
-            // cathode_ext1: how far PAST the cathode a cluster's (trimmed) cathode end
-            // may sit and still count as contained / at_x_boundary (= high_x_cut_ext1,
-            // also the PE-inclusion edge, QLMatching.cxx:1082).  Widened from the C++
-            // default 1.2 cm to 2.5 cm: PDHD's degenerate t0/velocity/SCE drift residual
-            // (~1.5-2 cm, project_cathode_crossing_offset) puts genuine cathode crossers
-            // a couple cm past the cathode even at the centered drift_speed=1.580, so the
-            // default 1.2 cm dropped real crossers (run 29107 evt 983 clus44/clus62 ended
-            // +1.2/+1.8 cm past at 1.580 and were culled -> no bundle).  2.5 cm restores
-            // them with ~0.75 cm margin; sized to the residual, NOT to over-relax the cut.
-            // (An earlier audit found "0/18 anchors fail at 1.2 cm" but it was survivorship-
-            // biased -- it counted only clusters that already formed a bundle.)
-            cathode_ext1: 2.5 * wc.cm,
+            // cathode_ext1 / cathode_ext2: the cathode-end window [u_cathode+ext2,
+            // u_cathode+ext1).  ext1 is the containment edge (how far PAST the cathode a
+            // cluster's trimmed end may sit and still count as contained / at_x_boundary;
+            // = high_x_cut_ext1, also the PE-inclusion edge, QLMatching.cxx:1082,2474).
+            // ext2 is the FLAG-ONLY lower edge (how far SHORT of the cathode an end may
+            // sit and still flag at_x_boundary, QLMatching.cxx:2506) -- it touches neither
+            // containment nor PE inclusion.
+            //
+            // PDHD's drift residual is degenerate t0/velocity/SCE at ~+-2 cm
+            // (project_cathode_crossing_offset): genuine cathode crossers scatter ~+-1.75 cm
+            // around the cathode and that spread is irreducible by any single velocity.  We
+            // set drift_speed=1.576 so the most-overshooting crosser sits just INSIDE the
+            // cathode (run 29107 evt 983: clus62 +0.84, clus44 +0.33 cm) rather than past it,
+            // which lets ext1 revert from the earlier 2.5 cm to 1.5 cm -- ~the C++ default
+            // 1.2, just +0.3 cm of noise cushion (clus62 has 0.66 cm margin to the edge).
+            // The undershoot residual then lands entirely on ext2: at 1.576 the worst
+            // undershooter is clus96 at -2.61 cm, so ext2 widens from the C++ default -2.0
+            // to -3.0 cm (0.4 cm margin) to keep flagging it at_x_boundary.  ext2 is the
+            // benign lever -- widening it only labels more near-cathode ends as boundary
+            // crossers (exempting them from reject_overpred); it cannot drop a bundle.
+            cathode_ext1: 1.5 * wc.cm,
+            cathode_ext2: -3.0 * wc.cm,
 
             // (b) Over-prediction reject: before the chi2 fit, drop a bundle whose
             // predicted light hugely exceeds the measured light over the masked PMT set:
