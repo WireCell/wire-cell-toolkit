@@ -660,19 +660,20 @@ local clus_all_tpc (
                     individual: false            // Output individual APA/Face
                 },
             {
-                    // name "img" dumps the live grouping BEFORE the all-TPC
-                    // pipeline -> the per-drift-group clustering result (stage
-                    // 3), grouped by drift side: clustering-group02 /
-                    // clustering-group13.  The "clustering" set above (end
-                    // dump) gives clustering-global (full-detector
-                    // clustering).
+                    // The hard-coded "img" name is MABC's pre-pipeline hook: this
+                    // set is dumped from the live grouping BEFORE the all-TPC
+                    // clustering pipeline runs -- i.e. the raw imaged charge (the
+                    // per-APA matched clusters).  With no apa_groups it is dumped
+                    // whole -> img-global (cf. SBND clus.jsonnet).  The "clustering"
+                    // set above (post-pipeline) gives clustering-global.  (This hook
+                    // can host only one set; emitting img-global here replaces the
+                    // former per-drift-side stage-3 clustering-group02/13 dump.)
                     name: "img",
                     detector: "protodunehd",
-                    algorithm: "clustering",    // -> clustering-group02 / clustering-group13
+                    algorithm: "img",           // -> img-global (raw imaged charge)
                     pcname: "3d",
                     coords: ["x", "y", "z"],
                     individual: false,
-                    apa_groups: apa_drift_groups,
                 }
             ],
             pipeline: wc.tns(cm_pipeline),

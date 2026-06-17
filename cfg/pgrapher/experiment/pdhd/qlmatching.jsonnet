@@ -37,12 +37,16 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
     // Static optical dead-channel mask (OpChannel == OpDet, 0..159).
     //   - 3                      noisy (LArSoft IgnoreChannels)
     //   - 86,87,97,107,116,117   dead  (LArSoft v1 IgnoreChannels; confirmed 0 PE / 115 evts)
-    //   - 120..159               DAPHNE full-stream readout, skipped by the snippet decoder
-    //                            => 0 PE in every event; never enter the WCT opflash.
-    // Run-to-run dead channels (e.g. the x<0 side, instrumented only in run 27980) are
-    // caught per-event by auto_mask below, not statically.  See
-    // pdhd/docs/pds-opchannel-opdet-mapping.md and pdhd-light-raw-data.md.
-    local ch_mask = [3, 86, 87, 97, 107, 116, 117] + std.range(120, 159),
+    // Channels 120..159 are the DAPHNE full-stream PDs (the entire -x / side-0
+    // z<250 half).  They USED to be dropped by the snippet decoder (0 PE) and were
+    // statically masked here; the full-160 re-extraction (all-PD light reco) now
+    // decodes them with real light (run 29107: ~38/40 fire, ~70k PE/evt), so they
+    // are NO LONGER statically masked -- masking them discarded half of side 0.
+    // Runs whose light reco lacks the full stream leave 120..159 at 0 PE; those are
+    // caught per-event by auto_mask below (as are the run-dependent x<0 dead
+    // channels), not statically.  See pdhd/docs/pds-opchannel-opdet-mapping.md and
+    // pdhd-light-raw-data.md.
+    local ch_mask = [3, 86, 87, 97, 107, 116, 117],
 
     // visibility->PE efficiency.  Uniform across all 160 X-ARAPUCA windows; VIS
     // unused (reflected light off) but kept the right length for the predictor.
