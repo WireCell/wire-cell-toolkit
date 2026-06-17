@@ -106,16 +106,18 @@ base {
     },
 
     lar: super.lar {
-        // Calibrated from PDHD data.  The earlier 1.565 was the midpoint of the
-        // anode->cathode crossing-track drift x-span bracket [~1.55 over-merge,
-        // ~1.57 crosser-truncation].  Refined to 1.585 from cathode-end
-        // registration: cathode-anchored crossers with a flash T0 (run 29107
-        // evt 983) had reconstructed cathode ends landing 3.5-5 cm short of the
-        // cathode surface at 1.565; 1.585 lands them on the surface (within ~1
-        // cm) so they trip flag_at_x_boundary.  This is above the old x-span
-        // bracket -- the span method under-weights the cathode end.
-        // See pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
-        drift_speed: 1.585 * wc.mm / wc.us,  // was 1.565 (A-C x-span midpoint), 1.6 (common default)
+        // Calibrated from PDHD data.  1.565 was the anode->cathode crossing-track
+        // x-span midpoint [~1.55 over-merge, ~1.57 crosser-truncation]; 1.585 was a
+        // first cathode-end-registration pass on two evt-983 crossers.  Adding two
+        // more evt-983 cathode crossers (n=4) showed 1.585 systematically OVER-shoots
+        // the cathode (3 of 4 cathode ends land +0.9..+2.9 cm PAST it), and no single
+        // velocity puts all four on the cathode (their per-cluster best-v spans
+        // 1.572..1.588).  1.580 centers the four (mean best-v 1.579) so the extreme
+        // pair sits symmetric at +-1.75 cm; the residual +-2 cm per-track scatter
+        // (degenerate t0 / velocity / SCE drift offset) is absorbed by the QLMatching
+        // cathode flag/containment window, not the velocity (pdhd/qlmatching.jsonnet
+        // cathode_ext1 widened 1.2->2.5).  See pdhd/docs/clustering-algorithm.md.
+        drift_speed: 1.580 * wc.mm / wc.us,  // 1.585 (over-shot cathode), 1.565 (A-C x-span), 1.6 (default)
     },
 
     daq: super.daq {

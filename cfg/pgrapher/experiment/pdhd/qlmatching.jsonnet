@@ -152,12 +152,22 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // The box is the TWO-APA union (compute_geometry unions inner_bounds over
             // grouping_anodes above) -- the SAME box used for the at_x_boundary /
             // two_boundary flag walk -- so on each -x/+x drift side it spans both APAs
-            // (z ~ 0..4.6 m, verified on run 29107: geometry z-span 462 cm). Checked on
-            // the 29107 calib winners: 0 of 2414 auto_selected matches (and 0 of 18
-            // two_boundary anchors) fail containment at the default cathode_ext1=1.2 cm,
-            // so no cushion widening is needed and no current match is removed -- it only
+            // (z ~ 0..4.6 m, verified on run 29107: geometry z-span 462 cm). It also
             // prunes non-contained junk candidates from the pre-LASSO pool.
             require_containment: true,
+
+            // cathode_ext1: how far PAST the cathode a cluster's (trimmed) cathode end
+            // may sit and still count as contained / at_x_boundary (= high_x_cut_ext1,
+            // also the PE-inclusion edge, QLMatching.cxx:1082).  Widened from the C++
+            // default 1.2 cm to 2.5 cm: PDHD's degenerate t0/velocity/SCE drift residual
+            // (~1.5-2 cm, project_cathode_crossing_offset) puts genuine cathode crossers
+            // a couple cm past the cathode even at the centered drift_speed=1.580, so the
+            // default 1.2 cm dropped real crossers (run 29107 evt 983 clus44/clus62 ended
+            // +1.2/+1.8 cm past at 1.580 and were culled -> no bundle).  2.5 cm restores
+            // them with ~0.75 cm margin; sized to the residual, NOT to over-relax the cut.
+            // (An earlier audit found "0/18 anchors fail at 1.2 cm" but it was survivorship-
+            // biased -- it counted only clusters that already formed a bundle.)
+            cathode_ext1: 2.5 * wc.cm,
 
             // (b) Over-prediction reject: before the chi2 fit, drop a bundle whose
             // predicted light hugely exceeds the measured light over the masked PMT set:
