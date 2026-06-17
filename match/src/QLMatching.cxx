@@ -203,6 +203,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_y_cushion    = get(cfg, "y_cushion",    m_y_cushion);
     m_z_cushion    = get(cfg, "z_cushion",    m_z_cushion);
     m_two_boundary_margin = get(cfg, "two_boundary_margin", m_two_boundary_margin);
+    m_robust_endpoint_trim  = get(cfg, "robust_endpoint_trim",  m_robust_endpoint_trim);
+    m_robust_endpoint_frac  = get(cfg, "robust_endpoint_frac",  m_robust_endpoint_frac);
+    m_robust_endpoint_count = get(cfg, "robust_endpoint_count", m_robust_endpoint_count);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -248,6 +251,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
 
     m_require_containment  = get(cfg, "require_containment",  m_require_containment);
+
+    m_cross_side_filter    = get(cfg, "cross_side_filter",    m_cross_side_filter);
 
     m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
     m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
@@ -378,6 +383,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["y_cushion"]    = m_y_cushion;
     cfg["z_cushion"]    = m_z_cushion;
     cfg["two_boundary_margin"] = m_two_boundary_margin;
+    cfg["robust_endpoint_trim"]  = m_robust_endpoint_trim;
+    cfg["robust_endpoint_frac"]  = m_robust_endpoint_frac;
+    cfg["robust_endpoint_count"] = m_robust_endpoint_count;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
@@ -422,6 +430,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
     cfg["require_containment"]  = m_require_containment;
+    cfg["cross_side_filter"]    = m_cross_side_filter;
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
     cfg["empty_rescue"]          = m_empty_rescue;
@@ -989,6 +998,28 @@ void QLMatching::compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc)
                   tpc, to_mask.size(), run.flashes.size());
 }
 
+// Opaque-cathode mismatched-candidate filter (see header). The flash's lit drift
+// side is read from where its measured PE actually is -- OpDet x vs the cathode plane
+// -- the SAME rule the merged-root opflash PC uses to tag a flash's side (the flash's
+// gid encodes the processing node's anode, not its lit volume). A cross-side bundle is
+// kept only when the cluster is a CATHODE-CROSSER at this flash's T0 (at_x_boundary):
+// only then can its far half be the source of the opposite side's light. Every other
+// cross-side bundle is dropped; same-side bundles are always kept.
+bool QLMatching::cross_side_mismatch_drop(const Opflash* flash, int cluster_side,
+                                          bool at_x_boundary) const
+{
+    if (!m_cross_side_filter) return false;
+    double pe_lo = 0.0, pe_hi = 0.0;
+    for (int ch = 0; ch < m_nchan; ++ch) {
+        const double p = flash->get_PE(ch);
+        if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+        else pe_lo += p;
+    }
+    const int flash_side = (pe_hi > pe_lo) ? 1 : 0;   // lit drift side (ties -> side 0)
+    if (flash_side == cluster_side) return false;       // same-side: always keep
+    return !at_x_boundary;                              // cross-side: keep only cathode-crossers
+}
+
 // [Stage 1] Build a candidate (flash, cluster-group) bundle for every pair,
 // predict its light (summed over the whole group), fill the boundary flags, and
 // drop the KS==1 degenerate (no measured/predicted overlap). Surviving bundles
@@ -1171,6 +1202,17 @@ void QLMatching::build_bundles(ApaRun& run)
                        int(bundle->get_ks_dis() * 1000) / 1000.,
                        int(bundle->get_chi2() / bundle->get_ndf() * 100) / 100.,
                        bundle->get_ndf());
+
+            // Opaque-cathode mismatched-candidate filter: drop a bundle whose flash is
+            // lit on the opposite drift side from the cluster unless the cluster is a
+            // cathode-crosser at this flash's T0 (at_x_boundary). OFF by default => no-op.
+            // dump_calib applies the same test so the hand-scan candidate tables match
+            // this fit candidate set.
+            if (cross_side_mismatch_drop(flash.get(), (int)run.anode->ident(),
+                                         bundle->get_flag_at_x_boundary())) {
+                bundle->set_potential_bad_match_flag(true);
+                continue;
+            }
 
             run.pre_bundles.insert(bundle);
         } // cluster loop
@@ -1943,6 +1985,11 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         // before the fit), so skipping them here loses no matcher decision.
         for (const auto& b : run.all_bundles) {
             if (!b->get_contained()) continue;
+            // Same opaque-cathode mismatched-candidate filter the fit uses in
+            // build_bundles, so the hand-scan tables show the same bundle universe:
+            // keep same-side and cross-side cathode-crossers, drop other cross-side.
+            if (cross_side_mismatch_drop(b->get_flash(), apa, b->get_flag_at_x_boundary()))
+                continue;
             auto* fl = b->get_flash();
             Json::Value jb;
             jb["apa"]          = apa;
@@ -2387,7 +2434,7 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         }
     }
 
-    struct SliceU { double u; int nblobs; };
+    struct SliceU { double u; int nblobs; int npts; };
     std::vector<SliceU> sv;
     for (const auto& [anode, faces] : tbm) {
         (void)anode;
@@ -2398,7 +2445,11 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                 auto pts = b0->points("3d", {"x", "y", "z"});
                 if (pts.empty()) continue;
                 const double x = pts.at(0).x() + flash_x_offset;
-                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()) });
+                // Slice point count (charge mass of the slice) for the robust-endpoint
+                // trim; npoints() is a cached int per blob, so this stays cheap.
+                int slice_npts = 0;
+                for (const Blob* b : bset) slice_npts += b->npoints();
+                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()), slice_npts });
             }
         }
     }
@@ -2461,6 +2512,40 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
             last_u = cur_u;
         }
         if (n_blobs_def_out < 0.0015 * N && n_blobs_def_out > 0) last_u = u_cathode;  // snap to cathode
+    }
+
+    // ---- robust-endpoint trim (default OFF, byte-identical when m_robust_endpoint_trim
+    // is false) ----
+    // The gap-based trims above only fire for an *isolated* deep straggle separated
+    // from the body by a >0.75 cm gap. A thin off-axis overclustering tail that stays
+    // within 0.75 cm of the body is never trimmed, so a 0.3%-of-points straggle drags
+    // the endpoint past the detector edge and falsely fails containment. This pass is
+    // gap-independent: at each end it sums the POINTS in the outer region (beyond the
+    // in-edge) and, if that material is sparse -- below max(frac*cluster_points, count)
+    // -- snaps the endpoint back to the first slice inside the edge. Point-mass (not
+    // blob count) is the sparsity measure, so a dense genuine track-end (hundreds of
+    // points past the edge => grossly mis-positioned t0) exceeds the allowance and is
+    // left to fail containment, while the thin tail is removed.
+    if (m_robust_endpoint_trim) {
+        const double allow =
+            std::max(m_robust_endpoint_frac * static_cast<double>(cluster->npoints()),
+                     m_robust_endpoint_count);
+        if (last_u >= cathode_in) {                         // cathode end (deepest)
+            int pts_out = 0; double in_u = last_u; bool reached = false;
+            for (auto it = sv.rbegin(); it != sv.rend(); ++it) {
+                if (it->u < cathode_in) { in_u = it->u; reached = true; break; }
+                pts_out += it->npts;
+            }
+            if (reached && pts_out <= allow) last_u = in_u;
+        }
+        if (first_u <= anode_in) {                          // anode end (shallowest)
+            int pts_out = 0; double in_u = first_u; bool reached = false;
+            for (const auto& sl : sv) {
+                if (sl.u > anode_in) { in_u = sl.u; reached = true; break; }
+                pts_out += sl.npts;
+            }
+            if (reached && pts_out <= allow) first_u = in_u;
+        }
     }
 
     // ---- flag block (prototype 272-290), guarded by the in-window check ----

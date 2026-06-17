@@ -156,6 +156,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // prunes non-contained junk candidates from the pre-LASSO pool.
             require_containment: true,
 
+            // Opaque-cathode mismatched-candidate filter. With an opaque cathode a flash
+            // lit on one drift side cannot illuminate a cluster on the other side, so a
+            // (cluster, opposite-side flash) bundle is non-physical -- EXCEPT for a
+            // genuine cathode-crosser: at the flash's T0 the cluster's end reaches the
+            // cathode (at_x_boundary), so its far half can be the source of the lit
+            // side's light (whose own-side flash may be missing/dark). Keep same-side and
+            // cross-side cathode-crossers; drop every other cross-side bundle. (Brightness
+            // is irrelevant -- a bright crosser is as valid as a dim one; a mid-drift
+            // cluster merely contained at some opposite flash's T0 is a coincidence.)
+            // Cleans the pre-LASSO pool AND the hand-scan candidate tables (same test in
+            // dump_calib). C++ default OFF (bit-identical for SBND/ICARUS).
+            cross_side_filter: true,
+
             // cathode_ext1 / cathode_ext2: the cathode-end window [u_cathode+ext2,
             // u_cathode+ext1).  ext1 is the containment edge (how far PAST the cathode a
             // cluster's trimmed end may sit and still count as contained / at_x_boundary;
@@ -178,6 +191,28 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // crossers (exempting them from reject_overpred); it cannot drop a bundle.
             cathode_ext1: 1.5 * wc.cm,
             cathode_ext2: -3.0 * wc.cm,
+
+            // Robust containment endpoint.  compute_endpoint_flags' gap-based trims only
+            // fire for an ISOLATED deep straggle (separated from the body by a >0.75 cm
+            // gap); a thin off-axis OVERCLUSTERING tail that stays within 0.75 cm of the
+            // body is never trimmed, so a few stray points dragging the drift endpoint
+            // past the cathode falsely fail containment and silently drop that candidate
+            // (run 29107 evt 983: cluster Bee-89/ident-55, an 11-point / 0.3% off-axis
+            // tail reaching 2.3 cm past the cathode, killed every cathode-time candidate).
+            // This gap-independent pass snaps each endpoint back inside the in-edge iff
+            // the outer material is SPARSE -- its point mass < max(frac*cluster_points,
+            // count).  Point mass (not blob count) is the sparsity measure, so a dense
+            // genuine track-end / at_x_boundary crosser (hundreds of points => the cluster
+            // is grossly mis-t0'd, not overclustered) exceeds the allowance and is left to
+            // fail containment.  Verified on evt 983: rescues ident-55, and NO cluster
+            // loses at_x_boundary (the calibration crossers keep their flags + strengths).
+            // 1% OR 15 points: the 15-pt floor catches small clusters (where 1% < 1 pt),
+            // the 1% scales for large ones.  C++ default OFF (robust_endpoint_trim=false)
+            // => byte-identical for every other config (verified vs baseline, 0 bundles
+            // differ).  See docs/qlmatching-chain.md.
+            robust_endpoint_trim: true,
+            robust_endpoint_frac: 0.01,
+            robust_endpoint_count: 15,
 
             // (b) Over-prediction reject: before the chi2 fit, drop a bundle whose
             // predicted light hugely exceeds the measured light over the masked PMT set:

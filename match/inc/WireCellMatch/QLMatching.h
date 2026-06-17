@@ -162,6 +162,19 @@ namespace WireCell::Match {
         // extreme counts as "at the detector edge" if it is within this distance of
         // any of the 6 per-APA active-volume faces (anode, cathode, ±y, ±z).
         double m_two_boundary_margin{3.0 * units::cm};
+        // Robust containment endpoint (default OFF => byte-identical). The cathode/anode
+        // inward-walk trims in compute_endpoint_flags only break (and trim) at an
+        // *isolated* deep straggle separated from the body by a >0.75 cm gap. A thin
+        // off-axis overclustering tail that stays within 0.75 cm of the body is never
+        // trimmed, so a 0.3%-of-points straggle drags the endpoint past the detector
+        // edge and falsely fails containment. When true, a gap-independent post-pass
+        // snaps each endpoint back inside the in-edge iff the outer material (points
+        // beyond the edge) is sparse -- below max(frac*cluster_points, count). Point
+        // mass (not blob count) is the sparsity measure, so dense genuine track-ends
+        // (and at_x_boundary crossers) are untouched.
+        bool m_robust_endpoint_trim{false};
+        double m_robust_endpoint_frac{0.05};   // outer-straggle allowance, fraction of cluster points
+        double m_robust_endpoint_count{0.0};   // outer-straggle allowance, absolute point floor
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)
@@ -238,6 +251,21 @@ namespace WireCell::Match {
         // Default OFF so existing production configs stay bit-identical; SBND
         // jsonnet sets require_containment: true.
         bool m_require_containment{false};
+
+        // Opaque-cathode "mismatched candidate" filter (PDHD). A candidate bundle that
+        // pairs a cluster with a flash lit on the OPPOSITE drift side is non-physical:
+        // with an opaque cathode a +x cluster cannot be the source of -x light (and
+        // vice-versa), so the cluster's predicted light has ~no overlap with the flash's
+        // measured light. The ONE physical exception is a genuine CATHODE-CROSSER: at the
+        // flash's T0 the cluster's end reaches the cathode (flag_at_x_boundary), so its
+        // far half could be the source of the other side's light (whose own-side flash
+        // may be missing/dark). So: keep same-side and cross-side cathode-crossers, drop
+        // every other cross-side bundle. (Brightness is irrelevant -- a bright crosser is
+        // as valid as a dim one; a dim mid-drift cluster contained at some opposite
+        // flash's T0 is just a coincidence.) Applied in build_bundles (fit candidate set)
+        // and again in dump_calib so the hand-scan tables show the same universe. OFF by
+        // default (no-op, bit-identical); PDHD jsonnet turns it on.
+        bool m_cross_side_filter{false};
 
         // Light-pattern over-prediction prefilter (the prototype's fired-fraction
         // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle BEFORE
@@ -416,6 +444,17 @@ namespace WireCell::Match {
                                     WireCell::Clus::Facade::Cluster* cluster,
                                     double flash_x_offset,
                                     double s, double anode_x, double u_cathode) const;
+
+        // True iff this (flash, cluster) bundle should be dropped by the opaque-cathode
+        // mismatched-candidate filter: the flash is lit on the opposite drift side from
+        // the cluster AND the cluster is NOT a cathode-crosser at this flash's T0
+        // (at_x_boundary == false), so it cannot physically be the far half of the track
+        // that lit the flash. The flash's lit side is taken from where its measured PE
+        // actually is (OpDet x vs the cathode plane), matching the opflash-PC tagging.
+        // Always false when the filter is off (m_cross_side_filter == false), so the
+        // default path is bit-identical.
+        bool cross_side_mismatch_drop(const Opflash* flash, int cluster_side,
+                                      bool at_x_boundary) const;
 
         // Significant extreme points of a cluster (get_extreme_wcps, flattened),
         // memoized in m_extreme_cache. Used to locate the cathode endpoint.
