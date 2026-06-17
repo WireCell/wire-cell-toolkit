@@ -106,13 +106,16 @@ base {
     },
 
     lar: super.lar {
-        // Calibrated from PDHD data: anode->cathode crossing tracks' reconstructed
-        // drift x-span (both drift volumes, 100+ events).  The span estimate is
-        // bracketed by over-merge (median-low ~1.55) and crosser-truncation
-        // (pile-up-high ~1.57); 1.565 is the midpoint and equals the
-        // dune-garfield-1d565 field response + LArSoft/Walkowiak at 500 V/cm.
+        // Calibrated from PDHD data.  The earlier 1.565 was the midpoint of the
+        // anode->cathode crossing-track drift x-span bracket [~1.55 over-merge,
+        // ~1.57 crosser-truncation].  Refined to 1.585 from cathode-end
+        // registration: cathode-anchored crossers with a flash T0 (run 29107
+        // evt 983) had reconstructed cathode ends landing 3.5-5 cm short of the
+        // cathode surface at 1.565; 1.585 lands them on the surface (within ~1
+        // cm) so they trip flag_at_x_boundary.  This is above the old x-span
+        // bracket -- the span method under-weights the cathode end.
         // See pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
-        drift_speed: 1.565 * wc.mm / wc.us,  // was 1.6 (pgrapher/common default)
+        drift_speed: 1.585 * wc.mm / wc.us,  // was 1.565 (A-C x-span midpoint), 1.6 (common default)
     },
 
     daq: super.daq {

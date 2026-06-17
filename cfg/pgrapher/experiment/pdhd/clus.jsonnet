@@ -25,13 +25,14 @@ local clus = import "pgrapher/common/clus.jsonnet";
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           time_offset=0 * wc.us, trigger_offset=0 * wc.us)
 
-// Calibrated from PDHD data (anode->cathode crossing tracks: reconstructed drift
-// x-span vs the U-plane->cathode distance); was 1.6.  The span estimate is
-// bracketed by two biases -- over-merge (median-low, ~1.55) and crosser
-// truncation (pile-up-high, ~1.57); 1.565 is the midpoint and equals the
-// dune-garfield-1d565 field response + LArSoft/Walkowiak at 500 V/cm (and the
-// PDVD data ~1.57).  See pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
-local drift_speed = 1.565 * wc.mm / wc.us;
+// Calibrated from PDHD data.  Earlier 1.565 was the midpoint of the anode->cathode
+// crossing-track drift x-span bracket [~1.55 over-merge, ~1.57 truncation].
+// Refined to 1.585 from cathode-end registration: cathode-anchored crossers with
+// a flash T0 (run 29107 evt 983) reconstructed their cathode ends 3.5-5 cm short
+// of the cathode surface at 1.565; 1.585 lands them on the surface (within ~1 cm)
+// so they trip flag_at_x_boundary.  MUST match params.lar.drift_speed (QLMatching
+// + img dump read that).  See pdhd/docs/clustering-algorithm.md (drift-velocity calibration).
+local drift_speed = 1.585 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);
