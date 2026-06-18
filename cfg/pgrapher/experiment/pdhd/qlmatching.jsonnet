@@ -54,7 +54,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
     // crossers, lambda=300 cm): median direct-PMT scale 0.63 x the 0.023 prior.
     // Supersedes the 27305 tuning (0.023, lambda=100) -- that run had only ~5-7
     // anchors and over-concentrated the model.  See ql-light-normalization-study.md.
-    local vuv_eff = 0.0145,
+    // 0.01254 = run-29107 evt-983 hand-scan label retune (self-consistent with the
+    // APA0 measured_pe_scale below): the +x side-1 anchor over-predicted by ~16%
+    // (meas/pred 0.865) on the sizable+low-ks matches, so vuv_eff = 0.0145 x 0.865.
+    // See ql-light-normalization-study.md / ql_light_calib/fit_labels.py.
+    local vuv_eff = 0.01254,
     local VUVEfficiency = std.makeArray(nchan, function(i) vuv_eff),
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
@@ -98,6 +102,20 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             data: if std.objectHas(params, 'reality') && params.reality == 'sim' then false else true,
             QtoL: 1.0,
             doReflectedLight: false,
+            // Per-channel MEASURED-PE gain correction (length nchan; 1.0 = identity,
+            // C++ default empty = byte-identical for SBND/ICARUS). The -x full-data-
+            // stream half ("APA0", optical ch 120-159) under-reports PE; scale its
+            // MEASUREMENT up by 1.57 so it matches the (recalibrated) prediction.
+            // 1.57 = g x median(pred_old/meas|APA0) = 0.865 x 1.814, self-consistent
+            // with the vuv_eff retune above (run-29107 evt-983 sizable+low-ks labels;
+            // the brighter ~2.3 tail is high-ks saturation, excluded). APA2 (ch80-119)
+            // shows the same elevation but is left to the common model per the
+            // APA0-only scope. ql_light_calib/fit_labels.py.
+            measured_pe_scale: std.makeArray(nchan, function(i) if i >= 120 then 1.57 else 1.0),
+            // Per-channel light-error model sigma = (PE<knee) ? floor : frac*PE.
+            // frac 0.3 -> 0.44 from the evt-983 label residuals of the corrected model
+            // (intrinsic per-PMT scatter on side1+APA0; floor/knee keep C++ defaults).
+            pe_err_frac: 0.44,
             // Assemble the round-1/2 LASSO matrices sparse (block-sparse P/PF): on the
             // bright outlier (run 29107 evt 1015, ~440 flashes) the dense path's P/PT
             // spike and dense Gram build dominate QLMatching's time and memory. Sparse

@@ -212,6 +212,11 @@ namespace WireCell::Match {
         // When true the bundle chi2 computes its per-PMT error from the PREDICTED pe
         // (not measured); the LASSO weight stays measured-based. SBND-on, default off.
         bool   m_pe_err_on_pred{false};
+        // Optional per-channel measured-PE gain correction (length nchan), applied
+        // to every flash's measured PE as it is read. Empty => identity (byte-
+        // identical). PDHD uses it to scale up the gain-biased -x full-stream half
+        // (optical ch 120-159) so its measured light matches the prediction.
+        std::vector<double> m_measured_pe_scale;
         double m_flash_pe_threshold{0.0};      // Opflash "fired" threshold (PE)
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).

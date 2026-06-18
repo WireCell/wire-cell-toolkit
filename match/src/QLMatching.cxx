@@ -246,6 +246,17 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
     m_pe_err_knee       = get(cfg, "pe_err_knee",       m_pe_err_knee);
     m_pe_err_on_pred    = get(cfg, "pe_err_on_pred",    m_pe_err_on_pred);
+
+    // Optional per-channel measured-PE gain correction (length nchan). Empty =>
+    // identity (byte-identical). A length mismatch is a config error.
+    if (cfg["measured_pe_scale"].isArray()) {
+        m_measured_pe_scale.clear();
+        for (const auto& v : cfg["measured_pe_scale"]) m_measured_pe_scale.push_back(v.asDouble());
+        if (!m_measured_pe_scale.empty() && (int)m_measured_pe_scale.size() != m_nchan) {
+            raise<ValueError>("QLMatching: measured_pe_scale length %d != nchan %d",
+                              (int)m_measured_pe_scale.size(), m_nchan);
+        }
+    }
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
 
     m_bundle_ks_merge_max      = get(cfg, "bundle_ks_merge_max",      m_bundle_ks_merge_max);
@@ -426,6 +437,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_err_frac"]        = m_pe_err_frac;
     cfg["pe_err_knee"]        = m_pe_err_knee;
     cfg["pe_err_on_pred"]     = m_pe_err_on_pred;
+    cfg["measured_pe_scale"]  = Json::Value(Json::arrayValue);  // empty => identity
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
 
     cfg["bundle_ks_merge_max"]      = m_bundle_ks_merge_max;
@@ -708,8 +720,9 @@ void QLMatching::build_opdet_mask(ApaRun& run)
 void QLMatching::read_flashes(ApaRun& run)
 {
     const PEErr pe_err_model{m_pe_err_floor, m_pe_err_frac, m_pe_err_knee};
+    const std::vector<double>* pe_scale = m_measured_pe_scale.empty() ? nullptr : &m_measured_pe_scale;
     for (const auto& ff : run.grouping->flashes()) {
-        auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model);
+        auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model, pe_scale);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
         run.flashes.push_back(flash);
@@ -1888,6 +1901,11 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["pe_err_frac"]         = m_pe_err_frac;
     qp["pe_err_knee"]         = m_pe_err_knee;
     qp["pe_err_on_pred"]      = m_pe_err_on_pred;
+    {
+        Json::Value mps(Json::arrayValue);
+        for (double s : m_measured_pe_scale) mps.append(s);
+        qp["measured_pe_scale"] = mps;  // empty => no correction applied
+    }
     qp["QtoL"]                = m_QtoL;
     qp["highconsist_ladder"]  = m_highconsist_ladder;
     qp["hc_clean_ks"] = m_hc_clean_ks;  qp["hc_clean_c2"] = m_hc_clean_c2;
