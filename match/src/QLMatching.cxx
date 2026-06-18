@@ -418,6 +418,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["robust_endpoint_trim"]  = m_robust_endpoint_trim;
     cfg["robust_endpoint_frac"]  = m_robust_endpoint_frac;
     cfg["robust_endpoint_count"] = m_robust_endpoint_count;
+    cfg["robust_endpoint_charge_frac"] = m_robust_endpoint_charge_frac;
+    cfg["robust_endpoint_charge_abs"]  = m_robust_endpoint_charge_abs;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
