@@ -241,18 +241,42 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // the count flat (1399->1428) and IMPROVING quality (the removed matches had
             // median best-KS ~0.87 = junk; stable matches held at paired median dKS=0;
             // strict ks<0.2 two-boundary anchors grew 3->14). See docs/qlmatching-chain.md.
-            // PROVISIONAL ceilings -- PDHD has no Q/L hand-scan ground truth yet (the
-            // run-29107 bee link being produced is what will create it), so unlike SBND
-            // (2.9/4.3, tuned on 10 GT events) these are sized LOOSE, deliberately ABOVE
-            // the rough optical model's own over-prediction range so the cut does not
-            // penalize model roughness while it is still being calibrated: on 29107 the
-            // matched winners have R_total p99=2.9 and R_max p99=21, so (5.0, 25.0) fires
-            // only on egregious >p99 over-prediction (and the ~60 degenerate
-            // zero-measured-light junk matches). Tighten once PDHD hand scans exist. See
-            // ql_light_calib/containment_overpred_check.py.
+            // GT-tightened ceilings.  The run-29107 evt-983 hand scan now provides PDHD
+            // ground truth: of its 31 labeled matches, 24 are boundary/window-truncated
+            // (overpred-EXEMPT) and 7 are subject to this cut; their worst values are
+            // R_total=1.90 and R_max=5.04 (mc 1000020, a real match that over-predicts one
+            // PMT 5x).  The optical-model retune (vuv_eff 0.0145->0.01254 + APA0 measured
+            // scale) also tightened genuine over-prediction, so the earlier deliberately-
+            // LOOSE provisional ceilings (5.0, 25.0 -- sized above the rough model's range)
+            // are no longer needed.  (3.0, 10.0) keeps every GT match with ~1.6x / 2.0x
+            // margin over the worst GT case, while culling the egregious tail (auto-selected
+            // winners run out to R_max~18).  R_max is NOT dropped below ~8: GT mc 1000020
+            // legitimately over-predicts one channel 5x, and this is single-event GT, so 2x
+            // headroom is kept.  Verified on evt 983: all 31 GT matches survive.  SBND keeps
+            // its own (2.9/4.3, 10 GT events).  See ql_light_calib/containment_overpred_check.py.
             reject_overpred: true,
-            overpred_total_ratio: 5.0,
-            overpred_maxch_ratio: 25.0,
+            overpred_total_ratio: 3.0,
+            overpred_maxch_ratio: 10.0,
+
+            // --- Flag fit-advantage (SBND method; default OFF in C++, byte-identical
+            // for any config that omits them) ----------------------------------------
+            // (a) LASSO L1 down-weight: a boundary/near-PD/window-truncated bundle (incl.
+            // the xTPC cathode-crossers) has its measured light UNDER-reported (charge
+            // drifts past the cathode / out the readout window), so a raw PE-mismatch L1
+            // penalty wrongly shrinks it below the strength cutoff. Multiplying its L1
+            // weight by lasso_boundary_weight (0.2 = C++/SBND default) lets it survive.
+            lasso_flag_weight: true,
+            lasso_boundary_weight: 0.2,
+            // (b) Per-bundle chi2 relaxation (prototype FlashTPCBundle.cxx:480): widens the
+            // chi2 denominator for a near-PD channel with a big measured excess over
+            // prediction, and drops the single worst-chi2 channel if it is a dead PD
+            // (pe==0, pred>0). The excess-widening thresholds (chi2_pmt_excess/ratio/inflate,
+            // C++ defaults 350/1.3/0.5) are SBND-PMT-scaled and largely inert at PDHD
+            // ARAPUCA PE levels (no channel reaches a 350-PE excess), so the ACTIVE effect
+            // here is the dead-PD worst-channel drop (detector-agnostic); the excess term is
+            // left for a later PDHD retune. Verified on evt 983: all 31 hand-scan matches
+            // survive both levers. See docs/qlmatching-chain.md.
+            chi2_relax: true,
 
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
@@ -292,8 +316,12 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             root_pcs_to_merge: ['opflash'],
             // Cross-cathode cathode-crossing consistency flag pass (needs both sides in
             // one node): pairs coincident at_x_boundary / window-truncated halves across
-            // the central cathode (drift side 0 vs side 1).  Observation-only stamp;
-            // SBND-seeded cuts pending PDHD hand-scan tuning.
+            // the central cathode (drift side 0 vs side 1).  CONSUMED by matching, not
+            // observation-only: cull_cross_tpc flags the coincident crosser pairs (run
+            // 29107 evt 983: 349 coincident pairs) and the cull_inconsistent ladder then
+            // keeps a cluster's scenario-1 xTPC crosser over its rivals (same code as
+            // SBND).  Geometry cuts SBND-seeded; the flag fit-advantage (lasso_flag_weight
+            // + chi2_relax above) is now also enabled, matching SBND's method.
             xtpc_flag: true,
             xtpc_dmax: 5 * wc.cm,
             xtpc_dmax2: 300 * wc.cm,
