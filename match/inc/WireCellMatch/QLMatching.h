@@ -64,6 +64,11 @@ namespace WireCell::Match {
         // face 0). PDHD's +x drift side (APA1/APA3 group) images through face 1, so
         // its matching node sets tpc_face=1; the -x side (APA0/APA2) keeps face 0.
         int m_tpc_face{0};
+        // Optional per-input face list ("tpc_faces"), one entry per input port, for a
+        // JOINT multi-side node whose inputs image through different faces (PDHD: -x
+        // side face 0, +x side face 1). Empty (default) => use the single m_tpc_face
+        // for every input => bit-identical for SBND / the per-side PDHD nodes.
+        std::vector<int> m_tpc_faces;
 
         // PMTs on vs off (default true => apply the OpDet type mask); see
         // ch_mask for further per-channel disables.
@@ -339,7 +344,13 @@ namespace WireCell::Match {
         // APA0+APA2 / APA1+APA3 merged before the all-TPC stage), list them all
         // here so blobs from every APA resolve; the run's drift geometry still
         // uses the single representative "anode".
-        std::vector<IAnodePlane::pointer> m_grouping_anodes;
+        //
+        // Stored PER INPUT (sized to m_multiplicity). Config "grouping_anodes" may be
+        // a flat array (the same list for every input -- single-side node) or an array
+        // of arrays (one list per input port -- JOINT multi-side node, so each run's
+        // active-volume box unions only its OWN side's APAs). An input with no list
+        // falls back to {run.anode}.
+        std::vector<std::vector<IAnodePlane::pointer>> m_grouping_anodes;
         // Root-node local PCs concatenated across inputs when merging the per-APA
         // trees (multi-APA path only); mirrors PointTreeMerging. ['opflash'] = the
         // optical-flash display PC; everything else is dropped from non-primary roots.
@@ -487,6 +498,7 @@ namespace WireCell::Match {
             WireCell::Clus::Facade::Grouping* grouping{nullptr};
             std::string inpath;
             int charge_ident{0};
+            std::size_t input_idx{0};   // this run's input-port index (k), for per-input config
 
             // optical-detector mask / kept-channel index
             std::vector<unsigned int> opdet_mask;

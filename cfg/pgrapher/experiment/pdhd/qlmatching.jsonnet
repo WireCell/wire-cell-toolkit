@@ -90,13 +90,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
     // hand-scan calibration JSON path: when non-empty QLMatching writes the per-event
     // candidate-bundle universe there for the pdhd/ql_scan viewer; '' => off, no dump,
     // production output bit-identical.
-    matching(anodes, dv, tag, face, calib_dump=''):: g.pnode({
-        type: 'QLMatching',
-        name: 'matching_%s' % tag,
-        data: {
-            anode: wc.tn(anodes[0]),
-            grouping_anodes: [wc.tn(a) for a in anodes],
-            tpc_face: face,   // imaging face of this drift side (0 = -x / APA0,2; 1 = +x / APA1,3)
+    // Shared QLMatching `data` block -- everything independent of the per-node
+    // anode/face wiring.  matching() (one drift side per node) and matching_joint()
+    // (both drift sides in one node) each splice this in with their own anode/face keys.
+    local match_data(dv, calib_dump) = {
             detector_volumes: wc.tn(dv),
             data: if std.objectHas(params, 'reality') && params.reality == 'sim' then false else true,
             QtoL: 1.0,
@@ -244,6 +241,46 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             VUVEfficiency: VUVEfficiency,
             VISEfficiency: VISEfficiency,
             calib_dump: calib_dump,
-        },
+    },
+
+    // One-drift-side matcher (historical PDHD path; kept for back-compat).  `anodes`
+    // are the group's APAs; anodes[0] is the representative drift geometry / OpDet-mask
+    // side; `face` its imaging face.
+    matching(anodes, dv, tag, face, calib_dump=''):: g.pnode({
+        type: 'QLMatching',
+        name: 'matching_%s' % tag,
+        data: {
+            anode: wc.tn(anodes[0]),
+            grouping_anodes: [wc.tn(a) for a in anodes],
+            tpc_face: face,   // imaging face of this drift side (0 = -x / APA0,2; 1 = +x / APA1,3)
+        } + match_data(dv, calib_dump),
     }, nin=1, nout=1, uses=[dv] + anodes),
+
+    // JOINT both-sides matcher (SBND-style): both drift volumes enter ONE node so the
+    // cross-cathode (xTPC) consistency pass can pair a cathode-crosser's two halves (one
+    // per side).  `sides` = per-side anode lists ([[APA0,APA2],[APA1,APA3]]); each side's
+    // representative (sides[i][0]) is input port i and faces[i] its imaging face.  Both
+    // grouping_anodes and tpc_faces are PER-INPUT, so each run's active-volume box and
+    // wire face come from its OWN side.  Emits one merged tree + one combined calib JSON.
+    matching_joint(sides, dv, faces, calib_dump=''):: g.pnode({
+        type: 'QLMatching',
+        name: 'matching_joint',
+        data: {
+            anodes: [wc.tn(side[0]) for side in sides],
+            grouping_anodes: [[wc.tn(a) for a in side] for side in sides],
+            tpc_faces: faces,
+            // Merge per-side optical-flash display PCs into the joint grouping (mirrors
+            // clus_all_tpc PointTreeMerging.root_pcs_to_merge) -> one flash list.
+            root_pcs_to_merge: ['opflash'],
+            // Cross-cathode cathode-crossing consistency flag pass (needs both sides in
+            // one node): pairs coincident at_x_boundary / window-truncated halves across
+            // the central cathode (drift side 0 vs side 1).  Observation-only stamp;
+            // SBND-seeded cuts pending PDHD hand-scan tuning.
+            xtpc_flag: true,
+            xtpc_dmax: 5 * wc.cm,
+            xtpc_dmax2: 300 * wc.cm,
+            xtpc_angle_max: 20,
+            xtpc_hough_radius: 15 * wc.cm,
+        } + match_data(dv, calib_dump),
+    }, nin=std.length(sides), nout=1, uses=[dv] + [a for side in sides for a in side]),
 }

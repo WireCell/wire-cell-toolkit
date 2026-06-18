@@ -126,10 +126,24 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_anode = m_anodes.front();
     m_multiplicity = m_anodes.size();
     // Optional extra anodes to register on each run's Grouping (for multi-APA
-    // drift-side group trees). Empty => only the run's own anode (SBND-identical).
-    m_grouping_anodes.clear();
-    if (cfg.isMember("grouping_anodes") && cfg["grouping_anodes"].isArray()) {
-        for (const auto& a : cfg["grouping_anodes"]) m_grouping_anodes.push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+    // drift-side group trees), stored per input port. "grouping_anodes" may be a flat
+    // array (same list for every input -- single-side node) or an array of arrays (one
+    // list per input -- JOINT multi-side node). Empty => only the run's own anode
+    // (SBND-identical).
+    m_grouping_anodes.assign(m_multiplicity, {});
+    if (cfg.isMember("grouping_anodes") && cfg["grouping_anodes"].isArray()
+        && !cfg["grouping_anodes"].empty()) {
+        const auto& ga = cfg["grouping_anodes"];
+        if (ga[0].isArray()) {   // per-input: one anode list per port
+            for (std::size_t k = 0; k < m_multiplicity && k < ga.size(); ++k)
+                for (const auto& a : ga[(Json::ArrayIndex)k])
+                    m_grouping_anodes[k].push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+        }
+        else {                   // flat: same list applied to every input (back-compat)
+            std::vector<IAnodePlane::pointer> flat;
+            for (const auto& a : ga) flat.push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+            for (std::size_t k = 0; k < m_multiplicity; ++k) m_grouping_anodes[k] = flat;
+        }
     }
     if (cfg.isMember("root_pcs_to_merge") && cfg["root_pcs_to_merge"].isArray()) {
         m_root_pcs_to_merge.clear();
@@ -186,6 +200,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_QtoL = get(cfg, "QtoL", m_QtoL);
     m_doReflectedLight = get(cfg, "doReflectedLight", m_doReflectedLight);
     m_tpc_face = get(cfg, "tpc_face", m_tpc_face);
+    // Optional per-input face list for a JOINT multi-side node (PDHD -x face 0 / +x
+    // face 1). Empty => m_tpc_face for every input (bit-identical).
+    m_tpc_faces.clear();
+    if (cfg.isMember("tpc_faces") && cfg["tpc_faces"].isArray())
+        for (const auto& f : cfg["tpc_faces"]) m_tpc_faces.push_back(f.asInt());
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
     m_sparse_lasso = get(cfg, "sparse_lasso", m_sparse_lasso);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
@@ -488,6 +507,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     std::vector<ApaRun> runs(invec.size());
     for (std::size_t k = 0; k < invec.size(); ++k) {
         ApaRun& run = runs[k];
+        run.input_idx    = k;
         run.anode        = m_anodes.at(k);
         run.charge_ident = invec[k]->ident();
         run.inpath       = m_inpath;
@@ -697,11 +717,12 @@ void QLMatching::read_flashes(ApaRun& run)
 
     // Register the run's own anode plus any extra group anodes (PDHD drift-side
     // group spanning >1 APA) so every blob's wpid resolves in get_anode().
-    if (m_grouping_anodes.empty()) {
+    const std::vector<IAnodePlane::pointer>& grp = m_grouping_anodes.at(run.input_idx);
+    if (grp.empty()) {
         run.grouping->set_anodes({run.anode});
     }
     else {
-        std::vector<IAnodePlane::pointer> all = m_grouping_anodes;
+        std::vector<IAnodePlane::pointer> all = grp;
         all.push_back(run.anode);
         run.grouping->set_anodes(all);
     }
@@ -833,13 +854,16 @@ void QLMatching::compute_geometry(ApaRun& run)
     // grouping list (SBND / single-APA) this reduces to the representative anode's box
     // => bit-identical. X is identical across same-side APAs, so the drift math
     // (anode_x / u_cathode / s) is unchanged; only the Y/Z extent widens.
-    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, m_tpc_face, static_cast<int>(tpc));
+    // Per-input imaging face (joint multi-side node) or the single m_tpc_face. The
+    // run's group anodes are all on its own drift side, so they share this face.
+    const int face = m_tpc_faces.empty() ? m_tpc_face : m_tpc_faces.at(run.input_idx);
+    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, face, static_cast<int>(tpc));
+    const std::vector<IAnodePlane::pointer>& grp = m_grouping_anodes.at(run.input_idx);
     const std::vector<IAnodePlane::pointer> group_anodes =
-        m_grouping_anodes.empty() ? std::vector<IAnodePlane::pointer>{run.anode}
-                                  : m_grouping_anodes;
+        grp.empty() ? std::vector<IAnodePlane::pointer>{run.anode} : grp;
     BoundingBox bb;
     for (const auto& a : group_anodes) {
-        const WirePlaneId awpid(WirePlaneLayer_t::kAllLayers, m_tpc_face,
+        const WirePlaneId awpid(WirePlaneLayer_t::kAllLayers, face,
                                 static_cast<int>(a->ident()));
         const BoundingBox abb = m_dv->inner_bounds(awpid);
         if (!abb.empty()) bb(abb.bounds());
@@ -2080,18 +2104,20 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
     const double dmax = 10 * cm;                 // closest-pair distance cut
     const double win_us = m_flash_group_window / us;
 
-    // Matched clusters from both APAs with their per-cluster T0 x-offset.
-    struct CC { Cluster* c; int apa; double off; double t_us; };
+    // Matched clusters from both drift sides with their per-cluster T0 x-offset. Side
+    // (low-x volume 0 / high-x volume 1) comes from the run's anode-vs-cathode position,
+    // not the raw APA ident -- consistent with cull_cross_tpc's cross-side pairing.
+    struct CC { Cluster* c; int side; double off; double t_us; };
     std::vector<CC> ccs;
     for (const auto& run : runs) {
-        const int apa = (int)run.anode->ident();
+        const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double ft  = flash->get_time();
             const double off = run.sign_offset * (ft + m_trigger_offset) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
-                ccs.push_back({bundle->get_main_cluster(), apa, off, ft / us});
+                ccs.push_back({bundle->get_main_cluster(), side, off, ft / us});
                 for (auto* oc : bundle->get_other_clusters())
-                    ccs.push_back({oc, apa, off, ft / us});
+                    ccs.push_back({oc, side, off, ft / us});
             }
         }
     }
@@ -2104,16 +2130,16 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
         return std::acos(c) * 180.0 / M_PI;
     };
 
-    log->info("QLCATHODE header: count apa0/id0 apa1/id1 t0_us t1_us d_cm "
+    log->info("QLCATHODE header: count side0_id side1_id t0_us t1_us d_cm "
               "p0(x,y,z)_cm p1(x,y,z)_cm dir0 dir1 conn_cm "
               "ang(d0,d1) ang(d0,conn) ang(d1,conn) ang(conn,dhat)_deg "
               "along_cm perp_cm | dX_cm[DRIFT t0/v-DEGENERATE] dY_cm dZ_cm[transverse]");
 
     std::set<std::pair<Cluster*, Cluster*>> seen;
     for (size_t i = 0; i < ccs.size(); ++i) {
-        if (ccs[i].apa != 0) continue;
+        if (ccs[i].side != 0) continue;
         for (size_t j = 0; j < ccs.size(); ++j) {
-            if (ccs[j].apa != 1) continue;
+            if (ccs[j].side != 1) continue;
             if (std::abs(ccs[i].t_us - ccs[j].t_us) > win_us) continue;
             Cluster* c0 = ccs[i].c;
             Cluster* c1 = ccs[j].c;
@@ -2279,10 +2305,16 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     // scenario 1) OR a truncated half (window_truncated, scenario 2). A clean
     // non-crossing bundle carries neither and cannot be a crosser half, so dropping it
     // here keeps the O(n0*n1*npts^2) pairing bounded without losing any real pair.
-    struct Cand { XtpcMC mc; int apa; double t_us; };
+    // Tag each candidate by its DRIFT SIDE (low-x volume = 0, high-x volume = 1),
+    // derived from the run's anode position vs the cathode -- NOT the raw APA ident.
+    // For SBND the two APAs sit on opposite sides of the cathode, so side == ident and
+    // the pairing is unchanged; for a JOINT PDHD node side 0 = {APA0,APA2} and side 1 =
+    // {APA1,APA3}, so the two cathode-crossing halves (each in its own drift volume) are
+    // paired across the central cathode.
+    struct Cand { XtpcMC mc; int side; double t_us; };
     std::vector<Cand> cands;
     for (auto& run : runs) {
-        const int apa = (int)run.anode->ident();
+        const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double off = run.sign_offset * (flash->get_time() + m_trigger_offset) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
@@ -2290,14 +2322,14 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
                     continue;
                 cands.push_back({XtpcMC{bundle.get(), bundle->get_main_cluster(), off,
                                         run.dy, run.dz, bundle->get_flag_window_truncated()},
-                                 apa, flash->get_time() / units::us});
+                                 side, flash->get_time() / units::us});
             }
         }
     }
     // Diagnostic: list every cross-TPC candidate (main-cluster bundle surviving prefit).
     for (const auto& c : cands)
-        log->debug("QLXTPC cand apa{} t={:.3f}us mainclus={} npts={} trunc={}",
-                   c.apa, c.t_us, c.mc.c->ident(), c.mc.c->npoints(), c.mc.wt);
+        log->debug("QLXTPC cand side{} t={:.3f}us mainclus={} npts={} trunc={}",
+                   c.side, c.t_us, c.mc.c->ident(), c.mc.c->npoints(), c.mc.wt);
 
     // Profiling: the pairing loop calls xtpc_pair_consistent, whose closest-approach
     // step is a brute-force O(npts0 x npts1) double loop over both clusters' 3D points.
@@ -2307,9 +2339,9 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     long long n_pairs_eval = 0, n_pairs_coincident = 0;
     double point_pairs = 0;  // double: can exceed 2^31
     for (size_t i = 0; i < cands.size(); ++i) {
-        if (cands[i].apa != 0) continue;
+        if (cands[i].side != 0) continue;
         for (size_t j = 0; j < cands.size(); ++j) {
-            if (cands[j].apa != 1) continue;
+            if (cands[j].side != 1) continue;
             ++n_pairs_eval;
             if (std::abs(cands[i].t_us - cands[j].t_us) > win_us) continue;  // coincident
             ++n_pairs_coincident;

@@ -566,6 +566,7 @@ local clus_all_tpc (
     subRunNo = 1,
     eventNo = 1,
     save_opflash = false,
+    premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -695,7 +696,10 @@ local clus_all_tpc (
     local end = if dump
     then g.pipeline([mabc, sink])
     else g.pipeline([mabc]),
-    ret :: g.intern(
+    // premerged: the upstream joint QLMatching node already emits ONE merged tree, so
+    // feed mabc directly (its single input is the all-TPC stage's input).  Else merge the
+    // ngroups per-side outputs through PointTreeMerging first (historical path).
+    ret :: if premerged then end else g.intern(
         innodes = [pcmerging],
         centernodes = [],
         outnodes = [end],
@@ -711,7 +715,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME per-group DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
