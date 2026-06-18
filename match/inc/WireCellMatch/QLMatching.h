@@ -180,6 +180,17 @@ namespace WireCell::Match {
         bool m_robust_endpoint_trim{false};
         double m_robust_endpoint_frac{0.05};   // outer-straggle allowance, fraction of cluster points
         double m_robust_endpoint_count{0.0};   // outer-straggle allowance, absolute point floor
+        double m_robust_endpoint_charge_frac{0.0};  // outer-straggle allowance, fraction of cluster
+                                                    // charge (0 => disabled, point-count judge only).
+                                                    // Trims low-charge overclustered satellites the
+                                                    // point-count judge misses (dense real track-ends
+                                                    // exceed the budget and are left to fail).
+        double m_robust_endpoint_charge_abs{0.0};   // absolute per-point charge-DENSITY ceiling for
+                                                    // trimmable outer material (0 => disabled). Size-
+                                                    // independent: keeps a charge-dense real track tip
+                                                    // (never trimmed) distinct from a charge-sparse
+                                                    // overclustered satellite (trimmable), regardless
+                                                    // of cluster size or tail length.
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)

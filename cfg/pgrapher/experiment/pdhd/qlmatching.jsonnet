@@ -228,6 +228,20 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             robust_endpoint_trim: true,
             robust_endpoint_frac: 0.01,
             robust_endpoint_count: 15,
+            // Charge-weighted straggle judge (OR with the point-count one above).  Overclustered
+            // satellites can carry many points yet a tiny charge fraction (evt 991 ident-31:
+            // 91 pts past the anode, >5x the 15-pt count floor, but ~0.1% of cluster charge and
+            // ~50x lower per-point q than the real track body), so the point-count judge misses
+            // them and require_containment vetoes an otherwise-anode-piercing candidate.  Trim
+            // outer material whose charge < 1% of cluster charge; a dense genuine track-end
+            // exceeds it and is left to fail.  C++ default 0.0 => disabled (byte-identical).
+            robust_endpoint_charge_frac: 0.005,
+            // Absolute per-point charge-density ceiling (size-independent): only trim
+            // charge-sparse outer material (diffuse overclustered satellites, ~150 q/pt),
+            // never a charge-dense real track tip into the boundary (~2500-8800 q/pt).  This
+            // is what stops the trim from shaving a genuine track tail to force containment,
+            // independent of cluster size.  C++ default 0 => disabled.
+            robust_endpoint_charge_abs: 1500,
 
             // (b) Over-prediction reject: before the chi2 fit, drop a bundle whose
             // predicted light hugely exceeds the measured light over the masked PMT set:

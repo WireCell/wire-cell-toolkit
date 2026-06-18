@@ -225,6 +225,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_robust_endpoint_trim  = get(cfg, "robust_endpoint_trim",  m_robust_endpoint_trim);
     m_robust_endpoint_frac  = get(cfg, "robust_endpoint_frac",  m_robust_endpoint_frac);
     m_robust_endpoint_count = get(cfg, "robust_endpoint_count", m_robust_endpoint_count);
+    m_robust_endpoint_charge_frac = get(cfg, "robust_endpoint_charge_frac", m_robust_endpoint_charge_frac);
+    m_robust_endpoint_charge_abs  = get(cfg, "robust_endpoint_charge_abs",  m_robust_endpoint_charge_abs);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -2484,7 +2486,7 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         }
     }
 
-    struct SliceU { double u; int nblobs; int npts; };
+    struct SliceU { double u; int nblobs; int npts; double q; };
     std::vector<SliceU> sv;
     for (const auto& [anode, faces] : tbm) {
         (void)anode;
@@ -2498,8 +2500,9 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                 // Slice point count (charge mass of the slice) for the robust-endpoint
                 // trim; npoints() is a cached int per blob, so this stays cheap.
                 int slice_npts = 0;
-                for (const Blob* b : bset) slice_npts += b->npoints();
-                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()), slice_npts });
+                double slice_q = 0.0;
+                for (const Blob* b : bset) { slice_npts += b->npoints(); slice_q += b->charge(); }
+                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()), slice_npts, slice_q });
             }
         }
     }
@@ -2580,21 +2583,42 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         const double allow =
             std::max(m_robust_endpoint_frac * static_cast<double>(cluster->npoints()),
                      m_robust_endpoint_count);
+        // Charge budget for the outer-straggle judge: low-charge overclustered satellites
+        // (~0.1% of cluster charge here) slip past the point-count allowance but stay under a
+        // charge fraction, while a dense genuine track-end exceeds it. Disabled when
+        // m_robust_endpoint_charge_frac == 0 (byte-identical to the point-count-only judge).
+        double q_total = 0.0;
+        for (const auto& sl : sv) q_total += sl.q;
+        const double q_allow = m_robust_endpoint_charge_frac * q_total;
+        // Absolute per-point charge-DENSITY gate (size-independent, does NOT scale with
+        // cluster size or tail length): only trim outer material that is charge-sparse
+        // (diffuse overclustered satellites, ~150 q/pt here), never a charge-dense real
+        // track tip running into the boundary (~2500-8800 q/pt). Disabled when
+        // m_robust_endpoint_charge_abs <= 0 (then the fraction/count judge stands alone).
+        auto sparse = [&](int pts_out, double q_out) {
+            if (pts_out <= allow) return true;   // original point-count path, untouched
+            if (m_robust_endpoint_charge_frac <= 0.0) return false;
+            if (q_out > q_allow) return false;   // new charge-fraction path
+            // Density gate applies ONLY to the charge-fraction path: trim charge-sparse
+            // (overclustered-satellite) material, never a charge-dense real track tip.
+            return m_robust_endpoint_charge_abs <= 0.0 ||
+                   (pts_out > 0 && q_out / pts_out < m_robust_endpoint_charge_abs);
+        };
         if (last_u >= cathode_in) {                         // cathode end (deepest)
-            int pts_out = 0; double in_u = last_u; bool reached = false;
+            int pts_out = 0; double q_out = 0.0; double in_u = last_u; bool reached = false;
             for (auto it = sv.rbegin(); it != sv.rend(); ++it) {
                 if (it->u < cathode_in) { in_u = it->u; reached = true; break; }
-                pts_out += it->npts;
+                pts_out += it->npts; q_out += it->q;
             }
-            if (reached && pts_out <= allow) last_u = in_u;
+            if (reached && sparse(pts_out, q_out)) last_u = in_u;
         }
         if (first_u <= anode_in) {                          // anode end (shallowest)
-            int pts_out = 0; double in_u = first_u; bool reached = false;
+            int pts_out = 0; double q_out = 0.0; double in_u = first_u; bool reached = false;
             for (const auto& sl : sv) {
                 if (sl.u > anode_in) { in_u = sl.u; reached = true; break; }
-                pts_out += sl.npts;
+                pts_out += sl.npts; q_out += sl.q;
             }
-            if (reached && pts_out <= allow) first_u = in_u;
+            if (reached && sparse(pts_out, q_out)) first_u = in_u;
         }
     }
 
