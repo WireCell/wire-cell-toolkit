@@ -360,6 +360,17 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // left for a later PDHD retune. Verified on evt 983: all 31 hand-scan matches
             // survive both levers. See docs/qlmatching-chain.md.
             chi2_relax: true,
+            // chi2_relax excess-widening threshold, re-scaled from the SBND/MicroBooNE 350 PE
+            // to a PDHD ARAPUCA level.  Path-1 widens the chi2 denom of a close_to_PMT channel
+            // whose MEASURED pe exceeds prediction by > chi2_pmt_excess PE AND pe > ratio*pred
+            // (un-modeled direct light / saturation the semi-analytical model under-predicts).
+            // PDHD's lower light yield means genuine excess is smaller in absolute PE than
+            // SBND's: on the run-29107 close_to_PMT bundles the qualifying per-channel excess
+            // has median ~22 PE, p90 ~165, with a saturation tail to ~10k; 100 PE targets that
+            // genuine-excess tail (ratio/inflate kept at the faithful C++ 1.3/0.5).  Measured
+            // benign for selection (the ladder is KS-led, c2n ceilings 35 loose) -- a faithful
+            // PDHD value, not a fit.  ql_light_calib/validate_chain.py.
+            chi2_pmt_excess: 100.0,
 
             // --- High-consistency ladder (SBND method; C++ default OFF => single-branch,
             // byte-identical for any config that omits it) ----------------------------
