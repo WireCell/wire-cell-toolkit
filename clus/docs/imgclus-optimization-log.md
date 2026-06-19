@@ -366,21 +366,53 @@ The mechanism is now pinned, and it is **not** an FP tie in clustering:
 So two residuals chain: (A) QLMatching emits the merged tree in a pointer-order
 that is not yet content-canonical across rebuilds (commit 32ac9e4d made the
 matching-internal iteration deterministic but the output-tree node order is the
-gap), feeding (B) a residual order-sensitivity in the clustering merge that the
-entry-8 `BlobLess` fix did not cover (that fix removed the FP-summation-order
-dependence in `calc_ave_pos`/`calc_dir`; this is a *different* order dependence —
-the connect1 candidate/graph order itself). Either link, fixed, kills the
-symptom: (A) canonical-sort the QL output cluster nodes by the stable
+gap), feeding (B) a residual order-sensitivity in the clustering that the entry-8
+`BlobLess` fix did not cover. Reading the `clus_all_tpc` pipeline pins (B) more
+precisely — and **the all-TPC sensitivity is to POINT order, not cluster order**:
+
+- The all-TPC pipeline is only `switch_scope` + `cathode_connect` (no `connect1`).
+  `cathode_connect` already `sort_clusters` before its merge loop and adds graph
+  edges whose *set* is order-independent (`connected_components` is deterministic),
+  so it is invariant to **cluster** order. Reversing the cluster order would not
+  reproduce the flip.
+- Its merge gate `is_cathode_crossing_pair` decides on `vhough_transform(p, r)` and
+  `get_pca().axis`. `hough_transform` (Facade_Cluster.cxx) accumulates the bin
+  weights `s_val[lin] += charge/npoints` over the kd-radius results **in query
+  order**, and that order follows point-insertion = blob-serialization = QL-output
+  order. FP addition is non-associative, so a different fill order yields sub-ULP
+  per-bin sums; at line `val > best_val` a near-tie argmax flips, one cathode merge
+  flips, 111↔110. (The PCA covariance sum is a second candidate of the same kind.)
+  This is exactly entry-8's hough-bin-flip, one level deeper: entry-8 made the
+  *coordinates* order-stable; the *fill order into the histogram* is the gap.
+- It cannot be reproduced within one binary: the points live in fixed per-cluster
+  arrays, so only a **re-serialized** input changes their order — i.e. a rebuild,
+  which is the very confound. A faithful reproduction harness must re-emit the
+  input tensor with permuted point order, then bisect per stage.
+
+**Fix options.** (A) canonical-sort the QL output cluster nodes by the stable
 `get_cluster_id()` before `as_tensors` (surgical, in match, mirrors 32ac9e4d;
-masks B by giving clus a build-stable input) — or (B) make the connect1
-merge order-invariant (the root fix; also helps SBND `clus_all_apa`, but a deeper
-clustering change). Both are by-construction NOT byte-identical (they re-resolve
-a borderline merge once, then hold), so they belong behind a default-off toggle
-and need an A/B. Cosmetic in physics terms — one ~111-cluster event gains/loses a
-single borderline split at a geometric tie — which is why the prior campaign
-validated at the deterministic level instead (match/docs/improve_progress.md
-Pass 3). Deferred pending a decision on whether cross-recompile byte-stability is
-required.
+gives clus a build-stable input and masks B for the whole pipeline) — the user
+chose against this. (B, root) make the order-sensitive clus accumulations
+order-invariant: sort the hough kd-radius results by coordinate before the fill
+(and likewise any PCA covariance accumulation), mirroring entry-8's content-keyed
+summation. (B) is the correct fix but lives in the top clustering hotspot
+(`hough_transform`), is globally shared across every stage, is non-byte-identical,
+and is best validated by a same-binary reverse-fill A/B + a perf check — a focused
+change, not a drive-by.
+
+**Shipped now (down-payment on the same class).** `ClusteringConnect1` had a
+*confirmed* sibling of this bug: it sorted its merge-candidate clusters by **length
+only** (`clustering_connect.cxx` ~181, ~722); `std::sort` is not stable, so
+equal-length clusters kept their build-dependent input order and could flip a
+merge. New `deterministic_order` knob (C++ **default OFF** => byte-identical legacy
+length-only sort; smoke-tested off-path 30/30 matching byte-identical) switches it
+to `sort_clusters` (length + nchildren/npoints/geometry/PCA tie-break), making
+those merges order-invariant by construction. This hardens the per-face / per-APA /
+per-group stages (which *do* run `connect1`); it does **not** touch the all-TPC
+`hough_transform` residual above, which remains the recommended follow-up. Cosmetic
+in physics terms (one borderline split at a geometric tie), which is why the prior
+campaign validated at the deterministic level (match/docs/improve_progress.md Pass
+3) rather than chase cross-recompile byte-stability.
 
 ### 9. ProjectionDeghosting: evict projection matrices after last use (imaging memory)
 
