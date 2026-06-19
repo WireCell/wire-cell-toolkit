@@ -155,9 +155,9 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
                 else pd_scale(i)),
             // Per-channel light-error model sigma = (PE<knee) ? floor : frac*PE.
             // frac 0.43 -> 0.60: CALIBRATE the bundle chi2 statistic, not minimise it.
-            // On the run-29107 hand-accepted good matches the median chi2/ndf sat at
-            // ~1.56 (frac 0.43) -- the per-PMT error was too tight; frac=0.60 brings the
-            // median to ~1.0 so chi2/ndf is a well-scaled goodness-of-fit. (The high-PE
+            // On the run-29107 hand-accepted good matches the real-C++ median chi2/ndf sat
+            // at ~1.66 (frac 0.43) -- the per-PMT error was too tight; frac=0.60 brings the
+            // median to ~1.13 so chi2/ndf is a well-scaled goodness-of-fit. (The high-PE
             // method-of-moments gives ~0.40 but only sees the bright tail; the full-
             // bundle statistic, dominated by mid-PE channels + the low-PE inflation
             // below, needs the larger frac.)  Re-validated at this frac: GT preserved,
