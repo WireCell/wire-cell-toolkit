@@ -345,6 +345,19 @@ namespace WireCell::Match {
         double m_rescue_exponent{0.8};         // chi2/ndf exponent (prototype 0.8)
         double m_rescue_boundary_weight{0.8};  // per-flag down-weight (prototype 0.8/0.64)
 
+        // Bee-op flash gid: when a single global optical flash list is fed to
+        // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides
+        // read the same opflash archive), EACH node's write_opflash_pc emits the
+        // FULL list keyed by its own anode ident, so every physical flash lands on
+        // the merged root TWICE and the Bee op display shows each flash doubled.
+        // With this set, the gid (and the cluster's matched_flash_gid) is keyed by
+        // the flash's PHYSICAL side instead of the node ident, so both nodes emit
+        // the same gid for one flash -> fill_bee_flashes collapses the duplicate and
+        // a cross-side (xTPC) matched_flash_gid still resolves to it. Default OFF =>
+        // legacy node-ident gid (byte-identical for SBND per-TPC flashes / single-
+        // node configs, whose per-node flash lists are already one-per-side).
+        bool   m_opflash_phys_gid{false};
+
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
         // match/docs/sbnd-opdetsim-chain.md). Maps the true predicted PE p on each PMT into
@@ -632,6 +645,14 @@ namespace WireCell::Match {
         void rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapshot);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
+
+        // Physical drift side (0 = low-x, 1 = high-x of the cathode) of a flash,
+        // from where its measured light actually sits. When m_opflash_phys_gid is
+        // set this seeds the Bee-op flash gid (and matched_flash_gid) instead of the
+        // processing node's anode ident, so a flash that two per-side nodes both
+        // dump from one shared global flash list gets ONE gid and collapses in the
+        // Bee op display (see write_opflash_pc).
+        int  flash_phys_side(const Opflash* flash) const;
 
         // Hand-scan calibration dump (m_calib_dump only). Builds one per-event JSON
         // from the finished per-APA runs (the full all_bundles candidate set across

@@ -295,6 +295,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_overpred_maxch_ratio = get(cfg, "overpred_maxch_ratio", m_overpred_maxch_ratio);
 
     m_empty_rescue          = get(cfg, "empty_rescue",          m_empty_rescue);
+    m_opflash_phys_gid      = get(cfg, "opflash_phys_gid",      m_opflash_phys_gid);
     m_rescue_metric_max     = get(cfg, "rescue_metric_max",     m_rescue_metric_max);
     m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
     m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
@@ -477,6 +478,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
     cfg["empty_rescue"]          = m_empty_rescue;
+    cfg["opflash_phys_gid"]      = m_opflash_phys_gid;
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
@@ -1788,7 +1790,12 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
         for (auto bundle : run.flash_bundles_map[flash]) {
             auto* cluster = bundle->get_main_cluster();
             const double t0 = flash->get_time() * units::ns;
-            const int flash_gid = run.anode->ident() * kFlashGidStride + run.global_flash_idx_map.at(flash);
+            // gid side: legacy = this node's anode ident; m_opflash_phys_gid = the
+            // flash's PHYSICAL side, so a cross-side (xTPC) match on the opposite
+            // node still keys the same gid the owning side emits in write_opflash_pc.
+            const int gid_side = m_opflash_phys_gid ? flash_phys_side(flash)
+                                                    : (int) run.anode->ident();
+            const int flash_gid = gid_side * kFlashGidStride + run.global_flash_idx_map.at(flash);
             cluster->set_cluster_t0(t0);
             cluster->set_scalar<int>("flash", flash->get_flash_id());
             cluster->set_scalar<int>("matched_flash_gid", flash_gid);
@@ -1823,27 +1830,37 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
 // Persist the per-flash measured light into a merge-safe, self-contained per-root
 // "opflash" PC (one row per (flash, channel): gid, time, ch, pe), so the all-APA
 // MABC can dump the op/flash Bee display after the per-APA trees are merged.
+// Physical drift side (0 = low-x / TPC0, 1 = high-x / TPC1) of a flash, from where
+// its measured light sits relative to the cathode.  m_opdets[ch].center.x() is the
+// OpDet position; ties (e.g. an all-zero flash) resolve to side 0.
+int QLMatching::flash_phys_side(const Opflash* flash) const
+{
+    double pe_lo = 0.0, pe_hi = 0.0;
+    for (int ch = 0; ch < m_nchan; ++ch) {
+        const double p = flash->get_PE(ch);
+        if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+        else pe_lo += p;
+    }
+    return (pe_hi > pe_lo) ? 1 : 0;
+}
+
 void QLMatching::write_opflash_pc(ApaRun& run)
 {
     std::vector<int> op_gid, op_ch, op_apa;
     std::vector<double> op_time, op_pe;
     for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
         const auto& flash = run.flashes[fi];
-        const int gid = run.anode->ident() * kFlashGidStride + static_cast<int>(fi);
         // Physical drift side of the flash (TPC 0 = low-x, TPC 1 = high-x of the
         // cathode), taken from where its measured light actually is rather than
-        // from the gid: the gid encodes the *processing node's* anode ident, not
-        // the flash's lit volume (the per-side matcher runs against one global
-        // flash list), so the merged-root opflash PC would otherwise tag every
-        // flash with a single side and the Bee op display would read e.g. all
-        // "TPC0".  m_opdets[ch].center.x() is the OpDet position; ties -> side 0.
-        double pe_lo = 0.0, pe_hi = 0.0;
-        for (int ch = 0; ch < m_nchan; ++ch) {
-            const double p = flash->get_PE(ch);
-            if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
-            else pe_lo += p;
-        }
-        const int apa = (pe_hi > pe_lo) ? 1 : 0;
+        // from the node's anode ident (the per-side matcher runs against one global
+        // flash list, so the node ident is NOT the lit volume).  Used for the Bee
+        // "apa" side tag always, and for the gid when m_opflash_phys_gid so the two
+        // per-side nodes emit ONE gid per physical flash and the duplicate collapses
+        // in fill_bee_flashes.  Legacy gid = node anode ident (byte-identical when
+        // each node's flash list is already one-per-side, e.g. SBND per-TPC flashes).
+        const int apa = flash_phys_side(flash.get());
+        const int gid_side = m_opflash_phys_gid ? apa : (int) run.anode->ident();
+        const int gid = gid_side * kFlashGidStride + static_cast<int>(fi);
         for (int ch = 0; ch < m_nchan; ++ch) {
             op_gid.push_back(gid);
             // Fold the per-event readout-vs-trigger offset into the displayed flash

@@ -435,6 +435,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             rescue_exponent: 0.8,
             rescue_boundary_weight: 0.8,
 
+            // Both drift sides read the SAME global opflash archive (all-PD light
+            // reco -> one opflash_pdhd-wct.tar.gz), so each per-side node would dump
+            // the full flash list and the Bee op display would double every flash.
+            // Key the Bee-op flash gid by the flash's physical side so the two nodes
+            // emit ONE gid per physical flash (duplicate collapses; cross-side xTPC
+            // matches still resolve).  SBND/PDVD per-TPC flashes are unaffected.
+            opflash_phys_gid: true,
+
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
             VUVEfficiency: VUVEfficiency,
