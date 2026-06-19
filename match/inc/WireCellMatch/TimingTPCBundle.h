@@ -35,6 +35,18 @@ namespace WireCell::Match {
         double pe_err_frac  = 0.3;
         double pe_err_knee  = 1.0;
         bool   pe_err_on_pred = false;
+        // Efficiency-aware low-PE error inflation (PD detection inefficiency at low
+        // light: a channel with a few PE predicted often measures zero -- far more
+        // than Poisson). When pe_err_lowpe_frac >= 0 (and pe_err_on_pred) the relative
+        // error grows as the predicted PE falls:
+        //   rel(pred) = pe_err_frac + (pe_err_lowpe_frac - pe_err_frac)*exp(-pred/lowpe_knee)
+        //   PE_err    = sqrt((rel*pred)^2 + pe_err_floor^2)
+        // so rel -> frac at high pred (unchanged) and -> lowpe_frac (~unity) at low pred,
+        // letting "predicted a few PE, measured zero" be tolerated rather than penalized.
+        // pe_err_lowpe_frac < 0 => disabled (use the floor/frac/knee branch, bit-identical).
+        // Calibrated on run-29107 hand scans (pdhd/ql_light_calib/fit_lowpe.py): PDHD 2.1/4.0.
+        double pe_err_lowpe_frac = -1.0;
+        double pe_err_lowpe_knee = 4.0;
         // Flag-aware multi-branch "high-consistent" ladder (ported from the MicroBooNE
         // prototype FlashTPCBundle, re-tuned for the SBND post-recipe chi2 scale from the
         // 10 hand-scan data events). When highconsist_ladder is false the single-branch

@@ -28,6 +28,22 @@ namespace {
         }
         return max_diff;
     }
+
+    // Per-opdet light error for the bundle chi2 (sigma^2 = meas + perr^2).
+    // pe_err_on_pred off  -> measured-based error (meas_err), bit-identical default.
+    // pe_err_lowpe_frac<0 -> predicted-based floor/frac/knee branch (SBND).
+    // else -> efficiency-aware low-PE inflation: rel grows as pred falls so a low-pred
+    //         channel that measures zero is tolerated (PD inefficiency at low light).
+    double per_opdet_perr(const Match::BundleQualityParams& qp, double pred, double meas_err)
+    {
+        if (!qp.pe_err_on_pred) return meas_err;
+        if (qp.pe_err_lowpe_frac >= 0.0) {
+            const double rel = qp.pe_err_frac
+                + (qp.pe_err_lowpe_frac - qp.pe_err_frac) * std::exp(-pred / qp.pe_err_lowpe_knee);
+            return std::sqrt(std::pow(rel * pred, 2) + std::pow(qp.pe_err_floor, 2));
+        }
+        return pred < qp.pe_err_knee ? qp.pe_err_floor : qp.pe_err_frac * pred;
+    }
 } // namespace
 
 TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
@@ -111,9 +127,7 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
         if (opdet_mask[j] == 0) continue;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        const double perr = m_qp.pe_err_on_pred
-            ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
-            : pe_err[j];
+        const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
         candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
     }
 
@@ -207,9 +221,7 @@ bool TimingTPCBundle::examine_bundle()
         ++nvalidopdets;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        const double perr = m_qp.pe_err_on_pred
-            ? (pred_pe[j] < m_qp.pe_err_knee ? m_qp.pe_err_floor : m_qp.pe_err_frac * pred_pe[j])
-            : pe_err[j];
+        const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
         double denom = pe[j] + perr * perr;
         // Prototype close-to-PMT relaxation: a big measured excess near the PMTs widens
         // the denominator (near-PMT over-response is not a real charge/light mismatch).

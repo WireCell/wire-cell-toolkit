@@ -250,6 +250,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
     m_pe_err_knee       = get(cfg, "pe_err_knee",       m_pe_err_knee);
     m_pe_err_on_pred    = get(cfg, "pe_err_on_pred",    m_pe_err_on_pred);
+    m_pe_err_lowpe_frac = get(cfg, "pe_err_lowpe_frac", m_pe_err_lowpe_frac);
+    m_pe_err_lowpe_knee = get(cfg, "pe_err_lowpe_knee", m_pe_err_lowpe_knee);
 
     // Optional per-channel measured-PE gain correction (length nchan). Empty =>
     // identity (byte-identical). A length mismatch is a config error.
@@ -445,6 +447,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_err_frac"]        = m_pe_err_frac;
     cfg["pe_err_knee"]        = m_pe_err_knee;
     cfg["pe_err_on_pred"]     = m_pe_err_on_pred;
+    cfg["pe_err_lowpe_frac"]  = m_pe_err_lowpe_frac;
+    cfg["pe_err_lowpe_knee"]  = m_pe_err_lowpe_knee;
     cfg["measured_pe_scale"]  = Json::Value(Json::arrayValue);  // empty => identity
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
 
@@ -933,6 +937,7 @@ void QLMatching::compute_geometry(ApaRun& run)
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
         m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee,
         m_bundle_mask_ks, m_pe_err_floor, m_pe_err_frac, m_pe_err_knee, m_pe_err_on_pred,
+        m_pe_err_lowpe_frac, m_pe_err_lowpe_knee,
         m_highconsist_ladder,
         m_hc_clean_ks, m_hc_clean_c2, m_hc_good_ks, m_hc_good_c2,
         m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf,

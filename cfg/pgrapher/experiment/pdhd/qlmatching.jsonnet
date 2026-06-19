@@ -116,6 +116,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // frac 0.3 -> 0.44 from the evt-983 label residuals of the corrected model
             // (intrinsic per-PMT scatter on side1+APA0; floor/knee keep C++ defaults).
             pe_err_frac: 0.44,
+            // Compute the bundle-chi2 per-PMT error from the PREDICTED pe (not the
+            // measured-based flash error). Required by the low-PE inflation below, and
+            // on its own already cures the catastrophic "predicted light, measured ~0"
+            // penalty the measured-based branch gives (perr=floor there -> chi2 ~ pred^2).
+            pe_err_on_pred: true,
+            // Efficiency-aware low-PE error inflation: PDs detect zero far more often than
+            // Poisson when little light is predicted (run-29107 hand scans: ~50% of pred
+            // 2-5 PE channels measure 0). Grow the relative error as pred falls so these
+            // are tolerated: rel = frac + (lowpe_frac-frac)*exp(-pred/lowpe_knee). Tuned so
+            // a typical measured-zero channel contributes ~1 to chi2 (median 5.2 -> 1.0)
+            // while pred>=50 is untouched. ql_light_calib/fit_lowpe.py on evts 983/991/999/1007.
+            pe_err_lowpe_frac: 1.55,
+            pe_err_lowpe_knee: 5.5,
             // Assemble the round-1/2 LASSO matrices sparse (block-sparse P/PF): on the
             // bright outlier (run 29107 evt 1015, ~440 flashes) the dense path's P/PT
             // spike and dense Gram build dominate QLMatching's time and memory. Sparse

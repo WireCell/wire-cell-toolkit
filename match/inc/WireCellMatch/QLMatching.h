@@ -237,6 +237,14 @@ namespace WireCell::Match {
         // When true the bundle chi2 computes its per-PMT error from the PREDICTED pe
         // (not measured); the LASSO weight stays measured-based. SBND-on, default off.
         bool   m_pe_err_on_pred{false};
+        // Efficiency-aware low-PE error inflation (PD detection inefficiency at low
+        // light). When m_pe_err_lowpe_frac >= 0 (and m_pe_err_on_pred) the bundle-chi2
+        // relative error grows as the predicted pe falls: rel = frac + (lowpe_frac-frac)
+        // *exp(-pred/lowpe_knee), PE_err = sqrt((rel*pred)^2 + floor^2). <0 => disabled
+        // (bit-identical). Calibrated on run-29107 hand scans (pdhd/ql_light_calib/
+        // fit_lowpe.py): PDHD 2.1/4.0. Feeds the chi2 only; LASSO weight stays measured.
+        double m_pe_err_lowpe_frac{-1.0};
+        double m_pe_err_lowpe_knee{4.0};
         // Optional per-channel measured-PE gain correction (length nchan), applied
         // to every flash's measured PE as it is read. Empty => identity (byte-
         // identical). PDHD uses it to scale up the gain-biased -x full-stream half
