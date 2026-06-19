@@ -296,10 +296,51 @@ B2 takes the solve from **~540 s to ~9 s (≈59×)** — group13 170 s→2.7 s, 
 drops another **4.5 GB** (the dense `X` is gone; `XdX` is built from the sparse pattern). **Combined
 A+B+B2: 1148 s → 220 s (5.2×) and 14.32 GB → 3.94 GB (3.6×) on evt 1015, production byte-identical.**
 
-What's left is now genuinely structural: the ~9 s solve is the coordinate-descent iterations over the
-sparse `XdX` (~O(nbeta²·sweeps)), and the ~4 GB floor is the charge point clouds, not the matcher. The
-only further lever is **C** (shrink `nbeta` with a pre-fit cull) — bigger still, but a physics toggle,
-not result-preserving. For the result-preserving track, A+B+B2 is the end of the line.
+What's left is now genuinely structural for the *solver*: the ~9 s solve is the coordinate-descent
+iterations over the sparse `XdX` (~O(nbeta²·sweeps)). **But the solver is no longer the bottleneck —
+see §9: a fresh re-profile shows `build_bundles` (the per-point visibility loop) is now ~90 % of
+QLMatching.** The next result-preserving lever is there, not in the LASSO.
+
+---
+
+## 9. Post-B2 re-profile (run 29107, evt 1015) — the bottleneck is now `build_bundles`, not the solver
+
+Re-measured on the current production build (A+B+B2 all on), evt 1015 = charge idx 4, joint matcher
+(two per-drift-side runs). Numbers straight from the run's own `QLtiming` debug log
+(`pdhd/work/029107_4/wct_clus_029107_4.log`):
+
+| phase | run A | run B | total | share of QL |
+|---|--:|--:|--:|--:|
+| **`build_bundles` vis_loop** | 106.2 s | 66.3 s | **172.5 s** | **~90 %** |
+| `cull_cross_tpc` (pairing loop) | — | — | 19.4 s | ~10 % |
+| `fit_round1`+`fit_round2` (LASSO) | 0.52 s | 0.03 s | 0.56 s | ~0.3 % |
+| output (tensor build) | — | — | 0.38 s | ~0.2 % |
+| **operator total** (prefit+cull+fit+out) | | | **~197.5 s** | |
+
+(process wall 236 s / peak RSS 1.38 GB; the gap to 197 s is frame I/O + clustering + finalize.) **The
+A+B+B2 work made the LASSO free, which is exactly why the picture flipped:** the `build_bundles`
+vis_loop — the ported `SemiAnalyticalModel` per-point/per-opdet kernel — was 169 s ≈ 14 % of the *old*
+1248 s; it is unchanged at ~172 s but is now ~90 % of the *new* ~197 s. The §3 "Option D (~14 %)"
+ranking was the pre-optimization fraction; it is now the headline. `cull_cross_tpc` is the only other
+nontrivial cost (19.4 s over **1.86×10¹⁰** point-pairs ≈ 1.1 ns/pair — already at the scope-hoisted
+floor, §`xtpc_pair_consistent`; the math is irreducible without an AABB/k-d pre-filter, which is a
+separate physics-touching change).
+
+**Where the vis_loop time is wasted (the result-preserving lever).** `build_bundles` builds a bundle
+for **every** (flash × cluster-group) pair — run A is 451 flashes × 52 groups = 23 452 bundles, run B
+451 × 54 = 24 354 — and computes the full per-point visibility **before** the candidate filters run.
+`require_containment` is already hoisted *above* the vis_loop (it `continue`s before the loop), but the
+opaque-cathode **cross-side mismatch drop** (`cross_side_mismatch_drop`) runs *after* the loop, even
+though its decision (flash lit-side vs the run's fixed cluster side, plus the pre-loop `at_x_boundary`
+flag) **never touches the predicted light**. PDHD feeds the full global flash list to *each* per-side
+run, so a large share of each run's bundles are cross-side and are dropped only after paying full
+visibility cost (survivors `pre_bundles`: run A 4831 of 23 452, run B 1433 of 24 354). Hoisting that
+check above the vis_loop — the same pattern `require_containment` already uses — skips the visibility
+of bundles that are discarded anyway → **byte-identical matching, lower wall time**. The two in-loop
+side effects are safe: `total_charge_blob`/`total_charge_point` are debug-log only, and the calib-dump
+bundle table already applies the same `cross_side_mismatch_drop` before reading any pred. The realized
+saving (= the vis_loop time spent on cross-side-but-contained bundles) is measured directly by the
+`vis_loop` A/B in §10.
 
 ## Reproduce
 
