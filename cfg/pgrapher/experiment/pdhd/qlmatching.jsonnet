@@ -154,17 +154,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
                 then perch_override[std.toString(i)]
                 else pd_scale(i)),
             // Per-channel light-error model sigma = (PE<knee) ? floor : frac*PE.
-            // frac 0.43 -> 0.60: CALIBRATE the bundle chi2 statistic, not minimise it.
-            // On the run-29107 hand-accepted good matches the real-C++ median chi2/ndf sat
-            // at ~1.66 (frac 0.43) -- the per-PMT error was too tight; frac=0.60 brings the
-            // median to ~1.13 so chi2/ndf is a well-scaled goodness-of-fit. (The high-PE
-            // method-of-moments gives ~0.40 but only sees the bright tail; the full-
-            // bundle statistic, dominated by mid-PE channels + the low-PE inflation
-            // below, needs the larger frac.)  Re-validated at this frac: GT preserved,
-            // matcher purity held (looser error is a matching knob -- checked, not
-            // re-inflated).  floor/knee + the low-PE inflation are unchanged.
-            // ql_light_calib/fit_perchannel_scale.py + validate_perchannel.py.
-            pe_err_frac: 0.60,
+            // frac = 0.40: the high-PE method-of-moments value (E[(pred-meas)^2]=meas+frac^2*pred^2
+            // on the bright tail of the run-29107 hand-accepted matches). We do NOT calibrate the
+            // bundle chi2/ndf to ~1 (the earlier frac=0.60 did that -- median chi2/ndf 1.66->1.13 --
+            // but chi2/ndf~1 is not required here, and the larger frac is a looser matching error
+            // that over-tolerates mismatch; the matcher is KS-led, so the intrinsic per-PMT 0.40 is
+            // the right scale).  floor/knee + the low-PE inflation below are unchanged.
+            // ql_light_calib/fit_perchannel_scale.py + validate_chain.py.
+            pe_err_frac: 0.40,
             // Compute the bundle-chi2 per-PMT error from the PREDICTED pe (not the
             // measured-based flash error). Required by the low-PE inflation below, and
             // on its own already cures the catastrophic "predicted light, measured ~0"
