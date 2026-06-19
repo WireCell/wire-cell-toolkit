@@ -342,6 +342,46 @@ This very likely also resolves (or at least stabilizes) the
 long-standing SBND `clus_all_apa` run-to-run nondeterminism family —
 worth a dedicated SBND A/B before relying on it there.
 
+### 8a. The remaining CROSS-RECOMPILE residual: `clus_all_tpc` is input-node-ORDER sensitive
+
+Re-confirmed on PDHD run 29107 (evt 1015 / busy idx18,15) while profiling
+QLMatching. After entry 8 the merge is **run-to-run and allocator stable**
+(glibc==tcmalloc, two runs of one binary byte-identical). What is *not* stable
+is **across a relink**: rebuilding only `libWireCellMatch.so` (clus untouched,
+06-16 build) flipped `mabc-all-apa` cluster count 111↔110 on idx18/15 — while
+the per-APA and per-group (`group02`/`group13`) QL outputs stayed byte-identical.
+
+The mechanism is now pinned, and it is **not** an FP tie in clustering:
+- `libWireCellClus.so` was identical across the compared runs ⇒ identical FP
+  codegen ⇒ `ClusteringConnect1` produces bit-identical sums for identical input.
+- The QL matching result (T0s, assignments, dumps) was byte-identical ⇒ the
+  merged-tree *content* fed to `clus_all_tpc` (which runs with `premerged=false`
+  on the joint-QL output) is identical.
+- Same clus binary + identical content but different output ⟹ **`clus_all_tpc`
+  clustering depends on the input node ORDER**, and the QLMatching merged-tree
+  serialization order is pointer-dependent, so it shifts when the match binary is
+  relinked (allocation order moves). Run-to-run is stable because within one
+  binary both the QL serialization order and the clustering are deterministic.
+
+So two residuals chain: (A) QLMatching emits the merged tree in a pointer-order
+that is not yet content-canonical across rebuilds (commit 32ac9e4d made the
+matching-internal iteration deterministic but the output-tree node order is the
+gap), feeding (B) a residual order-sensitivity in the clustering merge that the
+entry-8 `BlobLess` fix did not cover (that fix removed the FP-summation-order
+dependence in `calc_ave_pos`/`calc_dir`; this is a *different* order dependence —
+the connect1 candidate/graph order itself). Either link, fixed, kills the
+symptom: (A) canonical-sort the QL output cluster nodes by the stable
+`get_cluster_id()` before `as_tensors` (surgical, in match, mirrors 32ac9e4d;
+masks B by giving clus a build-stable input) — or (B) make the connect1
+merge order-invariant (the root fix; also helps SBND `clus_all_apa`, but a deeper
+clustering change). Both are by-construction NOT byte-identical (they re-resolve
+a borderline merge once, then hold), so they belong behind a default-off toggle
+and need an A/B. Cosmetic in physics terms — one ~111-cluster event gains/loses a
+single borderline split at a geometric tie — which is why the prior campaign
+validated at the deterministic level instead (match/docs/improve_progress.md
+Pass 3). Deferred pending a decision on whether cross-recompile byte-stability is
+required.
+
 ### 9. ProjectionDeghosting: evict projection matrices after last use (imaging memory)
 
 Implements option (b) from the memory ideas: the 3.7 GB live peak on the
