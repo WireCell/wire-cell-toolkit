@@ -383,6 +383,15 @@ the flag visibly toggles the vis_loop (70.3->39.2 s, 58.7->30.7 s). The hoist is
 result-preserving; the cross-build drift is the pre-existing `clus_all_tpc` relink-nondeterminism,
 independent of this change.
 
+**Broadened to all 30 (run 29107).** Flag-on outputs vs the pre-change baseline, comparing the
+confound-free matching subset (`mabc-group02`/`group13` + per-APA, the QL-annotated zips that held even
+cross-build): **30/30 byte-identical**, and on this pass `mabc-all-apa` also matched on all 30 (0
+relink drift — the heisenbug simply didn't fire this build). The matching-correctness signal is the
+per-APA / per-group zips + `pre_bundles` counts; an occasional `all-apa` global-clustering drift, if it
+recurs on another build, is the documented `clus_all_tpc` pointer-order nondeterminism, not a matching
+change. (Compared with `/home/xqian/tmp/cmp_matching.py`, which diffs zip inner entries since the `.zip`
+container embeds mtimes.)
+
 **Status:** the result-preserving wall-time lever the post-B2 profile pointed at is shipped. The only
 levers left now genuinely change physics: Option D (coarsen the vis_loop point sampling on large
 blobs) or an AABB/k-d pre-filter for `cull_cross_tpc` (the remaining ~19 s) -- both toggle + validate,
