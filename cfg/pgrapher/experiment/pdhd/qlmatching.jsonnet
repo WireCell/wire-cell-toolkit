@@ -398,6 +398,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // keep-all leaves them untouched unless a rival is consistent).  GUARDRAIL-tuned,
             // not refit; ql_light_calib/validate_chain.py.  The 12 xtpc-consistent GT winners
             // are protected by the scenario-1/consistent priority, so the cull cannot drop them.
+            // Apply the ch_mask (+ saturation mask) to the KS shape metric too, not just
+            // chi2/LASSO -- functional parity with SBND (bundle_mask_ks:true; C++ default
+            // false). A dead PD reading 0 where the model predicts light should not be charged
+            // to a match's KS.  PDHD's 7 dead channels (3/86/87/97/107/116/117) carry ~0
+            // predicted light for the current hand-scan matches, so this is near-neutral on the
+            // 4-event FOM (correctness/SBND-alignment, not a tuning gain).  Ladder ks ceilings
+            // held (no GT match's KS crosses a ceiling under the mask).
+            bundle_mask_ks: true,
             highconsist_ladder: true,
             highconsist_ks_max: 0.06,    // single-branch fallback (ladder-off); unused here
             highconsist_min_ndf: 3,      // B1/B2/B3 ndf floor
