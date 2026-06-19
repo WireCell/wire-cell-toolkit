@@ -342,6 +342,52 @@ bundle table already applies the same `cross_side_mismatch_drop` before reading 
 saving (= the vis_loop time spent on cross-side-but-contained bundles) is measured directly by the
 `vis_loop` A/B in §10.
 
+## 10. Implemented — hoist `cross_side_mismatch_drop` above the vis_loop (`crossside_skip_vis`)
+
+Realises §9. In `build_bundles`, when `crossside_skip_vis` is on, the opaque-cathode cross-side
+mismatch drop runs **before** the per-point visibility loop (right after the already-hoisted
+`require_containment` skip), using a per-flash `flash_side` computed once instead of per group. The
+legacy post-loop `cross_side_mismatch_drop` is kept verbatim and still fires when the flag is off, so
+the default path is byte-for-byte the old code. Flag is **C++ default OFF** (SBND/PDVD/ICARUS
+unchanged — they don't set `cross_side_filter` either); PDHD's `qlmatching.jsonnet` turns it on.
+
+**Resource win, evt 1015** (charge idx 4, run 29107, final shipped config):
+
+| metric | baseline (post-B2) | + crossside_skip_vis | delta |
+|---|--:|--:|--:|
+| `build_bundles` vis_loop (A+B) | 172.5 s | 109.1 s | **-37 %** |
+| candidate-points evaluated | 32.1 M | 20.7 M | -35 % |
+| prefit (= build_bundles) | 177.2 s | 113.0 s | -36 % |
+| process wall (full clustering) | 236 s | 170 s | **-28 %** |
+| peak RSS | 1.38 GB | 1.38 GB | -- (a *time* win) |
+| survivors `pre_bundles` (run A / B) | 4831 / 1433 | 4831 / 1433 | **unchanged** |
+
+Two more busy events confirm it scales: idx 18 vis_loop 70.3 s -> 39.2 s (wall 118 -> 86 s, -27 %),
+idx 15 58.7 s -> 30.7 s (wall 100 -> 73 s, -27 %). The saving is largest where one run's clusters sit on
+one drift side so most of the other side's flashes are cross-side (run B on evt 1015: 11.8 M -> 3.2 M
+candidate-points). RSS is unchanged because the vis buffers were already reused and the skipped
+`pred_flash` vectors are tiny -- as predicted, this is a wall-time lever, not a memory one (memory was
+already taken to the ~4 GB charge-point-cloud floor by A+B+B2).
+
+**Validation — same-binary A/B (the right test here).** `clus_all_tpc` runs **downstream** of joint
+QLMatching (`clus.jsonnet`: `premerged=false`, "joint QLMatching already merged"), and its all-TPC
+clustering carries the known pointer-order nondeterminism whose outcome shifts on **any** relink (heap
+addresses move). So a *cross-build* baseline-vs-new mabc diff is confounded: evt 1015 and idx 0 came
+out byte-identical, but idx 18 / idx 15 differed only in `mabc-all-apa`'s global
+`clustering-global.json` (111 vs 110 clusters) -- the per-APA and per-group (`group02`/`group13`, the
+QL-annotated outputs) were identical, and **two runs of the same new binary agreed with each other**
+(both 110), i.e. reproducible-per-binary, not the matching logic. The clean isolation is a
+**same-binary** A/B: build once, run with the flag **off** then **on**. Result: **`mabc-*`
+byte-identical for off vs on on idx 18 and idx 15** (the two events that drifted across the build) while
+the flag visibly toggles the vis_loop (70.3->39.2 s, 58.7->30.7 s). The hoist is therefore
+result-preserving; the cross-build drift is the pre-existing `clus_all_tpc` relink-nondeterminism,
+independent of this change.
+
+**Status:** the result-preserving wall-time lever the post-B2 profile pointed at is shipped. The only
+levers left now genuinely change physics: Option D (coarsen the vis_loop point sampling on large
+blobs) or an AABB/k-d pre-filter for `cull_cross_tpc` (the remaining ~19 s) -- both toggle + validate,
+not byte-identical.
+
 ## Reproduce
 
 ```

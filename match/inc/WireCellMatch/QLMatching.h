@@ -310,6 +310,17 @@ namespace WireCell::Match {
         // default (no-op, bit-identical); PDHD jsonnet turns it on.
         bool m_cross_side_filter{false};
 
+        // Perf only: apply the cross-side mismatch drop BEFORE the per-point visibility
+        // loop in build_bundles instead of after it. The drop verdict (flash lit-side vs
+        // the run's fixed cluster side, plus the pre-loop at_x_boundary flag) never uses
+        // the predicted light, so hoisting it skips the SemiAnalyticalModel evaluation of
+        // bundles that the post-loop test discards anyway -- same surviving candidate set,
+        // bit-identical matching, lower wall time (the now-dominant cost on busy PDHD
+        // events: vis_loop ~90% of QLMatching). Only meaningful with m_cross_side_filter
+        // on. Default OFF => the legacy post-loop drop runs and the result is byte-for-byte
+        // the old path (validated same-binary on PDHD: matching identical with skip on/off).
+        bool m_crossside_skip_vis{false};
+
         // Light-pattern over-prediction prefilter (the prototype's fired-fraction
         // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle BEFORE
         // the chi2 fit when its predicted light is much larger than the measured

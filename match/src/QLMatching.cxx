@@ -289,6 +289,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_require_containment  = get(cfg, "require_containment",  m_require_containment);
 
     m_cross_side_filter    = get(cfg, "cross_side_filter",    m_cross_side_filter);
+    m_crossside_skip_vis   = get(cfg, "crossside_skip_vis",   m_crossside_skip_vis);
 
     m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
     m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
@@ -475,6 +476,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
     cfg["require_containment"]  = m_require_containment;
     cfg["cross_side_filter"]    = m_cross_side_filter;
+    cfg["crossside_skip_vis"]   = m_crossside_skip_vis;
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
     cfg["empty_rescue"]          = m_empty_rescue;
@@ -1108,6 +1110,21 @@ void QLMatching::build_bundles(ApaRun& run)
                    int(flash->get_total_PE() * 100) / 100.,
                    int(flash_x_offset * 100) / 100.);
 
+        // Lit drift side of this flash from its PE pattern (the same test as
+        // cross_side_mismatch_drop), hoisted out of the per-group loop so the
+        // cross-side skip below can run BEFORE the per-point visibility loop. Only
+        // computed when the hoisted skip is active; left at 0 (and unused) otherwise.
+        int flash_side = 0;
+        if (m_cross_side_filter && m_crossside_skip_vis) {
+            double pe_lo = 0.0, pe_hi = 0.0;
+            for (int ch = 0; ch < m_nchan; ++ch) {
+                const double p = flash->get_PE(ch);
+                if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+                else pe_lo += p;
+            }
+            flash_side = (pe_hi > pe_lo) ? 1 : 0;   // lit drift side (ties -> side 0)
+        }
+
         for (std::size_t ig = 0; ig < run.match_groups.size(); ++ig) {
             Cluster* main_cluster = run.match_groups[ig].first;
             const auto& others = run.match_groups[ig].second;
@@ -1137,6 +1154,24 @@ void QLMatching::build_bundles(ApaRun& run)
             // Discard bundles whose cluster is not contained in the TPC box once
             // the flash T0 x-offset is applied. Off by default.
             if (m_require_containment && !contained) continue;
+
+            // Opaque-cathode cross-side mismatch (hoisted form): a flash lit on the
+            // opposite drift side from this cluster can only match a cathode-crosser
+            // (at_x_boundary). The verdict uses only the flash lit-side, the run's fixed
+            // cluster side, and the already-computed at_x_boundary flag -- it never
+            // touches the predicted light -- so when crossside_skip_vis is on we drop it
+            // HERE, before the expensive per-point visibility loop (exactly as
+            // require_containment is hoisted above), skipping the visibility of bundles
+            // the post-loop test below would discard anyway. Same final candidate set,
+            // so the matching is bit-identical; the time saved is the vis_loop cost of
+            // the cross-side-but-contained bundles. Default OFF => the post-loop test
+            // runs instead and the result is byte-for-byte the legacy path.
+            if (m_cross_side_filter && m_crossside_skip_vis
+                    && flash_side != (int) run.anode->ident()
+                    && !bundle->get_flag_at_x_boundary()) {
+                bundle->set_potential_bad_match_flag(true);
+                continue;
+            }
 
             const std::size_t nopdets = flash->get_num_channels();
             std::vector<double> pred_flash(nopdets, 0.0);
@@ -1255,11 +1290,13 @@ void QLMatching::build_bundles(ApaRun& run)
                        int(bundle->get_chi2() / bundle->get_ndf() * 100) / 100.,
                        bundle->get_ndf());
 
-            // Opaque-cathode mismatched-candidate filter: drop a bundle whose flash is
-            // lit on the opposite drift side from the cluster unless the cluster is a
-            // cathode-crosser at this flash's T0 (at_x_boundary). OFF by default => no-op.
-            // dump_calib applies the same test so the hand-scan candidate tables match
-            // this fit candidate set.
+            // Opaque-cathode mismatched-candidate filter (legacy post-loop form): drop a
+            // bundle whose flash is lit on the opposite drift side from the cluster
+            // unless the cluster is a cathode-crosser at this flash's T0 (at_x_boundary).
+            // OFF by default => no-op. When crossside_skip_vis is on, the identical drop
+            // already fired above (before the vis loop) so this is a no-op for those
+            // bundles; same-side bundles fall through here either way. dump_calib applies
+            // the same test so the hand-scan candidate tables match this fit candidate set.
             if (cross_side_mismatch_drop(flash.get(), (int)run.anode->ident(),
                                          bundle->get_flag_at_x_boundary())) {
                 bundle->set_potential_bad_match_flag(true);

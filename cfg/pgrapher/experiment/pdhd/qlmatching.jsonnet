@@ -243,6 +243,16 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // dump_calib). C++ default OFF (bit-identical for SBND/ICARUS).
             cross_side_filter: true,
 
+            // Perf only (matching bit-identical): apply the cross_side_filter drop BEFORE
+            // the per-point visibility loop instead of after it, skipping the
+            // SemiAnalyticalModel evaluation of cross-side bundles that get discarded
+            // anyway.  After the A+B+B2 LASSO work the vis_loop is ~90% of QLMatching on
+            // busy events; on evt 1015 this cuts vis_loop ~38% and the process wall ~28%
+            // with the surviving candidate set (pre_bundles) unchanged.  C++ default OFF
+            // (legacy post-loop drop, byte-for-byte the old path).  See
+            // match/docs/qlmatching-perf-evt1015-pdhd.md sec 9-10.
+            crossside_skip_vis: true,
+
             // cathode_ext1 / cathode_ext2: the cathode-end window [u_cathode+ext2,
             // u_cathode+ext1).  ext1 is the containment edge (how far PAST the cathode a
             // cluster's trimmed end may sit and still count as contained / at_x_boundary;
