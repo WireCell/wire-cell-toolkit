@@ -361,6 +361,41 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // survive both levers. See docs/qlmatching-chain.md.
             chi2_relax: true,
 
+            // --- High-consistency ladder (SBND method; C++ default OFF => single-branch,
+            // byte-identical for any config that omits it) ----------------------------
+            // flag_high_consistent gates the PRE-LASSO cull_inconsistent purity cull: when a
+            // cluster has a consistent bundle (ladder-flagged OR xtpc), its NON-consistent
+            // rivals are dropped before the fit (an xtpc scenario-1 bundle takes absolute
+            // priority).  With the ladder OFF the single-branch (highconsist_ks_max/min_ndf)
+            // is used.  The multi-branch ladder (TimingTPCBundle::examine_bundle) is KS-LED:
+            // a true match has low KS, a wrong one high KS; chi2/ndf only fences the tail.
+            // Branches (OR): B1 clean (ks<hc_clean_ks, c2n<hc_clean_c2); B2 good; B3 needs
+            // flag_two_boundary (auto-computed when the ladder is on); B4
+            // at_x_boundary|close_to_PMT|window_truncated, chi2 RELAXED (missing charge).
+            // KS ceilings are kept at the SBND values (KS is the purity lever -- on the
+            // run-29107 4-event hand scan ks<0.10 is 88% pure: 57 GT vs 8 junk); the chi2/ndf
+            // ceilings are RAISED to PDHD scale.  PDHD's semi-analytical light model is rougher
+            // than SBND's, so a clean-KS GT match runs chi2/ndf up to ~32 (vs SBND's ~1-2) while
+            // the few low-KS junk matches sit at chi2/ndf >= 40.  The SBND chi2 ceilings (6/4/8)
+            // amputated clean-KS PDHD GT matches (e.g. evt991 clu11 ks=0.033 c2n=6.4, evt1007
+            // clu87 ks=0.051 c2n=29) -- they fell non-consistent and were culled when their
+            // cluster had another ladder-passing bundle, losing 6 clean GT winners.  c2n<35 on
+            // the low-KS branches keeps every clean-KS GT (max ~32) and fences the low-KS junk
+            // tail (c2n>=40).  High-KS boundary matches (missing charge, ks 0.15-0.40) cannot be
+            // separated from junk by KS, so the ladder does NOT flag them consistent -- they win
+            // via the LASSO + lasso_flag_weight boundary down-weight as before (cull case-3
+            // keep-all leaves them untouched unless a rival is consistent).  GUARDRAIL-tuned,
+            // not refit; ql_light_calib/validate_chain.py.  The 12 xtpc-consistent GT winners
+            // are protected by the scenario-1/consistent priority, so the cull cannot drop them.
+            highconsist_ladder: true,
+            highconsist_ks_max: 0.06,    // single-branch fallback (ladder-off); unused here
+            highconsist_min_ndf: 3,      // B1/B2/B3 ndf floor
+            hc_clean_ks: 0.06, hc_clean_c2: 35.0,   // SBND ks 0.06; c2n 6->35 (PDHD chi2 scale)
+            hc_good_ks:  0.10, hc_good_c2:  35.0,   // SBND ks 0.09->0.10 (ks<0.10 = pure band); c2n 4->35
+            hc_tb_ks:    0.10, hc_tb_c2:    35.0,   // two_boundary; c2n 8->35
+            hc_miss_ks:  0.08, hc_miss_c2:  60.0,   // boundary/PMT/truncated: tight ks, relaxed chi2 (SBND)
+            hc_miss_min_ndf: 5,
+
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
             VUVEfficiency: VUVEfficiency,
