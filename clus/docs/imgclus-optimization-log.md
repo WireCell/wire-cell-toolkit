@@ -351,54 +351,54 @@ is **across a relink**: rebuilding only `libWireCellMatch.so` (clus untouched,
 06-16 build) flipped `mabc-all-apa` cluster count 111↔110 on idx18/15 — while
 the per-APA and per-group (`group02`/`group13`) QL outputs stayed byte-identical.
 
-The mechanism is now pinned, and it is **not** an FP tie in clustering:
-- `libWireCellClus.so` was identical across the compared runs ⇒ identical FP
-  codegen ⇒ `ClusteringConnect1` produces bit-identical sums for identical input.
-- The QL matching result (T0s, assignments, dumps) was byte-identical ⇒ the
-  merged-tree *content* fed to `clus_all_tpc` (which runs with `premerged=false`
-  on the joint-QL output) is identical.
-- Same clus binary + identical content but different output ⟹ **`clus_all_tpc`
-  clustering depends on the input node ORDER**, and the QLMatching merged-tree
-  serialization order is pointer-dependent, so it shifts when the match binary is
-  relinked (allocation order moves). Run-to-run is stable because within one
-  binary both the QL serialization order and the clustering are deterministic.
+The clustering depends on the input node ORDER (the QL/serialization order is
+pointer-dependent and shifts on relink; run-to-run within one binary is stable).
+The original write-up here pinned the mechanism to a `hough_transform` fill-order
+FP-tie and claimed it "cannot be reproduced within one binary." **Both were wrong
+— corrected below (2026-06-19) by a same-binary reproduction harness.**
 
-So two residuals chain: (A) QLMatching emits the merged tree in a pointer-order
-that is not yet content-canonical across rebuilds (commit 32ac9e4d made the
-matching-internal iteration deterministic but the output-tree node order is the
-gap), feeding (B) a residual order-sensitivity in the clustering that the entry-8
-`BlobLess` fix did not cover. Reading the `clus_all_tpc` pipeline pins (B) more
-precisely — and **the all-TPC sensitivity is to POINT order, not cluster order**:
+**Reproduced within ONE binary (the "needs a rebuild" claim was false).** The
+cluster-array input (`clusters-apa-apaN-ms-active.tar.gz`) stores blobs as `bnodes`
+rows keyed by a global vertex descriptor in column 0; `to_cluster`
+(aux/src/ClusterArrays.cxx:572-606) uses that vdesc *value* as the boost vertex id
+and edges resolve endpoints by row→vdesc, while `PointTreeBuilding` samples blobs
+in vdesc-sorted order. So **permuting the vdesc values among blob rows reorders the
+sampled points with geometry/charge/topology byte-identical** — a faithful proxy
+for what a relink perturbs. Harness: `pdhd/permute_clusters.py` (+ `run_clus_evt.sh
+-s <tag>` for the same-binary A/B). Permuting only point order flips `mabc-all-apa`
+111→110 (idx18) and 112→110 (idx15) across seeds, and flips **every** stage
+(per-face/APA/group too) — so the sensitivity is a *shared primitive*, not
+all-TPC-specific. The cross-relink flip was just a gentle instance.
 
-- The all-TPC pipeline is only `switch_scope` + `cathode_connect` (no `connect1`).
-  `cathode_connect` already `sort_clusters` before its merge loop and adds graph
-  edges whose *set* is order-independent (`connected_components` is deterministic),
-  so it is invariant to **cluster** order. Reversing the cluster order would not
-  reproduce the flip.
-- Its merge gate `is_cathode_crossing_pair` decides on `vhough_transform(p, r)` and
-  `get_pca().axis`. `hough_transform` (Facade_Cluster.cxx) accumulates the bin
-  weights `s_val[lin] += charge/npoints` over the kd-radius results **in query
-  order**, and that order follows point-insertion = blob-serialization = QL-output
-  order. FP addition is non-associative, so a different fill order yields sub-ULP
-  per-bin sums; at line `val > best_val` a near-tie argmax flips, one cathode merge
-  flips, 111↔110. (The PCA covariance sum is a second candidate of the same kind.)
-  This is exactly entry-8's hough-bin-flip, one level deeper: entry-8 made the
-  *coordinates* order-stable; the *fill order into the histogram* is the gap.
-- It cannot be reproduced within one binary: the points live in fixed per-cluster
-  arrays, so only a **re-serialized** input changes their order — i.e. a rebuild,
-  which is the very confound. A faithful reproduction harness must re-emit the
-  input tensor with permuted point order, then bisect per stage.
+**It is NOT hough, and NOT PCA.** Implemented order-invariant hough (canonical
+`(lin,value)` sum) and order-invariant PCA (sort points before the covariance sum),
+hardwired ON: **zero effect** on any stage's count (identical to unfixed). And
+`Find_Closest_Points` is already canonical — its `get_strategic_points` start set is
+pre-sorted by coordinate. The output-only primitives are not the driver. (So the
+hough fill-order story above, and the earlier "recommended follow-up", are retracted.)
 
-**Fix options.** (A) canonical-sort the QL output cluster nodes by the stable
-`get_cluster_id()` before `as_tensors` (surgical, in match, mirrors 32ac9e4d;
-gives clus a build-stable input and masks B for the whole pipeline) — the user
-chose against this. (B, root) make the order-sensitive clus accumulations
-order-invariant: sort the hough kd-radius results by coordinate before the fill
-(and likewise any PCA covariance accumulation), mirroring entry-8's content-keyed
-summation. (B) is the correct fix but lives in the top clustering hotspot
-(`hough_transform`), is globally shared across every stage, is non-byte-identical,
-and is best validated by a same-binary reverse-fill A/B + a perf check — a focused
-change, not a drive-by.
+**Root cause = kd-layer `knn1` ties.** `get_closest_point_blob` /
+`get_closest_dis` / `get_closest_point_index` (Facade_Cluster.cxx) call
+`NFKDVec::knn1`, which uses nanoflann's `KNNResultSet(1)`; on equidistant points it
+keeps whichever the kd-tree traverses first = **point insertion = storage order**.
+That primitive is the distance metric beneath nearly every merge decision in every
+pass, which is exactly why permuting point order flips counts at all stages. It is
+inside the nanoflann layer — not surgically fixable per call.
+
+**Decision (user, 2026-06-19): document & defer.** A proper fix means
+canonicalizing point STORAGE order at construction (sort sampled points by
+coordinate before the kd-tree binds them, in `PointTreeBuilding` / the scoped "3d"
+view, with consistent `blob_with_point` and 2D-scope re-indexing) so traversal and
+every downstream tie are deterministic. That is invasive (foundational point-cloud
+structure), **changes PDHD's canonical clustering result** (it picks one of 111/110
+— neither is "more correct"; a genuine FP tie), and needs full revalidation + a perf
+check. The flip is cosmetic (one borderline cluster), exactly the class the prior
+campaign deliberately deferred (match/docs/improve_progress.md Pass 3). So: no
+behavior change shipped; the experimental hough/PCA edits were reverted (they fix
+nothing observable); the reproduction harness is left for whoever takes the proper
+fix. (A surgical match-side alternative — canonical-sort the QL output cluster nodes
+before `as_tensors`, mirroring 32ac9e4d — was previously offered and declined; it
+would only mask the cross-relink trigger, not the underlying kd-tie.)
 
 **Shipped now (down-payment on the same class).** `ClusteringConnect1` had a
 *confirmed* sibling of this bug: it sorted its merge-candidate clusters by **length
@@ -407,12 +407,15 @@ equal-length clusters kept their build-dependent input order and could flip a
 merge. New `deterministic_order` knob (C++ **default OFF** => byte-identical legacy
 length-only sort; smoke-tested off-path 30/30 matching byte-identical) switches it
 to `sort_clusters` (length + nchildren/npoints/geometry/PCA tie-break), making
-those merges order-invariant by construction. This hardens the per-face / per-APA /
-per-group stages (which *do* run `connect1`); it does **not** touch the all-TPC
-`hough_transform` residual above, which remains the recommended follow-up. Cosmetic
-in physics terms (one borderline split at a geometric tie), which is why the prior
-campaign validated at the deterministic level (match/docs/improve_progress.md Pass
-3) rather than chase cross-recompile byte-stability.
+those merges order-invariant by construction (this `connect1` length-sort *is* a
+genuine same-class instance — it sorts clusters, distinct from the pervasive
+kd-`knn1` point-order driver pinned above). It hardens the per-face / per-APA /
+per-group stages (which *do* run `connect1`); like every other surgical primitive
+fix it does **not** stop the all-TPC flip, whose root cause is the kd-layer `knn1`
+tie documented & deferred above. Cosmetic in physics terms (one borderline split at
+a geometric tie), which is why the prior campaign validated at the deterministic
+level (match/docs/improve_progress.md Pass 3) rather than chase cross-recompile
+byte-stability.
 
 ### 9. ProjectionDeghosting: evict projection matrices after last use (imaging memory)
 
