@@ -242,6 +242,16 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // is what stops the trim from shaving a genuine track tail to force containment,
             // independent of cluster size.  C++ default 0 => disabled.
             robust_endpoint_charge_abs: 1500,
+            // Gap-aware (detachment) anode trim.  Some overclustered junk is moderately
+            // dense (~2000 q/pt, e.g. evt 1007 uid-126: 7 gap-separated groups marching
+            // from u=-111cm up to the body) and so overlaps the genuine track-end band
+            // the charge_abs gate protects -- the density judge cannot trim it.  But it
+            // is DETACHED from the contiguous body by large drift gaps (a real anode-
+            // piercing track end is continuous, slices ~0.08cm apart).  Trim sub-anode
+            // material that contains a gap > 3cm and carries < 1% of cluster charge.
+            // C++ default 0 => disabled (byte-identical).
+            robust_endpoint_gap: 3.0 * wc.cm,
+            robust_endpoint_gap_charge_frac: 0.01,
 
             // (b) Over-prediction reject: before the chi2 fit, drop a bundle whose
             // predicted light hugely exceeds the measured light over the masked PMT set:

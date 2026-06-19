@@ -191,6 +191,20 @@ namespace WireCell::Match {
                                                     // (never trimmed) distinct from a charge-sparse
                                                     // overclustered satellite (trimmable), regardless
                                                     // of cluster size or tail length.
+        // Gap-aware (detachment) anode-end trim (default OFF => byte-identical). The
+        // charge_abs density gate above refuses MODERATELY-dense (~2000 q/pt)
+        // overclustered junk because it overlaps the genuine track-end band
+        // (~2500 q/pt). But such junk gives itself away another way: it sits in
+        // gap-separated outer groups DETACHED from the contiguous track body, whereas
+        // a real anode-piercing track end is continuous (adjacent drift slices < the
+        // ~0.08 cm tick spacing apart). When m_robust_endpoint_gap > 0, the anode-end
+        // walk trims the sub-anode material iff (a) some gap in it exceeds
+        // m_robust_endpoint_gap (the detachment signal, NOT density) and (b) its charge
+        // stays within m_robust_endpoint_gap_charge_frac of the cluster (the safety
+        // bound: a real sub-anode stretch carrying more charge is left to fail). The
+        // existing density path is untouched.
+        double m_robust_endpoint_gap{0.0};            // detachment-gap threshold (0 => disabled)
+        double m_robust_endpoint_gap_charge_frac{0.0};// outer-charge cap for the gap path
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)

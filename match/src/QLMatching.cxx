@@ -227,6 +227,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_robust_endpoint_count = get(cfg, "robust_endpoint_count", m_robust_endpoint_count);
     m_robust_endpoint_charge_frac = get(cfg, "robust_endpoint_charge_frac", m_robust_endpoint_charge_frac);
     m_robust_endpoint_charge_abs  = get(cfg, "robust_endpoint_charge_abs",  m_robust_endpoint_charge_abs);
+    m_robust_endpoint_gap         = get(cfg, "robust_endpoint_gap",         m_robust_endpoint_gap);
+    m_robust_endpoint_gap_charge_frac = get(cfg, "robust_endpoint_gap_charge_frac", m_robust_endpoint_gap_charge_frac);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -420,6 +422,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["robust_endpoint_count"] = m_robust_endpoint_count;
     cfg["robust_endpoint_charge_frac"] = m_robust_endpoint_charge_frac;
     cfg["robust_endpoint_charge_abs"]  = m_robust_endpoint_charge_abs;
+    cfg["robust_endpoint_gap"]         = m_robust_endpoint_gap;
+    cfg["robust_endpoint_gap_charge_frac"] = m_robust_endpoint_gap_charge_frac;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
@@ -2616,11 +2620,25 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         }
         if (first_u <= anode_in) {                          // anode end (shallowest)
             int pts_out = 0; double q_out = 0.0; double in_u = first_u; bool reached = false;
+            // gap_detached: the sub-anode material contains a gap wider than
+            // m_robust_endpoint_gap, i.e. it is overclustered junk DETACHED from the
+            // contiguous body rather than a real continuous track end. Density-blind.
+            bool gap_detached = false; double prev_u = sv.front().u;
             for (const auto& sl : sv) {
                 if (sl.u > anode_in) { in_u = sl.u; reached = true; break; }
-                pts_out += sl.npts; q_out += sl.q;
+                if (m_robust_endpoint_gap > 0.0 && (sl.u - prev_u) > m_robust_endpoint_gap)
+                    gap_detached = true;
+                pts_out += sl.npts; q_out += sl.q; prev_u = sl.u;
             }
-            if (reached && sparse(pts_out, q_out)) first_u = in_u;
+            // Gap path: trim detached junk whose charge stays within the gap budget,
+            // regardless of its per-point density (which the charge_abs gate would
+            // refuse). The fraction cap is the safety bound: a real sub-anode stretch
+            // carrying more charge is left to fail. Disabled (=> sparse()-only,
+            // byte-identical) when m_robust_endpoint_gap <= 0.
+            const bool gap_trim = gap_detached
+                && m_robust_endpoint_gap_charge_frac > 0.0
+                && q_out <= m_robust_endpoint_gap_charge_frac * q_total;
+            if (reached && (gap_trim || sparse(pts_out, q_out))) first_u = in_u;
         }
     }
 
