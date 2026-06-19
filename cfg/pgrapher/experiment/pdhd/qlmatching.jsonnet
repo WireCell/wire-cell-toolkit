@@ -407,6 +407,26 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             hc_miss_ks:  0.08, hc_miss_c2:  60.0,   // boundary/PMT/truncated: tight ks, relaxed chi2 (SBND)
             hc_miss_min_ndf: 5,
 
+            // --- Empty-flash light rescue (SBND method; C++ default OFF => byte-identical) ---
+            // After the LASSO, a flash left EMPTY (no bundle above the strength cutoff) adopts
+            // its best light-quality candidate from the pre-fit snapshot if
+            // metric = ks*(chi2/ndf)^rescue_exponent  (x rescue_boundary_weight per at_x_boundary
+            // then close_to_PMT)  <  rescue_metric_max.  One-flash-per-cluster is enforced by
+            // reassignment only when the empty flash is a strictly better light match.
+            // Unlike SBND (where hand-scan misses were timing-degenerate, ~1/5 light-recoverable),
+            // PDHD has many clean GT matches sitting on LASSO-emptied flashes: on the run-29107
+            // 4-event scan 16 empty flashes have a GT-accept best candidate at metric < 0.16, with
+            // a clear gap before the ks=1.0 cross-side no-flash crossers (metric > 0.8 -- those are
+            // xTPC-annotation cases that must NOT be light-rescued).  The lowest non-GT candidate
+            // sits at 0.057 (off-scan, neutral) and NO human-rejected match appears at low metric.
+            // rescue_metric_max = 0.20 captures the clean GT recoveries, excludes the crossers, and
+            // admits only neutral off-scan adoptions; exponent/boundary_weight kept at SBND 0.8/0.8.
+            // ql_light_calib/validate_chain.py.
+            empty_rescue: true,
+            rescue_metric_max: 0.20,
+            rescue_exponent: 0.8,
+            rescue_boundary_weight: 0.8,
+
             active_opdet_types: [0],   // X-ARAPUCA (flat), not the SBND PMT default [1]
             semimodel_file: 'pdhd/photodet/semi-analytical-pdhd.json',
             VUVEfficiency: VUVEfficiency,
