@@ -54,11 +54,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
     // crossers, lambda=300 cm): median direct-PMT scale 0.63 x the 0.023 prior.
     // Supersedes the 27305 tuning (0.023, lambda=100) -- that run had only ~5-7
     // anchors and over-concentrated the model.  See ql-light-normalization-study.md.
-    // 0.01254 = run-29107 evt-983 hand-scan label retune (self-consistent with the
-    // APA0 measured_pe_scale below): the +x side-1 anchor over-predicted by ~16%
-    // (meas/pred 0.865) on the sizable+low-ks matches, so vuv_eff = 0.0145 x 0.865.
-    // See ql-light-normalization-study.md / ql_light_calib/fit_labels.py.
-    local vuv_eff = 0.01254,
+    // 0.01281 = run-29107 4-event hand-scan label retune (evts 983/991/999/1007, 25
+    // flag-clean sizable+low-ks anchors; flag_PMT/xboundary/wtrunc dropped). The +x/
+    // apa1 INTEGRAL meas/pred g=1.022 at lambda=300 (concentration-matched; the spread
+    // is N90-correct so the integral is the clean norm handle), vuv_eff = 0.01254 x
+    // 1.022. Supersedes the evt-983-only 0.01254. (KS rides to the grid edge on these
+    // non-crosser anchors and cannot refit lambda; N90+integral keep lambda=300.)
+    // See ql-light-normalization-study.md / ql_light_calib/fit_labels_multi.py.
+    local vuv_eff = 0.01281,
     local VUVEfficiency = std.makeArray(nchan, function(i) vuv_eff),
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
@@ -105,17 +108,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // Per-channel MEASURED-PE gain correction (length nchan; 1.0 = identity,
             // C++ default empty = byte-identical for SBND/ICARUS). The -x full-data-
             // stream half ("APA0", optical ch 120-159) under-reports PE; scale its
-            // MEASUREMENT up by 1.57 so it matches the (recalibrated) prediction.
-            // 1.57 = g x median(pred_old/meas|APA0) = 0.865 x 1.814, self-consistent
-            // with the vuv_eff retune above (run-29107 evt-983 sizable+low-ks labels;
-            // the brighter ~2.3 tail is high-ks saturation, excluded). APA2 (ch80-119)
-            // shows the same elevation but is left to the common model per the
-            // APA0-only scope. ql_light_calib/fit_labels.py.
-            measured_pe_scale: std.makeArray(nchan, function(i) if i >= 120 then 1.57 else 1.0),
+            // MEASUREMENT up so it matches the (recalibrated) prediction.
+            // 1.14 = CUR x g_full x median(pred/meas|APA0) = 1.57 x 1.022 x 0.713, from
+            // the run-29107 4-event label retune (15 flag-clean -x/apa0 anchors at
+            // lambda=300; dump-direct cross-check pred/meas=0.677 => ~1.1). Supersedes
+            // the evt-983-only 1.57 (over-scaled on the smaller sample; the brighter
+            // ~2.3 tail is high-ks saturation, excluded). APA2 (ch80-119) shows the same
+            // elevation but is left to the common model. ql_light_calib/fit_labels_multi.py.
+            measured_pe_scale: std.makeArray(nchan, function(i) if i >= 120 then 1.14 else 1.0),
             // Per-channel light-error model sigma = (PE<knee) ? floor : frac*PE.
-            // frac 0.3 -> 0.44 from the evt-983 label residuals of the corrected model
-            // (intrinsic per-PMT scatter on side1+APA0; floor/knee keep C++ defaults).
-            pe_err_frac: 0.44,
+            // frac 0.3 -> 0.43 from the run-29107 4-event label residuals of the
+            // corrected model (intrinsic per-PMT scatter on side1+APA0; floor/knee keep
+            // C++ defaults). (evt-983-only gave 0.44.)
+            pe_err_frac: 0.43,
             // Compute the bundle-chi2 per-PMT error from the PREDICTED pe (not the
             // measured-based flash error). Required by the low-PE inflation below, and
             // on its own already cures the catastrophic "predicted light, measured ~0"
