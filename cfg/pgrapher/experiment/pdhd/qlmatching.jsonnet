@@ -65,6 +65,44 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
     local VUVEfficiency = std.makeArray(nchan, function(i) vuv_eff),
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
+    // --- Per-channel (per-PD) MEASURED-PE gain calibration ---
+    // The optical SP chain deconvolves all 160 PDs with just TWO SPE templates
+    // (FBK / HPK, one shape per type); residual per-channel SiPM gain is not removed
+    // and biases the bundle chi2/KS.  measured_pe_scale (Opflash::init) absorbs it.
+    // Fit from the cleanest run-29107 hand-scan matches (54 low-ks, no flag_PMT/
+    // flag_wtrunc; ql_light_calib/fit_perchannel_scale.py).  Granularity = grouped
+    // block x type base + individual breakout only for well-sampled, tight-scatter
+    // outliers (the prior per-channel SPE-shape study overfit -- pdhd-spe-template-
+    // tuning.md; grouping generalises).  fbk_ch = template_index 0 in
+    // pdhd-spe-templates.json; the rest are HPK.
+    local fbk_ch = [4, 14, 24, 34, 40, 42, 45, 46, 47, 49, 50, 52, 55, 56, 57, 59,
+                    60, 62, 65, 66, 67, 69, 70, 72, 75, 76, 77, 79, 84, 85, 86, 87,
+                    94, 95, 96, 97, 104, 105, 106, 107, 114, 115, 116, 117, 120, 121,
+                    124, 125, 127, 129, 130, 131, 134, 135, 137, 139, 140, 141, 144,
+                    145, 147, 149, 150, 151, 154, 155, 157, 159],
+    // Block x type base = current_block_scale x light-weighted median(pred/meas) over
+    // each group's clean anchors.  The dominant effect is per-TYPE: FBK reads ~12-21%
+    // low everywhere (the documented FBK tail over-subtraction) -> FBK scaled up.  The
+    // old uniform APA0 (ch120-159) 1.14 splits cleanly into FBK 1.20 / HPK 1.00 -- the
+    // block average conflated an FBK-only defect with HPK that needs no boost.  The +x
+    // (ch0-79) bases are renormalised (meas-weighted mean held at 1.0, k=1.128) so the
+    // +x integral -- hence vuv_eff -- is unchanged; APA2 (ch80-119) ~1.0; -x bases
+    // subsume/refine the old 1.14/1.0.
+    local pd_scale = function(i)
+        local fbk = std.member(fbk_ch, i);
+        if i >= 120 then (if fbk then 1.20 else 1.00)            // APA0 full-stream
+        else if i >= 80 then (if fbk then 0.98 else 0.96)       // APA2
+        else (if fbk then 1.12 else 0.98),                      // +x (norm-preserving)
+    // Individual overrides: channels >3 standard-errors AND >0.20 off their group base,
+    // well sampled (N>=12) and tight (MAD<0.25) -- a stable per-channel gain, not anchor
+    // scatter.  Mostly high-gain HPK PDs reading ~1.5-2x too high (scale DOWN); ch23 is
+    // a low-gain HPK (UP).  The 3-5x factors the raw fit wanted on ch40/50/60/70 are
+    // statistical artifacts (N<=5, MAD up to 12) -> left at group default, NOT scaled.
+    local perch_override = {
+        '20': 0.71, '23': 1.47, '25': 0.59, '30': 0.73, '35': 0.68, '48': 0.70,
+        '88': 0.60, '98': 0.56, '108': 0.59, '118': 0.53, '139': 0.67, '149': 0.73,
+    },
+
     // Opflash archive reader (the single per-event PDHD opflash file).  `inname`
     // is the full path to opflash_pdhd-wct.tar.gz (caller prefixes the input dir).
     opflash_source(tag, inname):: g.pnode({
@@ -106,21 +144,27 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             QtoL: 1.0,
             doReflectedLight: false,
             // Per-channel MEASURED-PE gain correction (length nchan; 1.0 = identity,
-            // C++ default empty = byte-identical for SBND/ICARUS). The -x full-data-
-            // stream half ("APA0", optical ch 120-159) under-reports PE; scale its
-            // MEASUREMENT up so it matches the (recalibrated) prediction.
-            // 1.14 = CUR x g_full x median(pred/meas|APA0) = 1.57 x 1.022 x 0.713, from
-            // the run-29107 4-event label retune (15 flag-clean -x/apa0 anchors at
-            // lambda=300; dump-direct cross-check pred/meas=0.677 => ~1.1). Supersedes
-            // the evt-983-only 1.57 (over-scaled on the smaller sample; the brighter
-            // ~2.3 tail is high-ks saturation, excluded). APA2 (ch80-119) shows the same
-            // elevation but is left to the common model. ql_light_calib/fit_labels_multi.py.
-            measured_pe_scale: std.makeArray(nchan, function(i) if i >= 120 then 1.14 else 1.0),
+            // C++ default empty = byte-identical for SBND/ICARUS).  Built from the
+            // block x type base (pd_scale) with sparse per-channel overrides above.
+            // Supersedes the uniform-1.14-APA0 retune (which conflated the FBK defect
+            // with HPK).  See ql_light_calib/fit_perchannel_scale.py + the per-channel
+            // calibration section of ql-light-normalization-study.md.
+            measured_pe_scale: std.makeArray(nchan, function(i)
+                if std.objectHas(perch_override, std.toString(i))
+                then perch_override[std.toString(i)]
+                else pd_scale(i)),
             // Per-channel light-error model sigma = (PE<knee) ? floor : frac*PE.
-            // frac 0.3 -> 0.43 from the run-29107 4-event label residuals of the
-            // corrected model (intrinsic per-PMT scatter on side1+APA0; floor/knee keep
-            // C++ defaults). (evt-983-only gave 0.44.)
-            pe_err_frac: 0.43,
+            // frac 0.43 -> 0.60: CALIBRATE the bundle chi2 statistic, not minimise it.
+            // On the run-29107 hand-accepted good matches the median chi2/ndf sat at
+            // ~1.56 (frac 0.43) -- the per-PMT error was too tight; frac=0.60 brings the
+            // median to ~1.0 so chi2/ndf is a well-scaled goodness-of-fit. (The high-PE
+            // method-of-moments gives ~0.40 but only sees the bright tail; the full-
+            // bundle statistic, dominated by mid-PE channels + the low-PE inflation
+            // below, needs the larger frac.)  Re-validated at this frac: GT preserved,
+            // matcher purity held (looser error is a matching knob -- checked, not
+            // re-inflated).  floor/knee + the low-PE inflation are unchanged.
+            // ql_light_calib/fit_perchannel_scale.py + validate_perchannel.py.
+            pe_err_frac: 0.60,
             // Compute the bundle-chi2 per-PMT error from the PREDICTED pe (not the
             // measured-based flash error). Required by the low-PE inflation below, and
             // on its own already cures the catastrophic "predicted light, measured ~0"
