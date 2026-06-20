@@ -599,9 +599,10 @@ local clus_all_tpc (
 
         // Cathode-crossing connector (SBND-tuned parameters as placeholder;
         // PDHD central cathode is at x=0, the C++ default cathode_x —
-        // dimensions to be confirmed).  use_flash_t0=false because PDHD has
-        // no flash matching (the flash-coincidence gate would veto every
-        // pair).
+        // dimensions to be confirmed).  use_flash_t0=false: the connector runs
+        // on the corrected scope but does NOT gate pairs on flash-time
+        // coincidence (a clustering-topology choice, independent of the
+        // x_t0cor display correction the clustering-global dump now uses).
         cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
                            conn_short_cut=30.0, use_flash_t0=false),
@@ -673,7 +674,15 @@ local clus_all_tpc (
                     detector: "protodunehd",         // Detector name
                     algorithm: "clustering",    // Algorithm identifier
                     pcname: "3d",           // Which scope to use
-                    coords: ["x", "y", "z"],    // Coordinates to use (uncorrected; x_t0cor needs flash-associated t0)
+                    // T0-corrected drift coords (x_t0cor = x_raw - dirx*(cluster_t0 +
+                    // trigger_offset)*drift_speed), materialised by switch_scope above from
+                    // the QLMatching cluster_t0.  SBND parity (sbnd clus.jsonnet clus_all_apa
+                    // uses common_corr_coords for its clustering-global set).  A matched
+                    // cluster is drawn at its flash drift position; an UNMATCHED cluster
+                    // (cluster_t0=-1e12) lands far outside the volume, fails the containment
+                    // filter (scope_filter=false) and is dropped here -- it still appears in
+                    // img-global (raw, below).
+                    coords: common_corr_coords,
                     individual: false            // Output individual APA/Face
                 },
             {
