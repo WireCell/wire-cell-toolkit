@@ -107,6 +107,7 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `cluster_rescue_ks_max` | `0.0` (PDHD `0.20`) | `m_cluster_rescue_ks_max` | rescue acceptance: KS ceiling. `0` ⇒ gate `ks<0` vacuously false ⇒ no-op |
 | `cluster_rescue_chi2ndf_max` | `0.0` (PDHD `8.0`) | `m_cluster_rescue_chi2ndf_max` | rescue acceptance: chi2/ndf ceiling |
 | `cluster_rescue_ratio_lo` / `_hi` | `0.0` / `0.0` (PDHD `0.4` / `2.5`) | `m_cluster_rescue_ratio_lo/hi` | rescue acceptance: predicted/measured total-PE window |
+| `cluster_rescue_precull` | `false` (PDHD `true`) | `m_cluster_rescue_precull` | draw the rescue pool from the **pre-cull** universe (`all_bundles` minus bad) instead of the post-cull snapshot, to reach `cull_inconsistent`-removed candidates (§4.4b) |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
 | `trigger_offset` | `0` | `m_trigger_offset` | per-event readout-vs-trigger offset (WCT ns, ~+250000) folded into **every** flash drift-`x` correction: `flash_x_offset = sign_offset·(flash_time + m_trigger_offset)·drift_speed`. For detectors that leave the raw imaging `x` offset-free (`time_offset = 0`, e.g. PDHD); the partner `T0Correction` adds the same value to `x_t0cor` via its `trigger_offset` DV-metadata key, while `cluster_t0` stays the clean flash time. Default 0 ⇒ detectors that bake the offset into `x_raw` (e.g. SBND) are bit-identical. PDHD passes the opflash `offset_us·wc.us`. **Display time:** the per-flash time written for the *displays* — the Bee `op_t` (root `opflash` PC `time`, consumed by `fill_bee_flashes`) and the ql_scan calib `flashes[].time` — also has `m_trigger_offset` folded in, so the Bee red box / ql_scan charge land on the **raw-`x`** charge those viewers plot (PDHD dumps `["x","y","z"]`, offset-free, not `x_t0cor`). The calib top-level `trigger_offset` field is therefore written as `0` (already in `time`; the viewer must not re-add it). `cluster_t0`, `x_t0cor`, and the matching geometry are unchanged. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
@@ -466,9 +467,21 @@ for determinism, and each flash vector is re-sorted by `cluster_index_id` at the
 §4.4a does). The snapshot is now captured when **either** rescue is on
 (`if (m_empty_rescue || m_cluster_rescue)` at `fit_round1` start). C++ default OFF
 (`m_cluster_rescue=false` and `ks_max=0` ⇒ gate vacuously false ⇒ no-op, doubly inert) ⇒
-SBND/ICARUS byte-identical. PDHD tuning (run-29107 4-event scan, 0.20/8.0/0.4–2.5, end-to-end C++): **15 of
-22 LASSO-stranded GT recovered to the exact flash (16 matched), 0 `rejected_auto`
-re-introduced**; see `pdhd/docs/qlmatching-chain.md` §3g.
+SBND/ICARUS byte-identical.
+
+**Candidate pool — `cluster_rescue_precull`.** By default the pool is the post-cull
+`prefit_snapshot`. With `m_cluster_rescue_precull` it is the **pre-cull** universe:
+`run.all_bundles` filtered to `!get_potential_bad_match_flag()` — which equals `pre_bundles`
+*before* `cull_inconsistent` removed the non-consistent rivals. This restores a cluster's good
+light match that the consistency cull dropped before it reached the fit or the snapshot (the
+non-bad bundles in `all_bundles` were fully `set_pred_flash`/`examine_bundle`'d, so ks/χ²/pred
+are valid). Default OFF (snapshot pool = shipped behaviour); PDHD ON.
+
+PDHD tuning (run-29107 4-event scan, 0.20/8.0/0.4–2.5, end-to-end C++): snapshot pool recovers
+**15 of 22** LASSO-stranded GT; `cluster_rescue_precull` lifts that to **19 of 22** (the +4 are
+the *only* new matches — total matched +4, **0** `rejected_auto` re-introduced, 0 spurious). The
+`delta_charge` charge-constraint lever was investigated and rejected: the 4 cull-victims are not
+in the LASSO (strength stays 0 at every δ). See `pdhd/docs/qlmatching-chain.md` §3g.
 
 ### 4.5 t0 + output (`:656-680`)
 Clusters are pre-initialized with `set_scalar<int>("flash", -1)` (alongside the

@@ -373,6 +373,16 @@ namespace WireCell::Match {
         double m_cluster_rescue_chi2ndf_max{0.0};
         double m_cluster_rescue_ratio_lo{0.0};
         double m_cluster_rescue_ratio_hi{0.0};
+        // Draw the cluster-rescue candidate pool from the PRE-cull universe
+        // (run.all_bundles minus build-prefilter rejects) instead of the post-cull
+        // prefit_snapshot. cull_inconsistent drops a cluster's NON-consistent rivals
+        // when it has a consistent bundle; that can remove the cluster's only good
+        // LIGHT match (e.g. evt983 uid50 flash127: ks 0.108, pred/meas 1.45, free flash)
+        // before it ever reaches the fit OR the snapshot, so the post-cull rescue can't
+        // see it. With this on, the rescue can re-adopt such cull-victims -- still gated
+        // by the same PE-scale bar, so purity stays bounded. Default OFF (snapshot pool,
+        // = the shipped behaviour); PDHD-on.
+        bool   m_cluster_rescue_precull{false};
 
         // Bee-op flash gid: when a single global optical flash list is fed to
         // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides

@@ -469,6 +469,16 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             cluster_rescue_chi2ndf_max: 8.0,
             cluster_rescue_ratio_lo: 0.4,
             cluster_rescue_ratio_hi: 2.5,
+            // Draw the rescue candidate pool from the PRE-cull universe (all_bundles
+            // minus build-prefilter rejects) rather than the post-cull snapshot. The
+            // high-consistency cull (cull_inconsistent) drops a cluster's non-consistent
+            // rivals when it has a consistent bundle, which can remove the cluster's only
+            // good LIGHT match before the fit/snapshot (run-29107: evt983 uid50 flash127
+            // ks 0.108 pred/meas 1.45 on a FREE flash; evt991 uid1000041, evt999
+            // uid1000002, evt1007 uid1000131 likewise -- all strength 0.000 at every
+            // delta_charge, i.e. never in the LASSO). This lets the rescue re-adopt those
+            // cull-victims, still gated by the PE-scale bar above. C++ default OFF.
+            cluster_rescue_precull: true,
 
             // Both drift sides read the SAME global opflash archive (all-PD light
             // reco -> one opflash_pdhd-wct.tar.gz), so each per-side node would dump

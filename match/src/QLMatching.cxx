@@ -306,6 +306,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cluster_rescue_chi2ndf_max = get(cfg, "cluster_rescue_chi2ndf_max", m_cluster_rescue_chi2ndf_max);
     m_cluster_rescue_ratio_lo   = get(cfg, "cluster_rescue_ratio_lo",   m_cluster_rescue_ratio_lo);
     m_cluster_rescue_ratio_hi   = get(cfg, "cluster_rescue_ratio_hi",   m_cluster_rescue_ratio_hi);
+    m_cluster_rescue_precull    = get(cfg, "cluster_rescue_precull",    m_cluster_rescue_precull);
 
     // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
     // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
@@ -495,6 +496,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["cluster_rescue_chi2ndf_max"] = m_cluster_rescue_chi2ndf_max;
     cfg["cluster_rescue_ratio_lo"]   = m_cluster_rescue_ratio_lo;
     cfg["cluster_rescue_ratio_hi"]   = m_cluster_rescue_ratio_hi;
+    cfg["cluster_rescue_precull"]    = m_cluster_rescue_precull;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -1875,11 +1877,23 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
     for (auto& kv : run.flash_bundles_map)
         for (auto& b : kv.second) matched.insert(b->get_main_cluster());
 
-    // Group the snapshot candidates by main cluster (snapshot order is already
-    // deterministic from build_bundle_maps).
+    // Group candidates by main cluster. Default pool = the post-cull snapshot (the
+    // shipped behaviour). With m_cluster_rescue_precull, use the PRE-cull universe
+    // instead: run.all_bundles minus the build-prefilter rejects (potential_bad_match).
+    // {all_bundles : !bad} == pre_bundles BEFORE cull_inconsistent removed the
+    // non-consistent rivals, so it restores cull-victim candidates (valid ks/chi2/pred,
+    // since the non-bad bundles were fully examine_bundle'd) the snapshot can't reach.
+    // Both pools are vectors in deterministic build order.
     std::map<Cluster*, std::vector<TimingTPCBundle::pointer>> by_cluster;
-    for (auto& kv : snapshot)
-        for (auto& b : kv.second) by_cluster[b->get_main_cluster()].push_back(b);
+    if (m_cluster_rescue_precull) {
+        for (auto& b : run.all_bundles)
+            if (!b->get_potential_bad_match_flag())
+                by_cluster[b->get_main_cluster()].push_back(b);
+    }
+    else {
+        for (auto& kv : snapshot)
+            for (auto& b : kv.second) by_cluster[b->get_main_cluster()].push_back(b);
+    }
 
     // Iterate unmatched clusters in the canonical global_cluster_idx order (not pointer
     // order) for determinism.
