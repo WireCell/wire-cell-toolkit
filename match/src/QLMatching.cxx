@@ -165,6 +165,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_dmax2        = get(cfg, "xtpc_dmax2",        m_xtpc_dmax2);
     m_xtpc_angle_max    = get(cfg, "xtpc_angle_max",    m_xtpc_angle_max);
     m_xtpc_hough_radius = get(cfg, "xtpc_hough_radius", m_xtpc_hough_radius);
+    m_xtpc_joint_pin    = get(cfg, "xtpc_joint_pin",    m_xtpc_joint_pin);
+    m_xtpc_pin_angle    = get(cfg, "xtpc_pin_angle",    m_xtpc_pin_angle);
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -394,6 +396,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_dmax2"]        = m_xtpc_dmax2;
     cfg["xtpc_angle_max"]    = m_xtpc_angle_max;
     cfg["xtpc_hough_radius"] = m_xtpc_hough_radius;
+    cfg["xtpc_joint_pin"]    = m_xtpc_joint_pin;
+    cfg["xtpc_pin_angle"]    = m_xtpc_pin_angle;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["pmts"]            = m_pmts;
@@ -1383,12 +1387,26 @@ void QLMatching::cull_inconsistent(ApaRun& run)
     TimingTPCBundleSelection to_be_removed;
     for (auto* cluster : cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map)) {
         auto& bundles = run.cluster_bundles_map[cluster];
-        bool has_sc1 = false, has_keep = false;
+        bool has_pin = false, has_sc1 = false, has_keep = false;
         for (auto& b : bundles) {
+            if (b->get_flag_xtpc_pin()) has_pin = true;
             if (b->get_flag_xtpc_scenario1()) has_sc1 = true;
             if (keep_flag(b)) has_keep = true;
         }
-        if (has_sc1) {
+        if (has_pin) {
+            // Joint-pin (xtpc_joint_pin only): a direction-confirmed crosser half keeps ONLY
+            // its pinned bundle, binding the pair to one coincident flash. Overrides even the
+            // scenario-1 priority below (which keeps all sc1 bundles, allowing a split).
+            for (auto& b : bundles)
+                if (!b->get_flag_xtpc_pin()) {
+                    to_be_removed.push_back(b);
+                    log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
+                               "(cluster kept xtpc JOINT-PIN crosser)",
+                               (int)run.anode->ident(), cluster->ident(),
+                               b->get_flash()->get_flash_id());
+                }
+        }
+        else if (has_sc1) {
             for (auto& b : bundles)
                 if (!b->get_flag_xtpc_scenario1()) {
                     to_be_removed.push_back(b);
@@ -1554,7 +1572,12 @@ void QLMatching::fit_round1(ApaRun& run)
     int n = 0;
     for (auto* flash : flashes_ordered) {
         for (auto bundle : run.flash_bundles_map[flash]) {
-            if (solution(n) <= m_strength_cutoff && !m_beamonly) to_be_removed.push_back(bundle);
+            // xtpc joint-pin: a pinned crosser half keeps its flash regardless of LASSO
+            // strength (the pin ignores light by design), so it survives the cutoff prune
+            // and stays in flash_bundles_map -> apply_matched_t0s matches it. Off-path the
+            // flag is never set => identical.
+            if (solution(n) <= m_strength_cutoff && !m_beamonly && !bundle->get_flag_xtpc_pin())
+                to_be_removed.push_back(bundle);
             ++n;
         }
     }
@@ -1677,7 +1700,9 @@ void QLMatching::fit_round2(ApaRun& run)
     for (auto* flash : flashes_ordered) {
         for (auto bundle : run.flash_bundles_map[flash]) {
             bundle->set_strength(solution(n));
-            if (!(solution(n) > m_strength_cutoff || m_beamonly)) to_be_removed.push_back(bundle);
+            // xtpc joint-pin: keep a pinned crosser half regardless of strength (see round1).
+            if (!(solution(n) > m_strength_cutoff || m_beamonly || bundle->get_flag_xtpc_pin()))
+                to_be_removed.push_back(bundle);
             ++n;
         }
     }
@@ -1772,6 +1797,12 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
     for (auto& kv : run.flash_bundles_map) {
         for (auto& b : kv.second) matched[b->get_main_cluster()] = {kv.first, metric(b)};
     }
+    // xtpc joint-pin: clusters bound to a pinned crosser flash must never be reassigned to
+    // an empty flash by the light-quality guard below (the pin overrides light). Empty if off.
+    std::set<Cluster*> pin_locked;
+    for (auto& kv : run.flash_bundles_map)
+        for (auto& b : kv.second)
+            if (b->get_flag_xtpc_pin()) pin_locked.insert(b->get_main_cluster());
 
     // Empty flashes (in snapshot, absent/empty in the live map), in flash-id order.
     std::vector<Opflash*> empty_flashes;
@@ -1801,6 +1832,7 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
         if (!best || best_m > m_rescue_metric_max) continue;  // quality bar
 
         auto* C = best->get_main_cluster();
+        if (pin_locked.count(C)) continue;  // xtpc joint-pin owns C: do not reassign
         // One flash per cluster: never leave C double-matched.
         auto mit = matched.find(C);
         if (mit == matched.end()) {
@@ -2248,6 +2280,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["two_boundary"]         = b->get_flag_two_boundary();
             jb["xtpc_consistent"]      = b->get_flag_xtpc_consistent();
             jb["xtpc_scenario1"]       = b->get_flag_xtpc_scenario1();
+            jb["xtpc_pin"]             = b->get_flag_xtpc_pin();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
@@ -2415,10 +2448,12 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
 // present — tight, self-vetoing), 2 = scenario 2 (a half window-truncated AND
 // conn,dir0,dir1 mutually collinear < angle_max AND d < dmax2), 0 = not consistent. A
 // wrong-flash pairing carries the wrong T0 x-offset => large d => no match (self-vetoing).
-int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
+int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
+                                     double* d_out, bool* pin_collinear_out) const
 {
     const double R = m_xtpc_hough_radius;
     const double amax = m_xtpc_angle_max;
+    if (pin_collinear_out) *pin_collinear_out = false;
 
     auto deg = [](const geo_vector_t& a, const geo_vector_t& b) {
         const double m = a.magnitude() * b.magnitude();
@@ -2454,6 +2489,7 @@ int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
     }
     if (bi < 0) return false;
     const double d = std::sqrt(best);
+    if (d_out) *d_out = d;
 
     // Three-vector collinearity at the closest pair (scenario 2). Hough axes are
     // computed on raw points (a constant T0 x-shift does not rotate them).
@@ -2478,13 +2514,36 @@ int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
                            a01 < amax && a0c < amax && a1c < amax;
     const bool pass = scenario1 || scenario2;
 
+    // Joint-pin direction confirmation (only when xtpc_joint_pin): a scenario-1 pair is a
+    // genuine collinear crosser if the two TRACK AXES agree within m_xtpc_pin_angle. The
+    // connecting-vector angles (a0c,a1c) are deliberately NOT used -- a ~1cm inter-TPC
+    // transverse shift makes the closest-point connector ~perpendicular even for true
+    // crossers. Take the OR (min) of two axis estimates: the LOCAL vhough direction (a01
+    // above, at the cathode-end closest point) and the GLOBAL cluster PCA axis. Fold both
+    // to [0,90] (a Hough/PCA axis has no sign). The local estimate over-reads on straight
+    // crossers whose ends fan/curl (so global rescues them); the global estimate is
+    // meaningless on bent/messy clusters (so local rescues them).
+    double a01_global = 180.0;
+    if (m_xtpc_joint_pin) {
+        const geo_vector_t g0 = m0.c->get_pca().axis.at(0);
+        const geo_vector_t g1 = m1.c->get_pca().axis.at(0);
+        a01_global = deg(g0, g1);
+    }
+    auto foldd = [](double a) { return std::min(a, 180.0 - a); };
+    const double a01_pin = std::min(foldd(a01), foldd(a01_global));
+    if (pin_collinear_out)
+        *pin_collinear_out = scenario1 && a01_pin < m_xtpc_pin_angle;
+
     // Diagnostic: log EVERY coincident pair we evaluate (not only passes), with the
     // cut values, so a near-miss (geometry just outside dmax/angle) is visible.
     log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm (dmax={:.1f} dmax2={:.1f}) "
-               "a01={:.1f} a0c={:.1f} a1c={:.1f} (amax={:.1f}) trunc={} sc1={} sc2={} pass={}",
+               "a01={:.1f} a0c={:.1f} a1c={:.1f} (amax={:.1f}) trunc={} sc1={} sc2={} pass={} "
+               "a01g={:.1f} a01pin={:.1f} (pinmax={:.1f}) pin={}",
                m0.c->ident(), m1.c->ident(), d / units::cm,
                m_xtpc_dmax / units::cm, m_xtpc_dmax2 / units::cm,
-               a01, a0c, a1c, amax, (m0.wt || m1.wt), scenario1, scenario2, pass);
+               a01, a0c, a1c, amax, (m0.wt || m1.wt), scenario1, scenario2, pass,
+               foldd(a01_global), a01_pin, m_xtpc_pin_angle,
+               (scenario1 && a01_pin < m_xtpc_pin_angle));
     // Scenario 1 takes precedence (it is the tight, self-vetoing match that drives the
     // xtpc-priority cull); scenario 2 is the looser collinear-truncated fallback.
     if (scenario1) return 1;
@@ -2543,6 +2602,12 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     const auto t_pair0 = wallclock::now();
     long long n_pairs_eval = 0, n_pairs_coincident = 0;
     double point_pairs = 0;  // double: can exceed 2^31
+    // Joint-pin: collect direction-confirmed scenario-1 pairs (with their closest-approach
+    // d and the two bundles) for the greedy min-d pin below. Empty unless m_xtpc_joint_pin.
+    struct PinRec { TimingTPCBundle* b0; TimingTPCBundle* b1;
+                    WireCell::Clus::Facade::Cluster* c0; WireCell::Clus::Facade::Cluster* c1;
+                    double d; };
+    std::vector<PinRec> pins;
     for (size_t i = 0; i < cands.size(); ++i) {
         if (cands[i].side != 0) continue;
         for (size_t j = 0; j < cands.size(); ++j) {
@@ -2554,7 +2619,8 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
                        cands[i].mc.c->ident(), cands[i].t_us,
                        cands[j].mc.c->ident(), cands[j].t_us);
             point_pairs += (double)cands[i].mc.c->npoints() * cands[j].mc.c->npoints();
-            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc);
+            double pair_d = 0; bool pin_ok = false;
+            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc, &pair_d, &pin_ok);
             if (scenario == 0) continue;
             cands[i].mc.b->set_flag_xtpc_consistent(true);
             cands[j].mc.b->set_flag_xtpc_consistent(true);
@@ -2562,11 +2628,65 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
                 cands[i].mc.b->set_flag_xtpc_scenario1(true);
                 cands[j].mc.b->set_flag_xtpc_scenario1(true);
             }
+            if (m_xtpc_joint_pin && pin_ok)
+                pins.push_back({cands[i].mc.b, cands[j].mc.b, cands[i].mc.c, cands[j].mc.c, pair_d});
         }
     }
     log->debug("QLtiming cull_cross_tpc: ncands {} pairs_eval {} pairs_coincident {} "
                "point_pairs {:.3g} pairing_loop {:.1f} ms",
                cands.size(), n_pairs_eval, n_pairs_coincident, point_pairs, ms_since(t_pair0));
+
+    // Joint-pin: greedily bind the direction-confirmed crosser pairs, tightest (smallest
+    // closest-approach d) first, so each cluster is pinned at most once -- to the coincident
+    // flash where its halves actually meet at the cathode. A pinned bundle gets flag_xtpc_pin;
+    // cull_inconsistent then keeps ONLY pinned bundles for a pinned cluster, binding both
+    // halves to one flash (and keeping an otherwise-culled dim-flash partner alive). Empty
+    // unless m_xtpc_joint_pin, so the off path is bit-identical. Deterministic: sort by
+    // (d, ident0, ident1, flash_id0, flash_id1).
+    if (m_xtpc_joint_pin && !pins.empty()) {
+        // Per cluster-PAIR, choose the FLASH by best combined light (min ks-sum), not by
+        // closest approach: every confirmed pairing already has d<dmax and collinear axes, so
+        // among the coincident flashes light only picks which same-time wall -- it can never
+        // pull the match off the crosser time (a non-coincident bright flash is not a pairing
+        // here). This avoids forcing a same-time tie onto a worse-light wall (run29107 evt983
+        // gid55 ks=1.0 vs gid56 ks=0.06). Tie-break d, then flash-ids.
+        auto kssum = [](const PinRec& p) { return p.b0->get_ks_dis() + p.b1->get_ks_dis(); };
+        std::map<std::pair<WireCell::Clus::Facade::Cluster*, WireCell::Clus::Facade::Cluster*>,
+                 PinRec> best;
+        for (const auto& p : pins) {
+            auto key = std::make_pair(p.c0, p.c1);
+            auto it = best.find(key);
+            if (it == best.end()) { best.emplace(key, p); continue; }
+            const PinRec& q = it->second;
+            const double kp = kssum(p), kq = kssum(q);
+            const int pf0 = p.b0->get_flash()->get_flash_id(), qf0 = q.b0->get_flash()->get_flash_id();
+            bool better = (kp != kq) ? (kp < kq)
+                        : (p.d != q.d) ? (p.d < q.d)
+                        : (pf0 != qf0) ? (pf0 < qf0)
+                        : (p.b1->get_flash()->get_flash_id() < q.b1->get_flash()->get_flash_id());
+            if (better) it->second = p;
+        }
+        // Greedy over cluster-pairs, tightest geometry (min d) first, each cluster pinned once.
+        std::vector<PinRec> reps;
+        for (auto& kv : best) reps.push_back(kv.second);
+        std::stable_sort(reps.begin(), reps.end(), [](const PinRec& a, const PinRec& b) {
+            if (a.d != b.d) return a.d < b.d;
+            if (a.c0->ident() != b.c0->ident()) return a.c0->ident() < b.c0->ident();
+            return a.c1->ident() < b.c1->ident();
+        });
+        std::set<WireCell::Clus::Facade::Cluster*> pinned;
+        for (const auto& p : reps) {
+            if (pinned.count(p.c0) || pinned.count(p.c1)) continue;
+            p.b0->set_flag_xtpc_pin(true);
+            p.b1->set_flag_xtpc_pin(true);
+            pinned.insert(p.c0);
+            pinned.insert(p.c1);
+            log->debug("QLXTPCPIN pair 0/{} (flash {}) 1/{} (flash {}) d={:.2f}cm kssum={:.3f}",
+                       p.c0->ident(), p.b0->get_flash()->get_flash_id(),
+                       p.c1->ident(), p.b1->get_flash()->get_flash_id(),
+                       p.d / units::cm, kssum(p));
+        }
+    }
     // The actual culling (dropping a flagged cluster's rivals) is done by the unified
     // cull_inconsistent, which operator() runs per-APA right after this flag pass.
 }

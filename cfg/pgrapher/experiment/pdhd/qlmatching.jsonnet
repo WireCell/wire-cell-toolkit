@@ -537,6 +537,15 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             xtpc_dmax2: 300 * wc.cm,
             xtpc_angle_max: 20,
             xtpc_hough_radius: 15 * wc.cm,
+            // Joint-pin: bind a direction-confirmed cathode-crosser pair to ONE coincident
+            // flash instead of letting each half drift to whichever flash the light prefers
+            // (which splits true crossers across two flashes). Confirmation = scenario-1
+            // (d<xtpc_dmax) AND track-axis collinearity within xtpc_pin_angle, taken as the OR
+            // of the local-vhough and global-PCA axis (the local over-reads a spurious end-curl
+            // kink on straight crossers; run29107: vhough 37/43deg vs global 2/1.7deg). Tuned
+            // on the 4 run-29107 hand-scan events. Default off (SBND unaffected, byte-identical).
+            xtpc_joint_pin: true,
+            xtpc_pin_angle: 20,
         } + match_data(dv, calib_dump),
     }, nin=std.length(sides), nout=1, uses=[dv] + [a for side in sides for a in side]),
 }

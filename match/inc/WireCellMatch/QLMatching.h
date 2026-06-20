@@ -515,6 +515,24 @@ namespace WireCell::Match {
         double m_xtpc_angle_max{20.0};            // degrees
         double m_xtpc_hough_radius{15 * units::cm};
 
+        // Cross-TPC JOINT-PIN (off unless xtpc_joint_pin; requires xtpc_flag + 2 sides).
+        // Strengthens the scenario-1 priority cull: instead of each half keeping all its
+        // scenario-1 bundles independently (which lets a half drift to whichever flash the
+        // light prefers, splitting a true crosser across two flashes), a DIRECTION-CONFIRMED
+        // pair is pinned to ONE coincident flash -- both halves keep only that bundle. The
+        // confirmation adds a track-axis collinearity test to scenario-1's d<xtpc_dmax: the
+        // two halves' axes must agree within m_xtpc_pin_angle, taken as the OR (min angle) of
+        // the LOCAL vhough direction (at the cathode-end closest point) and the GLOBAL cluster
+        // PCA axis. Neither alone is reliable -- local vhough reads a spurious end-curl kink on
+        // straight crossers (PDHD run29107: vhough 37/43deg but global 2/1.7deg), global PCA is
+        // meaningless on bent/messy clusters; the OR passes a genuine crosser via either. The
+        // connecting-vector angles are NOT used (a ~1cm inter-TPC transverse shift makes them
+        // ~perpendicular even for true crossers). Pairs greedily by smallest closest-approach d
+        // so each cluster is pinned once, to the flash where its halves actually meet at the
+        // cathode. Default off => flag_xtpc_pin never set => bit-identical.
+        bool   m_xtpc_joint_pin{false};
+        double m_xtpc_pin_angle{20.0};            // degrees, folded track-axis collinearity
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -731,7 +749,13 @@ namespace WireCell::Match {
             double off, dy, dz;
             bool wt;
         };
-        int xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const;
+        // d_out (closest approach) and pin_collinear_out (scenario 1 AND the combined
+        // local/global track-axis collinearity test for xtpc_joint_pin) are optional
+        // outputs; the global-axis test is computed only when m_xtpc_joint_pin (off-path
+        // unchanged). The scenario return value is unchanged.
+        int xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
+                                 double* d_out = nullptr,
+                                 bool* pin_collinear_out = nullptr) const;
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

@@ -142,6 +142,30 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `xtpc_dmax2` | `300 cm` | `m_xtpc_dmax2` | scenario-2 closest-approach **ceiling** — the candidate population admits far-apart collinear truncated pairs that angle cannot reject (§16). |
 | `xtpc_angle_max` | `20` (deg) | `m_xtpc_angle_max` | scenario-2 collinearity cut (truncated half): `conn`,`dir0`,`dir1` mutual angles all below this. |
 | `xtpc_hough_radius` | `15 cm` | `m_xtpc_hough_radius` | radius for the local `vhough_transform` direction at each closest-point. |
+| `xtpc_joint_pin` | `false` (PDHD: **true**) | `m_xtpc_joint_pin` | **cross-TPC joint-flash pin** (§4.4c). A direction-confirmed scenario-1 pair is bound to ONE coincident flash — both halves keep only that bundle and it survives the strength cutoff + rescues. Fixes crossers split across two flashes (incl. the low-light partner). Default OFF ⇒ no `flag_xtpc_pin` ⇒ bit-identical. **Changes matching.** |
+| `xtpc_pin_angle` | `20` (deg) | `m_xtpc_pin_angle` | joint-pin track-axis collinearity cut: `min(folded vhough_a01, folded global-PCA_a01) < this`. Connector angles a0c/a1c are NOT used (a ~1 cm inter-TPC transverse shift makes them ~⊥ even for true crossers). |
+
+**§4.4c — Cross-TPC joint-flash pin (`xtpc_joint_pin`, PDHD-on).** `xtpc_flag`'s scenario-1 priority is
+applied to each cluster *independently*: it keeps **all** of a cluster's scenario-1 bundles, so a half with
+several coincident scenario-1 partners drifts to whichever flash the light prefers — splitting a true crosser
+across two flashes (run-29107 evt999 cluster22↔cluster83: the bright half won the 1259 pe flash while the dim
+half sat alone on the 99 pe flash). The joint-pin closes this. After `cull_cross_tpc` flags the pairs, a greedy
+pass (`QLMatching.cxx`, end of `cull_cross_tpc`) confirms each scenario-1 pair by **track-axis collinearity** —
+`min(local vhough a01, global cluster-PCA a01) < xtpc_pin_angle`, folded to [0,90]. Both estimates are needed:
+the local `vhough_transform` (15 cm at the cathode-end closest point) reads a spurious end-curl kink on straight
+crossers (evt999 7↔2 vhough 37° but global 2°; evt1007 116↔131 43° vs 1.7°), while a global PCA axis is
+meaningless on bent/messy clusters — the OR passes a genuine crosser via either. The connector angles a0c/a1c are
+dropped (the inter-TPC shift makes them unreliable). For each confirmed pair the **flash is chosen by best
+combined light** (min ks-sum) among the coincident pairings — geometry already holds, so light only picks which
+same-time wall, never pulling the match off the crosser time. Each cluster is pinned once (greedy, tightest `d`
+first); the chosen bundle gets `flag_xtpc_pin`. `cull_inconsistent` then keeps ONLY pinned bundles for a pinned
+cluster (top priority, above scenario-1); the pinned bundle is **exempted from the round-1/round-2 strength-cutoff
+prune** and pinned clusters are **excluded from both rescues** (`rescue_unmatched_clusters` sees them as matched;
+`rescue_empty_flashes` will not reassign them) — so a pinned bundle survives to `flash_bundles_map` and
+`apply_matched_t0s` matches it regardless of LASSO strength (the "ignore light, geometry wins" requirement; also
+rescues the low-light partner that would otherwise be unmatched). Validated on the 4 run-29107 hand-scan events:
+all 6 split/unmatched scenario-1 pairs become co-flashed, the 6 already-together stay put, A/B footprint = 10
+clusters changed (6 intended + 4 small ripples ≤261 pts), `xtpc_pin` dumped per bundle in the `-calib` JSON.
 
 `flag_xtpc_consistent` is dumped per bundle in the `-calib` JSON as `xtpc_consistent`; it is **not**
 written to the cluster output PC (the earlier post-fit confirm-stamp's per-cluster `xtpc_consistent`

@@ -157,6 +157,14 @@ namespace WireCell::Match {
         // cluster's high-consistent bundle on a different flash). Default false.
         void set_flag_xtpc_scenario1(bool v) { flag_xtpc_scenario1 = v; }
         bool get_flag_xtpc_scenario1() const { return flag_xtpc_scenario1; }
+        // Joint-pin winner: this bundle is the chosen (cluster,flash) of a confirmed
+        // direction-collinear cross-TPC pair (scenario 1 AND track axes collinear by the
+        // combined local-vhough / global-PCA test). Set only when xtpc_joint_pin is on;
+        // drives the TOP-priority cull (a cluster owning a pinned bundle keeps ONLY it),
+        // binding both crosser halves to one coincident flash. Default false => off-path
+        // never sets it => bit-identical.
+        void set_flag_xtpc_pin(bool v) { flag_xtpc_pin = v; }
+        bool get_flag_xtpc_pin() const { return flag_xtpc_pin; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -182,6 +190,7 @@ namespace WireCell::Match {
         bool flag_two_boundary;
         bool flag_xtpc_consistent{false};
         bool flag_xtpc_scenario1{false};
+        bool flag_xtpc_pin{false};
 
         double ks_dis;
         double chi2;
