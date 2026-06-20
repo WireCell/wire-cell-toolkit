@@ -301,6 +301,12 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
     m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
 
+    m_cluster_rescue            = get(cfg, "cluster_rescue",            m_cluster_rescue);
+    m_cluster_rescue_ks_max     = get(cfg, "cluster_rescue_ks_max",     m_cluster_rescue_ks_max);
+    m_cluster_rescue_chi2ndf_max = get(cfg, "cluster_rescue_chi2ndf_max", m_cluster_rescue_chi2ndf_max);
+    m_cluster_rescue_ratio_lo   = get(cfg, "cluster_rescue_ratio_lo",   m_cluster_rescue_ratio_lo);
+    m_cluster_rescue_ratio_hi   = get(cfg, "cluster_rescue_ratio_hi",   m_cluster_rescue_ratio_hi);
+
     // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
     // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
     const auto cathode_fv_tn = get<std::string>(cfg, "cathode_fiducial", std::string(""));
@@ -484,6 +490,11 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
+    cfg["cluster_rescue"]            = m_cluster_rescue;
+    cfg["cluster_rescue_ks_max"]     = m_cluster_rescue_ks_max;
+    cfg["cluster_rescue_chi2ndf_max"] = m_cluster_rescue_chi2ndf_max;
+    cfg["cluster_rescue_ratio_lo"]   = m_cluster_rescue_ratio_lo;
+    cfg["cluster_rescue_ratio_hi"]   = m_cluster_rescue_ratio_hi;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -1419,9 +1430,11 @@ double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) con
 void QLMatching::fit_round1(ApaRun& run)
 {
     const auto t_build0 = wallclock::now();
-    // Snapshot the full pre-LASSO candidate universe for the empty-flash rescue,
-    // before either round prunes by strength (§I; only when enabled).
-    if (m_empty_rescue) run.prefit_snapshot = run.flash_bundles_map;
+    // Snapshot the full pre-LASSO candidate universe for the empty-flash (§I) and
+    // cluster-centric (§J) rescues, before either round prunes by strength. Capturing
+    // it is unobservable unless a rescue consumes it, so this stays byte-identical for
+    // configs with both rescues off.
+    if (m_empty_rescue || m_cluster_rescue) run.prefit_snapshot = run.flash_bundles_map;
 
     const double lambda       = m_lasso_lambda;
     const double delta_charge = m_delta_charge;
@@ -1676,6 +1689,12 @@ void QLMatching::fit_round2(ApaRun& run)
     // strength-0 but light-good bundles both rounds pruned.
     if (m_empty_rescue) rescue_empty_flashes(run, run.prefit_snapshot);
 
+    // Cluster-centric rescue (§J; default OFF = bit-identical, PDHD-on). After the
+    // empty-flash pass, adopt the best accepted candidate for each cluster the LASSO
+    // left unmatched (its flash won by a rival), attaching it even onto a non-empty
+    // flash. Same pre-LASSO snapshot source as the empty-flash rescue.
+    if (m_cluster_rescue) rescue_unmatched_clusters(run, run.prefit_snapshot);
+
     // Keep best match per cluster.
     std::map<int, std::pair<Opflash*, double>> matched_pairs;
     for (std::size_t k = 0; k < pairs.size(); ++k) {
@@ -1816,6 +1835,93 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
                   });
     }
     log->debug("QLrescue: rescued {} empty flash(es)", n_rescued);
+}
+
+// Cluster-centric rescue (§J; the complement of the flash-centric empty-flash pick).
+// The empty-flash rescue fills only flashes left WHOLLY empty; a big cluster with an
+// excellent light candidate but driven to strength 0 by the LASSO L1 sparsity (a rival
+// already explains its flash) stays unmatched even when that flash is non-empty. For
+// each cluster still unmatched after the empty-flash pass, adopt its best ACCEPTED
+// candidate from the pre-cutoff snapshot, attaching it even onto an already-non-empty
+// flash (many-clusters-per-flash is physical and GT-endorsed). We only ADD (no reassign),
+// for clusters with zero live bundles, one bundle each => one-flash-per-cluster holds and
+// the addition set is independent of cluster iteration order. Mutates run.flash_bundles_map.
+void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& snapshot)
+{
+    // Acceptance bar: ks < ks_max AND chi2/ndf < chi2ndf_max AND ratio_lo < pred/meas <
+    // ratio_hi, with ratio = total predicted light / flash total measured PE (the same
+    // pairing the LASSO PE-mismatch weight uses).
+    auto accept = [this](const TimingTPCBundle::pointer& b) {
+        const int ndf = std::max(b->get_ndf(), 1);
+        const double c2ndf = b->get_chi2() / ndf;
+        const double meas = b->get_flash()->get_total_PE();
+        const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+        return b->get_ks_dis() < m_cluster_rescue_ks_max
+            && c2ndf < m_cluster_rescue_chi2ndf_max
+            && ratio > m_cluster_rescue_ratio_lo
+            && ratio < m_cluster_rescue_ratio_hi;
+    };
+    // Light-quality score (lower = better): KS shape, chi2/ndf, and PE-scale agreement.
+    auto score = [](const TimingTPCBundle::pointer& b) {
+        const int ndf = std::max(b->get_ndf(), 1);
+        const double meas = b->get_flash()->get_total_PE();
+        const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+        return b->get_ks_dis() * std::sqrt(std::max(b->get_chi2() / ndf, 1.0))
+             + std::abs(std::log(ratio));
+    };
+
+    // Clusters already matched (any live bundle) are off-limits.
+    std::set<Cluster*> matched;
+    for (auto& kv : run.flash_bundles_map)
+        for (auto& b : kv.second) matched.insert(b->get_main_cluster());
+
+    // Group the snapshot candidates by main cluster (snapshot order is already
+    // deterministic from build_bundle_maps).
+    std::map<Cluster*, std::vector<TimingTPCBundle::pointer>> by_cluster;
+    for (auto& kv : snapshot)
+        for (auto& b : kv.second) by_cluster[b->get_main_cluster()].push_back(b);
+
+    // Iterate unmatched clusters in the canonical global_cluster_idx order (not pointer
+    // order) for determinism.
+    std::vector<Cluster*> clusters;
+    for (auto& kv : by_cluster)
+        if (!matched.count(kv.first)) clusters.push_back(kv.first);
+    std::sort(clusters.begin(), clusters.end(), [&run](Cluster* a, Cluster* b) {
+        return run.global_cluster_idx_map.at(a) < run.global_cluster_idx_map.at(b);
+    });
+
+    int n_rescued = 0;
+    for (auto* C : clusters) {
+        TimingTPCBundle::pointer best;
+        double best_s = 0;
+        for (const auto& b : by_cluster[C]) {
+            if (!accept(b)) continue;
+            const double s = score(b);
+            // Tie-break by FLASH id (the tie here is between flashes for ONE cluster),
+            // then cluster_index_id for log stability.
+            if (!best || s < best_s ||
+                (s == best_s && b->get_flash()->get_flash_id() < best->get_flash()->get_flash_id()) ||
+                (s == best_s && b->get_flash()->get_flash_id() == best->get_flash()->get_flash_id()
+                             && b->get_cluster_index_id() < best->get_cluster_index_id())) {
+                best = b;
+                best_s = s;
+            }
+        }
+        if (!best) continue;
+        run.flash_bundles_map[best->get_flash()].push_back(best);  // attach (flash may be non-empty)
+        ++n_rescued;
+        log->debug("QLclusrescue: flash id {} adopted cluster ident {} (score {})",
+                   best->get_flash()->get_flash_id(), C->ident(), best_s);
+    }
+
+    // Re-sort inner vectors by cluster_index_id for build-stable output (as §I does).
+    for (auto& kv : run.flash_bundles_map) {
+        std::sort(kv.second.begin(), kv.second.end(),
+                  [](const TimingTPCBundle::pointer& a, const TimingTPCBundle::pointer& b) {
+                      return a->get_cluster_index_id() < b->get_cluster_index_id();
+                  });
+    }
+    log->debug("QLclusrescue: rescued {} unmatched cluster(s)", n_rescued);
 }
 
 // Stamp the matched flash/t0 onto each cluster (and its associated sub-clusters):

@@ -445,6 +445,31 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             rescue_exponent: 0.8,
             rescue_boundary_weight: 0.8,
 
+            // --- Cluster-centric rescue (§J; C++ default OFF => byte-identical) ---
+            // The empty-flash rescue above only fills flashes left WHOLLY empty. Big
+            // charge clusters with an excellent candidate (ks ~0.03-0.15, chi2/ndf ~1-2,
+            // pred/meas ~0.8-1.2) but driven to strength 0 by the LASSO L1 sparsity (a
+            // rival already explains that flash) stay UNMATCHED even when the flash is
+            // non-empty -- the prototype's many-clusters-per-flash case the strength cut
+            // + best-per-cluster pipeline drops. This pass adopts the best ACCEPTED
+            // candidate for each still-unmatched cluster, attaching it even onto an
+            // already-non-empty flash (multiple clusters per flash is physical and
+            // GT-endorsed -- the hand-scan labels list several cluster_idents per flash).
+            // Acceptance bar (PE-scale-aware, unlike §I's ks-only metric): ks<ks_max AND
+            // chi2/ndf<chi2ndf_max AND ratio_lo < pred/meas < ratio_hi. Tuned on the
+            // run-29107 4-event hand scan (evts 983/991/999/1007): of the 22 GT matches
+            // the LASSO left unmatched, the end-to-end pass recovers 15 to their EXACT
+            // hand-scan flash (16 of 22 strands now matched; 1 lands on a non-GT but
+            // non-rejected flash), re-introduces 0 scanner-REJECTED matches, and leaves 6
+            // (low-quality candidates, or candidates cull_inconsistent removed before the
+            // rescue snapshot). Loosening the bar costs purity (a rejected_auto pair
+            // reappears) with no recall gain. calib-dump vs labels-evt*.json comparison.
+            cluster_rescue: true,
+            cluster_rescue_ks_max: 0.20,
+            cluster_rescue_chi2ndf_max: 8.0,
+            cluster_rescue_ratio_lo: 0.4,
+            cluster_rescue_ratio_hi: 2.5,
+
             // Both drift sides read the SAME global opflash archive (all-PD light
             // reco -> one opflash_pdhd-wct.tar.gz), so each per-side node would dump
             // the full flash list and the Bee op display would double every flash.

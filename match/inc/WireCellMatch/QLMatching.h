@@ -356,6 +356,24 @@ namespace WireCell::Match {
         double m_rescue_exponent{0.8};         // chi2/ndf exponent (prototype 0.8)
         double m_rescue_boundary_weight{0.8};  // per-flag down-weight (prototype 0.8/0.64)
 
+        // §J cluster-centric rescue (the complement of §I's flash-centric pick). The
+        // empty-flash rescue only fills flashes left WHOLLY empty; a big cluster with an
+        // excellent candidate (low ks, chi2/ndf~1-2, pred/meas~1) but driven to strength
+        // 0 by the LASSO L1 sparsity — a rival already explains its flash — stays
+        // unmatched even when that flash is non-empty. After the empty-flash rescue, for
+        // each cluster STILL unmatched, adopt its best accepted candidate from the
+        // pre-cutoff snapshot, attaching it even onto an already-non-empty flash
+        // (many-clusters-per-flash is physical and GT-endorsed). Acceptance bar:
+        //   ks < ks_max  AND  chi2/ndf < chi2ndf_max  AND  ratio_lo < pred/meas < ratio_hi
+        // (pred = total predicted light, meas = flash total measured PE). Default
+        // ks_max=0 => the gate ks<0 is vacuously false => no-op (doubly inert with the
+        // bool guard) so production stays bit-identical; PDHD jsonnet turns it on.
+        bool   m_cluster_rescue{false};
+        double m_cluster_rescue_ks_max{0.0};        // 0 => gate false => inert
+        double m_cluster_rescue_chi2ndf_max{0.0};
+        double m_cluster_rescue_ratio_lo{0.0};
+        double m_cluster_rescue_ratio_hi{0.0};
+
         // Bee-op flash gid: when a single global optical flash list is fed to
         // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides
         // read the same opflash archive), EACH node's write_opflash_pc emits the
@@ -654,6 +672,13 @@ namespace WireCell::Match {
         // full pre-strength-cutoff flash->candidate map; this mutates run.flash_bundles_map
         // in place, adopting the best light-quality candidate of each emptied flash.
         void rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapshot);
+
+        // Cluster-centric rescue (m_cluster_rescue; see §J). After the empty-flash
+        // rescue, adopt the best accepted candidate for each cluster the LASSO left
+        // UNMATCHED (its flash was won by a rival under L1 sparsity), attaching it even
+        // onto an already-non-empty flash. snapshot is the same pre-strength-cutoff
+        // flash->candidate map; this mutates run.flash_bundles_map in place.
+        void rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& snapshot);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
 

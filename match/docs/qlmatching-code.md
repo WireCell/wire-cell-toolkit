@@ -103,6 +103,10 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `rescue_metric_max` | `1e9` (SBND `0.5`) | `m_rescue_metric_max` | rescue light-quality bar `ks·(chi2/ndf)^exp`; huge ⇒ inert. SBND `0.5` is below the lowest data-regression metric (recovers MC evt11 only, at zero regression) |
 | `rescue_exponent` | `0.8` | `m_rescue_exponent` | chi2/ndf exponent in the rescue metric (prototype 0.8) |
 | `rescue_boundary_weight` | `0.8` | `m_rescue_boundary_weight` | per-flag rescue down-weight, applied for `at_x_boundary` then `close_to_PMT` (prototype 0.8/0.64) |
+| `cluster_rescue` | `false` (PDHD `true`) | `m_cluster_rescue` | **post-fit cluster-centric rescue** (§4.4b). Adopt a best PE-scale-consistent candidate for a cluster the LASSO stranded at strength 0, even onto a **non-empty** flash. Default OFF ⇒ bit-identical; **changes matching** when on. |
+| `cluster_rescue_ks_max` | `0.0` (PDHD `0.20`) | `m_cluster_rescue_ks_max` | rescue acceptance: KS ceiling. `0` ⇒ gate `ks<0` vacuously false ⇒ no-op |
+| `cluster_rescue_chi2ndf_max` | `0.0` (PDHD `8.0`) | `m_cluster_rescue_chi2ndf_max` | rescue acceptance: chi2/ndf ceiling |
+| `cluster_rescue_ratio_lo` / `_hi` | `0.0` / `0.0` (PDHD `0.4` / `2.5`) | `m_cluster_rescue_ratio_lo/hi` | rescue acceptance: predicted/measured total-PE window |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
 | `trigger_offset` | `0` | `m_trigger_offset` | per-event readout-vs-trigger offset (WCT ns, ~+250000) folded into **every** flash drift-`x` correction: `flash_x_offset = sign_offset·(flash_time + m_trigger_offset)·drift_speed`. For detectors that leave the raw imaging `x` offset-free (`time_offset = 0`, e.g. PDHD); the partner `T0Correction` adds the same value to `x_t0cor` via its `trigger_offset` DV-metadata key, while `cluster_t0` stays the clean flash time. Default 0 ⇒ detectors that bake the offset into `x_raw` (e.g. SBND) are bit-identical. PDHD passes the opflash `offset_us·wc.us`. **Display time:** the per-flash time written for the *displays* — the Bee `op_t` (root `opflash` PC `time`, consumed by `fill_bee_flashes`) and the ql_scan calib `flashes[].time` — also has `m_trigger_offset` folded in, so the Bee red box / ql_scan charge land on the **raw-`x`** charge those viewers plot (PDHD dumps `["x","y","z"]`, offset-free, not `x_t0cor`). The calib top-level `trigger_offset` field is therefore written as `0` (already in `time`; the viewer must not re-add it). `cluster_t0`, `x_t0cor`, and the matching geometry are unchanged. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
@@ -442,6 +446,29 @@ double-listed, and only when the empty flash is a strictly better light match
 > (single-flash reassignment); the remaining degenerate misses need a drift/timing
 > discriminator (and the cross-TPC ones the `xtpc` machinery), not a light rescue.
 > C++ default OFF (`rescue_metric_max` huge ⇒ inert) ⇒ production byte-identical.
+
+### 4.4b Cluster-centric rescue (`rescue_unmatched_clusters`, PDHD-on)
+§4.4a fills only **wholly-empty** flashes. A big cluster whose correct flash is
+**non-empty** — a rival already won that flash on strength, so the L1 sparsity drives the
+big cluster's own strength to 0 and the cutoff drops it — is invisible to the flash-centric
+rescue. When `cluster_rescue` is on, immediately after `rescue_empty_flashes`, this pass
+keys on the **cluster**: for each cluster with **no** surviving bundle in
+`flash_bundles_map`, it scans the same `prefit_snapshot`, accepts candidates passing a
+**PE-scale-aware** bar — `ks < cluster_rescue_ks_max` AND `chi2/ndf <
+cluster_rescue_chi2ndf_max` AND `cluster_rescue_ratio_lo < pred/meas <
+cluster_rescue_ratio_hi` (ratio = `get_total_pred_light()` / `flash->get_total_PE()`) — and
+appends the lowest-`score` one (`score = ks·√max(chi2/ndf,1) + |ln ratio|`, tie-break
+`flash_id` then `cluster_index_id`) to its flash, **even if that flash is already
+non-empty** (many-clusters-per-flash is physical and GT-endorsed). Only **adds** (never
+reassigns), one bundle per still-unmatched cluster, so one-flash-per-cluster holds and the
+addition set is order-independent; cluster iteration is in `global_cluster_idx_map` order
+for determinism, and each flash vector is re-sorted by `cluster_index_id` at the end (as
+§4.4a does). The snapshot is now captured when **either** rescue is on
+(`if (m_empty_rescue || m_cluster_rescue)` at `fit_round1` start). C++ default OFF
+(`m_cluster_rescue=false` and `ks_max=0` ⇒ gate vacuously false ⇒ no-op, doubly inert) ⇒
+SBND/ICARUS byte-identical. PDHD tuning (run-29107 4-event scan, 0.20/8.0/0.4–2.5, end-to-end C++): **15 of
+22 LASSO-stranded GT recovered to the exact flash (16 matched), 0 `rejected_auto`
+re-introduced**; see `pdhd/docs/qlmatching-chain.md` §3g.
 
 ### 4.5 t0 + output (`:656-680`)
 Clusters are pre-initialized with `set_scalar<int>("flash", -1)` (alongside the
