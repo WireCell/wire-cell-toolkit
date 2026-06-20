@@ -59,6 +59,8 @@
 #include "WireCellUtil/NamedFactory.h"
 #include <unordered_map>
 #include <cmath>
+#include <cstdlib>   // std::getenv  (CATHODE_CONNECT_DEBUG instrumentation, removable)
+#include <cstdio>    // std::fprintf
 
 class ClusteringCathodeConnect;
 WIRECELL_FACTORY(ClusteringCathodeConnect, ClusteringCathodeConnect,
@@ -83,6 +85,8 @@ static void clustering_cathode_connect(
     double min_length_short, // the shorter member only needs this (admits a bridge fragment)
     double short_dir_len,    // below this a half's own direction is untrusted (prolong instead)
     double conn_short_cut,   // degrees; short-stub anchor->stub connection vs anchor direction
+    double tip_touch_cut,    // below this 3D gap the cc connection term is dropped (both-long PCA branch)
+    double tip_touch_angle_cut, // degrees; relaxed local-Hough collinearity in the tip-touch branch
     bool use_flash_t0,
     double flash_t0_window);
 
@@ -110,6 +114,17 @@ public:
         // byte-identical to the pre-prolongation behaviour unless explicitly set.
         short_dir_len_   = get(config, "short_dir_len", 0.0);
         conn_short_cut_  = get(config, "conn_short_cut", 30.0);     // degrees
+        // default tip_touch_cut == 0: the both-long PCA branch keeps its cc_pca
+        // connection-alignment gate (byte-identical to before).  When > 0, a pair
+        // whose closest 3D distance is below this is treated as "tips touching" and
+        // accepted on PCA collinearity alone (the connection vector over a ~1 cm gap
+        // is dominated by sub-cm transverse jitter and is uninformative there).
+        tip_touch_cut_   = get(config, "tip_touch_cut", 0.0);
+        // default tip_touch_angle_cut == angle_cut: the tip-touch local-Hough fallback
+        // reduces to the primary close test (byte-identical, no new accepts).  Set
+        // larger to also merge a tip-touching crosser whose curved half inflates its
+        // GLOBAL PCA above angle_cut while its LOCAL Hough arm stays collinear.
+        tip_touch_angle_cut_ = get(config, "tip_touch_angle_cut", angle_cut_);
         // default true: keep the flash-time coincidence gate (the original
         // behaviour).  Set false on detectors without flash matching, where no
         // cluster carries a matched flash and the gate would veto every pair.
@@ -126,7 +141,7 @@ public:
         clustering_cathode_connect(live, m_scope, drift_cut_, dis_cut_, max_dis_, angle_cut_,
                                    conn_far_cut_, cathode_x_, cathode_x_cut_, hough_radius_,
                                    min_length_, min_length_short_, short_dir_len_, conn_short_cut_,
-                                   use_flash_t0_, flash_t0_window_);
+                                   tip_touch_cut_, tip_touch_angle_cut_, use_flash_t0_, flash_t0_window_);
     }
 
 private:
@@ -142,6 +157,8 @@ private:
     double min_length_short_{10*units::cm};
     double short_dir_len_{0.0};
     double conn_short_cut_{30.0};
+    double tip_touch_cut_{0.0};
+    double tip_touch_angle_cut_{10.0};
     bool use_flash_t0_{true};
     double flash_t0_window_{80*units::ns};
 };
@@ -169,7 +186,9 @@ static bool is_cathode_crossing_pair(
     double cathode_x_cut,
     double hough_radius,
     double short_dir_len,
-    double conn_short_cut)
+    double conn_short_cut,
+    double tip_touch_cut,
+    double tip_touch_angle_cut)
 {
     geo_point_t p1;
     geo_point_t p2;
@@ -183,6 +202,19 @@ static bool is_cathode_crossing_pair(
     //     pass incapable of acting within a single TPC).
     auto wpid_p1 = cluster1.wpid(p1);
     auto wpid_p2 = cluster2.wpid(p2);
+    // --- CATHODE_CONNECT_DEBUG instrumentation (removable; env-gated) ---
+    static const bool cc_dbg = std::getenv("CATHODE_CONNECT_DEBUG") != nullptr;
+    if (cc_dbg && dis < 10*units::cm && std::min(length_1, length_2) >= 10*units::cm) {
+        std::fprintf(stderr,
+            "[cc] c%d<->c%d dis=%.2f p1=(%.2f,%.1f,%.1f) p2=(%.2f,%.1f,%.1f) apa=%d/%d driftsep=%.2f len=%.1f/%.1f t0=%.3f/%.3fus dt0=%.3fus\n",
+            (int)cluster1.ident(), (int)cluster2.ident(), dis/units::cm,
+            p1.x()/units::cm, p1.y()/units::cm, p1.z()/units::cm,
+            p2.x()/units::cm, p2.y()/units::cm, p2.z()/units::cm,
+            wpid_p1.apa(), wpid_p2.apa(), std::fabs(p1.x()-p2.x())/units::cm,
+            length_1/units::cm, length_2/units::cm,
+            cluster1.get_cluster_t0()/units::us, cluster2.get_cluster_t0()/units::us,
+            std::fabs(cluster1.get_cluster_t0()-cluster2.get_cluster_t0())/units::us);
+    }
     if (wpid_p1.apa() == wpid_p2.apa()) return false;
 
     // (2) both closest points must end at the cathode plane.
@@ -239,7 +271,37 @@ static bool is_cathode_crossing_pair(
             geo_point_t conn(p1.x() - p2.x(), p1.y() - p2.y(), p1.z() - p2.z());
             double cc_pca = std::min(collinear_deg(conn.angle(pca1)),
                                      collinear_deg(conn.angle(pca2)));
-            if (tt_pca < angle_cut && cc_pca < conn_far_cut) return true;
+            // TIP-TOUCH relaxation (default OFF: tip_touch_cut == 0).  When the two
+            //   halves nearly touch (dis < tip_touch_cut, e.g. a genuine crosser whose
+            //   cathode tips meet within ~1 cm), the p1->p2 connection vector spans only
+            //   that ~1 cm gap and is dominated by sub-cm transverse jitter -- cc_pca is
+            //   ~perpendicular (>=75 deg) even for a real crosser, so it is uninformative
+            //   and wrongly vetoes the merge.  There we drop the cc_pca term and accept on
+            //   PCA collinearity alone; the small closest distance itself is the evidence
+            //   the tips meet (a transversely-offset parallel cosmic has a larger dis and
+            //   still goes through the cc_pca gate below).  Gate pairs on flash-time
+            //   coincidence (use_flash_t0) so only same-flash tips are relaxed this way.
+            const bool tip_touch = (tip_touch_cut > 0 && dis < tip_touch_cut);
+            // global-PCA acceptance (original, plus cc_pca dropped when tips touch).
+            const bool acc_pca = (tt_pca < angle_cut && (tip_touch || cc_pca < conn_far_cut));
+            // LOCAL-Hough acceptance (default OFF: tip_touch_angle_cut == angle_cut, so
+            //   this reduces to the primary close test that already ran).  When tips
+            //   touch, a curved half can inflate its GLOBAL PCA above angle_cut while its
+            //   LOCAL cathode arm still continues the partner (e.g. 29107 evt991 cl26:
+            //   global tt_pca=15 deg, but Hough tt_hough=10 deg).  Accept on the local
+            //   Hough with the relaxed bound.  Hough is charge-weighted so it correctly
+            //   REJECTS oblique/perpendicular touchers (tt_hough 49/90 deg) that an
+            //   unweighted local SVD would wrongly pass; the strong spatial + same-flash
+            //   gates make a non-crossing coincidence at the cathode unlikely.
+            const bool acc_hough = (tip_touch && tt_hough < tip_touch_angle_cut);
+            if (cc_dbg && dis < 10*units::cm) {
+                std::fprintf(stderr,
+                    "[cc]   c%d<->c%d CLOSE both-long: tt_hough=%.1f tt_pca=%.1f cc_pca=%.1f tip_touch=%d(cut=%.1f,ang=%.1f) -> %s\n",
+                    (int)cluster1.ident(), (int)cluster2.ident(), tt_hough, tt_pca, cc_pca,
+                    (int)tip_touch, tip_touch_cut/units::cm, tip_touch_angle_cut,
+                    (acc_pca || acc_hough) ? "ACCEPT" : "reject");
+            }
+            if (acc_pca || acc_hough) return true;
         }
 
         // SHORT-STUB prolongation (default OFF: short_dir_len == 0).  When one half is
@@ -309,6 +371,8 @@ static void clustering_cathode_connect(
     double min_length_short,
     double short_dir_len,
     double conn_short_cut,
+    double tip_touch_cut,
+    double tip_touch_angle_cut,
     bool use_flash_t0,
     double flash_t0_window)
 {
@@ -357,7 +421,8 @@ static void clustering_cathode_connect(
                                          cluster_1->get_length(), cluster_2->get_length(),
                                          drift_cut, dis_cut, max_dis, angle_cut, conn_far_cut,
                                          cathode_x, cathode_x_cut, hough_radius,
-                                         short_dir_len, conn_short_cut)) {
+                                         short_dir_len, conn_short_cut, tip_touch_cut,
+                                         tip_touch_angle_cut)) {
                 boost::add_edge(ilive2desc[map_cluster_index[cluster_1]],
                                 ilive2desc[map_cluster_index[cluster_2]], g);
             }

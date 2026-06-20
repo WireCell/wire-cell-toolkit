@@ -597,15 +597,27 @@ local clus_all_tpc (
     local cm_pipeline = [
         cm_old.switch_scope(),
 
-        // Cathode-crossing connector (SBND-tuned parameters as placeholder;
-        // PDHD central cathode is at x=0, the C++ default cathode_x —
-        // dimensions to be confirmed).  use_flash_t0=false: the connector runs
-        // on the corrected scope but does NOT gate pairs on flash-time
-        // coincidence (a clustering-topology choice, independent of the
-        // x_t0cor display correction the clustering-global dump now uses).
+        // Cathode-crossing connector.  PDHD central cathode is at x=0 (the C++
+        // default cathode_x).  QLMatching runs BEFORE this all-TPC stage (see the
+        // premerged=false note above), so every cluster carries its matched
+        // cluster_t0 + "flash" scalar here: use_flash_t0=true gates pairs on
+        // flash-time coincidence (flash_t0_window=1us, matching the ql_scan
+        // cross-side coincidence window) so only same-crossing halves can merge.
+        // tip_touch_cut=3cm: when the two cathode tips nearly touch, drop the
+        // cc_pca connection-alignment term in the both-long PCA branch (over a
+        // ~1cm gap that vector is sub-cm-jitter noise, ~perpendicular even for a
+        // genuine crosser) and accept on PCA collinearity alone -- recovers
+        // same-flash crossers like run29107 evt983 cl36<->cl89.
+        // tip_touch_angle_cut=12deg: in the same tip-touch branch, also accept when
+        // the LOCAL (charge-weighted Hough) arms are collinear within 12deg even if a
+        // curved half inflates the GLOBAL PCA above angle_cut (10deg) -- recovers
+        // run29107 evt991 cl26<->cl67 (global 15deg, Hough 10deg); the Hough still
+        // rejects oblique/perpendicular touchers (49/90deg).
         cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
-                           conn_short_cut=30.0, use_flash_t0=false),
+                           conn_short_cut=30.0, tip_touch_cut=3*wc.cm,
+                           tip_touch_angle_cut=12.0,
+                           use_flash_t0=true, flash_t0_window=1*wc.us),
         #cm.retile(cut_time_low=3*wc.us,
         #          cut_time_high=5*wc.us,
         #          anodes=anodes,
