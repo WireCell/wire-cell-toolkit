@@ -647,15 +647,20 @@ local clus_all_tpc (
             // (summed predicted PE), so a flash matched to several clusters shows
             // them together instead of one row per cluster (SBND parity).
             bee_flash_per_flash: true,
-            // Group the two drift sides' flashes by this ±time window and stash a
+            // Group flashes by this time window (single-linkage over the
+            // time-sorted stream of BOTH drift sides' flashes -- a new group starts
+            // when the gap to the previous flash exceeds the window) and stash a
             // per-flash "op_flash_group" array on the root opflash PC.  PDHD's
             // opaque cathode makes a cathode-crosser scintillate independently in
-            // each volume -> TWO coincident per-side flashes (e.g. a bright near-PD
-            // flash + its faint far-side partner ~tens of ns apart); the Bee viewer
-            // shows a whole group together (one physical event), matching SBND
-            // (clus.jsonnet flash_group_window) where one OpFlash already spans both
-            // TPCs.  0 = off (no column => bit-identical ungrouped display).
-            flash_group_window: 80 * wc.ns,
+            // each volume -> TWO coincident per-side flashes (a bright near-PD flash
+            // + its faint far-side partner); the Bee viewer shows a whole group
+            // together (one physical event), matching SBND where one OpFlash already
+            // spans both TPCs.  Set to 1 us to match the ql_scan hand-scan tool's
+            // cross-side coincidence window; note this is wider than the ~200 ns at
+            // which the genuine cross-cathode pair population saturates (run 29107,
+            // 30 evts), so it also chains some unrelated busy-event flashes into the
+            // same display group.  0 = off (no column => bit-identical ungrouped display).
+            flash_group_window: 1 * wc.us,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PD anode face
             dead_apa_groups: apa_drift_groups,  // group dead area by drift side -> 2 dead instances
             anodes: [wc.tn(a) for a in anodes],
