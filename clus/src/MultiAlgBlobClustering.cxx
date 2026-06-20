@@ -202,6 +202,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
+    m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
@@ -1741,7 +1742,10 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
 // minimal |dt|) and leave everything else ungrouped.  This replaces the old
 // blind single-linkage chaining, which at a wide (1 us) window merged unrelated
 // busy-event flashes.  window<=0 => no grouping (bit-identical ungrouped dump).
-static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, double window)
+// greedy=false: one closest cross-side pair per coincidence neighborhood (the
+// rest solo).  greedy=true: disjoint pairs, repeatedly taking the next-closest
+// available cross-side pair, so two distinct close crossers both group.
+static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, double window, bool greedy)
 {
     if (window <= 0) return;
 
@@ -1792,28 +1796,53 @@ static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, doubl
         return a.gid < b.gid;
     });
 
-    // Single-linkage neighborhoods over eligible flashes; in each, keep only the
-    // closest cross-side pair (one per side, |dt| <= window).
     std::map<int, int> group_of;
     int next_group = 0;
     std::set<int> paired;
-    size_t i = 0;
-    while (i < elig.size()) {
-        size_t j = i + 1;
-        while (j < elig.size() && (elig[j].t - elig[j - 1].t) <= window) ++j;
-        double best = -1; int bi = -1, bj = -1;
-        for (size_t a = i; a < j; ++a)
-            for (size_t b = a + 1; b < j; ++b) {
-                if (elig[a].side == elig[b].side) continue;
-                double dt = elig[b].t - elig[a].t; if (dt < 0) dt = -dt;
-                if (dt <= window && (bi < 0 || dt < best)) { best = dt; bi = (int) a; bj = (int) b; }
+    auto make_pair = [&](size_t a, size_t b) {
+        const int g = ++next_group;
+        group_of[elig[a].gid] = g; group_of[elig[b].gid] = g;
+        paired.insert(elig[a].gid); paired.insert(elig[b].gid);
+    };
+    if (greedy) {
+        // Greedy disjoint pairs: take the next-closest available cross-side pair
+        // (|dt| <= window) until none remain; each flash used at most once.
+        struct Cand { double dt; size_t a, b; };
+        std::vector<Cand> cands;
+        for (size_t a = 0; a < elig.size(); ++a)
+            for (size_t b = a + 1; b < elig.size(); ++b) {
+                const double dt = elig[b].t - elig[a].t;   // elig is time-sorted
+                if (dt > window) break;                    // no later b can fit
+                if (elig[a].side != elig[b].side) cands.push_back({dt, a, b});
             }
-        if (bi >= 0) {
-            const int g = ++next_group;
-            group_of[elig[bi].gid] = g; group_of[elig[bj].gid] = g;
-            paired.insert(elig[bi].gid); paired.insert(elig[bj].gid);
+        std::sort(cands.begin(), cands.end(), [&](const Cand& x, const Cand& y) {
+            if (x.dt != y.dt) return x.dt < y.dt;
+            if (elig[x.a].gid != elig[y.a].gid) return elig[x.a].gid < elig[y.a].gid;
+            return elig[x.b].gid < elig[y.b].gid;
+        });
+        std::set<size_t> used;
+        for (const auto& c : cands) {
+            if (used.count(c.a) || used.count(c.b)) continue;
+            make_pair(c.a, c.b);
+            used.insert(c.a); used.insert(c.b);
         }
-        i = j;
+    } else {
+        // Single-linkage neighborhoods over eligible flashes; in each, keep only
+        // the closest cross-side pair (one per side, |dt| <= window).
+        size_t i = 0;
+        while (i < elig.size()) {
+            size_t j = i + 1;
+            while (j < elig.size() && (elig[j].t - elig[j - 1].t) <= window) ++j;
+            double best = -1; int bi = -1, bj = -1;
+            for (size_t a = i; a < j; ++a)
+                for (size_t b = a + 1; b < j; ++b) {
+                    if (elig[a].side == elig[b].side) continue;
+                    double dt = elig[b].t - elig[a].t; if (dt < 0) dt = -dt;
+                    if (dt <= window && (bi < 0 || dt < best)) { best = dt; bi = (int) a; bj = (int) b; }
+                }
+            if (bi >= 0) make_pair((size_t) bi, (size_t) bj);
+            i = j;
+        }
     }
 
     // Everyone else gets a unique singleton id so the viewer never merges them.
@@ -2170,7 +2199,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         if (gs.size()) {
             // Stash the ±window TPC0/TPC1 flash grouping on the root opflash PC
             // first, so the op dump (and every later pipeline step) can read it.
-            store_flash_groups(*gs[0], m_flash_group_window);
+            store_flash_groups(*gs[0], m_flash_group_window, m_flash_group_greedy);
             fill_bee_flashes(*gs[0]);
             perf("dump op flashes to bee");
         }

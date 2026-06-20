@@ -660,6 +660,11 @@ local clus_all_tpc (
             // pair logic keeps the wide window from merging unrelated busy-event
             // flashes.  0 = off (no column => bit-identical ungrouped display).
             flash_group_window: 1 * wc.us,
+            // Greedy disjoint pairing: when two distinct close crossers fall in one
+            // window-coincident neighborhood, group BOTH closest cross-side pairs
+            // instead of just the single closest one.  Default false (one pair per
+            // neighborhood); true here so a second real crosser pair is not dropped.
+            flash_group_greedy: true,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PD anode face
             dead_apa_groups: apa_drift_groups,  // group dead area by drift side -> 2 dead instances
             anodes: [wc.tn(a) for a in anodes],
