@@ -92,8 +92,10 @@ namespace WireCell::Clus {
             const auto md = m_dv->metadata(wpid);
             m_drift_speeds[wpid.apa()][wpid.face()] = md["drift_speed"].asDouble();
         }
-        if (m_field) spdlog::info("SCECorrection: ISCEField wired in (x,y,z)");
-        else         spdlog::info("SCECorrection: no ISCEField -- SCE disabled (T0 still applied)");
+        // Use a named logger rather than the process-global default logger.
+        auto log = Log::logger("clus.SCECorrection");
+        if (m_field) log->info("SCECorrection: ISCEField wired in (x,y,z)");
+        else         log->info("SCECorrection: no ISCEField -- SCE disabled (T0 still applied)");
     }
 
     inline Point SCECorrection::forward(const Point& pos_raw, double t0, int face, int apa) const {

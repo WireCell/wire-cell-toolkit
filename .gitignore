@@ -99,3 +99,7 @@ doxy_quick
 html
 latex
 .beads
+
+# Feel free to use your own locally, but we are not yet prepared to make universally good instances.
+AGENTS.md
+CLAUDE.md

@@ -7,6 +7,7 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Spdlog.h"
+#include "WireCellUtil/Logging.h"
 
 class ClusteringSwitchScope;
 WIRECELL_FACTORY(ClusteringSwitchScope, ClusteringSwitchScope,
@@ -16,6 +17,13 @@ using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+// A named logger so these messages flow through WCT's configured sinks
+// instead of relying on the process-global default logger.
+static Log::logptr_t logger() {
+    static Log::logptr_t l = Log::logger("clus.SwitchScope");
+    return l;
+}
 
 
 static void clustering_switch_scope(
@@ -37,7 +45,7 @@ public:
     void visit(Ensemble& ensemble) const {
         auto live_vec = ensemble.with_name("live");
         if (live_vec.empty()) {
-            spdlog::warn("ClusteringSwitchScope: no 'live' grouping found, skipping");
+            logger()->warn("ClusteringSwitchScope: no 'live' grouping found, skipping");
             return;
         }
         clustering_switch_scope(*live_vec.at(0), m_pcts, correction_name_);
@@ -54,7 +62,7 @@ static void clustering_switch_scope(
 )
 {
     if (live_grouping.wpids().empty()) {
-        spdlog::warn("clustering_switch_scope: live grouping has no wpids, skipping");
+        logger()->warn("clustering_switch_scope: live grouping has no wpids, skipping");
         return;
     }
 
