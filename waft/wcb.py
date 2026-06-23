@@ -259,6 +259,11 @@ def build(bld):
         REQUIRES = ' '.join(bld.env.REQUIRES),
         install_path = '${LIBDIR}/pkgconfig/')
 
+    # Produce CMake package-config files so downstream CMake projects can
+    # find_package(WireCellToolkit).  See waft/cmake.py and issue #484.
+    import cmake
+    cmake.write_cmake_config(bld)
+
 
     # Produce a libtool .la file.  This needs one for each lib.
     # bld(source='libWireCellXxxx.la.in', 
