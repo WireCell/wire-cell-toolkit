@@ -96,6 +96,23 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
         },
 
+        // Through-Going-Muon tagger.  Flags every live cluster whose two ends
+        // both exit the (SCE-corrected box) fiducial volume.  debug=true makes
+        // it write a per-point charge array on each tagged cluster (endpoints
+        // get debug_endpoint_charge, body debug_body_charge) for a Bee dump.
+        tagger_check_tgm(name="", debug=false, debug_charge_array="tgm_charge", debug_charge_pcname="tgm_debug", debug_endpoint_charge=10000.0, debug_body_charge=100.0) :: {
+            type: "TaggerCheckTGM",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                debug: debug,
+                debug_charge_array: debug_charge_array,
+                debug_charge_pcname: debug_charge_pcname,
+                debug_endpoint_charge: debug_endpoint_charge,
+                debug_body_charge: debug_body_charge,
+            } + dv_cfg + pcts_cfg
+        },
+
         tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,

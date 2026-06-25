@@ -82,6 +82,15 @@ namespace WireCell::Clus {
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
             bool use_graph_vertices{false};    // dump graph vertices; charge=15000 for main (kNeutrinoVertex), 0 otherwise
 
+            // Optional per-point charge override.  When charge_array is non-empty,
+            // ONLY clusters carrying a cluster-level array of that name (in
+            // charge_pcname, length == npoints) are dumped, and each point's Bee
+            // charge is taken from that array (indexed by global point index) rather
+            // than computed from wire charge.  Used by TaggerCheckTGM debug mode to
+            // highlight tagged-track endpoints (q=10000) vs body (q=100).
+            std::string charge_array;          // cluster PC array name (default "": disabled)
+            std::string charge_pcname{"3d"};   // cluster PC holding charge_array
+
             // Optional per-set drift-side / APA grouping (see ApaGroup above).
             // Non-empty -> route this set's clusters into group buckets.
             std::vector<ApaGroup> apa_groups;
@@ -121,7 +130,8 @@ namespace WireCell::Clus {
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
-            int filter);
+            int filter, const std::string& charge_array = "",
+            const std::string& charge_pcname = "3d");
         void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
 

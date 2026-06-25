@@ -298,10 +298,27 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     }, nin=nanodes, nout=1),
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
+    // Overall fiducial volume box (SCE-corrected true space): the dvm.overall
+    // active-volume bounds shrunk by the per-face margins.  TaggerCheckTGM's
+    // FiducialUtils tests endpoints against this box (a through-going track's
+    // ends fall OUTSIDE it).  Single box spans both TPCs in x_t0cor space.
+    local fvm = dvm(pos_offset_on).overall,
+    local fv_box = {
+        type: 'BoxFiducial',
+        name: 'all-overall-fv',
+        data: { bounds: {
+            tail: { x: fvm.FV_xmin + fvm.FV_xmin_margin,
+                    y: fvm.FV_ymin + fvm.FV_ymin_margin,
+                    z: fvm.FV_zmin + fvm.FV_zmin_margin },
+            head: { x: fvm.FV_xmax - fvm.FV_xmax_margin,
+                    y: fvm.FV_ymax - fvm.FV_ymax_margin,
+                    z: fvm.FV_zmax - fvm.FV_zmax_margin },
+        } },
+    },
     local cm_old = clus.clustering_methods(
         prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_coords),
     local cm = clus.clustering_methods(
-        prefix='all', detector_volumes=dv, pc_transforms=pcts, coords=common_corr_coords(pos_offset_on)),
+        prefix='all', detector_volumes=dv, pc_transforms=pcts, fiducial=fv_box, coords=common_corr_coords(pos_offset_on)),
     // Combined (all-APA) clustering runs AFTER QL charge-light matching, so every
     // cluster carries a matched flash time (cluster_t0).  switch_scope applies the
     // per-cluster T0 correction (x_t0cor scope) and drops any stale per-APA
@@ -325,7 +342,14 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, flash_t0_window=800*wc.ns)] else [])
     + [
         cm.examine_bundles(use_flash_t0=true),
+        // Attach a FiducialUtils (with the overall FV box) to the live grouping
+        // so TaggerCheckTGM can run its box test.
+        cm.fiducialutils(),
+        // Through-Going-Muon tagger (debug on: writes per-point charge so the
+        // "tgm" Bee set below highlights tagged-track endpoints).
+        cm.tagger_check_tgm(debug=true),
     ],
+    local tgm_visitor = wc.tn(cm.tagger_check_tgm(debug=true)),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
     local mabc = g.pnode({
         type: 'MultiAlgBlobClustering',
@@ -390,10 +414,26 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     coords: common_corr_coords(pos_offset_on),
                     individual: false,
                 },
+                {
+                    // TGM debug dump: only clusters tagged by TaggerCheckTGM carry
+                    // the "tgm_charge" array (in the "tgm_debug" PC), so only they
+                    // are dumped; per-point charge is read from that array
+                    // (endpoints=10000, body=100) instead of wire charge.
+                    name: 'tgm',
+                    detector: 'sbnd',
+                    algorithm: 'tgm',
+                    pcname: '3d',
+                    coords: common_corr_coords(pos_offset_on),
+                    individual: false,
+                    visitor: tgm_visitor,
+                    filter: 0,
+                    charge_array: 'tgm_charge',
+                    charge_pcname: 'tgm_debug',
+                },
             ],
             pipeline: wc.tns(cm_pipeline),
         },
-    }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline
+    }, nin=1, nout=1, uses=anodes + [dv, pcts, fv_box] + cm_pipeline
               + (if bee_sink != null then [bee_sink] else [])),
     local sink = g.pnode({
         type: 'TensorFileSink',

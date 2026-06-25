@@ -251,6 +251,8 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
+            bpc.charge_array = get<std::string>(bps, "charge_array", "");
+            bpc.charge_pcname = get<std::string>(bps, "charge_pcname", "3d");
 
             // Optional drift-side / APA grouping (additive; absent -> unchanged)
             if (bps.isMember("apa_groups")) {
@@ -630,7 +632,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 auto it2 = it->second.find(face);
                 if (it2 != it->second.end()) {
                     for (const auto* cluster : grouping.children()) {
-                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter);
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter, config.charge_array, config.charge_pcname);
                     }
                 }
             }
@@ -650,7 +652,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 if (!match) continue;
                 auto it = apa_bpts.by_group.find(grp.name);
                 if (it != apa_bpts.by_group.end()) {
-                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter);
+                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter, config.charge_array, config.charge_pcname);
                 }
                 break;
             }
@@ -659,7 +661,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter);
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.charge_array, config.charge_pcname);
         }
     }
 }
@@ -1495,10 +1497,24 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
 // Helper function to fill bee points from a single cluster
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
-    Bee::Points& bpts, const Cluster& cluster, 
-    const std::string& pcname, const std::vector<std::string>& coords, int filter)
+    Bee::Points& bpts, const Cluster& cluster,
+    const std::string& pcname, const std::vector<std::string>& coords, int filter,
+    const std::string& charge_array, const std::string& charge_pcname)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
+
+    // Optional per-point charge override (TaggerCheckTGM debug mode etc.):
+    // only dump clusters carrying the named cluster-level array; charge is read
+    // from it by global point index instead of being computed from wire charge.
+    const bool use_charge_array = !charge_array.empty();
+    if (use_charge_array && !cluster.has_pcarray<double>(charge_array, charge_pcname)) {
+        return;
+    }
+    std::vector<double> qoverride;
+    if (use_charge_array) {
+        auto sp = cluster.get_pcarray<double>(charge_array, charge_pcname);
+        qoverride.assign(sp.begin(), sp.end());
+    }
 
     // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
 
@@ -1598,16 +1614,22 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                     const WireCell::Point pt(x[ind], y[ind], z[ind]);
                     const size_t pt_idx = cluster.get_closest_point_index(pt);
 
-                    // Per-plane charge mean (prototype formula), excluding dead planes.
-                    double sum = 0.0;
-                    int nplanes = 0;
-                    for (int plane = 0; plane < 3; ++plane) {
-                        if (!cluster.is_wire_dead(pt_idx, plane, dead_threshold)) {
-                            sum += cluster.charge_value(pt_idx, plane);
-                            ++nplanes;
+                    double point_charge;
+                    if (use_charge_array) {
+                        // Read per-point charge directly from the override array.
+                        point_charge = (pt_idx < qoverride.size()) ? qoverride[pt_idx] : 0.0;
+                    } else {
+                        // Per-plane charge mean (prototype formula), excluding dead planes.
+                        double sum = 0.0;
+                        int nplanes = 0;
+                        for (int plane = 0; plane < 3; ++plane) {
+                            if (!cluster.is_wire_dead(pt_idx, plane, dead_threshold)) {
+                                sum += cluster.charge_value(pt_idx, plane);
+                                ++nplanes;
+                            }
                         }
+                        point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
                     }
-                    const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
 
                     bpts.append(pt, point_charge, clid, real_clid);
                 }
