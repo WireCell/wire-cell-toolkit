@@ -727,10 +727,10 @@ bool PDHD::NoisyFilterAlg(WireCell::Waveform::realseq_t& sig, float min_rms, flo
         for (int i = 0; i < numBins; i++) {
             sig.at(i) = 100000.0/*10000.0*/;
         }
-        std::cerr << "[PDHD::NoisyFilterAlg] noisy ch=" << ch
-                  << " rms=" << rmsVal
-                  << " (cuts: min=" << min_rms << ", max=" << max_rms << ")"
-                  << std::endl;
+        // std::cerr << "[PDHD::NoisyFilterAlg] noisy ch=" << ch
+        //           << " rms=" << rmsVal
+        //           << " (cuts: min=" << min_rms << ", max=" << max_rms << ")"
+        //           << std::endl;
 
         return true;
     }
