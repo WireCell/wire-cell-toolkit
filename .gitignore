@@ -103,3 +103,14 @@ latex
 # Feel free to use your own locally, but we are not yet prepared to make universally good instances.
 AGENTS.md
 CLAUDE.md
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.claude
+
+# CMake build (parallel to waf): the blanket *.txt rule above otherwise hides
+# CMake's mandatory CMakeLists.txt files, so re-include them explicitly.
+!CMakeLists.txt
+!**/CMakeLists.txt
