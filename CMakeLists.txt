@@ -143,6 +143,7 @@ include(WCTBuildConfig)
 # optional-dependency gating are completed in wct-ike.5 / wct-ike.6.
 # ---------------------------------------------------------------------------
 include(WCTPackage)
+include(WCTRootDict)   # wct-ike.7: provides the wct_package_root_dict() hook
 
 # Package subdirectories.  CMake resolves inter-target links at generate time,
 # so listing order is not significant; it is kept dependency-ordered for
