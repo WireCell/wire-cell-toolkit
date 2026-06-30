@@ -73,6 +73,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Helpful for editors/linters; replaces waft/clang_compilation_database.py.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Collect all shared libraries into one build-tree directory so the build-rpath
+# of executables (and the LD_LIBRARY_PATH of script tests, wct-ike.9) is simple.
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
 # Default to an optimized-with-symbols build, matching waf's --build-debug
 # default of "-O2 -ggdb3", while still allowing -DCMAKE_BUILD_TYPE=... override.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -154,6 +158,9 @@ include(WCTBuildConfig)
 # ---------------------------------------------------------------------------
 include(WCTPackage)
 include(WCTRootDict)   # wct-ike.7: provides the wct_package_root_dict() hook
+if(WCT_WITH_TESTS)
+  include(WCTTests)    # wct-ike.9: provides wct_register_tests(); enables CTest
+endif()
 
 # Package subdirectories.  CMake resolves inter-target links at generate time,
 # so listing order is not significant; it is kept dependency-ordered for
