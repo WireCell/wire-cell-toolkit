@@ -150,22 +150,66 @@ include(WCTPackage)
 # optional-dependency gating that conditions the optional ones.)
 # Core, always-on packages (their externals are all mandatory).
 set(WCT_PACKAGES util iface aux gen sigproc sig img pgraph sio quickhull)
-# pyutil is Python-gated but is a build dependency of clus when Python is
-# present, so it joins the core set here (the general optional-dependency gating
-# is formalized in wct-ike.6).
+# pyutil is Python-gated but is also a build dependency of clus when Python is
+# present, so it is placed here (before clus) when enabled.
 if(WCT_HAVE_PYTHON)
   list(APPEND WCT_PACKAGES pyutil)
 endif()
 list(APPEND WCT_PACKAGES clus match apps test cfg docs)
 
+# Optional packages, each gated on the WCT_HAVE_<DEP> flags discovered by
+# WCTDependencies.  This mirrors the per-package removal table in waft/wcb.py:
+#   root->ROOTSYS, tbb->TBB+FFTWTHREADS, hio->HDF5, pytorch->LIBTORCH,
+#   zio->ZMQ+CZMQ+ZYRE+ZIO, triton->GRPC+PROTOBUF+TRITON, cuda->CUDA.
+# (pyutil->PYTHON is handled above because clus depends on it.)
+set(WCT_OPTIONAL_PACKAGES
+    "tbb=TBB,FFTWTHREADS"
+    "hio=HDF5"
+    "zio=ZMQ,CZMQ,ZYRE,ZIO"
+    "triton=GRPC,PROTOBUF,TRITON"
+    "pytorch=LIBTORCH"
+    "root=ROOTSYS"
+    "cuda=CUDA")
+foreach(_entry IN LISTS WCT_OPTIONAL_PACKAGES)
+  string(REPLACE "=" ";" _pp "${_entry}")
+  list(GET _pp 0 _pkg)
+  list(GET _pp 1 _deps)
+  string(REPLACE "," ";" _deps "${_deps}")
+  set(_ok TRUE)
+  set(_miss "")
+  foreach(_d IN LISTS _deps)
+    if(NOT WCT_HAVE_${_d})
+      set(_ok FALSE)
+      list(APPEND _miss ${_d})
+    endif()
+  endforeach()
+  if(_ok)
+    list(APPEND WCT_PACKAGES ${_pkg})
+  else()
+    message(STATUS "WCT package '${_pkg}' disabled (missing dependency: ${_miss})")
+  endif()
+endforeach()
+
+# Pre-release packages are built only in development checkouts, never in a
+# release build (mirrors pre_release_packages in waft/wcb.py).
+set(WCT_PRERELEASE_PACKAGES patrec)
+if(NOT WCT_IS_DEVELOPMENT)
+  foreach(_pr IN LISTS WCT_PRERELEASE_PACKAGES)
+    if(_pr IN_LIST WCT_PACKAGES)
+      list(REMOVE_ITEM WCT_PACKAGES ${_pr})
+      message(STATUS "WCT package '${_pr}' excluded from release build")
+    endif()
+  endforeach()
+endif()
+
+message(STATUS "WCT packages configured: ${WCT_PACKAGES}")
 foreach(_pkg IN LISTS WCT_PACKAGES)
   add_subdirectory(${_pkg})
 endforeach()
 
 # ---------------------------------------------------------------------------
-# Optional, dependency-gated packages (root, tbb, hio, pytorch, triton, zio,
-# cuda) are added conditionally in wct-ike.6.  Test integration (wct-ike.9) and
-# install/export + pkg-config + CMake config (wct-ike.11) also still to land.
+# Test integration (wct-ike.9) and install/export + pkg-config + CMake config
+# (wct-ike.11) still to land.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
