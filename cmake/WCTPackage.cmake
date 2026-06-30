@@ -64,10 +64,25 @@ function(wct_package NAME)
 
   wct_resolve_uses(_use_tgts ${_use})
 
-  # ----- shared library from src/*.cxx -----
+  # ----- shared library from src/*.cxx (+ .cu/.kokkos when enabled) -----
   set(_have_lib FALSE)
   if(IS_DIRECTORY "${_dir}/src")
     file(GLOB _srcs CONFIGURE_DEPENDS "${_dir}/src/*.cxx")
+    # CUDA sources compile via the CUDA language enabled at the top level
+    # (wct-ike.8); only glob them when CUDA is in use.
+    if(WCT_HAVE_CUDA)
+      file(GLOB _cu CONFIGURE_DEPENDS "${_dir}/src/*.cu")
+      list(APPEND _srcs ${_cu})
+    endif()
+    # Kokkos sources use a non-standard extension; compile them as C++ with the
+    # Kokkos toolchain when Kokkos is in use.
+    if(WCT_HAVE_KOKKOS)
+      file(GLOB _kk CONFIGURE_DEPENDS "${_dir}/src/*.kokkos")
+      if(_kk)
+        set_source_files_properties(${_kk} PROPERTIES LANGUAGE CXX)
+        list(APPEND _srcs ${_kk})
+      endif()
+    endif()
     if(_srcs)
       add_library(${NAME} SHARED ${_srcs})
       set(_have_lib TRUE)
@@ -84,13 +99,9 @@ function(wct_package NAME)
               LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
               ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
               RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}")
-      # Allow other hooks (ROOT dict wct-ike.7, CUDA/Kokkos wct-ike.8) to add to
-      # this target's sources.
+      # ROOT dictionary (wct-ike.7) appends a generated source to this target.
       if(COMMAND wct_package_root_dict)
         wct_package_root_dict(${NAME} "${_dir}" "${_use}")
-      endif()
-      if(COMMAND wct_package_extra_sources)
-        wct_package_extra_sources(${NAME} "${_dir}")
       endif()
     endif()
   endif()

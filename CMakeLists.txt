@@ -133,6 +133,16 @@ set(WCT_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated-include"
 # ---------------------------------------------------------------------------
 include(WCTDependencies)
 
+# Enable the CUDA language when CUDA is in use, so packages with src/*.cu
+# (e.g. WireCellCuda) compile (wct-ike.8).  enable_language() must run at
+# directory scope, not inside wct_package().
+if(WCT_HAVE_CUDA)
+  if(NOT CMAKE_CUDA_COMPILER AND CUDAToolkit_NVCC_EXECUTABLE)
+    set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
+  endif()
+  enable_language(CUDA)
+endif()
+
 # ---------------------------------------------------------------------------
 # Generated WireCellUtil/BuildConfig.h (wct-ike.3).
 # ---------------------------------------------------------------------------

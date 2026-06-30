@@ -394,6 +394,19 @@ else()
   endif()
 endif()
 
+# --- Kokkos (opt-in; compiles .kokkos sources, see wct-ike.8) ---
+_wct_intent(KOKKOS)
+if(_wct_mode STREQUAL "SKIP")
+  _wct_missing(KOKKOS)
+else()
+  find_package(Kokkos QUIET)
+  if(Kokkos_FOUND)
+    _wct_provide(KOKKOS LINK Kokkos::kokkos)
+  else()
+    _wct_missing(KOKKOS)
+  endif()
+endif()
+
 # ===========================================================================
 # Feature checks consumed by BuildConfig.h (wct-ike.3)
 # ===========================================================================
