@@ -9,12 +9,12 @@
 //   - Runs AFTER the two-APA Q/L matching + stitching stage, on the
 //     T0-corrected, stitched all-APA clusters (default scope "3d" with
 //     x_t0cor/y_cor/z_cor coords).  cluster_t0 already folded into x_t0cor.
-//   - Each endpoint is SCE-corrected back to its true position with
-//     SCECorrection::forward(p, t0=0, face, apa) BEFORE the fiducial test
-//     (t0=0 because x_t0cor already carries the drift correction; forward then
-//     only adds the SCE spatial displacement).  When no ISCEField is wired the
-//     transform is a no-op and the test runs on the x_t0cor point, which is the
-//     current SBND configuration.
+//   - The all-APA pipeline runs in SCE-corrected true space (x_sce) when
+//     use_sce=true: clus.jsonnet inserts a switch_scope(SCECorrection, backward,
+//     t0=0) step that materializes x_sce = backward(x_t0cor) (reco -> true) and
+//     sets it as the default scope, so every point TaggerCheckTGM sees is already
+//     true space.  TGM therefore box-tests the scope points DIRECTLY (no SCE
+//     correction of its own).  With use_sce=false the scope is x_t0cor (reco).
 //   - With SCE-corrected (true) points the fiducial boundary is a simple BOX,
 //     which is exactly what FiducialUtils::inside_fiducial_volume() tests
 //     (m_sd.fiducial->contained(p)); the box bounds come from
@@ -98,12 +98,9 @@ public:
             return;
         }
 
-        // SCE transform (no-op when no ISCEField is wired).
-        IPCTransform::pointer sce = m_pcts ? m_pcts->pc_transform("SCECorrection") : nullptr;
-
         int ntagged = 0;
         for (auto* cluster : grouping.children()) {
-            if (check_tgm(*cluster, *fiducial_utils, sce)) {
+            if (check_tgm(*cluster, *fiducial_utils)) {
                 cluster->set_flag(Flags::TGM);
                 ++ntagged;
                 if (m_debug) {
@@ -123,23 +120,17 @@ private:
     double m_debug_endpoint_charge{10000.0};
     double m_debug_body_charge{100.0};
 
-    // SCE-correct a (default-scope, x_t0cor) point back to true position and box-test.
-    bool inside_fv(const geo_point_t& p, const FiducialUtils& fid, IPCTransform::pointer sce) const {
-        geo_point_t p_cor = p;
-        if (sce) {
-            WirePlaneId wpid = m_dv->contained_by(p);
-            if (wpid.apa() >= 0 && wpid.face() >= 0) {
-                // t0=0: x_t0cor already carries the drift correction; forward()
-                // here only adds the SCE spatial displacement.
-                p_cor = sce->forward(p, 0.0, wpid.face(), wpid.apa());
-            }
-        }
-        return fid.inside_fiducial_volume(p_cor);
+    // Box-test a point against the fiducial volume.  The cluster's default scope
+    // is already SCE-corrected true space (x_sce) when the pipeline runs with
+    // use_sce=true (switch_scope materializes it upstream), so no SCE correction
+    // is applied here -- we test the scope point directly.
+    bool inside_fv(const geo_point_t& p, const FiducialUtils& fid) const {
+        return fid.inside_fiducial_volume(p);
     }
 
     // Port of WCP ToyFiducial::check_tgm.  Returns true if the cluster is a
     // through-going muon (both ends exit the fiducial volume).
-    bool check_tgm(const Cluster& cluster, const FiducialUtils& fid, IPCTransform::pointer sce) const {
+    bool check_tgm(const Cluster& cluster, const FiducialUtils& fid) const {
 
         std::vector<std::vector<geo_point_t>> out_vec_wcps = cluster.get_extreme_wcps();
         if (out_vec_wcps.size() < 2) return false;
@@ -164,7 +155,7 @@ private:
             int p1_index = -1;
             for (size_t j = 0; j != out_vec_wcps.at(i).size(); j++) {
                 const geo_point_t& p1 = out_vec_wcps.at(i).at(j);
-                flag_p1_inside = flag_p1_inside && inside_fv(p1, fid, sce);
+                flag_p1_inside = flag_p1_inside && inside_fv(p1, fid);
                 if (!flag_p1_inside) { p1_index = (int)j; break; }
             }
 
@@ -173,7 +164,7 @@ private:
                 int p2_index = -1;
                 for (size_t j = 0; j != out_vec_wcps.at(k).size(); j++) {
                     const geo_point_t& p2 = out_vec_wcps.at(k).at(j);
-                    flag_p2_inside = flag_p2_inside && inside_fv(p2, fid, sce);
+                    flag_p2_inside = flag_p2_inside && inside_fv(p2, fid);
                     if (!flag_p2_inside) { p2_index = (int)j; break; }
                 }
 
@@ -189,7 +180,7 @@ private:
                         geo_point_t p3(e1.x() + (e2.x() - e1.x()) / 4. * (kk + 1),
                                        e1.y() + (e2.y() - e1.y()) / 4. * (kk + 1),
                                        e1.z() + (e2.z() - e1.z()) / 4. * (kk + 1));
-                        flag_check = flag_check || inside_fv(p3, fid, sce);
+                        flag_check = flag_check || inside_fv(p3, fid);
                     }
 
                     if (flag_check) {
@@ -211,13 +202,13 @@ private:
                                     geo_point_t p3(e1.x() + (em.x() - e1.x()) / 4. * (kk + 1),
                                                    e1.y() + (em.y() - e1.y()) / 4. * (kk + 1),
                                                    e1.z() + (em.z() - e1.z()) / 4. * (kk + 1));
-                                    flag_check_again = flag_check_again || inside_fv(p3, fid, sce);
+                                    flag_check_again = flag_check_again || inside_fv(p3, fid);
                                 }
                                 for (int kk = 0; kk != 3; kk++) {
                                     geo_point_t p3(em.x() + (e2.x() - g0.x()) / 4. * (kk + 1),
                                                    em.y() + (e2.y() - g0.y()) / 4. * (kk + 1),
                                                    em.z() + (e2.z() - g0.z()) / 4. * (kk + 1));
-                                    flag_check_again = flag_check_again || inside_fv(p3, fid, sce);
+                                    flag_check_again = flag_check_again || inside_fv(p3, fid);
                                 }
                             }
                             if (!flag_check_again) {

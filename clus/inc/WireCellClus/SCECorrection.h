@@ -26,10 +26,13 @@
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/ISCEField.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Units.h"
 
+#include <cmath>
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace WireCell::Clus {
 
@@ -94,7 +97,33 @@ namespace WireCell::Clus {
         }
         // Use a named logger rather than the process-global default logger.
         auto log = Log::logger("clus.SCECorrection");
-        if (m_field) log->info("SCECorrection: ISCEField wired in (x,y,z)");
+        if (m_field) {
+            log->info("SCECorrection: ISCEField wired in (x,y,z)");
+            // Sanity probe (once per construction): report the forward
+            // (reco -> true) SCE displacement at a few fixed interior points so
+            // the direction and magnitude (~cm) can be eyeballed in the log.
+            // t0=0 -> pure SCE part (no drift term).
+            const std::vector<Point> probes = {
+                {-10 * units::cm,     100 * units::cm,        250 * units::cm},
+                {-190 * units::cm,    100 * units::cm,        250 * units::cm},
+                {10 * units::cm,      100 * units::cm,        250 * units::cm},
+                {190 * units::cm,     100 * units::cm,        250 * units::cm},
+            };
+            for (const auto& p : probes) {
+                WirePlaneId wpid = m_dv->contained_by(p);
+                if (wpid.apa() < 0 || wpid.face() < 0) {
+                    log->info("SCECorrection probe ({:.0f},{:.0f},{:.0f})cm: outside TPC",
+                              p[0]/units::cm, p[1]/units::cm, p[2]/units::cm);
+                    continue;
+                }
+                Point pc = forward(p, 0.0, wpid.face(), wpid.apa());
+                double d = std::sqrt(std::pow(pc[0]-p[0],2) + std::pow(pc[1]-p[1],2) + std::pow(pc[2]-p[2],2));
+                log->info("SCECorrection probe apa{} ({:.1f},{:.1f},{:.1f})cm -> "
+                          "({:.1f},{:.1f},{:.1f})cm  |d|={:.2f}cm (forward = reco->true)",
+                          wpid.apa(), p[0]/units::cm, p[1]/units::cm, p[2]/units::cm,
+                          pc[0]/units::cm, pc[1]/units::cm, pc[2]/units::cm, d/units::cm);
+            }
+        }
         else         log->info("SCECorrection: no ISCEField -- SCE disabled (T0 still applied)");
     }
 
