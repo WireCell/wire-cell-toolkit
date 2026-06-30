@@ -93,7 +93,18 @@ function(wct_package NAME)
       if(_use_tgts)
         target_link_libraries(${NAME} PUBLIC ${_use_tgts})
       endif()
+      # Exported name strips the WireCell/WCP prefix so downstream consumers use
+      # WireCell::Util, WireCell::Quickhull, ... (the established contract from
+      # the waf-generated config); the on-disk library stays libWireCellUtil.so.
+      set(_exp "${NAME}")
+      foreach(_pre WireCell WCP)
+        if(_exp MATCHES "^${_pre}(.+)$")
+          set(_exp "${CMAKE_MATCH_1}")
+          break()
+        endif()
+      endforeach()
       set_target_properties(${NAME} PROPERTIES
+        EXPORT_NAME "${_exp}"
         INSTALL_RPATH "$ORIGIN;${CMAKE_INSTALL_FULL_LIBDIR}")
       install(TARGETS ${NAME} EXPORT WireCellToolkitTargets
               LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"

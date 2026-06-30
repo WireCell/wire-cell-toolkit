@@ -227,9 +227,11 @@ foreach(_pkg IN LISTS WCT_PACKAGES)
 endforeach()
 
 # ---------------------------------------------------------------------------
-# Test integration (wct-ike.9) and install/export + pkg-config + CMake config
-# (wct-ike.11) still to land.
+# Install/export: pkg-config .pc, native install(EXPORT) target file, and the
+# WireCellToolkitConfig package config for downstream find_package (wct-ike.11).
 # ---------------------------------------------------------------------------
+include(WCTExport)
+wct_install_exports()
 
 # ---------------------------------------------------------------------------
 # Configuration summary.
