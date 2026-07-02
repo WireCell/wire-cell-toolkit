@@ -463,7 +463,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     coords: common_corr_coords(pos_offset_on, use_sce),
                     individual: false,
                     visitor: tgm_visitor,
-                    filter: 0,
+                    filter: 1,
                     charge_array: 'tgm_charge',
                     charge_pcname: 'tgm_debug',
                 },
