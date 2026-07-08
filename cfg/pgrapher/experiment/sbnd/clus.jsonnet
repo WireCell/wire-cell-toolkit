@@ -526,6 +526,12 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // (sce_correction: false keeps the field wired but unapplied).
             sce_field: wc.tn(sce_field_fwd),
             sce_correction: true,
+            // Depo diffusion before blob filling: DL/DT drift diffusion +
+            // SP-filter smearing default to the sbndcode values
+            // (wcsimsp_sbnd.fcl DL=4.0/DT=8.8 cm2/s; sp-filters.jsonnet
+            // Gaus_wide 0.10 MHz, Wire_ind k=1.05 / Wire_col k=3.60) inside
+            // the component.  Bee truth_depo_sce samples per depo ball:
+            n_sample_truth_depo_sce: 1,
             // Bee "mc" particle-flow tree cuts: KE threshold + keep only
             // particles with at least one end inside the FV box.
             pf_ke_min: 10 * wc.MeV,
