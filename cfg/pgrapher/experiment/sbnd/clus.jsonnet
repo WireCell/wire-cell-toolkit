@@ -41,6 +41,25 @@ local sce_field = {
     },
 };
 
+// FORWARD (true->reco) SCE displacement from the same dualmap file: used by
+// the truth labeler to shift the priorSCE (true position) SimEnergyDeposits
+// onto the spatially-distorted charge the blobs were reconstructed from
+// (up to ~1.4 cm, i.e. several 3 mm wire pitches).
+local sce_field_fwd = {
+    type: 'SCEFieldTH3',
+    name: 'sbnd_dualmap_fwd',
+    data: sce_field.data {
+        th3_name_E:   'TrueFwd_Displacement_X_E',
+        th3_name_W:   'TrueFwd_Displacement_X_W',
+        th3_name_E_y: 'TrueFwd_Displacement_Y_E',
+        th3_name_W_y: 'TrueFwd_Displacement_Y_W',
+        th3_name_E_z: 'TrueFwd_Displacement_Z_E',
+        th3_name_W_z: 'TrueFwd_Displacement_Z_W',
+        // sign=+1: TrueFwd holds the true->reco offset to ADD to a true position.
+        sign: 1,
+    },
+};
+
 // Per-TPC transverse (Y,Z) position offset, materialized in the post-QLMatching
 // scope by T0Correction as y_cor/z_cor (see match/docs/cathode-offset-correction.md).
 // One flag drives BOTH the metadata injection (which the C++ keys on for the
@@ -503,8 +522,22 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             drift_speed: drift_speed,
             time_offset: time_offset,
             tick: 0.5 * wc.us,
+            // shift the priorSCE depos true->reco before association
+            // (sce_correction: false keeps the field wired but unapplied).
+            sce_field: wc.tn(sce_field_fwd),
+            sce_correction: true,
+            // Bee "mc" particle-flow tree cuts: KE threshold + keep only
+            // particles with at least one end inside the FV box.
+            pf_ke_min: 10 * wc.MeV,
+            pf_fiducial: wc.tn(fv_box),
+            // "mc" tree: beam-nu-derived particles only (no cosmics);
+            // false -> also keep FV-touching/crossing cosmics.
+            pf_nu_only: true,
+            // truth_per_track tensor: only main-nu-interaction particles
+            // (no cosmic-muon truth); false -> full MCParticle table.
+            truth_tracks_nu_only: true,
         } + (if bee_sink != null then { bee_sink: wc.tn(bee_sink) } else {}),
-    }, nin=1, nout=1, uses=anodes + (if bee_sink != null then [bee_sink] else [])),
+    }, nin=1, nout=1, uses=anodes + [sce_field_fwd, fv_box] + (if bee_sink != null then [bee_sink] else [])),
     local end = if dump then g.pipeline(if truth_labeler then [mabc, labeler, sink] else [mabc, sink]) else g.pipeline([mabc]),
     // premerged: input is already one merged tree (joint QLMatching) -> feed MABC
     // directly, no PointTreeMerging.  Else: fan the per-APA inputs into pcmerging.
