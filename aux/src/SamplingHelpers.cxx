@@ -84,6 +84,9 @@ void Aux::fill_scalar_blob(PointCloud::Dataset& scalar, const IBlob& iblob, cons
     scalar.add("charge", Array({(double)iblob.value()}));
     WirePlaneId wpid(kAllLayers, iblob.face()->which(), iblob.face()->anode());
     scalar.add("wpid",Array({(int)wpid.ident()}));
+    // Truth label: G4 track ID of the dominant energy depositor.  Filled
+    // downstream (e.g. larwirecell TensorSetLabeler); -1 = unlabeled.
+    scalar.add("trackid", Array({(int)-1}));
 
     const auto& islice = iblob.slice();
     // fixme: possible risk of roundoff error + truncation makes _min == _max?

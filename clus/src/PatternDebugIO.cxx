@@ -552,6 +552,7 @@ static PointCloud::Tree::Points::node_t* make_cluster_node(
             {"center_y", Array(std::vector<fa_float_t>{0.0})},
             {"center_z", Array(std::vector<fa_float_t>{0.0})},
             {"wpid", Array(std::vector<fa_int_t>{0})},
+            {"trackid", Array(std::vector<fa_int_t>{-1})},
             {"npoints", Array(std::vector<fa_int_t>{1})},
             {"slice_index_min", Array(std::vector<fa_int_t>{0})},
             {"slice_index_max", Array(std::vector<fa_int_t>{1})},

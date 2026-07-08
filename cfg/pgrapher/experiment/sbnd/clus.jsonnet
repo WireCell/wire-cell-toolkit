@@ -309,7 +309,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // per-APA cluster trees into one, so skip the PointTreeMerging fanin and feed the
 // single pre-merged input straight to the all-APA MABC.  Default false = the
 // historical per-APA path (two QLMatching nodes -> PointTreeMerging -> MABC).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, use_sce=true) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, use_sce=true, truth_labeler=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -478,10 +478,34 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         data: {
             outname: 'trash-all-apa.tar.gz',
             prefix: 'clustering_',
-            dump_mode: true,
+            // When the truth labeler is in the pipeline the tensor output is
+            // the deliverable (labeled pctree + truth_per_track + metadata),
+            // so actually write it; otherwise keep the historical discard.
+            dump_mode: !truth_labeler,
         },
     }, nin=1, nout=0),
-    local end = if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
+    // Optional truth labeling (MC only): larwirecell wclsTensorSetLabeler
+    // (plugin "WireCellAIML"; must ALSO be listed in the fcl "inputers" so it
+    // sees the art::Event).  Adds run/subrun/event + neutrino truth to the
+    // tensor-set metadata, a "truth_per_track" 2D tensor (MCParticle table),
+    // and the dominant G4 "trackid" to each blob "scalar" PC via a
+    // BlobDepoFill-style SimEnergyDeposit<->blob association in the raw
+    // (non-t0-corrected) coordinates.  drift_speed/time_offset/tick MUST
+    // match the BlobSampler above.  With a shared bee_sink it also dumps the
+    // "truth_trackid" Bee set: raw x,y,z points, cluster_id = blob trackid.
+    local labeler = g.pnode({
+        type: 'wclsTensorSetLabeler',
+        name: 'clus_all_apa',
+        data: {
+            inpath: 'pointtrees/%d',
+            grouping: 'live',
+            anodes: [wc.tn(anode) for anode in anodes],
+            drift_speed: drift_speed,
+            time_offset: time_offset,
+            tick: 0.5 * wc.us,
+        } + (if bee_sink != null then { bee_sink: wc.tn(bee_sink) } else {}),
+    }, nin=1, nout=1, uses=anodes + (if bee_sink != null then [bee_sink] else [])),
+    local end = if dump then g.pipeline(if truth_labeler then [mabc, labeler, sink] else [mabc, sink]) else g.pipeline([mabc]),
     // premerged: input is already one merged tree (joint QLMatching) -> feed MABC
     // directly, no PointTreeMerging.  Else: fan the per-APA inputs into pcmerging.
     ret:: if premerged then end else g.intern(
@@ -499,7 +523,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // id.  Default false keeps production byte-identical (the key is omitted).
 // use_sce (default true): run the all-APA pipeline in SCE-corrected true space
 // (x_sce); false -> the T0-corrected reco scope.
-function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data', use_sce=true) {
+// truth_labeler (default false): insert the larwirecell wclsTensorSetLabeler
+// between the all-APA MABC and its TensorFileSink (MC only; needs the
+// "WireCellAIML" plugin and a "wclsTensorSetLabeler" entry in fcl inputers).
+function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data', use_sce=true, truth_labeler=false) {
     // pos_offset (per-TPC transverse y,z calibration) is data-only -- see the
     // pos_offset_a0/a1 comment above.  reality='data' (default; keeps the data
     // chain byte-identical to the previous always-on state) -> on; reality='sim'
@@ -524,6 +551,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     all_apa(anodes, dump=true, bee_sink=null, premerged=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on, use_sce=use_sce),
+                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on, use_sce=use_sce, truth_labeler=truth_labeler),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
