@@ -76,12 +76,16 @@ namespace {
 
     void refine_hits_in_flash(const std::vector<int>& hits_this_flash, const std::vector<Hit>& hits,
                               std::vector<std::vector<int>>& refined, double width_tolerance,
-                              double flash_threshold)
+                              double flash_threshold, std::vector<bool>& used)
     {
         std::map<double, std::vector<int>, std::greater<double>> hits_by_size;
         for (int hit_index : hits_this_flash) hits_by_size[hits.at(hit_index).pe].push_back(hit_index);
 
-        std::vector<bool> used(hits.size(), false);
+        // `used` is a caller-provided scratch indexed by global hit index;
+        // only this flash's (disjoint) hits are ever touched, so clearing
+        // just those replaces a full-size allocation per flash.
+        used.resize(hits.size(), false);
+        for (int hit_index : hits_this_flash) used.at(hit_index) = false;
         while (true) {
             std::vector<int> flash_hits;
             double pe = 0, tmax = 0, tmin = 0;
@@ -205,12 +209,17 @@ namespace {
                 if (nsigma < 3.0) remove[j] = true;
             }
         }
-        for (int i = remove.size() - 1; i >= 0; --i) {
-            if (remove[i]) {
-                flashes.erase(flashes.begin() + i);
-                hits_per_flash.erase(hits_per_flash.begin() + i);
+        size_t w = 0;
+        for (size_t i = 0; i < flashes.size(); ++i) {
+            if (remove[i]) continue;
+            if (w != i) {
+                flashes[w] = std::move(flashes[i]);
+                hits_per_flash[w] = std::move(hits_per_flash[i]);
             }
+            ++w;
         }
+        flashes.resize(w);
+        hits_per_flash.resize(w);
     }
 
     // Knobs + precomputed per-OpDet grid for the optional refinement pass.
@@ -379,8 +388,10 @@ namespace {
         assign_hits_to_flash(flashes1, flashes2, binned1, binned2, contributors1, contributors2,
                              hits, hits_per_flash, flash_threshold);
 
+        std::vector<bool> used_scratch;
         for (const auto& flash_hits : hits_per_flash) {
-            refine_hits_in_flash(flash_hits, hits, out_refined, width_tolerance, flash_threshold);
+            refine_hits_in_flash(flash_hits, hits, out_refined, width_tolerance, flash_threshold,
+                                 used_scratch);
         }
 
         for (const auto& flash_hits : out_refined) {
@@ -401,15 +412,22 @@ namespace {
             // Per-PD PE for the fired-PD count: cut_fired_pe when set (>=0),
             // else the refinement fired_pe (bit-identical default).
             const double fired_pe = rp.cut_fired_pe >= 0 ? rp.cut_fired_pe : rp.fired_pe;
-            for (int k = (int) out_flashes.size() - 1; k >= 0; --k) {
+            size_t w = 0;
+            for (size_t k = 0; k < out_flashes.size(); ++k) {
                 int npd = 0;
                 for (int od = 0; od < nchan; ++od)
                     if (out_flashes[k].pes[od] >= fired_pe) ++npd;
                 if (npd < rp.cut_min_pds || out_flashes[k].total_pe < rp.cut_min_pe) {
-                    out_flashes.erase(out_flashes.begin() + k);
-                    out_refined.erase(out_refined.begin() + k);
+                    continue;
                 }
+                if (w != k) {
+                    out_flashes[w] = std::move(out_flashes[k]);
+                    out_refined[w] = std::move(out_refined[k]);
+                }
+                ++w;
             }
+            out_flashes.resize(w);
+            out_refined.resize(w);
         }
     }
 }

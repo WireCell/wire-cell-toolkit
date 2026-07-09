@@ -96,11 +96,15 @@ bool Root::PDVDOpWaveformSource::operator()(IFrame::pointer& out)
     tree->SetBranchAddress("timestamp", &b_timestamp);
     tree->SetBranchAddress("adc", &b_adc);
 
-    // Pass 1 (adc branch off): find the event's records, their start
-    // ticks and the common tick origin t0 = min start over ALL
+    // Pass 1 (only the selection/timing branches enabled, so the adc and
+    // x/y/z baskets are not deserialized): find the event's records, their
+    // start ticks and the common tick origin t0 = min start over ALL
     // channels -- deliberately ignoring the opch selection so that
     // per-population source instances share one origin.
-    tree->SetBranchStatus("adc", false);
+    tree->SetBranchStatus("*", false);
+    for (const char* b : {"run", "subrun", "event", "opchannel", "nsamp", "timestamp"}) {
+        tree->SetBranchStatus(b, true);
+    }
     const Long64_t nent = tree->GetEntries();
     std::vector<std::pair<Long64_t, int64_t>> selected;  // entry, start tick
     int64_t t0 = 0;
@@ -138,7 +142,7 @@ bool Root::PDVDOpWaveformSource::operator()(IFrame::pointer& out)
         std::vector<float> values(b_adc->begin(), b_adc->end());
         raw_idx.push_back(all_traces.size());
         all_traces.push_back(std::make_shared<Aux::SimpleTrace>(
-            b_opch, (int)(start - t0), values));
+            b_opch, (int)(start - t0), std::move(values)));
     }
     tree->ResetBranchAddresses();
     tfile->Close();
