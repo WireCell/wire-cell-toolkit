@@ -17,6 +17,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellAux/Logger.h"
 
+#include <map>
 #include <vector>
 
 namespace WireCell {
@@ -34,6 +35,17 @@ namespace WireCell {
           private:
             int m_nchan{160};
             std::string m_geom_file{"pgrapher/experiment/pdhd/pdhd-opdet-geom.json"};
+            // Optional OpChannel -> OpDet ganging map, JSON
+            // {"channels": [{"opch": <id>, "opdet": <0..nchan-1>}, ...]}.
+            // When set, incoming hit channel ids are remapped to OpDet
+            // columns before flash building, so several readout channels
+            // (e.g. the two DAPHNE channels of a PDVD X-ARAPUCA) sum into
+            // one opflash PE column; hits on unmapped channels are ignored.
+            // The output "ophits" tensor keeps the ORIGINAL channel ids.
+            // Empty (default) = identity, bit-identical to before (hit
+            // channel ids are already OpDet indices for PDHD/SBND).
+            std::string m_channel_map_file{""};
+            std::map<int, int> m_chmap;
             // standard_opflash / protodune_opflash values (times in WCT ns).
             double m_bin_width{1000.0};      // BinWidth, 1 us
             double m_flash_threshold{3.5};   // FlashThreshold [PE] (dunefd/protodune)

@@ -152,6 +152,14 @@ than derived.  Downstream charge clustering / Q/L matching reads it from the arc
 Not ported: wire-plane centers/widths, Frame/InBeamFrame/OnBeamTime
 bookkeeping (LArSoft frame conventions don't apply).
 
+**OpChannel → OpDet ganging (extension, `channel_map_file`).** Default empty =
+identity, bit-identical (PDHD/SBND hit channel ids are already OpDet indices).
+When set to a JSON `{"channels": [{"opch": <id>, "opdet": <0..nchan-1>}, ...]}`,
+incoming hit channels are remapped to OpDet columns before flash building, so
+several readout channels sum into one opflash PE column — e.g. the two DAPHNE
+channels of a PDVD X-ARAPUCA.  Hits on unmapped channels are ignored; the output
+`ophits` tensor keeps the original channel ids for traceability.
+
 **Coincidence window is robust at 1 µs (data-checked).** Across the four example
 events the OpHit time spread *within* a reconstructed flash is always < 1 µs (max
 0.96 µs) — a 1 µs bin never splits a real flash — while inter-flash gaps down to

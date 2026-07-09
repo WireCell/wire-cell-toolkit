@@ -426,6 +426,7 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     Configuration cfg;
     cfg["nchan"] = m_nchan;
     cfg["geom_file"] = m_geom_file;
+    cfg["channel_map_file"] = m_channel_map_file;
     cfg["bin_width"] = m_bin_width;
     cfg["flash_threshold"] = m_flash_threshold;
     cfg["width_tolerance"] = m_width_tolerance;
@@ -448,6 +449,7 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
 {
     m_nchan = get(cfg, "nchan", m_nchan);
     m_geom_file = get(cfg, "geom_file", m_geom_file);
+    m_channel_map_file = get(cfg, "channel_map_file", m_channel_map_file);
     m_bin_width = get(cfg, "bin_width", m_bin_width);
     m_flash_threshold = get(cfg, "flash_threshold", m_flash_threshold);
     m_width_tolerance = get(cfg, "width_tolerance", m_width_tolerance);
@@ -463,6 +465,16 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_min_total_pe = get(cfg, "min_total_pe", m_min_total_pe);
     m_min_fired_pe = get(cfg, "min_fired_pe", m_min_fired_pe);
     m_offset_us = get(cfg, "offset_us", m_offset_us);
+
+    m_chmap.clear();
+    if (!m_channel_map_file.empty()) {
+        auto jmap = Persist::load(m_channel_map_file);
+        for (const auto& jc : jmap["channels"]) {
+            m_chmap[jc["opch"].asInt()] = jc["opdet"].asInt();
+        }
+        log->debug("loaded {} opch->opdet mappings from {}",
+                   m_chmap.size(), m_channel_map_file);
+    }
 
     auto jgeom = Persist::load(m_geom_file);
     m_opdet_x.assign(m_nchan, 0.0);
@@ -537,6 +549,24 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         const double* row = H + r * ncol;
         hits[r] = Hit{int(row[0]), row[1], row[2], row[3], row[4], row[5], row[6], row[8]};
     }
+    // Optional OpChannel -> OpDet ganging: remap hit channels to OpDet
+    // columns; unmapped channels get -1 and are excluded from the flash
+    // subsets below.  The output "ophits" tensor (copied verbatim from
+    // the input further down) keeps the original channel ids.
+    int nunmapped = 0;
+    if (!m_chmap.empty()) {
+        for (auto& hit : hits) {
+            auto it = m_chmap.find(hit.channel);
+            hit.channel = (it != m_chmap.end()) ? it->second : -1;
+            if (hit.channel < 0 or hit.channel >= m_nchan) {
+                hit.channel = -1;
+                ++nunmapped;
+            }
+        }
+        if (nunmapped) {
+            log->debug("ignoring {} of {} hits on channels outside the map", nunmapped, nhit);
+        }
+    }
 
     // Build flashes either across all OpDets (larana default) or
     // independently per cathode side (PDHD: the cathode is opaque, so the
@@ -563,6 +593,7 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         std::vector<int> sideA, sideB;  // A: x >= 0, B: x < 0
         for (size_t r = 0; r < nhit; ++r) {
             const int ch = hits[r].channel;
+            if (!m_chmap.empty() && ch < 0) continue;  // unmapped, ganging on
             const double x = (ch >= 0 && ch < m_nchan) ? m_opdet_x[ch] : 0.0;
             (x >= 0.0 ? sideA : sideB).push_back((int) r);
         }
@@ -592,8 +623,12 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         refined = std::move(sr);
     }
     else {
-        std::vector<int> all(nhit);
-        std::iota(all.begin(), all.end(), 0);
+        std::vector<int> all;
+        all.reserve(nhit);
+        for (size_t r = 0; r < nhit; ++r) {
+            if (!m_chmap.empty() && hits[r].channel < 0) continue;  // unmapped
+            all.push_back((int) r);
+        }
         find_flashes(hits, all, m_bin_width, m_flash_threshold, m_width_tolerance,
                      m_remove_late_light, m_nchan, m_opdet_y, m_opdet_z, rp, flashes, refined);
     }
