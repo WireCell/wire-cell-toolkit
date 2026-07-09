@@ -186,6 +186,45 @@ void Flash::OpDecon::ensure_fft(SPETemplate& spe)
         for (const auto& c : spe.fft) hmax = std::max(hmax, std::abs(std::complex<double>(c)));
         spe.wi_eps = std::pow(m_wi_eps_rel * hmax, 2);
     }
+    // With a fixed SNR and flat noise the filter -- hence the AutoScale
+    // normalization -- is the same for every record of this template.
+    if (m_auto_scale && !m_wiener_inspired && m_fixed_snr > 0.0 && m_noise_file.empty()) {
+        const int N = m_samples;
+        const double N2_flat = m_line_noise_rms * m_line_noise_rms * N;
+        const double S2 = m_fixed_snr * N2_flat;
+        std::vector<std::complex<float>> xG(N);
+        for (int k = 0; k < N; ++k) {
+            const std::complex<double> H = spe.fft[k];
+            const double H2 = std::norm(H);
+            const std::complex<double> g = std::conj(H) * S2 / (H2 * S2 + N2_flat);
+            xG[k] = std::complex<float>(g);
+        }
+        spe.cached_scale = auto_scale(spe, xG);
+        spe.scale_cached = true;
+    }
+}
+
+// AutoScale normalization: apply the filter to the SPE response, center it,
+// and integrate the positive region around the peak.
+double Flash::OpDecon::auto_scale(const SPETemplate& spe,
+                                  const std::vector<std::complex<float>>& xG) const
+{
+    const int N = m_samples;
+    std::vector<std::complex<float>> xGH(N);
+    for (int k = 0; k < N; ++k) {
+        // phase shift by half window: exp(+i 2 pi k (N/2) / N) = (-1)^k
+        const float sign = (k % 2 == 0) ? 1.0f : -1.0f;
+        xGH[k] = xG[k] * spe.fft[k] * sign;
+    }
+    auto x = Aux::DftTools::inv_c2r(m_dft, xGH);
+    const int imax = std::distance(x.begin(), std::max_element(x.begin(), x.end()));
+    int ileft = imax, iright = imax;
+    while (ileft > 0 && x[ileft] > 0) --ileft;
+    while (iright < N && x[iright] > 0) ++iright;
+    double norm = 0;
+    for (int k = ileft; k <= iright && k < N; ++k) norm += x[k];
+    if (norm > 1.0 || norm <= 0.0) norm = 1.0;
+    return 1.0 / norm;
 }
 
 std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
@@ -248,26 +287,12 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     }
     auto xvdec = Aux::DftTools::inv_c2r(m_dft, xY);  // normalized inverse
 
-    // AutoScale normalization: apply the filter to the SPE response,
-    // center it, and integrate the positive region around the peak.
+    // AutoScale normalization (cached per template when the filter is
+    // record-independent; see ensure_fft).
     // Wiener-inspired: F(0)=1 already gives unit 1-PE area; keep m_scale.
     double scale = m_scale;
     if (m_auto_scale && !m_wiener_inspired) {
-        std::vector<std::complex<float>> xGH(N);
-        for (int k = 0; k < N; ++k) {
-            // phase shift by half window: exp(+i 2 pi k (N/2) / N) = (-1)^k
-            const float sign = (k % 2 == 0) ? 1.0f : -1.0f;
-            xGH[k] = xG[k] * spe.fft[k] * sign;
-        }
-        auto x = Aux::DftTools::inv_c2r(m_dft, xGH);
-        const int imax = std::distance(x.begin(), std::max_element(x.begin(), x.end()));
-        int ileft = imax, iright = imax;
-        while (ileft > 0 && x[ileft] > 0) --ileft;
-        while (iright < N && x[iright] > 0) ++iright;
-        double norm = 0;
-        for (int k = ileft; k <= iright && k < N; ++k) norm += x[k];
-        if (norm > 1.0 || norm <= 0.0) norm = 1.0;
-        scale = 1.0 / norm;
+        scale = spe.scale_cached ? spe.cached_scale : auto_scale(spe, xG);
     }
 
     // Baseline of the deconvolved waveform, computed before the
@@ -349,7 +374,7 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
         ensure_fft(m_templates[it->second]);
         auto dec = deconvolve(trace->charge(), m_templates[it->second], noise);
         out_idx.push_back(all_traces.size());
-        all_traces.push_back(std::make_shared<Aux::SimpleTrace>(chan, trace->tbin(), dec));
+        all_traces.push_back(std::make_shared<Aux::SimpleTrace>(chan, trace->tbin(), std::move(dec)));
     }
     if (nskipped) {
         log->warn("frame {}: skipped {} traces with no SPE template", in->ident(), nskipped);

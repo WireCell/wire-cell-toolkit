@@ -96,7 +96,12 @@ namespace WireCell {
             void ensure_hpf(int n);
 
             // ROI-clean one deconvolved waveform.
-            std::vector<float> clean(const std::vector<float>& decon) const;
+            std::vector<float> clean(const std::vector<float>& decon);
+
+            // Reused per-trace scratch (median input copies), avoiding two
+            // full-length allocations per full-stream trace.
+            std::vector<float> m_scratch;
+            std::vector<float> m_dev;
         };
     }  // namespace Flash
 }  // namespace WireCell

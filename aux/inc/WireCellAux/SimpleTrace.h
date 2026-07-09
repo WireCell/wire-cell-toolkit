@@ -20,6 +20,7 @@ namespace WireCell::Aux {
         ChargeSequence m_charge;
 
         SimpleTrace(int chid, int tbin, const ChargeSequence& charge);
+        SimpleTrace(int chid, int tbin, ChargeSequence&& charge);
         SimpleTrace(int chid, int tbin, size_t ncharges);
 
         // while someone has me as a concrete object they can modify.

@@ -78,8 +78,8 @@ void Flash::OpRoi::ensure_hpf(int n)
     m_hpf_n = n;
 }
 
-// Median of a copy (the caller's vector is left untouched).
-static double vmedian(std::vector<float> v)
+// Median via nth_element on the caller's vector, which is reordered.
+static double vmedian_inplace(std::vector<float>& v)
 {
     if (v.empty()) return 0.0;
     const size_t mid = v.size() / 2;
@@ -87,27 +87,28 @@ static double vmedian(std::vector<float> v)
     return v[mid];
 }
 
-std::vector<float> Flash::OpRoi::clean(const std::vector<float>& decon) const
+std::vector<float> Flash::OpRoi::clean(const std::vector<float>& decon)
 {
     const int n = decon.size();
     std::vector<float> out(n, 0.0f);
     if (n == 0) return out;
 
     // 1. High-pass filter -> "ROI-finding" waveform h.
-    std::vector<float> in(decon);
-    auto D = Aux::DftTools::fwd_r2c(m_dft, in);
+    auto D = Aux::DftTools::fwd_r2c(m_dft, decon);
     for (int k = 0; k < n; ++k) D[k] *= std::complex<float>((float) m_hpf[k], 0.0f);
     auto h = Aux::DftTools::inv_c2r(m_dft, D);  // real, size n
 
     // 2. Baseline removal: subtract median(h).
-    const double hmed = vmedian(h);
+    m_scratch.assign(h.begin(), h.end());
+    const double hmed = vmedian_inplace(m_scratch);
     for (int i = 0; i < n; ++i) h[i] -= (float) hmed;
 
     // 3. Noise rms = 1.4826 * MAD(h), and the ringing-channel veto.
-    const double hmed2 = vmedian(h);
-    std::vector<float> dev(n);
-    for (int i = 0; i < n; ++i) dev[i] = std::abs(h[i] - (float) hmed2);
-    const double rms = 1.4826 * vmedian(dev);
+    m_scratch.assign(h.begin(), h.end());
+    const double hmed2 = vmedian_inplace(m_scratch);
+    m_dev.resize(n);
+    for (int i = 0; i < n; ++i) m_dev[i] = std::abs(h[i] - (float) hmed2);
+    const double rms = 1.4826 * vmedian_inplace(m_dev);
     if (rms > m_veto_sigma) return out;  // zeroed channel
 
     // 4. ROIs (hysteresis): contiguous runs of h > ext (low) that reach seed
@@ -177,7 +178,7 @@ bool Flash::OpRoi::operator()(const IFrame::pointer& in, IFrame::pointer& out)
                            ? std::vector<float>(d.size(), 0.0f)
                            : clean(d);
         out_idx.push_back(all_traces.size());
-        all_traces.push_back(std::make_shared<Aux::SimpleTrace>(trace->channel(), trace->tbin(), cleaned));
+        all_traces.push_back(std::make_shared<Aux::SimpleTrace>(trace->channel(), trace->tbin(), std::move(cleaned)));
     }
 
     // Forward any incoming masks (e.g. OpDecon's "saturation" flags) so the

@@ -105,9 +105,17 @@ namespace WireCell {
                 std::vector<std::complex<float>> fft;  // full-size spectrum, lazy
                 double amplitude;                   // max(wave), >= 1
                 double wi_eps{0.0};                 // (wi_eps_rel * max|fft|)^2, lazy
+                // AutoScale normalization cached when the Wiener filter is
+                // record-independent (fixed_snr > 0, flat noise): the filtered
+                // SPE response then depends only on the template, so the extra
+                // inverse FFT per record collapses to one per template.
+                double cached_scale{0.0};
+                bool scale_cached{false};
             };
             std::vector<SPETemplate> m_templates;
             void ensure_fft(SPETemplate& spe);
+            double auto_scale(const SPETemplate& spe,
+                              const std::vector<std::complex<float>>& xG) const;
             std::map<int, size_t> m_chan2tmpl;
             std::vector<std::complex<float>> m_postfilter;  // full-size spectrum
             std::vector<double> m_wi_filter;  // full-size F(f), wiener_inspired

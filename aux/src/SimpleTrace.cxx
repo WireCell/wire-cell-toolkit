@@ -8,6 +8,12 @@ Aux::SimpleTrace::SimpleTrace(int chid, int tbin, const ChargeSequence& charge)
   , m_charge(charge)
 {
 }
+Aux::SimpleTrace::SimpleTrace(int chid, int tbin, ChargeSequence&& charge)
+  : m_chid(chid)
+  , m_tbin(tbin)
+  , m_charge(std::move(charge))
+{
+}
 Aux::SimpleTrace::SimpleTrace(int chid, int tbin, size_t ncharges)
   : m_chid(chid)
   , m_tbin(tbin)
