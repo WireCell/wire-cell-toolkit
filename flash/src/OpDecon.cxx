@@ -40,6 +40,10 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["auto_scale"] = m_auto_scale;
     cfg["scale"] = m_scale;
     cfg["fixed_snr"] = m_fixed_snr;
+    cfg["wiener_inspired"] = m_wiener_inspired;
+    cfg["wi_sigma_mhz"] = m_wi_sigma_mhz;
+    cfg["wi_power"] = m_wi_power;
+    cfg["wi_eps_rel"] = m_wi_eps_rel;
     cfg["apply_postfilter"] = m_apply_postfilter;
     cfg["postfilter_cutoff"] = m_postfilter_cutoff;
     cfg["apply_post_blcorr"] = m_apply_post_blcorr;
@@ -65,6 +69,10 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_auto_scale = get(cfg, "auto_scale", m_auto_scale);
     m_scale = get(cfg, "scale", m_scale);
     m_fixed_snr = get(cfg, "fixed_snr", m_fixed_snr);
+    m_wiener_inspired = get(cfg, "wiener_inspired", m_wiener_inspired);
+    m_wi_sigma_mhz = get(cfg, "wi_sigma_mhz", m_wi_sigma_mhz);
+    m_wi_power = get(cfg, "wi_power", m_wi_power);
+    m_wi_eps_rel = get(cfg, "wi_eps_rel", m_wi_eps_rel);
     m_apply_postfilter = get(cfg, "apply_postfilter", m_apply_postfilter);
     m_postfilter_cutoff = get(cfg, "postfilter_cutoff", m_postfilter_cutoff);
     m_apply_post_blcorr = get(cfg, "apply_post_blcorr", m_apply_post_blcorr);
@@ -87,6 +95,11 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
         spe.wave.resize(m_samples, 0);
         spe.fft = Aux::DftTools::fwd_r2c(m_dft, spe.wave);
         spe.amplitude = std::max(1.0f, *std::max_element(spe.wave.begin(), spe.wave.end()));
+        if (m_wiener_inspired) {
+            double hmax = 0;
+            for (const auto& c : spe.fft) hmax = std::max(hmax, std::abs(std::complex<double>(c)));
+            spe.wi_eps = std::pow(m_wi_eps_rel * hmax, 2);
+        }
         m_templates.push_back(std::move(spe));
     }
     m_chan2tmpl.clear();
@@ -144,6 +157,20 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
             m_postfilter[k] = F[k] * std::complex<float>(std::cos(ph), std::sin(ph));
         }
     }
+
+    // Wiener-inspired band filter F(f) = exp(-0.5 (f/sigma)^power),
+    // F(0) = 1 exactly, on the full-spectrum frequency grid.
+    if (m_wiener_inspired) {
+        const double sample_freq = 62.5;  // MHz
+        const double df = sample_freq / m_samples;
+        m_wi_filter.resize(m_samples);
+        for (int k = 0; k < m_samples; ++k) {
+            const double f = df * std::min(k, m_samples - k);
+            m_wi_filter[k] = std::exp(-0.5 * std::pow(f / m_wi_sigma_mhz, m_wi_power));
+        }
+        log->debug("wiener-inspired filter: sigma={} MHz power={} eps_rel={}",
+                   m_wi_sigma_mhz, m_wi_power, m_wi_eps_rel);
+    }
 }
 
 std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
@@ -172,8 +199,11 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     // so the filter follows the brightest pulse in the window.  Fixed
     // (m_fixed_snr > 0): S2 = R * N^2 with R the chosen S2/N^2 ratio, giving
     // a filter independent of signal amplitude and record length.
-    double S2;
-    if (m_fixed_snr > 0.0) {
+    double S2 = 0;
+    if (m_wiener_inspired) {
+        // unused: the wiener-inspired filter has no signal/noise model.
+    }
+    else if (m_fixed_snr > 0.0) {
         S2 = m_fixed_snr * N2_flat;
     }
     else {
@@ -184,13 +214,20 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     // Wiener filter G = conj(H) S2 / (|H|^2 S2 + N2), full spectrum.
     // N2 per bin from the channel's noise power spectrum (half-spectrum
     // indexed, mirrored onto the upper bins) when available.
+    // Wiener-inspired mode: G = conj(H) F / (|H|^2 + eps) instead.
     auto xV = Aux::DftTools::fwd_r2c(m_dft, xv);
     std::vector<std::complex<float>> xG(N), xY(N);
     for (int k = 0; k < N; ++k) {
         const std::complex<double> H = spe.fft[k];
         const double H2 = std::norm(H);
-        const double N2 = noise ? (*noise)[k <= N / 2 ? k : N - k] : N2_flat;
-        const std::complex<double> g = std::conj(H) * S2 / (H2 * S2 + N2);
+        std::complex<double> g;
+        if (m_wiener_inspired) {
+            g = std::conj(H) * m_wi_filter[k] / (H2 + spe.wi_eps);
+        }
+        else {
+            const double N2 = noise ? (*noise)[k <= N / 2 ? k : N - k] : N2_flat;
+            g = std::conj(H) * S2 / (H2 * S2 + N2);
+        }
         xG[k] = std::complex<float>(g);
         xY[k] = xG[k] * xV[k];
     }
@@ -198,8 +235,9 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
 
     // AutoScale normalization: apply the filter to the SPE response,
     // center it, and integrate the positive region around the peak.
+    // Wiener-inspired: F(0)=1 already gives unit 1-PE area; keep m_scale.
     double scale = m_scale;
-    if (m_auto_scale) {
+    if (m_auto_scale && !m_wiener_inspired) {
         std::vector<std::complex<float>> xGH(N);
         for (int k = 0; k < N; ++k) {
             // phase shift by half window: exp(+i 2 pi k (N/2) / N) = (-1)^k

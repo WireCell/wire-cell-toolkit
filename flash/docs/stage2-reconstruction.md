@@ -56,6 +56,16 @@ Differences from the module: a shorter-than-`samples` input is zero-padded
 snippets); `kScint` input shape is not ported (unused in the PDHD
 configuration).
 
+**Wiener-inspired mode** (`wiener_inspired: true`, default OFF —
+bit-identical when off): replaces steps 3–4 with the pure inverse times a
+band filter pinned to exactly 1 at zero frequency,
+`G = conj(H)·F(f)/(|H|² + ε)`, `F(f) = exp(−0.5·(f/wi_sigma_mhz)^wi_power)`,
+`ε = (wi_eps_rel·max|H|)²`.  `F(0) = 1` makes the deconvolved 1-PE area
+exactly 1 for any filter parameters, so AutoScale is skipped and
+`fixed_snr`/`line_noise_rms`/`noise_file` are unused; the Gauss post-filter
+should be disabled (`F` *is* the band filter).  Introduced for PDVD
+(derivation and per-population σ: `pdvd/docs/pdvd-light-filter.md`).
+
 ### SPE + noise templates — default is the 2024 averages (NOT v1)
 
 Two template sets exist; **the default `pdhd-spe-templates.json` is the 2024

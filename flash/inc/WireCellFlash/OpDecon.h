@@ -56,6 +56,22 @@ namespace WireCell {
             // amplitude AND record length -- the same filter for the 1024-tick
             // snippets and the 343808-tick full stream.  Assumes flat noise.
             double m_fixed_snr{-1.0};
+            // Wiener-INSPIRED mode.  Default OFF -> bit-identical to every
+            // existing config.  When ON the deconvolution spectrum becomes
+            // the pure inverse times a band filter pinned to 1 at zero
+            // frequency:
+            //   G = conj(H) F(f) / (|H|^2 + eps),  F(f) = exp(-0.5 (f/sigma)^p)
+            // with eps = (wi_eps_rel * max_k|H_k|)^2 guarding template
+            // spectral nulls.  F(0) = 1 makes the deconvolved 1-PE area
+            // exactly 1 independent of the filter parameters, so AutoScale
+            // is skipped (scale = `scale`, default 1) and fixed_snr /
+            // line_noise_rms are unused.  The Gauss post-filter should be
+            // disabled in this mode (F *is* the band filter).  See
+            // pdvd/docs/pdvd-light-filter.md.
+            bool m_wiener_inspired{false};
+            double m_wi_sigma_mhz{1.0};   // F half form: exp(-0.5 (f/sigma)^power)
+            double m_wi_power{2.0};
+            double m_wi_eps_rel{1e-3};
             bool m_apply_postfilter{true};
             double m_postfilter_cutoff{1.5};  // MHz, Gauss post-filter
             bool m_apply_post_blcorr{true};
@@ -85,10 +101,12 @@ namespace WireCell {
                 std::vector<float> wave;            // time domain, m_samples
                 std::vector<std::complex<float>> fft;  // full-size spectrum
                 double amplitude;                   // max(wave), >= 1
+                double wi_eps{0.0};                 // (wi_eps_rel * max|fft|)^2
             };
             std::vector<SPETemplate> m_templates;
             std::map<int, size_t> m_chan2tmpl;
             std::vector<std::complex<float>> m_postfilter;  // full-size spectrum
+            std::vector<double> m_wi_filter;  // full-size F(f), wiener_inspired
 
             // Noise power spectra, half-spectrum (samples/2+1) bins.
             std::vector<std::vector<double>> m_noise_templates;
