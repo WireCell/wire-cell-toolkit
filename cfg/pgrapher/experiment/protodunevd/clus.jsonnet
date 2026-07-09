@@ -24,9 +24,10 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           time_offset=0 * wc.us, relax_containment_filter=true)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
-// x-span vs the collection-plane->cathode-surface distance 339.01 cm); was 1.6.
+// x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
+// surface corrected 2.54->3.0 cm, so 1.57->1.568, v proportional to D); was 1.6.
 // See pdvd/docs/clus-workflow.md (drift-velocity calibration).
-local drift_speed = 1.57 * wc.mm / wc.us;
+local drift_speed = 1.568 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);
@@ -50,9 +51,9 @@ local apa_drift_groups = [
 // ProtoDUNE-VD geometry parameters
 // 8 anodes total: anodes 0-3 are bottom drift (centerline x=-3415.5mm, drift in +x direction)
 //                 anodes 4-7 are top    drift (centerline x=+3415.5mm, drift in -x direction)
-// apa_plane = 57.15mm (half of apa_g2g=114.3mm), cpa_plane = 3390.1mm
-// Bottom drift anode face x ~ -3358.35mm, cathode x ~ -25.4mm
-// Top    drift anode face x ~  3358.35mm, cathode x ~   25.4mm
+// apa_plane = 57.15mm (half of apa_g2g=114.3mm), cpa_plane = 3385.5mm
+// Bottom drift anode face x ~ -3358.35mm, cathode x ~ -30.0mm
+// Top    drift anode face x ~  3358.35mm, cathode x ~   30.0mm
 local dvm = {
     overall: {
         FV_xmin: -3415.5 * wc.mm,
@@ -70,7 +71,7 @@ local dvm = {
         vertical_dir: [0,1,0],
         beam_dir: [0,0,1]
     },
-    // Bottom drift (anodes 0-3): anode face at ~-3358.35mm, cathode at ~-25.4mm
+    // Bottom drift (anodes 0-3): anode face at ~-3358.35mm, cathode at ~-30.0mm
     // Both faces share same x-bounds (2-sided CRP, same drift direction)
     a0f0pA: {
         drift_speed: drift_speed,
@@ -79,7 +80,7 @@ local dvm = {
         time_offset: time_offset,
         nticks_live_slice: 4,
         FV_xmin: -3358.35 * wc.mm,
-        FV_xmax: -25.4 * wc.mm,
+        FV_xmax: -30.0 * wc.mm,
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
     },
@@ -90,9 +91,9 @@ local dvm = {
     a2f1pA: $.a0f0pA,
     a3f0pA: $.a0f0pA,
     a3f1pA: $.a0f0pA,
-    // Top drift (anodes 4-7): cathode at ~25.4mm, anode face at ~3358.35mm
+    // Top drift (anodes 4-7): cathode at ~30.0mm, anode face at ~3358.35mm
     a4f0pA: $.a0f0pA + {
-        FV_xmin: 25.4 * wc.mm,
+        FV_xmin: 30.0 * wc.mm,
         FV_xmax: 3358.35 * wc.mm,
     },
     a4f1pA: $.a4f0pA,
@@ -592,8 +593,8 @@ local clus_all_tpc (
 
         // Cathode-crossing connector (SBND-tuned parameters as placeholder;
         // PDVD central cathode is at x=0, the C++ default cathode_x — the
-        // sensitive volumes end at -+25.4mm so cathode_x_cut=5cm spans the
-        // |x|<2.54cm gap).  use_flash_t0=false because PDVD has no flash
+        // sensitive volumes end at -+30.0mm so cathode_x_cut=5cm spans the
+        // |x|<3.0cm gap).  use_flash_t0=false because PDVD has no flash
         // matching (the flash-coincidence gate would veto every pair).
         cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
