@@ -156,6 +156,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_outpath       = get(cfg, "outpath", m_outpath);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
+    m_light_model   = get(cfg, "light_model", m_light_model);
+    m_photon_library_file = get(cfg, "photon_library_file", m_photon_library_file);
     m_calib_dump    = get(cfg, "calib_dump", m_calib_dump);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_cathode_diag  = get(cfg, "cathode_diag", m_cathode_diag);
@@ -378,8 +380,26 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_semi_model = std::make_unique<SemiAnalyticalModel>(
         vuv_cfg, vis_cfg, geom, m_opdets, m_doReflectedLight);
 
-    log->debug("QLMatching configured: nopdets={}, semimodel_file={}",
-               m_opdets.size(), m_semimodel_file);
+    // Optional gridded-library visibility backend (default "semi" leaves the
+    // path above untouched).  The semi model and OpDet table stay loaded --
+    // masks, cathode-side and boundary-flag logic use them either way.
+    m_lib_model.reset();
+    if (m_light_model == "library") {
+        if (m_photon_library_file.empty()) {
+            raise<ValueError>("QLMatching: light_model 'library' needs photon_library_file");
+        }
+        m_lib_model = std::make_unique<PhotonLibraryModel>(m_photon_library_file);
+        if (m_lib_model->nchan() != m_opdets.size()) {
+            raise<ValueError>("QLMatching: photon library nchan %d != nopdets %d",
+                              (int) m_lib_model->nchan(), (int) m_opdets.size());
+        }
+    }
+    else if (m_light_model != "semi") {
+        raise<ValueError>("QLMatching: unknown light_model '%s'", m_light_model);
+    }
+
+    log->debug("QLMatching configured: nopdets={}, semimodel_file={}, light_model={}",
+               m_opdets.size(), m_semimodel_file, m_light_model);
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -400,6 +420,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_pin_angle"]    = m_xtpc_pin_angle;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
+    cfg["light_model"]     = m_light_model;
+    cfg["photon_library_file"] = m_photon_library_file;
     cfg["pmts"]            = m_pmts;
     cfg["active_opdet_types"] = Json::arrayValue;
     for (int t : m_active_opdet_types) cfg["active_opdet_types"].append(t);
@@ -1219,12 +1241,21 @@ void QLMatching::build_bundles(ApaRun& run)
 
                     // SemiAnalyticalModel expects positions in cm; blob points are mm.
                     const WireCell::Point xyz_cm(x / units::cm, y / units::cm, z / units::cm);
+                    if (m_lib_model) {
+                        // Gridded library holds total photon arrival (incl. any
+                        // reflected component) with the detector's own optical
+                        // shadowing; reflected term stays 0.
+                        m_lib_model->visibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
+                        reflected_visibilities.assign(nopdets, 0.0);
+                    }
+                    else {
                     // Skip masked opdets inside the model: their predicted light is
                     // discarded by the flash_opdet_mask gate below, so evaluating the
                     // per-opdet solid-angle/Gaisser-Hillas correction for them is wasted
                     // (~half of the same-TPC opdets are masked). Bit-identical result.
                     m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
                     m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm, &flash_opdet_mask);
+                    }
 
                     for (std::size_t idet = 0; idet < nopdets; ++idet) {
                         if (flash_opdet_mask.at(idet) == 0) continue;

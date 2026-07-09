@@ -8,6 +8,7 @@
 #include "WireCellIface/IFiducial.h"
 #include "WireCellIface/ITensorSetFanin.h"
 
+#include "WireCellMatch/PhotonLibraryModel.h"
 #include "WireCellMatch/SemiAnalyticalModel.h"
 #include "WireCellMatch/TimingTPCBundle.h"
 
@@ -538,6 +539,20 @@ namespace WireCell::Match {
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
 
         std::unique_ptr<SemiAnalyticalModel> m_semi_model;
+
+        // Visibility backend selector: "semi" (default, the semi-analytical
+        // model) or "library" (gridded lookup sampled offline from a detector
+        // optical model, e.g. the PDVD PDFastSimANN computable graph; see
+        // PhotonLibraryModel.h).  In library mode semimodel_file is still
+        // loaded (it supplies the OpDet table used by masks and cathode-side
+        // logic) but the per-point visibilities come from
+        // photon_library_file, with reflected light 0 (the library holds
+        // total photon arrival) and no same-TPC x-sign gate (the library
+        // encodes cathode opacity and double-sided cathode PDs).  Default
+        // "semi" leaves the existing path untouched (bit-identical).
+        std::string m_light_model{"semi"};
+        std::string m_photon_library_file{""};
+        std::unique_ptr<PhotonLibraryModel> m_lib_model;
 
         // Per-OpDet table (type + position) loaded from semimodel_file. Used to
         // build the SemiAnalyticalModel and, at execute() time, to derive the
