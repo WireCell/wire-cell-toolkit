@@ -36,6 +36,7 @@ WireCell::Configuration Flash::OpRoi::default_configuration() const
     cfg["roi_post_peak"] = m_roi_post_peak;
     cfg["veto_sigma"] = m_veto_sigma;
     cfg["apply_baseline"] = m_apply_baseline;
+    cfg["use_real_dft"] = m_use_real_dft;
     cfg["veto_channels"] = Json::arrayValue;
     cfg["dft"] = "FftwDFT";
     return cfg;
@@ -52,6 +53,7 @@ void Flash::OpRoi::configure(const WireCell::Configuration& cfg)
     m_roi_post_peak = get(cfg, "roi_post_peak", m_roi_post_peak);
     m_veto_sigma = get(cfg, "veto_sigma", m_veto_sigma);
     m_apply_baseline = get(cfg, "apply_baseline", m_apply_baseline);
+    m_use_real_dft = get(cfg, "use_real_dft", m_use_real_dft);
 
     if (cfg.isMember("veto_channels")) {
         m_veto_channels.clear();
@@ -94,9 +96,11 @@ std::vector<float> Flash::OpRoi::clean(const std::vector<float>& decon)
     if (n == 0) return out;
 
     // 1. High-pass filter -> "ROI-finding" waveform h.
-    auto D = Aux::DftTools::fwd_r2c(m_dft, decon);
+    auto D = m_use_real_dft ? Aux::DftTools::fwd_r2c_real(m_dft, decon)
+                            : Aux::DftTools::fwd_r2c(m_dft, decon);
     for (int k = 0; k < n; ++k) D[k] *= std::complex<float>((float) m_hpf[k], 0.0f);
-    auto h = Aux::DftTools::inv_c2r(m_dft, D);  // real, size n
+    auto h = m_use_real_dft ? Aux::DftTools::inv_c2r_real(m_dft, D)
+                            : Aux::DftTools::inv_c2r(m_dft, D);  // real, size n
 
     // 2. Baseline removal: subtract median(h).
     m_scratch.assign(h.begin(), h.end());

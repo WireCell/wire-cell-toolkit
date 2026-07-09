@@ -49,6 +49,20 @@ DftTools::real_vector_t DftTools::inv_c2r(const IDFT::pointer& dft, const DftToo
     return rvec;
 }
 
+DftTools::complex_vector_t DftTools::fwd_r2c_real(const IDFT::pointer& dft, const DftTools::real_vector_t& vec)
+{
+    complex_vector_t ret(vec.size());
+    dft->fwd_r2c_1d(vec.data(), ret.data(), vec.size());
+    return ret;
+}
+
+DftTools::real_vector_t DftTools::inv_c2r_real(const IDFT::pointer& dft, const DftTools::complex_vector_t& spec)
+{
+    real_vector_t ret(spec.size());
+    dft->inv_c2r_1d(spec.data(), ret.data(), spec.size());
+    return ret;
+}
+
 /*** array ***/
 
 // Implementation notes for fwd()/inv():

@@ -120,6 +120,64 @@ void Aux::FftwDFT::inv1d(const complex_t* in, complex_t* out, int ncols) const
 }
 
 
+void Aux::FftwDFT::fwd_r2c_1d(const scalar_t* in, complex_t* out, int size) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    auto src = const_cast<scalar_t*>(in);
+    auto dst = pval_cast(out);
+    auto key = make_key(src, dst, 1, size, FFTW_FORWARD);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            plan = fftwf_plan_dft_r2c_1d(size, src, dst,
+                                         FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_r2c(plan, src, dst);
+    // FFTW fills the non-redundant lower half; mirror the rest so the
+    // caller sees the full-size Hermitian spectrum.
+    for (int ind = size / 2 + 1; ind < size; ++ind) {
+        out[ind] = std::conj(out[size - ind]);
+    }
+}
+
+void Aux::FftwDFT::inv_c2r_1d(const complex_t* in, scalar_t* out, int size) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    // c2r reads only the size/2+1 lower half of the spectrum (the
+    // Hermitian assumption); rank-1 out-of-place supports
+    // FFTW_PRESERVE_INPUT so the caller's spectrum is untouched.
+    auto src = pval_cast(in);
+    auto dst = out;
+    auto key = make_key(src, dst, 1, size, FFTW_BACKWARD);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            plan = fftwf_plan_dft_c2r_1d(size, src, dst,
+                                         FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_c2r(plan, src, dst);
+    // Apply 1/n normalization
+    for (int ind = 0; ind < size; ++ind) {
+        out[ind] /= size;
+    }
+}
+
 fftwf_plan plan_1b(fftwf_complex *in, fftwf_complex *out,
                    int nrows, int ncols, int sign, int axis)
 {

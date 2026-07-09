@@ -47,6 +47,8 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["apply_postfilter"] = m_apply_postfilter;
     cfg["postfilter_cutoff"] = m_postfilter_cutoff;
     cfg["apply_post_blcorr"] = m_apply_post_blcorr;
+    cfg["use_real_dft"] = m_use_real_dft;
+    cfg["fold_postfilter"] = m_fold_postfilter;
     cfg["detect_saturation"] = m_detect_saturation;
     cfg["saturation_adc"] = m_saturation_adc;
     cfg["saturation_min_samples"] = m_saturation_min_samples;
@@ -76,6 +78,8 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_apply_postfilter = get(cfg, "apply_postfilter", m_apply_postfilter);
     m_postfilter_cutoff = get(cfg, "postfilter_cutoff", m_postfilter_cutoff);
     m_apply_post_blcorr = get(cfg, "apply_post_blcorr", m_apply_post_blcorr);
+    m_use_real_dft = get(cfg, "use_real_dft", m_use_real_dft);
+    m_fold_postfilter = get(cfg, "fold_postfilter", m_fold_postfilter);
     m_detect_saturation = get(cfg, "detect_saturation", m_detect_saturation);
     m_saturation_adc = get(cfg, "saturation_adc", m_saturation_adc);
     m_saturation_min_samples = get(cfg, "saturation_min_samples", m_saturation_min_samples);
@@ -150,11 +154,31 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
             const double u = (i - mu) / sigma;
             xf[i] = norm * std::exp(-0.5 * u * u);
         }
-        auto F = Aux::DftTools::fwd_r2c(m_dft, xf);
+        auto F = dft_fwd(xf);
         m_postfilter.resize(m_samples);
         for (int k = 0; k < m_samples; ++k) {
             const double ph = -2 * M_PI * double(k) * mu / m_samples;
             m_postfilter[k] = F[k] * std::complex<float>(std::cos(ph), std::sin(ph));
+        }
+    }
+
+    // Spectral weights for the fold_postfilter head-pedestal: the mean of
+    // the first nped samples of the (unfiltered) inverse transform is
+    // mean = Re sum_k X_k w_k with w_k = (1/(N nped)) sum_{i<nped}
+    // exp(+2 pi i k i / N) (geometric sum in closed form).
+    if (m_apply_postfilter && m_fold_postfilter && m_apply_post_blcorr) {
+        const int N = m_samples;
+        const int nped = m_pre_trigger - m_pedestal_buffer;
+        m_ped_w.assign(N, {0.0, 0.0});
+        for (int k = 0; k < N; ++k) {
+            if (k == 0) {
+                m_ped_w[k] = 1.0 / N;
+                continue;
+            }
+            const double th = 2 * M_PI * double(k) / N;
+            const std::complex<double> num = 1.0 - std::polar(1.0, th * nped);
+            const std::complex<double> den = 1.0 - std::polar(1.0, th);
+            m_ped_w[k] = num / den / double(N) / double(nped);
         }
     }
 
@@ -173,6 +197,18 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     }
 }
 
+std::vector<std::complex<float>> Flash::OpDecon::dft_fwd(const std::vector<float>& wave) const
+{
+    return m_use_real_dft ? Aux::DftTools::fwd_r2c_real(m_dft, wave)
+                          : Aux::DftTools::fwd_r2c(m_dft, wave);
+}
+
+std::vector<float> Flash::OpDecon::dft_inv(const std::vector<std::complex<float>>& spec) const
+{
+    return m_use_real_dft ? Aux::DftTools::inv_c2r_real(m_dft, spec)
+                          : Aux::DftTools::inv_c2r(m_dft, spec);
+}
+
 void Flash::OpDecon::ensure_fft(SPETemplate& spe)
 {
     if (!spe.fft.empty()) {
@@ -180,7 +216,7 @@ void Flash::OpDecon::ensure_fft(SPETemplate& spe)
     }
     std::vector<float> padded(spe.wave);
     padded.resize(m_samples, 0);
-    spe.fft = Aux::DftTools::fwd_r2c(m_dft, padded);
+    spe.fft = dft_fwd(padded);
     if (m_wiener_inspired) {
         double hmax = 0;
         for (const auto& c : spe.fft) hmax = std::max(hmax, std::abs(std::complex<double>(c)));
@@ -216,7 +252,7 @@ double Flash::OpDecon::auto_scale(const SPETemplate& spe,
         const float sign = (k % 2 == 0) ? 1.0f : -1.0f;
         xGH[k] = xG[k] * spe.fft[k] * sign;
     }
-    auto x = Aux::DftTools::inv_c2r(m_dft, xGH);
+    auto x = dft_inv(xGH);
     const int imax = std::distance(x.begin(), std::max_element(x.begin(), x.end()));
     int ileft = imax, iright = imax;
     while (ileft > 0 && x[ileft] > 0) --ileft;
@@ -269,8 +305,10 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     // N2 per bin from the channel's noise power spectrum (half-spectrum
     // indexed, mirrored onto the upper bins) when available.
     // Wiener-inspired mode: G = conj(H) F / (|H|^2 + eps) instead.
-    auto xV = Aux::DftTools::fwd_r2c(m_dft, xv);
+    auto xV = dft_fwd(xv);
+    const bool fold = m_apply_postfilter && m_fold_postfilter;
     std::vector<std::complex<float>> xG(N), xY(N);
+    std::complex<double> ped_acc(0.0, 0.0);
     for (int k = 0; k < N; ++k) {
         const std::complex<double> H = spe.fft[k];
         const double H2 = std::norm(H);
@@ -284,8 +322,13 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
         }
         xG[k] = std::complex<float>(g);
         xY[k] = xG[k] * xV[k];
+        if (fold) {
+            // Head pedestal of the UNfiltered decon, evaluated spectrally.
+            if (m_apply_post_blcorr) ped_acc += std::complex<double>(xY[k]) * m_ped_w[k];
+            xY[k] *= m_postfilter[k];
+        }
     }
-    auto xvdec = Aux::DftTools::inv_c2r(m_dft, xY);  // normalized inverse
+    auto xvdec = dft_inv(xY);  // normalized inverse
 
     // AutoScale normalization (cached per template when the filter is
     // record-independent; see ensure_fft).
@@ -296,17 +339,24 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     }
 
     // Baseline of the deconvolved waveform, computed before the
-    // post-filter, subtracted after (as in the LArSoft module).
+    // post-filter, subtracted after (as in the LArSoft module).  With
+    // fold_postfilter the same pre-filter baseline comes from the
+    // spectral accumulation above.
     double dec_pedestal = 0;
     if (m_apply_post_blcorr) {
-        for (int i = 0; i < nped; ++i) dec_pedestal += xvdec[i];
-        dec_pedestal /= nped;
+        if (fold) {
+            dec_pedestal = ped_acc.real();
+        }
+        else {
+            for (int i = 0; i < nped; ++i) dec_pedestal += xvdec[i];
+            dec_pedestal /= nped;
+        }
     }
 
-    if (m_apply_postfilter) {
-        auto Y = Aux::DftTools::fwd_r2c(m_dft, xvdec);
+    if (m_apply_postfilter && !fold) {
+        auto Y = dft_fwd(xvdec);
         for (int k = 0; k < N; ++k) Y[k] *= m_postfilter[k];
-        xvdec = Aux::DftTools::inv_c2r(m_dft, Y);
+        xvdec = dft_inv(Y);
     }
 
     std::vector<float> out(N);

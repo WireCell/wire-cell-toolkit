@@ -86,6 +86,9 @@ namespace WireCell {
             // Per-ROI linear endpoint-zeroing.  When false the in-ROI decon is
             // kept verbatim (only the outside-ROI zeroing applies).
             bool m_apply_baseline{true};
+            // Perf knob, default OFF -> bit-identical: run the HPF transforms
+            // as true real FFTs (r2c/c2r plans), same results up to round-off.
+            bool m_use_real_dft{false};
 
             IDFT::pointer m_dft;
 

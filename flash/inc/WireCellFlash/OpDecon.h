@@ -75,6 +75,18 @@ namespace WireCell {
             bool m_apply_postfilter{true};
             double m_postfilter_cutoff{1.5};  // MHz, Gauss post-filter
             bool m_apply_post_blcorr{true};
+            // Perf knobs, default OFF -> bit-identical to every existing
+            // config.  use_real_dft: run the transforms as true real FFTs
+            // (FFTW r2c/c2r plans) -- same results up to round-off (~1e-7),
+            // about half the FFT flops and transform memory.
+            // fold_postfilter: multiply the Gauss post-filter into the
+            // deconvolution spectrum instead of a separate fwd+inv pair per
+            // record.  The post baseline correction keeps its exact
+            // semantics (mean of the UNfiltered decon head): that mean is a
+            // linear functional of the spectrum and is evaluated with the
+            // precomputed m_ped_w weights, so only round-off differs.
+            bool m_use_real_dft{false};
+            bool m_fold_postfilter{false};
             // 14-bit ADC saturation detection.  Default OFF -> the output frame
             // carries no masks, bit-identical to every existing config.  When ON:
             // any input snippet with >= saturation_min_samples raw samples at or
@@ -116,9 +128,15 @@ namespace WireCell {
             void ensure_fft(SPETemplate& spe);
             double auto_scale(const SPETemplate& spe,
                               const std::vector<std::complex<float>>& xG) const;
+            // Transform via the complex (default) or real (use_real_dft) path.
+            std::vector<std::complex<float>> dft_fwd(const std::vector<float>& wave) const;
+            std::vector<float> dft_inv(const std::vector<std::complex<float>>& spec) const;
             std::map<int, size_t> m_chan2tmpl;
             std::vector<std::complex<float>> m_postfilter;  // full-size spectrum
             std::vector<double> m_wi_filter;  // full-size F(f), wiener_inspired
+            // Spectral weights for the head-pedestal mean, used by
+            // fold_postfilter: mean_{i<nped} x_i = Re sum_k X_k m_ped_w[k].
+            std::vector<std::complex<double>> m_ped_w;
 
             // Noise power spectra, half-spectrum (samples/2+1) bins.
             std::vector<std::vector<double>> m_noise_templates;
