@@ -94,6 +94,9 @@ local wc = import 'wirecell.jsonnet';
             wi_sigma_mhz: wi_sigma,
             wi_power: 2.0,
             apply_postfilter: false,
+            // Perf knob (validated 2026-07-08, flash/docs/light-perf-round1.md):
+            // true real FFTs -- same physics to float round-off, half the FFT work.
+            use_real_dft: true,
             [if detect_saturation then 'detect_saturation']: detect_saturation,
             [if detect_saturation && saturation_pad != 0 then 'saturation_pad']: saturation_pad,
         },
@@ -116,6 +119,7 @@ local wc = import 'wirecell.jsonnet';
             roi_post_peak: 300,
             veto_sigma: veto_sigma,
             veto_channels: veto_channels,
+            use_real_dft: true,  // perf knob, round-off-level change only
         },
     }, nin=1, nout=1, uses=[dft]),
 

@@ -97,6 +97,11 @@ local wc = import 'wirecell.jsonnet';
             noise_file: '',
             samples: samples,
             fixed_snr: fixed_snr,
+            // Perf knobs (validated 2026-07-08, flash/docs/light-perf-round1.md):
+            // true real FFTs and the post-filter folded into the decon
+            // spectrum -- same physics to float round-off, ~half the FFT work.
+            use_real_dft: true,
+            fold_postfilter: true,
             [if spe_file != '' then 'spe_file']: spe_file,
             // Flag raw 14-bit ADC saturation (rail at 16383) so OpHitFinder can
             // drop the over-integrated hits (default off -> no masks,
@@ -142,6 +147,7 @@ local wc = import 'wirecell.jsonnet';
             roi_post_peak: 300,
             veto_sigma: 0.1,
             veto_channels: veto_channels,
+            use_real_dft: true,  // perf knob, round-off-level change only
         },
     }, nin=1, nout=1, uses=[dft]),
 
