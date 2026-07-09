@@ -96,14 +96,18 @@ namespace WireCell {
 
             IDFT::pointer m_dft;
 
-            // Per-template precomputed state.
+            // Per-template precomputed state.  The spectrum is built lazily
+            // on a template's first use: a branch instance configured with
+            // the full template file only pays the (m_samples-long) FFT and
+            // spectrum storage for the channels it actually deconvolves.
             struct SPETemplate {
-                std::vector<float> wave;            // time domain, m_samples
-                std::vector<std::complex<float>> fft;  // full-size spectrum
+                std::vector<float> wave;            // time domain, unpadded (<= m_samples)
+                std::vector<std::complex<float>> fft;  // full-size spectrum, lazy
                 double amplitude;                   // max(wave), >= 1
-                double wi_eps{0.0};                 // (wi_eps_rel * max|fft|)^2
+                double wi_eps{0.0};                 // (wi_eps_rel * max|fft|)^2, lazy
             };
             std::vector<SPETemplate> m_templates;
+            void ensure_fft(SPETemplate& spe);
             std::map<int, size_t> m_chan2tmpl;
             std::vector<std::complex<float>> m_postfilter;  // full-size spectrum
             std::vector<double> m_wi_filter;  // full-size F(f), wiener_inspired

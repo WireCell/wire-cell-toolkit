@@ -92,14 +92,14 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
         for (const auto& jv : jt["values"]) {
             spe.wave.push_back(jv.asFloat());
         }
-        spe.wave.resize(m_samples, 0);
-        spe.fft = Aux::DftTools::fwd_r2c(m_dft, spe.wave);
-        spe.amplitude = std::max(1.0f, *std::max_element(spe.wave.begin(), spe.wave.end()));
-        if (m_wiener_inspired) {
-            double hmax = 0;
-            for (const auto& c : spe.fft) hmax = std::max(hmax, std::abs(std::complex<double>(c)));
-            spe.wi_eps = std::pow(m_wi_eps_rel * hmax, 2);
+        if ((int)spe.wave.size() > m_samples) {
+            spe.wave.resize(m_samples);
         }
+        // Zero-padding to m_samples does not change the max (amplitude is
+        // clamped to >= 1), so it can be computed on the unpadded wave; the
+        // padded spectrum itself is built lazily in ensure_fft() on the
+        // template's first use.
+        spe.amplitude = std::max(1.0f, *std::max_element(spe.wave.begin(), spe.wave.end()));
         m_templates.push_back(std::move(spe));
     }
     m_chan2tmpl.clear();
@@ -170,6 +170,21 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
         }
         log->debug("wiener-inspired filter: sigma={} MHz power={} eps_rel={}",
                    m_wi_sigma_mhz, m_wi_power, m_wi_eps_rel);
+    }
+}
+
+void Flash::OpDecon::ensure_fft(SPETemplate& spe)
+{
+    if (!spe.fft.empty()) {
+        return;
+    }
+    std::vector<float> padded(spe.wave);
+    padded.resize(m_samples, 0);
+    spe.fft = Aux::DftTools::fwd_r2c(m_dft, padded);
+    if (m_wiener_inspired) {
+        double hmax = 0;
+        for (const auto& c : spe.fft) hmax = std::max(hmax, std::abs(std::complex<double>(c)));
+        spe.wi_eps = std::pow(m_wi_eps_rel * hmax, 2);
     }
 }
 
@@ -331,6 +346,7 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
         if (nit != m_chan2noise.end() and nit->second < m_noise_templates.size()) {
             noise = &m_noise_templates[nit->second];
         }
+        ensure_fft(m_templates[it->second]);
         auto dec = deconvolve(trace->charge(), m_templates[it->second], noise);
         out_idx.push_back(all_traces.size());
         all_traces.push_back(std::make_shared<Aux::SimpleTrace>(chan, trace->tbin(), dec));
