@@ -280,7 +280,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // per-APA cluster trees into one, so skip the PointTreeMerging fanin and feed the
 // single pre-merged input straight to the all-APA MABC.  Default false = the
 // historical per-APA path (two QLMatching nodes -> PointTreeMerging -> MABC).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true) = {
+// tensor_outname (default ''): when set, the terminal TensorFileSink becomes a
+// REAL sink writing the post-QL point-cloud tree tensors (live+dead, prefix
+// 'clustering_') to that file -- the persistent intermediate format consumed by
+// the downstream pattern-recognition job (see sbnd/docs/sbnd-pattern-recognition.md).
+// Default '' keeps the historical dump_mode no-op sink (byte-identical).
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='') = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -399,9 +404,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         type: 'TensorFileSink',
         name: 'clus_all_apa',
         data: {
-            outname: 'trash-all-apa.tar.gz',
+            outname: if tensor_outname == '' then 'trash-all-apa.tar.gz' else tensor_outname,
             prefix: 'clustering_',
-            dump_mode: true,
+            dump_mode: tensor_outname == '',
         },
     }, nin=1, nout=0),
     local end = if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
@@ -442,9 +447,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
-    all_apa(anodes, dump=true, bee_sink=null, premerged=false)::
+    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='')::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
+                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
+                     tensor_outname=tensor_outname),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
