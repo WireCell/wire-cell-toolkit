@@ -201,15 +201,25 @@ struct BlobSampler::Sampler : public Aux::Logger
         return avg;
     }
 
-    // Match array name suffix against regexp
+    // Match array name suffix against regexp.  Memoized: the suffix
+    // vocabulary is a handful of fixed names asked once per sampled blob.
+    // Same thread-safety caveat as plane_ident2index below.
+    std::unordered_map<std::string, bool> extra_cache;
     bool is_extra(const std::string& suffix) {
+        auto hit = extra_cache.find(suffix);
+        if (hit != extra_cache.end()) {
+            return hit->second;
+        }
         std::smatch smatch;
+        bool found = false;
         for (const auto& re : cc.extra_re) {
             if (std::regex_match(suffix, smatch, re)) {
-                return true;
+                found = true;
+                break;
             }
         }
-        return false;
+        extra_cache.emplace(suffix, found);
+        return found;
     }
     
     // Fixme: this cache is not thread safe if a BlobSampler is shared
