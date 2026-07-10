@@ -96,6 +96,52 @@ namespace WireCell::Match {
         double m_auto_mask_pe_bright{50.0};  // neighbour-median PE meaning "light present"
         int    m_auto_mask_min_contrast{1};  // # bright-neighbour flashes required
         int    m_auto_mask_min_flash{3};     // skip auto-masking below this flash count
+        // Restrict the auto-mask neighbour pool to OpDets of the SAME type as the
+        // candidate channel. For a mixed-PD detector (PDVD: X-ARAPUCAs ~0.03 eff vs
+        // PMTs ~0.12/0.036) a (Y,Z)-nearest neighbour can be a different PD type
+        // whose brightness is not a meaningful reference. Default false => the
+        // historical all-active-type pool (bit-identical).
+        bool m_auto_mask_same_type{false};
+
+        // ---- PDVD / vertical-drift knobs (all default OFF => other detectors
+        // byte-identical). See match/docs/qlmatching-code.md. ----
+        //
+        // shared_flash: the detector produces ONE all-PD flash list shared by every
+        // input port (PDVD: a single flash covers both drift volumes; the cathode
+        // XAs at x=0 see both sides). The per-run pipeline through cull_inconsistent
+        // is unchanged, but the two LASSO rounds run JOINTLY: each physical flash
+        // (keyed by its input tensor row id, identical across ports) gets ONE
+        // measured block and columns from EVERY port's candidate bundles, so
+        // clusters from both drift sides share the explanation of one flash instead
+        // of each side independently absorbing the full PE (which would bias every
+        // cathode-crosser). Requires >1 input port; the merged-root opflash PC and
+        // matched_flash_gid are emitted once (side-0 keyed). The empty-flash and
+        // cluster rescues are NOT shared-flash-aware and are skipped with a warning.
+        bool m_shared_flash{false};
+        // opdet_all_volumes: keep every active OpDet in every run's mask instead of
+        // splitting by cathode-plane x (PDVD: the cathode XAs sit AT x=0 and are
+        // double-sided; a single flash needs all PDs on both drift-side runs).
+        bool m_opdet_all_volumes{false};
+        // vd_surface_flags: PD-surface-aware endpoint flags. The historical
+        // flag_close_to_PMT test assumes the PDs sit behind the anode plane (SBND /
+        // PDHD horizontal drift). For PDVD the PDs are at the cathode (XAs), on the
+        // two y walls (membrane XAs) and behind the BOTTOM anode only (PMTs):
+        //  - anode-end proximity sets flag_close_to_PMT only for an input whose
+        //    anode_pd_channels list is non-empty (PDVD: bottom volume yes, top no);
+        //    flag_at_x_boundary is set regardless (unchanged T0 semantics).
+        //  - proximity to a y wall with a non-empty pd_wall_channels list sets
+        //    flag_close_to_PMT (drift-invariant, memoized per cluster).
+        //  - the cathode end additionally sets the inert flag_at_cathode.
+        // Each trigger also records its surface's PD channels on the bundle
+        // (TimingTPCBundle::add_relax_channels), so the chi2_relax denominator
+        // widening applies only to the RELEVANT PDs, not any channel.
+        bool m_vd_surface_flags{false};
+        double m_pd_wall_cushion{10 * units::cm};  // wall-proximity band
+        std::vector<int> m_pd_wall_channels_ylo;   // PD channels on the low-y wall (empty => wall inactive)
+        std::vector<int> m_pd_wall_channels_yhi;   // PD channels on the high-y wall (empty => wall inactive)
+        // Per-input-port PD channels behind that input's anode (empty list => that
+        // anode hosts no PDs => no anode-end flag_close_to_PMT in vd mode).
+        std::vector<std::vector<int>> m_anode_pd_channels;
         bool m_beamonly{false};
         double m_flash_minPE{500};
         double m_flash_mintime{-1.5 * units::ms};
@@ -471,6 +517,12 @@ namespace WireCell::Match {
         mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*,
                                    std::pair<WireCell::Point, WireCell::Point>> m_pca_endpoints_cache;
 
+        // Per-cluster wall-proximity verdict cache (vd_surface_flags only; a cluster
+        // belongs to exactly one input port, so keying by cluster is unambiguous).
+        // Cleared each event in operator() alongside m_extreme_cache.
+        mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*, uint8_t>
+            m_wall_flag_cache;
+
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
         float m_cluster_t0{-1e12};
@@ -559,25 +611,6 @@ namespace WireCell::Match {
         // per-channel on/off mask and the per-TPC OpDet split.
         std::vector<SemiAnalyticalModel::OpticalDetector> m_opdets;
         double m_cathode_x{0.0};  // cathode-plane x; OpDets on its low/high side belong to TPC 0/1
-
-        // Fill the per-bundle boundary flags (flag_close_to_PMT,
-        // flag_at_x_boundary, flag_spec_end) for one (flash, cluster) bundle.
-        // Ports the MicroBooNE prototype end-trimming walk (ToyMatching.cxx
-        // ~176-290) into the per-TPC drift coordinate u. s/anode_x/u_cathode are
-        // the geometry scalars computed once per anode in operator().
-        //
-        // Returns the prototype's flag_good_bundle / TPC-containment verdict: true
-        // iff the (post-trim) cluster endpoints fall inside the TPC drift box (the
-        // 4-part in-window guard, == ToyMatching.cxx 272-275). Returns false when
-        // the cluster has no 3d points at all (it cannot be contained). The
-        // endpoint walk unions the cluster's slices over EVERY anode it touches (a
-        // PDHD drift group spans two APAs offset in Z), so a cluster living wholly
-        // in the group's second APA is no longer spuriously declared uncontained.
-        // The caller discards uncontained bundles when m_require_containment.
-        bool compute_endpoint_flags(TimingTPCBundle* bundle,
-                                    WireCell::Clus::Facade::Cluster* cluster,
-                                    double flash_x_offset,
-                                    double s, double anode_x, double u_cathode) const;
 
         // True iff this (flash, cluster) bundle should be dropped by the opaque-cathode
         // mismatched-candidate filter: the flash is lit on the opposite drift side from
@@ -687,6 +720,33 @@ namespace WireCell::Match {
         void compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc);  // per-event dead-PMT auto-mask
         void build_bundles(ApaRun& run);             // (flash,group) bundles + predicted light  [Stage 1]
 
+        // Fill the per-bundle boundary flags (flag_close_to_PMT,
+        // flag_at_x_boundary, flag_spec_end, flag_at_cathode) for one
+        // (flash, cluster) bundle. Ports the MicroBooNE prototype end-trimming
+        // walk (ToyMatching.cxx ~176-290) into the per-TPC drift coordinate u,
+        // using run.s / run.anode_x / run.u_cathode (computed in compute_geometry).
+        // With m_vd_surface_flags, PD-surface awareness applies (see the knob doc).
+        //
+        // Returns the prototype's flag_good_bundle / TPC-containment verdict: true
+        // iff the (post-trim) cluster endpoints fall inside the TPC drift box (the
+        // 4-part in-window guard, == ToyMatching.cxx 272-275). Returns false when
+        // the cluster has no 3d points at all (it cannot be contained). The
+        // endpoint walk unions the cluster's slices over EVERY anode it touches (a
+        // PDHD drift group spans two APAs offset in Z), so a cluster living wholly
+        // in the group's second APA is no longer spuriously declared uncontained.
+        // The caller discards uncontained bundles when m_require_containment.
+        bool compute_endpoint_flags(TimingTPCBundle* bundle,
+                                    WireCell::Clus::Facade::Cluster* cluster,
+                                    double flash_x_offset,
+                                    const ApaRun& run) const;
+
+        // Wall-proximity verdict for the vd_surface_flags mode: bit 0 = the cluster
+        // reaches within m_pd_wall_cushion of the low-y active edge (run.y_lo),
+        // bit 1 = of the high-y edge (run.y_hi). y is drift-invariant so the verdict
+        // is flash-independent; memoized per cluster (m_wall_flag_cache).
+        uint8_t wall_proximity(WireCell::Clus::Facade::Cluster* cluster,
+                               const ApaRun& run) const;
+
         // Set the diagnostic flag_two_boundary on one bundle: true iff the two
         // main-PCA extremes of the main cluster each lie within m_two_boundary_margin
         // of a per-APA active-volume face AND those are two SEPARATE faces (different
@@ -705,6 +765,15 @@ namespace WireCell::Match {
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
+
+        // Shared-flash JOINT LASSO rounds (m_shared_flash, >1 input port; PDVD).
+        // Mirror fit_round1/fit_round2 but build ONE system over the physical
+        // flashes (keyed by flash row id, identical across ports) with columns from
+        // every port's candidate bundles, so both drift sides share each flash's
+        // explanation. Prunes route to each bundle's owning run's maps. The per-run
+        // fit_roundN code paths are untouched (knob off => byte-identical).
+        void fit_round1_shared(std::vector<ApaRun>& runs);
+        void fit_round2_shared(std::vector<ApaRun>& runs);
 
         // Per-column L1 down-weight (m_lasso_boundary_weight) for a boundary / near-PMT /
         // window-truncated bundle when m_lasso_flag_weight is on (prototype's flag-based

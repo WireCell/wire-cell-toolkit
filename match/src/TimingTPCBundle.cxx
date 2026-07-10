@@ -76,6 +76,14 @@ TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
 
 TimingTPCBundle::~TimingTPCBundle() = default;
 
+void TimingTPCBundle::add_relax_channels(const std::vector<int>& chs)
+{
+    if (relax_channels.empty()) relax_channels.assign(m_nchan, 0);
+    for (int ch : chs) {
+        if (ch >= 0 && ch < (int)relax_channels.size()) relax_channels[ch] = 1;
+    }
+}
+
 double TimingTPCBundle::get_total_pred_light() const
 {
     double sum = 0;
@@ -225,7 +233,11 @@ bool TimingTPCBundle::examine_bundle()
         double denom = pe[j] + perr * perr;
         // Prototype close-to-PMT relaxation: a big measured excess near the PMTs widens
         // the denominator (near-PMT over-response is not a real charge/light mismatch).
+        // relax_channels (vd_surface_flags mode) restricts the widening to the PD
+        // channels of the surface the activity is actually near; empty => all channels
+        // eligible (the historical behavior).
         if (m_qp.chi2_relax && flag_close_to_PMT &&
+            (relax_channels.empty() || relax_channels[j]) &&
             pe[j] - pred_pe[j] > m_qp.chi2_pmt_excess &&
             pe[j] > m_qp.chi2_pmt_ratio * pred_pe[j])
             denom += std::pow(pe[j] * m_qp.chi2_pmt_inflate, 2);

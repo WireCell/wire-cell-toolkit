@@ -145,6 +145,21 @@ namespace WireCell::Match {
         // (calib dump); nothing in the matching path reads it. Default false.
         void set_flag_two_boundary(bool v) { flag_two_boundary = v; }
         bool get_flag_two_boundary() const { return flag_two_boundary; }
+        // Cathode-end proximity (set alongside the cathode-end at_x_boundary in
+        // compute_endpoint_flags). Inert diagnostic for now — nothing in the
+        // matching path reads it; exported in the calib dump so a PDVD
+        // cathode-PD treatment can be designed from hand-scan data. Default false.
+        void set_flag_at_cathode(bool v) { flag_at_cathode = v; }
+        bool get_flag_at_cathode() const { return flag_at_cathode; }
+        // Per-channel chi2-relax eligibility (QLMatching vd_surface_flags mode).
+        // EMPTY (default) => every channel is eligible, which is the historical
+        // behavior — the close-to-PMT chi2 denominator inflation may fire on any
+        // channel with a big measured excess. When filled (PDVD: only the PD
+        // channels of the surface the activity is actually near — that wall's
+        // membrane XAs, or the bottom PMTs), the inflation is restricted to those
+        // channels. add_relax_channels unions surfaces across calls.
+        void add_relax_channels(const std::vector<int>& chs);
+        const std::vector<uint8_t>& get_relax_channels() const { return relax_channels; }
         // Cross-TPC cathode-crossing confirmation (post-matching): the matched main
         // cluster connects geometrically, across the cathode, to the coincident other
         // TPC's matched main cluster. Confirm-stamp only; nothing in the matching path
@@ -188,6 +203,7 @@ namespace WireCell::Match {
         bool flag_high_consistent;
         bool flag_contained;
         bool flag_two_boundary;
+        bool flag_at_cathode{false};
         bool flag_xtpc_consistent{false};
         bool flag_xtpc_scenario1{false};
         bool flag_xtpc_pin{false};
@@ -199,6 +215,9 @@ namespace WireCell::Match {
 
         int m_nchan;
         BundleQualityParams m_qp;
+        // Per-channel chi2-relax eligibility (see add_relax_channels). Empty =>
+        // all channels eligible (historical behavior, bit-identical).
+        std::vector<uint8_t> relax_channels;
         std::vector<double> pred_flash;
         std::vector<Cluster*> other_clusters;
         std::vector<Cluster*> more_clusters;
