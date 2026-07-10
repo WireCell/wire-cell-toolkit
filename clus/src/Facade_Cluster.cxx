@@ -226,7 +226,11 @@ std::vector<int> Cluster::add_corrected_points(
                                              blob->wpid().face(), blob->wpid().apa());
 
         // Persist only the arrays that actually changed (per the transform).
+        // erase first: on a tree reloaded from disk the corrected arrays may
+        // already exist (they persist through the tensor round trip) and
+        // add() throws on duplicates.
         for (const auto& name : store_names) {
+            lpc_3d.erase(name);
             lpc_3d.add(name, *corrected_points.get(name));
         }
 

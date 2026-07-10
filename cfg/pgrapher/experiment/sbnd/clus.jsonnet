@@ -420,6 +420,86 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     ),
 }.ret;
 
+// Pattern-recognition (PR) stage: consume the persisted post-QL point-cloud tree
+// (the tensor_outname tarball written by clus_all_apa, reloaded through a
+// TensorFileSource) and run the PR-tail visitors on it.  See
+// sbnd/docs/sbnd-pattern-recognition.md.  pipeline_names selects the visitors by
+// name from the map below (empty = pass-through, used by the round-trip identity
+// gate).  The Bee config mirrors clus_all_apa so the 'clustering' layer of the
+// PR job's zip is directly comparable to mabc-all-apa.zip, except save_opflash
+// is off: the op display needs the per-cluster flashpred pcarray, which is
+// consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
+local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='') = {
+    local dv = detector_volumes(anodes, '', pos_offset_on),
+    local pcts = pctransforms(dv),
+    local cm_old = clus.clustering_methods(
+        prefix='pr', detector_volumes=dv, pc_transforms=pcts, coords=common_coords),
+    local cm = clus.clustering_methods(
+        prefix='pr', detector_volumes=dv, pc_transforms=pcts, coords=common_corr_coords(pos_offset_on)),
+    // Visitors available to the PR pipeline, by name.  switch_scope re-applies
+    // the per-cluster T0 correction on the loaded tree (the corrected scope is
+    // runtime state and does not persist through the tarball); it recomputes
+    // deterministically from cluster_t0.  M3 adds steiner / fiducialutils /
+    // tagger_check_stm here.
+    local cm_by_name = {
+        switch_scope: cm_old.switch_scope(),
+    },
+    local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
+    local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
+    local mabc = g.pnode({
+        type: 'MultiAlgBlobClustering',
+        name: 'clus_pr',
+        data: {
+            inpath: 'pointtrees/%d',
+            outpath: 'pointtrees/%d',
+            perf: true,
+            bee_dir: bee_dir,
+            bee_zip: bee_zip_path,
+            bee_detector: 'sbnd',
+            initial_index: 0,
+            use_config_rse: true,
+            runNo: runNo,
+            subRunNo: subRunNo,
+            eventNo: eventNo,
+            [if rse_from_ident then 'rse_from_ident']: true,
+            save_deadarea: true,
+            dead_area_version: 2,
+            save_opflash: false,
+            anodes: [wc.tn(a) for a in anodes],
+            detector_volumes: wc.tn(dv),
+            cluster_id_order: 'tree',
+            bee_points_sets: [
+                {
+                    name: 'clustering',
+                    detector: 'sbnd',
+                    algorithm: 'clustering',
+                    pcname: '3d',
+                    coords: common_corr_coords(pos_offset_on),
+                    individual: false,
+                    // Same filter semantics as clus_all_apa (default 1): the dump
+                    // keys on the per-cluster runtime scope-filter flag, which is
+                    // NOT persisted through the tarball -- it is re-established by
+                    // running switch_scope at the head of the PR pipeline.  A
+                    // pass-through job (pipeline_names=[]) therefore dumps
+                    // nothing; the round-trip identity gate runs
+                    // pipeline_names=['switch_scope'].
+                },
+            ],
+            pipeline: wc.tns(cm_pipeline),
+        },
+    }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline),
+    local sink = g.pnode({
+        type: 'TensorFileSink',
+        name: 'clus_pr',
+        data: {
+            outname: if tensor_outname == '' then 'trash-pr.tar.gz' else tensor_outname,
+            prefix: 'clustering_',
+            dump_mode: tensor_outname == '',
+        },
+    }, nin=1, nout=0),
+    ret:: if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
+}.ret;
+
 // rse_from_ident (default false): when true, the MultiAlgBlobClustering nodes take
 // the Bee event number from each event's tensor ident (run/subrun = 0) instead of
 // the configured runNo/eventNo auto-increment.  Used by the bundled standalone chain
@@ -452,5 +532,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname),
+    // PR job: input is the reloaded post-QL tarball (see clus_pr above).
+    pr(anodes, dump=true, pipeline_names=[], tensor_outname='')::
+        clus_pr(anodes, dump=dump,
+                output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
+                rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
+                pipeline_names=pipeline_names, tensor_outname=tensor_outname),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
