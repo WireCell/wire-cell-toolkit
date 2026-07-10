@@ -573,9 +573,12 @@ namespace WireCell::Clus {
         IPCTransformSet::pointer m_pcts{nullptr};          // PC Transform Set
         
         // cluster and grouping, CTPC is from m_grouping ...
+        // Ordered by cluster id (not pointer): prepare_data() iterates these and
+        // FP-accumulates shared dead-channel charge, so iteration order must be
+        // content-stable across runs.
         Facade::Grouping* m_grouping{nullptr};
-        std::set<Facade::Cluster*> m_clusters;
-        std::set<Facade::Cluster*> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
+        std::set<Facade::Cluster*, PR::ClusterPtrCmp> m_clusters;
+        std::set<Facade::Cluster*, PR::ClusterPtrCmp> m_loaded_clusters;  ///< Clusters whose charge data has been loaded into m_charge_data
         bool m_charge_data_dirty{true};                ///< True when m_clusters has clusters not yet in m_charge_data
         Facade::Cluster* m_cluster_filter{nullptr};    ///< If non-null, restrict fitting to segments of this cluster
 

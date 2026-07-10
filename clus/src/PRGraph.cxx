@@ -1,6 +1,19 @@
 #include "WireCellClus/PRGraph.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <execinfo.h>
+
 namespace WireCell::Clus::PR {
+
+    // Determinism-debug (WCT_DET_DEBUG=2): log every segment creation with
+    // its stable index and a mini backtrace so creation-order divergence
+    // between two runs can be diffed and attributed to the calling function.
+    static bool det_dbg_graph() {
+        static const char* v = std::getenv("WCT_DET_DEBUG");
+        static const bool on = (v && v[0] == '2');
+        return on;
+    }
 
     bool add_vertex(Graph& g, VertexPtr vtx)
     {
@@ -48,6 +61,26 @@ namespace WireCell::Clus::PR {
             ++ gb.num_edge_indices;
             seg->set_descriptor(desc);
             seg->set_graph_index(index);
+            if (det_dbg_graph()) {
+                const auto& p1 = vtx1->wcpt().point;
+                const auto& p2 = vtx2->wcpt().point;
+                double wf[3] = {0,0,0}, wb[3] = {0,0,0};
+                if (!seg->wcpts().empty()) {
+                    const auto& f = seg->wcpts().front().point;
+                    const auto& b = seg->wcpts().back().point;
+                    wf[0]=f.x(); wf[1]=f.y(); wf[2]=f.z();
+                    wb[0]=b.x(); wb[1]=b.y(); wb[2]=b.z();
+                }
+                fprintf(stderr, "WCT_DETA seg idx=%zu nw=%zu v1=(%.4f,%.4f,%.4f) v2=(%.4f,%.4f,%.4f) wf=(%.4f,%.4f,%.4f) wb=(%.4f,%.4f,%.4f)\n",
+                        index, seg->wcpts().size(), p1.x(), p1.y(), p1.z(), p2.x(), p2.y(), p2.z(),
+                        wf[0], wf[1], wf[2], wb[0], wb[1], wb[2]);
+                void* bt[8];
+                int nbt = backtrace(bt, 8);
+                char** syms = backtrace_symbols(bt, nbt);
+                for (int i = 1; i < nbt && i < 6; ++i)
+                    fprintf(stderr, "WCT_DETA   bt[%d] %s\n", i, syms ? syms[i] : "?");
+                free(syms);
+            }
             return true;
         }
 

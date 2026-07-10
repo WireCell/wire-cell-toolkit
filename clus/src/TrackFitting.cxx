@@ -17,6 +17,31 @@ static auto s_log = WireCell::Log::logger("clus.TrackFitting");
 
 using geo_point_t = WireCell::Point;
 
+// Temporary determinism-debug helpers, enabled with WCT_DET_DEBUG=1.
+// FNV-1a over raw double bytes; prints stable per-call checksums of solver
+// inputs so two runs can be diffed to localize run-to-run divergence.
+namespace {
+    inline uint64_t det_fnv(const double* p, size_t n, uint64_t h = 1469598103934665603ULL) {
+        const unsigned char* b = reinterpret_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n * sizeof(double); ++i) { h ^= b[i]; h *= 1099511628211ULL; }
+        return h;
+    }
+    inline bool det_dbg() {
+        static const bool on = (getenv("WCT_DET_DEBUG") != nullptr);
+        return on;
+    }
+    inline void det_dump(const char* tag, const Eigen::SparseMatrix<double>& A,
+                         const Eigen::VectorXd& b, const Eigen::VectorXd& x0) {
+        if (!det_dbg()) return;
+        Eigen::SparseMatrix<double> Ac = A; Ac.makeCompressed();
+        uint64_t ha = det_fnv(Ac.valuePtr(), Ac.nonZeros());
+        uint64_t hb = det_fnv(b.data(), b.size());
+        uint64_t hx = det_fnv(x0.data(), x0.size());
+        fprintf(stderr, "WCT_DET %s n=%ld nnz=%ld A=%016lx b=%016lx x0=%016lx\n",
+                tag, (long)b.size(), (long)Ac.nonZeros(), ha, hb, hx);
+    }
+}
+
 
 TrackFitting::TrackFitting(FittingType fitting_type) 
     : m_fitting_type(fitting_type) 
@@ -697,7 +722,9 @@ void TrackFitting::prepare_data() {
     // Only process clusters whose charge data has not yet been loaded.
     // This allows incremental loading when associated clusters are added after
     // the main cluster has already been processed.
-    std::set<Facade::Cluster*> new_clusters;
+    // Cluster-id order: the dead-channel pass below FP-accumulates into shared
+    // coords, so iteration order must be content-stable.
+    std::set<Facade::Cluster*, PR::ClusterPtrCmp> new_clusters;
     for (auto& cluster : m_clusters) {
         if (m_loaded_clusters.find(cluster) == m_loaded_clusters.end()) {
             new_clusters.insert(cluster);
@@ -4391,10 +4418,11 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
         Eigen::VectorXd b = RUT * data_u_2D + RVT * data_v_2D + RWT * data_w_2D;
         Eigen::SparseMatrix<double> A = RUT * RU + RVT * RV + RWT * RW;
-        
+
+        det_dump("traj_multi", A, b, temp_pos_3D_init);
         solver.compute(A);
         temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
-        
+
         // Store result or use initial position if solver failed
         // these are raw positions ...
         if (std::isnan(solver.error())) {
@@ -6312,14 +6340,14 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         std::vector<WireCell::Point> connected_pts;
         
         WireCell::Clus::Facade::Cluster* cluster = nullptr;
-        // Find connected segments
+        // Find connected segments.  Stable edge-index order: connected_pts
+        // order feeds the total_dx FP sum below (and 'cluster' is last-wins),
+        // so adjacency must not iterate in boost pointer order.
         auto vertex_desc = vertex->get_descriptor();
         if (vertex_desc != PR::Graph::null_vertex()) {
-            auto adj_edges = boost::adjacent_vertices(vertex_desc, *m_graph);
-            for (auto v_it = adj_edges.first; v_it != adj_edges.second; ++v_it) {
-                auto edge_desc = boost::edge(vertex_desc, *v_it, *m_graph);
-                if (edge_desc.second) {
-                    auto& edge_bundle = (*m_graph)[edge_desc.first];
+            for (auto edesc : PR::sorted_out_edges(vertex_desc, *m_graph)) {
+                {
+                    auto& edge_bundle = (*m_graph)[edesc];
                     if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
                         auto& fits = edge_bundle.segment->fits();
                         cluster = edge_bundle.segment->cluster();
@@ -6609,14 +6637,15 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     
     // Add vertex connections — iterate in stable fit_index order (key is int, value is vertex ptr)
     for (const auto& [vertex_idx, vertex] : vertex_index_map) {
-        // Find connected segments
+        // Find connected segments.  Stable edge-index order: connected_vec
+        // entry order feeds the F-matrix triplet accumulation (setFromTriplets
+        // sums duplicates in triplet order), so adjacency must not iterate in
+        // boost pointer order.
         auto vertex_desc = vertex->get_descriptor();
         if (vertex_desc != PR::Graph::null_vertex()) {
-            auto adj_edges = boost::adjacent_vertices(vertex_desc, *m_graph);
-            for (auto v_it = adj_edges.first; v_it != adj_edges.second; ++v_it) {
-                auto edge_desc = boost::edge(vertex_desc, *v_it, *m_graph);
-                if (edge_desc.second) {
-                    auto& edge_bundle = (*m_graph)[edge_desc.first];
+            for (auto edesc : PR::sorted_out_edges(vertex_desc, *m_graph)) {
+                {
+                    auto& edge_bundle = (*m_graph)[edesc];
                     if (edge_bundle.segment && !edge_bundle.segment->fits().empty()) {
                         auto& fits = edge_bundle.segment->fits();
                         // Find connected segment points
@@ -6699,14 +6728,34 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     FMatrix *= lambda;
     
     Eigen::SparseMatrix<double> FMatrixT = FMatrix.transpose();
-    
+
     // Solve the system
     Eigen::BiCGSTAB<Eigen::SparseMatrix<double>> solver;
     Eigen::VectorXd b = RUT * MU * data_u_2D + RVT * MV * data_v_2D + RWT * MW * data_w_2D;
     Eigen::SparseMatrix<double> A = RUT * MU * RU + RVT * MV * RV + RWT * MW * RW + FMatrixT * FMatrix;
-    
+
+    det_dump("dqdx_multi", A, b, pos_3D_init);
+    if (det_dbg()) {
+        auto hs = [](const Eigen::SparseMatrix<double>& m) {
+            Eigen::SparseMatrix<double> c = m; c.makeCompressed();
+            return det_fnv(c.valuePtr(), c.nonZeros());
+        };
+        uint64_t hp = 1469598103934665603ULL;
+        for (const auto& p : traj_pts) {
+            double xyz[3] = {p.x(), p.y(), p.z()};
+            hp = det_fnv(xyz, 3, hp);
+        }
+        fprintf(stderr, "WCT_DET dqdx_cmp RU=%016lx MU=%016lx F=%016lx du=%016lx dv=%016lx dw=%016lx dx=%016lx pts=%016lx\n",
+                hs(RU), hs(MU), hs(FMatrix),
+                det_fnv(data_u_2D.data(), data_u_2D.size()),
+                det_fnv(data_v_2D.data(), data_v_2D.size()),
+                det_fnv(data_w_2D.data(), data_w_2D.size()),
+                det_fnv(local_dx.data(), local_dx.size()), hp);
+    }
     solver.compute(A);
     pos_3D = solver.solveWithGuess(b, pos_3D_init);
+    if (det_dbg()) fprintf(stderr, "WCT_DET dqdx_multi_out x=%016lx iters=%ld err=%.17g\n",
+                           det_fnv(pos_3D.data(), pos_3D.size()), (long)solver.iterations(), solver.error());
     
     if (std::isnan(solver.error())) {
         pos_3D = solver.solve(b);
@@ -7567,8 +7616,50 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
     m_cluster_filter = cluster_filter;
 
+    // Temporary determinism-debug: content hash of all fit points (see det_dbg()).
+    // h  = order-dependent (graph-index order, includes wcpts)
+    // hx = order-independent XOR of per-segment content hashes (no indices)
+    // h diff + hx match -> pure graph-index relabeling; hx diff -> real content.
+    auto det_fits = [&](const char* tag) {
+        if (!det_dbg()) return;
+        uint64_t h = 1469598103934665603ULL;
+        uint64_t hx = 0;
+        size_t np = 0, nw = 0;
+        for (auto ed : PR::ordered_edges(*m_graph)) {
+            auto seg = (*m_graph)[ed].segment;
+            if (!seg) continue;
+            uint64_t hs = 1469598103934665603ULL;
+            for (const auto& w : seg->wcpts()) {
+                double xyz[3] = {w.point.x(), w.point.y(), w.point.z()};
+                hs = det_fnv(xyz, 3, hs);
+                ++nw;
+            }
+            for (const auto& f : seg->fits()) {
+                double xyz[3] = {f.point.x(), f.point.y(), f.point.z()};
+                hs = det_fnv(xyz, 3, hs);
+                ++np;
+            }
+            h = det_fnv(reinterpret_cast<const double*>(&hs), 1, h);
+            hx ^= hs;
+            if (tag[0] == 'd') { // dmt_entry detail: index -> content mapping
+                fprintf(stderr, "WCT_DETE idx=%zu nw=%zu nf=%zu hs=%016lx\n",
+                        seg->get_graph_index(), seg->wcpts().size(), seg->fits().size(), (unsigned long)hs);
+            }
+        }
+        for (auto nd : PR::ordered_nodes(*m_graph)) {
+            auto vtx = (*m_graph)[nd].vertex;
+            if (!vtx) continue;
+            double xyz[3] = {vtx->fit().point.x(), vtx->fit().point.y(), vtx->fit().point.z()};
+            h = det_fnv(xyz, 3, h);
+            hx ^= det_fnv(xyz, 3);
+        }
+        fprintf(stderr, "WCT_DETF %-24s np=%zu nw=%zu h=%016lx hx=%016lx\n",
+                tag, np, nw, (unsigned long)h, (unsigned long)hx);
+    };
+
     // Build edge/node cache once for the entire do_multi_tracking call
     build_cluster_edges();
+    det_fits("dmt_entry");
 
     // Reset fit properties for all vertices first
     for (auto vd : m_ordered_nodes_vec) {
@@ -7643,6 +7734,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
 
         
         organize_segments_path(low_dis_limit, end_point_limit);
+        det_fits("organize_1st");
 
         // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
@@ -7690,6 +7782,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //     }
         // }
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        det_fits("form_map_1st");
 
         // if (m_perf) std::cout << "do_multiple_tracking timing: form_map_graph took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
@@ -7710,6 +7803,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         //     }
         // }
         multi_trajectory_fit(1, m_params.div_sigma);
+        det_fits("fit_1st");
 
         // if (m_perf) std::cout << "do_multiple_tracking timing: first track fitting took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
@@ -7821,7 +7915,8 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // }
 
         // organize path
-        organize_segments_path_2nd(low_dis_limit, end_point_limit);    
+        organize_segments_path_2nd(low_dis_limit, end_point_limit);
+        det_fits("organize_2nd");    
         // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path_2nd took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         
@@ -7881,9 +7976,11 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // }
 
         form_map_graph(flag_exclusion, m_params.end_point_factor, m_params.mid_point_factor, m_params.nlevel, m_params.time_tick_cut, m_params.charge_cut);
+        det_fits("form_map_2nd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: form_map_graph took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         multi_trajectory_fit(1, m_params.div_sigma);
+        det_fits("fit_2nd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: second track fitting took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
         // std::cout << "After second Fit " << std::endl;
@@ -7974,6 +8071,7 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // organize path
         low_dis_limit = 0.6*units::cm;
         organize_segments_path_3rd(low_dis_limit);
+        det_fits("organize_3rd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path_3rd took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
 
 

@@ -736,9 +736,11 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         }
     }
 
-    // Iterate through all segments (edges) in the graph
+    // Iterate through all segments (edges) in the graph.  Stable edge-index
+    // order: boost::edges on setS iterates in pointer order, which reorders
+    // the emitted Bee point arrays run-to-run.
     int segment_count = 0;
-    for (auto edge_desc : mir(boost::edges(*pr_graph))) {
+    for (auto edge_desc : PR::ordered_edges(*pr_graph)) {
         const auto& edge_bundle = (*pr_graph)[edge_desc];
         auto segment = edge_bundle.segment;
 
@@ -985,10 +987,10 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     visited_vtxs.insert(main_vertex);
     std::vector<std::pair<PR::VertexPtr, PR::SegmentPtr>> bfs_cur;
 
-    // Seed BFS: all non-shower edges adjacent to main_vertex
-    for (auto [eit, end] = boost::out_edges(vtx_to_nd.at(main_vertex), *pr_graph);
-         eit != end; ++eit) {
-        auto seg = (*pr_graph)[*eit].segment;
+    // Seed BFS: all non-shower edges adjacent to main_vertex.  Stable
+    // edge-index order so the PF-tree child order is run-reproducible.
+    for (auto edesc : PR::sorted_out_edges(vtx_to_nd.at(main_vertex), *pr_graph)) {
+        auto seg = (*pr_graph)[edesc].segment;
         if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
         auto far = PR::find_other_vertex(*pr_graph, seg, main_vertex);
         if (!far) continue;
@@ -1006,9 +1008,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             visited_vtxs.insert(cur_vtx);
             auto nd_it = vtx_to_nd.find(cur_vtx);
             if (nd_it == vtx_to_nd.end()) continue;
-            for (auto [eit, end] = boost::out_edges(nd_it->second, *pr_graph);
-                 eit != end; ++eit) {
-                auto seg = (*pr_graph)[*eit].segment;
+            for (auto edesc : PR::sorted_out_edges(nd_it->second, *pr_graph)) {
+                auto seg = (*pr_graph)[edesc].segment;
                 if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
                 auto far = PR::find_other_vertex(*pr_graph, seg, cur_vtx);
                 if (!far) continue;
