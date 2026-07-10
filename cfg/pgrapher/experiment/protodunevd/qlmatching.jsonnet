@@ -35,7 +35,7 @@
 //   24-39  bottom PMTs (x=-336.5; PEN 0.036 except 29/39 PEN+Q and 32 uncoated
 //          -> Ar-blind; 24/27/28/34 dead in data)
 //
-// QtoL / absolute PE scale are placeholders until the crosser calibration;
+// QtoL = 0.11 from the beam-flash gold-pair calibration (see the knob comment);
 // trigger_offsets = [bottom, top] per-CRATE light<->charge offsets (the PDVD
 // analogue of PDHD's opflash offset_us; per event from the rawwf trigoff tree
 // via the archive metadata offset_bot_us/offset_top_us -- the BDE/TDE charge
@@ -124,7 +124,21 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     local match_data(dv, calib_dump) = {
             detector_volumes: wc.tn(dv),
             data: if std.objectHas(params, 'reality') && params.reality == 'sim' then false else true,
-            QtoL: 1.0,                 // placeholder until the PE-scale calibration
+            // Data PE scale, anchored on GROUND-TRUTH pairs: the 80 beam-
+            // trigger flashes (position known to ~1 us from the trigoff tc_us,
+            // see check_trigger_flash.py) paired with their beam cluster
+            // (largest predicted-light bundle on that flash) in the QtoL=1
+            // DIAG=2 calib dumps.  Median measured/predicted = 0.11,
+            // [16,84]% = [0.03,0.25] -- the library+official-eff model OVER-
+            // predicts ~10x, roughly flat across PD groups (cathode XA 0.13,
+            // bottom PMT 0.16, z-PMT 0.12, top membrane XA 0.10), so the
+            // efficiencies are NOT double-counted and this is a global
+            // normalization (units/recombination/SPE-scale product).
+            // DO NOT refit this from auto-selected "good-KS" bundles: with a
+            // mis-scaled QtoL the LASSO is amplitude-inert and the selection
+            // is dominated by accidentals ~40x brighter than prediction (that
+            // route gave QtoL~40, off by ~350x -- see pdvd-qlmatching.md).
+            QtoL: 0.11,
             doReflectedLight: false,   // library vis is total photon arrival
             nchan: nchan,
             ch_mask: ch_mask,
@@ -162,14 +176,21 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // Dead-PD self-check: per-event dynamic auto-mask on top of the
             // static ch_mask.  Same-type neighbour pool (XA vs PMT efficiencies
             // differ ~4x, so a cross-type (Y,Z) neighbour is not a meaningful
-            // brightness reference).  Thresholds are 40-PD/PDVD-scaled versions
-            // of the PDHD 10/50/4/1/3 set.
+            // brightness reference).  pe_bright/min_contrast tuned on the 120
+            // DIAG=2 dumps by emulating the C++ gate with ch24 dropped from the
+            // static mask: bottom-PMT neighbour medians almost never reach the
+            // earlier bright=20 (ch24 caught in 55% of events); at 10/3 the
+            // known-dead ch24 is caught in 91/120 events with healthy channels
+            // masked in <6%.  Two genuinely DIM channels, ch16 and ch33
+            // (event-max PE median ~5.6, ~50x below their peers), get
+            // per-event masked when quiet -- the safe direction; their status
+            // is flagged in pdvd-questions-dune.md (per-run bad channels).
             auto_mask: true,
             auto_mask_same_type: true,
             auto_mask_pe_low: 5,
-            auto_mask_pe_bright: 20,
+            auto_mask_pe_bright: 10,
             auto_mask_neighbors: 3,
-            auto_mask_min_contrast: 2,
+            auto_mask_min_contrast: 3,
             auto_mask_min_flash: 3,
 
             // Flash admission: no time cut (flash times run 0..7.5 ms on the
@@ -205,6 +226,23 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // starts at the PDHD ARAPUCA scale (retune after the hand scan).
             chi2_relax: true,
             chi2_pmt_excess: 100.0,
+            // Per-channel light-error model, PDHD-proven structure: error on
+            // the PREDICTED pe (cures the "predicted light, measured ~0"
+            // catastrophe; the measured-based branch gives chi2/ndf ~ 10^3-10^4
+            // on the gold pairs) with efficiency-aware low-PE inflation
+            // rel = frac + (lowpe_frac-frac)*exp(-pred/lowpe_knee).  Fractions
+            // widened vs PDHD's 0.40/1.55/5.5 because the PDVD per-channel
+            // measured-PE calibration is still raw (within the cathode-XA
+            // group alone the gold-pair per-channel scale spans x13 -- the
+            // known "no 1-PE peak" cathode SPE question): on the QtoL=0.11
+            // gold pairs this model gives median chi2/ndf 9.7, 71% under the
+            // hc ladder ceiling 35.  Retune (and fit measured_pe_scale) after
+            // the hand scan provides multi-topology ground truth.
+            pe_err_on_pred: true,
+            pe_err_floor: 2.0,
+            pe_err_frac: 0.60,
+            pe_err_lowpe_frac: 2.0,
+            pe_err_lowpe_knee: 10.0,
             // KS-led high-consistency ladder (purity cull before the fit).  KS
             // ceilings = SBND/PDHD; chi2/ndf ceilings at the loose PDHD scale --
             // with the uncalibrated PDVD PE scale the chi2 is inflated, so the
@@ -219,15 +257,20 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             hc_miss_min_ndf: 5,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
-            //  - reject_overpred: cuts on the ABSOLUTE pred/meas ratio; enable
-            //    only after QtoL is renormalized from the first calib dumps.
+            //  - reject_overpred: the gold-pair pred/meas scatter is still
+            //    ~x3 either way around QtoL and the per-channel PE scale is
+            //    uncalibrated; enable with data-tuned ceilings after the hand
+            //    scan (SBND 2.9/4.3, PDHD 3.0/10 for reference).
+            //  - measured_pe_scale: beam-gold per-channel fit exists (see
+            //    pdvd-qlmatching.md) but is single-topology (bright beam
+            //    showers; possible saturation bias) -- refit on hand-scan GT.
             //  - empty_rescue / cluster_rescue: per-run "empty flash" concepts,
             //    not shared_flash-aware (the C++ skips them with a warning).
             //  - cross_side_filter / crossside_skip_vis / xtpc_* /
             //    opflash_phys_gid: per-side flash concepts; PDVD has one flash
             //    and the shared fit handles cathode-crossers natively.
-            //  - robust_endpoint_trim / pe_err_on_pred / pmt_nonlinearity:
-            //    PDHD/SBND-tuned; revisit after the hand scan.
+            //  - robust_endpoint_trim / pmt_nonlinearity: PDHD/SBND-tuned;
+            //    revisit after the hand scan.
 
             drift_speed: params.lar.drift_speed,
             trigger_offset: trigger_offset,
