@@ -204,6 +204,22 @@ carries the per-channel role/efficiency rationale); chain-level docs live in
 `at_cathode` in the calib dump (key present only in vd mode — legacy dumps
 byte-identical).
 
+### Per-input trigger offsets (8a765d5e, 2026-07-10)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `trigger_offsets` | `[]` | per-INPUT-port trigger offsets, for detectors whose charge readout windows start at different times per drift volume. PDVD: the TDE (top CRPs) and BDE (bottom CRPs) crates each open on their own 64-sample frame boundary, up to ~32 µs apart, and float ±15 µs vs the trigger while the light window is trigger-locked — so the light→charge offset is per event AND per crate. `trigger_offset_for(input_idx)` returns the array value when set, else the scalar `trigger_offset` (empty = bit-identical). Used at every `flash_time + offset` site via `run.input_idx` (flash_x_offset, xtpc/cathode candidate pairing, opflash PC `time`, calib-dump `f["time"]` — the dump/PC use input-0 = the trigger-locked BDE side under `shared_flash`). When set, the dump exports `trigger_offsets_us` at top level. |
+
+Companion (flash/): `OpFlashFinder` gained `metadata_extra` — a config object
+merged verbatim into the output tensor-set metadata (null default = unchanged).
+PDVD's light pass stamps `offset_bot_us`/`offset_top_us` through it
+(`cfg/pgrapher/experiment/protodunevd/flash.jsonnet:opflash_finder`), and
+`protodunevd/clus.jsonnet` gained `trigger_offset_top` so the stage-4
+`x_t0cor` uses the per-volume value (PCTransforms already reads a per-(apa,
+face) `trigger_offset` from the DetectorVolumes metadata). Root:
+`PDVDOpWaveformSource` also reads the nested `rawdump/raw_waveform` layout.
+Offset semantics + closure: wcp `pdvd/docs/pdvd-ql-pending.md` §1.
+
 ---
 
 ## 3. Input parsing (`operator()`)
