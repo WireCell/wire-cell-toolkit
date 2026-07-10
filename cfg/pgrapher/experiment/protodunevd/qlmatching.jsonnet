@@ -1,67 +1,244 @@
-// PDVD charge-light (Q/L) matching constants -- SKELETON, NOT PRODUCTION.
+// PDVD charge-light (Q/L) matching helper.
 //
-// PDVD has no Q/L matching chain wired yet (clus.jsonnet runs without it);
-// this file collects the PDVD-decided QLMatching light-model constants so the
-// future chain (opflash_source -> flash_attach -> matching, as in
-// pdhd/qlmatching.jsonnet) can import them.  Everything light-model-related
-// below is derived and validated in pdvd/photlib/ (wcp-porting repo) and
-// documented in pdvd/docs/pdvd-photon-model.md:
+// PDVD counterpart of cfg/pgrapher/experiment/pdhd/qlmatching.jsonnet.  Builds
+// the matching graph nodes for ProtoDUNE-VD; the matching-only detector
+// constants live here (not in params.jsonnet).  Light-model provenance:
+// pdvd/photlib/ (wcp-porting repo) + pdvd/docs/pdvd-photon-model.md; chain
+// design + knob rationale: pdvd/docs/pdvd-qlmatching.md.
 //
-//  - light_model 'library': per-point visibilities interpolated from a 10 cm
-//    grid sampled off the official PDFastSimANN v5 computable graph
-//    (protodune_vd_v5_128nm_tf2.6) -- the as-built geometry that matches the
-//    raw-data opdet positions exactly.  Library channel == flash-chain OpDet.
-//  - semimodel_file: the semi-analytical FIT to the same ANN (fallback /
-//    cross-check; cathode XAs fit to ~13%, PMTs ~40%, membrane XAs need the
-//    unported lateral-cosine branch -- see the JSON's _comment).
-//  - The library mode needs no same-TPC x-sign gate: the ANN encodes cathode
-//    opacity and the double-sided cathode XAs.
+// PDVD differs from PDHD in the ways that matter here:
+//   - 40 OpDets of MIXED type: 8 cathode X-ARAPUCAs (x=0, double-sided),
+//     8 membrane-wall XAs (y=+-417.6 cm), 8 z-wall PMTs, 16 bottom PMTs
+//     (x=-336.5 cm, behind the BOTTOM anode; the top CRP has no PDs).
+//     active_opdet_types=[0,1] (both XA and PMT).
+//   - ONE all-PD flash (no per-side split; the cathode XAs see both drift
+//     volumes) => shared_flash joint LASSO + opdet_all_volumes (all 40 PDs on
+//     both drift-side runs) + NO cross-side/xTPC machinery.
+//   - vd_surface_flags: flag_close_to_PMT fires for activity near a PD-bearing
+//     surface (bottom anode -> bottom PMTs; +-y walls -> that wall's membrane
+//     XAs) and the chi2 relaxation applies only to those channels; the cathode
+//     end sets the inert flag_at_cathode (treatment designed later).
+//   - light model = 'library' (v5 PDFastSimANN sampled on a 10 cm grid); the
+//     fitted semi-analytical JSON is the fallback ('semi'), where the membrane
+//     XAs must be masked (the port's cosine=|dx|/d is wrong for y-normal PDs).
 //
-// Still to calibrate before production: offset_us (light<->charge time base),
-// QtoL / absolute PE scale, per-PD gains, and the DAPHNE<->module assignment
-// check for Arapuca mirror pairs (jjo map vs PDS_Mapping_v04152025 -- see
-// pdvd-photon-model.md "open items").
+// Channel roles (flash-chain OpDet order == v5 ANN order; from
+// pdvd/photlib/pdvd-photlib-chanmap.json, three-way gated against the v5 GDML,
+// the official PDVD_PDS_Mapping_v04152025 and the raw-data opdet positions):
+//   0-3    membrane XA, top volume    (0,2 at y=+417.6; 1,3 at y=-417.6)
+//   4-11   cathode XA (x~0, double-sided)
+//   12,13  membrane XA, bottom volume (12 y+; 13 y-, NO WLS -> Ar-blind)
+//   14-17  z-wall PMTs, bottom volume (14,15 z=+409; 16,17 z~-100; 14,16,17
+//          TPB 0.12; 15 PEN 0.036)
+//   18,19  membrane XA, bottom volume (18 y+; 19 y-)
+//   20-23  z-wall PMTs (20,22,23 TPB 0.12; 21 PEN 0.036)
+//   24-39  bottom PMTs (x=-336.5; PEN 0.036 except 29/39 PEN+Q and 32 uncoated
+//          -> Ar-blind; 24/27/28/34 dead in data)
+//
+// QtoL / absolute PE scale are placeholders until the crosser calibration;
+// trigger_offset is the CALIBRATED light<->charge time-base constant (the PDVD
+// analogue of PDHD's opflash offset_us) -- see pdvd/ql_light_calib/.
 
+local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
 
-{
-    nchan: 40,
+// require_containment / flash_minPE are function parameters so the driver can
+// loosen them for the trigger-offset diagnostic runs (containment is meaningless
+// until the time base is calibrated) without editing this file.
+function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
+         light_model='library', require_containment=true, flash_minPE=25) {
+    local nchan = 40,
 
-    // Dead in data: 24/27/28/34.  Ar-blind (official eff_Ar=0, no/quenched
-    // WLS at 128nm): 16 (membrane, no PTP), 29/39 (PEN+Q), 32 (no coating).
-    // Keep the Ar-blind ones masked for pure-Ar running; unmask 16/29/39 for
-    // Xe-doped running with the 175nm library.
-    ch_mask: [16, 24, 27, 28, 29, 32, 34, 39],
+    // Static optical dead-channel mask:
+    //   dead in data (not in the DAPHNE readout): 24, 27, 28, 34
+    //   Ar-blind (official eff_Ar = 0; no/quenched WLS at 128 nm):
+    //     13 (membrane XA, no PTP), 29/39 (PEN+Q PMTs), 32 (uncoated PMT).
+    // For Xe-doped running unmask 13/29/39 and switch to the 175 nm library.
+    local ch_mask_base = [13, 24, 27, 28, 29, 32, 34, 39],
+    // Semi-analytical mode: additionally mask the LIVE membrane XAs -- the WCT
+    // port fixes cosine=|dx|/d (orientation-0), which is wrong/divergent for
+    // the y-normal wall XAs (see pdvd-photon-model.md sec 6).  13 is already
+    // in the base mask.
+    local ch_mask = if light_model == 'semi'
+        then ch_mask_base + [0, 1, 2, 3, 12, 18, 19]
+        else ch_mask_base,
 
-    // Official per-OpDet detection efficiencies (PDVD_PDS_Mapping_v04152025):
-    // XAs 0.03, TPB-coated PMTs 0.12, PEN PMTs 0.036, Ar-blind 0.  The
-    // absolute PE scale on data still needs a crosser calibration on top
-    // (PDHD-style); these set the relative PD-type weighting.
-    VUVEfficiency: [
-        0.03, 0.03, 0.03, 0.03,                  // 0-3   membrane XA
+    // Official per-OpDet detection efficiencies (PDVD_PDS_Mapping_v04152025,
+    // read per channel from pdvd-photlib-chanmap.json): XA (PTP) 0.03,
+    // TPB-coated PMT 0.12, PEN PMT 0.036, Ar-blind 0.  These set the relative
+    // PD-type weighting; the absolute scale rides on QtoL (data calibration
+    // pending).  Masked channels keep their nominal value (inert).
+    local VUVEfficiency = [
+        0.03, 0.03, 0.03, 0.03,                    // 0-3   membrane XA (top)
         0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03,  // 4-11 cathode XA
-        0.12, 0.036, 0.12, 0.12,                 // 12-15 TCO PMTs
-        0.0, 0.03,                               // 16-17 membrane XA (16 no-WLS)
-        0.12, 0.036, 0.12, 0.12,                 // 18-21 TCO PMTs
-        0.03, 0.03,                              // 22-23 membrane XA
-        0.036, 0.036, 0.036, 0.036, 0.036, 0.0,  // 24-29 bottom PMTs (29 PEN+Q)
-        0.036, 0.036, 0.0, 0.036, 0.036, 0.036,  // 30-35 (32 no coating)
-        0.036, 0.036, 0.036, 0.0,                // 36-39 (39 PEN+Q)
+        0.03, 0.0,                                 // 12,13 membrane XA (13 no-WLS)
+        0.12, 0.036, 0.12, 0.12,                   // 14-17 z-wall PMTs (15 PEN)
+        0.03, 0.03,                                // 18,19 membrane XA
+        0.12, 0.036, 0.12, 0.12,                   // 20-23 z-wall PMTs (21 PEN)
+        0.036, 0.036, 0.036, 0.036, 0.036, 0.0,    // 24-29 bottom PMTs (29 PEN+Q)
+        0.036, 0.036, 0.0, 0.036, 0.036, 0.036,    // 30-35 (32 uncoated)
+        0.036, 0.036, 0.036, 0.0,                  // 36-39 (39 PEN+Q)
     ],
-    VISEfficiency: std.makeArray(40, function(i) 0.0),
+    local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
-    match_data: {
-        nchan: $.nchan,
-        ch_mask: $.ch_mask,
-        // both flat XAs (type 0) and PMTs (type 1) are active PDs
-        active_opdet_types: [0, 1],
-        doReflectedLight: false,   // library vis is total photon arrival
-        QtoL: 1.0,                 // placeholder until PE-scale calibration
-        VUVEfficiency: $.VUVEfficiency,
-        VISEfficiency: $.VISEfficiency,
+    // PD-surface channel sets for vd_surface_flags (see channel roles above).
+    local wall_ylo_channels = [1, 3, 13, 19],    // y=-417.6 membrane XAs
+    local wall_yhi_channels = [0, 2, 12, 18],    // y=+417.6 membrane XAs
+    local bottom_pmt_channels = std.range(24, 39),
 
-        light_model: 'library',
-        photon_library_file: 'pdvd/photodet/pdvd-photlib-vis-v5-128nm.json',
-        semimodel_file: 'pdvd/photodet/semi-analytical-pdvd.json',
+    // Opflash archive reader (the single per-event PDVD opflash file).  `inname`
+    // is the full path to opflash_pdvd-wct.tar.gz (caller prefixes the input dir).
+    opflash_source(tag, inname):: g.pnode({
+        type: 'TensorFileSource',
+        name: 'opflash_src_%s' % tag,
+        data: {
+            inname: inname,
+            prefix: 'opflash_',
+        },
+    }, nin=0, nout=1),
+
+    // Opflash matrix -> canonical flash/light/flashlight PCs (2->1 fan-in).
+    // port 0 = cluster pctree, port 1 = opflash matrix.
+    flash_attach(tag):: g.pnode({
+        type: 'FlashTensorToOpticalPCs',
+        name: 'flash_attach_%s' % tag,
+        data: {
+            nchan: nchan,
+            // PDVD opflash has no per-frame CAF time offset -> raw flash time.
+            correct_flash_time: false,
+        },
+    }, nin=2, nout=1),
+
+    // Shared QLMatching `data` block -- everything independent of the per-node
+    // anode/face wiring.
+    local match_data(dv, calib_dump) = {
+            detector_volumes: wc.tn(dv),
+            data: if std.objectHas(params, 'reality') && params.reality == 'sim' then false else true,
+            QtoL: 1.0,                 // placeholder until the PE-scale calibration
+            doReflectedLight: false,   // library vis is total photon arrival
+            nchan: nchan,
+            ch_mask: ch_mask,
+            active_opdet_types: [0, 1],   // XAs AND PMTs
+            VUVEfficiency: VUVEfficiency,
+            VISEfficiency: VISEfficiency,
+
+            // Visibility backend (see header).  In library mode the semimodel
+            // is still loaded for the OpDet table.
+            light_model: light_model,
+            photon_library_file: 'pdvd/photodet/pdvd-photlib-vis-v5-128nm.json',
+            semimodel_file: 'pdvd/photodet/semi-analytical-pdvd.json',
+
+            // --- PDVD single-flash mode (all C++-default-OFF knobs) ---
+            // One all-PD flash covers both drift volumes: the two drift-side
+            // runs share each physical flash and ONE joint LASSO explains it
+            // with clusters from both sides (a per-side fit would let each side
+            // independently absorb the full PE -- biased for cathode-crossers).
+            shared_flash: true,
+            // Keep all 40 PDs on both runs (cathode XAs at x=0 are double-sided;
+            // the legacy per-TPC split by cathode x would halve the flash).
+            opdet_all_volumes: true,
+            // PD-surface endpoint flags: bottom-anode proximity -> bottom PMTs;
+            // +-y wall proximity -> that wall's membrane XAs; chi2 relaxation
+            // restricted to the triggering surface's channels; the cathode end
+            // sets the inert flag_at_cathode.  The z-wall PMTs (~1% of flash PE)
+            // are deliberately NOT flagged in round 1 (add their walls later if
+            // the hand scan shows a need).
+            vd_surface_flags: true,
+            pd_wall_cushion: 10 * wc.cm,
+            pd_wall_channels_ylo: wall_ylo_channels,
+            pd_wall_channels_yhi: wall_yhi_channels,
+            anode_pd_channels: [bottom_pmt_channels, []],  // [bottom volume, top volume]
+
+            // Dead-PD self-check: per-event dynamic auto-mask on top of the
+            // static ch_mask.  Same-type neighbour pool (XA vs PMT efficiencies
+            // differ ~4x, so a cross-type (Y,Z) neighbour is not a meaningful
+            // brightness reference).  Thresholds are 40-PD/PDVD-scaled versions
+            // of the PDHD 10/50/4/1/3 set.
+            auto_mask: true,
+            auto_mask_same_type: true,
+            auto_mask_pe_low: 5,
+            auto_mask_pe_bright: 20,
+            auto_mask_neighbors: 3,
+            auto_mask_min_contrast: 2,
+            auto_mask_min_flash: 3,
+
+            // Flash admission: no time cut (flash times run 0..7.5 ms on the
+            // light base; the SBND default +-1.5 ms would clip the tail) and
+            // the light-chain-study PE knee (~20-30) as the floor.
+            flash_minPE: flash_minPE,
+            flash_mintime: -1 * wc.s,
+            flash_maxtime: 1 * wc.s,
+            // Real PDVD readout window (post-resample SP frame length, 10000
+            // ticks x 0.5 us = 5 ms), supplied by run_clus_evt.sh from the SP
+            // frame.  Without it the C++ default (SBND's 3427) would falsely
+            // flag every mid-drift cluster as window-truncated.
+            readout_window_ticks: readout_window_ticks,
+
+            // Containment prefilter (drop bundles whose cluster leaves the
+            // drift box at the flash's T0).  Meaningless until the light<->
+            // charge time base is calibrated -- the driver disables it for the
+            // trigger-offset diagnostic runs.
+            require_containment: require_containment,
+
+            // Generic SBND/PDHD-proven levers (all C++-default-OFF):
+            // sparse LASSO (perf; the joint system is bigger than a per-side one),
+            sparse_lasso: true,
+            // flag-aware L1 down-weight (a boundary/near-PD bundle's measured
+            // light is an underestimate; don't let the LASSO shrink it away),
+            lasso_flag_weight: true,
+            lasso_boundary_weight: 0.2,
+            // mask the KS shape metric on the same channels the chi2/LASSO drop,
+            bundle_mask_ks: true,
+            // per-bundle chi2 relaxation: with vd_surface_flags the excess
+            // widening applies only to the near-surface PD channels; the
+            // dead-PD worst-channel drop is detector-agnostic.  chi2_pmt_excess
+            // starts at the PDHD ARAPUCA scale (retune after the hand scan).
+            chi2_relax: true,
+            chi2_pmt_excess: 100.0,
+            // KS-led high-consistency ladder (purity cull before the fit).  KS
+            // ceilings = SBND/PDHD; chi2/ndf ceilings at the loose PDHD scale --
+            // with the uncalibrated PDVD PE scale the chi2 is inflated, so the
+            // ladder simply fires less (safe direction).
+            highconsist_ladder: true,
+            highconsist_ks_max: 0.06,
+            highconsist_min_ndf: 3,
+            hc_clean_ks: 0.06, hc_clean_c2: 35.0,
+            hc_good_ks:  0.10, hc_good_c2:  35.0,
+            hc_tb_ks:    0.10, hc_tb_c2:    35.0,
+            hc_miss_ks:  0.08, hc_miss_c2:  60.0,
+            hc_miss_min_ndf: 5,
+
+            // DELIBERATELY OFF for round 1 (C++ defaults):
+            //  - reject_overpred: cuts on the ABSOLUTE pred/meas ratio; enable
+            //    only after QtoL is renormalized from the first calib dumps.
+            //  - empty_rescue / cluster_rescue: per-run "empty flash" concepts,
+            //    not shared_flash-aware (the C++ skips them with a warning).
+            //  - cross_side_filter / crossside_skip_vis / xtpc_* /
+            //    opflash_phys_gid: per-side flash concepts; PDVD has one flash
+            //    and the shared fit handles cathode-crossers natively.
+            //  - robust_endpoint_trim / pe_err_on_pred / pmt_nonlinearity:
+            //    PDHD/SBND-tuned; revisit after the hand scan.
+
+            drift_speed: params.lar.drift_speed,
+            trigger_offset: trigger_offset,
+            calib_dump: calib_dump,
     },
+
+    // JOINT both-sides matcher: the two drift volumes enter ONE node so the
+    // shared-flash joint LASSO sees both sides' candidate bundles.  `sides` =
+    // per-side anode lists ([[anode0..3],[anode4..7]]); each side's
+    // representative (sides[i][0]) is input port i and faces[i] its imaging
+    // face (PDVD: both 0 -- the two faces of a CRP share x-bounds).
+    matching_joint(sides, dv, faces, calib_dump=''):: g.pnode({
+        type: 'QLMatching',
+        name: 'matching_joint',
+        data: {
+            anodes: [wc.tn(side[0]) for side in sides],
+            grouping_anodes: [[wc.tn(a) for a in side] for side in sides],
+            tpc_faces: faces,
+            // Merge the (single, input-0) optical-flash display PC into the
+            // joint grouping.
+            root_pcs_to_merge: ['opflash'],
+        } + match_data(dv, calib_dump),
+    }, nin=std.length(sides), nout=1, uses=[dv] + [a for side in sides for a in side]),
 }

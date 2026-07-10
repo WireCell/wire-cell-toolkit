@@ -20,8 +20,16 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     out-of-time activity apparently sits past the cathode in the opposite
 //     drift volume; the strict filter would exclude such clusters from ALL
 //     all-APA merge passes (see pdvd/docs/clustering-boundary-merge.md).
+//   trigger_offset: per-event light-vs-charge time-base offset (the calibrated
+//     PDVD analogue of the PDHD opflash offset_us) applied DOWNSTREAM rather
+//     than baked into x_raw -- with time_offset=0 the raw imaging x stays
+//     offset-free, and T0Correction (x_t0cor scope) adds (cluster_t0 +
+//     trigger_offset) so flash-matched charge lands on the light time base.
+//     QLMatching folds the same value into its matching geometry.  Default 0
+//     => x_t0cor unchanged (bit-identical).
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
-          time_offset=0 * wc.us, relax_containment_filter=true)
+          time_offset=0 * wc.us, relax_containment_filter=true,
+          trigger_offset=0 * wc.us)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -78,6 +86,7 @@ local dvm = {
         tick: 0.5 * wc.us,  // 0.5 mm per tick
         tick_drift: self.drift_speed * self.tick,
         time_offset: time_offset,
+        trigger_offset: trigger_offset,
         nticks_live_slice: 4,
         FV_xmin: -3358.35 * wc.mm,
         FV_xmax: -30.0 * wc.mm,
@@ -561,6 +570,8 @@ local clus_all_tpc (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    save_opflash = false,
+    premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -594,11 +605,17 @@ local clus_all_tpc (
         // Cathode-crossing connector (SBND-tuned parameters as placeholder;
         // PDVD central cathode is at x=0, the C++ default cathode_x — the
         // sensitive volumes end at -+30.0mm so cathode_x_cut=5cm spans the
-        // |x|<3.0cm gap).  use_flash_t0=false because PDVD has no flash
-        // matching (the flash-coincidence gate would veto every pair).
+        // |x|<3.0cm gap).  Without Q/L matching (premerged=false)
+        // use_flash_t0=false (the flash-coincidence gate would veto every
+        // pair).  With Q/L matching upstream (premerged=true) every cluster
+        // carries its matched cluster_t0: gate pairs on flash-time coincidence.
+        // NB PDVD has ONE all-PD flash, so a genuine crosser's two halves
+        // normally share the SAME matched flash — the 1 us window is a
+        // formality that also admits a rare split match.
         cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
-                           conn_short_cut=30.0, use_flash_t0=false),
+                           conn_short_cut=30.0, use_flash_t0=premerged,
+                           flash_t0_window=1*wc.us),
     ],
 
     local mabc = g.pnode({
@@ -618,6 +635,19 @@ local clus_all_tpc (
             subRunNo: subRunNo,
             eventNo: eventNo,
             save_deadarea: true,
+            // Dump the optical "op" bee instance (measured flash PE + Q/L
+            // predicted PE per matched cluster) at the pre-pipeline point.
+            // Needs do_qlmatch (the QLMatching "opflash" root PC); no-op
+            // otherwise.  Default false => bit-identical.
+            save_opflash: save_opflash,
+            // One "op" row per flash carrying ALL its matched cluster ids
+            // (summed predicted PE) — with PDVD's single all-PD flash a flash
+            // is typically matched to many clusters, so per-flash rows are the
+            // only readable display (SBND/PDHD parity).
+            bee_flash_per_flash: true,
+            // No flash-flash grouping: PDVD has ONE all-PD flash per time (no
+            // per-side pair to group).  0 = off (no column).
+            flash_group_window: 0,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PDVD anode face
             dead_apa_groups: apa_drift_groups,  // group dead area by drift side -> 2 dead instances
             anodes: [wc.tn(a) for a in anodes],
@@ -628,7 +658,14 @@ local clus_all_tpc (
                     detector: "protodunevd",         // Detector name
                     algorithm: "clustering",    // Algorithm identifier
                     pcname: "3d",           // Which scope to use
-                    coords: ["x", "y", "z"],    // Coordinates to use (uncorrected; x_t0cor needs flash-associated t0)
+                    // With Q/L matching upstream (premerged) draw the
+                    // T0-corrected drift coords (x_t0cor = x_raw - dirx*
+                    // (cluster_t0 + trigger_offset)*drift_speed, materialised
+                    // by switch_scope from the QLMatching cluster_t0; an
+                    // unmatched cluster fails the containment filter and is
+                    // dropped here — it still appears in the raw "img" set).
+                    // Without matching keep the raw coords (bit-identical).
+                    coords: if premerged then common_corr_coords else ["x", "y", "z"],
                     individual: false            // Output individual APA/Face
                 },
             {
@@ -663,7 +700,10 @@ local clus_all_tpc (
     local end = if dump
     then g.pipeline([mabc, sink])
     else g.pipeline([mabc]),
-    ret :: g.intern(
+    // premerged: the upstream joint QLMatching node already emits ONE merged tree, so
+    // feed mabc directly (its single input is the all-TPC stage's input).  Else merge the
+    // ngroups per-side outputs through PointTreeMerging first (historical path).
+    ret :: if premerged then end else g.intern(
         innodes = [pcmerging],
         centernodes = [],
         outnodes = [end],
@@ -679,5 +719,8 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged),
+    // Expose the DetectorVolumes node builder so the Q/L matching graph can
+    // reference the SAME all-anode DV the clustering uses (deterministic by name).
+    detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
 }
