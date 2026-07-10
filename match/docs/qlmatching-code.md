@@ -179,6 +179,31 @@ comparing code defaults to observed runs.
 The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 `OpDets` are handed straight to the `SemiAnalyticalModel` ctor (`:78-112`).
 
+## 2a. Photon-library visibility backend (f52c4a47) and PDVD vertical-drift knobs (e06ea900)
+
+All default-OFF ⇒ PDHD/SBND/legacy configs bit-identical (verified: PDHD 29107
+evt0 all mabc archives, SBND data evt686, PDVD no-QL abtest). PDVD turns them
+all on (`cfg/pgrapher/experiment/protodunevd/qlmatching.jsonnet`, which also
+carries the per-channel role/efficiency rationale); chain-level docs live in
+`pdvd/docs/pdvd-qlmatching.md` (wcp-porting-img).
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `light_model` | `'semi'` | visibility backend: `'semi'` = SemiAnalyticalModel (unchanged path); `'library'` = gridded photon library (nearest-neighbor lookup in a `(nx,ny,nz,nchan)` visibility grid). The semimodel is still loaded either way (OpDet table source). |
+| `photon_library_file` | `''` | library-mode grid JSON+npy (e.g. `pdvd/photodet/pdvd-photlib-vis-v5-128nm.json`; metadata `origin_cm`/`step_cm`/shape) |
+| `shared_flash` | `false` | **joint LASSO over all input ports**: physical flashes are shared by every port (identical archives asserted by id/time/PE), `fit_round1_shared`/`fit_round2_shared` build columns from ALL runs' bundles per flash so one all-PD flash is explained jointly, not absorbed once per side. Output PC + calib dump emitted once (side-0 gid). `empty_rescue`/`cluster_rescue` are not shared-flash-aware — `configure()` warns and skips them. |
+| `opdet_all_volumes` | `false` | skip the per-TPC OpDet cull (`compute_geometry` cathode-x split) and treat every OpDet as in-TPC for the auto-mask: needed when PDs serve both drift volumes (PDVD double-sided cathode XAs at x=0). |
+| `vd_surface_flags` | `false` | PD-surface-aware `flag_close_to_PMT`: the anode-end window sets it only where that input's anode hosts PDs (`anode_pd_channels`, per-input array; empty = no PDs), and a NEW check flags clusters whose extreme y is within `pd_wall_cushion` of a ±y wall (channels `pd_wall_channels_ylo`/`_yhi`). Each trigger records its surface's channels into `TimingTPCBundle::relax_channels`, so the `chi2_relax` per-channel widening applies **only to the relevant PDs** (empty relax set = legacy all-channel behavior). Also enables the inert `flag_at_cathode`. |
+| `pd_wall_cushion` | `10 cm` | ±y wall proximity band for the wall-XA flag |
+| `pd_wall_channels_ylo` / `_yhi` | `[]` | OpDet indices relaxed when the y− / y+ wall triggers |
+| `anode_pd_channels` | `[]` | per-input-port OpDet index lists relaxed when the anode window triggers (PDVD: `[bottom PMTs 24-39, []]`) |
+| `auto_mask_same_type` | `false` | restrict the auto-mask neighbour pool to the candidate's OpDet `type` — for mixed XA/PMT detectors where a cross-type (Y,Z) neighbour is not a brightness reference (~4× efficiency gap) |
+
+`flag_at_cathode` (TimingTPCBundle, set in the cathode-end branch under
+`vd_surface_flags`) is diagnostic-only: no behavioral consumer, exported as
+`at_cathode` in the calib dump (key present only in vd mode — legacy dumps
+byte-identical).
+
 ---
 
 ## 3. Input parsing (`operator()`)
