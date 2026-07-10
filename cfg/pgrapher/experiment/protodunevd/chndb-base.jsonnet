@@ -624,7 +624,7 @@ top_u_groups:
                            { l: 120.0, v:  9.0 * gain_scale },
                            { l: 172.0, v: 10.0 * gain_scale },
                          ] },
-          max_rms_cut: 50.0 * gain_scale },
+          max_rms_cut: 20.0 * gain_scale },
         { channels: v_chans,
           min_rms_cut: { type: 'piecewise_linear_in_wirelength',
                          points: [
@@ -632,7 +632,7 @@ top_u_groups:
                            { l: 120.0, v:  9.1 * gain_scale },
                            { l: 172.0, v: 11.0 * gain_scale },
                          ] },
-          max_rms_cut: 30.0 * gain_scale },
+          max_rms_cut: 20.0 * gain_scale },
         { channels: w_chans, min_rms_cut: 10.0 * gain_scale, max_rms_cut: 30.0 * gain_scale },
       ] else [
         // Bottom TPCs: W flat; U and V linear-in-wirelength on min

@@ -7,6 +7,13 @@
 using namespace WireCell;
 using namespace WireCell::RayGrid;
 
+// A named logger so these messages flow through WCT's configured sinks
+// instead of relying on the process-global default logger.
+static Log::logptr_t logger() {
+    static Log::logptr_t l = Log::logger("raygrid");
+    return l;
+}
+
 Ray RayGrid::crossing_points(const Coordinates& coords,
                              const coordinate_t& ray,
                              const Strip& strip)
@@ -66,8 +73,8 @@ Activity Activity::subspan(int abs_beg, int abs_end) const
     const int rel_end = abs_end - m_offset;
 
     if (rel_beg < 0 or rel_beg >= rel_end or rel_end > (int) m_span.size()) {
-        spdlog::debug("activity::subspan bogus absolute:[{},{}] m_offset={} span.size={}", abs_beg, abs_end, m_offset,
-                      m_span.size());
+        logger()->debug("activity::subspan bogus absolute:[{},{}] m_offset={} span.size={}", abs_beg, abs_end, m_offset,
+                        m_span.size());
         return Activity(m_layer);
     }
 
@@ -509,7 +516,7 @@ blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords,
         else {
             blobs = rc(blobs, activity);
             if (blobs.empty()) {
-                spdlog::trace("RayGrid::make_blobs: lost blobs with {}", activity);
+                logger()->trace("RayGrid::make_blobs: lost blobs with {}", activity);
                 return blobs_t{};
             }
         }

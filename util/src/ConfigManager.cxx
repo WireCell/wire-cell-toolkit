@@ -7,6 +7,13 @@
 using namespace std;
 using namespace WireCell;
 
+// A named logger so these messages flow through WCT's configured sinks
+// instead of relying on the process-global default logger.
+static Log::logptr_t logger() {
+    static Log::logptr_t l = Log::logger("cfgmgr");
+    return l;
+}
+
 
 ConfigManager::ConfigManager()
   : m_top(Json::arrayValue)
@@ -41,8 +48,8 @@ void ConfigManager::extend(Configuration more)
             by_tn[key] = ind;
         }
         else {
-            spdlog::warn("ConfigManager::extend() overwriting type=\"{}\" name=\"{}\"",
-                         type, name);
+            logger()->warn("ConfigManager::extend() overwriting type=\"{}\" name=\"{}\"",
+                           type, name);
             m_top[it->second] = std::move(one);
         }
     }
@@ -74,7 +81,7 @@ int ConfigManager::add(Configuration& cfg)
         ind = m_top.size();
     }
     else {
-        spdlog::warn("ConfigManager:add() overwriting existing type=\"{}\" name=\"{}\"", type, name);
+        logger()->warn("ConfigManager:add() overwriting existing type=\"{}\" name=\"{}\"", type, name);
     }
     m_top[ind] = cfg;
     return ind;

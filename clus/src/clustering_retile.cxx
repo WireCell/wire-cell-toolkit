@@ -27,6 +27,7 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Spdlog.h"
+#include "WireCellUtil/Logging.h"
 
 #include "WireCellAux/SimpleBlob.h"
 #include "WireCellAux/SamplingHelpers.h"
@@ -49,6 +50,13 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+// A named logger so these messages flow through WCT's configured sinks
+// instead of relying on the process-global default logger.
+static Log::logptr_t logger() {
+    static Log::logptr_t l = Log::logger("clus.Retile");
+    return l;
+}
+
 
 
 class ClusteringRetile : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedScope {
@@ -65,10 +73,10 @@ public:
         // kT0CorrectionScope = {"3d", {"x_t0cor","y","z"}}, so any other scope will
         // silently pass no clusters through to shadow.
         if (m_scope != Facade::kT0CorrectionScope) {
-            spdlog::warn("ClusteringRetile: configured scope (pc_name=\"{}\") does not match "
-                         "the T0Correction scope (pc_name=\"3d\", coords=[x_t0cor,y,z]). "
-                         "All clusters will be filtered out if this follows ClusteringSwitchScope.",
-                         m_scope.pcname);
+            logger()->warn("ClusteringRetile: configured scope (pc_name=\"{}\") does not match "
+                           "the T0Correction scope (pc_name=\"3d\", coords=[x_t0cor,y,z]). "
+                           "All clusters will be filtered out if this follows ClusteringSwitchScope.",
+                           m_scope.pcname);
         }
     }
     virtual Configuration default_configuration() const {
@@ -102,7 +110,7 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
 
     auto live_vec = ensemble.with_name("live");
     if (live_vec.empty()) {
-        spdlog::warn("ClusteringRetile: no 'live' grouping found, skipping");
+        logger()->warn("ClusteringRetile: no 'live' grouping found, skipping");
         return;
     }
     auto& orig_grouping = *live_vec.at(0);
@@ -136,10 +144,10 @@ void ClusteringRetile::visit(Ensemble& ensemble) const
     }
 
     if (nclusters > 0 && nretiled == 0) {
-        spdlog::warn("ClusteringRetile: 0/{} clusters passed scope filter."
-                     " If this follows ClusteringSwitchScope with T0Correction,"
-                     " configure: pc_name=\"3d\", coords=[x_t0cor,y,z].",
-                     nclusters);
+        logger()->warn("ClusteringRetile: 0/{} clusters passed scope filter."
+                       " If this follows ClusteringSwitchScope with T0Correction,"
+                       " configure: pc_name=\"3d\", coords=[x_t0cor,y,z].",
+                       nclusters);
     }
 }
 
