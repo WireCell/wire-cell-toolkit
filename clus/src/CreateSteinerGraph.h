@@ -33,6 +33,11 @@ namespace WireCell::Clus::Steiner {
         std::string m_graph_name{"steiner"};
         bool m_replace{true};
         bool m_perf{false};
+        // When true (default, uBooNE) only clusters flagged beam_flash are
+        // processed.  Post-QL-matching detectors (e.g. SBND) have no
+        // beam_flash flag: set false to process every scope-passing cluster,
+        // with each flagged main cluster getting the main treatment.
+        bool m_require_beam_flash{true};
 
         Grapher::Config m_grapher_config;
 

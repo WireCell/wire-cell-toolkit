@@ -35,6 +35,7 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     NeedPCTS::configure(cfg);
 
     m_perf = get(cfg, "perf", m_perf);
+    m_require_beam_flash = get(cfg, "require_beam_flash", m_require_beam_flash);
     m_grapher_config.dv = m_dv;
     m_grapher_config.pcts = m_pcts;
     m_grapher_config.perf = m_perf; // propagate perf flag into Grapher instances
@@ -54,6 +55,10 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["replace"] = m_replace;
     // If true, print per-step timing to stdout.
     cfg["perf"] = m_perf;
+    // If true (uBooNE) only beam_flash-flagged clusters are processed; false
+    // (post-QL-matching detectors without that flag) processes every
+    // scope-passing cluster, mains recognized by their main_cluster flag.
+    cfg["require_beam_flash"] = m_require_beam_flash;
 
     return cfg;
 }
@@ -80,11 +85,16 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         // if scope is not raw, apply filter ...
         if (default_scope.hash()!=raw_scope.hash() && (!cluster->get_scope_filter(default_scope)) ) continue;
 
-        if (cluster->get_flag(Flags::beam_flash)){
-            filtered_clusters.push_back(cluster);
-            if (cluster->get_flag(Flags::main_cluster)) {
-                main_cluster = cluster;
+        if (m_require_beam_flash) {
+            if (cluster->get_flag(Flags::beam_flash)){
+                filtered_clusters.push_back(cluster);
+                if (cluster->get_flag(Flags::main_cluster)) {
+                    main_cluster = cluster;
+                }
             }
+        }
+        else {
+            filtered_clusters.push_back(cluster);
         }
     }
 
@@ -187,14 +197,23 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     };
 
     if (m_grapher_config.retile) {
-        if (main_cluster != nullptr) {
-            process_cluster_steiner(main_cluster, /*is_main=*/true);
-        }
+        if (m_require_beam_flash) {
+            if (main_cluster != nullptr) {
+                process_cluster_steiner(main_cluster, /*is_main=*/true);
+            }
 
-        // Associated (non-main) beam_flash clusters.
-        for (auto* cluster : filtered_clusters) {
-            if (cluster == main_cluster) continue;
-            process_cluster_steiner(cluster, /*is_main=*/false);
+            // Associated (non-main) beam_flash clusters.
+            for (auto* cluster : filtered_clusters) {
+                if (cluster == main_cluster) continue;
+                process_cluster_steiner(cluster, /*is_main=*/false);
+            }
+        }
+        else {
+            // One matched main cluster per flash bundle: each gets the main
+            // treatment; associated/unflagged clusters the light one.
+            for (auto* cluster : filtered_clusters) {
+                process_cluster_steiner(cluster, cluster->get_flag(Flags::main_cluster));
+            }
         }
     }
 

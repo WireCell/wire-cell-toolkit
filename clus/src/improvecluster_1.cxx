@@ -595,9 +595,20 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
 std::vector<const WireCell::Clus::Facade::Blob*>
 ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
 {
-    // Get time-organized maps of original and new blobs
-    const auto& orig_time_blob_map = cluster.time_blob_map().at(apa).at(face);
-    const auto& new_time_blob_map = shad_cluster.time_blob_map().at(apa).at(face);
+    // Get time-organized maps of original and new blobs.  A multi-APA
+    // (cathode-crossing) cluster can retile to a shadow with blobs on only
+    // one APA -- a missing (apa,face) entry on either side means there is
+    // nothing to filter for this pair.
+    static const std::map<int, BlobSet> empty_tbm;
+    auto tbm_at = [](const auto& tbm, int apa, int face) -> const auto& {
+        auto ait = tbm.find(apa);
+        if (ait == tbm.end()) return empty_tbm;
+        auto fit = ait->second.find(face);
+        if (fit == ait->second.end()) return empty_tbm;
+        return fit->second;
+    };
+    const auto& orig_time_blob_map = tbm_at(cluster.time_blob_map(), apa, face);
+    const auto& new_time_blob_map = tbm_at(shad_cluster.time_blob_map(), apa, face);
 
     // Build index mappings for new blobs.  Sort by (time_slice, blob->ident())
     // so vertex IDs are deterministic across runs regardless of heap layout.

@@ -645,7 +645,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         },
 
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
-        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true) :: {
+        // require_beam_flash=true (uBooNE): only beam_flash-flagged clusters; false
+        // (post-QL-matching detectors without that flag): every scope-passing cluster.
+        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -653,6 +655,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 graph: graph,
                 retiler: wc.tn(retiler),
                 perf: perf,
+                require_beam_flash: require_beam_flash,
             } + dv_cfg + pcts_cfg,
             uses: [detector_volumes, pc_transforms, retiler]
         },

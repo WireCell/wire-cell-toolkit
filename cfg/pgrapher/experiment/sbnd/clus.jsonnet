@@ -429,22 +429,49 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // PR job's zip is directly comparable to mabc-all-apa.zip, except save_opflash
 // is off: the op display needs the per-cluster flashpred pcarray, which is
 // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
-local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='') = {
+local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
+              trackfitting_config_file='', particle_dataset=null, extra_uses=[]) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
+    // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
+    // MakeFiducialUtils / the taggers' inside_fiducial_volume().
     local cm_old = clus.clustering_methods(
-        prefix='pr', detector_volumes=dv, pc_transforms=pcts, coords=common_coords),
+        prefix='pr', detector_volumes=dv, pc_transforms=pcts, fiducial=dv, coords=common_coords),
     local cm = clus.clustering_methods(
-        prefix='pr', detector_volumes=dv, pc_transforms=pcts, coords=common_corr_coords(pos_offset_on)),
+        prefix='pr', detector_volumes=dv, pc_transforms=pcts, fiducial=dv, coords=common_corr_coords(pos_offset_on)),
+    // Box-model recombination at the SBND drift field (uBooNE used 0.273 kV/cm).
+    local sbnd_box_recomb = {
+        type: 'BoxRecombination',
+        name: 'sbnd_box_recomb',
+        data: { A: 1.0, B: 0.255, Efield: 0.5, rho: 1.38, Wi: 23.6e-6 },
+    },
+    // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
+    // PC (PointTreeBuilding), one per (APA, face 0).
+    local improve2 = cm.improve_cluster_2(
+        anodes=anodes,
+        samplers=[clus.sampler(bs_live_face(a.name, 0), apa=a.data.ident, face=0) for a in anodes]),
     // Visitors available to the PR pipeline, by name.  switch_scope re-applies
     // the per-cluster T0 correction on the loaded tree (the corrected scope is
     // runtime state and does not persist through the tarball); it recomputes
-    // deterministically from cluster_t0.  M3 adds steiner / fiducialutils /
-    // tagger_check_stm here.
+    // deterministically from cluster_t0.  fiducialutils MUST precede any
+    // tagger (they silently no-op without it).
     local cm_by_name = {
         switch_scope: cm_old.switch_scope(),
+        // SBND has no beam_flash flag (QLMatching sets main/associated_cluster
+        // instead) -- process every scope-passing cluster.
+        steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false),
+        fiducialutils: cm.fiducialutils(),
+        tagger_check_stm: cm.tagger_check_stm(
+            trackfitting_config_file=trackfitting_config_file,
+            particle_dataset=wc.tn(particle_dataset),
+            recombination_model=wc.tn(sbnd_box_recomb)),
     },
     local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
+    // tagger_check_stm's config only names the recombination/particle-dataset
+    // components; emit them (and the caller's LinterpFunctions etc. via
+    // extra_uses) when the tagger is in the pipeline.
+    local tagger_uses = if std.member(pipeline_names, 'tagger_check_stm')
+                        then [sbnd_box_recomb] + extra_uses else [],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
     local mabc = g.pnode({
         type: 'MultiAlgBlobClustering',
@@ -487,7 +514,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             ],
             pipeline: wc.tns(cm_pipeline),
         },
-    }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline),
+    }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline + tagger_uses),
     local sink = g.pnode({
         type: 'TensorFileSink',
         name: 'clus_pr',
@@ -533,10 +560,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
-    pr(anodes, dump=true, pipeline_names=[], tensor_outname='')::
+    pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
+       trackfitting_config_file='', particle_dataset=null, extra_uses=[])::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
-                pipeline_names=pipeline_names, tensor_outname=tensor_outname),
+                pipeline_names=pipeline_names, tensor_outname=tensor_outname,
+                trackfitting_config_file=trackfitting_config_file,
+                particle_dataset=particle_dataset, extra_uses=extra_uses),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
