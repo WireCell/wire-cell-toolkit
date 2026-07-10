@@ -111,6 +111,12 @@ namespace WireCell {
             // 0 (no offset applied downstream).
             double m_offset_us{0.0};
 
+            // Extra key/values merged verbatim into the output tensor-set
+            // metadata (e.g. PDVD's per-crate offsets offset_bot_us /
+            // offset_top_us).  Null (default) => nothing stamped, output
+            // byte-identical.
+            Configuration m_metadata_extra;
+
             std::vector<double> m_opdet_x, m_opdet_y, m_opdet_z;  // [nchan], mm
 
             int m_count{0};

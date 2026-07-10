@@ -166,10 +166,17 @@ local wc = import 'wirecell.jsonnet';
     // (DAPHNE) are ganged to the 40 OpDet PE columns via the channel
     // map.  bin_width 1000 ns (PDHD parity, validated on data).
     // Quality cuts scaled to 40 PDs (PDHD: 5/20 on 160).
-    // offset_us: light<->charge offset, NOT yet established for PDVD --
-    // stamped 0 (provisional) until the charge chain association is
-    // calibrated.
-    opflash_finder(name='', offset_us=0, min_fired_pds=2, min_total_pe=10.0)::  g.pnode({
+    // offset_us: legacy scalar key, stays 0 for PDVD (inert).  The real
+    // per-event light<->charge offsets are PER CRATE (the TDE/BDE charge
+    // windows open up to ~32 us apart, each jittering vs the trigger):
+    //   offset_bot_us = light_chain_t0 - charge_bde_start  (bottom volume)
+    //   offset_top_us = light_chain_t0 - charge_tde_start  (top volume)
+    // (negative, ~-2.1..-2.5 ms; ADD to a flash time to land on that crate's
+    // charge time base).  Measured per event from the rawwf trigoff tree by
+    // run_light_evt.sh and stamped verbatim into the archive metadata for
+    // run_clus_evt.sh / QLMatching trigger_offsets.
+    opflash_finder(name='', offset_us=0, min_fired_pds=2, min_total_pe=10.0,
+                   offset_bot_us=null, offset_top_us=null)::  g.pnode({
         type: 'OpFlashFinder',
         name: name,
         data: {
@@ -182,6 +189,11 @@ local wc = import 'wirecell.jsonnet';
             min_fired_pds: min_fired_pds,
             min_total_pe: min_total_pe,
             min_fired_pe: 1.0,
+        } + if offset_bot_us == null && offset_top_us == null then {} else {
+            metadata_extra: {
+                offset_bot_us: offset_bot_us,
+                offset_top_us: offset_top_us,
+            },
         },
     }, nin=1, nout=1),
 }

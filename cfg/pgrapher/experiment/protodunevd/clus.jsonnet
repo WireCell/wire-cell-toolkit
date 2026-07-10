@@ -27,9 +27,14 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     trigger_offset) so flash-matched charge lands on the light time base.
 //     QLMatching folds the same value into its matching geometry.  Default 0
 //     => x_t0cor unchanged (bit-identical).
+//   trigger_offset_top: optional separate offset for the TOP drift volume
+//     (anodes 4-7).  The PDVD TDE/BDE charge-readout crates open their windows
+//     up to ~32 us apart, so the light->charge offset is per crate:
+//     trigger_offset = bottom (BDE), trigger_offset_top = top (TDE).  null
+//     (default) => trigger_offset everywhere (bit-identical).
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
           time_offset=0 * wc.us, relax_containment_filter=true,
-          trigger_offset=0 * wc.us)
+          trigger_offset=0 * wc.us, trigger_offset_top=null)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -104,6 +109,9 @@ local dvm = {
     a4f0pA: $.a0f0pA + {
         FV_xmin: 30.0 * wc.mm,
         FV_xmax: 3358.35 * wc.mm,
+        // Top volume charge is read by the TDE crate (its own window start).
+        trigger_offset: if trigger_offset_top == null then trigger_offset
+                        else trigger_offset_top,
     },
     a4f1pA: $.a4f0pA,
     a5f0pA: $.a4f0pA,

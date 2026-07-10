@@ -168,6 +168,17 @@ namespace WireCell::Match {
         // trigger time base as the flash times. In WCT internal time units (ns).
         // Default 0 => detectors that DO bake it (e.g. SBND) are bit-identical.
         double m_trigger_offset{0.0};
+        // Per-INPUT trigger offsets ("trigger_offsets", one per input port), for
+        // detectors whose charge readout windows start at different times per
+        // drift volume (PDVD: the TDE/BDE crates open up to ~32 us apart, each
+        // wandering event-to-event vs the trigger-locked light window). Empty
+        // (the default) => m_trigger_offset for every input, bit-identical.
+        std::vector<double> m_trigger_offsets;
+        double trigger_offset_for(std::size_t input_idx) const
+        {
+            return m_trigger_offsets.empty() ? m_trigger_offset
+                                             : m_trigger_offsets.at(input_idx);
+        }
         // LASSO solution threshold below which a (flash, cluster) bundle is
         // dropped after each matching round. Was hard-coded 0.05 inline; pulled
         // out so it can be widened/narrowed from the jsonnet without rebuild.

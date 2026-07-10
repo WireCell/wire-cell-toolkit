@@ -80,7 +80,11 @@ bool Root::PDVDOpWaveformSource::operator()(IFrame::pointer& out)
     if (!tfile or tfile->IsZombie()) {
         THROW(IOError() << errmsg{"PDVDOpWaveformSource: failed to open " + m_filename});
     }
+    // Newer extractions nest the tree under a TDirectory.
     TTree* tree = dynamic_cast<TTree*>(tfile->Get("raw_waveform"));
+    if (!tree) {
+        tree = dynamic_cast<TTree*>(tfile->Get("rawdump/raw_waveform"));
+    }
     if (!tree) {
         THROW(IOError() << errmsg{"PDVDOpWaveformSource: no raw_waveform tree in " + m_filename});
     }

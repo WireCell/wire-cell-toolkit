@@ -460,6 +460,7 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["min_total_pe"] = m_min_total_pe;
     cfg["min_fired_pe"] = m_min_fired_pe;
     cfg["offset_us"] = m_offset_us;
+    cfg["metadata_extra"] = m_metadata_extra;
     return cfg;
 }
 
@@ -483,6 +484,7 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_min_total_pe = get(cfg, "min_total_pe", m_min_total_pe);
     m_min_fired_pe = get(cfg, "min_fired_pe", m_min_fired_pe);
     m_offset_us = get(cfg, "offset_us", m_offset_us);
+    if (cfg.isMember("metadata_extra")) m_metadata_extra = cfg["metadata_extra"];
 
     m_chmap.clear();
     if (!m_channel_map_file.empty()) {
@@ -700,6 +702,11 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     md["producer"] = "wct-flash";
     md["nchan"] = m_nchan;
     md["offset_us"] = m_offset_us;   // per-event trigger offset for downstream Q/L
+    if (!m_metadata_extra.isNull()) {
+        for (const auto& key : m_metadata_extra.getMemberNames()) {
+            md[key] = m_metadata_extra[key];
+        }
+    }
     out = std::make_shared<Aux::SimpleTensorSet>(in->ident(), md,
                                                  ITensor::shared_vector(tensors));
     log->debug("set {}: {} flashes from {} hits", in->ident(), nflash, nhit);

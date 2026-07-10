@@ -36,8 +36,12 @@
 //          -> Ar-blind; 24/27/28/34 dead in data)
 //
 // QtoL / absolute PE scale are placeholders until the crosser calibration;
-// trigger_offset is the CALIBRATED light<->charge time-base constant (the PDVD
-// analogue of PDHD's opflash offset_us) -- see pdvd/ql_light_calib/.
+// trigger_offsets = [bottom, top] per-CRATE light<->charge offsets (the PDVD
+// analogue of PDHD's opflash offset_us; per event from the rawwf trigoff tree
+// via the archive metadata offset_bot_us/offset_top_us -- the BDE/TDE charge
+// windows open up to ~32 us apart).  Any per-run residual constant
+// (data/ql_trigger_offset.txt, normally 0) is folded into BOTH values by
+// run_clus_evt.sh before they get here.
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
@@ -46,7 +50,13 @@ local wc = import 'wirecell.jsonnet';
 // loosen them for the trigger-offset diagnostic runs (containment is meaningless
 // until the time base is calibrated) without editing this file.
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
-         light_model='library', require_containment=true, flash_minPE=25) {
+         light_model='library', require_containment=true, flash_minPE=25,
+         trigger_offsets=null) {
+    // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
+    // (the C++ per-input array, when set, REPLACES the scalar).
+    local trigoffs = if trigger_offsets == null
+                     then [trigger_offset, trigger_offset]
+                     else trigger_offsets,
     local nchan = 40,
 
     // Static optical dead-channel mask:
@@ -221,6 +231,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
 
             drift_speed: params.lar.drift_speed,
             trigger_offset: trigger_offset,
+            trigger_offsets: trigoffs,
             calib_dump: calib_dump,
     },
 

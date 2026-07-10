@@ -245,6 +245,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_sparse_lasso = get(cfg, "sparse_lasso", m_sparse_lasso);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
     m_trigger_offset = get(cfg, "trigger_offset", m_trigger_offset);
+    // Optional per-input offsets (see QLMatching.h). Empty => scalar everywhere.
+    m_trigger_offsets.clear();
+    if (cfg.isMember("trigger_offsets") && cfg["trigger_offsets"].isArray())
+        for (const auto& t : cfg["trigger_offsets"]) m_trigger_offsets.push_back(t.asDouble());
     m_nchan = get(cfg, "nchan", m_nchan);
 
     // §A active-volume cushions (see match/docs/improve_progress.md). The raw
@@ -490,6 +494,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["sparse_lasso"]    = m_sparse_lasso;
     cfg["drift_speed"]     = m_drift_speed;
     cfg["trigger_offset"]  = m_trigger_offset;
+    cfg["trigger_offsets"] = Json::Value(Json::arrayValue);
 
     cfg["anode_ext1"]   = m_anode_ext1;
     cfg["anode_ext2"]   = m_anode_ext2;
@@ -1209,10 +1214,11 @@ void QLMatching::build_bundles(ApaRun& run)
     std::vector<double> reflected_visibilities;
     for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
-        // m_trigger_offset folds the per-event readout-vs-trigger offset into the
+        // trigger_offset_for folds the per-event readout-vs-trigger offset into the
         // drift x correction for detectors that don't bake it into the charge x at
-        // imaging time (default 0 => bit-identical). See QLMatching.h.
-        const double flash_x_offset = run.sign_offset * (flash_time + m_trigger_offset) * m_drift_speed;
+        // imaging time (default 0 => bit-identical); per-input when the charge
+        // windows start per-crate (PDVD TDE/BDE). See QLMatching.h.
+        const double flash_x_offset = run.sign_offset * (flash_time + trigger_offset_for(run.input_idx)) * m_drift_speed;
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
         std::vector<unsigned int> flash_opdet_mask = run.opdet_mask;
@@ -2497,9 +2503,10 @@ void QLMatching::write_opflash_pc(ApaRun& run)
             op_gid.push_back(gid);
             // Fold the per-event readout-vs-trigger offset into the displayed flash
             // time so the Bee red box lands on the (raw-x) charge it matches; the
-            // matching geometry already carries m_trigger_offset (see flash_x_offset).
-            // 0 => bit-identical.
-            op_time.push_back(flash->get_time() + m_trigger_offset);
+            // matching geometry already carries the offset (see flash_x_offset).
+            // 0 => bit-identical. Under shared_flash this emits for input 0 only,
+            // so the per-input value is this run's own.
+            op_time.push_back(flash->get_time() + trigger_offset_for(run.input_idx));
             op_ch.push_back(ch);
             op_pe.push_back(flash->get_PE(ch));
             op_apa.push_back(apa);
@@ -2542,6 +2549,14 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     // The per-event readout-vs-trigger offset is folded into f["time"] below, so the
     // viewer must NOT re-add it; keep this 0 so a folding viewer stays a no-op.
     top["trigger_offset"] = 0.0;   // us (already in f["time"])
+    // Per-input offsets, for reference only (already folded into f["time"] /
+    // the per-bundle geometry). Emitted only when configured => byte-identical
+    // dumps for scalar-offset detectors.
+    if (!m_trigger_offsets.empty()) {
+        Json::Value tov(Json::arrayValue);
+        for (double t : m_trigger_offsets) tov.append(t / us);
+        top["trigger_offsets_us"] = tov;
+    }
     top["count"]        = (Json::UInt64)m_count;
     top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
     // Readout window used by the window-truncation flag (raw post-resample ticks).
@@ -2646,7 +2661,7 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             f["gid"]      = (m_shared_flash ? 0 : apa) * kFlashGidStride + (int)fi;
             f["id"]       = fl->get_flash_id();
             f["apa"]      = apa;
-            f["time"]     = (fl->get_time() + m_trigger_offset) / us;   // us (trigger-folded)
+            f["time"]     = (fl->get_time() + trigger_offset_for(run.input_idx)) / us;   // us (trigger-folded)
             f["total_PE"] = fl->get_total_PE();
             Json::Value pe(Json::arrayValue), pe_err(Json::arrayValue);
             for (int ch = 0; ch < m_nchan; ++ch) { pe.append(fl->get_PE(ch)); pe_err.append(fl->get_PE_err(ch)); }
@@ -2799,7 +2814,7 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
         const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double ft  = flash->get_time();
-            const double off = run.sign_offset * (ft + m_trigger_offset) * v;
+            const double off = run.sign_offset * (ft + trigger_offset_for(run.input_idx)) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 ccs.push_back({bundle->get_main_cluster(), side, off, ft / us});
                 for (auto* oc : bundle->get_other_clusters())
@@ -3028,7 +3043,7 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     for (auto& run : runs) {
         const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
-            const double off = run.sign_offset * (flash->get_time() + m_trigger_offset) * v;
+            const double off = run.sign_offset * (flash->get_time() + trigger_offset_for(run.input_idx)) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated())
                     continue;
