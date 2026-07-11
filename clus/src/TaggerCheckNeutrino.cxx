@@ -81,6 +81,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_top_k            = get(config, "dl_vtx_top_k",            m_dl_vtx_top_k);
     m_dl_vtx_min_accept_score = get(config, "dl_vtx_min_accept_score", m_dl_vtx_min_accept_score);
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
+    m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
+    m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -113,6 +115,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
+    cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
+    cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
 
     return cfg;
 }
@@ -143,17 +147,64 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     int nclusters = grouping.nchildren();
     int n_main_clusters = 0;
     int n_in_beam_clusters = 0;
-    for (auto* cluster : grouping.children()) {
-        if (cluster->get_flag(Flags::main_cluster)) {
-            main_cluster = cluster;
-            n_main_clusters ++;
+    const bool beam_gate = m_beam_window_low < m_beam_window_high;
+    if (!beam_gate) {
+        for (auto* cluster : grouping.children()) {
+            if (cluster->get_flag(Flags::main_cluster)) {
+                main_cluster = cluster;
+                n_main_clusters ++;
+            }
+            if (cluster->get_flag(Flags::beam_flash)) n_in_beam_clusters++;
         }
-        if (cluster->get_flag(Flags::beam_flash)) n_in_beam_clusters++;
+        for (auto* cluster : grouping.children()) {
+            if (cluster != main_cluster && cluster->get_flag(Flags::beam_flash)) {
+                other_clusters.push_back(cluster);
+            }
+        }
     }
-    for (auto* cluster : grouping.children()) {
-        if (cluster != main_cluster && cluster->get_flag(Flags::beam_flash)) {
-            other_clusters.push_back(cluster);
+    else {
+        // Beam-bundle selection: among the (possibly many) matched main
+        // clusters, neutrino PR runs on the one whose matched flash time
+        // (cluster_t0) falls inside the beam window; ties broken by length.
+        // Companions are the associated clusters sharing its matched_flash_gid.
+        for (auto* cluster : grouping.children()) {
+            if (!cluster->get_flag(Flags::main_cluster)) continue;
+            n_main_clusters++;
+            const double t0 = cluster->get_cluster_t0();
+            if (t0 < m_beam_window_low || t0 >= m_beam_window_high) continue;
+            n_in_beam_clusters++;
+            if (!main_cluster) {
+                main_cluster = cluster;
+            }
+            else {
+                Cluster* loser = cluster->get_length() > main_cluster->get_length() ? main_cluster : cluster;
+                if (loser == main_cluster) main_cluster = cluster;
+                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window bundle cluster {} (t0 {:.3f} us, L {:.1f} cm) not selected",
+                                   loser->get_cluster_id(), loser->get_cluster_t0()/units::us, loser->get_length()/units::cm);
+            }
         }
+        if (main_cluster) {
+            const int gid = main_cluster->get_scalar<int>("matched_flash_gid", -1);
+            for (auto* cluster : grouping.children()) {
+                if (cluster == main_cluster) continue;
+                if (!cluster->get_flag(Flags::associated_cluster)) continue;
+                if (gid < 0 || cluster->get_scalar<int>("matched_flash_gid", -1) == gid) {
+                    other_clusters.push_back(cluster);
+                }
+            }
+        }
+    }
+
+    if (!main_cluster) {
+        SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino: no main cluster selected ({} mains, {} in-window); skipping.",
+                            n_main_clusters, n_in_beam_clusters);
+        return;
+    }
+
+    if (beam_gate) {
+        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: selected main cluster {} (t0 {:.3f} us, L {:.1f} cm, {} associated)",
+                           main_cluster->get_cluster_id(), main_cluster->get_cluster_t0()/units::us,
+                           main_cluster->get_length()/units::cm, other_clusters.size());
     }
 
     SPDLOG_LOGGER_TRACE(log, "Found {} clusters, {} main clusters, {} in-beam clusters, {} of blobs in main cluster id {}", nclusters, n_main_clusters, n_in_beam_clusters, main_cluster->nchildren(), main_cluster->get_cluster_id());

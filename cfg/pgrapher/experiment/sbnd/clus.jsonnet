@@ -430,7 +430,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // is off: the op display needs the per-cluster flashpred pcarray, which is
 // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
 local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
-              trackfitting_config_file='', particle_dataset=null, extra_uses=[]) = {
+              trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='', beam_window=[0, 0]) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -465,12 +465,26 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
             recombination_model=wc.tn(sbnd_box_recomb)),
+        // Neutrino pattern recognition on the beam-coincident bundle.  The
+        // beam_window gate (on cluster_t0 = matched flash time) replaces
+        // uBooNE's single-main + beam_flash selection; companions are the
+        // associated clusters sharing the main's matched_flash_gid.
+        // dl_weights='' = geometric vertex (the SCN net is uBooNE-trained).
+        tagger_check_neutrino: cm.tagger_check_neutrino(
+            trackfitting_config_file=trackfitting_config_file,
+            particle_dataset=wc.tn(particle_dataset),
+            recombination_model=wc.tn(sbnd_box_recomb),
+            perf=true,
+            dl_weights=dl_weights,
+            beam_window_low=beam_window[0],
+            beam_window_high=beam_window[1]),
     },
     local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
-    // tagger_check_stm's config only names the recombination/particle-dataset
+    // The taggers' configs only name the recombination/particle-dataset
     // components; emit them (and the caller's LinterpFunctions etc. via
-    // extra_uses) when the tagger is in the pipeline.
+    // extra_uses) when a tagger is in the pipeline.
     local tagger_uses = if std.member(pipeline_names, 'tagger_check_stm')
+                        || std.member(pipeline_names, 'tagger_check_neutrino')
                         then [sbnd_box_recomb] + extra_uses else [],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
     local mabc = g.pnode({
@@ -510,6 +524,53 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // pass-through job (pipeline_names=[]) therefore dumps
                     // nothing; the round-trip identity gate runs
                     // pipeline_names=['switch_scope'].
+                },
+                // Neutrino-PR layers, dumped after TaggerCheckNeutrino runs (the
+                // visitor key is the full type:name; prefix='pr').  Inert unless
+                // tagger_check_neutrino is in pipeline_names.  PRGraph fit points
+                // are already T0-corrected, hence plain x/y/z.
+                {
+                    name: 'track_fit',
+                    visitor: 'TaggerCheckNeutrino:pr',
+                    grouping: 'live',
+                    detector: 'sbnd',
+                    algorithm: 'track_fit',
+                    pcname: '3d',            // not used for PRGraph dumps, but required
+                    coords: ['x', 'y', 'z'],
+                    individual: false,
+                    dQdx_scale: 0.1,
+                    dQdx_offset: -1000.0,
+                },
+                {
+                    name: 'shower_track',    // associated points: q=15000 shower, q=0 track
+                    visitor: 'TaggerCheckNeutrino:pr',
+                    grouping: 'live',
+                    detector: 'sbnd',
+                    algorithm: 'shower_track',
+                    pcname: '3d',
+                    coords: ['x', 'y', 'z'],
+                    individual: false,
+                    use_associate_points: true,
+                },
+                {
+                    name: 'vertices',        // PR graph vertices; main vertex q=15000
+                    visitor: 'TaggerCheckNeutrino:pr',
+                    grouping: 'live',
+                    detector: 'sbnd',
+                    algorithm: 'vertices',
+                    pcname: '3d',
+                    coords: ['x', 'y', 'z'],
+                    individual: false,
+                    use_graph_vertices: true,
+                },
+            ],
+            // Particle-flow Bee output ("mc" jsTree JSON), emitted once after
+            // TaggerCheckNeutrino runs; inert when the visitor is not in the pipeline.
+            bee_pf: [
+                {
+                    name: 'mc',
+                    visitor: 'TaggerCheckNeutrino:pr',
+                    grouping: 'live',
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -561,12 +622,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      tensor_outname=tensor_outname),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
-       trackfitting_config_file='', particle_dataset=null, extra_uses=[])::
+       trackfitting_config_file='', particle_dataset=null, extra_uses=[],
+       dl_weights='', beam_window=[0, 0])::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                 pipeline_names=pipeline_names, tensor_outname=tensor_outname,
                 trackfitting_config_file=trackfitting_config_file,
-                particle_dataset=particle_dataset, extra_uses=extra_uses),
+                particle_dataset=particle_dataset, extra_uses=extra_uses,
+                dl_weights=dl_weights, beam_window=beam_window),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

@@ -96,7 +96,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -113,6 +113,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 dl_vtx_top_k: dl_vtx_top_k,             // number of top DL voxels to re-rank (only when dl_vtx_rerank==true)
                 dl_vtx_min_accept_score: dl_vtx_min_accept_score,  // min composite score to accept re-ranked DL vertex
                 dl_vtx_score_scale: dl_vtx_score_scale, // scale factor on raw DL score (1.0=unscaled; ~1000 for typical ~0.005 scores)
+                beam_window_low: beam_window_low,   // beam window on cluster_t0 (matched flash time); low >= high
+                beam_window_high: beam_window_high, // (default) disables the gate = uBooNE single-main selection
             } + dv_cfg + pcts_cfg
         },
 
