@@ -121,11 +121,20 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         // transient peak << nbeta^2).  Capacity only -> the assembled XdX, and the fit,
         // are byte-identical either way.  size_t: int nbeta*nbeta overflows beyond 46340.
         size_t xnnz = 0;
+        std::vector<std::vector<int>> col_rows(nbeta);
         for (int c = 0; c < nbeta; ++c)
             for (int r = 0; r < X.rows(); ++r)
-                if (X(r, c) != 0.0) ++xnnz;
+                if (X(r, c) != 0.0) { ++xnnz; col_rows[c].push_back(r); }
         const size_t nb2 = size_t(nbeta) * size_t(nbeta);
         const bool dense_X = (xnnz * 2 > nb2);
+        // Row -> columns adjacency of the nonzero pattern, for the support-overlap
+        // pair enumeration below (sparse X only).
+        std::vector<std::vector<int>> row_cols;
+        if (!dense_X) {
+            row_cols.assign(X.rows(), {});
+            for (int c = 0; c < nbeta; ++c)
+                for (int r : col_rows[c]) row_cols[r].push_back(c);
+        }
         const long col_reserve =
             dense_X ? (long)(nbeta / 2)
                     : std::max(8L, std::min((long)nbeta, (long)(4 * xnnz / std::max(nbeta, 1))));
@@ -140,6 +149,15 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         // off-diagonal dot once and mirror it -- bit-identical to the full
         // i,j loop at half the cost.  No duplicate triplets are produced, so
         // setFromTriplets() yields the same matrix regardless of list order.
+        // For a sparse X, only column pairs with overlapping row support can have a
+        // nonzero dot: a non-overlapping pair's dense dot sums only exact-zero
+        // products (+-0.0), which the legacy `value != 0` guard already dropped.  So
+        // enumerate the overlapping j > i via the row->cols adjacency and run the
+        // UNCHANGED dense dot on just those pairs -- identical triplets, identical
+        // XdX, at a fraction of the nbeta^2 * nrows cost (the dominant hd-max
+        // imaging term).  Dense X keeps the plain double loop.
+        std::vector<int> jstamp(dense_X ? 0 : nbeta, -1);
+        std::vector<int> jlist;
         for (int i = 0; i < nbeta; i++) {
             ydX(i) = y.dot(X.col(i));
             {
@@ -147,17 +165,28 @@ std::vector<size_t> WireCell::LassoModel::Fit()
                 if (value != 0)
                     tripletList.push_back(T(i,i,value));
             }
-            for (int j = i + 1; j < nbeta; j++) {
+            if (dense_X) {
+                for (int j = i + 1; j < nbeta; j++) {
+                    double value = X.col(i).dot(X.col(j));
+                    if (value != 0) {
+                        tripletList.push_back(T(i,j,value));
+                        tripletList.push_back(T(j,i,value));
+                    }
+                }
+                continue;
+            }
+            jlist.clear();
+            for (int r : col_rows[i])
+                for (int j : row_cols[r])
+                    if (j > i && jstamp[j] != i) { jstamp[j] = i; jlist.push_back(j); }
+            std::sort(jlist.begin(), jlist.end());
+            for (int j : jlist) {
                 double value = X.col(i).dot(X.col(j));
                 if (value != 0) {
                     tripletList.push_back(T(i,j,value));
                     tripletList.push_back(T(j,i,value));
                 }
-                // sum_non_zeros += value;
             }
-            // if ( nbeta == 5582) {
-            //     std::cout << " inner_product nbeta == 5582 " << i << std::endl;
-            // }
         }
         XdX.setFromTriplets(tripletList.begin(), tripletList.end());
     }
@@ -178,8 +207,16 @@ std::vector<size_t> WireCell::LassoModel::Fit()
             }
             beta(j) = ydX(j);
             for (SparseMatrix<double>::InnerIterator it(XdX, j); it; ++it) {
-                // if (it.row()!=j && beta(it.row())!=0)
-                if (it.row() != j) beta(j) -= it.value() * beta(it.row());
+                // Skip exact-zero betas: their term is (value * +-0.0) = +-0.0 and
+                // "x -= +-0.0" is a bitwise no-op for every x that is not itself -0.0
+                // (zero betas here are always +0.0: VectorXd::Zero init or the literal-0
+                // soft-threshold return).  After the first sweeps most betas are exactly
+                // 0 (LASSO support is sparse), so this skips the bulk of the
+                // multiply-subtract work in the dominant coordinate-descent loop with a
+                // bit-identical result.  (This guard was present in the original
+                // prototype as a comment.)
+                const double br = beta(it.row());
+                if (it.row() != j && br != 0.0) beta(j) -= it.value() * br;
             }
             beta(j) = _soft_thresholding(beta(j) / norm(j), lambda * lambda_weight(j));
 
