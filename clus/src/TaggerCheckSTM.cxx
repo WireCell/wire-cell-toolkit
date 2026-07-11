@@ -123,6 +123,14 @@ public:
         if (main_clusters.empty()) return;
 
         for (auto* main_cluster : main_clusters) {
+            // Honor an upstream TGM verdict (TaggerCheckTGM): a through-going
+            // muon is never an STM.  No existing pipeline pre-sets the flag,
+            // so this is inert unless tagger_check_tgm runs earlier.
+            if (main_cluster->get_flag(Flags::TGM)) {
+                SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: cluster {} already TGM; skipping",
+                    main_cluster->ident());
+                continue;
+            }
             // Associated sub-clusters belong to the same matched flash when the
             // QL-matching gid annotation exists; without it (uBooNE: flags come
             // from the WCP file, single beam bundle) every associated cluster

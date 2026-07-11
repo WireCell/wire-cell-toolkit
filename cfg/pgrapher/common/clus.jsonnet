@@ -96,6 +96,25 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
         },
 
+        // Through-going-muon tagger (port of prototype check_tgm).  fiducial
+        // names the IFiducial for the inside/outside-FV tests (e.g. a
+        // BoxFiducial spanning ALL TPCs so cathode crossers are not exiters);
+        // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins (negative =
+        // inset).  In-beam-window bundles are never tagged (conservative until
+        // check_neutrino_candidate is ported).
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true) :: {
+            type: "TaggerCheckTGM",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                fv_tolerance: fv_tolerance,
+                beam_window_low: beam_window_low,
+                beam_window_high: beam_window_high,
+                length_limit_frac: length_limit_frac,
+                enable_case_b: enable_case_b,
+            } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial }),
+        },
+
         tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,

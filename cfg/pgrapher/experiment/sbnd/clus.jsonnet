@@ -445,6 +445,23 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         name: 'sbnd_box_recomb',
         data: { A: 1.0, B: 0.255, Efield: 0.5, rho: 1.38, Wi: 23.6e-6 },
     },
+    // TGM fiducial: ONE box spanning BOTH TPCs (the overall FV bounds of
+    // dvm above), so a cathode-crossing track is not an "exiter" at x=0.
+    // The default fiducial=dv cannot serve here: DetectorVolumes::contained()
+    // is the union of per-face sensitive volumes, which excludes the CPA slab
+    // (|x| < 0.45 cm).  Margins go in via the tagger's fv_tolerance instead
+    // of the box, mirroring the metadata *_margin values.
+    local sbnd_pr_fv = {
+        type: 'BoxFiducial',
+        name: 'sbnd_pr_fv',
+        data: {
+            bounds: {
+                tail: { x: -201.05 * wc.cm, y: -199.312 * wc.cm, z: 0.85 * wc.cm },
+                head: { x: 201.05 * wc.cm, y: 199.312 * wc.cm, z: 500.15 * wc.cm },
+            },
+        },
+    },
+    local sbnd_pr_fv_margins = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -3 * wc.cm, -3 * wc.cm],
     // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
     // PC (PointTreeBuilding), one per (APA, face 0).
     local improve2 = cm.improve_cluster_2(
@@ -465,6 +482,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
             recombination_model=wc.tn(sbnd_box_recomb)),
+        // Through-going-muon tagger (prototype check_tgm port).  Runs on every
+        // matched main cluster; in-beam-window bundles are never tagged
+        // (conservative until check_neutrino_candidate is ported).  Must run
+        // after fiducialutils (dead-region / signal-processing checks) and
+        // before tagger_check_stm (which skips TGM-flagged mains).
+        tagger_check_tgm: cm.tagger_check_tgm(
+            fiducial=wc.tn(sbnd_pr_fv),
+            fv_tolerance=sbnd_pr_fv_margins,
+            beam_window_low=beam_window[0],
+            beam_window_high=beam_window[1]),
         // Neutrino pattern recognition on the beam-coincident bundle.  The
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the
@@ -483,9 +510,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
     // The taggers' configs only name the recombination/particle-dataset
     // components; emit them (and the caller's LinterpFunctions etc. via
     // extra_uses) when a tagger is in the pipeline.
-    local tagger_uses = if std.member(pipeline_names, 'tagger_check_stm')
-                        || std.member(pipeline_names, 'tagger_check_neutrino')
-                        then [sbnd_box_recomb] + extra_uses else [],
+    local tagger_uses = (if std.member(pipeline_names, 'tagger_check_stm')
+                         || std.member(pipeline_names, 'tagger_check_neutrino')
+                         then [sbnd_box_recomb] + extra_uses else [])
+                        + (if std.member(pipeline_names, 'tagger_check_tgm')
+                           then [sbnd_pr_fv] else []),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
     local mabc = g.pnode({
         type: 'MultiAlgBlobClustering',
