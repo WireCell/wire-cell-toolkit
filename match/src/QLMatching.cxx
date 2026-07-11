@@ -241,6 +241,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_tpc_faces.clear();
     if (cfg.isMember("tpc_faces") && cfg["tpc_faces"].isArray())
         for (const auto& f : cfg["tpc_faces"]) m_tpc_faces.push_back(f.asInt());
+    m_tpc_extra_faces.clear();
+    if (cfg.isMember("tpc_extra_faces") && cfg["tpc_extra_faces"].isArray())
+        for (const auto& f : cfg["tpc_extra_faces"]) m_tpc_extra_faces.push_back(f.asInt());
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
     m_sparse_lasso = get(cfg, "sparse_lasso", m_sparse_lasso);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
@@ -996,6 +999,10 @@ void QLMatching::compute_geometry(ApaRun& run)
     // Per-input imaging face (joint multi-side node) or the single m_tpc_face. The
     // run's group anodes are all on its own drift side, so they share this face.
     const int face = m_tpc_faces.empty() ? m_tpc_face : m_tpc_faces.at(run.input_idx);
+    // Optional second face to union in (PDVD: its two faces split Y in half rather
+    // than duplicating the full Y/Z like PDHD/SBND's do; see m_tpc_extra_faces).
+    // -1 => none => bit-identical for PDHD/SBND.
+    const int extra_face = m_tpc_extra_faces.empty() ? -1 : m_tpc_extra_faces.at(run.input_idx);
     const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, face, static_cast<int>(tpc));
     const std::vector<IAnodePlane::pointer>& grp = m_grouping_anodes.at(run.input_idx);
     const std::vector<IAnodePlane::pointer> group_anodes =
@@ -1006,6 +1013,12 @@ void QLMatching::compute_geometry(ApaRun& run)
                                 static_cast<int>(a->ident()));
         const BoundingBox abb = m_dv->inner_bounds(awpid);
         if (!abb.empty()) bb(abb.bounds());
+        if (extra_face >= 0) {
+            const WirePlaneId awpid2(WirePlaneLayer_t::kAllLayers, extra_face,
+                                     static_cast<int>(a->ident()));
+            const BoundingBox abb2 = m_dv->inner_bounds(awpid2);
+            if (!abb2.empty()) bb(abb2.bounds());
+        }
     }
     if (bb.empty()) {
         raise<ValueError>("QLMatching: empty detector-volume bounds for anode %d", tpc);

@@ -70,6 +70,14 @@ namespace WireCell::Match {
         // side face 0, +x side face 1). Empty (default) => use the single m_tpc_face
         // for every input => bit-identical for SBND / the per-side PDHD nodes.
         std::vector<int> m_tpc_faces;
+        // Optional per-input SECOND face ("tpc_extra_faces") to union into the active-
+        // volume box alongside tpc_face(s). PDHD/SBND anode faces span the full Y/Z and
+        // differ only slightly in X, so a single face's sensitive box already covers the
+        // TPC; PDVD's two faces instead split the Y range in half (adjacent, disjoint),
+        // so using only one face truncates the active-volume box (and the light-
+        // prediction inclusion gate) to roughly half the true Y extent. Empty (default)
+        // => no second face unioned => bit-identical for PDHD/SBND.
+        std::vector<int> m_tpc_extra_faces;
 
         // PMTs on vs off (default true => apply the OpDet type mask); see
         // ch_mask for further per-channel disables.

@@ -295,7 +295,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     // shared-flash joint LASSO sees both sides' candidate bundles.  `sides` =
     // per-side anode lists ([[anode0..3],[anode4..7]]); each side's
     // representative (sides[i][0]) is input port i and faces[i] its imaging
-    // face (PDVD: both 0 -- the two faces of a CRP share x-bounds).
+    // face (PDVD: both 0). Each CRP anode's two faces share x-bounds but split
+    // the Y range in half (adjacent, disjoint) rather than duplicating it like
+    // PDHD/SBND -- tpc_extra_faces unions in face 1 so the active-volume box
+    // (and the light-prediction inclusion gate) covers the full Y extent
+    // instead of truncating to face 0's half.
     matching_joint(sides, dv, faces, calib_dump=''):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
@@ -303,6 +307,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             anodes: [wc.tn(side[0]) for side in sides],
             grouping_anodes: [[wc.tn(a) for a in side] for side in sides],
             tpc_faces: faces,
+            tpc_extra_faces: [1 for side in sides],
             // Merge the (single, input-0) optical-flash display PC into the
             // joint grouping.
             root_pcs_to_merge: ['opflash'],
