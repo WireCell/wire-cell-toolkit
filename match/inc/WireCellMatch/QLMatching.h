@@ -379,6 +379,19 @@ namespace WireCell::Match {
         // the old path (validated same-binary on PDHD: matching identical with skip on/off).
         bool m_crossside_skip_vis{false};
 
+        // Approximation knob (default OFF): coarsen the per-point visibility loop of
+        // build_bundles for LARGE cluster groups. When vis_sample_stride > 1 and the
+        // group's total point count is >= vis_sample_min_pts, every stride-th point of
+        // each blob is evaluated and weighted by the number of points it stands in for
+        // (min(stride, npoints - i)), so each blob's total charge entering pred_flash
+        // is conserved exactly; the approximation is that the visibility is taken
+        // piecewise-constant over stride-long runs of the blob's point order. At the
+        // default stride 1 the loop body performs the identical FP operations
+        // (bit-identical output). Changes pred_flash on coarsened groups =>
+        // result-changing => jsonnet-togglable and A/B-validated before any enable.
+        int m_vis_sample_stride{1};
+        int m_vis_sample_min_pts{10000};
+
         // Light-pattern over-prediction prefilter (the prototype's fired-fraction
         // reject, FlashTPCBundle.cxx 547-602). Drop a (flash, cluster) bundle BEFORE
         // the chi2 fit when its predicted light is much larger than the measured
@@ -844,13 +857,30 @@ namespace WireCell::Match {
             double off, dy, dz;
             bool wt;
         };
+        // Raw-coordinate (T0-independent) bounding boxes of one cluster's 3D points:
+        // the whole-cluster box plus per-chunk boxes over runs of XTPC_CHUNK
+        // consecutive points, used by xtpc_pair_consistent to prune its brute-force
+        // closest-approach loop against the running best distance. Pruning only
+        // skips point pairs that cannot strictly improve the minimum, and the
+        // iteration order of the surviving pairs is the legacy row-major order, so
+        // the closest pair (value AND argmin/tie-break) is bit-identical.
+        static constexpr int XTPC_CHUNK = 256;
+        struct XtpcBoxes {
+            std::array<double, 6> whole;                 // {xlo,xhi,ylo,yhi,zlo,zhi}
+            std::vector<std::array<double, 6>> chunks;   // per XTPC_CHUNK-point run
+        };
+        static XtpcBoxes xtpc_boxes(const WireCell::Clus::Facade::Cluster* c);
+
         // d_out (closest approach) and pin_collinear_out (scenario 1 AND the combined
         // local/global track-axis collinearity test for xtpc_joint_pin) are optional
         // outputs; the global-axis test is computed only when m_xtpc_joint_pin (off-path
-        // unchanged). The scenario return value is unchanged.
+        // unchanged). The scenario return value is unchanged. bx0/bx1 (optional) enable
+        // the box-pruned closest-approach path; null falls back to the plain loop.
         int xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
                                  double* d_out = nullptr,
-                                 bool* pin_collinear_out = nullptr) const;
+                                 bool* pin_collinear_out = nullptr,
+                                 const XtpcBoxes* bx0 = nullptr,
+                                 const XtpcBoxes* bx1 = nullptr) const;
 
         // Deterministic iteration orders over the bundle maps (pointer-keyed maps
         // would otherwise iterate in heap-address order). Static: no this-state.

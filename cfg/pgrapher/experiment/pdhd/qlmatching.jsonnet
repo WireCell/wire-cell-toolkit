@@ -253,6 +253,15 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=6000) {
             // match/docs/qlmatching-perf-evt1015-pdhd.md sec 9-10.
             crossside_skip_vis: true,
 
+            // Option D vis-loop coarsening (APPROXIMATION, default OFF): on cluster
+            // groups with >= vis_sample_min_pts points, evaluate the SemiAnalyticalModel
+            // on every vis_sample_stride-th blob point, weighted so each blob's total
+            // charge in pred_flash is conserved.  Cuts the vis_loop ~stride-fold on
+            // bright events but CHANGES pred_flash (KS/chi2 drift) => enable only after
+            // the documented A/B.  Left at the bit-identical defaults here:
+            // vis_sample_stride: 4, vis_sample_min_pts: 1000,
+            // See match/docs/qlmatching-perf-evt1015-pdhd.md sec 11.
+
             // cathode_ext1 / cathode_ext2: the cathode-end window [u_cathode+ext2,
             // u_cathode+ext1).  ext1 is the containment edge (how far PAST the cathode a
             // cluster's trimmed end may sit and still count as contained / at_x_boundary;

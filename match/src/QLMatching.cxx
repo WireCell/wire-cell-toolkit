@@ -331,6 +331,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cross_side_filter    = get(cfg, "cross_side_filter",    m_cross_side_filter);
     m_crossside_skip_vis   = get(cfg, "crossside_skip_vis",   m_crossside_skip_vis);
 
+    m_vis_sample_stride    = get(cfg, "vis_sample_stride",    m_vis_sample_stride);
+    m_vis_sample_min_pts   = get(cfg, "vis_sample_min_pts",   m_vis_sample_min_pts);
+
     m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
     m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
     m_overpred_maxch_ratio = get(cfg, "overpred_maxch_ratio", m_overpred_maxch_ratio);
@@ -559,6 +562,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["require_containment"]  = m_require_containment;
     cfg["cross_side_filter"]    = m_cross_side_filter;
     cfg["crossside_skip_vis"]   = m_crossside_skip_vis;
+    cfg["vis_sample_stride"]    = m_vis_sample_stride;
+    cfg["vis_sample_min_pts"]   = m_vis_sample_min_pts;
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
     cfg["empty_rescue"]          = m_empty_rescue;
@@ -1305,6 +1310,15 @@ void QLMatching::build_bundles(ApaRun& run)
             std::size_t npt = 0;
             for (auto* gc : group_clusters) npt += gc->npoints();
             total_pts += npt;
+            // Option D coarsening (default stride 1 = OFF): sample every stride-th
+            // point of each blob and weight it by the run of points it stands in
+            // for, conserving each blob's total charge. Active only on groups at
+            // least vis_sample_min_pts big. At stride 1 the weight is exactly 1
+            // point (qw == q, no extra FP op) and the iteration is unchanged, so
+            // the default path is bit-identical.
+            const int vstride =
+                (m_vis_sample_stride > 1 && npt >= std::size_t(m_vis_sample_min_pts))
+                    ? m_vis_sample_stride : 1;
             const auto t_vis0 = wallclock::now();
             for (auto* gc : group_clusters) {
               for (auto blob : gc->children()) {
@@ -1312,8 +1326,10 @@ void QLMatching::build_bundles(ApaRun& run)
                 const double q = blob->charge() / blob->npoints();
                 auto points = blob->points("3d", {"x", "y", "z"});
 
-                for (int i = 0; i < blob->npoints(); ++i) {
-                    run.total_charge_point += q;
+                for (int i = 0; i < blob->npoints(); i += vstride) {
+                    const double qw =
+                        (vstride == 1) ? q : q * double(std::min(vstride, blob->npoints() - i));
+                    run.total_charge_point += qw;
                     const double x = points.at(i).x() + flash_x_offset;
                     const double y = points.at(i).y();
                     const double z = points.at(i).z();
@@ -1348,7 +1364,7 @@ void QLMatching::build_bundles(ApaRun& run)
                         const auto dir_eff = m_VUVEfficiency.at(idet);
                         const auto ref_eff = m_VISEfficiency.at(idet);
                         pred_flash.at(idet) +=
-                            q * m_QtoL * dir_vis * dir_eff + q * m_QtoL * ref_vis * ref_eff;
+                            qw * m_QtoL * dir_vis * dir_eff + qw * m_QtoL * ref_vis * ref_eff;
                     }
                 }
               }
@@ -2911,8 +2927,33 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
 // present — tight, self-vetoing), 2 = scenario 2 (a half window-truncated AND
 // conn,dir0,dir1 mutually collinear < angle_max AND d < dmax2), 0 = not consistent. A
 // wrong-flash pairing carries the wrong T0 x-offset => large d => no match (self-vetoing).
+// Whole-cluster + per-256-point-chunk bounding boxes over the raw (T0-independent)
+// 3D points, for the box-pruned closest-approach in xtpc_pair_consistent.
+QLMatching::XtpcBoxes QLMatching::xtpc_boxes(const WireCell::Clus::Facade::Cluster* c)
+{
+    static constexpr std::array<double, 6> empty_box{1e300, -1e300, 1e300, -1e300, 1e300, -1e300};
+    XtpcBoxes bx;
+    bx.whole = empty_box;
+    const auto& P = c->points();
+    const std::size_t n = P[0].size();
+    bx.chunks.assign((n + XTPC_CHUNK - 1) / XTPC_CHUNK, empty_box);
+    for (std::size_t k = 0; k < n; ++k) {
+        auto& cb = bx.chunks[k / XTPC_CHUNK];
+        cb[0] = std::min(cb[0], P[0][k]); cb[1] = std::max(cb[1], P[0][k]);
+        cb[2] = std::min(cb[2], P[1][k]); cb[3] = std::max(cb[3], P[1][k]);
+        cb[4] = std::min(cb[4], P[2][k]); cb[5] = std::max(cb[5], P[2][k]);
+    }
+    for (const auto& cb : bx.chunks) {
+        bx.whole[0] = std::min(bx.whole[0], cb[0]); bx.whole[1] = std::max(bx.whole[1], cb[1]);
+        bx.whole[2] = std::min(bx.whole[2], cb[2]); bx.whole[3] = std::max(bx.whole[3], cb[3]);
+        bx.whole[4] = std::min(bx.whole[4], cb[4]); bx.whole[5] = std::max(bx.whole[5], cb[5]);
+    }
+    return bx;
+}
+
 int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
-                                     double* d_out, bool* pin_collinear_out) const
+                                     double* d_out, bool* pin_collinear_out,
+                                     const XtpcBoxes* bx0, const XtpcBoxes* bx1) const
 {
     const double R = m_xtpc_hough_radius;
     const double amax = m_xtpc_angle_max;
@@ -2940,14 +2981,57 @@ int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
     const int n0 = (int)P0[0].size();
     const int n1 = (int)P1[0].size();
     double best = 1e30; int bi = -1, bj = -1;
-    for (int a = 0; a < n0; ++a) {
-        const double ax = P0[0][a] + m0.off, ay = P0[1][a] + m0.dy, az = P0[2][a] + m0.dz;
-        for (int b = 0; b < n1; ++b) {
-            const double dx = ax - (P1[0][b] + m1.off);
-            const double dy = ay - (P1[1][b] + m1.dy);
-            const double dz = az - (P1[2][b] + m1.dz);
-            const double d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 < best) { best = d2; bi = a; bj = b; }
+    if (bx0 && bx1) {
+        // Box-pruned exact closest approach. Same row-major point order as the
+        // plain loop below, but (i) a whole 256-point chunk of m0 is skipped when
+        // its box gap to m1's whole box cannot beat the running best, and (ii) a
+        // single m0 point skips each m1 chunk its point-to-box gap cannot beat.
+        // A pruned block contains only pairs with d2 >= best, which the strict
+        // `<` update ignores anyway, and the first pair attaining each strictly
+        // smaller distance is never inside a pruned block -- so best/bi/bj
+        // (including FP-tie behavior) are bit-identical to the plain loop.
+        auto gap1 = [](double lo0, double hi0, double lo1, double hi1) {
+            return std::max(0.0, std::max(lo1 - hi0, lo0 - hi1));
+        };
+        const auto& w1 = bx1->whole;
+        const int nc1 = (int)bx1->chunks.size();
+        for (int ca = 0; ca * XTPC_CHUNK < n0; ++ca) {
+            const auto& c0 = bx0->chunks[ca];
+            const double wgx = gap1(c0[0] + m0.off, c0[1] + m0.off, w1[0] + m1.off, w1[1] + m1.off);
+            const double wgy = gap1(c0[2] + m0.dy,  c0[3] + m0.dy,  w1[2] + m1.dy,  w1[3] + m1.dy);
+            const double wgz = gap1(c0[4] + m0.dz,  c0[5] + m0.dz,  w1[4] + m1.dz,  w1[5] + m1.dz);
+            if (wgx * wgx + wgy * wgy + wgz * wgz >= best) continue;
+            const int a_end = std::min(n0, (ca + 1) * XTPC_CHUNK);
+            for (int a = ca * XTPC_CHUNK; a < a_end; ++a) {
+                const double ax = P0[0][a] + m0.off, ay = P0[1][a] + m0.dy, az = P0[2][a] + m0.dz;
+                for (int cb = 0; cb < nc1; ++cb) {
+                    const auto& c1 = bx1->chunks[cb];
+                    const double gx = gap1(ax, ax, c1[0] + m1.off, c1[1] + m1.off);
+                    const double gy = gap1(ay, ay, c1[2] + m1.dy,  c1[3] + m1.dy);
+                    const double gz = gap1(az, az, c1[4] + m1.dz,  c1[5] + m1.dz);
+                    if (gx * gx + gy * gy + gz * gz >= best) continue;
+                    const int b_end = std::min(n1, (cb + 1) * XTPC_CHUNK);
+                    for (int b = cb * XTPC_CHUNK; b < b_end; ++b) {
+                        const double dx = ax - (P1[0][b] + m1.off);
+                        const double dy = ay - (P1[1][b] + m1.dy);
+                        const double dz = az - (P1[2][b] + m1.dz);
+                        const double d2 = dx * dx + dy * dy + dz * dz;
+                        if (d2 < best) { best = d2; bi = a; bj = b; }
+                    }
+                }
+            }
+        }
+    }
+    else {
+        for (int a = 0; a < n0; ++a) {
+            const double ax = P0[0][a] + m0.off, ay = P0[1][a] + m0.dy, az = P0[2][a] + m0.dz;
+            for (int b = 0; b < n1; ++b) {
+                const double dx = ax - (P1[0][b] + m1.off);
+                const double dy = ay - (P1[1][b] + m1.dy);
+                const double dz = az - (P1[2][b] + m1.dz);
+                const double d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 < best) { best = d2; bi = a; bj = b; }
+            }
         }
     }
     if (bi < 0) return false;
@@ -3058,12 +3142,37 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
         log->debug("QLXTPC cand side{} t={:.3f}us mainclus={} npts={} trunc={}",
                    c.side, c.t_us, c.mc.c->ident(), c.mc.c->npoints(), c.mc.wt);
 
+    // AABB prefilter for xtpc_pair_consistent's brute-force O(npts0 x npts1)
+    // closest-approach step, two levels, both exact (bound-then-exact => flags,
+    // pins and the closest pair itself are bit-identical):
+    //  1. whole-box gap: the axis-aligned box gap between the two candidates'
+    //     T0-shifted point clouds is a LOWER bound on their true closest
+    //     approach, so a coincident pair whose gap already exceeds the scenario
+    //     ceiling (xtpc_dmax, widened to xtpc_dmax2 when a window-truncated half
+    //     makes scenario 2 possible) cannot pass and is skipped outright. This
+    //     kills wrong-flash pairings whose T0 x-offset is wildly wrong.
+    //  2. chunk boxes: pairs that survive 1 run the exact loop pruned per
+    //     256-point chunk against the running best (see xtpc_pair_consistent).
+    // Raw-point boxes are T0-independent -> cached per cluster; the
+    // per-candidate (off, dy, dz) shift is applied to the box bounds at use.
+    std::map<const WireCell::Clus::Facade::Cluster*, XtpcBoxes> box_cache;
+    auto boxes_of = [&box_cache](const WireCell::Clus::Facade::Cluster* c)
+        -> const XtpcBoxes& {
+        auto it = box_cache.find(c);
+        if (it == box_cache.end()) it = box_cache.emplace(c, xtpc_boxes(c)).first;
+        return it->second;
+    };
+    // Gap between two shifted 1-D intervals (0 when they overlap).
+    auto axis_gap = [](double lo0, double hi0, double lo1, double hi1) {
+        return std::max(0.0, std::max(lo1 - hi0, lo0 - hi1));
+    };
+
     // Profiling: the pairing loop calls xtpc_pair_consistent, whose closest-approach
     // step is a brute-force O(npts0 x npts1) double loop over both clusters' 3D points.
     // Count coincident pairs actually evaluated and the total point-pair distance ops
     // they incur, so the wall (operator's `xtpc_cull`) can be read as cost/point-pair.
     const auto t_pair0 = wallclock::now();
-    long long n_pairs_eval = 0, n_pairs_coincident = 0;
+    long long n_pairs_eval = 0, n_pairs_coincident = 0, n_pairs_boxskip = 0;
     double point_pairs = 0;  // double: can exceed 2^31
     // Joint-pin: collect direction-confirmed scenario-1 pairs (with their closest-approach
     // d and the two bundles) for the greedy min-d pin below. Empty unless m_xtpc_joint_pin.
@@ -3081,9 +3190,31 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
             log->debug("QLXTPC coincident 0/{} (t={:.3f}us) 1/{} (t={:.3f}us)",
                        cands[i].mc.c->ident(), cands[i].t_us,
                        cands[j].mc.c->ident(), cands[j].t_us);
+            // Level 1: whole-box gap vs the widest ceiling this pair could pass.
+            const XtpcBoxes& bx0 = boxes_of(cands[i].mc.c);
+            const XtpcBoxes& bx1 = boxes_of(cands[j].mc.c);
+            {
+                const auto& b0 = bx0.whole;
+                const auto& b1 = bx1.whole;
+                const auto& m0 = cands[i].mc;
+                const auto& m1 = cands[j].mc;
+                const double gx = axis_gap(b0[0] + m0.off, b0[1] + m0.off,
+                                           b1[0] + m1.off, b1[1] + m1.off);
+                const double gy = axis_gap(b0[2] + m0.dy, b0[3] + m0.dy,
+                                           b1[2] + m1.dy, b1[3] + m1.dy);
+                const double gz = axis_gap(b0[4] + m0.dz, b0[5] + m0.dz,
+                                           b1[4] + m1.dz, b1[5] + m1.dz);
+                const double thr = (m0.wt || m1.wt) ? std::max(m_xtpc_dmax, m_xtpc_dmax2)
+                                                    : m_xtpc_dmax;
+                if (gx * gx + gy * gy + gz * gz > thr * thr) {
+                    ++n_pairs_boxskip;
+                    continue;
+                }
+            }
             point_pairs += (double)cands[i].mc.c->npoints() * cands[j].mc.c->npoints();
             double pair_d = 0; bool pin_ok = false;
-            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc, &pair_d, &pin_ok);
+            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc, &pair_d, &pin_ok,
+                                                      &bx0, &bx1);
             if (scenario == 0) continue;
             cands[i].mc.b->set_flag_xtpc_consistent(true);
             cands[j].mc.b->set_flag_xtpc_consistent(true);
@@ -3096,8 +3227,9 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
         }
     }
     log->debug("QLtiming cull_cross_tpc: ncands {} pairs_eval {} pairs_coincident {} "
-               "point_pairs {:.3g} pairing_loop {:.1f} ms",
-               cands.size(), n_pairs_eval, n_pairs_coincident, point_pairs, ms_since(t_pair0));
+               "pairs_boxskip {} point_pairs {:.3g} pairing_loop {:.1f} ms",
+               cands.size(), n_pairs_eval, n_pairs_coincident, n_pairs_boxskip,
+               point_pairs, ms_since(t_pair0));
 
     // Joint-pin: greedily bind the direction-confirmed crosser pairs, tightest (smallest
     // closest-approach d) first, so each cluster is pinned at most once -- to the coincident
