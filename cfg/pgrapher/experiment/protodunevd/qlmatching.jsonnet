@@ -35,7 +35,7 @@
 //   24-39  bottom PMTs (x=-336.5; PEN 0.036 except 29/39 PEN+Q and 32 uncoated
 //          -> Ar-blind; 24/27/28/34 dead in data)
 //
-// QtoL = 0.11 from the beam-flash gold-pair calibration (see the knob comment);
+// QtoL = 0.070 from the beam-flash gold-pair calibration (see the knob comment);
 // trigger_offsets = [bottom, top] per-CRATE light<->charge offsets (the PDVD
 // analogue of PDHD's opflash offset_us; per event from the rawwf trigoff tree
 // via the archive metadata offset_bot_us/offset_top_us -- the BDE/TDE charge
@@ -137,17 +137,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // trigger flashes (position known to ~1 us from the trigoff tc_us,
             // see check_trigger_flash.py) paired with their beam cluster
             // (largest predicted-light bundle on that flash).  Under the
-            // Xe/175 nm library + eff_Xe + the Xe-live mask the gold-pair
-            // median measured/predicted = 0.082, [16,84]% = [0.027,0.218]
-            // (ql_light_calib recompute, validated exact vs the C++ vis
-            // loop; the 128 nm-era value was 0.11).  The library+official-
-            // eff model OVER-predicts ~10x as one global normalization
-            // (units/recombination/SPE-scale product).
+            // Xe/175 nm library + eff_Xe + the Xe-live mask, geometry-fix
+            // dumps (tpc_extra_faces union, full +-336.4cm Y): gold-pair
+            // median measured/predicted = 0.070, [16,84]% = [0.024,0.176]
+            // (80 pairs, ql_light_calib/fit_qtol_gold.py; superseded values
+            // 0.082 pre-geometry-fix Xe, 0.11 128nm-era -- fixing the Y
+            // truncation raised predicted light, so QtoL moved down).  The
+            // library+official-eff model OVER-predicts ~14x as one global
+            // normalization (units/recombination/SPE-scale product).
             // DO NOT refit this from auto-selected "good-KS" bundles: with a
             // mis-scaled QtoL the LASSO is amplitude-inert and the selection
             // is dominated by accidentals ~40x brighter than prediction (that
             // route gave QtoL~40, off by ~350x -- see pdvd-qlmatching.md).
-            QtoL: 0.082,
+            QtoL: 0.070,
             doReflectedLight: false,   // library vis is total photon arrival
             nchan: nchan,
             ch_mask: ch_mask,
