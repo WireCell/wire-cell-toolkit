@@ -3329,10 +3329,21 @@ std::pair<int, int> Cluster::get_two_boundary_steiner_graph_idx(const std::strin
     }
     auto& steiner_pc = get_pc(steiner_pc_name);
     const auto& coords = get_default_scope().coords;
-    const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
-    const auto& y_coords = steiner_pc.get(coords.at(1))->elements<double>();
-    const auto& z_coords = steiner_pc.get(coords.at(2))->elements<double>();
-    const auto& flag_terminal = steiner_pc.get("flag_steiner_terminal")->elements<int>();
+    // An EMPTY steiner point cloud carries no arrays at all (Dataset::get
+    // returns null) -- report it as the empty-cloud error below instead of
+    // dereferencing null (segfault seen on SBND MC evt 11, whose main cluster
+    // yields zero steiner points).
+    const auto xa = steiner_pc.get(coords.at(0));
+    const auto ya = steiner_pc.get(coords.at(1));
+    const auto za = steiner_pc.get(coords.at(2));
+    const auto fa = steiner_pc.get("flag_steiner_terminal");
+    if (!xa || !ya || !za || !fa) {
+        throw std::runtime_error("Empty Steiner point cloud");
+    }
+    const auto& x_coords = xa->elements<double>();
+    const auto& y_coords = ya->elements<double>();
+    const auto& z_coords = za->elements<double>();
+    const auto& flag_terminal = fa->elements<int>();
 
     const size_t npts = x_coords.size();
     if (npts == 0) {

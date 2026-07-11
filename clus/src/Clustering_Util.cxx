@@ -76,8 +76,13 @@ FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
 {
     FCCheckResult result;
 
-    // Require steiner_pc
-    if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size() == 0) {
+    // Require a NON-EMPTY steiner_pc.  Dataset::size() counts ARRAYS, not
+    // points -- an empty steiner cloud can carry zero-length coordinate
+    // arrays (SBND MC evt 11), which get_two_boundary_steiner_graph_idx
+    // rejects by throw; catch that case here and keep the documented
+    // conservative is_fc=false return instead.
+    if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size() == 0
+        || cluster.get_pc("steiner_pc").size_major() == 0) {
         return result;
     }
 

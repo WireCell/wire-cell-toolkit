@@ -861,9 +861,17 @@ void establish_same_blob_steiner_edges_steiner_graph(EnhancedSteinerResult& resu
     }
 
     const auto& coords = cluster.get_default_scope().coords;
-    const auto& x_arr = result.point_cloud.get(coords.at(0))->elements<double>();
-    const auto& y_arr = result.point_cloud.get(coords.at(1))->elements<double>();
-    const auto& z_arr = result.point_cloud.get(coords.at(2))->elements<double>();
+    // Null guard: an EMPTY steiner point cloud (a cluster contributing no
+    // selected points) has no coordinate arrays at all -- Dataset::get()
+    // returns null and the deref below segfaults (seen on SBND MC evt 11 in
+    // the per-event PR job).  No points => no same-blob edges to establish.
+    const auto xa = result.point_cloud.get(coords.at(0));
+    const auto ya = result.point_cloud.get(coords.at(1));
+    const auto za = result.point_cloud.get(coords.at(2));
+    if (!xa || !ya || !za) return;
+    const auto& x_arr = xa->elements<double>();
+    const auto& y_arr = ya->elements<double>();
+    const auto& z_arr = za->elements<double>();
 
     for (const auto& [blob_node_idx, point_indices] : cell_points_map) {
         (void)blob_node_idx;

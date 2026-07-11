@@ -170,6 +170,17 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
 
         const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+        // A degenerate cluster can yield an EMPTY steiner point cloud (zero
+        // points; SBND MC evt 11).  Transferring it would hang a
+        // schema-deviant "steiner_pc" local PC on the real cluster, which the
+        // pctree serializer rejects (Dataset::append: missing keys) -- treat
+        // it like the no-steiner_graph case above: skip the transfer, leaving
+        // the cluster without steiner products (all consumers guard on that).
+        if (steiner_point_cloud.size_major() == 0) {
+            SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: empty steiner_pc for {}, skipping transfer", tag);
+            grouping.destroy_child(new_cluster_ptr, true);
+            return false;
+        }
         const auto& steiner_graph       = sg.get_graph("steiner_graph");
         auto& flag_terminals = sg.get_flag_steiner_terminal();
         size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
@@ -184,10 +195,17 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] transfer_pc/graph took {} ms", tag, MS(Clock::now() - t0).count());
 
         if (is_main) {
-            // Extra probe done only for the main cluster.
-            (void)src->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
-            auto kd_results = src->kd_steiner_knn(1, pair_points.first);
-            (void)src->kd_steiner_points(kd_results);
+            // Extra probe done only for the main cluster.  Non-fatal: a main
+            // cluster yielding an EMPTY steiner point cloud (SBND MC evt 11)
+            // has nothing to probe -- warn and continue rather than letting
+            // the empty-cloud throw kill the job.
+            try {
+                (void)src->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+                auto kd_results = src->kd_steiner_knn(1, pair_points.first);
+                (void)src->kd_steiner_points(kd_results);
+            } catch (const std::exception& e) {
+                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph [{}]: boundary probe skipped: {}", tag, e.what());
+            }
         }
 
         t0 = Clock::now();

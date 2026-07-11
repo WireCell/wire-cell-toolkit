@@ -202,10 +202,11 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
     using IFS_Clock = std::chrono::steady_clock;
     using IFS_MS = std::chrono::duration<double, std::milli>;
     auto t0 = IFS_Clock::now();
+    // Require a NON-EMPTY steiner_pc BEFORE the boundary call below, which
+    // throws on an empty cloud (zero-length arrays; SBND MC evt 11).
+    if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size_major() == 0) return nullptr;
     // Get two boundary points from the cluster
     auto boundary_indices = cluster.get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc");
-
-    if (!cluster.has_pc("steiner_pc")) return nullptr;
     const auto& steiner_pc = cluster.get_pc("steiner_pc");
     const auto& coords = cluster.get_default_scope().coords;
     const auto& x_coords = steiner_pc.get(coords.at(0))->elements<double>();
