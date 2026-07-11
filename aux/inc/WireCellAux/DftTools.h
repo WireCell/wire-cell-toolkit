@@ -101,6 +101,12 @@ namespace WireCell::Aux::DftTools {
     complex_vector_t fwd_r2c_real(const IDFT::pointer& dft, const real_vector_t& wave);
     real_vector_t inv_c2r_real(const IDFT::pointer& dft, const complex_vector_t& spec);
 
+    // Batched (2D array, one axis) analogues via IDFT::fwd_r2c_1b /
+    // inv_c2r_1b.  Equal to the fwd_r2c / inv_c2r array versions only
+    // up to round-off.
+    complex_array_t fwd_r2c_real(const IDFT::pointer& dft, const real_array_t& wave, int axis);
+    real_array_t inv_c2r_real(const IDFT::pointer& dft, const complex_array_t& spec, int axis);
+
 
     /// Convolve in1 and in2 via DFT.  Returned vecgtor has size sum
     /// of sizes of in1 and in2 less one element in order to assure no

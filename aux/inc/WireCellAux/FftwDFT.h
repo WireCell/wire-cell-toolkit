@@ -42,9 +42,19 @@ namespace WireCell::Aux {
         void fwd1b(const complex_t* in, complex_t* out,
                    int nrows, int ncols, int axis) const;
 
-        virtual 
+        virtual
         void inv1b(const complex_t* in, complex_t* out,
                    int nrows, int ncols, int axis) const;
+
+        // Native FFTW batched real transforms (advanced-interface
+        // r2c/c2r plans).
+        virtual
+        void fwd_r2c_1b(const scalar_t* in, complex_t* out,
+                        int nrows, int ncols, int axis) const;
+
+        virtual
+        void inv_c2r_1b(const complex_t* in, scalar_t* out,
+                        int nrows, int ncols, int axis) const;
 
         virtual 
         void fwd2d(const complex_t* in, complex_t* out,

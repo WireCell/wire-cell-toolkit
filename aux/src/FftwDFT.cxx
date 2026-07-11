@@ -178,6 +178,108 @@ void Aux::FftwDFT::inv_c2r_1d(const complex_t* in, scalar_t* out, int size) cons
     }
 }
 
+void Aux::FftwDFT::fwd_r2c_1b(const scalar_t* in, complex_t* out,
+                              int nrows, int ncols, int axis) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    auto src = const_cast<scalar_t*>(in);
+    auto dst = pval_cast(out);
+    auto key = make_key(src, dst, nrows, ncols, FFTW_FORWARD, axis);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            const int rank = 1;
+            int n = ncols;      // along rows
+            int howmany = nrows;
+            int stride = 1;
+            int dist = ncols;
+            if (axis == 0) {    // along columns
+                n = nrows;
+                howmany = ncols;
+                stride = ncols;
+                dist = 1;
+            }
+            // The plan writes only the non-redundant n/2+1 lower half
+            // of each transform; dist/stride place it inside the
+            // full-size output array and the mirror below fills the rest.
+            plan = fftwf_plan_many_dft_r2c(rank, &n, howmany,
+                                           src, &n, stride, dist,
+                                           dst, &n, stride, dist,
+                                           FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_r2c(plan, src, dst);
+    // Mirror to the full-size Hermitian spectrum along the transform axis.
+    if (axis) {
+        for (int irow = 0; irow < nrows; ++irow) {
+            complex_t* row = out + (size_t) irow * ncols;
+            for (int icol = ncols / 2 + 1; icol < ncols; ++icol) {
+                row[icol] = std::conj(row[ncols - icol]);
+            }
+        }
+    }
+    else {
+        for (int irow = nrows / 2 + 1; irow < nrows; ++irow) {
+            for (int icol = 0; icol < ncols; ++icol) {
+                out[(size_t) irow * ncols + icol] = std::conj(out[(size_t) (nrows - irow) * ncols + icol]);
+            }
+        }
+    }
+}
+
+void Aux::FftwDFT::inv_c2r_1b(const complex_t* in, scalar_t* out,
+                              int nrows, int ncols, int axis) const
+{
+    static std::shared_mutex mutex;
+    static plan_map_t plans;
+    // c2r reads only the n/2+1 lower half along the transform axis
+    // (the Hermitian assumption); rank-1 out-of-place supports
+    // FFTW_PRESERVE_INPUT so the caller's spectrum is untouched.
+    auto src = pval_cast(in);
+    auto dst = out;
+    auto key = make_key(src, dst, nrows, ncols, FFTW_BACKWARD, axis);
+    auto plan = get_plan(mutex, plans, key);
+    if (!plan) {
+        std::unique_lock lock(mutex);
+        auto it = plans.find(key);
+        if (it == plans.end()) {
+            const int rank = 1;
+            int n = ncols;      // along rows
+            int howmany = nrows;
+            int stride = 1;
+            int dist = ncols;
+            if (axis == 0) {    // along columns
+                n = nrows;
+                howmany = ncols;
+                stride = ncols;
+                dist = 1;
+            }
+            plan = fftwf_plan_many_dft_c2r(rank, &n, howmany,
+                                           src, &n, stride, dist,
+                                           dst, &n, stride, dist,
+                                           FFTW_ESTIMATE | FFTW_PRESERVE_INPUT | FFTW_UNALIGNED);
+            plans[key] = plan;
+        }
+        else {
+            plan = it->second;
+        }
+    }
+    fftwf_execute_dft_c2r(plan, src, dst);
+    // Apply 1/n normalization
+    const int norm = axis ? ncols : nrows;
+    const int ntot = ncols * nrows;
+    for (int ind = 0; ind < ntot; ++ind) {
+        out[ind] /= norm;
+    }
+}
+
 fftwf_plan plan_1b(fftwf_complex *in, fftwf_complex *out,
                    int nrows, int ncols, int sign, int axis)
 {

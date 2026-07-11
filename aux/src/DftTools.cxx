@@ -167,6 +167,24 @@ DftTools::real_array_t DftTools::inv_c2r(const IDFT::pointer& dft, const DftTool
     return symspec.real();
 }
 
+// As with fwd_inplace()/inv_inplace(): Eigen arrays are column-major
+// but IDFT assumes row-major, so reverse (nrows, ncols) and the
+// meaning of axis.
+
+DftTools::complex_array_t DftTools::fwd_r2c_real(const IDFT::pointer& dft, const DftTools::real_array_t& wave, int axis)
+{
+    complex_array_t ret(wave.rows(), wave.cols());
+    dft->fwd_r2c_1b(wave.data(), ret.data(), wave.cols(), wave.rows(), !axis);
+    return ret;
+}
+
+DftTools::real_array_t DftTools::inv_c2r_real(const IDFT::pointer& dft, const DftTools::complex_array_t& spec, int axis)
+{
+    real_array_t ret(spec.rows(), spec.cols());
+    dft->inv_c2r_1b(spec.data(), ret.data(), spec.cols(), spec.rows(), !axis);
+    return ret;
+}
+
 
 
 /*** high level functions ***/
