@@ -61,33 +61,42 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
 
     // Static optical dead-channel mask:
     //   dead in data (not in the DAPHNE readout): 24, 27, 28, 34
-    //   Ar-blind (official eff_Ar = 0; no/quenched WLS at 128 nm):
-    //     13 (membrane XA, no PTP), 29/39 (PEN+Q PMTs), 32 (uncoated PMT).
-    // For Xe-doped running unmask 13/29/39 and switch to the 175 nm library.
-    local ch_mask_base = [13, 24, 27, 28, 29, 32, 34, 39],
+    //   32 (uncoated PMT): official eff_Ar = eff_Xe = 0 -- masked, though the
+    //     data show it responding at its PEN peers' level (ablib_gold.py
+    //     Ar-blind closure 1.85x peers); revisit if an official 175 nm
+    //     efficiency for it appears.
+    // The Ar-blind-only channels 13 (membrane XA, no PTP) and 29/39 (PEN+Q
+    // PMTs) are LIVE under the Xe/175 nm model (unmasked 2026-07-11 with the
+    // library switch; they respond in data at their peers' level -- see
+    // pdvd-questions-dune.md sec 3).
+    local ch_mask_base = [24, 27, 28, 32, 34],
     // Semi-analytical mode: additionally mask the LIVE membrane XAs -- the WCT
     // port fixes cosine=|dx|/d (orientation-0), which is wrong/divergent for
-    // the y-normal wall XAs (see pdvd-photon-model.md sec 6).  13 is already
-    // in the base mask.
+    // the y-normal wall XAs (see pdvd-photon-model.md sec 6).  13 (now live
+    // under Xe) is a membrane XA too.
     local ch_mask = if light_model == 'semi'
-        then ch_mask_base + [0, 1, 2, 3, 12, 18, 19]
+        then ch_mask_base + [0, 1, 2, 3, 12, 13, 18, 19]
         else ch_mask_base,
 
-    // Official per-OpDet detection efficiencies (PDVD_PDS_Mapping_v04152025,
-    // read per channel from pdvd-photlib-chanmap.json): XA (PTP) 0.03,
-    // TPB-coated PMT 0.12, PEN PMT 0.036, Ar-blind 0.  These set the relative
-    // PD-type weighting; the absolute scale rides on QtoL (data calibration
-    // pending).  Masked channels keep their nominal value (inert).
+    // Official per-OpDet detection efficiencies, Xe/175 nm column eff_Xe
+    // (PDVD_PDS_Mapping_v04152025, read per channel from
+    // pdvd-photlib-chanmap.json; identical to eff_Ar except 13/29/39 which
+    // are Ar-blind-only): XA (PTP) 0.03, TPB-coated PMT 0.12, PEN PMT 0.036,
+    // uncoated 0.  A newer official map exists (PDVD_PDS_Mapping_v09162025,
+    // dunecore) -- re-check these values against it when convenient.  These
+    // set the relative PD-type weighting; the absolute scale rides on QtoL
+    // (data calibration pending).  Masked channels keep their nominal value
+    // (inert).
     local VUVEfficiency = [
         0.03, 0.03, 0.03, 0.03,                    // 0-3   membrane XA (top)
         0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03,  // 4-11 cathode XA
-        0.03, 0.0,                                 // 12,13 membrane XA (13 no-WLS)
+        0.03, 0.03,                                // 12,13 membrane XA (13 Xe-only)
         0.12, 0.036, 0.12, 0.12,                   // 14-17 z-wall PMTs (15 PEN)
         0.03, 0.03,                                // 18,19 membrane XA
         0.12, 0.036, 0.12, 0.12,                   // 20-23 z-wall PMTs (21 PEN)
-        0.036, 0.036, 0.036, 0.036, 0.036, 0.0,    // 24-29 bottom PMTs (29 PEN+Q)
-        0.036, 0.036, 0.0, 0.036, 0.036, 0.036,    // 30-35 (32 uncoated)
-        0.036, 0.036, 0.036, 0.0,                  // 36-39 (39 PEN+Q)
+        0.036, 0.036, 0.036, 0.036, 0.036, 0.036,  // 24-29 bottom PMTs (29 PEN+Q Xe-live)
+        0.036, 0.036, 0.0, 0.036, 0.036, 0.036,    // 30-35 (32 uncoated, eff_Xe=0 too)
+        0.036, 0.036, 0.036, 0.036,                // 36-39 (39 PEN+Q Xe-live)
     ],
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
@@ -127,18 +136,18 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // Data PE scale, anchored on GROUND-TRUTH pairs: the 80 beam-
             // trigger flashes (position known to ~1 us from the trigoff tc_us,
             // see check_trigger_flash.py) paired with their beam cluster
-            // (largest predicted-light bundle on that flash) in the QtoL=1
-            // DIAG=2 calib dumps.  Median measured/predicted = 0.11,
-            // [16,84]% = [0.03,0.25] -- the library+official-eff model OVER-
-            // predicts ~10x, roughly flat across PD groups (cathode XA 0.13,
-            // bottom PMT 0.16, z-PMT 0.12, top membrane XA 0.10), so the
-            // efficiencies are NOT double-counted and this is a global
-            // normalization (units/recombination/SPE-scale product).
+            // (largest predicted-light bundle on that flash).  Under the
+            // Xe/175 nm library + eff_Xe + the Xe-live mask the gold-pair
+            // median measured/predicted = 0.082, [16,84]% = [0.027,0.218]
+            // (ql_light_calib recompute, validated exact vs the C++ vis
+            // loop; the 128 nm-era value was 0.11).  The library+official-
+            // eff model OVER-predicts ~10x as one global normalization
+            // (units/recombination/SPE-scale product).
             // DO NOT refit this from auto-selected "good-KS" bundles: with a
             // mis-scaled QtoL the LASSO is amplitude-inert and the selection
             // is dominated by accidentals ~40x brighter than prediction (that
             // route gave QtoL~40, off by ~350x -- see pdvd-qlmatching.md).
-            QtoL: 0.11,
+            QtoL: 0.082,
             doReflectedLight: false,   // library vis is total photon arrival
             nchan: nchan,
             ch_mask: ch_mask,
@@ -149,7 +158,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // Visibility backend (see header).  In library mode the semimodel
             // is still loaded for the OpDet table.
             light_model: light_model,
-            photon_library_file: 'pdvd/photodet/pdvd-photlib-vis-v5-128nm.json',
+            // Xe/175 nm as of 2026-07-11: the runs are Xe-doped by every
+            // data test (Ar-blind channels live at peer level, 175 nm wins
+            // the gold-pair shape A/B 56/80, mixture scan monotonic --
+            // pdvd-questions-dune.md sec 3 + ql_light_calib/ablib_gold.py).
+            photon_library_file: 'pdvd/photodet/pdvd-photlib-vis-v5-175nm.json',
             semimodel_file: 'pdvd/photodet/semi-analytical-pdvd.json',
 
             // --- PDVD single-flash mode (all C++-default-OFF knobs) ---
