@@ -677,19 +677,26 @@ local clus_all_tpc (
                     individual: false            // Output individual APA/Face
                 },
             {
-                    // name "img" dumps the live grouping BEFORE the all-TPC
-                    // pipeline -> the per-drift-group clustering result (stage
-                    // 3, post group merging), grouped by drift side:
-                    // clustering-group0123 / clustering-group4567.  The
-                    // "clustering" set above (end dump) gives
-                    // clustering-global (full-detector clustering).
+                    // The hard-coded "img" name is MABC's pre-pipeline hook: this
+                    // set is dumped from the live grouping BEFORE the all-TPC
+                    // clustering pipeline runs -- i.e. the raw imaged charge (the
+                    // per-anode matched clusters).  With no apa_groups it is
+                    // dumped whole -> img-global (PDHD/SBND parity).  Its cluster
+                    // ids are the SAME enumeration the pre-pipeline "op" dump
+                    // writes into each flash's op_cluster_ids (fill_bee_flashes
+                    // runs at the same point), so the Bee viewer's flash<->cluster
+                    // pairing must be checked against THIS instance -- neither the
+                    // post-pipeline clustering-global (re-enumerated) nor a
+                    // separate bee-blobs imaging pass (own numbering) matches.
+                    // The hook can host only one set, so emitting img-global here
+                    // replaces the former per-drift-side stage-3
+                    // clustering-group0123/4567 dump (cf. PDHD clus.jsonnet).
                     name: "img",
                     detector: "protodunevd",
-                    algorithm: "clustering",    // -> clustering-group0123 / clustering-group4567
+                    algorithm: "img",           // -> img-global (raw imaged charge)
                     pcname: "3d",
-                    coords: ["x", "y", "z"],    // uncorrected, matching the global set
+                    coords: ["x", "y", "z"],    // raw drift coords, matching the op dump point
                     individual: false,
-                    apa_groups: apa_drift_groups,
                 }
             ],
             pipeline: wc.tns(cm_pipeline),
