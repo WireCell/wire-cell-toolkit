@@ -637,6 +637,14 @@ namespace WireCell::Match {
         std::string m_light_model{"semi"};
         std::string m_photon_library_file{""};
         std::unique_ptr<PhotonLibraryModel> m_lib_model;
+        // Cross-check tolerance (cm) between the library's own optional
+        // per-channel chan_pos_cm and m_opdets[i].center, at configure time.
+        // Only exercised when the library file actually carries chan_pos_cm
+        // (older/hand-written files without it skip the check silently, so
+        // this is not a new requirement on existing files) -- catches a
+        // channel-order mismatch between the library export and the OpDet
+        // table that the bare nchan==nopdets count check cannot.
+        double m_photon_library_pos_tol{5.0};
 
         // Per-OpDet table (type + position) loaded from semimodel_file. Used to
         // build the SemiAnalyticalModel and, at execute() time, to derive the

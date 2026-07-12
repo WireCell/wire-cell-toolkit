@@ -158,6 +158,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
     m_light_model   = get(cfg, "light_model", m_light_model);
     m_photon_library_file = get(cfg, "photon_library_file", m_photon_library_file);
+    m_photon_library_pos_tol = get(cfg, "photon_library_pos_tol", m_photon_library_pos_tol);
     m_calib_dump    = get(cfg, "calib_dump", m_calib_dump);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_cathode_diag  = get(cfg, "cathode_diag", m_cathode_diag);
@@ -423,6 +424,35 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         m_opdets.push_back(o);
     }
 
+    // ch_mask entries index m_opdets/run.opdet_mask directly (build_opdet_mask,
+    // below); an out-of-range value from a config typo would otherwise be a
+    // silent out-of-bounds write there. All current detector configs pass
+    // in-range indices, so this never fires today -- it converts a future
+    // typo from memory corruption into a clear config error.
+    for (int c : m_ch_mask) {
+        if (c < 0 || (std::size_t) c >= m_opdets.size()) {
+            raise<ValueError>("QLMatching: ch_mask entry %d out of range [0,%d)",
+                              c, (int) m_opdets.size());
+        }
+    }
+
+    // VUVEfficiency/VISEfficiency are indexed by the same OpDet index as
+    // m_opdets (pred_flash accumulation, execute()). A too-short array would
+    // otherwise throw deep in the per-point hot loop (.at(idet)) instead of
+    // here at configure time; a too-long one is harmless (the extra tail is
+    // simply unused), so this checks "too short", not "wrong length" --
+    // every current detector config supplies an array of exactly nopdets
+    // length (SBND via the 312-entry default, PDHD/PDVD via an explicit
+    // nchan-length override), so this never fires today.
+    if (m_VUVEfficiency.size() < m_opdets.size()) {
+        raise<ValueError>("QLMatching: VUVEfficiency length %d < nopdets %d",
+                          (int) m_VUVEfficiency.size(), (int) m_opdets.size());
+    }
+    if (m_VISEfficiency.size() < m_opdets.size()) {
+        raise<ValueError>("QLMatching: VISEfficiency length %d < nopdets %d",
+                          (int) m_VISEfficiency.size(), (int) m_opdets.size());
+    }
+
     m_semi_model = std::make_unique<SemiAnalyticalModel>(
         vuv_cfg, vis_cfg, geom, m_opdets, m_doReflectedLight);
 
@@ -438,6 +468,30 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         if (m_lib_model->nchan() != m_opdets.size()) {
             raise<ValueError>("QLMatching: photon library nchan %d != nopdets %d",
                               (int) m_lib_model->nchan(), (int) m_opdets.size());
+        }
+        // The bare nchan count check above cannot catch a library whose
+        // channel order does not match m_opdets' order (e.g. a future
+        // re-export using a different channel convention) -- it only
+        // catches a length mismatch. When the library's optional
+        // chan_pos_cm is present, cross-check it against m_opdets[i].center
+        // and raise on a real mismatch rather than silently mispredicting.
+        // Absent in a library file (as all files shipped before this check
+        // was added), has_positions() is false and this is a no-op -- adding
+        // the check does not require regenerating existing library files.
+        if (m_lib_model->has_positions()) {
+            for (std::size_t i = 0; i < m_opdets.size(); ++i) {
+                const double d = (m_lib_model->position(i) - m_opdets[i].center).magnitude();
+                if (d > m_photon_library_pos_tol) {
+                    raise<ValueError>(
+                        "QLMatching: photon library channel %d position mismatch with OpDet "
+                        "table: library=(%.1f,%.1f,%.1f) opdet=(%.1f,%.1f,%.1f) d=%.1f cm > "
+                        "tol %.1f cm -- library channel order likely does not match m_opdets",
+                        (int) i,
+                        m_lib_model->position(i).x(), m_lib_model->position(i).y(), m_lib_model->position(i).z(),
+                        m_opdets[i].center.x(), m_opdets[i].center.y(), m_opdets[i].center.z(),
+                        d, m_photon_library_pos_tol);
+                }
+            }
         }
     }
     else if (m_light_model != "semi") {
@@ -2512,8 +2566,14 @@ void QLMatching::write_opflash_pc(ApaRun& run)
     // once (from input 0, gid side 0) — otherwise the merged root would hold every
     // physical flash N times. merge_pct simply skips roots without an opflash PC.
     if (m_shared_flash && run.input_idx != 0) return;
+    // Per-side clocks: when the charge crates frame independently (per-input
+    // trigger_offsets configured, e.g. PDVD BDE/TDE), also emit the flash time
+    // on input-1's (top) clock as a "time1" column so display consumers need
+    // not re-derive the inter-crate skew.  Key absent when trigger_offsets is
+    // empty (PDHD/SBND scalar path) => those outputs stay byte-identical.
+    const bool per_side_clocks = m_shared_flash && !m_trigger_offsets.empty();
     std::vector<int> op_gid, op_ch, op_apa;
-    std::vector<double> op_time, op_pe;
+    std::vector<double> op_time, op_pe, op_time1;
     for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
         const auto& flash = run.flashes[fi];
         // Physical drift side of the flash (TPC 0 = low-x, TPC 1 = high-x of the
@@ -2539,6 +2599,7 @@ void QLMatching::write_opflash_pc(ApaRun& run)
             op_ch.push_back(ch);
             op_pe.push_back(flash->get_PE(ch));
             op_apa.push_back(apa);
+            if (per_side_clocks) op_time1.push_back(flash->get_time() + trigger_offset_for(1));
         }
     }
     run.grouping->put_pcarray<int>(op_gid, "gid", "opflash");
@@ -2546,6 +2607,7 @@ void QLMatching::write_opflash_pc(ApaRun& run)
     run.grouping->put_pcarray<int>(op_ch, "ch", "opflash");
     run.grouping->put_pcarray<double>(op_pe, "pe", "opflash");
     run.grouping->put_pcarray<int>(op_apa, "apa", "opflash");
+    if (per_side_clocks) run.grouping->put_pcarray<double>(op_time1, "time1", "opflash");
 }
 
 // ---------------------------------------------------------------------------
@@ -2691,6 +2753,12 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             f["id"]       = fl->get_flash_id();
             f["apa"]      = apa;
             f["time"]     = (fl->get_time() + trigger_offset_for(run.input_idx)) / us;   // us (trigger-folded)
+            // Per-side clocks (per-input trigger_offsets, e.g. PDVD BDE/TDE):
+            // "time" above is on input-0's (bottom) charge clock; also emit the
+            // input-1 (top) clock so top-volume drift math needs no re-basing.
+            // Key absent otherwise => PDHD/SBND dumps byte-identical.
+            if (m_shared_flash && !m_trigger_offsets.empty())
+                f["time1"] = (fl->get_time() + trigger_offset_for(1)) / us;
             f["total_PE"] = fl->get_total_PE();
             Json::Value pe(Json::arrayValue), pe_err(Json::arrayValue);
             for (int ch = 0; ch < m_nchan; ++ch) { pe.append(fl->get_PE(ch)); pe_err.append(fl->get_PE_err(ch)); }

@@ -1,5 +1,6 @@
 #include "WireCellMatch/PhotonLibraryModel.h"
 
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/cnpy.h"
 #include "WireCellUtil/doctest.h"
@@ -70,6 +71,59 @@ TEST_CASE("photonlibrarymodel trilinear")
 
     std::remove(npy.c_str());
     std::remove(meta.c_str());
+}
+
+// Exercises the optional chan_pos_cm field (QLMatching's channel-order
+// cross-check against m_opdets relies on has_positions()/position() -- see
+// QLMatching.cxx's library-mode configure() block).
+TEST_CASE("photonlibrarymodel chan_pos_cm")
+{
+    const int nx = 2, ny = 2, nz = 2, nch = 2;
+    std::vector<float> vis(nx * ny * nz * nch, 1.f);
+
+    const std::string dir = "/home/xqian/tmp";
+    const std::string npy = dir + "/doctest_photlib_pos_vis.npy";
+    const std::string meta_ok = dir + "/doctest_photlib_pos_meta_ok.json";
+    const std::string meta_bad = dir + "/doctest_photlib_pos_meta_bad.json";
+    cnpy::npy_save(npy, vis.data(),
+                   {(size_t) nx, (size_t) ny, (size_t) nz, (size_t) nch});
+
+    const std::string header =
+        "{\"origin_cm\": [0, 0, 0], \"step_cm\": [1, 1, 1], "
+        "\"n\": [2, 2, 2], \"nchan\": 2, "
+        "\"vis_npy\": \"doctest_photlib_pos_vis.npy\", ";
+
+    {
+        std::ofstream f(meta_ok);
+        f << header << "\"chan_pos_cm\": [[1.0, 2.0, 3.0], [-1.0, 0.0, 5.0]]}";
+    }
+    {
+        // length mismatch (1 entry, nchan=2) -- must raise, not silently truncate.
+        std::ofstream f(meta_bad);
+        f << header << "\"chan_pos_cm\": [[1.0, 2.0, 3.0]]}";
+    }
+
+    PhotonLibraryModel plm_ok(meta_ok);
+    CHECK(plm_ok.has_positions());
+    CHECK(plm_ok.position(0).x() == doctest::Approx(1.0));
+    CHECK(plm_ok.position(1).z() == doctest::Approx(5.0));
+
+    CHECK_THROWS_AS(PhotonLibraryModel{meta_bad}, WireCell::ValueError);
+
+    // absent chan_pos_cm (the format all library files shipped before this
+    // check was added use) -- has_positions() stays false, no error.
+    const std::string meta_nopos = dir + "/doctest_photlib_pos_meta_none.json";
+    {
+        std::ofstream f(meta_nopos);
+        f << header.substr(0, header.size() - 2) << "}";
+    }
+    PhotonLibraryModel plm_none(meta_nopos);
+    CHECK_FALSE(plm_none.has_positions());
+
+    std::remove(npy.c_str());
+    std::remove(meta_ok.c_str());
+    std::remove(meta_bad.c_str());
+    std::remove(meta_nopos.c_str());
 }
 
 // Optional check against a production library file whose meta JSON carries a
