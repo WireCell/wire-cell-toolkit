@@ -271,6 +271,38 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             hc_miss_ks:  0.08, hc_miss_c2:  60.0,
             hc_miss_min_ndf: 5,
 
+            // --- Cathode-crosser (xTPC) machinery, ENABLED 2026-07-11 ---
+            // Works under shared_flash: cull_cross_tpc pairs candidate bundles
+            // across the two drift sides by flash-TIME coincidence (identical
+            // times when the flash is shared) and splits sides by anode_x vs
+            // the cathode.  Cuts validated on the 17 hand/finder-confirmed
+            // crosser pairs of run 039252 evts 298567/298581/298595 (wcp
+            // pdvd/ql_display/docs/ql-cathode-crosser-recipe.md).
+            xtpc_flag: true,                // C++ default false
+            // PDVD-specific scenario-1 distance ceiling: each volume's active
+            // edge sits ~3 cm from x=0 (cathode_x = +-3 cm per side) and the
+            // top/bottom trigger crates skew by up to ~30 us (~5 cm), so the
+            // true pairs meet at 10-22 cm -- NOT the PDHD/SBND 5 cm.
+            xtpc_dmax: 25 * wc.cm,          // C++ default 5 cm
+            xtpc_dmax2: 300 * wc.cm,        // C++ default (scenario-2 ceiling)
+            xtpc_angle_max: 20,             // C++ default (scenario-2 angles, deg)
+            xtpc_hough_radius: 15 * wc.cm,  // C++ default (local-direction radius)
+            // Bind each direction-confirmed scenario-1 pair to ONE coincident
+            // flash; pinned bundles are exempt from the round-1/2 strength
+            // prunes (fit_round{1,2}_shared already honor the exemption).
+            xtpc_joint_pin: true,           // C++ default false
+            xtpc_pin_angle: 20,             // deg, min(local vhough, global PCA)
+            // Widened at-cathode flag window (C++ default -2 cm, PDHD -3 cm):
+            // a clean untruncated crosser half whose endpoint stops 2-7 cm
+            // short of the cathode (e.g. the evt298567 gid83 hand pick, whose
+            // halves carry neither at_x_boundary nor window_truncated with the
+            // default window) must acquire at_x_boundary to enter the xtpc
+            // candidate pool (admission = at_x_boundary || window_truncated).
+            // Side effect (intended): those bundles also join the
+            // lasso_flag_weight boundary down-weight group, like every other
+            // boundary bundle (~2% of evt298567 bundles flip).
+            cathode_ext2: -12 * wc.cm,
+
             // DELIBERATELY OFF for round 1 (C++ defaults):
             //  - reject_overpred: the gold-pair pred/meas scatter is still
             //    ~x3 either way around QtoL and the per-channel PE scale is
@@ -281,9 +313,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             //    showers; possible saturation bias) -- refit on hand-scan GT.
             //  - empty_rescue / cluster_rescue: per-run "empty flash" concepts,
             //    not shared_flash-aware (the C++ skips them with a warning).
-            //  - cross_side_filter / crossside_skip_vis / xtpc_* /
-            //    opflash_phys_gid: per-side flash concepts; PDVD has one flash
-            //    and the shared fit handles cathode-crossers natively.
+            //  - cross_side_filter / crossside_skip_vis / opflash_phys_gid:
+            //    per-side flash concepts; PDVD has one flash.  (xtpc_* is NOT
+            //    in this list any more -- enabled above; the joint LASSO alone
+            //    proved insufficient to keep both crosser halves together.)
             //  - robust_endpoint_trim / pmt_nonlinearity: PDHD/SBND-tuned;
             //    revisit after the hand scan.
 
