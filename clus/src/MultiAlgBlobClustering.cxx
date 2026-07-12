@@ -1909,10 +1909,23 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         group_col.assign(gc.begin(), gc.end());
     }
 
+    // Optional per-side-clock flash time (QLMatching "time1": the flash time on
+    // input-1's/top charge clock, ns; "time" is input-0's/bottom).  Present only
+    // when per-input trigger_offsets are configured (PDVD BDE/TDE); absent =>
+    // op_t1 is not emitted and the op JSON stays bit-identical (PDHD/SBND).
+    auto a_time1 = ds.get("time1");
+    const bool have_time1 = (a_time1 != nullptr);
+    std::vector<double> time1_col;
+    if (have_time1) {
+        auto tc = a_time1->elements<double>();
+        time1_col.assign(tc.begin(), tc.end());
+    }
+
     // Group rows by global flash id (first-seen order) into per-flash time +
     // dense per-channel measured PE.
     std::vector<int> flash_order;
     std::map<int, double> flash_time;
+    std::map<int, double> flash_time1;               // gid -> input-1-clock time
     std::map<int, int> flash_group;                  // gid -> flash-group id
     std::map<int, int> flash_apa;                    // gid -> physical drift side
     std::map<int, std::map<int, double>> flash_pe;   // gid -> (ch -> pe)
@@ -1921,6 +1934,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         if (flash_pe.find(g) == flash_pe.end()) {
             flash_order.push_back(g);
             flash_time[g] = time[i];
+            if (have_time1) flash_time1[g] = time1_col[i];
             if (have_group) flash_group[g] = group_col[i];
             if (have_apa) flash_apa[g] = apa_col[i];
         }
@@ -1960,9 +1974,11 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // so apa = gid / kFlashGidStride (correct only for single-face anodes).
     constexpr int kFlashGidStride = 1000000;
     std::vector<int> appended_groups;   // one per appended row, same order
+    std::vector<double> appended_t1;    // ditto, input-1-clock time (us)
     for (const int g : flash_order) {
         const int apa = have_apa ? flash_apa[g] : (g / kFlashGidStride);
         const int grp = have_group ? flash_group[g] : -1;
+        const double t1_us = have_time1 ? flash_time1[g] * 1e-3 : 0.0;   // ns -> us
         int maxch = -1;
         for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;
         std::vector<double> pes(maxch + 1, 0.0);
@@ -1985,21 +2001,27 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                 }
                 m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
                 appended_groups.push_back(grp);
+                appended_t1.push_back(t1_us);
             } else {
                 for (const auto& cp : mit->second) {
                     m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
                     appended_groups.push_back(grp);
+                    appended_t1.push_back(t1_us);
                 }
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
             appended_groups.push_back(grp);
+            appended_t1.push_back(t1_us);
         }
     }
 
     // Attach the per-row flash-group array only when grouping was computed, so
     // the ungrouped output is unchanged.
     if (have_group) m_bee_flash.set_groups(appended_groups);
+    // Attach the per-row input-1-clock time only when the opflash PC carries it
+    // (per-input trigger_offsets, PDVD), so other detectors' op JSON is unchanged.
+    if (have_time1) m_bee_flash.set_t1(appended_t1);
 }
 
 struct Perf {

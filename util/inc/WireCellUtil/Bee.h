@@ -250,6 +250,15 @@ namespace WireCell::Bee {
         /// unless this is called, so existing op JSON stays bit-identical.
         void set_groups(const std::vector<int>& groups);
 
+        /// Optionally attach a per-flash "op_t1" array (one entry per appended
+        /// row, same order, microseconds): the flash time expressed on the
+        /// SECOND drift side's charge readout clock, for detectors whose two
+        /// charge crates frame their readout windows independently (PDVD
+        /// BDE/TDE): op_t is on input-0's (bottom) clock, op_t1 on input-1's
+        /// (top).  Not written unless this is called, so existing op JSON
+        /// (single-clock detectors, e.g. PDHD/SBND) stays bit-identical.
+        void set_t1(const std::vector<double>& t1);
+
         size_t size() const;
         bool empty() const;
     };
