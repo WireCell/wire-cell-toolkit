@@ -37,7 +37,18 @@ base {
         local plane_gap = 4.76*wc.mm,
         local apa_g2g = 114.3*wc.mm, 
 
-        local apa_plane = 0.5*apa_g2g, // pick it to be at the grid wires
+        // FV / sensitive-volume anode edge.  2026-07-12: moved from the legacy
+        // grid-wire convention 0.5*apa_g2g = 57.15 mm (a DocDB-203 /
+        // ProtoDUNE-SP wire-stack constant; no such plane exists in the PDVD
+        // CRP -- the GDML strip planes U/V/Z are 0.2 mm apart and the active
+        // LAr reaches to 0.5 mm below the U plane) to the PDHD convention:
+        // the first-induction (U) strip plane, 2 x 0.2 mm above the collection
+        // plane.  anode = +-341.51 cm ~ GDML CRMActive edge (341.50).  Changes
+        // QLMatching FV/u-coordinate and boundary flags; NOT byte-identical to
+        // the pre-fix reco.  See pdvd/docs/qlmatch/pdvd-anode-time-consistency.md
+        // and pdhd-anode-time-consistency.md (wcp-porting-validation repo).
+        local crp_strip_pitch = 0.2*wc.mm, // U-V / V-Z plane spacing (GDML + wires file)
+        local apa_plane = 2*crp_strip_pitch, // at the first induction (U) wires
 
         // The "response" plane is where the field response functions
         // start.  Garfield calcualtions start somewhere relative to
