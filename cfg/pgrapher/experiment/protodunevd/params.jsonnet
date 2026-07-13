@@ -37,18 +37,18 @@ base {
         local plane_gap = 4.76*wc.mm,
         local apa_g2g = 114.3*wc.mm, 
 
-        // FV / sensitive-volume anode edge.  2026-07-12: moved from the legacy
-        // grid-wire convention 0.5*apa_g2g = 57.15 mm (a DocDB-203 /
-        // ProtoDUNE-SP wire-stack constant; no such plane exists in the PDVD
-        // CRP -- the GDML strip planes U/V/Z are 0.2 mm apart and the active
-        // LAr reaches to 0.5 mm below the U plane) to the PDHD convention:
-        // the first-induction (U) strip plane, 2 x 0.2 mm above the collection
-        // plane.  anode = +-341.51 cm ~ GDML CRMActive edge (341.50).  Changes
-        // QLMatching FV/u-coordinate and boundary flags; NOT byte-identical to
-        // the pre-fix reco.  See pdvd/docs/qlmatch/pdvd-anode-time-consistency.md
-        // and pdhd-anode-time-consistency.md (wcp-porting-validation repo).
-        local crp_strip_pitch = 0.2*wc.mm, // U-V / V-Z plane spacing (GDML + wires file)
-        local apa_plane = 2*crp_strip_pitch, // at the first induction (U) wires
+        // FV / sensitive-volume anode edge.  2026-07-13: moved to the PHYSICAL
+        // CRP shield plane, the drift-facing boundary of the active LAr.  The
+        // confirmed CRP stack (W collection fixed) is W -3.2mm-> V -10mm-> U
+        // -3.2mm-> Shield, so the shield sits 16.4 mm below W (toward the drift
+        // volume); the 16.4 mm W..shield is PCB stack, not active drift region.
+        // anode = +-(341.55 - 1.64) = +-339.91 cm.  Supersedes the 2026-07-12
+        // U-plane choice (2 x 0.2 mm = +-341.51 cm), which used the v5 wire
+        // file's LArSoft 0.2 mm-step convention.  Drives DetectorVolumes::
+        // inner_bounds -> QLMatching FV/u-coordinate + boundary flags and the
+        // inner_bounds-based clustering.  NOT byte-identical.  See
+        // pdvd/docs/qlmatch/pdvd-crp-anode-plane-geometry.md.
+        local apa_plane = 16.4*wc.mm, // W -> shield plane (3.2 + 10 + 3.2 mm)
 
         // The "response" plane is where the field response functions
         // start.  Garfield calcualtions start somewhere relative to
@@ -204,7 +204,12 @@ base {
     },
 
     files: {
-        wires: "protodunevd-wires-larsoft-v5.json.bz2",
+        // v6 = v5 with the U/V induction planes moved to their PHYSICAL CRP
+        // spacing (W kept fixed at |x|=341.55 cm): V at W-3.2 mm (341.23),
+        // U at W-13.2 mm (340.23), vs the v5 LArSoft 0.2 mm-step convention.
+        // See pdvd/docs/qlmatch/pdvd-crp-anode-plane-geometry.md.  NOT
+        // byte-identical to v5 reco (sigproc/imaging induction-plane geometry).
+        wires: "protodunevd-wires-larsoft-v6.json.bz2",
         strip_length: "PDVD_strip_length.json.bz2",
 
         fields: [

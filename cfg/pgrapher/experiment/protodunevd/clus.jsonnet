@@ -73,11 +73,12 @@ local apa_drift_groups = [
 // ProtoDUNE-VD geometry parameters
 // 8 anodes total: anodes 0-3 are bottom drift (centerline x=-3415.5mm, drift in +x direction)
 //                 anodes 4-7 are top    drift (centerline x=+3415.5mm, drift in -x direction)
-// apa_plane = 0.4mm (first-induction U plane, PDHD convention; 2026-07-12,
-// was 57.15mm = the fictional DocDB-203 grid plane -- see params.jsonnet and
-// pdvd/docs/qlmatch/pdvd-anode-time-consistency.md), cpa_plane = 3385.5mm
-// Bottom drift anode face x ~ -3415.1mm, cathode x ~ -30.0mm
-// Top    drift anode face x ~  3415.1mm, cathode x ~   30.0mm
+// apa_plane = 16.4mm (physical CRP shield plane, drift-facing boundary of the
+// active LAr; 2026-07-13, supersedes the 2026-07-12 U-plane 0.4mm choice --
+// see params.jsonnet and pdvd/docs/qlmatch/pdvd-crp-anode-plane-geometry.md),
+// cpa_plane = 3385.5mm
+// Bottom drift anode face x ~ -3399.1mm, cathode x ~ -30.0mm
+// Top    drift anode face x ~  3399.1mm, cathode x ~   30.0mm
 local dvm = {
     overall: {
         FV_xmin: -3415.5 * wc.mm,
@@ -95,7 +96,7 @@ local dvm = {
         vertical_dir: [0,1,0],
         beam_dir: [0,0,1]
     },
-    // Bottom drift (anodes 0-3): anode face at ~-3415.1mm, cathode at ~-30.0mm
+    // Bottom drift (anodes 0-3): anode face at ~-3399.1mm (shield), cathode at ~-30.0mm
     // Both faces share same x-bounds (2-sided CRP, same drift direction)
     a0f0pA: {
         drift_speed: drift_speed_bot,
@@ -104,7 +105,7 @@ local dvm = {
         time_offset: time_offset,
         trigger_offset: trigger_offset,
         nticks_live_slice: 4,
-        FV_xmin: -3415.1 * wc.mm,
+        FV_xmin: -3399.1 * wc.mm,
         FV_xmax: -30.0 * wc.mm,
         FV_xmin_margin: 2 * wc.cm,
         FV_xmax_margin: 2 * wc.cm,
@@ -116,11 +117,11 @@ local dvm = {
     a2f1pA: $.a0f0pA,
     a3f0pA: $.a0f0pA,
     a3f1pA: $.a0f0pA,
-    // Top drift (anodes 4-7): cathode at ~30.0mm, anode face at ~3415.1mm
+    // Top drift (anodes 4-7): cathode at ~30.0mm, anode face at ~3399.1mm (shield)
     a4f0pA: $.a0f0pA + {
         drift_speed: drift_speed_top,
         FV_xmin: 30.0 * wc.mm,
-        FV_xmax: 3415.1 * wc.mm,
+        FV_xmax: 3399.1 * wc.mm,
         // Top volume charge is read by the TDE crate (its own window start).
         trigger_offset: if trigger_offset_top == null then trigger_offset
                         else trigger_offset_top,
