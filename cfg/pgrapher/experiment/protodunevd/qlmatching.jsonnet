@@ -51,7 +51,7 @@ local wc = import 'wirecell.jsonnet';
 // until the time base is calibrated) without editing this file.
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
-         trigger_offsets=null) {
+         trigger_offsets=null, drift_speed=null, drift_speeds=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -320,7 +320,17 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             //  - robust_endpoint_trim / pmt_nonlinearity: PDHD/SBND-tuned;
             //    revisit after the hand scan.
 
-            drift_speed: params.lar.drift_speed,
+            // Scalar override (sec 8.12 recalibration): null => the common
+            // params.lar.drift_speed => byte-identical pre-knob config.  Also
+            // the value the calib dump exports as d["drift_speed"].
+            drift_speed: if drift_speed == null then params.lar.drift_speed
+                         else drift_speed,
+            // Per-input [bottom, top] drift speeds (the two PDVD volumes can
+            // carry different calibrated values, sec 8.12 of
+            // pdvd-anode-time-consistency.md). C++ default [] => the scalar
+            // drift_speed for every input. Key omitted when null =>
+            // byte-identical pre-knob compiled config.
+            [if drift_speeds != null then 'drift_speeds']: drift_speeds,
             trigger_offset: trigger_offset,
             trigger_offsets: trigoffs,
             calib_dump: calib_dump,

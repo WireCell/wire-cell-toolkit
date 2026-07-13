@@ -34,13 +34,22 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     (default) => trigger_offset everywhere (bit-identical).
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=false,
           time_offset=0 * wc.us, relax_containment_filter=true,
-          trigger_offset=0 * wc.us, trigger_offset_top=null)
+          trigger_offset=0 * wc.us, trigger_offset_top=null,
+          drift_speed_b=null, drift_speed_t=null)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
 // surface corrected 2.54->3.0 cm, so 1.57->1.568, v proportional to D); was 1.6.
 // See pdvd/docs/clus-workflow.md (drift-velocity calibration).
 local drift_speed = 1.568 * wc.mm / wc.us;
+// Optional per-side calibrated speeds (sec 8.12 of
+// pdvd-anode-time-consistency.md): bottom volume = anodes 0-3, top = 4-7.
+// null => the common legacy value above; compiled config byte-identical when
+// both are null.  These feed BOTH the per-face BlobSampler (x_raw) and the
+// dvm blocks below (T0Correction / grouping x_t0cor) from the same resolved
+// value, so the two coordinates cannot drift apart.
+local drift_speed_bot = if drift_speed_b == null then drift_speed else drift_speed_b;
+local drift_speed_top = if drift_speed_t == null then drift_speed else drift_speed_t;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);
@@ -89,7 +98,7 @@ local dvm = {
     // Bottom drift (anodes 0-3): anode face at ~-3415.1mm, cathode at ~-30.0mm
     // Both faces share same x-bounds (2-sided CRP, same drift direction)
     a0f0pA: {
-        drift_speed: drift_speed,
+        drift_speed: drift_speed_bot,
         tick: 0.5 * wc.us,  // 0.5 mm per tick
         tick_drift: self.drift_speed * self.tick,
         time_offset: time_offset,
@@ -109,6 +118,7 @@ local dvm = {
     a3f1pA: $.a0f0pA,
     // Top drift (anodes 4-7): cathode at ~30.0mm, anode face at ~3415.1mm
     a4f0pA: $.a0f0pA + {
+        drift_speed: drift_speed_top,
         FV_xmin: 30.0 * wc.mm,
         FV_xmax: 3415.1 * wc.mm,
         // Top volume charge is read by the TDE crate (its own window start).
@@ -162,11 +172,11 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, center_fallback=false) = {
+local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
-        drift_speed: drift_speed,
+        drift_speed: speed,
         time_offset: time_offset,
         // center_fallback: emit one point at the blob center when the stepped
         // grid yields none (tiny 1-wire blobs); default off -> bit-identical.
@@ -218,7 +228,9 @@ local clus_per_face (
         }
     }, nin=1, nout=1, uses=[]),
 
-    local bsl = bs_live_face(anode.name, face, center_fallback=stepped_center_fallback),
+    local bsl = bs_live_face(anode.name, face, center_fallback=stepped_center_fallback,
+                             speed=if anode.data.ident < 4 then drift_speed_bot
+                                   else drift_speed_top),
     local bsd = bs_dead_face(anode.name, face),
 
     local ptb = g.pnode({

@@ -253,6 +253,14 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_trigger_offsets.clear();
     if (cfg.isMember("trigger_offsets") && cfg["trigger_offsets"].isArray())
         for (const auto& t : cfg["trigger_offsets"]) m_trigger_offsets.push_back(t.asDouble());
+    // Optional per-input drift speeds (see QLMatching.h). Empty => scalar everywhere.
+    m_drift_speeds.clear();
+    if (cfg.isMember("drift_speeds") && cfg["drift_speeds"].isArray())
+        for (const auto& s : cfg["drift_speeds"]) m_drift_speeds.push_back(s.asDouble());
+    if (!m_drift_speeds.empty() && m_drift_speeds.size() != m_multiplicity) {
+        raise<ValueError>("QLMatching: drift_speeds size %d != multiplicity %d",
+                          (int) m_drift_speeds.size(), (int) m_multiplicity);
+    }
     m_nchan = get(cfg, "nchan", m_nchan);
 
     // §A active-volume cushions (see match/docs/improve_progress.md). The raw
@@ -555,6 +563,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["drift_speed"]     = m_drift_speed;
     cfg["trigger_offset"]  = m_trigger_offset;
     cfg["trigger_offsets"] = Json::Value(Json::arrayValue);
+    cfg["drift_speeds"]    = Json::Value(Json::arrayValue);
 
     cfg["anode_ext1"]   = m_anode_ext1;
     cfg["anode_ext2"]   = m_anode_ext2;
@@ -1290,7 +1299,7 @@ void QLMatching::build_bundles(ApaRun& run)
         // drift x correction for detectors that don't bake it into the charge x at
         // imaging time (default 0 => bit-identical); per-input when the charge
         // windows start per-crate (PDVD TDE/BDE). See QLMatching.h.
-        const double flash_x_offset = run.sign_offset * (flash_time + trigger_offset_for(run.input_idx)) * m_drift_speed;
+        const double flash_x_offset = run.sign_offset * (flash_time + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
         std::vector<unsigned int> flash_opdet_mask = run.opdet_mask;
@@ -2648,6 +2657,14 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         for (double t : m_trigger_offsets) tov.append(t / us);
         top["trigger_offsets_us"] = tov;
     }
+    // Per-input drift speeds, cm/us (already applied to the per-bundle x
+    // offsets). Emitted only when configured => byte-identical dumps for
+    // scalar-speed detectors; top["drift_speed"] stays the scalar.
+    if (!m_drift_speeds.empty()) {
+        Json::Value dsv(Json::arrayValue);
+        for (double s : m_drift_speeds) dsv.append(s / (cm / us));
+        top["drift_speeds"] = dsv;
+    }
     top["count"]        = (Json::UInt64)m_count;
     top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
     // Readout window used by the window-truncation flag (raw post-resample ticks).
@@ -2736,6 +2753,10 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         g["u_cathode"]   = run.u_cathode / cm;
         g["s"]           = run.s;
         g["sign_offset"] = run.sign_offset;
+        // Per-side speed the matching actually used for this volume; key
+        // absent when the drift_speeds knob is off => byte-identical dumps.
+        if (!m_drift_speeds.empty())
+            g["drift_speed"] = drift_speed_for(run.input_idx) / (cm / us);
         g["y_lo"]        = run.y_lo / cm;
         g["y_hi"]        = run.y_hi / cm;
         g["z_lo"]        = run.z_lo / cm;
@@ -2896,7 +2917,6 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
 {
     const double cm = units::cm;
     const double us = units::us;
-    const double v  = m_drift_speed;             // internal units (length/time)
     const double R  = m_cathode_diag_radius;     // Hough radius, internal length
     const double band = 15 * cm;                 // cathode region half-width (corrected x)
     const double dmax = 10 * cm;                 // closest-pair distance cut
@@ -2911,7 +2931,7 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
         const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double ft  = flash->get_time();
-            const double off = run.sign_offset * (ft + trigger_offset_for(run.input_idx)) * v;
+            const double off = run.sign_offset * (ft + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 ccs.push_back({bundle->get_main_cluster(), side, off, ft / us});
                 for (auto* oc : bundle->get_other_clusters())
@@ -3187,7 +3207,6 @@ int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
 // the 10 SBND hand-scan data events (MC validation); purity-first.
 void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
 {
-    const double v = m_drift_speed;
     const double win_us = m_flash_group_window / units::us;
 
     // Gather candidate main-cluster bundles from both APAs, each tagged by APA side and
@@ -3208,7 +3227,7 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     for (auto& run : runs) {
         const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
-            const double off = run.sign_offset * (flash->get_time() + trigger_offset_for(run.input_idx)) * v;
+            const double off = run.sign_offset * (flash->get_time() + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated())
                     continue;

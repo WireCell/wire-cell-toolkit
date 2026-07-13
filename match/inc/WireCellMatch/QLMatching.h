@@ -187,6 +187,16 @@ namespace WireCell::Match {
             return m_trigger_offsets.empty() ? m_trigger_offset
                                              : m_trigger_offsets.at(input_idx);
         }
+        // Per-INPUT drift speeds ("drift_speeds", one per input port), for
+        // detectors whose drift volumes can carry different calibrated speeds
+        // (PDVD: bottom volume = port 0, top volume = port 1). Empty (the
+        // default) => m_drift_speed for every input, bit-identical.
+        std::vector<double> m_drift_speeds;
+        double drift_speed_for(std::size_t input_idx) const
+        {
+            return m_drift_speeds.empty() ? m_drift_speed
+                                          : m_drift_speeds.at(input_idx);
+        }
         // LASSO solution threshold below which a (flash, cluster) bundle is
         // dropped after each matching round. Was hard-coded 0.05 inline; pulled
         // out so it can be widened/narrowed from the jsonnet without rebuild.
