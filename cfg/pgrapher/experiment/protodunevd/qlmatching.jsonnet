@@ -292,16 +292,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // prunes (fit_round{1,2}_shared already honor the exemption).
             xtpc_joint_pin: true,           // C++ default false
             xtpc_pin_angle: 20,             // deg, min(local vhough, global PCA)
-            // Widened at-cathode flag window (C++ default -2 cm, PDHD -3 cm):
-            // a clean untruncated crosser half whose endpoint stops 2-7 cm
-            // short of the cathode (e.g. the evt298567 gid83 hand pick, whose
-            // halves carry neither at_x_boundary nor window_truncated with the
-            // default window) must acquire at_x_boundary to enter the xtpc
+            // At-cathode flag window inner edge (C++ default -2 cm, PDHD -3 cm).
+            // Previously widened to -12 cm so that clean untruncated crosser
+            // halves stopping 2-7 cm short of the cathode (e.g. the evt298567
+            // gid83 hand pick) still acquire at_x_boundary and enter the xtpc
             // candidate pool (admission = at_x_boundary || window_truncated).
-            // Side effect (intended): those bundles also join the
-            // lasso_flag_weight boundary down-weight group, like every other
-            // boundary bundle (~2% of evt298567 bundles flip).
-            cathode_ext2: -12 * wc.cm,
+            // That window over-flagged ordinary non-crosser cluster ends near
+            // the cathode (evt298567 bot fl62 c3/c75 shown atCATH/xbound though
+            // several cm short), so it is narrowed back to the C++ default -2 cm.
+            // Trade-off: a genuine crosser half whose end stops >2 cm short of
+            // the cathode no longer acquires at_x_boundary via this window and
+            // must rely on window_truncated for xtpc admission -- revisit if the
+            // gid83-style short-half pool needs recovering.
+            cathode_ext2: -2 * wc.cm,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
             //  - reject_overpred: the gold-pair pred/meas scatter is still
