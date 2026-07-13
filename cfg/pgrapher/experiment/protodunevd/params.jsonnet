@@ -22,8 +22,9 @@ base {
     // This section will be overwritten in simparams.jsonnet
     det : {
 
-        // See:  wirecell-util wire-volumes protodune-wires-larsoft-v3.json.bz2
-        // to help with defining these parameters.
+        // See:  wirecell-util wire-volumes protodunevd-wires-larsoft-v6.json.bz2
+        // to help with defining these parameters.  (v6 = default wire file, see
+        // files.wires below and pdvd/docs/qlmatch/pdvd-crp-anode-plane-geometry.md)
 
         // between center lines
         local apa_cpa = 341.55*wc.cm,
