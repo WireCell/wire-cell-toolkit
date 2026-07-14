@@ -133,7 +133,7 @@ TEST_CASE("configuration various")
         debug("{} {}", name, mm[name]);
     }
 
-    TEST_CASE("configuration sizes")
+    SUBCASE("configuration sizes")
     {
         {
             Configuration cfg;
@@ -175,7 +175,7 @@ TEST_CASE("configuration various")
     }
 
 
-    TEST_CASE("configuration hash speed")
+    SUBCASE("configuration hash speed")
     {
         Configuration cfg = Persist::loads(tracks_json());
         TimeKeeper kp("configuration hash speed");
@@ -198,7 +198,7 @@ TEST_CASE("configuration various")
 
     }
 
-    TEST_CASE("configuration various")
+    SUBCASE("configuration various")
     {
 
         Configuration cfg;
@@ -223,7 +223,7 @@ TEST_CASE("configuration various")
     }
 
 
-    TEST_CASE("configuration override") {
+    SUBCASE("configuration override") {
         Configuration a, b, c;
 
         a["tag"] = Json::nullValue;
