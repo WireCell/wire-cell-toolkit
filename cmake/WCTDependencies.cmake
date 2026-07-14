@@ -47,10 +47,23 @@ set(WCT_DEP_OPTIONAL
 # enabled deliberately, e.g. configit.sh passes --with-root.)
 set(WCT_DEP_OPTIN ROOTSYS LIBTORCH CUDA KOKKOS)
 
-# Declare the WITH_<TOKEN> options.
+# Declare the per-dependency options.  These mirror waf's family of
+# --with-NAME[/-include/-lib/-libs] options:
+#   WITH_<TOKEN>          '' (auto) | no | yes | <install-prefix path>
+#   WITH_<TOKEN>_INCLUDE  include dir(s) (comma list), overrides <prefix>/include
+#   WITH_<TOKEN>_LIB      library dir(s) (comma list), overrides <prefix>/lib
+#   WITH_<TOKEN>_LIBS     exact library name(s) (comma list), overrides defaults
+#                         e.g. -DWITH_JSONNET_LIBS=gojsonnet
+# Run `cmake -LH <build>` (or ccmake) to see them all with their help strings.
 foreach(_tok IN LISTS WCT_DEP_MANDATORY WCT_DEP_OPTIONAL)
   set(WITH_${_tok} "" CACHE STRING
       "Discovery for ${_tok}: ''=auto, no/yes, or an install-prefix path")
+  set(WITH_${_tok}_INCLUDE "" CACHE STRING
+      "Include dir(s) for ${_tok} (comma list; overrides <prefix>/include)")
+  set(WITH_${_tok}_LIB "" CACHE STRING
+      "Library dir(s) for ${_tok} (comma list; overrides <prefix>/lib)")
+  set(WITH_${_tok}_LIBS "" CACHE STRING
+      "Exact library name(s) for ${_tok} (comma list; overrides defaults)")
 endforeach()
 
 set(WCT_EXTERNAL_FOUND "" CACHE INTERNAL "External tokens discovered")
@@ -69,6 +82,7 @@ macro(_wct_intent tok)
   set(_wct_val "${WITH_${tok}}")
   string(TOLOWER "${_wct_val}" _wct_vl)
   list(FIND WCT_DEP_OPTIN "${tok}" _wct_optin_idx)
+  set(_wct_prefix "")
   if(_wct_vl STREQUAL "")
     if(_wct_mandatory)
       set(_wct_mode REQUIRE)
@@ -86,12 +100,45 @@ macro(_wct_intent tok)
     set(_wct_mode REQUIRE)
   else()
     # A path: use it as an install-prefix hint for all search mechanisms.
+    set(_wct_prefix "${_wct_val}")
     list(PREPEND CMAKE_PREFIX_PATH "${_wct_val}")
     if(EXISTS "${_wct_val}/lib/pkgconfig")
       set(ENV{PKG_CONFIG_PATH} "${_wct_val}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
     endif()
     set(_wct_mode REQUIRE)
   endif()
+
+  # Fine-grained overrides (mirror --with-NAME-include/-lib/-libs).  These set,
+  # for the discovery block below:
+  #   _wct_inc_hints  include dir(s) to search (find_path HINTS / CMAKE_INCLUDE_PATH)
+  #   _wct_lib_hints  library dir(s) to search (find_library HINTS / CMAKE_LIBRARY_PATH)
+  #   _wct_lib_names  explicit library name(s), or empty to use the built-in default
+  set(_wct_inc_hints "")
+  set(_wct_lib_hints "")
+  set(_wct_lib_names "")
+  if(NOT "${WITH_${tok}_INCLUDE}" STREQUAL "")
+    string(REPLACE "," ";" _wct_inc_hints "${WITH_${tok}_INCLUDE}")
+  elseif(_wct_prefix)
+    set(_wct_inc_hints "${_wct_prefix}/include")
+  endif()
+  if(NOT "${WITH_${tok}_LIB}" STREQUAL "")
+    string(REPLACE "," ";" _wct_lib_hints "${WITH_${tok}_LIB}")
+  elseif(_wct_prefix)
+    set(_wct_lib_hints "${_wct_prefix}/lib")
+  endif()
+  if(NOT "${WITH_${tok}_LIBS}" STREQUAL "")
+    string(REPLACE "," ";" _wct_lib_names "${WITH_${tok}_LIBS}")
+  endif()
+  # Make find_package()/pkg-config honor explicit include/lib dirs too.
+  if(_wct_inc_hints)
+    list(APPEND CMAKE_INCLUDE_PATH ${_wct_inc_hints})
+  endif()
+  foreach(_lh IN LISTS _wct_lib_hints)
+    list(APPEND CMAKE_LIBRARY_PATH "${_lh}")
+    if(EXISTS "${_lh}/pkgconfig")
+      set(ENV{PKG_CONFIG_PATH} "${_lh}/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+    endif()
+  endforeach()
 endmacro()
 
 # Create the WCT::<tok> interface target and record the token as found.
@@ -184,10 +231,17 @@ _wct_intent(JSONCPP)
 pkg_check_modules(WCT_JSONCPP REQUIRED IMPORTED_TARGET jsoncpp)
 _wct_provide(JSONCPP LINK PkgConfig::WCT_JSONCPP)
 
-# --- Jsonnet (find_library; gojsonnet or jsonnet) ---
+# --- Jsonnet (find_library; jsonnet or gojsonnet) ---
+# The C and Go implementations are ABI-compatible; select one with
+# -DWITH_JSONNET_LIBS=gojsonnet (mirrors wcb's --with-jsonnet-libs=gojsonnet).
 _wct_intent(JSONNET)
-find_library(WCT_JSONNET_LIBRARY NAMES jsonnet gojsonnet)
-find_path(WCT_JSONNET_INCLUDE_DIR NAMES libjsonnet.h)
+if(_wct_lib_names)
+  set(_wct_jsonnet_names ${_wct_lib_names})
+else()
+  set(_wct_jsonnet_names jsonnet gojsonnet)
+endif()
+find_library(WCT_JSONNET_LIBRARY NAMES ${_wct_jsonnet_names} HINTS ${_wct_lib_hints})
+find_path(WCT_JSONNET_INCLUDE_DIR NAMES libjsonnet.h HINTS ${_wct_inc_hints})
 if(WCT_JSONNET_LIBRARY AND WCT_JSONNET_INCLUDE_DIR)
   _wct_provide(JSONNET LINK ${WCT_JSONNET_LIBRARY} INCLUDE ${WCT_JSONNET_INCLUDE_DIR})
 else()
@@ -234,16 +288,23 @@ function(_wct_opt_pkgconfig tok pcname)
 endfunction()
 
 function(_wct_opt_findlib tok header)
-  # remaining ARGN are candidate library names
+  # remaining ARGN are the default candidate library names
   _wct_intent(${tok})
   if(_wct_mode STREQUAL "SKIP")
     _wct_missing(${tok})
     return()
   endif()
+  # WITH_<tok>_LIBS overrides the library name(s); WITH_<tok>_LIB/_INCLUDE add
+  # search hints (both computed by _wct_intent).
+  if(_wct_lib_names)
+    set(_names ${_wct_lib_names})
+  else()
+    set(_names ${ARGN})
+  endif()
   set(_libs "")
   set(_ok TRUE)
-  foreach(_nm IN LISTS ARGN)
-    find_library(WCT_${tok}_${_nm}_LIB NAMES ${_nm})
+  foreach(_nm IN LISTS _names)
+    find_library(WCT_${tok}_${_nm}_LIB NAMES ${_nm} HINTS ${_wct_lib_hints})
     if(WCT_${tok}_${_nm}_LIB)
       list(APPEND _libs ${WCT_${tok}_${_nm}_LIB})
     else()
@@ -252,7 +313,7 @@ function(_wct_opt_findlib tok header)
   endforeach()
   set(_inc "")
   if(NOT header STREQUAL "")
-    find_path(WCT_${tok}_INCLUDE_DIR NAMES ${header})
+    find_path(WCT_${tok}_INCLUDE_DIR NAMES ${header} HINTS ${_wct_inc_hints})
     if(WCT_${tok}_INCLUDE_DIR)
       set(_inc ${WCT_${tok}_INCLUDE_DIR})
     else()

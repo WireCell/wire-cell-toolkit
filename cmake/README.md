@@ -81,21 +81,68 @@ Pass these as `-D<NAME>=<VALUE>` at configure time.
 
 ## 4. Dependencies
 
-Each external dependency has a `WITH_<TOKEN>` option that mirrors waf's
-`--with-<name>`:
+Each external dependency `<TOKEN>` (`SPDLOG`, `BOOST`, `FFTW`, `EIGEN`,
+`JSONCPP`, `JSONNET`, `ZLIB`, `BZIP2`, `TBB`, `HDF5`, `ROOTSYS`, ...) has a
+family of `WITH_*` cache options that mirror waf's
+`--with-NAME[/-include/-lib/-libs]`:
 
-* `WITH_<TOKEN>=` (empty) — auto: mandatory deps are required, ordinary
-  optional deps are probed quietly.
-* `WITH_<TOKEN>=no` — do not use (error if the dependency is mandatory).
-* `WITH_<TOKEN>=yes` — require it.
-* `WITH_<TOKEN>=/some/prefix` — use that install prefix as a search hint, then
-  require it.
+| Option | waf equivalent | Meaning |
+|---|---|---|
+| `WITH_<TOKEN>` | `--with-name` | `` (auto) / `no` / `yes` / an **install-prefix path** |
+| `WITH_<TOKEN>_INCLUDE` | `--with-name-include` | include dir(s) (comma list), overrides `<prefix>/include` |
+| `WITH_<TOKEN>_LIB` | `--with-name-lib` | library dir(s) (comma list), overrides `<prefix>/lib` |
+| `WITH_<TOKEN>_LIBS` | `--with-name-libs` | exact library name(s) (comma list), overrides the built-in default |
 
-**Opt-in dependencies** — `WITH_ROOTSYS`, `WITH_CUDA`, `WITH_LIBTORCH`,
-`WITH_KOKKOS` — are *never* auto-detected (matching waf's `with_p()` gating);
-they are used only when their `WITH_*` is non-empty.  Their packages
-(`root`, `cuda`, `pytorch`, ...) are gated on the corresponding dependency
-being found.
+`WITH_<TOKEN>` alone behaves like waf: empty means auto (mandatory deps are
+required, ordinary optional deps are probed quietly); `no` disables; `yes`
+requires; a path is used as an install-prefix search hint and requires the dep.
+
+### Discovering every `WITH_*` option
+
+The options are declared during configuration, so configure once, then list
+them (with their one-line help) from the cache:
+
+```bash
+cmake -S toolkit -B build -DCMAKE_PREFIX_PATH="$PWD/local"
+cmake -LH build | grep -B1 '^WITH_'
+```
+
+`cmake -LAH build` shows all cache variables (including advanced ones); or use
+the interactive `ccmake build` / `cmake-gui build`.
+
+### Boost
+
+Boost is treated **uniformly**, not special-cased — there is no separate set of
+`--boost-*` flags as in waf.  Use `WITH_BOOST=/prefix` (or
+`WITH_BOOST_INCLUDE` / `WITH_BOOST_LIB`) to point at a non-standard Boost.
+Modern Boost ships `BoostConfig.cmake`, which is preferred automatically, so the
+multithreaded/ABI selection waf did with `--boost-mt` is handled by CMake.
+
+### Fine-grained include/lib locations and exact library names
+
+`WITH_<TOKEN>_INCLUDE` and `WITH_<TOKEN>_LIB` add explicit search dirs (fed to
+`find_package`, `find_library`/`find_path`, and pkg-config), and
+`WITH_<TOKEN>_LIBS` overrides the library name(s) to link.  For example, to link
+the Go implementation of Jsonnet (`libgojsonnet.so`) instead of the C one — the
+CMake equivalent of waf's `--with-jsonnet-libs=gojsonnet`:
+
+```bash
+cmake -S toolkit -B build -DCMAKE_PREFIX_PATH="$PWD/local" \
+      -DWITH_JSONNET_LIBS=gojsonnet
+# or point at a specific tree and library:
+cmake -S toolkit -B build \
+      -DWITH_JSONNET=/opt/jsonnet \
+      -DWITH_JSONNET_INCLUDE=/opt/jsonnet/include \
+      -DWITH_JSONNET_LIB=/opt/jsonnet/lib \
+      -DWITH_JSONNET_LIBS=gojsonnet
+```
+
+### Opt-in dependencies
+
+`WITH_ROOTSYS`, `WITH_CUDA`, `WITH_LIBTORCH`, `WITH_KOKKOS` are *never*
+auto-detected (matching waf's `with_p()` gating); they are used only when their
+`WITH_*` is non-empty.  Their packages (`root`, `cuda`, `pytorch`, ...) are
+gated on the corresponding dependency being found.
 
 ```bash
 # Build with ROOT and CUDA enabled (deps live under local/):
