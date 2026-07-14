@@ -252,3 +252,49 @@ removing a `.cxx`/`.h` is picked up on the next build without editing any
 CMake file.  Changing a package's dependency tokens does require editing its
 `CMakeLists.txt` (the one piece of per-package metadata duplicated with the
 waf `wscript_build`).
+
+## 9. Maintaining the CMake build alongside waf
+
+The CMake build is **additive** and runs in parallel with waf; keeping both is
+well under 2× the effort of one because almost everything that changes often is
+either shared or convention-driven.  Only two kinds of metadata are duplicated:
+
+1. **Per-package dependency tokens.** A package's `use=`/`app_use=`/`test_use=`
+   in `*/wscript_build` is mirrored by `wct_package(... USE ... APP_USE ...
+   TEST_USE ...)` in `*/CMakeLists.txt`.  Adding an inter-package edge or an
+   external dependency to a package means editing both one-liners.
+
+2. **The external-dependency recipe.** waf's `waft/wcb.py:package_descriptions`
+   + `waft/generic.py` are mirrored by `cmake/WCTDependencies.cmake` (discovery)
+   and the small re-find table in `cmake/WCTExport.cmake` (so downstream
+   consumers inherit the dep).  Adding a *new* external dependency touches both
+   build systems here.
+
+Everything else is **not** duplicated: adding/removing a source, header, app or
+test file is picked up by globbing in both builds; the C++ code, the install
+layout, `BuildConfig.h` contents, and the optional-dependency gating rules have
+a single conceptual definition each.
+
+**Adding a package** — create the directory with `src/`, `inc/<Name>/`,
+`test/`, add a one-line `wscript_build` and a one-line `CMakeLists.txt`
+(`wct_package(<Name> USE ...)`), and add its directory to the package list in
+the top-level `CMakeLists.txt` (or the optional-gating table if it depends on an
+optional external).
+
+**Adding an external dependency** — add its `package_descriptions` entry (waf)
+and a discovery block in `cmake/WCTDependencies.cmake` (a `WCT::<TOKEN>` target
++ `WCT_HAVE_<TOKEN>` flag); if consumers need it transitively, add a one-line
+case to `_wct_refind` in `cmake/WCTExport.cmake`; if it should gate a package,
+add a row to the optional table in the top-level `CMakeLists.txt`.
+
+**Guarding against drift** — the parity harness under `cmake/test/` builds and
+installs both ways and diffs the results (libraries, apps, headers,
+`BuildConfig.h`, `.pc`, and the CMake target set).  Run it before a release, or
+wire it into CI (`cmake/test/ci-parity.yml`):
+
+```bash
+WCT_DEPS=$PWD/local bash toolkit/cmake/test/parity.sh
+```
+
+See `cmake/test/README.md` for the harness details and the expected
+version/environment-probe caveats.
