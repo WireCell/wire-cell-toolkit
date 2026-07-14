@@ -51,7 +51,8 @@ local wc = import 'wirecell.jsonnet';
 // until the time base is calibrated) without editing this file.
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
-         trigger_offsets=null, drift_speed=null, drift_speeds=null) {
+         trigger_offsets=null, drift_speed=null, drift_speeds=null,
+         cathode_ext1=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -306,6 +307,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // must rely on window_truncated for xtpc admission -- revisit if the
             // gid83-style short-half pool needs recovering.
             cathode_ext2: -2 * wc.cm,
+
+            // Cathode-side containment tolerance (how far past the cathode a
+            // cluster's drift end may reach and still count as contained;
+            // cut is last_u < u_cathode + cathode_ext1).  C++ default +1.2 cm
+            // (QLMatching.h:238).  Key omitted when the arg is null =>
+            // byte-identical pre-knob config; the driver passes a value only
+            // for the anode-pull / cushion study (run 039252 evt298567).
+            [if cathode_ext1 != null then 'cathode_ext1']: cathode_ext1,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
             //  - reject_overpred: the gold-pair pred/meas scatter is still
