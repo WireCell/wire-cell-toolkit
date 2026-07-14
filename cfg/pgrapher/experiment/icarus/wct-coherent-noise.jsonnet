@@ -53,7 +53,7 @@ local chndb = [{
 } for n in anode_iota];
 
 local nf_maker = import 'pgrapher/experiment/icarus/nf.jsonnet';
-local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], n, name='nf%d' % n) for n in std.range(0, std.length(tools.anodes) - 1)];
+local nf_pipes = [nf_maker(params, tools.anodes[n], chndb[n], tools, name='nf%d' % n) for n in std.range(0, std.length(tools.anodes) - 1)];
 
 local sp_maker = import 'pgrapher/experiment/icarus/sp.jsonnet';
 local sp = sp_maker(params, tools);
@@ -93,7 +93,7 @@ local add_noise = function(model, n) g.pnode({
     }}, nin=1, nout=1, uses=[model]);
 local noises = [add_noise(noise_model, n) for n in std.range(0,3)];
 
-local add_coherent_noise = = function(n) g.pnode({
+local add_coherent_noise = function(n) g.pnode({
       type: "AddGroupNoise",
       name: "addgroupnoise%d" %n,
       data: {

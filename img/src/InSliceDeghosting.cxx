@@ -63,7 +63,7 @@ namespace {
         if (tag)
             pack |= (1 << p);
         else
-            pack &= (0 << p);
+            pack &= ~(1 << p);
     }
 
     template <class Map, class Key, class Pos>
@@ -104,6 +104,44 @@ namespace {
         return cidents;
     }
 
+    // bool adjacent(std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int> >& cid1,
+    //               std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int> >& cid2)
+    // {
+    //     std::map<WireCell::WirePlaneLayer_t, std::pair<int, int> > map1_plane_chs, map2_plane_chs;
+    //     std::map<WireCell::WirePlaneLayer_t, int> map_plane_score;
+
+    //     for (auto it = cid1.begin(); it != cid1.end(); it++) {
+    //         map_plane_score[it->first] = 0;
+    //         map1_plane_chs[it->first] = std::make_pair(*it->second.begin(), *it->second.rbegin());
+    //     }
+
+    //     for (auto it = cid2.begin(); it != cid2.end(); it++) {
+    //         map2_plane_chs[it->first] = std::make_pair(*it->second.begin(), *it->second.rbegin());
+    //     }
+
+    //     int sum_score = 0;
+    //     for (auto it = map_plane_score.begin(); it != map_plane_score.end(); it++) {
+    //         if (map1_plane_chs[it->first].first == map2_plane_chs[it->first].second + 1 ||
+    //             map2_plane_chs[it->first].first == map1_plane_chs[it->first].second + 1) {
+    //             map_plane_score[it->first] = 1;
+    //         }
+    //         else if (map1_plane_chs[it->first].first <= map2_plane_chs[it->first].second &&
+    //                  map2_plane_chs[it->first].first <= map1_plane_chs[it->first].second) {
+    //             map_plane_score[it->first] = 2;
+    //         }
+
+    //         if (map_plane_score[it->first] == 0) return false;
+    //         sum_score += map_plane_score[it->first];
+    //     }
+
+    //     if (sum_score >= 5) {
+    //         return true;
+    //     }
+    //     else {
+    //         return false;
+    //     }
+    // }
+
     bool adjacent(const std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid1,
         const std::unordered_map<WireCell::WirePlaneLayer_t, std::set<int>>& cid2)
     {
@@ -111,49 +149,49 @@ namespace {
 
         // Iterate through all planes in cid1
         for (const auto& [plane, channels1] : cid1) {
-            // Skip if this plane isn't in cid2
-            auto it2 = cid2.find(plane);
-            if (it2 == cid2.end()) continue;
-            
-            const auto& channels2 = it2->second;
-            
-            // Check for overlap and adjacency in a single pass
-            bool has_overlap = false;
-            bool is_adjacent = false;
-            
-            // Iterate through the smaller set for efficiency
-            const auto& smaller = (channels1.size() <= channels2.size()) ? channels1 : channels2;
-            const auto& larger = (channels1.size() <= channels2.size()) ? channels2 : channels1;
-            
-            for (int ch : smaller) {
-                // Check for overlap
-                if (larger.find(ch) != larger.end()) {
-                    has_overlap = true;
-                    if (is_adjacent) break; // If we already found adjacency, we can stop
-                }
-                
-                // Check for adjacency
-                if (larger.find(ch + 1) != larger.end() || larger.find(ch - 1) != larger.end()) {
-                    is_adjacent = true;
-                    if (has_overlap) break; // If we already found overlap, we can stop
-                }
+        // Skip if this plane isn't in cid2
+        auto it2 = cid2.find(plane);
+        if (it2 == cid2.end()) continue;
+        
+        const auto& channels2 = it2->second;
+        
+        // Check for overlap and adjacency in a single pass
+        bool has_overlap = false;
+        bool is_adjacent = false;
+        
+        // Iterate through the smaller set for efficiency
+        const auto& smaller = (channels1.size() <= channels2.size()) ? channels1 : channels2;
+        const auto& larger = (channels1.size() <= channels2.size()) ? channels2 : channels1;
+        
+        for (int ch : smaller) {
+            // Check for overlap
+            if (larger.find(ch) != larger.end()) {
+                has_overlap = true;
+                if (is_adjacent) break; // If we already found adjacency, we can stop
             }
             
-            // Apply scoring logic
-            int score = 0;
-            if (is_adjacent && !has_overlap) {
-                score = 1;
-            } else if (has_overlap) {
-                score = 2;
+            // Check for adjacency
+            if (larger.find(ch + 1) != larger.end() || larger.find(ch - 1) != larger.end()) {
+                is_adjacent = true;
+                if (has_overlap) break; // If we already found overlap, we can stop
             }
-            
-            // For planes that exist in both maps, a score of 0 means immediate failure
-            if (score == 0) return false;
-            
-            sum_score += score;
-            
-            // Early exit if the sum is already >= 5
-            if (sum_score >= 5) return true;
+        }
+        
+        // Apply scoring logic
+        int score = 0;
+        if (is_adjacent && !has_overlap) {
+            score = 1;
+        } else if (has_overlap) {
+            score = 2;
+        }
+        
+        // For planes that exist in both maps, a score of 0 means immediate failure
+        if (score == 0) return false;
+        
+        sum_score += score;
+        
+        // Early exit if the sum is already >= 5
+        if (sum_score >= 5) return true;
         }
 
         return sum_score >= 5;
@@ -216,14 +254,19 @@ namespace {
     // }
 
 
-    // Helper function to calculate overlap ratio between two sets of wires
+    // Helper function to calculate overlap ratio between two sets of wires.
+    // Uses counting iterator to avoid allocating a temporary vector.
     double calculate_wire_overlap(const std::set<int>& wires1, const std::set<int>& wires2) {
-        std::vector<int> common_wires;
-        std::set_intersection(wires1.begin(), wires1.end(), 
-                             wires2.begin(), wires2.end(),
-                             std::back_inserter(common_wires));
-        
-        return common_wires.size() * 1.0 / wires1.size();
+        if (wires1.empty()) return 0.0;
+        size_t common_count = 0;
+        auto it1 = wires1.begin();
+        auto it2 = wires2.begin();
+        while (it1 != wires1.end() && it2 != wires2.end()) {
+            if (*it1 < *it2) { ++it1; }
+            else if (*it2 < *it1) { ++it2; }
+            else { ++common_count; ++it1; ++it2; }
+        }
+        return common_count * 1.0 / wires1.size();
     }
 
 }  // namespace
@@ -696,8 +739,8 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
 
     TimeKeeper tk(fmt::format("InSliceDeghosting"));
 
-    const auto in_graph = in->graph();
-    log->debug("in_graph: {}", dumps(in_graph));
+    const auto& in_graph = in->graph();
+    if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));
 
     // blob desc -> quality tag
     vertex_tags_t blob_tags;
@@ -718,48 +761,42 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
         /// DEBUGONLY:
         log->debug("conf 1 step 2 {}", dump_blob_tags(blob_tags));
 
-        /// 3, delete some blobs. in: ICluster + blob_quality_tags out: filtered ICluster
+        /// 3+4, delete TO_BE_REMOVED blobs AND strip old b-b edges in a SINGLE
+        /// filtered copy.  This was two back-to-back copy_graph passes (a vertex
+        /// filter into cg_old_bb, then an edge filter on cg_old_bb into cg_new_bb);
+        /// combining the vertex+edge predicates into one filtered_graph removes a
+        /// full-graph copy.  Output-identical: the surviving vertices keep their
+        /// in_graph iteration order (so copy_graph assigns identical descriptors) and
+        /// the removed edges are the same set (b-b edges + any edge touching a removed
+        /// blob).  c2o (new->orig) is just the inverse of the single orig->copy map.
         log->debug(tk(fmt::format("start delete some blobs")));
-        using VFiltered =
-            typename boost::filtered_graph<cluster_graph_t, boost::keep_all, std::function<bool(cluster_vertex_t)> >;
-        VFiltered fg_rm_bad_blobs(in_graph, {}, [&](auto vtx) { return !tag(blob_tags, vtx, TO_BE_REMOVED); });
         /// DEBUGONLY:
         log->debug("conf 1 step 3 {}", dump_blob_tags(blob_tags));
-
-        /// 4, in-group clustering. in: ICluster + blob_quality_tags out: filtered ICluster
-        /// TODO: do we need to call copy_graph?
         log->debug(tk(fmt::format("start per group clustering")));
         using desc_map_t = std::unordered_map<cluster_vertex_t, cluster_vertex_t>;
         using pm_desc_map_t = boost::associative_property_map<desc_map_t>;
-        desc_map_t o2c1;
-        WireCell::cluster_graph_t cg_old_bb;
-        boost::copy_graph(fg_rm_bad_blobs, cg_old_bb, boost::orig_to_copy(pm_desc_map_t(o2c1)));
-        log->debug("cg_old_bb: {}", dumps(cg_old_bb));
-        /// rm old b-b edges
-        using EFiltered =
-            typename boost::filtered_graph<cluster_graph_t, std::function<bool(cluster_edge_t)>, boost::keep_all>;
-        EFiltered fg_no_bb(cg_old_bb,
-                           [&](auto edge) {
-                               auto source = boost::source(edge, cg_old_bb);
-                               auto target = boost::target(edge, cg_old_bb);
-                               if (cg_old_bb[source].code() == 'b' and cg_old_bb[target].code() == 'b') {
-                                   return false;
-                               }
-                               return true;
-                           },
-                           {});
-
-        desc_map_t o2c2;
-        boost::copy_graph(fg_no_bb, cg_new_bb, boost::orig_to_copy(pm_desc_map_t(o2c2)));
-
-        /// reverse the mapping
-        /// TODO: need protection?
+        using VEFiltered = typename boost::filtered_graph<cluster_graph_t,
+                                                          std::function<bool(cluster_edge_t)>,
+                                                          std::function<bool(cluster_vertex_t)> >;
+        VEFiltered fg_rm_bad_no_bb(
+            in_graph,
+            [&](auto edge) {
+                auto source = boost::source(edge, in_graph);
+                auto target = boost::target(edge, in_graph);
+                if (in_graph[source].code() == 'b' and in_graph[target].code() == 'b') {
+                    return false;
+                }
+                return true;
+            },
+            [&](auto vtx) { return !tag(blob_tags, vtx, TO_BE_REMOVED); });
+        desc_map_t o2c;
+        boost::copy_graph(fg_rm_bad_no_bb, cg_new_bb, boost::orig_to_copy(pm_desc_map_t(o2c)));
+        /// reverse the mapping (new -> orig) for the per-group filters below
         desc_map_t c2o;
-        for (const auto [o, c1] : o2c1) {
-            const auto c2 = o2c2[c1];
-            c2o[c2] = o;
+        for (const auto [o, c] : o2c) {
+            c2o[c] = o;
         }
-        log->debug("cg_new_bb: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb: {}", dumps(cg_new_bb));
         /// make new b-b edges within groups
         /// four separated groups, good&bad, good&good, bad&bad  (two of these might not be useful ...)
         std::vector<gc_filter_t> filters = {
@@ -804,7 +841,7 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
 
         grouped_geom_clustering(cg_new_bb, m_clustering_policy, groups);
         log->debug(tk(fmt::format("end")));
-        log->debug("cg_new_bb: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb: {}", dumps(cg_new_bb));
     }
     else if (m_config_round == 2) {
         // after charge solving ...
@@ -820,7 +857,7 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
         VFiltered fg_rm_bad_blobs(in_graph, {}, [&](auto vtx) { return !tag(blob_tags, vtx, TO_BE_REMOVED); });
         // do we have to copy this every time ???
         boost::copy_graph(fg_rm_bad_blobs, cg_new_bb);
-        log->debug("cg_new_bb 2nd: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb 2nd: {}", dumps(cg_new_bb));
     }
     else if (m_config_round == 3) {
         // after charge solving ...
@@ -837,16 +874,16 @@ bool InSliceDeghosting::operator()(const input_pointer& in, output_pointer& out)
         });
         // do we have to copy this every time ???
         boost::copy_graph(fg_rm_bad_blobs, cg_new_bb);
-        log->debug("cg_new_bb 3rd: {}", dumps(cg_new_bb));
+        if (log->level() <= spdlog::level::debug) log->debug("cg_new_bb 3rd: {}", dumps(cg_new_bb));
     }
 
     /// output
     auto& out_graph = cg_new_bb;
     /// TODO: keep this?
-    log->debug("in_graph: {}", dumps(in_graph));
-    log->debug("out_graph: {}", dumps(out_graph));
+    if (log->level() <= spdlog::level::debug) log->debug("in_graph: {}", dumps(in_graph));
+    if (log->level() <= spdlog::level::debug) log->debug("out_graph: {}", dumps(out_graph));
 
-    out = std::make_shared<Aux::SimpleCluster>(out_graph, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(out_graph), in->ident());
     if (m_dryrun) {
         out = std::make_shared<Aux::SimpleCluster>(in_graph, in->ident());
     }

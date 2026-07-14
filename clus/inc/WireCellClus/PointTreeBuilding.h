@@ -8,6 +8,7 @@
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Units.h"
@@ -34,34 +35,60 @@ namespace WireCell::Clus {
       private:
         // sampling for live/dead
         using node_ptr = WireCell::PointCloud::Tree::Points::node_ptr;
-        void sample_live(node_ptr& root, const WireCell::ICluster::pointer icluster) const;
+        node_ptr sample_live(const WireCell::ICluster::pointer cluster, const double tick, const std::vector<double>& angles) const;
         node_ptr sample_dead(const WireCell::ICluster::pointer cluster, const double tick) const;
         // add CT point cloud to the root/Grouping
         void add_ctpc(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
         // wind -> xbeg, xend
         void add_dead_winds(node_ptr& root, const WireCell::ICluster::pointer cluster) const;
 
+        double get_time_offset(const WirePlaneId& wpid) const;
+        double get_drift_speed(const WirePlaneId& wpid) const;
+        double get_tick(const WirePlaneId& wpid) const;
+
         size_t m_multiplicity {2};
         std::vector<std::string> m_tags;
         size_t m_count{0};
 
+        // cache ...
+        mutable std::map<WirePlaneId, double> cache_map_tick;
+        mutable std::map<WirePlaneId, double> cache_map_drift_speed;
+        mutable std::map<WirePlaneId, double> cache_map_time_offset;
 
         // double m_tick {0.5*units::us};
         // double m_drift_speed {1.101*units::millimeter/units::us};
         // double m_time_offset {-1600 * units::us};
         double m_dead_threshold {1e10};
-        // double m_angle_u {1.0472}; // 60 degrees
-        // double m_angle_v {-1.0472}; // -60 degrees
-        // double m_angle_w {0}; // 0 degrees
+
+        // Config: "inject_dead_winds" (default empty) -- hand-declared dead winds
+        // added on top of those derived from the live imaging.  Each entry marks a
+        // set of channels' wires dead over a drift-x window, so is_good_point()/
+        // test_good_point() treat that region as crossable WITHOUT marking the
+        // channels dead in imaging.  See cfg/.../sbnd/dead_regions.jsonnet.
+        //
+        // When "gap" is true, the entry's W-plane winds also feed a "dead-gap"
+        // registry (serialized to dead_gap_a*f*pW): a dead W wind spans the full
+        // vertical column, so the whole column is treated as dead on all three
+        // planes (Grouping::in_dead_gap), generalizing the y~0 center patch to the
+        // full-height defect band.
+        struct DeadWindInjection {
+            std::vector<int> channels;
+            double xbeg{0.0};
+            double xend{0.0};
+            bool gap{false};
+        };
+        std::vector<DeadWindInjection> m_inject_dead_winds;
 
         // the anode to be processed
         IAnodePlane::pointer m_anode;
+
+        IDetectorVolumes::pointer m_dv;
 
         // the face to be processed
         int m_face{0};
 
         // the geometry helper
-        IClusGeomHelper::pointer m_geomhelper;
+        // IClusGeomHelper::pointer m_geomhelper;
         
         /** Configuration: "samplers"
 

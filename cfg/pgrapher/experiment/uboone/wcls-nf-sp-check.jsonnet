@@ -165,15 +165,14 @@ local graph = g.pipeline([wcls_input.adc_digits, magnifio,
                           sink]);
 
 local graph2 = g.insert_node(graph, g.edge_labels("OmnibusSigProc", "FrameSplitter:sigsplitter"), wcls_output.sp_thresholds, wcls_output.sp_thresholds, name="graph2");
-local graph3 = g.insert_node(graph2, g.edge_labels("wclsFrameSaver:spthresholds", "FrameSplitter:sigsplitter"), name="graph3");
 
 
 local app = {
     type: "Pgrapher",
     data: {
-        edges: g.edges(graph3),
+        edges: g.edges(graph2),
     },
 };
 
 // Finally, the configuration sequence 
-g.uses(graph3) + [app]
+g.uses(graph2) + [app]

@@ -1,0 +1,359 @@
+#+title: Algorithm Examination — wire-cell-toolkit/pytorch
+
+* Overview
+
+The ~pytorch~ package provides C++ components that use ~libtorch~ (the PyTorch C++
+API) for two distinct purposes:
+
+1. *DNN-based signal processing* — applying trained deep neural network models to
+   detector data for Region-of-Interest (ROI) finding.
+2. *FFT/IFFT operations* — an alternative DFT implementation backed by PyTorch's
+   FFT library instead of FFTW.
+
+Both use cases share a common device management and semaphore infrastructure
+(~TorchContext~) that abstracts CPU vs GPU execution.
+
+The package has no Python dependency despite its name — it links only against
+~libtorch~.
+
+* Component Architecture
+
+#+begin_example
+                    ┌─────────────┐
+                    │  IFrame     │ (input frame with tagged traces)
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │DNNROIFinding│  IFrameFilter
+                    │  (per-plane)│
+                    └──────┬──────┘
+                           │ uses ITensorForward
+                    ┌──────▼──────┐
+                    │ TorchService│  ITensorForward (loads .ts model)
+                    └──────┬──────┘
+                           │ uses TorchContext
+                    ┌──────▼──────┐
+                    │TorchContext  │  Device + Semaphore management
+                    └─────────────┘
+
+  Separate component:
+                    ┌─────────────┐
+                    │  TorchDFT   │  IDFT implementation
+                    └──────┬──────┘
+                           │ uses TorchContext
+                    ┌──────▼──────┐
+                    │TorchContext  │
+                    └─────────────┘
+
+  Legacy component:
+                    ┌─────────────┐
+                    │ TorchScript │  ITensorSetFilter (older interface)
+                    └─────────────┘
+#+end_example
+
+* TorchContext and TorchSemaphore
+
+** Algorithm
+
+~TorchContext~ is a support class (not a WCT component) that encapsulates:
+
+1. *Device selection*: Parses a device name string (~"cpu"~, ~"gpu"~, ~"gpu0"~,
+   ~"gpu1"~, etc.) and creates the corresponding ~torch::Device~. For GPU, the
+   device number is extracted from substring position 3 onward (e.g. ~"gpu2"~ →
+   device number 2). If just ~"gpu"~, defaults to device 0.
+
+2. *Semaphore acquisition*: Looks up an ~ISemaphore~ component with a canonical
+   type-name ~"Semaphore:torch-<devname>"~ (or a user-specified name). This
+   semaphore is used to limit concurrent GPU/device access to prevent resource
+   exhaustion.
+
+~TorchSemaphore~ is an RAII wrapper: its constructor calls ~enter()~ (acquire)
+and its destructor calls ~exit()~ (release), ensuring the semaphore is always
+freed even if an exception occurs.
+
+** Details
+
+- The ~NoGradGuard~ in ~connect()~ is scoped only to the connect method itself,
+  which is fine since no gradient computation happens during device setup.
+- The semaphore is "voluntary" — it only limits code that opts in. External code
+  using the same GPU is not constrained.
+
+* TorchDFT (DFT)
+
+** Algorithm
+
+Provides ~IDFT~ interface implementations for 1D, batched-1D, and 2D
+forward/inverse FFT using PyTorch's ~torch::fft~ namespace.
+
+All transforms follow the same pattern via a helper function ~doit()~:
+
+1. *Acquire semaphore* — create ~TorchSemaphore~ (RAII) to honor device
+   concurrency limits.
+2. *Disable gradient tracking* — ~torch::NoGradGuard~ ensures no autograd
+   overhead.
+3. *Copy input to output buffer* — if ~in != out~, memcpy the input data into
+   the output buffer. This is because ~torch::from_blob()~ requires non-const
+   data and the ~in~ pointer is const.
+4. *Wrap as tensor* — ~torch::from_blob()~ creates a tensor view over the output
+   buffer (zero-copy, shares memory).
+5. *Transfer to device* — ~src.to(ctx.device())~ moves data to GPU if
+   configured.
+6. *Apply transform* — call the appropriate ~torch::fft~ function.
+7. *Make contiguous + transfer back* — ~dst.contiguous().cpu()~ ensures
+   row-major memory layout (critical because libtorch may use logical
+   transposes internally that don't match physical memory layout) and moves
+   data back to CPU.
+8. *Copy result* — memcpy from tensor to output buffer.
+
+** Transform mappings
+
+| Method  | Torch function          | Notes                              |
+|---------+-------------------------+------------------------------------|
+| fwd1d   | torch::fft::fft         | 1D FFT on a 1×N tensor             |
+| inv1d   | torch::fft::ifft        | 1D IFFT                            |
+| fwd1b   | torch::fft::fft2(axis)  | Batched 1D: FFT along one axis     |
+| inv1b   | torch::fft::ifft2(axis) | Batched 1D: IFFT along one axis    |
+| fwd2d   | torch::fft::fft2        | Full 2D FFT                        |
+| inv2d   | torch::fft::ifft2       | Full 2D IFFT                       |
+
+** Details on batched 1D
+
+The "1b" (batched 1D) methods use ~torch::fft::fft2~ with a single-element
+~dim~ vector, which effectively performs 1D FFTs along the specified axis across
+all rows (or columns). This is semantically equivalent to calling ~fft~ in a
+loop but leverages GPU parallelism.
+
+* TorchService
+
+** Algorithm
+
+~TorchService~ implements ~ITensorForward~ — it takes an ~ITensorSet~ as input,
+runs it through a pre-loaded TorchScript model, and returns the output as an
+~ITensorSet~.
+
+*** Configuration phase (~configure~):
+1. Connect to the specified device via ~TorchContext~.
+2. Resolve the model path (using WCT's ~Persist::resolve~ which searches
+   configured paths).
+3. Load the TorchScript model with ~torch::jit::load()~ directly onto the
+   target device.
+4. A ~NoGradGuard~ is active during model loading to reduce memory usage
+   (documented as "almost 1/2 the memory and 3/4 the time").
+
+*** Inference phase (~forward~):
+1. Acquire the semaphore (RAII ~TorchSemaphore~).
+2. Disable gradient tracking (~NoGradGuard~).
+3. Convert ~ITensorSet~ → ~vector<torch::IValue>~ via ~Pytorch::from_itensor()~,
+   optionally moving tensors to GPU.
+4. Call ~m_module.forward(iival)~.
+5. Convert the output ~torch::IValue~ back to ~ITensorSet~ via
+   ~Pytorch::to_itensor()~.
+
+The ~forward()~ method is declared ~const~ and claimed to be thread-safe, with
+~m_module~ marked ~mutable~ to allow the non-const ~.forward()~ call from
+within a const method.
+
+* TorchScript (Legacy)
+
+** Algorithm
+
+~TorchScript~ implements ~ITensorSetFilter~ (an older DFP node interface,
+different from the service-based ~ITensorForward~ used by ~TorchService~).
+
+*** Configuration:
+1. Loads a TorchScript model, selecting CPU or GPU.
+2. The ~wait_time~ parameter has a known units convention issue (documented via
+   FIXME): it is stored in WCT system of units internally but configured in
+   milliseconds.
+
+*** Operation:
+1. Move model to device (this happens on *every call*, unlike TorchService which
+   loads once).
+2. Enter an infinite retry loop:
+   - Convert input ITensorSet to torch IValues.
+   - Call ~m_module.forward()~.
+   - On success, break out of the loop.
+   - On ~std::runtime_error~: rethrow (fatal).
+   - On any other exception: sleep for ~wait_time~ and retry.
+3. Convert output back to ITensorSet.
+
+The retry-on-unknown-exception pattern was presumably designed for transient GPU
+memory allocation failures, but the catch-all with sleep is unusual.
+
+* Util (Conversion Utilities)
+
+** Algorithm
+
+Provides bidirectional conversion between WCT's ~ITensorSet~ and PyTorch
+~torch::IValue~ tensors.
+
+*** ~from_itensor(ITensorSet, gpu)~ → ~vector<torch::IValue>~:
+1. Iterate over each ~ITensor~ in the set.
+2. Validate that each tensor is 4D (batch × channels × height × width).
+3. Create a torch tensor via ~from_blob()~ sharing the same memory.
+4. If ~gpu=true~, move to CUDA device 0.
+
+*** ~to_itensor(vector<torch::IValue>)~ → ~ITensorSet~:
+1. For each IValue, extract the torch::Tensor, move to CPU.
+2. Validate 4D shape.
+3. Create a ~SimpleTensor~ with the full 4D shape.
+4. *Critical detail*: copies data starting from ~ten[0][0]~, indexing into the
+   first batch and first channel — but copies ~nbyte~ which is the *full* 4D
+   size. This assumes the tensor has batch=1 and channel=1 at indices [0][0],
+   and the rest of the data follows contiguously.
+
+* DNNROIFinding
+
+** Algorithm — High Level
+
+~DNNROIFinding~ is the main signal processing component. It implements
+~IFrameFilter~: takes an input frame of wire detector traces and produces an
+output frame where DNN-predicted ROIs are applied to deconvolved charge data.
+
+The algorithm operates per wire plane (U, V, or W). Typically, U and V planes go
+through DNN processing while the W (collection) plane is simply passed through
+via a ~PlaneSelector~.
+
+** Algorithm — Detailed Steps
+
+*** Step 1: Configuration (~configure~)
+
+1. Look up the ~IAnodePlane~ to determine which channels belong to the
+   configured plane number (0=U, 1=V, 2=W).
+2. Build ~m_chset~ (unordered_set for O(1) lookup) and ~m_chlist~ (ordered
+   vector defining row ordering in the dense array).
+3. Optionally sort channels by channel ID (~sort_chanids~).
+4. Validate that ~intags~ and ~decon_charge_tag~ are configured.
+5. Look up the ~ITensorForward~ service (typically ~TorchService~).
+6. Pre-allocate ~m_trace_indices~ as a simple iota sequence [0, 1, 2, ...].
+
+*** Step 2: Frame → Eigen arrays
+
+For each input tag (typically 3 tags: ~loose_lf~, ~mp2_roi~, ~mp3_roi~):
+
+1. *Select traces*: filter to only traces whose channel ID is in ~m_chset~.
+2. *Fill dense array*: create an ~m_nrows × m_ncols~ Eigen array (channels ×
+   ticks), fill from sparse traces using ~Aux::fill()~.
+3. *Scale*: apply ~input_scale~ and ~input_offset~ to normalize charge values.
+   Default scale is 1/4000.
+4. *Downsample*: reduce time dimension by ~tick_per_slice~ (default 10) via
+   averaging. A 6000-tick waveform becomes 600 time bins.
+
+*** Step 3: Eigen → Torch tensor
+
+1. Each Eigen array (one per input tag) is wrapped as a torch tensor via
+   ~from_blob~. Note: the Eigen array is column-major but wrapped as
+   ~{cols, rows}~ — effectively a transpose.
+2. Stack the per-tag tensors: ~torch::stack(ch, 0)~ → shape ~{ntags, nticks_ds, nchannels}~.
+3. Transpose and add batch dimension:
+   ~torch::stack({torch::transpose(img, 1, 2)}, 0)~ → shape ~{1, ntags, nchannels, nticks_ds}~.
+
+*** Step 4: Chunked inference
+
+1. Split the batch tensor along channel dimension (dim=2) into ~nchunks~
+   chunks (default 1 = no chunking).
+2. For each chunk:
+   a. If chunking is active (~nchunks > 1~), clone the chunk to make it
+      contiguous in memory.
+   b. Convert to ~ITensorSet~ via ~to_itensor~.
+   c. Call ~m_forward->forward()~ (the TorchService).
+   d. Convert output back to torch tensor on CPU.
+   e. Clone the output (important: ~from_itensor~ shares memory with ITensorSet,
+      so clone prevents dangling reference).
+3. Concatenate chunk outputs along channel dimension.
+
+*** Step 5: Tensor → Eigen mask
+
+1. Map the DNN output tensor to an Eigen array via ~Eigen::Map~.
+   Output shape is ~{1, 1, nchannels, nticks_ds}~, mapped as ~(nticks_ds, nchannels)~.
+2. Upsample the mask back to original time resolution (multiply rows by
+   ~tick_per_slice~). This is a nearest-neighbor upsample (each value is
+   repeated k times).
+
+*** Step 6: Apply mask to deconvolved charge
+
+1. Load the deconvolved charge traces (~decon_charge_tag~) into a dense Eigen
+   array using the same channel selection and ordering.
+2. Transpose the charge array (now ~nticks × nchannels~).
+3. Apply the mask: ~Array::mask(charge_T, mask_e, threshold)~ — zeros out any
+   region where the DNN output is below ~mask_thresh~ (default 0.5).
+4. Baseline subtraction: for each channel, within each contiguous non-zero
+   ROI segment, subtract a linear interpolation between the segment endpoints.
+   This removes baseline bias introduced by the ROI boundaries.
+5. Apply ~output_scale~ and ~output_offset~.
+6. Transpose back to ~nchannels × nticks~.
+
+*** Step 7: Eigen → output frame
+
+1. Convert the masked/corrected charge array to ~SimpleTrace~ objects.
+2. Optionally zero out negative charge values.
+3. Build a ~SimpleFrame~ preserving the input frame's identity, time, tick, and
+   masks.
+4. Tag the frame as ~"DNNROIFinding"~ and tag traces with the configured
+   ~outtag~.
+5. Attach the trace summary (typically RMS values) reordered to match the
+   Eigen array row ordering.
+
+** Signal Processing Context
+
+The DNN ROI finding sits in a typical wire-cell signal processing pipeline:
+
+#+begin_example
+  raw waveforms → noise filtering → signal processing (deconvolution)
+                                          │
+                                          ├── loose ROIs (loose_lf)
+                                          ├── tight ROIs (mp2_roi, mp3_roi)
+                                          └── deconvolved charge (decon_charge)
+                                                      │
+                                              ┌───────▼────────┐
+                                              │  DNNROIFinding  │
+                                              │  (per U,V plane)│
+                                              └───────┬────────┘
+                                                      │
+                                              refined charge with
+                                              DNN-selected ROIs
+#+end_example
+
+The DNN model takes as input the multiple ROI views (3 channels) of the
+same data and predicts a probability mask indicating which time-channel
+regions contain true signal. This mask is then applied to the
+deconvolved charge to produce a cleaner signal estimate.
+
+** Downsampling and Upsampling
+
+The downsample operation averages groups of ~k~ consecutive time bins:
+~out[i/k] += in[i]; out /= k~. This serves dual purposes:
+1. Reduces tensor size for the DNN model (memory and compute savings).
+2. Matches the time resolution the model was trained on.
+
+The upsample is nearest-neighbor: ~out[i] = in[i/k]~ (integer division). This
+means the upsampled mask has a step-function character at boundaries — it does
+not interpolate.
+
+** Baseline Subtraction
+
+The baseline subtraction algorithm operates column-by-column (per channel in the
+transposed array):
+
+1. Scan through time ticks looking for zero/non-zero transitions.
+2. Each contiguous non-zero segment (ROI) is identified by its start (~sta~) and
+   end (~end~) ticks.
+3. Within each ROI, subtract a linear ramp from ~in(sta, ch)~ to ~in(end, ch)~.
+   This removes the DC offset that can arise when the ROI boundaries don't fall
+   at true zero crossings.
+4. Regions outside ROIs remain zero in the output.
+
+* Typical Configuration
+
+From the jsonnet configuration files, a typical DNNROIFinding deployment:
+
+- Runs per-plane (U and V go through DNN; W is passed through directly)
+- Uses 3 input tags: ~loose_lf<N>~, ~mp2_roi<N>~, ~mp3_roi<N>~
+- Applies to deconvolved charge: ~decon_charge<N>~
+- Outputs with tag: ~dnnsp<N><plane>~ (e.g., ~dnnsp0u~)
+- Default input_scale: 1/4000
+- Default tick_per_slice: 10 (6000 ticks → 600 bins)
+- Default mask_thresh: 0.5
+- Default nchunks: 1 (no chunking)
+- The three per-plane outputs are merged via FrameFanout/Fanin with frame tag
+  ~dnnsp<N>~

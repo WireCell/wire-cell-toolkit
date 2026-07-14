@@ -44,7 +44,7 @@ local img = {
         //name: 'chsel%d' % n,
         name: 'chsel%d' % anode.data.ident,
         data: {
-          channels: std.range(5632 * anode.data.ident, 5632 * (anode.data.ident + 1) - 1),
+          channels: std.range(5638 * anode.data.ident, 5638 * (anode.data.ident + 1) - 1),
           //tags: ['orig%d' % n], // traces tag //commented? Ewerton 2023-09-xx
           tags: ['gauss%d' % anode.data.ident, 'wiener%d' % anode.data.ident], // changed Ewerton 2023-09-27
         },
@@ -86,7 +86,7 @@ local img = {
             // dead_ch_hlimit: [2176, 2096],
             ncount_org: 1,   // organize the dead channel ranges according to these boundaries 
             org_llimit: [0], // must be ordered ...
-            org_hlimit: [3400], // must be ordered ...
+            org_hlimit: [3427], // must be ordered ...
         },
     }, nin=1, nout=1, uses=[anode]),
 
@@ -125,7 +125,8 @@ local img = {
                 anode: wc.tn(anode),
             },
         }, nin=1, nout=1, uses=[anode]),
-        ret: g.pipeline([chsel_pipes, cmm_mod, frame_masking, charge_err], "uboone-preproc"), // mag
+        //ret: g.pipeline([chsel_pipes, mag, cmm_mod, frame_masking, charge_err], "uboone-preproc"), //changed Ewerton 2023-10-05
+        ret: g.pipeline([chsel_pipes, cmm_mod, frame_masking, charge_err], "uboone-preproc"), //changed Ewerton 2023-10-05
     }.ret,
 
     // A functio that sets up slicing for an APA.
@@ -141,7 +142,7 @@ local img = {
                 error_tag: "gauss_error%d" % anode.data.ident,
                 anode: wc.tn(anode),
                 min_tbin: 0,
-                max_tbin: 3400, //we used 0 previously. changed to 3400 to check Ewerton 2023-10-25 (original=8500 PD?)
+                max_tbin: 3427, // SBND DAQ readout window length (ticks); was 3400, dropped 27 ticks of real data
                 active_planes: active_planes,
                 masked_planes: masked_planes,
                 dummy_planes: dummy_planes,
@@ -187,20 +188,6 @@ local img = {
     }.ret,
 
     //
-    multi_masked_1view_slicing_tiling :: function(anode, name, span=500) {
-        local dummy_planes = [[1,2],[0,2],[0,1]],
-        local masked_planes = [[0],[1],[2]],
-        local iota = std.range(0,std.length(dummy_planes)-1),
-        local slicings = [$.slicing(anode, name+"_%d"%n, span,
-            active_planes=[],masked_planes=masked_planes[n], dummy_planes=dummy_planes[n])
-            for n in iota],
-        local tilings = [$.tiling(anode, name+"_%d"%n)
-            for n in iota],
-        local multipass = [g.pipeline([slicings[n],tilings[n]]) for n in iota],
-        ret: f.fanpipe("FrameFanout", multipass, "BlobSetMerge", "multi_masked_slicing_tiling-%s"%anode.name),
-    }.ret,
-
-    //
     multi_masked_2view_slicing_tiling :: function(anode, name, span=500) {
         local dummy_planes = [[2],[0],[1]],
         local masked_planes = [[0,1],[1,2],[0,2]],
@@ -226,7 +213,15 @@ local img = {
     }.ret,
 
     // in: IBlobSet out: ICluster
-    solving :: function(anode, aname) {
+    //
+    // full_deghost (bool, default=false):
+    //   false → "simple-solving" — historical SBND default: one ChargeSolving
+    //           triple + one InSliceDeghosting round + GlobalGeomClustering.
+    //   true  → "uboone-solving" — matches uBooNE production: two
+    //           ProjectionDeghosting passes, three ChargeSolving triples,
+    //           three InSliceDeghosting rounds. See sbnd_xin/docs/imaging.md
+    //           "Comparison with the uBooNE imaging chain" for derivation.
+    solving :: function(anode, aname, full_deghost=false) {
 
         local bc = g.pnode({
             type: "BlobClustering",
@@ -309,8 +304,9 @@ local img = {
         local cs3 = self.solving("3rd"),
         local ld3 = self.local_deghosting(3,"3rd"),
 
-        ret: g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc],"uboone-solving"),
-        // ret: g.pipeline([bc, cs1, ld1, gc],"simple-solving"),
+        ret: if full_deghost
+             then g.pipeline([bc, gd1, cs1, ld1, gd2, cs2, ld2, cs3, ld3, gc], "uboone-solving")
+             else g.pipeline([bc, cs1, ld1, gc], "simple-solving"),
     }.ret,
 
     dump :: function(anode, aname, drift_speed) {
@@ -327,21 +323,21 @@ local img = {
 };
 
 function() {
-    local imgpipe (anode, multi_slicing, add_dump = true) =
+    local imgpipe (anode, multi_slicing, add_dump = true, full_deghost = false) =
     if multi_slicing == "single"
     then g.pipeline([
             // img.slicing(anode, anode.name, 109, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             // img.slicing(anode, anode.name, 1916, active_planes=[], masked_planes=[0,1],dummy_planes=[2]), // 109*22*4
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             img.tiling(anode, anode.name),
-            img.solving(anode, anode.name),
+            img.solving(anode, anode.name, full_deghost=full_deghost),
             // img.clustering(anode, anode.name),
             ] + if add_dump then [
             img.dump(anode, anode.name, params.lar.drift_speed),] else [])
     else if multi_slicing == "active"
     then g.pipeline([
             img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4),
-            img.solving(anode, anode.name+"-ms-active"),
+            img.solving(anode, anode.name+"-ms-active", full_deghost=full_deghost),
             // img.clustering(anode, anode.name+"-ms-active"),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else [])
@@ -352,21 +348,18 @@ function() {
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else [])
     else {
-        local st = if multi_slicing == "multi-2view"
+        local st = if multi_slicing == "multi-2view" || multi_slicing == "multi-3view"
         then img.multi_active_slicing_tiling(anode, anode.name+"-ms-active", 4)
         else g.pipeline([
             img.slicing(anode, anode.name, 4, active_planes=[0,1,2], masked_planes=[],dummy_planes=[]), // 109*22*4
             img.tiling(anode, anode.name),]),
-        local mt = if multi_slicing == "multi-2view"
-        then img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500) // 109, 1744 (total 9592)
-        else img.multi_masked_1view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592),
         local active_fork = g.pipeline([
             st,
-            img.solving(anode, anode.name+"-ms-active"),
+            img.solving(anode, anode.name+"-ms-active", full_deghost=full_deghost),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-active", params.lar.drift_speed),] else []),
         local masked_fork = g.pipeline([
-            mt,
+            img.multi_masked_2view_slicing_tiling(anode, anode.name+"-ms-masked", 500), // 109, 1744 (total 9592)
             img.clustering(anode, anode.name+"-ms-masked"),
             ] + if add_dump then [
             img.dump(anode, anode.name+"-ms-masked", params.lar.drift_speed),] else []),
@@ -374,8 +367,8 @@ function() {
     }.ret,
 
 
-    per_anode(anode, multi_slicing = "single", add_dump = true) :: g.pipeline([
+    per_anode(anode, multi_slicing = "single", add_dump = true, full_deghost = false) :: g.pipeline([
         img.pre_proc(anode, anode.name),
-        imgpipe(anode, multi_slicing, add_dump),
+        imgpipe(anode, multi_slicing, add_dump, full_deghost),
         ], "per_anode"),
 }

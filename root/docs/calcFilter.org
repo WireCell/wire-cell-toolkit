@@ -1,0 +1,56 @@
+#+TITLE: calcFilter.C - Wiener Filter Fitting for PDHD
+#+AUTHOR: Original provided by W.Gu, uploaded by X.Ning
+
+* Usage
+
+#+BEGIN_SRC cpp
+root -l 'calcFilter.C("path/to/input.root")'
+#+END_SRC
+
+Example input file: ~/exp/dune/data/users/xning/data/protodunevd-sim-check-exa-for-wienerfilter.root~
+
+* Required Manual Configuration
+
+Before running the macro, you must manually select parameters based on your input data:
+
+[[file:image-1.png]]
+
+** 1. Channel Selection (Lines 69-70)
+
+#+BEGIN_SRC cpp
+fill_range(splusn_chans, 1050, 1250);  // Signal+noise channel range
+fill_range(noise_chans, 1050, 1250);   // Noise-only channel range
+#+END_SRC
+
+- *splusn_chans*: Channel range containing signal plus noise
+- *noise_chans*: Channel range containing noise only
+
+** 2. Time Tick Selection (Lines 83-85)
+
+#+BEGIN_SRC cpp
+TH1F* hsplusn_powden = get_power_density(hraw, splusn_chans, "splusn", 3550, 3550, 200);
+TH1F* hnoise_powden = get_power_density(hraw, noise_chans, "signal", 1000, 1000, 200);
+#+END_SRC
+
+Parameters: ~get_power_density(histogram, channels, name, track_startpoint_timetick, track_endpoint_timetick, nticks)~
+
+- *track_startpoint_time*: time of P1 (e.g., 3550 for signal region, 1000 for noise region)
+- *track_endpoint_time*: time of P2 (usually same as tick_start for tracks parallel to wire plane)
+- *nticks*: Number of time ticks in the analysis window (default: 200)
+
+For tracks parallel to the plane and perpendicular to wires, ~tick_start == tick_end~. For angled tracks, adjust ~tick_end~ accordingly.
+
+* Output
+
+The macro produces two canvases:
+
+1. *c1*: Power spectral density comparison
+   - Red: Signal + noise power density
+   - Blue: Noise-only power density
+
+2. *c2*: Wiener filter response
+   - Normalized to maximum value of 1
+   - Fitted with function: ~exp(-0.5*(x/p0)^p1)~
+   - Fit parameters printed to console
+
+[[file:image-2.png]]

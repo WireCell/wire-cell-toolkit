@@ -34,6 +34,13 @@ namespace WireCell {
             virtual void configure(const WireCell::Configuration& config);
             virtual WireCell::Configuration default_configuration() const;
 
+            // Push the actual frame size from the first frame into the DB so that
+            // frequency-domain spectra (freqmasks, rcrc, …) are always sized to
+            // match the real FFT length.  Only OmniChannelNoiseDB supports this;
+            // OmnibusNoiseFilter calls it via dynamic_cast.
+            int nsamples() const { return m_nsamples; }
+            void set_nsamples(int n);
+
             // IChannelNoiseDatabase
             virtual double sample_time() const;
 
@@ -89,9 +96,15 @@ namespace WireCell {
            private:
             double m_tick;
             int m_nsamples;
+            Json::Value m_cfg_channel_info;  // stashed for set_nsamples() rebuild
             IAnodePlane::pointer m_anode;
             IFieldResponse::pointer m_fr;
             int m_rc_layers;
+
+            // per-channel summed wire length in cm; built lazily on first use
+            std::unordered_map<int, double> m_wire_length_cm;
+            bool m_wire_length_cached{false};
+            void cache_wire_lengths();
 
             typedef std::shared_ptr<filter_t> shared_filter_t;
             typedef std::vector<shared_filter_t> filter_vector_t;

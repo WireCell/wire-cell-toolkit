@@ -29,6 +29,11 @@ convert input ~IFrame~ ultimately to torch tensors, and vice versa on output.
 This node also supports a chunked processing pattern and down/up sampling as
 attempts to limit (CPU) memory usage.
 
+An optional ~debugfile~ config writes a per-call ~{debugfile}_callN.pt~
+containing the model's ~(input, output, meta)~ tuple via ~torch::pickle_save~,
+loadable in Python with ~torch.load~ for offline validation against the same
+~.ts~ run standalone.
+
 ** TorchService
 
 The ~TorchService~ component name provides an ~ITensorForward~ service component

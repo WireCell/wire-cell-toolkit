@@ -13,6 +13,8 @@ Aux::Bee::Points Aux::Bee::dump(const IBlob::vector& blobs, IBlobSampler::pointe
     Aux::Bee::Points bee;    
 
     for (const auto& iblob : blobs) {
+
+        // This does some sampling "by hand".  See #430 for details.
         auto [pc, aux] = sampler->sample_blob(iblob, iblob->ident());
         auto x = pc.get("x")->elements<double>();
         auto y = pc.get("y")->elements<double>();

@@ -8,18 +8,6 @@ using namespace std;
 
 using namespace WireCell;
 
-// bool Gen::GausDiffTimeCompare::operator()(const std::shared_ptr<Gen::GaussianDiffusion>& lhs, const
-// std::shared_ptr<Gen::GaussianDiffusion>& rhs) const
-// {
-//   if (lhs->depo_time() == rhs->depo_time()) {
-//     if (lhs->depo_x() == lhs->depo_x()) {
-//       return lhs.get() < rhs.get(); // break tie by pointer
-//     }
-//     return lhs->depo_x() < lhs->depo_x();
-//   }
-//   return lhs->depo_time() < rhs->depo_time();
-// }
-
 Gen::BinnedDiffusion_transform::BinnedDiffusion_transform(const Pimpos& pimpos, const Binning& tbins, double nsigma,
                                                           IRandom::pointer fluctuate,
                                                           ImpactDataCalculationStrategy calcstrat)
@@ -88,7 +76,9 @@ bool Gen::BinnedDiffusion_transform::add(IDepo::pointer depo, double sigma_time,
     //   //   if (bin == bin_beg)  m_diffs.insert(gd);
     //   this->add(gd, bin);
     // }
-    m_diffs.insert(gd);
+    // m_diffs.insert(gd);
+    m_diffs.push_back(gd);
+    // std::cout << "yuhw m_diffs.size() " << m_diffs.size() << std::endl;
     return true;
 }
 
@@ -158,7 +148,8 @@ void Gen::BinnedDiffusion_transform::get_charge_matrix(std::vector<Eigen::Sparse
     int max_imp = ib.nbins();
 
     for (auto diff : m_diffs) {
-        //    std::cout << diff->depo()->time() << std::endl
+        // std::cout << "yuhw m_diffs get_charge_matrix " << diff->depo()->time() << " " << diff->depo()->pos() << " " << diff->depo()->charge() / units::eplus
+        //           << "e" << std::endl;
         // diff->set_sampling(m_tbins, ib, m_nsigma, 0, m_calcstrat);
         diff->set_sampling(m_tbins, ib, m_nsigma, m_fluctuate, m_calcstrat);
         // counter ++;
@@ -277,6 +268,8 @@ void Gen::BinnedDiffusion_transform::get_charge_vec(
     // }
 
     for (auto diff : m_diffs) {
+        // std::cout << "yuhw m_diffs get_charge_vec " << diff->depo()->time() << " " << diff->depo()->pos() << " " << diff->depo()->charge() / units::eplus
+        //           << "e" << std::endl;
         //    std::cout << diff->depo()->time() << std::endl
         // diff->set_sampling(m_tbins, ib, m_nsigma, 0, m_calcstrat);
         diff->set_sampling(m_tbins, ib, m_nsigma, m_fluctuate, m_calcstrat);

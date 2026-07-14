@@ -25,6 +25,16 @@ local params = base {
     // drift_speed: std.extVar('driftSpeed') * wc.mm / wc.us,
     drift_speed: 1.565 * wc.mm / wc.us,
   },
+  // cfg/pgrapher/common/params.jsonnet leaves elec.gain and
+  // adc.resolution commented out as "read from fcl" — larsoft injects
+  // them at runtime.  Standalone wcsonnet has no fcl injection, so
+  // restore the historical PDSP defaults here.
+  elec: super.elec {
+    gain: 14.0 * wc.mV / wc.fC,
+  },
+  adc: super.adc {
+    resolution: 12,
+  },
 };
 
 local tools = tools_maker(params);

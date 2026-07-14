@@ -11,9 +11,6 @@ local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 local f = import "pgrapher/common/funcs.jsonnet";
 
-local cli = import "pgrapher/ui/cli/nodes.jsonnet";
-
-local io = import "pgrapher/common/fileio.jsonnet";
 local params_maker = import 'pgrapher/experiment/dune10kt-1x2x6/simparams.jsonnet';
 local params = params_maker({});
 local tools_maker = import "pgrapher/common/tools.jsonnet";
@@ -60,14 +57,13 @@ local tracklist = [
    // },
 ];
 
-local output = "wct-dune10kt-1x2x6-sim-ideal-sn-nf-sp.npz";
+local output = "wct-dune10kt-1x2x6-sim-ideal-sn-nf-sp.tar.bz2";
     
 //local depos = g.join_sources(g.pnode({type:"DepoMerger", name:"BlipTrackJoiner"}, nin=2, nout=1),
 //                             [sim.ar39(), sim.tracks(tracklist)]);
 local depos = sim.tracks(tracklist);
 
 
-local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;
 local bagger = sim.make_bagger();
 
@@ -78,11 +74,21 @@ local sn_sp = [g.pipeline([sn_pipes[n], sp_pipes[n]], "sn_sp_pipe_%d" % n)
                for n in std.range(0, std.length(tools.anodes)-1)];
 local snsp_graph = f.fanpipe('DepoSetFanout', sn_sp, 'FrameFanin', "snsp");
 
-local frameio = io.numpy.frames(output);
-local sink = sim.frame_sink;
+// Save the simulated raw frame.  Replaces the removed
+// pgrapher/common/fileio.jsonnet npz helper -- follows the inline
+// FrameFileSink pattern of the pdhd_sim configs (output: tar.bz2).
+local frame_sink = g.pnode({
+    type: "FrameFileSink",
+    name: "framesink",
+    data: {
+        outname: output,
+        tags: [],          // empty => save all traces
+        digitize: false,
+        masks: false,
+    },
+}, nin=1, nout=0);
 
-
-local graph = g.pipeline([depos, deposio, drifter, bagger, snsp_graph, frameio, sink]);
+local graph = g.pipeline([depos, drifter, bagger, snsp_graph, frame_sink]);
 
 local app = {
     type: "Pgrapher",
@@ -91,8 +97,17 @@ local app = {
     },
 };
 
+// The command-line node.  Replaces the removed pgrapher/ui/cli/nodes.jsonnet
+// helper -- inlined, following the pdhd_sim configs.
+local cmdline = {
+    type: "wire-cell",
+    data: {
+        plugins: ["WireCellGen", "WireCellSigProc", "WireCellPgraph", "WireCellSio", "WireCellTbb"],
+        apps: ["Pgrapher"],
+    },
+};
+
 // Finally, the configuration sequence which is emitted.
 
-
-[cli.cmdline] + g.uses(graph) + [app]
+[cmdline] + g.uses(graph) + [app]
 

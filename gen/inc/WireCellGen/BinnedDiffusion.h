@@ -110,8 +110,10 @@ namespace WireCell {
             // the content of the current window
             std::map<int, ImpactData::mutable_pointer> m_impacts;
             // std::vector<std::shared_ptr<GaussianDiffusion> > m_diffs;
-            // std::set<std::shared_ptr<GaussianDiffusion>, GausDiffTimeCompare> m_diffs;
-            std::set<std::shared_ptr<GaussianDiffusion> > m_diffs;
+            // This GausDiffTimeCompare works in BinnedDiffusion_transform but not tested
+            // in BinnedDiffusion, details in issue #447
+            std::set<std::shared_ptr<GaussianDiffusion>, GausDiffTimeCompare> m_diffs;
+            // std::set<std::shared_ptr<GaussianDiffusion> > m_diffs;
 
             int m_outside_pitch;
             int m_outside_time;

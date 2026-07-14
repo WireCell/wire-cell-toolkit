@@ -1,0 +1,277 @@
+#include "WireCellMatch/TimingTPCBundle.h"
+
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+
+using namespace WireCell;
+using namespace WireCell::Match;
+using namespace WireCell::Clus::Facade;
+
+namespace {
+    // Kolmogorov-Smirnov statistic between two empirical CDFs constructed from
+    // (already normalised) bin distributions.
+    double calc_ks_test(const std::vector<double>& measured,
+                        const std::vector<double>& predicted)
+    {
+        const std::size_t n = measured.size();
+        std::vector<double> cum_m(n), cum_p(n);
+        cum_m[0] = measured[0];
+        cum_p[0] = predicted[0];
+        for (std::size_t i = 1; i < n; ++i) {
+            cum_m[i] = cum_m[i - 1] + measured[i];
+            cum_p[i] = cum_p[i - 1] + predicted[i];
+        }
+        double max_diff = 0.0;
+        for (std::size_t i = 0; i < n; ++i) {
+            max_diff = std::max(max_diff, std::abs(cum_m[i] - cum_p[i]));
+        }
+        return max_diff;
+    }
+
+    // Per-opdet light error for the bundle chi2 (sigma^2 = meas + perr^2).
+    // pe_err_on_pred off  -> measured-based error (meas_err), bit-identical default.
+    // pe_err_lowpe_frac<0 -> predicted-based floor/frac/knee branch (SBND).
+    // else -> efficiency-aware low-PE inflation: rel grows as pred falls so a low-pred
+    //         channel that measures zero is tolerated (PD inefficiency at low light).
+    double per_opdet_perr(const Match::BundleQualityParams& qp, double pred, double meas_err)
+    {
+        if (!qp.pe_err_on_pred) return meas_err;
+        if (qp.pe_err_lowpe_frac >= 0.0) {
+            const double rel = qp.pe_err_frac
+                + (qp.pe_err_lowpe_frac - qp.pe_err_frac) * std::exp(-pred / qp.pe_err_lowpe_knee);
+            return std::sqrt(std::pow(rel * pred, 2) + std::pow(qp.pe_err_floor, 2));
+        }
+        return pred < qp.pe_err_knee ? qp.pe_err_floor : qp.pe_err_frac * pred;
+    }
+} // namespace
+
+TimingTPCBundle::TimingTPCBundle(Opflash* flash, Cluster* main_cluster,
+                                 int flash_index_id, int cluster_index_id)
+    : flash(flash)
+    , main_cluster(main_cluster)
+    , orig_main_cluster(nullptr)
+    , flash_index_id(flash_index_id)
+    , cluster_index_id(cluster_index_id)
+    , flag_close_to_PMT(false)
+    , flag_at_x_boundary(false)
+    , flag_spec_end(false)
+    , flag_window_truncated(false)
+    , flag_potential_bad_match(false)
+    , flag_high_consistent(false)
+    , flag_contained(true)
+    , flag_two_boundary(false)
+    , ks_dis(1)
+    , chi2(0)
+    , ndf(0)
+    , strength(0)
+{
+    // An unmatched cluster is represented by a bundle with a null flash (see
+    // QLMatching: the "no matched flash" branch). Such a bundle carries no
+    // predicted light, so there is no channel count to take from the flash.
+    m_nchan = flash ? flash->get_num_channels() : 0;
+    pred_flash.resize(m_nchan, 0);
+    opdet_mask.resize(m_nchan, 0);
+}
+
+TimingTPCBundle::~TimingTPCBundle() = default;
+
+void TimingTPCBundle::add_relax_channels(const std::vector<int>& chs)
+{
+    if (relax_channels.empty()) relax_channels.assign(m_nchan, 0);
+    for (int ch : chs) {
+        if (ch >= 0 && ch < (int)relax_channels.size()) relax_channels[ch] = 1;
+    }
+}
+
+double TimingTPCBundle::get_total_pred_light() const
+{
+    double sum = 0;
+    for (auto v : pred_flash) sum += v;
+    return sum;
+}
+
+bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
+{
+    std::vector<double> measured_dist(m_nchan);
+    std::vector<double> predicted_dist(m_nchan);
+    std::vector<double> pe(m_nchan);
+    std::vector<double> pe_err(m_nchan);
+    std::vector<double> pred_pe(m_nchan);
+
+    double candidate_ks_dis = 0;
+    double candidate_chi2 = 0;
+
+    for (int i = 0; i < m_nchan; ++i) {
+        pe[i]     = flash->get_PE(i);
+        pe_err[i] = flash->get_PE_err(i);
+        pred_pe[i] = pred_flash.at(i) + candidate_bundle->get_pred_flash().at(i);
+    }
+
+    double total_predicted = 0;
+    double total_measured  = 0;
+    for (int j = 0; j < m_nchan; ++j) {
+        // Optionally mask the KS shape metric on the same channels the chi2/LASSO
+        // paths drop. The prediction is already 0 on masked channels, so this just
+        // zeroes the measured side too: a masked channel becomes (0,0) and is
+        // invisible to KS (no contribution to either CDF nor the normalisation).
+        const double m = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pe[j];
+        const double p = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pred_pe[j];
+        measured_dist[j]  = m;
+        predicted_dist[j] = p;
+        total_predicted  += p;
+        total_measured   += m;
+    }
+    if (total_predicted > 0) {
+        for (int j = 0; j < m_nchan; ++j) predicted_dist[j] /= total_predicted;
+    }
+    if (total_measured > 0) {
+        for (int j = 0; j < m_nchan; ++j) measured_dist[j] /= total_measured;
+    }
+    if (total_predicted > 0) candidate_ks_dis = calc_ks_test(measured_dist, predicted_dist);
+
+    ndf = 0;
+    for (int j = 0; j < m_nchan; ++j) {
+        if (opdet_mask[j] == 0) continue;
+        if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
+        else ndf++;
+        const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
+        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
+    }
+
+    if ((candidate_ks_dis < ks_dis || candidate_chi2 < chi2) &&
+        (candidate_ks_dis < m_qp.ks_merge_max) && (candidate_chi2 / ndf < m_qp.chi2ndf_merge_max)) {
+        return true;
+    }
+    return false;
+}
+
+void TimingTPCBundle::add_bundle(TimingTPCBundle* candidate_bundle)
+{
+    if (ks_dis * std::pow(chi2 / ndf, m_qp.addmerge_exponent) <
+        candidate_bundle->get_ks_dis() *
+            std::pow(candidate_bundle->get_chi2() / candidate_bundle->get_ndf(),
+                     m_qp.addmerge_exponent)) {
+        other_clusters.push_back(candidate_bundle->get_main_cluster());
+        more_clusters.push_back(candidate_bundle->get_main_cluster());
+
+        std::copy(candidate_bundle->get_other_clusters().begin(),
+                  candidate_bundle->get_other_clusters().end(),
+                  std::back_inserter(other_clusters));
+        std::copy(candidate_bundle->get_more_clusters().begin(),
+                  candidate_bundle->get_more_clusters().end(),
+                  std::back_inserter(more_clusters));
+    }
+    else {
+        other_clusters.push_back(main_cluster);
+        more_clusters.push_back(main_cluster);
+
+        main_cluster = candidate_bundle->get_main_cluster();
+        std::copy(candidate_bundle->get_other_clusters().begin(),
+                  candidate_bundle->get_other_clusters().end(),
+                  std::back_inserter(other_clusters));
+        std::copy(candidate_bundle->get_more_clusters().begin(),
+                  candidate_bundle->get_more_clusters().end(),
+                  std::back_inserter(more_clusters));
+
+        flag_close_to_PMT  = candidate_bundle->get_flag_close_to_PMT();
+        flag_at_x_boundary = candidate_bundle->get_flag_at_x_boundary();
+        // Copy (not OR) to match the two flags above; revisit OR-vs-copy once a
+        // consumer reads flag_window_truncated.
+        flag_window_truncated = candidate_bundle->get_flag_window_truncated();
+    }
+
+    auto& pes = candidate_bundle->get_pred_flash();
+    for (std::size_t i = 0; i < pred_flash.size(); ++i) pred_flash.at(i) += pes.at(i);
+    examine_bundle();
+}
+
+bool TimingTPCBundle::examine_bundle()
+{
+    std::vector<double> measured_dist(m_nchan);
+    std::vector<double> predicted_dist(m_nchan);
+    std::vector<double> pe(m_nchan);
+    std::vector<double> pe_err(m_nchan);
+    std::vector<double> pred_pe(m_nchan);
+
+    for (int i = 0; i < m_nchan; ++i) {
+        pe[i]     = flash->get_PE(i);
+        pe_err[i] = flash->get_PE_err(i);
+        pred_pe[i] = pred_flash.at(i);
+    }
+
+    double total_predicted = 0;
+    double total_measured  = 0;
+    for (int j = 0; j < m_nchan; ++j) {
+        // See examine_bundle(candidate): optionally mask the KS metric so masked
+        // channels become (0,0) and drop out, consistent with chi2/LASSO.
+        const double m = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pe[j];
+        const double p = (m_qp.mask_ks && opdet_mask[j] == 0) ? 0.0 : pred_pe[j];
+        measured_dist[j]  = m;
+        predicted_dist[j] = p;
+        total_predicted  += p;
+        total_measured   += m;
+    }
+    if (total_predicted > 0) {
+        for (int j = 0; j < m_nchan; ++j) predicted_dist[j] /= total_predicted;
+    }
+    if (total_measured > 0) {
+        for (int j = 0; j < m_nchan; ++j) measured_dist[j] /= total_measured;
+    }
+    if (total_predicted > 0) ks_dis = calc_ks_test(measured_dist, predicted_dist);
+
+    chi2 = 0;
+    ndf  = 0;
+    int nvalidopdets = 0;
+    double max_chi2 = -1; int max_bin = -1;
+    for (int j = 0; j < m_nchan; ++j) {
+        if (opdet_mask[j] == 0) continue;
+        ++nvalidopdets;
+        if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
+        else ndf++;
+        const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
+        double denom = pe[j] + perr * perr;
+        // Prototype close-to-PMT relaxation: a big measured excess near the PMTs widens
+        // the denominator (near-PMT over-response is not a real charge/light mismatch).
+        // relax_channels (vd_surface_flags mode) restricts the widening to the PD
+        // channels of the surface the activity is actually near; empty => all channels
+        // eligible (the historical behavior).
+        if (m_qp.chi2_relax && flag_close_to_PMT &&
+            (relax_channels.empty() || relax_channels[j]) &&
+            pe[j] - pred_pe[j] > m_qp.chi2_pmt_excess &&
+            pe[j] > m_qp.chi2_pmt_ratio * pred_pe[j])
+            denom += std::pow(pe[j] * m_qp.chi2_pmt_inflate, 2);
+        const double cur = std::pow(pred_pe[j] - pe[j], 2) / denom;
+        chi2 += cur;
+        if (cur > max_chi2) { max_chi2 = cur; max_bin = j; }
+    }
+    // Prototype one-inefficient-PMT tolerance: drop the single worst channel when it is a
+    // dead/inefficient PMT (measured 0 but light predicted).
+    if (m_qp.chi2_relax && max_bin >= 0 && pe[max_bin] == 0 && pred_pe[max_bin] > 0)
+        chi2 -= max_chi2 - 1;
+
+    flag_high_consistent = false;
+    if (!m_qp.highconsist_ladder) {
+        if (ks_dis < m_qp.highconsist_ks_max && ndf >= m_qp.highconsist_min_ndf &&
+            chi2 < ndf * nvalidopdets)
+            flag_high_consistent = true;
+    }
+    else if (ndf > 0) {
+        // Flag-aware multi-branch ladder (prototype-structured, SBND-tuned). KS is the
+        // purity lever; the chi2/ndf ceilings only fence the tail. The B4 boundary/near-PMT/
+        // window-truncated branch relaxes chi2 (missing charge) but keeps KS tight.
+        const double c2n = chi2 / ndf;
+        const bool miss = flag_at_x_boundary || flag_close_to_PMT || flag_window_truncated;
+        if (ndf >= m_qp.highconsist_min_ndf && ks_dis < m_qp.hc_clean_ks && c2n < m_qp.hc_clean_c2)
+            flag_high_consistent = true;                                        // B1 clean very-good
+        else if (ndf >= m_qp.highconsist_min_ndf && ks_dis < m_qp.hc_good_ks && c2n < m_qp.hc_good_c2)
+            flag_high_consistent = true;                                        // B2 general good
+        else if (flag_two_boundary && ndf >= m_qp.highconsist_min_ndf &&
+                 ks_dis < m_qp.hc_tb_ks && c2n < m_qp.hc_tb_c2)
+            flag_high_consistent = true;                                        // B3 two_boundary
+        else if (miss && ndf >= m_qp.hc_miss_min_ndf &&
+                 ks_dis < m_qp.hc_miss_ks && c2n < m_qp.hc_miss_c2)
+            flag_high_consistent = true;                                        // B4 x-bnd/PMT/trunc
+    }
+    return flag_high_consistent;
+}

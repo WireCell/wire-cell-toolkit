@@ -115,11 +115,11 @@ bool Img::LCBlobRemoval::operator()(const input_pointer& in, output_pointer& out
         log->debug("EOS");
         return true;
     }
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     dump_cg(in_graph, log);
     auto out_graph = prune(in_graph, m_blob_thresh.value());
     dump_cg(out_graph, log);
-    out = std::make_shared<Aux::SimpleCluster>(out_graph, in->ident());
+    out = std::make_shared<Aux::SimpleCluster>(std::move(out_graph), in->ident());
     return true;
 }
 

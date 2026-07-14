@@ -24,6 +24,7 @@ package_descriptions = [
     ('spdlog',   dict(incs=['spdlog/spdlog.h'], libs=['spdlog'], pcname='spdlog')),
 
     ('ZLib',     dict(incs=['zlib.h'], libs=['z'], pcname='zlib')),
+    ('BZIP2',    dict(incs=['bzlib.h'], libs=['bz2'])),
     ('FFTW',     dict(incs=['fftw3.h'], libs=['fftw3f'], pcname='fftw3f')),
     ('FFTWThreads', dict(libs=['fftw3f_threads'], pcname='fftw3f', mandatory=False)),
     ('JsonCpp',  dict(incs=["json/json.h"], libs=['jsoncpp'], pcname='jsoncpp')),
@@ -44,7 +45,21 @@ package_descriptions = [
     ('ZYRE',     dict(incs=["zyre.h"], libs=['zyre'], pcname='libzyre', mandatory=False)),
     ('ZIO',      dict(incs=["zio/node.hpp"], libs=['zio'], pcname='libzio', mandatory=False,
                       extuses=("ZYRE","CZMQ","ZMQ"))),
+    ('GRPC',     dict(incs=['grpcpp/grpcpp.h'], libs=['grpc++', 'grpc', 'gpr'], pcname='grpc++', mandatory=False)),
+    ('PROTOBUF', dict(incs=['google/protobuf/message.h'], libs=['protobuf'], pcname='protobuf', mandatory=False)),
+    ('TRITON',   dict(incs=['grpc_client.h'],
+    libs=[
+        'grpcclient',
+        'tritoncommonerror',
+        'tritoncommonmodelconfig',
+        'tritoncommonlogging',
+        'tritontableprinter',
+        'tritonthreadpool',
+        'tritonasyncworkqueue',
+    ],
+    mandatory=False)),
 
+    ('Python',   dict(incs=['Python.h'], libs=['python3.11'], pcname='python3-embed', mandatory=False)),
     # Note, this list may be modified (appended) in wscript files.
     # The list here represents the minimum wire-cell-toolkit requires.
 ]
@@ -70,8 +85,11 @@ def options(opt):
 
 def find_submodules(ctx):
     sms = list()
-    for wb in ctx.path.ant_glob("**/wscript_build"):
-        sms.append(wb.parent.name)
+    for wb in ctx.path.ant_glob("*/wscript_build"):
+        name = wb.parent.name
+        if name.startswith("prototype"):
+            continue
+        sms.append(name)
     sms.sort()
     return sms
 
@@ -113,7 +131,10 @@ def configure(cfg):
         else:
             info('NO %s libs'%one)
 
-    cfg.check_boost(lib='system filesystem graph thread program_options iostreams regex')
+    # I would like to add "serialization" to assist in writing methods for graph
+    # I/O.  The "math" lib could be useful.  But these additions will require
+    # changes to wire-cell-spack and perhaps other build methods.
+    cfg.check_boost(lib='filesystem graph thread program_options iostreams regex')
     haveit('boost')
 
     cfg.check(header_name="dlfcn.h", uselib_store='DYNAMO', lib=['dl'], mandatory=True)
@@ -156,8 +177,9 @@ def configure(cfg):
             ("cuda","HAVE_CUDA"),
             ("hio", "INCLUDES_HDF5"),
             ("pytorch", "LIB_LIBTORCH"),
-            ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ")
-            #("nvtx", "HAVE_NVTX")
+            ("pyutil", "INCLUDES_PYTHON"),
+            ("zio", "LIB_ZIO LIB_ZYRE LIB_CZMQ LIB_ZMQ"),
+            ("triton", "LIB_GRPC LIB_PROTOBUF LIB_TRITON"), # LIB_PROTOBUF LIB_TRITON
     ]:
         exts = to_list(ext)
         for have in exts:
@@ -239,6 +261,11 @@ def build(bld):
         LLIBS = ' '.join([f'-l{n}' for n in link_libs]),
         REQUIRES = ' '.join(bld.env.REQUIRES),
         install_path = '${LIBDIR}/pkgconfig/')
+
+    # Produce CMake package-config files so downstream CMake projects can
+    # find_package(WireCellToolkit).  See waft/cmake.py and issue #484.
+    import cmake
+    cmake.write_cmake_config(bld)
 
 
     # Produce a libtool .la file.  This needs one for each lib.

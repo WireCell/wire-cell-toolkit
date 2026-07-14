@@ -417,7 +417,11 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
 
     if not hasattr(bld, 'smplpkg_names'):
         bld.smplpkg_names = list()
-    bld.smplpkg_names.append(name)    
+    bld.smplpkg_names.append(name)
+    # Names of packages that actually build a shared library (have src/).
+    # Used by waft/cmake.py to know which imported targets to export.
+    if not hasattr(bld, 'smplpkg_libs'):
+        bld.smplpkg_libs = list()
     if not hasattr(bld, 'smplpkg_graph'):
         bld.smplpkg_graph = SimpleGraph()
     bld.smplpkg_graph.register(
@@ -484,7 +488,8 @@ def smplpkg(bld, name, use='', app_use='', test_use=''):
             #rpath = bld.get_rpath(use),
             includes = includes, # 'inc',
             export_includes = ei,
-            use = use)            
+            use = use)
+        bld.smplpkg_libs.append(name)
 
     bld.cycle_group("applications")
 

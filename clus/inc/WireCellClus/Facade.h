@@ -9,5 +9,7 @@
 #include "WireCellClus/Facade_Blob.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
+#include "WireCellClus/Facade_Ensemble.h"
+#include "WireCellClus/DynamicPointCloud.h"
 
 #endif

@@ -1,0 +1,287 @@
+#!/usr/bin/env bash
+# Wire Cell Toolkit release management script.
+#
+# Usage:
+#   waft/release <tag>         - run full release workflow
+#   waft/release <tag> <step>  - run a single step
+#   waft/release guess         - guess the next tag based on current branch
+
+set -euo pipefail
+
+RELEASE_BRANCH_RE='^([0-9]+)\.([0-9]+)\.x$'
+TAG_RE='^([0-9]+)\.([0-9]+)\.([0-9]+)$'
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+info() { echo "INFO: $*"; }
+
+# Parse a tag into A BB C components (exported as globals)
+parse_tag() {
+    local tag=$1
+    if [[ ! $tag =~ $TAG_RE ]]; then
+        die "Tag '$tag' does not match A.BB.C format"
+    fi
+    TAG_A="${BASH_REMATCH[1]}"
+    TAG_BB="${BASH_REMATCH[2]}"
+    TAG_C="${BASH_REMATCH[3]}"
+}
+
+# Return the release branch name for a tag
+branch_for_tag() {
+    local tag=$1
+    parse_tag "$tag"
+    echo "${TAG_A}.${TAG_BB}.x"
+}
+
+# Return all existing tags matching A.BB.C, sorted by version
+all_release_tags() {
+    git tag | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V
+}
+
+# Return the largest BB number used in tags
+latest_bb() {
+    all_release_tags | awk -F. '{print $2}' | sort -n | tail -1
+}
+
+# Return the largest C for a given A.BB
+latest_c() {
+    local a=$1 bb=$2
+    all_release_tags | awk -F. -v a="$a" -v bb="$bb" '$1==a && $2==bb {print $3}' | sort -n | tail -1
+}
+
+# Guess the next tag based on current branch
+cmd_guess() {
+    local branch
+    branch=$(git rev-parse --abbrev-ref HEAD)
+
+    if [[ $branch == "master" ]]; then
+        local bb
+        bb=$(latest_bb)
+        if [[ -z $bb ]]; then
+            echo "0.1.0"
+        else
+            echo "0.$((bb + 1)).0"
+        fi
+    elif [[ $branch =~ $RELEASE_BRANCH_RE ]]; then
+        local a="${BASH_REMATCH[1]}" bb="${BASH_REMATCH[2]}"
+        local c
+        c=$(latest_c "$a" "$bb")
+        if [[ -z $c ]]; then
+            echo "${a}.${bb}.0"
+        else
+            echo "${a}.${bb}.$((c + 1))"
+        fi
+    else
+        die "Current branch '$branch' is neither 'master' nor a release branch (A.BB.x)"
+    fi
+}
+
+# Validate tag and ensure the release branch exists and is checked out
+cmd_check() {
+    local tag=$1
+    parse_tag "$tag"
+
+    local branch="${TAG_A}.${TAG_BB}.x"
+
+    if [[ $TAG_C -eq 0 ]]; then
+        # New minor release: BB must be exactly one more than the current max
+        local cur_bb
+        cur_bb=$(latest_bb)
+        if [[ -z $cur_bb ]]; then
+            [[ $TAG_BB -eq 0 ]] || die "First release must start at 0.0.0 or similar; expected BB=0, got BB=$TAG_BB"
+        else
+            [[ $TAG_BB -eq $((cur_bb + 1)) ]] || die "For a new minor release, BB must be $((cur_bb + 1)); got $TAG_BB"
+        fi
+    else
+        # Bug-fix release: C must be exactly one more than the current max for this A.BB
+        local cur_c
+        cur_c=$(latest_c "$TAG_A" "$TAG_BB")
+        if [[ -z $cur_c ]]; then
+            die "No existing tags for ${TAG_A}.${TAG_BB}.* — if starting fresh on this branch use C=0"
+        fi
+        [[ $TAG_C -eq $((cur_c + 1)) ]] || die "For a bug-fix release, C must be $((cur_c + 1)); got $TAG_C"
+    fi
+
+    # Ensure the release branch exists (locally or on origin)
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+        info "Local release branch '$branch' exists"
+        git checkout "$branch"
+    elif git show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+        info "Creating local tracking branch '$branch' from origin"
+        git checkout -b "$branch" "origin/$branch"
+    else
+        info "Creating new release branch '$branch' from current HEAD"
+        git checkout -b "$branch"
+    fi
+
+    info "Now on branch: $(git rev-parse --abbrev-ref HEAD)"
+    info "Tag '$tag' is valid"
+}
+
+# Write version.txt, commit, and tag
+cmd_version() {
+    local tag=$1
+    parse_tag "$tag"
+
+    local branch
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    local expected_branch="${TAG_A}.${TAG_BB}.x"
+
+    [[ $branch == "$expected_branch" ]] || \
+        die "Current branch '$branch' does not match expected '$expected_branch' for tag '$tag'"
+
+    # Check tag doesn't already exist
+    if git tag | grep -qxF "$tag"; then
+        die "Tag '$tag' already exists"
+    fi
+
+    info "Writing version '$tag' to version.txt"
+    echo "$tag" > version.txt
+    git add --force version.txt
+    git commit -m "Set version to $tag"
+    git tag -a -m "Release $tag" "$tag"
+    info "Committed and tagged as $tag"
+}
+
+# Export a tarball and verify it builds cleanly
+cmd_tarball() {
+    local tag=$1
+    local base="wire-cell-toolkit"
+    local name="${base}-${tag}"
+    local tarfile="${name}.tar.gz"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+
+    info "Exporting tag '$tag' to tarball '$tarfile'"
+    git archive --prefix="${name}/" "$tag" | gzip > "$tarfile"
+    info "Tarball created: $tarfile"
+
+    echo "Not yet able to do a test build of the tar file"
+    # info "Unpacking and verifying build in $tmpdir"
+    # tar -C "$tmpdir" -xzf "$tarfile"
+    # local srcdir="${tmpdir}/${name}"
+
+    # if [[ -f "$srcdir/wscript" ]]; then
+    #     info "Running waf configure and build for clean-build check"
+    #     (
+    #         cd "$srcdir"
+    #         ./wcb configure 2>&1 | tail -5
+    #         ./wcb build 2>&1 | tail -10
+    #     )
+    #     info "Clean build succeeded"
+    # else
+    #     info "No wscript found; skipping build check (manual verification needed)"
+    # fi
+
+    # rm -rf "$tmpdir"
+    # info "Tarball verified: $tarfile"
+}
+
+# Retrofit a release branch to match the highest existing tag for A.BB.x
+cmd_fixpast() {
+    local branch=$1
+    [[ $branch =~ $RELEASE_BRANCH_RE ]] || \
+        die "'$branch' is not a valid release branch name (expected A.BB.x)"
+    local a="${BASH_REMATCH[1]}" bb="${BASH_REMATCH[2]}"
+
+    # Find the highest tag for this A.BB series
+    local top_c
+    top_c=$(latest_c "$a" "$bb")
+    if [[ -z $top_c ]]; then
+        die "No tags found matching ${a}.${bb}.* — nothing to do"
+    fi
+    local top_tag="${a}.${bb}.${top_c}"
+    local top_commit
+    top_commit=$(git rev-list -n1 "$top_tag")
+    info "Highest tag in ${a}.${bb}.* series: $top_tag ($top_commit)"
+
+    # Determine local and remote branch state
+    local local_exists=false remote_exists=false
+    git show-ref --verify --quiet "refs/heads/$branch"          && local_exists=true
+    git show-ref --verify --quiet "refs/remotes/origin/$branch" && remote_exists=true
+
+    if ! $local_exists && ! $remote_exists; then
+        info "Branch '$branch' does not exist — creating at $top_tag"
+        git branch "$branch" "$top_tag"
+        info "Created local branch '$branch' at $top_tag"
+        return
+    fi
+
+    if ! $local_exists && $remote_exists; then
+        info "Branch '$branch' exists on origin but not locally — creating local tracking branch"
+        git fetch origin "$branch"
+        git branch "$branch" "origin/$branch"
+        local_exists=true
+    fi
+
+    local branch_commit
+    branch_commit=$(git rev-parse "$branch")
+    info "Branch '$branch' is at $branch_commit"
+
+    if [[ $branch_commit == "$top_commit" ]]; then
+        info "Branch '$branch' is already at $top_tag — nothing to do"
+        return
+    fi
+
+    if git merge-base --is-ancestor "$top_commit" "$branch_commit"; then
+        info "Branch '$branch' is already ahead of $top_tag — nothing to do"
+        return
+    fi
+
+    if git merge-base --is-ancestor "$branch_commit" "$top_commit"; then
+        info "Branch '$branch' is behind $top_tag — fast-forwarding"
+        git update-ref "refs/heads/$branch" "$top_commit"
+        info "Fast-forwarded '$branch' to $top_tag ($top_commit)"
+        return
+    fi
+
+    # Branch and tag have diverged — cannot fast-forward
+    local base
+    base=$(git merge-base "$branch_commit" "$top_commit")
+    die "Branch '$branch' ($branch_commit) and tag $top_tag ($top_commit) have diverged (common ancestor: $base) — manual resolution required"
+}
+
+# Full workflow
+full_workflow() {
+    local tag=$1
+    info "=== Step: check ==="
+    cmd_check "$tag"
+    info "=== Step: version ==="
+    cmd_version "$tag"
+    info "=== Step: tarball ==="
+    cmd_tarball "$tag"
+    info "=== Release $tag complete ==="
+    info "Remember to: git push origin $(branch_for_tag "$tag") && git push --tags"
+}
+
+# --- Entry point ---
+if [[ $# -eq 0 ]]; then
+    echo "Usage:"
+    echo "  $0 guess              - guess next tag"
+    echo "  $0 fixpast <A.BB.x>   - create or fast-forward release branch to highest existing tag"
+    echo "  $0 <tag>              - full release workflow"
+    echo "  $0 <tag> check        - validate tag and switch to release branch"
+    echo "  $0 <tag> version      - write version.txt, commit, tag"
+    echo "  $0 <tag> tarball      - export tarball and verify build"
+    exit 1
+fi
+
+case "$1" in
+    guess)
+        cmd_guess
+        ;;
+    fixpast)
+        [[ $# -ge 2 ]] || die "fixpast requires a branch name argument (e.g. 0.30.x)"
+        cmd_fixpast "$2"
+        ;;
+    *)
+        TAG=$1
+        STEP=${2:-}
+        case "$STEP" in
+            "")       full_workflow "$TAG" ;;
+            check)    cmd_check "$TAG" ;;
+            version)  cmd_version "$TAG" ;;
+            tarball)  cmd_tarball "$TAG" ;;
+            *)        die "Unknown step '$STEP'. Valid steps: check version tarball" ;;
+        esac
+        ;;
+esac

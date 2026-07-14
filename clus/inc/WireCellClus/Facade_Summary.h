@@ -7,9 +7,7 @@
 
 #include "WireCellUtil/Configuration.h"
 
-// fixme: this namespace here and elsewhere in clus should be in
-// WireCell::Clus::Facade or something.
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
 
     // Summarize facades as JSON.  These recur down the type hierarchy and into the tree via 
     Configuration json_summary(const Grouping& grp);

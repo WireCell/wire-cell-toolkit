@@ -10,7 +10,7 @@ PointCloud::Dataset PointTesting::make_janky_track(const Ray& box, double step_s
     const auto step_dir = ray_unit(box);
 
     std::vector<double> x(nsteps,0), y(nsteps,0), z(nsteps,0), q(nsteps,0);
-    std::vector<int> uwire_index(nsteps,0), vwire_index(nsteps,0), wwire_index(nsteps,0);
+    std::vector<int> uwire_index(nsteps,0), vwire_index(nsteps,0), wwire_index(nsteps,0), wpid(nsteps,0);
 
     // Walk the track and place points on grid of step_size to
     // construct the janky sampling
@@ -23,6 +23,7 @@ PointCloud::Dataset PointTesting::make_janky_track(const Ray& box, double step_s
         uwire_index[step] = x[step]*10;
         vwire_index[step] = 100+x[step]*10;
         wwire_index[step] = 200+x[step]*10;
+        wpid[step] = uwire_index[step];
 
         // Accumulte relative distance away from line to the grid
         // point as some meaningless value to fill in for charge.
@@ -40,6 +41,7 @@ PointCloud::Dataset PointTesting::make_janky_track(const Ray& box, double step_s
     ds.add("uwire_index", Array(uwire_index));
     ds.add("vwire_index", Array(vwire_index));
     ds.add("wwire_index", Array(wwire_index));
+    ds.add("wpid", Array(wpid));
     return ds;
 }
 

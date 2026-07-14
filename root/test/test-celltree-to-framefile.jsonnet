@@ -10,7 +10,7 @@ function(infile="celltree.root", outfile="frames.npz", eventid="6501")
     local source = high.fio.celltree_file_source(
         infile, eventid,
         branches = ["calibWiener", "calibGaussian"],
-        frame_tags = ["gauss","weiner"],
+        frame_tags = ["gauss","wiener"],
         trace_tags = trace_tags,
         extra_params = {in_branch_thresholds: ["channelThreshold", "channelThreshold"]});
 

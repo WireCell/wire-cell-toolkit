@@ -99,7 +99,7 @@ namespace WireCell {
                 return pitchV();
             case kWlayer:
                 return pitchW();
-            case kUnknownLayer:
+            default:
                 return bogus;
             }
             return bogus;

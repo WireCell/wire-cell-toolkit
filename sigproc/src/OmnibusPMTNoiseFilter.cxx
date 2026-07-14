@@ -20,7 +20,8 @@ using namespace WireCell;
 
 using namespace WireCell::SigProc;
 
-std::vector<PMTNoiseROI*> PMT_ROIs;
+// m_pmt_rois moved from file-scope global to member variable m_pmt_rois
+// to ensure thread safety and prevent state leakage across instances.
 
 OmnibusPMTNoiseFilter::OmnibusPMTNoiseFilter(const std::string anode_tn, int pad_window, int min_window_length,
                                              int threshold, float rms_threshold, int sort_wires, float ind_th1,
@@ -89,121 +90,122 @@ bool OmnibusPMTNoiseFilter::operator()(const input_pointer& in, output_pointer& 
     std::map<int, double> by_chan_rms;
     // go through all channels and calculate RMS as well as categorize them
     auto traces = Aux::tagged_traces(in, m_intag);
-    for (auto trace : traces) {
+    for (const auto& trace : traces) {
         int ch = trace->channel();
 
         auto wpid = m_anode->resolve(ch);
         const int iplane = wpid.index();
 
-        Waveform::realseq_t signal = trace->charge();
-        std::pair<double, double> results = Derivations::CalcRMS(signal);
-        by_chan_rms[ch] = results.second;
-
-        // std::cout << iplane << " " << ch << " " << results.second << std::endl;
-
+        // Store waveform once, compute RMS from the stored copy
         if (iplane == 0) {
             bychan_indu[ch] = trace->charge();
+            std::pair<double, double> results = Derivations::CalcRMS(bychan_indu[ch]);
+            by_chan_rms[ch] = results.second;
         }
         else if (iplane == 1) {
             bychan_indv[ch] = trace->charge();
+            std::pair<double, double> results = Derivations::CalcRMS(bychan_indv[ch]);
+            by_chan_rms[ch] = results.second;
         }
         else {
             bychan_coll[ch] = trace->charge();
+            std::pair<double, double> results = Derivations::CalcRMS(bychan_coll[ch]);
+            by_chan_rms[ch] = results.second;
         }
     }
 
     // Remove PMT signal from Collection
-    for (auto cs : bychan_coll) {
+    for (auto& cs : bychan_coll) {
         // ignore dead channels ...
         if (by_chan_rms[cs.first] > m_rms_threshold)
-            IDPMTSignalCollection(bychan_coll[cs.first], by_chan_rms[cs.first], cs.first);
+            IDPMTSignalCollection(cs.second, by_chan_rms[cs.first], cs.first);
     }
 
     // ID PMT signal in induction signal
-    for (auto cs : bychan_indu) {
+    for (auto& cs : bychan_indu) {
         // ignore dead channels ...
         if (by_chan_rms[cs.first] > m_rms_threshold)
-            IDPMTSignalInduction(bychan_indu[cs.first], by_chan_rms[cs.first], cs.first, 0);
+            IDPMTSignalInduction(cs.second, by_chan_rms[cs.first], cs.first, 0);
     }
-    for (auto cs : bychan_indv) {
+    for (auto& cs : bychan_indv) {
         // ignore dead channels ...
         if (by_chan_rms[cs.first] > m_rms_threshold)
-            IDPMTSignalInduction(bychan_indv[cs.first], by_chan_rms[cs.first], cs.first, 1);
+            IDPMTSignalInduction(cs.second, by_chan_rms[cs.first], cs.first, 1);
     }
 
     // Remove PMT signal from Induction ...
 
-    for (int i = 0; i != int(PMT_ROIs.size()); i++) {
-        PMT_ROIs.at(i)->sort_wires(m_sort_wires);
+    for (int i = 0; i != int(m_pmt_rois.size()); i++) {
+        m_pmt_rois.at(i)->sort_wires(m_sort_wires);
         // int flag_qx = 0;
-        if (PMT_ROIs.at(i)->get_sorted_uwires().size() > 0 && PMT_ROIs.at(i)->get_sorted_vwires().size() > 0) {
-            for (int j = 0; j != int(PMT_ROIs.at(i)->get_sorted_uwires().size()); j++) {
-                if (PMT_ROIs.at(i)->get_average_uwires_peak_height(j) <
-                        m_ind_th1 * PMT_ROIs.at(i)->get_average_wwires_peak_height() &&
-                    PMT_ROIs.at(i)->get_max_uwires_peak_height(j) <
-                        m_ind_th2 * PMT_ROIs.at(i)->get_max_wwires_peak_height() &&
-                    PMT_ROIs.at(i)->get_sorted_uwires().at(j).size() <= PMT_ROIs.at(i)->get_sorted_wwires().size()) {
+        if (m_pmt_rois.at(i)->get_sorted_uwires().size() > 0 && m_pmt_rois.at(i)->get_sorted_vwires().size() > 0) {
+            for (int j = 0; j != int(m_pmt_rois.at(i)->get_sorted_uwires().size()); j++) {
+                if (m_pmt_rois.at(i)->get_average_uwires_peak_height(j) <
+                        m_ind_th1 * m_pmt_rois.at(i)->get_average_wwires_peak_height() &&
+                    m_pmt_rois.at(i)->get_max_uwires_peak_height(j) <
+                        m_ind_th2 * m_pmt_rois.at(i)->get_max_wwires_peak_height() &&
+                    m_pmt_rois.at(i)->get_sorted_uwires().at(j).size() <= m_pmt_rois.at(i)->get_sorted_wwires().size()) {
                     //	  flag_qx = 1;
-                    for (int k = 0; k != int(PMT_ROIs.at(i)->get_sorted_uwires().at(j).size()); k++) {
-                        RemovePMTSignal(bychan_indu[PMT_ROIs.at(i)->get_sorted_uwires().at(j).at(k)],
-                                        PMT_ROIs.at(i)->get_start_bin(), PMT_ROIs.at(i)->get_end_bin());
-                        // RemovePMTSignalInduction(hu[PMT_ROIs.at(i)->get_sorted_uwires().at(j).at(k)],PMT_ROIs.at(i)->get_start_bin(),PMT_ROIs.at(i)->get_end_bin());
+                    for (int k = 0; k != int(m_pmt_rois.at(i)->get_sorted_uwires().at(j).size()); k++) {
+                        RemovePMTSignal(bychan_indu[m_pmt_rois.at(i)->get_sorted_uwires().at(j).at(k)],
+                                        m_pmt_rois.at(i)->get_start_bin(), m_pmt_rois.at(i)->get_end_bin());
+                        // RemovePMTSignalInduction(hu[m_pmt_rois.at(i)->get_sorted_uwires().at(j).at(k)],m_pmt_rois.at(i)->get_start_bin(),m_pmt_rois.at(i)->get_end_bin());
                     }
 
-                    // std::cout << i << " " <<  PMT_ROIs.at(i)->get_peaks().at(0) << " " <<
-                    // PMT_ROIs.at(i)->get_peaks().size() << " " << PMT_ROIs.at(i)->get_sorted_uwires().at(j).size() <<
-                    // " " << j << " " << PMT_ROIs.at(i)->get_average_uwires_peak_height(j) << " " <<
-                    // PMT_ROIs.at(i)->get_average_wwires_peak_height() << " " <<
-                    // PMT_ROIs.at(i)->get_max_uwires_peak_height(j) << " " <<
-                    // PMT_ROIs.at(i)->get_max_wwires_peak_height() << " " <<
-                    // PMT_ROIs.at(i)->get_sorted_uwires().at(j).size() << " " <<
-                    // PMT_ROIs.at(i)->get_sorted_wwires().size() << std::endl;
+                    // std::cout << i << " " <<  m_pmt_rois.at(i)->get_peaks().at(0) << " " <<
+                    // m_pmt_rois.at(i)->get_peaks().size() << " " << m_pmt_rois.at(i)->get_sorted_uwires().at(j).size() <<
+                    // " " << j << " " << m_pmt_rois.at(i)->get_average_uwires_peak_height(j) << " " <<
+                    // m_pmt_rois.at(i)->get_average_wwires_peak_height() << " " <<
+                    // m_pmt_rois.at(i)->get_max_uwires_peak_height(j) << " " <<
+                    // m_pmt_rois.at(i)->get_max_wwires_peak_height() << " " <<
+                    // m_pmt_rois.at(i)->get_sorted_uwires().at(j).size() << " " <<
+                    // m_pmt_rois.at(i)->get_sorted_wwires().size() << std::endl;
                 }
             }
 
-            for (int j = 0; j != int(PMT_ROIs.at(i)->get_sorted_vwires().size()); j++) {
-                if (PMT_ROIs.at(i)->get_average_vwires_peak_height(j) <
-                        m_ind_th1 * PMT_ROIs.at(i)->get_average_wwires_peak_height() &&
-                    PMT_ROIs.at(i)->get_max_vwires_peak_height(j) <
-                        m_ind_th2 * PMT_ROIs.at(i)->get_max_wwires_peak_height() &&
-                    PMT_ROIs.at(i)->get_sorted_vwires().at(j).size() <= PMT_ROIs.at(i)->get_sorted_wwires().size()) {
+            for (int j = 0; j != int(m_pmt_rois.at(i)->get_sorted_vwires().size()); j++) {
+                if (m_pmt_rois.at(i)->get_average_vwires_peak_height(j) <
+                        m_ind_th1 * m_pmt_rois.at(i)->get_average_wwires_peak_height() &&
+                    m_pmt_rois.at(i)->get_max_vwires_peak_height(j) <
+                        m_ind_th2 * m_pmt_rois.at(i)->get_max_wwires_peak_height() &&
+                    m_pmt_rois.at(i)->get_sorted_vwires().at(j).size() <= m_pmt_rois.at(i)->get_sorted_wwires().size()) {
                     // flag_qx = 1;
-                    for (int k = 0; k != int(PMT_ROIs.at(i)->get_sorted_vwires().at(j).size()); k++) {
-                        RemovePMTSignal(bychan_indv[PMT_ROIs.at(i)->get_sorted_vwires().at(j).at(k)],
-                                        PMT_ROIs.at(i)->get_start_bin(), PMT_ROIs.at(i)->get_end_bin());
-                        // RemovePMTSignalInduction(hv[PMT_ROIs.at(i)->get_sorted_vwires().at(j).at(k)],PMT_ROIs.at(i)->get_start_bin(),PMT_ROIs.at(i)->get_end_bin());
+                    for (int k = 0; k != int(m_pmt_rois.at(i)->get_sorted_vwires().at(j).size()); k++) {
+                        RemovePMTSignal(bychan_indv[m_pmt_rois.at(i)->get_sorted_vwires().at(j).at(k)],
+                                        m_pmt_rois.at(i)->get_start_bin(), m_pmt_rois.at(i)->get_end_bin());
+                        // RemovePMTSignalInduction(hv[m_pmt_rois.at(i)->get_sorted_vwires().at(j).at(k)],m_pmt_rois.at(i)->get_start_bin(),m_pmt_rois.at(i)->get_end_bin());
                     }
-                    //  std::cout << i << " " <<  PMT_ROIs.at(i)->get_peaks().at(0) << " " <<
-                    //  PMT_ROIs.at(i)->get_peaks().size() << " " << PMT_ROIs.at(i)->get_sorted_vwires().at(j).size() <<
-                    //  " " << j << " " << PMT_ROIs.at(i)->get_average_vwires_peak_height(j) << " " <<
-                    //  PMT_ROIs.at(i)->get_average_wwires_peak_height() << " " <<
-                    //  PMT_ROIs.at(i)->get_max_vwires_peak_height(j) << " " <<
-                    //  PMT_ROIs.at(i)->get_max_wwires_peak_height() << " " <<
-                    //  PMT_ROIs.at(i)->get_sorted_vwires().at(j).size() << " " <<
-                    //  PMT_ROIs.at(i)->get_sorted_wwires().size() << std::endl;
+                    //  std::cout << i << " " <<  m_pmt_rois.at(i)->get_peaks().at(0) << " " <<
+                    //  m_pmt_rois.at(i)->get_peaks().size() << " " << m_pmt_rois.at(i)->get_sorted_vwires().at(j).size() <<
+                    //  " " << j << " " << m_pmt_rois.at(i)->get_average_vwires_peak_height(j) << " " <<
+                    //  m_pmt_rois.at(i)->get_average_wwires_peak_height() << " " <<
+                    //  m_pmt_rois.at(i)->get_max_vwires_peak_height(j) << " " <<
+                    //  m_pmt_rois.at(i)->get_max_wwires_peak_height() << " " <<
+                    //  m_pmt_rois.at(i)->get_sorted_vwires().at(j).size() << " " <<
+                    //  m_pmt_rois.at(i)->get_sorted_wwires().size() << std::endl;
                 }
             }
 
-            if (int(PMT_ROIs.at(i)->get_sorted_wwires().size()) >= m_nwire_pmt_col_th) {
-                for (int j = 0; j != int(PMT_ROIs.at(i)->get_sorted_wwires().size()); j++) {
-                    RemovePMTSignal(bychan_coll[PMT_ROIs.at(i)->get_sorted_wwires().at(j)],
-                                    PMT_ROIs.at(i)->get_start_bin(), PMT_ROIs.at(i)->get_end_bin(), 1);
+            if (int(m_pmt_rois.at(i)->get_sorted_wwires().size()) >= m_nwire_pmt_col_th) {
+                for (int j = 0; j != int(m_pmt_rois.at(i)->get_sorted_wwires().size()); j++) {
+                    RemovePMTSignal(bychan_coll[m_pmt_rois.at(i)->get_sorted_wwires().at(j)],
+                                    m_pmt_rois.at(i)->get_start_bin(), m_pmt_rois.at(i)->get_end_bin(), 1);
                 }
             }
 
-            // if (flag_qx == 1) std::cout << i << " " <<  PMT_ROIs.at(i)->get_peaks().at(0) << " " <<
-            // PMT_ROIs.at(i)->get_peaks().size() << " " << PMT_ROIs.at(i)->get_uwires().size() << " " <<
-            // PMT_ROIs.at(i)->get_vwires().size() << " " << PMT_ROIs.at(i)->get_sorted_uwires().size() << " " <<
-            // PMT_ROIs.at(i)->get_sorted_vwires().size() << " " << PMT_ROIs.at(i)->get_sorted_wwires().size() << " " <<
-            // PMT_ROIs.at(i)->get_average_uwires_peak_height() << " " <<
-            // PMT_ROIs.at(i)->get_average_vwires_peak_height() << " " <<
-            // PMT_ROIs.at(i)->get_average_wwires_peak_height() << " " << PMT_ROIs.at(i)->get_max_uwires_peak_height() <<
-            // " " << PMT_ROIs.at(i)->get_max_vwires_peak_height() << " " << PMT_ROIs.at(i)->get_max_wwires_peak_height()
+            // if (flag_qx == 1) std::cout << i << " " <<  m_pmt_rois.at(i)->get_peaks().at(0) << " " <<
+            // m_pmt_rois.at(i)->get_peaks().size() << " " << m_pmt_rois.at(i)->get_uwires().size() << " " <<
+            // m_pmt_rois.at(i)->get_vwires().size() << " " << m_pmt_rois.at(i)->get_sorted_uwires().size() << " " <<
+            // m_pmt_rois.at(i)->get_sorted_vwires().size() << " " << m_pmt_rois.at(i)->get_sorted_wwires().size() << " " <<
+            // m_pmt_rois.at(i)->get_average_uwires_peak_height() << " " <<
+            // m_pmt_rois.at(i)->get_average_vwires_peak_height() << " " <<
+            // m_pmt_rois.at(i)->get_average_wwires_peak_height() << " " << m_pmt_rois.at(i)->get_max_uwires_peak_height() <<
+            // " " << m_pmt_rois.at(i)->get_max_vwires_peak_height() << " " << m_pmt_rois.at(i)->get_max_wwires_peak_height()
             // << std::endl;
         }
-        delete PMT_ROIs.at(i);
+        delete m_pmt_rois.at(i);
     }
-    PMT_ROIs.clear();
+    m_pmt_rois.clear();
 
     // load results ...
 
@@ -264,29 +266,32 @@ void OmnibusPMTNoiseFilter::IDPMTSignalCollection(Waveform::realseq_t& signal, d
                     float min = signal.at(start_bin);
                     peak_bin = start_bin;
                     for (int j = start_bin + 1; j != end_bin; j++) {
-                        if (signal.at(j) < min) peak_bin = j;
+                        if (signal.at(j) < min) {
+                            min = signal.at(j);
+                            peak_bin = j;
+                        }
                     }
 
                     PMTNoiseROI* ROI = new PMTNoiseROI(start_bin, end_bin, peak_bin, ch, signal.at(peak_bin));
 
                     // std::cout << start_bin << " " << end_bin << std::endl;
-                    if (PMT_ROIs.size() == 0) {
-                        PMT_ROIs.push_back(ROI);
+                    if (m_pmt_rois.size() == 0) {
+                        m_pmt_rois.push_back(ROI);
                     }
                     else {
                         bool flag_merge = false;
-                        for (int i = 0; i != int(PMT_ROIs.size()); i++) {
-                            flag_merge = PMT_ROIs.at(i)->merge_ROI(*ROI);
+                        for (int i = 0; i != int(m_pmt_rois.size()); i++) {
+                            flag_merge = m_pmt_rois.at(i)->merge_ROI(*ROI);
                             if (flag_merge) {
                                 delete ROI;
                                 break;
                             }
                         }
                         if (!flag_merge) {
-                            PMT_ROIs.push_back(ROI);
+                            m_pmt_rois.push_back(ROI);
                         }
                     }
-                    // std::cout << "h " << PMT_ROIs.size() << std::endl;
+                    // std::cout << "h " << m_pmt_rois.size() << std::endl;
 
                     flag_start = 0;
 
@@ -320,10 +325,10 @@ void OmnibusPMTNoiseFilter::IDPMTSignalCollection(Waveform::realseq_t& signal, d
 
 void OmnibusPMTNoiseFilter::IDPMTSignalInduction(Waveform::realseq_t& signal, double rms, int ch, int plane)
 {
-    // std::cout <<  PMT_ROIs.size() << std::endl;
+    // std::cout <<  m_pmt_rois.size() << std::endl;
 
-    for (int i = 0; i != int(PMT_ROIs.size()); i++) {
-        PMTNoiseROI* ROI = PMT_ROIs.at(i);
+    for (int i = 0; i != int(m_pmt_rois.size()); i++) {
+        PMTNoiseROI* ROI = m_pmt_rois.at(i);
         for (int j = 0; j != int(ROI->get_peaks().size()); j++) {
             int peak = ROI->get_peaks().at(j);
             int peak_m1 = peak - 1;
@@ -390,7 +395,9 @@ void OmnibusPMTNoiseFilter::RemovePMTSignal(Waveform::realseq_t& signal, int sta
     }
 
     for (int j = start_bin; j <= end_bin; j++) {
-        float content = start_content + (end_content - start_content) * (j - start_bin) / (end_bin - start_bin * 1.0);
+        float content = (end_bin != start_bin)
+            ? start_content + (end_content - start_content) * (j - start_bin) / (end_bin - start_bin * 1.0)
+            : start_content;
         if (flag == 1) {
             if (signal.at(j) < 0) signal.at(j) = content;
         }

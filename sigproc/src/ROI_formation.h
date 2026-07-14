@@ -58,6 +58,15 @@ namespace WireCell {
                 }
             }
 
+            // Use a median-absolute-deviation first-pass estimate in cal_RMS
+            // instead of the (16,50,84) percentile spread.  The percentile
+            // spread is corrupted when a strong signal occupies more than
+            // ~16% of the waveform (the 84th percentile lands inside the
+            // signal), inflating the RMS -- and so the ROI threshold -- by
+            // up to ~10x, which fragments long signals at ROI finding.  MAD
+            // stays robust up to 50% occupancy.  Default false = legacy.
+            void set_mad_rms(bool flag) { use_mad_rms = flag; }
+
             std::vector<float>& get_uplane_rms() { return uplane_rms; };
             std::vector<float>& get_vplane_rms() { return vplane_rms; };
             std::vector<float>& get_wplane_rms() { return wplane_rms; };
@@ -70,7 +79,7 @@ namespace WireCell {
             };
 
            private:
-            double cal_RMS(Waveform::realseq_t signal);
+            double cal_RMS(const Waveform::realseq_t& signal);
             double local_ave(Waveform::realseq_t& signal, int bin, int width);
             int find_ROI_end(Waveform::realseq_t& signal, int bin, double th = 0, int jump_one_bin = 0);
             int find_ROI_begin(Waveform::realseq_t& signal, int bin, double th = 0, int jump_one_bin = 0);
@@ -90,6 +99,8 @@ namespace WireCell {
             double l_factor1;
             int l_short_length;
             int l_jump_one_bin;
+
+            bool use_mad_rms{false};
 
             std::map<int, std::vector<std::pair<int, int>>> bad_ch_map;
 

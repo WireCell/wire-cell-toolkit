@@ -6,6 +6,8 @@
 
 #include "spdlog/spdlog.h"
 
+#include <limits>
+
 using namespace WireCell;
 using namespace WireCell::Img;
 using namespace WireCell::Img::CS;
@@ -31,6 +33,13 @@ indexed_vdescs_t CS::select_ordered(const graph_t& csg,
 graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verbose)
 {
     graph_t csg_out;
+
+    // {
+    //     auto& gp = csg[boost::graph_bundle];
+    //     auto tick = gp.islice->start()/gp.islice->span();
+    //     SPDLOG_INFO("CS solve: {} ticks={} span={}",
+    //                  gp.islice->ident(), tick, gp.islice->span());
+    // }
 
     // Copy graph level properties
     csg_out[boost::graph_bundle] = csg[boost::graph_bundle];
@@ -86,13 +95,13 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
     // special case of one blob
     if (params.config == SolveParams::simple && blob_descs.size() == 1) {
         auto nbdesc = blob_descs_out.collection[0];
-        value_t val;
+        value_t val{0, 0};
         for (size_t mind=0; mind < nmeas; ++mind) {
             auto nmdesc = meas_descs_out.collection[mind];
             boost::add_edge(nbdesc, nmdesc, csg_out);
             val += csg_out[nmdesc].value;
         }
-        csg_out[nbdesc].value = val / nmeas;
+        csg_out[nbdesc].value = val / nmeas * params.scale;
         return csg_out;
     }
         
@@ -149,25 +158,33 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
 
     if (params.whiten) {
 
-        // std::cerr << "A:\n" << A << "\nmcov:\n" << mcov << "\nmcovinv:\n" << mcov.inverse() << std::endl;
-        Eigen::LLT<double_matrix_t> llt(mcov.inverse());
-        double_matrix_t U = llt.matrixL().transpose();
-        // std::cerr << "U:\n" << U << std::endl;
- 
+        // Cholesky decomposition of mcov directly (avoids computing explicit inverse).
+        // If mcov = L*L^T, then mcov^{-1} = L^{-T}*L^{-1}, and the whitening
+        // transform U = L^{-1} satisfies U^T*U = mcov^{-1}.
+        Eigen::LLT<double_matrix_t> llt(mcov);
+        if (llt.info() != Eigen::Success) {
+            SPDLOG_WARN("Cholesky decomposition of measurement covariance failed, skipping whitening");
+            return csg_out;
+        }
+        // U*x = L^{-1}*x is computed via triangular solve of L*y = x
+        auto L = llt.matrixL();
+
         // The measure vector in a "whitened" basis
-        m_vec = U*measure;
+        m_vec = L.solve(measure);
 
         // The blob-measure association in "whitened" basis (becomes
-        // the "reasponse" matrix in ress solving).
-        R_mat = params.scale*U*A;
+        // the "response" matrix in ress solving).
+        R_mat = params.scale * L.solve(A);
     }
     if (verbose) {
-        SPDLOG_INFO("CS params {} {}", params.scale, params.whiten);
-        SPDLOG_INFO("ress param {} {}", rparams.lambda, rparams.tolerance);
-        SPDLOG_INFO("R_mat \n{}", String::stringify(R_mat));
-        SPDLOG_INFO("m_vec \n{}", String::stringify(m_vec));
-        SPDLOG_INFO("source \n{}", String::stringify(source));
-        SPDLOG_INFO("weight \n{}", String::stringify(weight));
+        SPDLOG_INFO("CS params scale {} whiten {}", params.scale, params.whiten);
+        SPDLOG_INFO("ress lambda {} tolerance {}", rparams.lambda, rparams.tolerance);
+        SPDLOG_INFO("m_vec {}", m_vec.size());
+        SPDLOG_INFO("R_mat {} {}", R_mat.rows(), R_mat.cols());
+        // SPDLOG_INFO("R_mat \n{}", String::stringify(R_mat));
+        // SPDLOG_INFO("m_vec \n{}", String::stringify(m_vec));
+        // SPDLOG_INFO("source \n{}", String::stringify(source));
+        // SPDLOG_INFO("weight \n{}", String::stringify(weight));
     }
     // std::cerr << "R:\n" << R_mat << "\nm:\n" << m_vec << std::endl;
     auto solution = Ress::solve(R_mat, m_vec, rparams,
@@ -201,6 +218,33 @@ graph_t CS::solve(const graph_t& csg, const SolveParams& params, const bool verb
     return csg_out;
 }
 
+graph_t CS::prune(graph_t&& csg, float threshold)
+{
+    // Fast path: when no blob falls below threshold the rebuild below
+    // is an identity copy -- move the input through instead.  This is
+    // iteration-order safe: out-edge storage is setS (ordered by target
+    // descriptor, insertion-order independent) and vertices are vecS,
+    // so the moved graph and a rebuilt copy iterate identically.  With
+    // the default blob_value_threshold of -1 and non-negative solved
+    // charges this path is taken for every subgraph.
+    bool any_blob = false;
+    for (auto v : vertex_range(csg)) {
+        const auto& node = csg[v];
+        if (node.kind == node_t::blob) {
+            any_blob = true;
+            if (node.value.value() < threshold) {
+                // something to prune: fall back to the rebuild
+                return prune(static_cast<const graph_t&>(csg), threshold);
+            }
+        }
+    }
+    if (!any_blob) {
+        // preserve the rebuild's no-blob semantics (drops all edges)
+        return prune(static_cast<const graph_t&>(csg), threshold);
+    }
+    return std::move(csg);
+}
+
 graph_t CS::prune(const graph_t& csg, float threshold)
 {
     graph_t csg_out;
@@ -209,7 +253,10 @@ graph_t CS::prune(const graph_t& csg, float threshold)
     csg_out[boost::graph_bundle] = csg[boost::graph_bundle];
     
     size_t nblobs = 0;
-    std::unordered_map<vdesc_t, vdesc_t> old2new;
+    // vecS vertex descriptors are dense indices: a flat vector remap beats a
+    // hash map here.  "max" marks a pruned (unmapped) vertex.
+    constexpr vdesc_t unmapped = std::numeric_limits<vdesc_t>::max();
+    std::vector<vdesc_t> old2new(boost::num_vertices(csg), unmapped);
     for (auto oldv : vertex_range(csg)) {
         const auto& node = csg[oldv];
         if (node.kind == node_t::blob) {
@@ -220,7 +267,7 @@ graph_t CS::prune(const graph_t& csg, float threshold)
         }
         old2new[oldv] = boost::add_vertex(node, csg_out);
     }
-    
+
     if (!nblobs) {
         return csg_out;
     }
@@ -229,16 +276,16 @@ graph_t CS::prune(const graph_t& csg, float threshold)
         auto old_tail = boost::source(edge, csg);
         auto old_head = boost::target(edge, csg);
 
-        auto old_tit = old2new.find(old_tail);
-        if (old_tit == old2new.end()) {
+        const auto new_tail = old2new[old_tail];
+        if (new_tail == unmapped) {
             continue;
         }
-        auto old_hit = old2new.find(old_head);
-        if (old_hit == old2new.end()) {
+        const auto new_head = old2new[old_head];
+        if (new_head == unmapped) {
             continue;
         }
-        boost::add_edge(old_tit->second, old_hit->second, csg_out);
-    }    
+        boost::add_edge(new_tail, new_head, csg_out);
+    }
     return csg_out;
 }
 

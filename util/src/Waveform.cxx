@@ -157,13 +157,17 @@ WireCell::Waveform::BinRangeList WireCell::Waveform::merge(const WireCell::Wavef
     WireCell::Waveform::BinRangeList tmp(brl.begin(), brl.end());
     WireCell::Waveform::BinRangeList out;
     sort(tmp.begin(), tmp.end());
-    Waveform::BinRange last_br = tmp[0];
-    out.push_back(last_br);
+    out.push_back(tmp[0]);
 
     for (size_t ind = 1; ind < tmp.size(); ++ind) {
         Waveform::BinRange this_br = tmp[ind];
         if (out.back().second >= this_br.first) {
-            out.back().second = this_br.second;
+            // Sorting by .first does not order .second. A wide earlier range
+            // followed by a narrower later one would shrink the merged range
+            // if we unconditionally took this_br.second. Take the max instead.
+            if (this_br.second > out.back().second) {
+                out.back().second = this_br.second;
+            }
             continue;
         }
         out.push_back(this_br);

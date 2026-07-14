@@ -174,7 +174,50 @@ def build(bld):
     bld.smplpkg('WireCellUser', use='WireCellUtil')
 #+end_src
 
-* Packing waft 
+* Building against WCT with CMake
+
+Although WCT is built with ~waf~, a downstream project that uses CMake can build
+against an *installed* WCT in the conventional way.  At ~./wcb install~ time WCT
+generates and installs CMake package-config files:
+
+#+begin_example
+  <prefix>/lib/cmake/WireCellToolkit/WireCellToolkitConfig.cmake
+  <prefix>/lib/cmake/WireCellToolkit/WireCellToolkitConfigVersion.cmake
+#+end_example
+
+A consumer then writes:
+
+#+begin_src cmake
+  find_package(WireCellToolkit REQUIRED)
+
+  add_executable(myapp myapp.cxx)
+  target_link_libraries(myapp PRIVATE WireCell::Util WireCell::Aux)
+#+end_src
+
+and configures with the install prefix on the search path:
+
+#+begin_example
+  $ cmake -S . -B build -DCMAKE_PREFIX_PATH=<prefix>
+#+end_example
+
+Each WCT library is exported as a namespaced imported target with the
+~WireCell~ prefix stripped, e.g. ~WireCellUtil~ → ~WireCell::Util~,
+~WireCellSigProc~ → ~WireCell::SigProc~, ~WCPQuickhull~ → ~WireCell::Quickhull~.
+A convenience aggregate target ~WireCell::WireCell~ links the core libraries
+(~Util~, ~Iface~, ~Aux~).
+
+WCT's own external dependencies (Boost, Eigen, spdlog, ...) are re-discovered
+inside ~WireCellToolkitConfig.cmake~ (via ~find_dependency()~, or ~pkg-config~
+for dependencies lacking a CMake package) and attached transitively to the
+imported targets.  A consumer that links ~WireCell::Util~ therefore inherits
+Boost include paths and link libraries automatically and need not
+~find_package(Boost)~ itself.
+
+These files are produced by =waft/cmake.py= from the same dependency
+information used by the rest of the build, so they track whatever optional
+packages a given build was configured with.
+
+* Packing waft
 
 As mentioned above, today ~wcb~ provided by WCT is simply a copy of ~waf~ and the tools are read from the ~waft~ "tooldir".  It is possible to "dump" these tools so that ~wcb = waf + waft~.  This can be done simply as:
 

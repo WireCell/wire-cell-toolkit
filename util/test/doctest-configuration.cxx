@@ -83,6 +83,54 @@ TEST_SUITE("util configuration") {
                 /*Ray ray =*/ get<Ray>(track, "ray");
             }
         }
+    }    
+}
+
+
+TEST_CASE("configuration hash speed")
+{
+    Configuration cfg = Persist::loads(tracks_json());
+    TimeKeeper kp("configuration hash speed");
+
+    const int ntimes = 10000;
+
+    std::hash<Configuration> chash;
+    std::hash<std::string> shash;
+
+    for (int count=0; count<ntimes; ++count) {
+        chash(cfg);
+    }
+    kp("... std::hash'ed object");
+    for (int count=0; count<ntimes; ++count) {
+
+        // This is "nodiscard" but we do not in fact care about the value here,
+        // only the function's speed.
+        (void)shash(Persist::dumps(cfg));
+
+    }
+    kp("... std::hash'ed json text");
+
+    debug("repeated {} times\n{}", ntimes, kp.summary());
+
+}
+
+TEST_CASE("configuration various")
+{
+
+    Configuration cfg;
+    cfg["chirp"] = "bad";
+    CHECK("bad" == cfg["chirp"].asString());
+    cfg["bad"] = "bad";
+
+    Configuration top;
+    top["maskmap"] = cfg;
+
+    auto jmm = top["maskmap"];
+
+    std::unordered_map<std::string, std::string> mm;
+    for (auto name : jmm.getMemberNames()) {
+        mm[name] = jmm[name].asString();
+        debug("{} {}", name, mm[name]);
     }
 
     TEST_CASE("configuration sizes")

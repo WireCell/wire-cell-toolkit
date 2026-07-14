@@ -40,7 +40,7 @@ namespace WireCell::Img::Data {
         int ident() const { return m_ident; }
         double start() const { return m_start; }
         double span() const { return m_span; }
-        map_t activity() const { return m_activity; }
+        const map_t& activity() const { return m_activity; }
 
         // These methods are not part of the ISlice interface and may be
         // used prior to interment in the ISlice::pointer.

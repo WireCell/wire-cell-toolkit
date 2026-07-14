@@ -141,6 +141,14 @@ spectrum_resize(const Waveform::compseq_t& spec, size_t newsize, double norm)
 
 void Gen::PlaneImpactResponse::build_responses()
 {
+    // Make this method idempotent under repeated configure(): m_ir and
+    // m_bywire are appended to in the loops below, so if the same PIR
+    // instance is reconfigured (e.g. one shared by multiple WireCellToolkit
+    // art modules) the per-wire and per-impact-response indexing arrays would
+    // grow without bound and PIR::closest() would return mismatched data.
+    m_ir.clear();
+    m_bywire.clear();
+
     auto dft = Factory::find_tn<IDFT>(m_dftname);
 
     auto ifr = Factory::find_tn<IFieldResponse>(m_frname);

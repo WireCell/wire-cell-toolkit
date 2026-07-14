@@ -35,7 +35,7 @@ struct DatasetSelectionAdaptor {
     {
         for (auto arr : points) {
             assert(arr);
-            assert(arr->is_type<ElementType>());
+            assert(arr->template is_type<ElementType>());
         }
         if (dim < points.size()) {
             auto arr = points[dim];
@@ -47,7 +47,7 @@ struct DatasetSelectionAdaptor {
             }
                 
             if (idx < arr->size_major()) {
-                element_t val = arr->element<ElementType>(idx);
+                element_t val = arr->template element<ElementType>(idx);
                 return val;
             }
         }

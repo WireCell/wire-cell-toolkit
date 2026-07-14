@@ -1,11 +1,61 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+
+class ClusteringIsolated;
+WIRECELL_FACTORY(ClusteringIsolated, ClusteringIsolated,
+                 WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_isolated(
+    Grouping& live_grouping,
+    IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope,
+    bool use_flash_t0 = false,
+    double flash_t0_window = 80*units::ns,
+    double length_cut = 20*units::cm,
+    int range_cut = 150
+    );
+
+class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
+public:
+    ClusteringIsolated() {}
+    virtual ~ClusteringIsolated() {}
+    
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedScope::configure(config);
+
+        use_flash_t0_ = get(config, "use_flash_t0", false);
+        flash_t0_window_ = get(config, "flash_t0_window", 80*units::ns);
+        // Small/big classification thresholds. Defaults reproduce the historical
+        // hardcoded values, so configs that omit these keys are unchanged.
+        length_cut_ = get(config, "length_cut", 20*units::cm);
+        range_cut_ = get(config, "range_cut", 150);
+    }
+
+    void visit(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_,
+                                   length_cut_, range_cut_);
+    }
+
+private:
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
+    double length_cut_{20*units::cm};
+    int range_cut_{150};
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -22,45 +72,116 @@ using namespace WireCell::PointCloud::Tree;
  * @brief aims to organize clusters based on spatial relationships and merges those that meet specific proximity and size criteria.
  * @return large cluster -> {small cluster, distance} 
 */
-void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
+// Handle all APA/Faces
+static void clustering_isolated(
+    Grouping& live_grouping,
+    const IDetectorVolumes::pointer dv,
+    const Tree::Scope& scope,
+    bool use_flash_t0,
+    double flash_t0_window,
+    double length_cut,
+    int range_cut
+)
 {
+    // Get all the wire plane IDs from the grouping
+    const auto& wpids = live_grouping.wpids();
+    // Key: pair<APA, face>, Value: drift_dir, angle_u, angle_v, angle_w
+    std::map<WirePlaneId , std::tuple<geo_point_t, double, double, double>> wpid_params;
+    std::set<int> apas;
+    for (const auto& wpid : wpids) {
+        int apa = wpid.apa();
+        int face = wpid.face();
+        apas.insert(apa);
+
+        // Create wpids for all three planes with this APA and face
+        WirePlaneId wpid_u(kUlayer, face, apa);
+        WirePlaneId wpid_v(kVlayer, face, apa);
+        WirePlaneId wpid_w(kWlayer, face, apa);
+     
+        // Get drift direction based on face orientation
+        int face_dirx = dv->face_dirx(wpid_u);
+        geo_point_t drift_dir(face_dirx, 0, 0);
+        
+        // Get wire directions for all planes
+        Vector wire_dir_u = dv->wire_direction(wpid_u);
+        Vector wire_dir_v = dv->wire_direction(wpid_v);
+        Vector wire_dir_w = dv->wire_direction(wpid_w);
+
+        // Calculate angles
+        double angle_u = std::atan2(wire_dir_u.z(), wire_dir_u.y());
+        double angle_v = std::atan2(wire_dir_v.z(), wire_dir_v.y());
+        double angle_w = std::atan2(wire_dir_w.z(), wire_dir_w.y());
+
+        wpid_params[wpid] = std::make_tuple(drift_dir, angle_u, angle_v, angle_w);
+    }
+
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    // sort the clusters by length using a lambda function  (sort from small to large clusters ... )
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() > cluster2->get_length();
-    });
+    // Sort descending by length with deterministic tie-breaking via cluster_less (reversed).
+    // cluster_less defines a full content-based ordering (length, nchildren, npoints, per-wpid
+    // ranges), so reversing it gives a strict weak ordering for std::sort.
+    std::sort(live_clusters.begin(), live_clusters.end(),
+              [](const Cluster *a, const Cluster *b) { return cluster_less(b, a); });
+
+    for (auto& cluster : live_clusters) {
+          if (cluster->get_default_scope().hash() != scope.hash()) {
+            cluster->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+    }
     
-    const auto &mp = live_grouping.get_params();
+    // const auto &mp = live_grouping.get_params();
     // this is for 4 time slices
-    double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
-    geo_point_t drift_dir(1, 0, 0);
+    // double time_slice_width = mp.nticks_live_slice * mp.tick_drift;
 
-    // std::cout << mp.nticks_live_slice << std::endl;
+    // get wpids ...
+    std::map<WirePlaneId, double> map_wpid_nticks_live_slice;
+    std::map<WirePlaneId, double> map_wpid_time_slice_width;
+    for (const auto& wpid : wpids) {
+        map_wpid_nticks_live_slice[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble() ;
+        map_wpid_time_slice_width[wpid] = dv->metadata(wpid)["nticks_live_slice"].asDouble()  * dv->metadata(wpid)["tick_drift"].asDouble() ;
+        // std::cout << "Test: " << wpid << " " << map_wpid_nticks_live_slice[wpid] << " " << map_wpid_time_slice_width[wpid] << " " << mp.nticks_live_slice << " " << time_slice_width << std::endl;
+    }
 
-    int range_cut = 150;
-    int length_cut = 20 * units::cm;
+
+    // geo_point_t drift_dir(1, 0, 0);
+    // Get drift direction from the first element of wpid_params, 
+    // in the current code, we do not care about the actual direction of drift_dir, so just picking up the first instance 
+    geo_point_t drift_dir_abs(1,0,0);
+
+
+    // range_cut / length_cut are now configurable (see configure()); the
+    // function-argument defaults (150 / 20 cm) reproduce the historical values.
 
     std::vector<Cluster*> big_clusters;
     std::vector<Cluster*> small_clusters;
 
     for (size_t i = 0; i != live_clusters.size(); i++) {
-        std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
-        std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-        ranges.at(3) /= mp.nticks_live_slice;
+        if (!live_clusters.at(i)->get_scope_filter(scope)) continue;
+        auto map_wpid_uvwt_range = live_clusters.at(i)->get_uvwt_range();
+        std::vector<int> ranges(4, 0);  // Initialize a vector with 4 zeros
+          
+        for (auto [wpid, uvwt_range] : map_wpid_uvwt_range) {
+            ranges.at(0) += std::get<0>(uvwt_range);
+            ranges.at(1) += std::get<1>(uvwt_range);
+            ranges.at(2) += std::get<2>(uvwt_range);
+            ranges.at(3) += std::get<3>(uvwt_range)/map_wpid_nticks_live_slice[wpid];
+        }
+        // std::tuple<int, int, int, int> ranges_tuple = live_clusters.at(i)->get_uvwt_range();
+        // std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
+
         int max = 0;
         for (int j = 0; j != 4; j++) {
             if (ranges.at(j) > max) max = ranges.at(j);
         }
-        // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_center() << " " << max << " " << range_cut << std::endl;
+        // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_pca().center) << " " << max << " " << range_cut << std::endl;
         if (max < range_cut && live_clusters.at(i)->get_length() < length_cut) {
             small_clusters.push_back(live_clusters.at(i));
         }
         else {
             if (live_clusters.at(i)->get_length() < 60 * units::cm) {
-                if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir, live_clusters.at(i)->get_length(),
-                                       time_slice_width)) {
+                if (JudgeSeparateDec_1(live_clusters.at(i), drift_dir_abs, live_clusters.at(i)->get_length())) {
                     // std::vector<Cluster *> sep_clusters = Separate_2(live_clusters.at(i), 2.5 * units::cm);
-                    const auto b2id = Separate_2(live_clusters.at(i), 2.5 * units::cm);
+                    const auto b2id = Separate_2(live_clusters.at(i), scope, 2.5 * units::cm);
                     std::set<int> ids;
                     for (const auto& id : b2id) {
                         ids.insert(id);
@@ -70,15 +191,16 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                     double max_length = 0;
                     // for (auto it = sep_clusters.begin(); it != sep_clusters.end(); it++) {
                     for (const auto id : ids) {    
-                        // std::tuple<int, int, int, int> ranges = (*it)->get_uvwt_range();
-                        // std::tuple<int, int, int, int> ranges_tuple = (*it)->get_uvwt_range();
-                        std::tuple<int, int, int, int> ranges_tuple = get_uvwt_range(live_clusters.at(i), b2id, id);
-                        std::vector<int> ranges = {std::get<0>(ranges_tuple), std::get<1>(ranges_tuple), std::get<2>(ranges_tuple), std::get<3>(ranges_tuple)};
-                        ranges.at(3) /= mp.nticks_live_slice;
-                        // double length_1 = sqrt(2. / 3. *
-                        //                            (pow(mp.pitch_u * ranges.at(0), 2) + pow(mp.pitch_v * ranges.at(1), 2) +
-                        //                             pow(mp.pitch_w * ranges.at(2), 2)) +
-                        //                        pow(time_slice_width * ranges.at(3), 2));
+                        auto map_wpid_uvwt_range = get_uvwt_range(live_clusters.at(i), b2id, id);
+
+                        std::vector<int> ranges(4, 0);  // Initialize a vector with 4 zeros
+                        for (auto [wpid, uvwt_range] : map_wpid_uvwt_range) {
+                            ranges.at(0) += std::get<0>(uvwt_range);
+                            ranges.at(1) += std::get<1>(uvwt_range);
+                            ranges.at(2) += std::get<2>(uvwt_range);
+                            ranges.at(3) += std::get<3>(uvwt_range)/map_wpid_nticks_live_slice[wpid];
+                        }
+
                         double length_1 = get_length(live_clusters.at(i), b2id, id);
                         for (int j = 0; j != 4; j++) {
                             if (ranges.at(j) > max) {
@@ -92,7 +214,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                     // for (size_t j = 0; j != sep_clusters.size(); j++) {
                     //     delete sep_clusters.at(j);
                     // }
-                    // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_center() << " " << max << " " << range_cut << std::endl;
+                    // std::cout << i << " " << live_clusters.at(i)->get_length()/units::cm << " " << live_clusters.at(i)->get_pca().center) << " " << max << " " << range_cut << std::endl;
 
                     if (max < range_cut && max_length < length_cut) {
                         small_clusters.push_back(live_clusters.at(i));
@@ -112,11 +234,20 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     }
     // LogDebug("big_clusters.size() = " << big_clusters.size() << " small_clusters.size() = " << small_clusters.size());
 
-    std::set<std::pair<Cluster *, Cluster *>> to_be_merged_pairs;
+    // Deterministic pair comparator (cluster_less_functor on first, then second element).
+    struct cluster_pair_less_t {
+        cluster_less_functor clf;
+        bool operator()(const std::pair<Cluster*,Cluster*>& a, const std::pair<Cluster*,Cluster*>& b) const {
+            if (clf(a.first, b.first)) return true;
+            if (clf(b.first, a.first)) return false;
+            return clf(a.second, b.second);
+        }
+    };
+    std::set<std::pair<Cluster *, Cluster *>, cluster_pair_less_t> to_be_merged_pairs;
 
     // clustering small with big ones ...
     double small_big_dis_cut = 80 * units::cm;
-    std::set<Cluster *> used_small_clusters;
+    std::set<Cluster *, cluster_less_functor> used_small_clusters;
     for (auto it = small_clusters.begin(); it != small_clusters.end(); it++) {
         Cluster *curr_cluster = (*it);
         // curr_cluster->Create_point_cloud();
@@ -136,7 +267,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                 min_dis_cluster = big_cluster;
             }
         }
-        // std::cout << "SB: " << curr_cluster->get_length()/units::cm << " " << min_dis_cluster->get_length()/units::cm << " " << curr_cluster->get_center() << " " << min_dis_cluster->get_center() << " " << min_dis << " " << small_big_dis_cut << std::endl;
+        // std::cout << "SB: " << curr_cluster->get_length()/units::cm << " " << min_dis_cluster->get_length()/units::cm << " " << curr_cluster->get_pca().center) << " " << min_dis_cluster->get_pca().center) << " " << min_dis << " " << small_big_dis_cut << std::endl;
 
         if (min_dis < small_big_dis_cut) {    
 
@@ -163,7 +294,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                     used_small_clusters.find(cluster2) != used_small_clusters.end() &&
                         used_small_clusters.find(cluster1) == used_small_clusters.end()) {
                     to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
-                    // std::cout << "SD: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                    // std::cout << "SD: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center) << " " << cluster2->get_pca().center) << std::endl;
                     used_small_clusters.insert(cluster1);
                     used_small_clusters.insert(cluster2);
                 }
@@ -190,7 +321,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
             std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
             double dis = std::get<2>(results);
             if (dis < small_small_dis_cut) {
-                // std::cout << "SS: "<< cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                // std::cout << "SS: "<< cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_pca().center) << " " << cluster2->get_pca().center) << std::endl;
                 to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
             }
         }
@@ -200,41 +331,25 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     // clustering big ones ...
     // cloud1 is the longer one
     // used_big_clusters holds the shorter one
-    std::set<Cluster *> used_big_clusters;
+    std::set<Cluster *, cluster_less_functor> used_big_clusters;
     double big_dis_cut = 3 * units::cm;
     double big_dis_range_cut = 16 * units::cm;
     for (size_t i = 0; i != big_clusters.size(); i++) {
-        Cluster *cluster1 = big_clusters.at(i);
         // cluster1->Create_point_cloud();
         for (size_t j = i + 1; j != big_clusters.size(); j++) {
-            Cluster *cluster2 = big_clusters.at(j);
+            // Use fresh inner-loop locals so that std::swap below does not corrupt
+            // cluster1 for subsequent j iterations (prototype bug fix).
+            Cluster *c1 = big_clusters.at(i);
+            Cluster *c2 = big_clusters.at(j);
             // cluster2->Create_point_cloud();
-            // ToyPointCloud *cloud1, *cloud2;
-            double pca_ratio, small_cluster_length;
-            // if (cluster1->get_length() > cluster2->get_length()) {
-            //     // cloud1 = cluster1->get_point_cloud();
-            //     // cloud2 = cluster2->get_point_cloud();
-            //     if (used_big_clusters.find(cluster2) != used_big_clusters.end()) continue;
-            //     // cluster2->Calc_pca();
-            //     pca_ratio = cluster2->get_pca_value(1) / cluster2->get_pca_value(0);
-            //     small_cluster_length = cluster2->get_length();
-            // }
-            // else {
-            //     // cloud1 = cluster2->get_point_cloud();
-            //     // cloud2 = cluster1->get_point_cloud();
-            //     if (used_big_clusters.find(cluster1) != used_big_clusters.end()) continue;
-            //     // cluster1->Calc_pca();
-            //     pca_ratio = cluster1->get_pca_value(1) / cluster1->get_pca_value(0);
-            //     small_cluster_length = cluster1->get_length();
-            // }
-            // make sure cluster1 is the longer one
-            if (!(cluster1->get_length() > cluster2->get_length())) std::swap(cluster1, cluster2);
-            if (used_big_clusters.find(cluster2) != used_big_clusters.end()) continue;
-            pca_ratio = cluster2->get_pca_value(1) / cluster2->get_pca_value(0);
-            small_cluster_length = cluster2->get_length();
+            // make sure c1 is the longer one
+            if (!(c1->get_length() > c2->get_length())) std::swap(c1, c2);
+            if (used_big_clusters.find(c2) != used_big_clusters.end()) continue;
+            double pca_ratio = c2->get_pca().values.at(1) / c2->get_pca().values.at(0);
+            double small_cluster_length = c2->get_length();
 
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
-            std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
+            std::tuple<int, int, double> results = c2->get_closest_points(*c1);
             double min_dis = std::get<2>(results);
             if (min_dis < big_dis_cut) {
                 bool flag_merge = true;
@@ -242,13 +357,13 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                 int num_outside_points = 0;
                 /* int num_close_points = 0; */
                 // const int N = cloud2->get_num_points();
-                const int N = cluster2->npoints();
+                const int N = c2->npoints();
                 // WCP::WCPointCloud<double> &cloud = cloud2->get_cloud();
                 for (int k = 0; k != N; k++) {
                     // Point test_p1(cloud.pts[k].x, cloud.pts[k].y, cloud.pts[k].z);
-                    geo_point_t test_p1 = cluster2->point(k);
+                    geo_point_t test_p1 = c2->point3d(k);
                     // double close_dis = cloud1->get_closest_dis(test_p1);
-                    double close_dis = cluster1->get_closest_dis(test_p1);
+                    double close_dis = c1->get_closest_dis(test_p1);
                     if (close_dis > big_dis_range_cut) {
                         num_outside_points++;
                         if (num_outside_points > 400) break;
@@ -265,25 +380,22 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
                 if (flag_merge && small_cluster_length > 60 * units::cm && pca_ratio < 0.0015) flag_merge = false;
 
                 if (flag_merge) {
-                    to_be_merged_pairs.insert(std::make_pair(cluster1, cluster2));
+                    to_be_merged_pairs.insert(std::make_pair(c1, c2));
 
-                    // std::cout << "BB: " << cluster1->get_length()/units::cm << " " << cluster2->get_length()/units::cm << " " << cluster1->get_center() << " " << cluster2->get_center() << std::endl;
+                    // std::cout << "BB: " << c1->get_length()/units::cm << " " << c2->get_length()/units::cm << std::endl;
 
-                    if (cluster1->get_length() < cluster2->get_length()) {
-                        used_big_clusters.insert(cluster1);
-                    }
-                    else {
-                        used_big_clusters.insert(cluster2);
-                    }
+                    // c2 is always the shorter one (c1 >= c2 by construction above)
+                    used_big_clusters.insert(c2);
                 }
             }
         }
     }
     // LogDebug("clustering big ones " << to_be_merged_pairs.size());
 
-    // merge clusters
-    std::vector<std::set<Cluster *>> merged_clusters;
-    std::set<Cluster *> used_clusters;
+    // merge clusters — all inner sets use cluster_less_functor for deterministic iteration order.
+    using cluster_set_clf = std::set<Cluster *, cluster_less_functor>;
+    std::vector<cluster_set_clf> merged_clusters;
+    std::set<Cluster *, cluster_less_functor> used_clusters;
 
     for (auto it = to_be_merged_pairs.begin(); it != to_be_merged_pairs.end(); it++) {
         Cluster *cluster1 = (*it).first;
@@ -296,9 +408,9 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
         used_clusters.insert(cluster2);
 
         bool flag_new = true;
-        std::vector<std::set<Cluster *>> temp_set;
+        std::vector<cluster_set_clf> temp_set;
         for (auto it1 = merged_clusters.begin(); it1 != merged_clusters.end(); it1++) {
-            std::set<Cluster *> &clusters = (*it1);
+            cluster_set_clf &clusters = (*it1);
             if (clusters.find(cluster1) != clusters.end() || clusters.find(cluster2) != clusters.end()) {
                 clusters.insert(cluster1);
                 clusters.insert(cluster2);
@@ -308,14 +420,14 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
             }
         }
         if (flag_new) {
-            std::set<Cluster *> clusters;
+            cluster_set_clf clusters;
             clusters.insert(cluster1);
             clusters.insert(cluster2);
             merged_clusters.push_back(clusters);
         }
         if (temp_set.size() > 1) {
             // merge them further ...
-            std::set<Cluster *> clusters;
+            cluster_set_clf clusters;
             for (size_t i = 0; i != temp_set.size(); i++) {
                 for (auto it1 = temp_set.at(i).begin(); it1 != temp_set.at(i).end(); it1++) {
                     clusters.insert(*it1);
@@ -329,7 +441,7 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     for (auto it = live_clusters.begin(); it != live_clusters.end(); it++) {
         Cluster *cluster = *it;
         if (used_clusters.find(cluster) == used_clusters.end()) {
-            std::set<Cluster *> temp_clusters;
+            cluster_set_clf temp_clusters;
             temp_clusters.insert(cluster);
             merged_clusters.push_back(temp_clusters);
         }
@@ -338,9 +450,9 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
     // new stuff ...
     std::map<Cluster*, std::vector<std::pair<Cluster*,double>>, cluster_less_functor> results;
     for (auto it = merged_clusters.begin(); it != merged_clusters.end(); it++) {
-        std::set<Cluster *> &cluster_set = (*it);
+        cluster_set_clf &cluster_set = (*it);
         double max_length = 0;
-        Cluster *max_cluster;
+        Cluster *max_cluster = nullptr;
         for (auto it1 = cluster_set.begin(); it1 != cluster_set.end(); it1++) {
             Cluster *temp_cluster = (*it1);
             if (temp_cluster->get_length() > max_length) {
@@ -369,25 +481,78 @@ void WireCell::PointCloud::Facade::clustering_isolated(Grouping& live_grouping)
 
     {
         cluster_connectivity_graph_t g;
-        std::unordered_map<int, int> ilive2desc;  // added live index to graph descriptor
-        std::map<const Cluster*, int> map_cluster_index;
-        for (const Cluster* live : live_grouping.children()) {
-            size_t ilive = map_cluster_index.size();
-            map_cluster_index[live] = ilive;
-            ilive2desc[ilive] = boost::add_vertex(ilive, g);
+        // Use the deterministically-ordered children() vector for vertex indices.
+        const auto live_all = live_grouping.children();
+        // When flash-aware, only merge clusters coincident in matched flash time.
+        // Edges here form a star per group (max_cluster -> each member), so a
+        // per-edge group guard suffices (no transitive bridging).
+        std::map<const Cluster*, int> flash_t0_group;
+        if (use_flash_t0) {
+            flash_t0_group = assign_flash_t0_groups(live_all, flash_t0_window);
+        }
+        std::unordered_map<const Cluster*, int> map_cluster_index;
+        map_cluster_index.reserve(live_all.size());
+        for (size_t ilive = 0; ilive < live_all.size(); ++ilive) {
+            map_cluster_index[live_all[ilive]] = static_cast<int>(ilive);
+            boost::add_vertex(ilive, g);
         }
         for (auto it = results.begin(); it != results.end(); it++) {
             const Cluster* live = it->first;
-            size_t ilive = ilive2desc[map_cluster_index[live]];
             for (const auto& pair : it->second) {
                 const Cluster* live2 = pair.first;
-                size_t ilive2 = ilive2desc[map_cluster_index[live2]];
-                /*auto edge =*/ add_edge(ilive, ilive2, g);
+                if (use_flash_t0 && flash_t0_group.at(live) != flash_t0_group.at(live2)) continue;
+                add_edge(map_cluster_index[live], map_cluster_index[live2], g);
             }
         }
-        cluster_set_t temp_clusters;
-        merge_clusters(g, live_grouping, temp_clusters, "isolated");
+        merge_clusters(g, live_grouping, "isolated");
     }
+
+    // example separation ... 
+    // {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //     for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //         if (!live_clusters.at(iclus)->get_scope_filter(scope)) continue;
+
+    //         auto cc = live_clusters.at(iclus)->get_pcarray("isolated", "perblob");
+    //         // convert span to vector
+    //         std::vector<int> cc_vec(cc.begin(), cc.end());
+    //         // for (const auto& val : cc_vec) {
+    //         //     std::cout << val << " ";
+    //         // }
+    //         // std::cout << std::endl;
+    //         if (cc_vec.size() < 2) continue;
+    //         auto scope = live_clusters.at(iclus)->get_default_scope();
+    //         auto scope_transform = live_clusters.at(iclus)->get_scope_transform(scope);
+    //         // // origi_cluster still have the original main cluster ... 
+    //         // std::cout << "Start: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+    //         auto splits = live_grouping.separate(live_clusters.at(iclus), cc_vec);
+    //         // std::cout << "Mid: " << orig_cluster->kd_blobs().size() << " " << orig_cluster->nchildren() << std::endl;
+
+    //         // Apply the scope filter settings to all new clusters
+    //         for (auto& [id, new_cluster] : splits) {
+    //             new_cluster->set_scope_filter(scope, true);
+    //             new_cluster->set_default_scope(scope);
+    //             new_cluster->set_scope_transform(scope,scope_transform);
+    //         }
+    //     }
+    // }
+
+
+    //         {
+    //     auto live_clusters = live_grouping.children(); // copy
+    //      // Process each cluster
+    //      for (size_t iclus = 0; iclus < live_clusters.size(); ++iclus) {
+    //          Cluster* cluster = live_clusters.at(iclus);
+    //          auto& scope = cluster->get_default_scope();
+    //          std::cout << "Test: " << iclus << " " << cluster->nchildren() << " " << scope.pcname << " " << scope.coords[0] << " " << scope.coords[1] << " " << scope.coords[2] << " " << cluster->get_scope_filter(scope)<< " " << cluster->get_pca().center) << std::endl;
+    //      }
+    //    }
+
+
+
+
+
+
 
     return;
 }

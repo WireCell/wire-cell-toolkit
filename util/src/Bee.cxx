@@ -13,13 +13,13 @@ using namespace WireCell;
         
 std::string Bee::Object::json() const
 {
-    return Persist::dumps(m_data, 0, 6);
+    return Persist::dumps(asJson(), 0, 6);
 }
 
 size_t Bee::Object::hash() const
 {
     std::hash<Configuration> chash;
-    return chash(m_data);
+    return chash(asJson());
 }
 
 Bee::Points::Points()
@@ -27,11 +27,6 @@ Bee::Points::Points()
     detector("");
     algorithm("");
     rse(0,0,0);
-    m_data["x"] = Json::arrayValue;
-    m_data["y"] = Json::arrayValue;
-    m_data["z"] = Json::arrayValue;
-    m_data["q"] = Json::arrayValue;
-    m_data["cluster_id"] = Json::arrayValue;
 }
 
 
@@ -42,11 +37,27 @@ Bee::Points::Points(const std::string& geom,
     detector(geom);
     algorithm(type);
     rse(run,sub,evt);
-    m_data["x"] = Json::arrayValue;
-    m_data["y"] = Json::arrayValue;
-    m_data["z"] = Json::arrayValue;
-    m_data["q"] = Json::arrayValue;
-    m_data["cluster_id"] = Json::arrayValue;
+}
+
+Configuration Bee::Points::asJson() const
+{
+    Configuration data = m_data;
+    auto& jx = data["x"] = Json::arrayValue;
+    auto& jy = data["y"] = Json::arrayValue;
+    auto& jz = data["z"] = Json::arrayValue;
+    auto& jq = data["q"] = Json::arrayValue;
+    auto& jc = data["cluster_id"] = Json::arrayValue;
+    auto& jr = data["real_cluster_id"] = Json::arrayValue;
+    const size_t num = m_q.size();
+    for (size_t ind = 0; ind < num; ++ind) {
+        jx.append(m_x[ind]);
+        jy.append(m_y[ind]);
+        jz.append(m_z[ind]);
+        jq.append(m_q[ind]);
+        jc.append(m_clid[ind]);
+        jr.append(m_real_clid[ind]);
+    }
+    return data;
 }
 
 void Bee::Points::detector(const std::string& geom)
@@ -78,11 +89,12 @@ void Bee::Points::rse(int run, int sub, int evt)
 void Bee::Points::reset(int evt, int sub, int run)
 {
     rse(run,sub,evt);
-    m_data["x"] = Json::arrayValue;
-    m_data["y"] = Json::arrayValue;
-    m_data["z"] = Json::arrayValue;
-    m_data["q"] = Json::arrayValue;
-    m_data["cluster_id"] = Json::arrayValue;
+    m_x.clear();
+    m_y.clear();
+    m_z.clear();
+    m_q.clear();
+    m_clid.clear();
+    m_real_clid.clear();
 }
 
 std::vector<int> Bee::Points::rse() const
@@ -94,44 +106,42 @@ std::vector<int> Bee::Points::rse() const
     };
 }
 
-void Bee::Points::append(const Point& p, double q, int clid)
+void Bee::Points::append(const Point& p, double q, int clid, int real_clid)
 {
     // Here we take the unusual pattern to store a value in explicit units.
-    // Normally, WCT code should NOT do this.  But, we consider m_data to belong
-    // to Bee's domain.
-    m_data["x"].append(p.x()/units::cm);
-    m_data["y"].append(p.y()/units::cm);
-    m_data["z"].append(p.z()/units::cm);
-    m_data["q"].append(q);
-    m_data["cluster_id"].append(clid);
+    // Normally, WCT code should NOT do this.  But, we consider these columns
+    // to belong to Bee's domain.
+    m_x.push_back(p.x()/units::cm);
+    m_y.push_back(p.y()/units::cm);
+    m_z.push_back(p.z()/units::cm);
+    m_q.push_back(q);
+    m_clid.push_back(clid);
+    m_real_clid.push_back(real_clid);
 }
 
 void Bee::Points::append(const Bee::Points& obj)
 {
-    const int num = obj.size();
-    const std::vector<std::string> xyzq = {"x","y","z","q","cluser_id"};
-    for (const auto& key : xyzq) {
-        const auto& arr = obj.m_data[key];
-        for (int ind=0; ind<num; ++ind) {
-            m_data[key].append(arr[ind]);
-        }
-    }
+    m_x.insert(m_x.end(), obj.m_x.begin(), obj.m_x.end());
+    m_y.insert(m_y.end(), obj.m_y.begin(), obj.m_y.end());
+    m_z.insert(m_z.end(), obj.m_z.begin(), obj.m_z.end());
+    m_q.insert(m_q.end(), obj.m_q.begin(), obj.m_q.end());
+    m_clid.insert(m_clid.end(), obj.m_clid.begin(), obj.m_clid.end());
+    m_real_clid.insert(m_real_clid.end(), obj.m_real_clid.begin(), obj.m_real_clid.end());
 }
 
 size_t Bee::Points::size() const
 {
-    return m_data["q"].size();
+    return m_q.size();
 }
 bool Bee::Points::empty() const
 {
-    return m_data["q"].empty();
+    return m_q.empty();
 }
 
 int Bee::Points::back_cluster_id() const
 {
-    int siz = size();
-    if (!siz) { return -1; }
-    return m_data["cluser_id"][siz-1].asInt();
+    if (m_clid.empty()) { return -1; }
+    return m_clid.back();
 }
 
 
@@ -141,14 +151,30 @@ int Bee::Points::back_cluster_id() const
 // array of patches
 // each patch is array of pairs
 // each pair gives (x,y).
-Bee::Patches::Patches(const std::string& name, double tolerance, size_t minpts)
-    : Object(name, Json::arrayValue)
+//
+// When m_tpc >= 0, m_data is instead a wrapper object
+// {"version":2, "tpc":m_tpc, "polygons":<triple-nested array>}
+// matching the wire-cell-bee3 v2 dead-area schema.
+namespace {
+    Json::Value init_patches_data(int tpc) {
+        if (tpc < 0) return Json::Value(Json::arrayValue);
+        Json::Value v(Json::objectValue);
+        v["version"] = 2;
+        v["tpc"] = tpc;
+        v["polygons"] = Json::arrayValue;
+        return v;
+    }
+}
+
+Bee::Patches::Patches(const std::string& name, double tolerance, size_t minpts, int tpc)
+    : Object(name, init_patches_data(tpc))
     , m_tolerance(tolerance)
     , m_minpts(minpts)
+    , m_tpc(tpc)
 {
 
 }
-        
+
 void Bee::Patches::append(double y, double z)
 {
     m_y.push_back(y);
@@ -159,7 +185,11 @@ void Bee::Patches::clear()
 {
     m_y.clear();
     m_z.clear();
-    m_data = Json::arrayValue;
+    if (m_tpc < 0) {
+        m_data = Json::arrayValue;
+    } else {
+        m_data["polygons"] = Json::arrayValue;
+    }
 }
 
 void Bee::Patches::flush()
@@ -218,14 +248,112 @@ void Bee::Patches::flush()
         jpt.append(m_z[ind] / units::cm);
         jpatch.append(jpt);
     }
-    m_data.append(jpatch);
+    if (m_tpc < 0) {
+        m_data.append(jpatch);
+    } else {
+        m_data["polygons"].append(jpatch);
+    }
 
     m_y.clear();
     m_z.clear();
 }
 
-size_t Bee::Patches::size() const { return m_data.size(); }
-bool Bee::Patches::empty() const { return m_data.empty(); }
+size_t Bee::Patches::size() const {
+    return m_tpc < 0 ? m_data.size() : m_data["polygons"].size();
+}
+bool Bee::Patches::empty() const {
+    return m_tpc < 0 ? m_data.empty() : m_data["polygons"].empty();
+}
+
+///// Flashes
+
+namespace {
+    void init_flashes_arrays(Configuration& d)
+    {
+        d["op_t"] = Json::arrayValue;
+        d["op_peTotal"] = Json::arrayValue;
+        d["op_pes"] = Json::arrayValue;
+        d["op_pes_pred"] = Json::arrayValue;
+        d["op_cluster_ids"] = Json::arrayValue;
+        d["apa"] = Json::arrayValue;
+    }
+}
+
+Bee::Flashes::Flashes()
+    : Object("")
+{
+    detector("");
+    rse(0, 0, 0);
+    init_flashes_arrays(m_data);
+}
+
+Bee::Flashes::Flashes(const std::string& geom, const std::string& name,
+                      int run, int sub, int evt)
+    : Object(name)
+{
+    detector(geom);
+    rse(run, sub, evt);
+    init_flashes_arrays(m_data);
+}
+
+void Bee::Flashes::detector(const std::string& geom)
+{
+    m_data["geom"] = geom;
+}
+
+void Bee::Flashes::rse(int run, int sub, int evt)
+{
+    if (run >= 0) m_data["runNo"] = run;
+    if (sub >= 0) m_data["subRunNo"] = sub;
+    if (evt >= 0) m_data["eventNo"] = evt;
+}
+
+void Bee::Flashes::reset(int evt, int sub, int run)
+{
+    rse(run, sub, evt);
+    init_flashes_arrays(m_data);
+}
+
+void Bee::Flashes::append(double t, const std::vector<double>& pes, double peTotal,
+                          const std::vector<int>& cluster_ids,
+                          const std::vector<double>& pes_pred,
+                          int apa)
+{
+    m_data["op_t"].append(t);
+    m_data["op_peTotal"].append(peTotal);
+
+    Json::Value jpes(Json::arrayValue);
+    for (auto v : pes) jpes.append(v);
+    m_data["op_pes"].append(jpes);
+
+    Json::Value jpred(Json::arrayValue);
+    for (auto v : pes_pred) jpred.append(v);
+    m_data["op_pes_pred"].append(jpred);
+
+    Json::Value jcid(Json::arrayValue);
+    for (auto c : cluster_ids) jcid.append(c);
+    m_data["op_cluster_ids"].append(jcid);
+
+    // Legacy dump_light stored the per-flash APA as a string ("0"/"1").
+    m_data["apa"].append(std::to_string(apa));
+}
+
+void Bee::Flashes::set_groups(const std::vector<int>& groups)
+{
+    Json::Value jg(Json::arrayValue);
+    for (int g : groups) jg.append(g);
+    m_data["op_flash_group"] = jg;
+}
+
+size_t Bee::Flashes::size() const
+{
+    return m_data["op_t"].size();
+}
+bool Bee::Flashes::empty() const
+{
+    return m_data["op_t"].empty();
+}
+
 
 ///// Sink
 
@@ -323,16 +451,14 @@ size_t Bee::Sink::write(const Object& obj)
     // WCT stream protocol for actual file.
     {
         const std::string fname = "name " + store_path(obj);
-        
-        // Create a new JSON object and copy original data
-        Json::Value json_data = Json::objectValue;  // Initialize as object
-        const Configuration& orig_data = obj.data();
+
+        // Materialize the object's JSON DOM (for Points this builds the
+        // point arrays from compact columns).
+        Json::Value json_data = obj.asJson();
 
         std::string json;
 
-        // Check if original data is an object and copy it
-        if (orig_data.isObject()) {
-            json_data = orig_data;
+        if (json_data.isObject()) {
             // Add RSE values
             json_data["runNo"] = std::to_string(m_runNo);
             json_data["subRunNo"] = std::to_string(m_subRunNo);
@@ -344,7 +470,7 @@ size_t Bee::Sink::write(const Object& obj)
             // dead area data is an array not an object
             // and does not have RSE values
             // ref: https://www.phy.bnl.gov/twister/bee/set/uboone/imaging/dead-region-2/event/0/channel-deadarea/
-            json = Persist::dumps(orig_data, 0, 6);
+            json = Persist::dumps(json_data, 0, 6);
         }
 
         //const std::string json = obj.json();
@@ -364,4 +490,35 @@ void Bee::Sink::close()
     m_out.flush();
     m_out.pop();
     m_out.clear();
+}
+
+// ---- Bee::ParticleTree ----
+//
+// The serialized form is a bare JSON array, exactly matching the prototype "mc"
+// output read by the Bee viewer.  No object wrapper, no RSE metadata.
+
+Bee::ParticleTree::ParticleTree(const std::string& name)
+{
+    m_name = name;
+    m_data = Json::arrayValue;
+}
+
+void Bee::ParticleTree::reset()
+{
+    m_data = Json::arrayValue;
+}
+
+void Bee::ParticleTree::set_particles(const Configuration& particles_array)
+{
+    m_data = particles_array;
+}
+
+bool Bee::ParticleTree::empty() const
+{
+    return m_data.empty();
+}
+
+size_t Bee::ParticleTree::size() const
+{
+    return m_data.size();
 }

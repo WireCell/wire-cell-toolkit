@@ -42,6 +42,10 @@ WireCell::Configuration FrameFileSource::default_configuration() const
 
     cfg["frame_tags"] = Json::arrayValue;
 
+    // Optional override of the per-frame sampling period.  0 means use
+    // the period stored in the input file.
+    cfg["tick"] = m_tick;
+
     return cfg;
 }
 
@@ -64,6 +68,8 @@ void FrameFileSource::configure(const WireCell::Configuration& cfg)
     for (auto jtag : cfg["frame_tags"]) {
         m_frame_tags.push_back(jtag.asString());
     }
+
+    m_tick = get(cfg, "tick", m_tick);
 }
 
 bool FrameFileSource::is_excluded(const std::string& tag)
@@ -107,15 +113,20 @@ bool FrameFileSource::read()
         return false;
     }
     auto parts = split(m_cur.fname, "_");
-    if (parts.size() != 3) {
+    if (parts.size() < 3) {
         // log->warn("read parse file name failed got {} parts from {}", parts.size(), m_cur.fname);
         return false;
     }
-    auto rparts = split(parts[2], ".");
+    // Filename format: <type>_<tag>_<ident>.<ext>.  The tag may itself contain
+    // underscores (e.g. "lf_noisy"), so any extra middle parts join into the tag.
+    auto rparts = split(parts.back(), ".");
     m_cur.ident = std::atoi(rparts[0].c_str());
     m_cur.okay = true;
     m_cur.type = parts[0];
     m_cur.tag = parts[1];
+    for (size_t i = 2; i + 1 < parts.size(); ++i) {
+        m_cur.tag += "_" + parts[i];
+    }
     m_cur.ext = rparts[1];
     log->debug("read type={} tag={} ident={} ext={} at call={}",
                m_cur.type, m_cur.tag, m_cur.ident, m_cur.ext, m_count);
@@ -335,7 +346,7 @@ IFrame::pointer FrameFileSource::load()
     }
 
     const double time = framelets[0].tickinfo[0];
-    const double tick = framelets[0].tickinfo[1];
+    const double tick = m_tick > 0.0 ? m_tick : framelets[0].tickinfo[1];
 
     auto sframe = std::make_shared<Aux::SimpleFrame>(ident, time, all_traces, tick, cmm);
     for (auto ftag : m_frame_tags) {

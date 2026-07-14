@@ -86,7 +86,11 @@ base {
     },
 
     daq: super.daq {
-        nticks: 3400,
+        nticks: 3427,
+    },
+
+    nf: super.nf {
+        nsamples: $.daq.nticks,
     },
 
     adc: super.adc {
@@ -94,6 +98,10 @@ base {
 	// induction plane: 6k Ohm vs 6k Ohm; collection: 6k Ohm vs 1.2k Ohm
 	//Vref = 1.8 V
 	// induce a RC filter  with tau = 1ms
+        // ADC resolution (bits): restores the default removed from the
+        // shared base params in commit 41e02736 (pre-41e02736 inherited 12).
+        resolution: 12,
+
         baselines: [879.5*wc.millivolt, 879.5*wc.millivolt, 286.0*wc.millivolt],
 
         // check this
@@ -106,9 +114,12 @@ base {
     // in pgrapher/common/ui/wcls/nodes.jsonnet.
     // also, see later overwriting in simparams.jsonnet
     elec: super.elec {
+      // FE gain: restores the default removed from the shared base in
+      // commit 41e02736 (pre-41e02736 inherited 14 mV/fC).
+      gain: 14.0*wc.mV/wc.fC,
       postgain: 1.0, // pulser calibration: 41.649 ADC*tick/1ke
                        // theoretical elec resp (14mV/fC): 36.6475 ADC*tick/1ke
-      shaping: 2.0 * wc.us,
+      shaping: 2.2 * wc.us,
     },
 
     sim: super.sim {
@@ -117,9 +128,9 @@ base {
         fixed: true,
 
         // The "absolute" time (ie, relative to trigger time?) that the lower edge
-        // of final readout tick #0 should correspond to.  This is a
-        // "fixed" notion.
-        local tick0_time = -200*wc.us,
+        // of final readout tick #0 should correspond to.
+        // this is the default value unless overridden with extVar in main
+        tick0_time: -205 * wc.us,
 
         // Open the ductor's gate a bit early.
         local response_time_offset = $.det.response_plane / $.lar.drift_speed,
@@ -128,7 +139,7 @@ base {
         ductor : {
             nticks: $.daq.nticks + response_nticks,
             readout_time: self.nticks * $.daq.tick,
-            start_time: tick0_time - response_time_offset,
+            start_time: $.sim.tick0_time - response_time_offset,
         },
 
         // To counter the enlarged duration of the ductor, a Reframer
@@ -141,7 +152,7 @@ base {
     },
 
     files: {
-        wires: "sbnd-wires-geometry-v0200.json.bz2",
+        wires: "sbnd-wires-geometry-v0206.json.bz2", // new SBND geometry
 
         fields: [ "garfield-sbnd-v1.json.bz2" ],
 

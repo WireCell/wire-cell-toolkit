@@ -1,0 +1,392 @@
+#+title: Examination: DFT and Signal Processing
+#+include: ../../../docs/include-topic.org
+
+* Purpose
+
+This document records code examination findings for the DFT, noise
+modeling, resampling, waveform mapping, and interpolation code in the
+=aux= package.  No code has been modified; findings are documented here
+for review before any changes are made.
+
+Examination date: 2026-04.
+
+* Files Examined
+
+| Source                    | Header                             |
+|---------------------------+------------------------------------|
+| src/DftTools.cxx          | inc/WireCellAux/DftTools.h         |
+| src/FftwDFT.cxx           | inc/WireCellAux/FftwDFT.h          |
+| src/NoiseTools.cxx        | inc/WireCellAux/NoiseTools.h       |
+| src/Resampler.cxx         | inc/WireCellAux/Resampler.h        |
+| src/SamplingHelpers.cxx   | inc/WireCellAux/SamplingHelpers.h  |
+| src/WaveformMap.cxx       | inc/WireCellAux/WaveformMap.h      |
+| src/LinterpFunction.cxx   | inc/WireCellAux/LinterpFunction.h  |
+
+* Algorithm Overview
+
+** DFT Pipeline (DftTools + FftwDFT)
+
+~DftTools~ provides a typed C++ interface on top of the abstract ~IDFT~
+interface.  It supports:
+
+- 1D forward/inverse complex DFT (~fwd~, ~inv~)
+- Real-to-complex (~fwd_r2c~) and complex-to-real (~inv_c2r~) with
+  Hermitian symmetry enforcement via ~hermitian_mirror~.
+- 1D batched transforms on 2D Eigen arrays along a specified axis.
+  The axis convention follows NumPy: axis=0 transforms along rows
+  (each column independently), axis=1 transforms along columns (each
+  row independently).
+- 2D full transforms (both axes).
+- High-level operations: ~convolve~ (FFT-based linear convolution with
+  automatic zero-padding to prevent circular aliasing) and ~replace~
+  (spectral response replacement: =meas * resp2 / resp1=).
+
+~FftwDFT~ is the concrete FFTW3-backed implementation of ~IDFT~.  It
+maintains a per-method static plan cache protected by ~shared_mutex~ for
+thread safety.  Plan lookup uses a shared (read) lock; plan creation
+acquires an exclusive (write) lock with double-checked locking.
+
+For 2D transforms, the FFTW plan parameters are intentionally swapped
+(~fftwf_plan_dft_2d(ncols, nrows, ...)~) to account for Eigen's
+default column-major storage vs. FFTW's row-major assumption.  The
+=doit()= template in =DftTools.cxx= further compensates by swapping
+=(nrows, ncols)= for row-major arrays.
+
+** Noise Characterization and Generation (NoiseTools)
+
+The =Collector= class accumulates spectral statistics from an ensemble
+of time-domain "noise" waveforms:
+
+1. Each waveform is zero-padded (or truncated) to =nsamples= and
+   forward-DFT'd.
+2. Per-frequency-bin, the magnitude (=m_sum=) and squared magnitude
+   (=m_sum2=) are accumulated in double precision.
+3. Optionally (=acs=true=), biased autocorrelation (BAC), unbiased
+   sample autocorrelation (SAC), and power spectral density (PSD) are
+   also accumulated via additional DFT round-trips.
+
+The =Generator= classes produce fluctuated noise waveforms from a sigma
+(Rayleigh parameter) spectrum:
+
+- =GeneratorN=: draws from normal (Gaussian) distribution for
+  real/imaginary parts independently.
+- =GeneratorU=: draws Rayleigh-distributed magnitudes and uniform
+  phases, producing the same statistical properties with uniform
+  random inputs.
+
+Both enforce Hermitian symmetry so that ~inv_c2r~ yields real output.
+
+** Resampling (Resampler)
+
+Implements LMN-based (rational ratio) resampling of frames.  For each
+trace:
+
+1. Compute the rational approximation ratio =Nrat= of =Ts/Tr=.
+2. Pad the waveform to the next multiple of =Nrat= (via
+   =LMN::nbigger=).
+3. Apply configurable padding fill: zero, first-sample, last-sample,
+   or linear interpolation.
+4. Forward FFT, spectral resampling via =LMN::resample=, inverse FFT.
+5. Normalize by =Nr / Ns_pad= ("interpolation interpretation").
+6. Optionally truncate to preserve original duration.
+
+** Waveform Mapping and Interpolation (WaveformMap, LinterpFunction)
+
+=WaveformMap= loads named waveforms from JSON files and wraps each in a
+linear interpolator.  Rebinning queries call the interpolator at
+requested sample points.
+
+=LinterpFunction= provides a configurable IFunction1D backed by
+=linterp<double>=.  It supports both regular grids (start + step) and
+irregular grids (explicit coordinate array).
+
+* Critical Findings
+
+** CRIT-DSP-01: ~replace()~ uses time-domain vectors instead of spectra
+
+- *File*: =src/DftTools.cxx:190-192=
+- *Severity*: Critical
+- *Category*: Bug (wrong computation + out-of-bounds access)
+- *Description*:
+
+  After forward-FFT of all three inputs into complex vectors =cmeas=,
+  =cres1=, =cres2=, the spectral division loop mistakenly uses the
+  original real-valued function parameters =res1= and =res2= instead of
+  the FFT'd complex vectors =cres1= and =cres2=.
+
+  #+begin_src c++
+  // Lines 186-192 of src/DftTools.cxx
+  dft->fwd1d(cmeas.data(), cmeas.data(), size);
+  dft->fwd1d(cres1.data(), cres1.data(), size);
+  dft->fwd1d(cres2.data(), cres2.data(), size);
+
+  for (size_t ind=0; ind<size; ++ind) {
+      cmeas[ind] *= res2[ind]/res1[ind];   // BUG: should be cres2/cres1
+  }
+  #+end_src
+
+  This has two consequences:
+
+  1. *Wrong domain*: The multiplication uses time-domain values where
+     frequency-domain values are needed.  The documented intent
+     (=meas * resp2 / resp1= in frequency space) is not achieved.
+
+  2. *Out-of-bounds access*: =size= is computed as
+     =sizes[0] + sizes[1] + sizes[2] - min(sizes) - 1= which is larger
+     than any individual input.  When =ind >= res1.size()= or
+     =ind >= res2.size()=, the access is out of bounds (undefined
+     behavior).
+
+  Compare with the correct pattern in =convolve()= (line 160-162) which
+  properly uses the FFT'd =cin1= and =cin2=.
+
+- *Impact*: Produces incorrect spectral replacement results.
+  Out-of-bounds reads corrupt computation or crash.
+- *Suggested Remediation*: Change line 191 to
+  =cmeas[ind] *= cres2[ind] / cres1[ind];=
+- *Testing*: The existing =test_dfttools.cxx= should be extended to
+  include a test for =replace()= that verifies round-trip correctness,
+  e.g., replacing a response with itself should yield the original
+  measurement (up to numerical noise).
+
+** CRIT-DSP-02: Division by zero in =replace()= spectral division
+
+- *File*: =src/DftTools.cxx:191=
+- *Severity*: Critical
+- *Category*: Bug (numerical)
+- *Description*:
+
+  Even after fixing CRIT-DSP-01, the corrected line
+  =cmeas[ind] *= cres2[ind] / cres1[ind]= performs unprotected complex
+  division.  If any frequency bin of =cres1= is zero (or near-zero due
+  to zero-padding or a response with nulls), the result is NaN/Inf
+  which silently propagates through subsequent processing.
+
+  The header documentation (=DftTools.h:99-113=) describes this as
+  "response replacement" but provides no guidance on zero-response
+  handling.
+
+- *Impact*: NaN/Inf corruption in output waveforms.
+- *Suggested Remediation*: Add epsilon-based protection or a
+  regularization threshold.  For example:
+
+  #+begin_src c++
+  for (size_t ind=0; ind<size; ++ind) {
+      auto denom = cres1[ind];
+      if (std::abs(denom) < epsilon) {
+          cmeas[ind] = 0;  // or skip
+      } else {
+          cmeas[ind] *= cres2[ind] / denom;
+      }
+  }
+  #+end_src
+
+* Moderate Findings
+
+** MOD-DSP-01: FFTW plan cache never freed
+
+- *File*: =src/FftwDFT.cxx:90-91= (and similar at lines 103, 151, 164,
+  188, 201, 242, 274)
+- *Severity*: Moderate
+- *Category*: Resource leak
+- *Description*:
+
+  Each FFTW method maintains a =static plan_map_t= (hash map of FFTW
+  plans).  Plans are created lazily but never destroyed via
+  =fftwf_destroy_plan()=.  For typical WCT processing the plan count is
+  small and bounded, so this is benign in practice.  However, for
+  long-running processes with varying transform sizes, plan memory
+  accumulates without bound.
+
+- *Impact*: Minor memory leak; negligible for typical workloads.
+- *Suggested Remediation*: Consider adding a static cleanup function
+  or =atexit= handler.  Alternatively, document the "create once"
+  assumption.
+
+** MOD-DSP-02: FFTW 2D parameter order appears swapped but is intentional
+
+- *File*: =src/FftwDFT.cxx:195,209=
+- *Severity*: Moderate (documentation/clarity)
+- *Category*: Maintainability
+- *Description*:
+
+  #+begin_src c++
+  // Line 195
+  return fftwf_plan_dft_2d(ncols, nrows, src, dst, dir, ...);
+  #+end_src
+
+  FFTW's =fftwf_plan_dft_2d(n0, n1, ...)= expects =n0= as the
+  slowest-varying (row) dimension in row-major layout.  Passing
+  =(ncols, nrows)= looks wrong but is intentional: it compensates for
+  Eigen's default column-major storage where the fastest-varying
+  dimension is rows.  The =doit()= template in =DftTools.cxx:92-106=
+  further handles row-major arrays by swapping the arguments.
+
+  This is correct but dangerously subtle.  A future maintainer unfamiliar
+  with the column-major compensation might "fix" it and introduce a real
+  bug.
+
+- *Impact*: Maintenance risk.
+- *Suggested Remediation*: Add a comment explaining the intentional
+  swap and its relationship to Eigen storage order.
+
+** MOD-DSP-03: =Resampler= normalization factor uses padded size
+
+- *File*: =src/Resampler.cxx:125=
+- *Severity*: Moderate
+- *Category*: Potential numerical error
+- *Description*:
+
+  #+begin_src c++
+  double norm = wave.size() / (double)Ns_pad;
+  #+end_src
+
+  The normalization uses =Ns_pad= (the padded input size) in the
+  denominator.  When padding is significant (e.g., =Ns_pad >> Ns_orig=),
+  the normalization factor differs from the true interpolation ratio
+  =Nr / Ns_orig=.  This is labeled "interpolation interpretation" but
+  the choice of =Ns_pad= vs =Ns_orig= affects amplitude accuracy
+  proportional to the padding fraction.
+
+- *Impact*: Amplitude scaling error proportional to padding fraction.
+- *Suggested Remediation*: Verify whether =Ns_orig= or =Ns_pad= is
+  the correct denominator for the intended spectral interpolation
+  normalization.
+
+** MOD-DSP-04: =WaveformMap= rebinning samples at bin edge, not center
+
+- *File*: =src/WaveformMap.cxx:44-45=
+- *Severity*: Moderate
+- *Category*: Potential numerical error
+- *Description*:
+
+  #+begin_src c++
+  for (size_t ind=0; ind<nbins; ++ind) {
+      ret[ind] = interp(tbins.edge(ind));  // samples at left edge
+  }
+  #+end_src
+
+  The rebinning loop evaluates the interpolator at the left bin edge
+  rather than the bin center.  For steeply varying waveforms, this
+  introduces a systematic half-bin time offset.
+
+- *Impact*: Half-bin time shift in rebinned output.
+- *Suggested Remediation*: Use bin center:
+  =interp((tbins.edge(ind) + tbins.edge(ind+1)) / 2.0)= or equivalent.
+
+* Minor Findings
+
+** MIN-DSP-01: Hard-coded Pi value in NoiseTools
+
+- *File*: =src/NoiseTools.cxx:106,243=
+- *Severity*: Minor
+- *Category*: Code quality
+- *Description*:
+
+  #+begin_src c++
+  // Line 106
+  const double norm = sqrt((2.0*m_nsamples)/(3.14159265*m_nticks));
+  // Line 243
+  float ang = 2 * 3.141592653589793 * uniforms.at(ind+nhalf);
+  #+end_src
+
+  Two different precision levels of Pi are hard-coded (10 vs 16 digits).
+  Should use =M_PI= or a project-level constant for consistency.
+
+- *Impact*: Negligible numerical difference but inconsistent style.
+- *Suggested Remediation*: Replace with =M_PI= throughout.
+
+** MIN-DSP-02: Variable shadowing in =fill_2dpcs()=
+
+- *File*: =src/SamplingHelpers.cxx:62-72=
+- *Severity*: Minor
+- *Category*: Code quality / maintainability
+- *Description*:
+
+  #+begin_src c++
+  for (size_t ind=0; ind<angles.size(); ++ind) {     // outer
+      const double angle = angles[ind];
+      for (size_t ind=0; ind<npoints; ++ind) {        // inner: SHADOWS outer
+          x2d[ind] = xx;
+          y2d[ind] = cos(angle) * zz - sin(angle) * yy;
+      }
+      const auto xname = String::format(pattern, ind, 'x');  // outer ind
+      ...
+  }
+  #+end_src
+
+  The inner loop reuses the name =ind=, shadowing the outer loop
+  variable.  In C++, the inner =ind= goes out of scope after the inner
+  loop, so line 72 correctly uses the outer =ind=.  This is valid but
+  highly confusing and prone to maintenance errors.
+
+- *Impact*: No runtime bug, but significant confusion risk.
+- *Suggested Remediation*: Rename the inner loop variable (e.g.,
+  =ipt=).
+
+** MIN-DSP-03: =LinterpFunction= does not validate coord/value size match
+
+- *File*: =src/LinterpFunction.cxx:23-28=
+- *Severity*: Minor
+- *Category*: Robustness
+- *Description*:
+
+  When using irregular-grid mode, the code loops over =values.size()=
+  entries but indexes into =coords= without checking that
+  =coords.size() >= values.size()=.  A size mismatch would cause
+  out-of-bounds access.
+
+- *Impact*: Crash on malformed configuration.
+- *Suggested Remediation*: Add assertion or throw on size mismatch.
+
+** MIN-DSP-04: =Resampler= casts float to int before size_t
+
+- *File*: =src/Resampler.cxx:129=
+- *Severity*: Minor
+- *Category*: Robustness
+- *Description*:
+
+  #+begin_src c++
+  const size_t Nr_unpadded = (int)(Ns_orig * (Ts / Tr));
+  #+end_src
+
+  The intermediate cast to =int= before assignment to =size_t= truncates
+  toward zero rather than rounding.  If the floating-point product is
+  just below an integer (e.g., 99.9999999 due to FP arithmetic),
+  truncation yields one less sample than expected.
+
+- *Impact*: Potential off-by-one in output waveform length.
+- *Suggested Remediation*: Use =std::lround()= or add 0.5 before
+  truncation.
+
+* Efficiency Observations
+
+** EFF-DSP-01: =DftTools= array transforms copy to normalize storage order
+
+=src/DftTools.cxx:67,76=: The 1D-batched =fwd()= and =inv()= functions
+start with =complex_array_t ret = arr= to get a guaranteed storage
+layout.  This is a full copy of the array.  For very large arrays, this
+could be avoided if the IDFT interface were storage-order-aware, but the
+current approach trades one copy for correctness and simplicity.
+
+** EFF-DSP-02: =convolve()= and =replace()= allocate three complex vectors
+
+=src/DftTools.cxx:150,178=: Each call allocates three zero-initialized
+complex vectors of padded size.  For repeated convolutions (e.g., in a
+processing pipeline), pre-allocated workspace would avoid per-call
+allocation overhead.
+
+** EFF-DSP-03: FFTW uses =FFTW_ESTIMATE= planning
+
+=src/FftwDFT.cxx=: All plans use =FFTW_ESTIMATE= which selects a
+heuristic algorithm without benchmarking.  For production workloads
+where the same transform sizes repeat many times, =FFTW_MEASURE= or
+=FFTW_PATIENT= would produce faster plans at the cost of longer initial
+planning time.
+
+** EFF-DSP-04: =NoiseTools::Collector= always accumulates both sum and sum2
+
+=src/NoiseTools.cxx:59-64=: The =add_safe= method always computes and
+stores both =m_sum= (linear magnitude) and =m_sum2= (squared
+magnitude), even if the caller will only use one of them.  For large
+ensembles this doubles the per-waveform work unnecessarily.

@@ -67,8 +67,11 @@ namespace WireCell {
         // Return the time span of this slice
         virtual double span() const = 0;
 
-        // The activity in the form of a channel/value map;
-        virtual map_t activity() const = 0;
+        // The activity in the form of a channel/value map.  Returned by
+        // const reference: callers that need a mutable copy must copy
+        // explicitly.  (Hot imaging paths call this per slice per cluster;
+        // the previous by-value return copied the whole map each call.)
+        virtual const map_t& activity() const = 0;
     };
 }  // namespace WireCell
 

@@ -107,7 +107,7 @@ local wc = import "wirecell.jsonnet";
         baselines: [900*wc.millivolt,900*wc.millivolt,200*wc.millivolt],
 
         // The resolution (bits) of the ADC
-        resolution: 12,
+        // resolution: 14, // read from fcl
 
         // The voltage range as [min,max] of the ADC, eg min voltage
         // counts 0 ADC, max counts 2^resolution-1.
@@ -117,7 +117,7 @@ local wc = import "wirecell.jsonnet";
     // Parameters having to do with the front end electronics
     elec : {
         // The FE amplifier gain in units of Voltage/Charge.
-        gain : 14.0*wc.mV/wc.fC,
+        // gain : 14.0*wc.mV/wc.fC, // read from fcl
 
         // The shaping (aka peaking) time of the amplifier shaper.
         shaping : 2.0*wc.us,
@@ -245,9 +245,6 @@ local wc = import "wirecell.jsonnet";
         // This file gives per-channel calibrated responses.  See
         // "wirecell-sigproc channel-response" for one converter.
         chresp: null, 
-
-        // The sigproc DNNROI model file. 
-        dnnroi: "unet-l23-cosmic500-e50.ts",
     },
 }
 

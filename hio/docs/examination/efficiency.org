@@ -1,0 +1,222 @@
+#+title: Efficiency Examination — wire-cell-toolkit/hio
+
+* 1. Redundant Full-Array Copy for Row-Major Conversion
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 292-301
+
+*Issue*: Eigen3 defaults to column-major storage, but HDF5 expects row-major
+(C-order) data. The code handles this by creating a full copy:
+
+#+begin_src cpp
+// Float path:
+using ROWF = Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+ROWF farr = arr;   // full copy: column-major -> row-major
+H5Dwrite(dset, dtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, farr.data());
+
+// Digitize path:
+using ROWI = Eigen::Array<int16_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+ROWI sarr = arr.cast<short>();  // copy + cast
+#+end_src
+
+For a typical MicroBooNE frame (8256 channels x 6000 ticks), this is:
+- Float path: ~190 MB temporary allocation + element-by-element copy
+- Digitize path: ~95 MB temporary allocation + cast + copy
+
+*Suggestion*: Construct ~arr~ as row-major from the start:
+#+begin_src cpp
+using RowMajorArray = Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+RowMajorArray arr = RowMajorArray::Zero(nrows, ncols) + m_baseline;
+#+end_src
+
+This eliminates one full-array copy. The ~Aux::fill()~ function operates on
+individual traces and should work regardless of storage order. (Needs
+verification that ~Aux::fill~ accepts row-major arrays -- if it requires
+~array_xxf~ specifically, an overload or template may be needed.)
+
+
+* 2. Baseline Addition via Full-Array Operation
+
+*File*: ~src/HDF5FrameTap.cxx~, line 222
+
+#+begin_src cpp
+Array::array_xxf arr = Array::array_xxf::Zero(nrows, ncols) + m_baseline;
+#+end_src
+
+This performs: (1) allocate and zero-fill ~190 MB, then (2) add ~m_baseline~
+to every element. When ~m_baseline == 0~ (the default), step (2) is a wasted
+full-array traversal.
+
+*Suggestion*: Use a conditional:
+#+begin_src cpp
+Array::array_xxf arr = (m_baseline == 0.0f)
+    ? Array::array_xxf::Zero(nrows, ncols)
+    : Array::array_xxf::Constant(nrows, ncols, m_baseline);
+#+end_src
+
+Or simply use ~Constant()~ unconditionally (it handles zero correctly).
+
+*Impact*: Minor. One extra pass over ~190 MB. Dwarfed by I/O and compression
+time, but trivial to fix.
+
+
+* 3. Scale/Offset Applied Unconditionally
+
+*File*: ~src/HDF5FrameTap.cxx~, line 224
+
+#+begin_src cpp
+arr = arr * m_scale + m_offset;
+#+end_src
+
+When ~m_scale == 1.0~ and ~m_offset == 0.0~ (the defaults), this is a no-op
+that still traverses the entire array twice (multiply, then add), creating a
+temporary and writing back.
+
+*Suggestion*: Guard with a condition:
+#+begin_src cpp
+if (m_scale != 1.0f || m_offset != 0.0f) {
+    arr = arr * m_scale + m_offset;
+}
+#+end_src
+
+*Impact*: Minor. Saves ~two passes over ~190 MB in the common default case.
+
+
+* 4. Verbose Logging via =stringstream= on Every Frame
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 190-204
+
+*Issue*: On every frame, the code constructs a detailed log message by
+iterating over all traces, frame tags, and trace tags using a ~stringstream~:
+
+#+begin_src cpp
+std::stringstream ss;
+ss << "HDF5FrameTap: see frame #" << inframe->ident() << " with "
+   << inframe->traces()->size() << " traces with frame tags:";
+for (auto t : inframe->frame_tags()) { ss << " \"" << t << "\""; }
+// ... etc
+log->debug(ss.str());
+#+end_src
+
+This constructs the full string even when the log level is above debug (the
+message is discarded). The ~spdlog~ library supports deferred formatting that
+avoids this, but the manual ~stringstream~ approach bypasses it.
+
+*Suggestion*: Either guard with a log level check:
+#+begin_src cpp
+if (log->should_log(spdlog::level::debug)) { ... }
+#+end_src
+Or replace with the existing ~taginfo()~ method as the fixme comment suggests.
+
+*Impact*: Minor per frame, but measurable if thousands of frames are
+processed.
+
+
+* 5. No HDF5 Resource Reuse Across Tags
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 230-314
+
+*Issue*: For each trace tag within a frame, the code creates and destroys a
+full set of HDF5 property lists (~lcpl~, ~dcpl~) from scratch:
+
+#+begin_src cpp
+for (auto jtag : m_cfg["trace_tags"]) {
+    // ... creates lcpl, dcpl, dspace, dtype, dset for frame
+    // ... creates dspace, dtype, dset for channels
+    // ... creates dspace, dtype, dset for tickinfo
+}
+#+end_src
+
+The ~lcpl~ (link creation property list) and ~dcpl~ (dataset creation property
+list) are identical across tags and could be created once before the loop and
+reused.
+
+*Suggestion*: Hoist ~lcpl~ and ~dcpl~ creation out of the tag loop. Create
+them once, reuse for all tags and datasets.
+
+*Impact*: Negligible for typical use (1-3 tags), but cleaner.
+
+
+* 6. Channel Array Stored Uncompressed
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 316-331
+
+*Issue*: The channel array (and tickinfo) are written without compression or
+chunking, even when gzip is configured. For a MicroBooNE detector with 8256
+channels, the channel array is ~32 KB uncompressed. Since channel IDs are
+often sequential or nearly sequential integers, they compress extremely well.
+
+*Impact*: Negligible in absolute terms (~32 KB per tag per frame), but
+inconsistent with the compression intent.
+
+
+* 7. Compression/Chunk Benchmark Insights
+
+From the existing benchmark data in ~docs/frame-npz-to-hio.org~:
+
+** ADC (digitized) data
+- *No compression* (gz=0): ~30 MB, ~0.27s -- baseline
+- *gz=1, chunk=256*: ~17 MB (43% reduction), ~0.41s -- best time/size trade-off
+- *gz=5, chunk=256*: ~9.4 MB (69% reduction), ~0.89s -- good for archival
+- *gz=9, chunk=256*: ~9.5 MB (68% reduction), ~3.31s -- diminishing returns, 8x slower than gz=5 for same size
+
+** Signal (float) data
+- *No compression* (gz=0): ~59 MB, ~0.29s
+- *gz=1, chunk=64*: ~2.1 MB (96% reduction!), ~0.33s -- signal data is mostly zeros, compresses extremely well
+- *gz=5+*: Marginal improvement over gz=1 for signal data
+
+** Chunk size effects
+- Chunk=32 is consistently slower than chunk=64+ for similar or worse compression
+- Chunk=128 to 512 show diminishing returns
+- *Chunk=0 forces no compression* regardless of gzip setting (by design)
+
+** Recommendations from benchmarks
+- For ADC data: gz=3-5 with chunk=128-256 offers the best time/space balance
+- For signal data: gz=1 with chunk=64+ is sufficient (data is sparse)
+- gz=9 is almost never worth the CPU cost
+
+
+* 8. Full Eigen Array Allocated Even for Sparse Data
+
+*File*: ~src/HDF5FrameTap.cxx~, line 222
+
+*Issue*: The code always allocates a dense ~nrows x ncols~ array, even when
+the trace data is sparse (many channels with no signal). For signal data
+that is 96% zeros (as shown in benchmarks), this means ~190 MB of mostly-zero
+memory is allocated, filled, transformed, copied to row-major, and then
+compressed.
+
+A sparse representation (e.g., CSR format) could be more memory-efficient for
+signal data. However, this would require a different HDF5 storage format and
+would break compatibility with the current reader (~frame-npz-to-hio.py~).
+
+*Impact*: Medium for memory usage, but the dense format is standard for
+detector data and the compression handles storage efficiency. This is more of
+a design trade-off than a bug.
+
+
+* 9. Configuration Parsed from JSON on Every Frame
+
+*File*: ~src/HDF5FrameTap.cxx~, lines 183-185, 218-219
+
+*Issue*: Several configuration values are re-read from the JSON config on
+every frame call:
+
+#+begin_src cpp
+m_cfg["trace_tags"]                         // line 183
+m_cfg["trace_tags"][0] = "";                // line 185 -- mutates config!
+get(m_cfg, "tick0", tbinmm.first)           // line 218
+get(m_cfg, "nticks", tbinmm.second - tbin)  // line 219
+#+end_src
+
+These values don't change between frames. More concerning, line 185 mutates
+~m_cfg~ (adding an empty string tag) on every call when ~trace_tags~ is empty.
+After the first call, ~trace_tags~ will have one element ~""~, so subsequent
+calls skip the mutation -- but this is an unnecessary side-effect pattern.
+
+*Suggestion*: Parse all config once in ~configure()~ and store as member
+variables (as is already done for ~m_digitize~, ~m_baseline~, ~m_scale~,
+~m_offset~, ~m_gzip~, ~m_chunk~). The code itself has a ~fixme~ comment about
+this on line 164.
+
+*Impact*: Minor per frame (JSON access is fast), but the config mutation is a
+code smell.

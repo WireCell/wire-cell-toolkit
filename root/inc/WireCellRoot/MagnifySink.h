@@ -39,8 +39,10 @@ namespace WireCell {
             IAnodePlane::pointer m_anode;
 
             int m_nrebin;
+            bool m_geo_written{false};
             void create_file();
             void do_shunt(TFile* output_tf);
+            void write_geo_tree(TFile* output_tf);
 
             Log::logptr_t log;
         };

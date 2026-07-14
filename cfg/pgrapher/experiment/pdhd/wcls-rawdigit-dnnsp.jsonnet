@@ -25,7 +25,7 @@ local reality = std.extVar('reality');
 local sigoutform = std.extVar('signal_output_form');  // eg "sparse" or "dense"
 
 local wc = import 'wirecell.jsonnet';
-local g = import 'pgrapher/common/pgraph.jsonnet'; // FIXME: use system-wide pgraph.jsonnet
+local g = import 'pgraph.jsonnet';
 
 local raw_input_label = std.extVar('raw_input_label');  // eg "daq"
 
@@ -276,12 +276,12 @@ local hio_dnn = [g.pnode({
     ];
 
 
-local dnnroi = import 'pgrapher/experiment/pdhd/dnnroi.jsonnet';
+local dnnroi = import 'pgrapher/experiment/pdhd/dnnroi_pp.jsonnet';
 local ts = {
     type: "TorchService",
     name: "dnnroi",
     data: {
-        model: "ts-model/unet-cosmic390-newwc-depofluxsplat-pdhd.ts",
+        model: "dnnroi/pdhd/pipe_distill_transformer_6ch.ts",
         device: "cpu", // "gpucpu",
         concurrency: 1,
     },

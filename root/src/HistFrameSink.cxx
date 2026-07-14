@@ -108,17 +108,20 @@ bool Root::HistFrameSink::operator()(const IFrame::pointer& frame)
         hist->SetXTitle("time [us]");
         hist->SetYTitle("channel");
 
+        const int tbin_offset = *tbmm.first;  // min tbin across all traces in this plane
         double qtot = 0;
         int nbins_tot = 0;
         for (auto& trace : traces) {
-            double fch = trace->channel() + 0.5;  // make sure we land in bin-center.
+            int ch = trace->channel();
             int tbin = trace->tbin();
             auto& charge = trace->charge();
             int nbins = charge.size();
             nbins_tot += nbins;
+            int ybin = ch - chmin + 1;  // ROOT bin (1-based)
             for (int ibin = 0; ibin < nbins; ++ibin) {
-                const double t = t0 + (tick) * (tbin + ibin + 0.5);  // 0.5 to land in bin-center
-                hist->Fill(t / units::us, fch, charge[ibin] / m_units);
+                int xbin = (tbin + ibin) - tbin_offset + 1;  // ROOT bin (1-based)
+                double val = charge[ibin] / m_units;
+                hist->SetBinContent(xbin, ybin, val + hist->GetBinContent(xbin, ybin));
                 qtot += charge[ibin];
             }
         }

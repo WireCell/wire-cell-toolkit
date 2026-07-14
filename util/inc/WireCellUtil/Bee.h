@@ -53,6 +53,13 @@ namespace WireCell::Bee {
 
     public:
 
+        virtual ~Object() = default;
+
+        /// Return the full JSON DOM for serialization.  Subclasses that hold
+        /// bulk content outside of m_data (eg Points) override this to
+        /// materialize it on demand.
+        virtual Configuration asJson() const { return m_data; }
+
         /// Return self as a JSON string
         std::string json() const;
 
@@ -63,16 +70,27 @@ namespace WireCell::Bee {
         /// identifies a Bee class of data (eg "clusters").
         std::string name() const { return m_name; }
 
-        // Method to get JSON data
+        // Method to get JSON data.  Note: for Points this holds only the
+        // metadata; the point arrays appear via asJson().
         Configuration& data() { return m_data; }
         const Configuration& data() const { return m_data; }
     };
 
     /// A Bee "object" represents a set of 3D points with attributes.  It maps
     /// to one Bee JSON file.  The "type" is used as the Object name.
+    ///
+    /// Points are held in compact columns; the JSON arrays are materialized
+    /// only by asJson() (ie, at serialization time).  A Json::Value costs
+    /// ~300 B per point vs ~44 B here, and busy events hold millions of
+    /// points across many live Points objects.
     class Points : public Object {
 
+        std::vector<double> m_x, m_y, m_z, m_q;
+        std::vector<int> m_clid, m_real_clid;
+
     public:
+
+        Configuration asJson() const override;
 
         /// Default constructor sets geom and type to empty.  This will not make
         /// Bee happy but it is okay if this Points is an intermediate object
@@ -103,7 +121,7 @@ namespace WireCell::Bee {
         std::vector<int> rse() const;
 
         /// Add a WCT point.  Note, p is expected to be in usual WCT system-of-units.
-        void append(const Point& p, double q=0, int clid=0);
+        void append(const Point& p, double q=0, int clid=0, int real_clid=0);
 
         /// Simply append obj's x,y,z,q,cluster_id arrays to this.
         void append(const Points& obj);
@@ -122,6 +140,7 @@ namespace WireCell::Bee {
         std::vector<double> m_y, m_z; // a buffered patch in the making
         double m_tolerance{0};
         size_t m_minpts{3};        // at least a triangle
+        int m_tpc{-1};             // -1 = legacy bare-array JSON; >=0 = {version:2, tpc, polygons}
     public:
 
         /// Create a named patches.  A point is ignored if it is withing
@@ -129,8 +148,12 @@ namespace WireCell::Bee {
         /// Tolerance must be provided in WCT system of units.  For a patch to
         /// be considered it must have at least minpts number of points after
         /// tolerance filtering is applied.
+        /// If tpc >= 0, the serialized JSON is the wire-cell-bee3 v2 wrapper
+        /// {"version":2, "tpc":tpc, "polygons":[...]} (see wire-cell-bee3
+        /// docs/dead-area.md).  Default (tpc=-1) keeps the legacy bare-array
+        /// JSON format.
         explicit Patches(const std::string& name, double tolerance=0*units::mm,
-                         size_t minpts=3);
+                         size_t minpts=3, int tpc=-1);
         
         /// Append a single point to the current patch.
         void append(double y, double z);
@@ -156,6 +179,79 @@ namespace WireCell::Bee {
         void clear();
 
 
+    };
+
+
+    /// Represents a hierarchical particle-flow tree for the Bee viewer.
+    ///
+    /// Matches the prototype "mc" JSON format exactly.  The serialized form is a
+    /// bare JSON array (no object wrapper), where each element is a jsTree node:
+    ///   { "id":N, "text":"mu-  214 MeV",
+    ///     "data":{"start":[x,y,z],"end":[x,y,z]},
+    ///     "children":[...] }
+    /// Leaf nodes (empty children) also carry "icon":"jstree-file".
+    ///
+    /// The Bee sink writes this array verbatim under data/{index}/{index}-mc.json.
+    class ParticleTree : public Object {
+    public:
+        ParticleTree() = default;
+        explicit ParticleTree(const std::string& name);
+
+        /// Replace the entire particle array with a pre-built JSON array.
+        void set_particles(const Configuration& particles_array);
+
+        void reset();
+
+        bool empty() const;
+        size_t size() const;
+    };
+
+
+    /// A Bee "op" object holds the optical flash / charge-light matching
+    /// display: per flash, the measured per-channel PE, total PE and time, plus
+    /// (for matched flashes) the matched charge cluster id(s) and the model's
+    /// predicted per-channel PE.  It maps to one Bee JSON file (conventionally
+    /// named "op").  Schema (arrays are parallel, one entry per display row):
+    ///   { runNo, subRunNo, eventNo, geom,
+    ///     op_t:[t_us], op_peTotal:[sumPE], op_pes:[[pe_ch]],
+    ///     op_pes_pred:[[pred_ch]], cluster_id:[[clid]],
+    ///     op_nomatching_cluster_ids:[] }
+    /// An unmatched flash is one row with empty cluster_id / op_pes_pred.
+    /// Optionally an op_flash_group:[gid] array (via set_groups) ties together
+    /// the rows of one ±80 ns TPC0/TPC1 flash coincidence for joint display.
+    class Flashes : public Object {
+    public:
+        Flashes();
+        /// Construct with metadata.  "name" is the Bee file name (default "op").
+        Flashes(const std::string& geom, const std::string& name = "op",
+                int run = 0, int sub = 0, int evt = 0);
+
+        void detector(const std::string& geom);
+
+        /// Set the run/subrun/event numbers.
+        void rse(int run, int sub, int evt);
+
+        /// Drop arrays and (re)set the e/s/r numbers.  If sub or run are
+        /// negative, any previous value is kept.
+        void reset(int evt, int sub = -1, int run = -1);
+
+        /// Append one display row: a flash with time t (in microseconds), the
+        /// measured per-channel PE vector and its total, the matched cluster
+        /// id(s) (empty for an unmatched flash), the predicted per-channel PE
+        /// (empty for an unmatched flash) and the flash's APA (anode) number.
+        void append(double t, const std::vector<double>& pes, double peTotal,
+                    const std::vector<int>& cluster_ids,
+                    const std::vector<double>& pes_pred,
+                    int apa);
+
+        /// Optionally attach a per-flash "op_flash_group" array (one entry per
+        /// appended row, same order).  Flashes sharing a group id are the ±80 ns
+        /// TPC0/TPC1 coincidence the Bee viewer shows together.  Not written
+        /// unless this is called, so existing op JSON stays bit-identical.
+        void set_groups(const std::vector<int>& groups);
+
+        size_t size() const;
+        bool empty() const;
     };
 
 

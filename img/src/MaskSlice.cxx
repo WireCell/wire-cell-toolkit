@@ -5,6 +5,8 @@
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/PlaneTools.h"
 
+#include <unordered_set>
+
 // Test to see if we can make slice time absolute
 #undef SLICE_START_TIME_IS_RELATIVE
 
@@ -217,6 +219,9 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
 {
     log->debug("call={} input frame: {}", m_count++, Aux::taginfo(in));
 
+    // Precompute sets for O(1) plane membership lookup in hot loops
+    const std::unordered_set<int> active_planes_set(m_active_planes.begin(), m_active_planes.end());
+
     const double tick = in->tick();
     const double span = tick * m_tick_span;
 
@@ -300,7 +305,7 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
         }
         IChannel::pointer ich = m_anode->channel(chid);
         auto planeid = ich->planeid();
-        if (std::find(m_active_planes.begin(),m_active_planes.end(),planeid.index())==m_active_planes.end()) {
+        if (active_planes_set.find(planeid.index()) == active_planes_set.end()) {
             continue;
         }
         const auto& charge = trace->charge();

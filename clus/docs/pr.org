@@ -1,0 +1,6 @@
+#+title: Pattern Recognition
+
+* to write
+
+- [ ] generalities
+- [ ] warning about non-ordering of segment edges

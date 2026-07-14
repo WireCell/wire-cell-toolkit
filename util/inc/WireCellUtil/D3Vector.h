@@ -136,7 +136,9 @@ namespace WireCell {
         }
 
         /// Return the magnitude of this vector.
-        T magnitude() const { return std::sqrt(x() * x() + y() * y() + z() * z()); }
+        T magnitude() const { return std::sqrt(magnitude2()); }
+        /// Return the magnitude-squared of this vector.
+        T magnitude2() const { return x() * x() + y() * y() + z() * z(); }
 
         /// Return a normalized vector in the direction of this vector.
         D3Vector norm() const
@@ -165,10 +167,11 @@ namespace WireCell {
 
         bool operator<(const D3Vector& rhs) const
         {
-            if (z() < rhs.z()) return true;
-            if (y() < rhs.y()) return true;
             if (x() < rhs.x()) return true;
-            return false;
+            else if (x() > rhs.x()) return false;
+            else if (y() < rhs.y()) return true;
+            else if (y() > rhs.y()) return false;
+            else return z() < rhs.z();
         }
 
         D3Vector& operator+=(const D3Vector& other)

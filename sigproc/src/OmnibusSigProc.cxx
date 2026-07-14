@@ -18,6 +18,9 @@
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/FFTBestLength.h"
 #include "WireCellUtil/Waveform.h"
+#include "WireCellUtil/NumpyHelper.h"
+
+#include <cmath>
 
 #include "WireCellUtil/NamedFactory.h"
 
@@ -30,8 +33,10 @@ using namespace WireCell;
 using namespace WireCell::SigProc;
 
 using WireCell::Aux::DftTools::fwd;
+using WireCell::Aux::DftTools::fwd_inplace;
 using WireCell::Aux::DftTools::fwd_r2c;
 using WireCell::Aux::DftTools::inv;
+using WireCell::Aux::DftTools::inv_inplace;
 using WireCell::Aux::DftTools::inv_c2r;
 
 OmnibusSigProc::OmnibusSigProc(    )
@@ -88,6 +93,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
 
     m_th_factor_ind = get(config, "troi_ind_th_factor", m_th_factor_ind);
     m_th_factor_col = get(config, "troi_col_th_factor", m_th_factor_col);
+    m_roi_mad_rms = get(config, "roi_mad_rms", m_roi_mad_rms);
     m_pad = get(config, "troi_pad", m_pad);
     m_asy = get(config, "troi_asy", m_asy);
     m_rebin = get(config, "lroi_rebin", m_rebin);
@@ -106,6 +112,20 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         get(config, "r_fake_signal_high_th_ind_factor", m_r_fake_signal_high_th_ind_factor);
     m_r_pad = get(config, "r_pad", m_r_pad);
     m_r_break_roi_loop = get(config, "r_break_roi_loop", m_r_break_roi_loop);
+    // Optional per-plane overrides (arrays of size 3, indexed by plane/slot).
+    // Absent => empty => the scalar knobs above apply to every plane.
+    if (config.isMember("r_th_factor_planes")) {
+        m_r_th_factor_planes.clear();
+        for (auto v : config["r_th_factor_planes"]) m_r_th_factor_planes.push_back(v.asFloat());
+    }
+    if (config.isMember("r_pad_planes")) {
+        m_r_pad_planes.clear();
+        for (auto v : config["r_pad_planes"]) m_r_pad_planes.push_back(v.asInt());
+    }
+    if (config.isMember("r_break_roi_loop_planes")) {
+        m_r_break_roi_loop_planes.clear();
+        for (auto v : config["r_break_roi_loop_planes"]) m_r_break_roi_loop_planes.push_back(v.asInt());
+    }
     m_r_th_peak = get(config, "r_th_peak", m_r_th_peak);
     m_r_sep_peak = get(config, "r_sep_peak", m_r_sep_peak);
     m_r_low_peak_sep_threshold_pre = get(config, "r_low_peak_sep_threshold_pre", m_r_low_peak_sep_threshold_pre);
@@ -167,10 +187,13 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         log->warn("The 'wiener_threshold_tag' is obsolete, thresholds in summary on 'wiener' tagged traces");
     }
     m_decon_charge_tag = get(config, "decon_charge_tag", m_decon_charge_tag);
+    m_rawdecon_tag = get(config, "rawdecon_tag", m_rawdecon_tag);
     m_gauss_tag = get(config, "gauss_tag", m_gauss_tag);
     m_frame_tag = get(config, "frame_tag", m_frame_tag);
 
     m_use_roi_debug_mode = get(config, "use_roi_debug_mode", m_use_roi_debug_mode);
+    m_dump_2d_spectra = get(config, "dump_2d_spectra", m_dump_2d_spectra);
+    m_dump_2d_prefix = get(config, "dump_2d_prefix", m_dump_2d_prefix);
     m_save_negative_charge = get(config, "save_negative_charge", m_save_negative_charge);
     m_use_roi_refinement = get(config, "use_roi_refinement", m_use_roi_refinement);
     m_tight_lf_tag = get(config, "tight_lf_tag", m_tight_lf_tag);
@@ -205,6 +228,18 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
        }
     }
     m_rebase_nbins = get(config, "rebase_nbins", m_rebase_nbins);
+    {
+        std::string method = get<std::string>(config, "rebase_method", "sigmask");
+        if (method == "median") m_rebase_method = RB_MEDIAN;
+        else if (method == "sigmask") m_rebase_method = RB_SIGMASK;
+        else {
+            // "mean" was removed: a signal pulse inside a window biases the
+            // plain-mean anchor and tilts the whole channel.
+            THROW(ValueError() << errmsg{"OmnibusSigProc: unknown rebase_method \"" + method +
+                                         "\" (expect median|sigmask)"});
+        }
+    }
+    m_rebase_nsigma = get(config, "rebase_nsigma", m_rebase_nsigma);
 
     m_isWrapped = get<bool>(config, "isWrapped", m_isWrapped);
 
@@ -296,6 +331,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
 
     cfg["troi_ind_th_factor"] = m_th_factor_ind;
     cfg["troi_col_th_factor"] = m_th_factor_col;
+    cfg["roi_mad_rms"] = m_roi_mad_rms;
     cfg["troi_pad"] = m_pad;
     cfg["troi_asy"] = m_asy;
     cfg["lroi_rebin"] = m_rebin;
@@ -317,7 +353,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["r_low_peak_sep_threshold_pre"] = m_r_low_peak_sep_threshold_pre;
     cfg["r_max_npeaks"] = m_r_max_npeaks;
     cfg["r_sigma"] = m_r_sigma;
-    cfg["r_th_precent"] = m_r_th_percent;
+    cfg["r_th_percent"] = m_r_th_percent;
 
     cfg["ROI_tight_lf_filter"] = m_ROI_tight_lf_filter;
     cfg["ROI_tighter_lf_filter"] = m_ROI_tighter_lf_filter;
@@ -332,6 +368,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["wiener_tag"] = m_wiener_tag;
     // cfg["wiener_threshold_tag"] = m_wiener_threshold_tag;
     cfg["decon_charge_tag"] = m_decon_charge_tag;
+    cfg["rawdecon_tag"] = m_rawdecon_tag;
     cfg["gauss_tag"] = m_gauss_tag;
     cfg["frame_tag"] = m_frame_tag;
 
@@ -352,9 +389,11 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["mp_th2"] = m_mp_th2;
     cfg["mp_tick_resolution"] = m_mp_tick_resolution;
     
-    cfg["rebase_nbins"] = m_rebase_nbins;    
+    cfg["rebase_nbins"] = m_rebase_nbins;
+    cfg["rebase_method"] = "sigmask";  // median|sigmask
+    cfg["rebase_nsigma"] = m_rebase_nsigma;
 
-    cfg["isWarped"] = m_isWrapped;  // default false
+    cfg["isWrapped"] = m_isWrapped;  // default false
 
     cfg["sparse"] = false;
 
@@ -364,6 +403,11 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
 void OmnibusSigProc::load_data(const input_pointer& in, int plane)
 {
     m_r_data[plane] = Array::array_xxf::Zero(m_fft_nwires[plane], m_fft_nticks);
+    // for (int i = 0; i < m_r_data[plane].rows(); ++i) {
+    //     for (int j = 0; j < m_r_data[plane].cols(); ++j) {
+    //         m_r_data[plane](i, j) = 7370;
+    //     }
+    // }
 
     auto traces = in->traces();
 
@@ -402,8 +446,10 @@ void OmnibusSigProc::load_data(const input_pointer& in, int plane)
     }
     //rebase for this plane
     if (std::find(m_rebase_planes.begin(), m_rebase_planes.end(), plane) != m_rebase_planes.end()) {
-        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {}", plane, m_rebase_nbins);
-        rebase_waveform(m_r_data[plane],m_rebase_nbins);
+        log->debug("rebase_waveform for plane {} with m_rebase_nbins = {} method = {} (0=median,1=sigmask)",
+                   plane, m_rebase_nbins, (int) m_rebase_method);
+        auto m_r_data_ref = m_r_data[plane].block(0, 0, m_r_data[plane].rows(), m_nticks);
+        rebase_waveform(m_r_data_ref,m_rebase_nbins);
     }
 
     log->debug("call={} load plane index: {}, ntraces={}, input bad regions: {}",
@@ -770,6 +816,15 @@ void OmnibusSigProc::save_mproi(ITrace::vector& itraces, IFrame::trace_list_t& i
 
 void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
 {
+    // Fixme: this should be moved into configure()
+    auto ifr = Factory::find_tn<IFieldResponse>(m_field_response);
+    // Get full, "fine-grained" field responses defined at impact
+    // positions.
+    Response::Schema::FieldResponse fr = ifr->field_response();
+
+    // Make a new data set which is the average FR
+    Response::Schema::FieldResponse fravg = Response::wire_region_average(fr);
+
     m_period = frame->tick();
     {
         std::vector<int> tbins;
@@ -786,34 +841,29 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
         log->debug("call={} init nticks={} tbinmin={} tbinmax={}", m_count, m_nticks, tbinmin, tbinmax);
 
         if (m_fft_flag == 0) {
-            m_fft_nticks = m_nticks;
+            m_fft_nticks = m_nticks+fravg.planes[0].paths[0].current.size()/5;
+            log->debug("call={} init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
         }
         else {
-            m_fft_nticks = fft_best_length(m_nticks);
-            log->debug("call={} init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
+            m_fft_nticks = fft_best_length(m_nticks, false);
+            log->debug("call={} using fft_best_length init enlarge window from {} to {}", m_count, m_nticks, m_fft_nticks);
         }
         //
 
         m_pad_nticks = m_fft_nticks - m_nticks;
     }
 
-    // Fixme: this should be moved into configure()
-    auto ifr = Factory::find_tn<IFieldResponse>(m_field_response);
-    // Get full, "fine-grained" field responses defined at impact
-    // positions.
-    Response::Schema::FieldResponse fr = ifr->field_response();
-
-    // Make a new data set which is the average FR
-    Response::Schema::FieldResponse fravg = Response::wire_region_average(fr);
-
     for (int i = 0; i != 3; i++) {
         //
         if (m_fft_flag == 0) {
-            m_fft_nwires[i] = m_nwires[i];
+            m_fft_nwires[i] = m_nwires[i] + fravg.planes[0].paths.size() - 1;
+            log->debug("call={} init enlarge wire number in plane {} from {} to {}",
+                       m_count, i, m_nwires[i],
+                       m_fft_nwires[i]);
         }
         else {
-            m_fft_nwires[i] = fft_best_length(m_nwires[i] + fravg.planes[0].paths.size() - 1, 1);
-            log->debug("call={} init enlarge wire number in plane {} from {} to {}",
+            m_fft_nwires[i] = fft_best_length(m_nwires[i] + fravg.planes[0].paths.size() - 1, true);
+            log->debug("call={} using fft_best_length init enlarge wire number in plane {} from {} to {}",
                        m_count, i, m_nwires[i],
                        m_fft_nwires[i]);
         }
@@ -821,7 +871,22 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
     }
 
     // since we only do FFT along time, no need to change dimension for wire ...
-    const size_t fine_nticks = fft_best_length(fravg.planes[0].paths[0].current.size());
+    //
+    // Linear-conv fix: the FFT-based FR × ER multiply below is a CIRCULAR
+    // convolution on this window.  Without padding, the linear-conv length
+    // (FR_len + ER_len - 1, e.g. 1325 + ~200 - 1 = 1524 for PDVD V plane on
+    // the top CRP) can exceed the window length (= fft_best_length(FR_len) =
+    // 1331 for PDVD), so the tail of the linear conv wraps around to the
+    // start of the window.  For ERs with a sharp cutoff (the PD-VD top JSON
+    // ER ends abruptly at 20 µs) the wraparound destructively interferes at
+    // the V crosshair (k_wire ≈ -0.16, f_time ≈ 0.0019 MHz) and creates a
+    // spurious ~28× deepening of the response notch there.  Doubling the
+    // FFT length gives a comfortable margin for the linear conv: the FR + ER
+    // tail fits without wrapping.  For PDVD this gives fine_nticks ≈ 2662.
+    // Cost: 2× memory + ~2× FFT cost for this build-once response array.
+    // See DNN_ROI_SP/docs/vplane_low_freq_pole.md ("Identification — Fix 2").
+    const size_t fine_nticks_orig = fft_best_length(fravg.planes[0].paths[0].current.size());
+    const size_t fine_nticks = fft_best_length(2 * fine_nticks_orig);
     int fine_nwires = fravg.planes[0].paths.size();
     m_avg_response_nwires = fine_nwires;
 
@@ -896,32 +961,46 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
             // arr.block(0,ncols-fine_time_shift,nrows,fine_time_shift) = arr1;
         }
 
-        // redigitize ...
+        // Redigitize from the fine (FR period) grid onto the SP tick grid via
+        // textbook linear interpolation.  This restores the original toolkit
+        // author's intent (a linear-interp recipe whose two weights had been
+        // accidentally swapped, producing the picked-sample pattern
+        // arr[1, 4, 9, 14, ...] at integer ratio 5 which collapsed the V-plane
+        // response at the crosshair).  Now that the FR × ER multiply above is
+        // a true LINEAR convolution (fine_nticks padded to 2× orig), the
+        // decimation method matters only ~0.03% at the V crosshair (verified
+        // in DNN_ROI_SP/simulation/test_decim_choice.py: orig / corrected /
+        // offset_0 / boxcar all agree to 4 digits under linear_conv=True).
+        //
+        // At integer ratio R = m_period / fravg.period (= 5 for PDVD), this
+        // reduces to wfs[i] = arr(irow, i*R) -- direct subsample at the start
+        // of each SP tick.  At non-integer ratios it linearly interpolates
+        // between the two surrounding fine-grid samples.
+        //
+        // TIME-ORIGIN NOTE: the previous boxcar fix at this site was a
+        // (1/R) * Σ arr[i*R : (i+1)*R] -- equivalent to a 5-tap moving-average
+        // FIR with linear-phase delay of (R-1)/2 = 2 fine ticks = +200 ns
+        // (PDVD).  The textbook linear-interp below has no delay (wfs[0] =
+        // arr(irow, 0) sits at t = 0 ns, matching the FR's own time origin).
+        // This is a -200 ns shift in c_resp relative to the prior boxcar
+        // commit; equivalently the deconvolved waveform shifts +200 ns later.
+        // Any downstream tick-alignment calibration that was tuned against
+        // the boxcar's effective +200 ns delay may need to be revisited.
         for (int irow = 0; irow < fine_nwires; ++irow) {
-            // gtemp = new TGraph();
-
-            size_t fcount = 1;
-            for (int i = 0; i != m_fft_nticks; i++) {
-                double ctime = ctbins.at(i);
-
-                if (fcount < fine_nticks)
-                    while (ctime > ftbins.at(fcount)) {
-                        fcount++;
-                        if (fcount >= fine_nticks) break;
-                    }
-
-                if (fcount < fine_nticks) {
-                    wfs.at(i) = ((ctime - ftbins.at(fcount - 1)) / fravg.period * arr(irow, fcount - 1) +
-                                 (ftbins.at(fcount) - ctime) / fravg.period * arr(irow, fcount));  // / (-1);
-                }
-                else {
-                    wfs.at(i) = 0;
-                }
+            for (int i = 0; i != m_fft_nticks; ++i) {
+                const double ctime = i * m_period;
+                const double fidx = ctime / fravg.period;
+                const int j_lo = (int)std::floor(fidx);
+                const double frac = fidx - j_lo;             // [0, 1)
+                const int j_hi = j_lo + 1;
+                const double v_lo = (j_lo >= 0 && j_lo < (int)fine_nticks)
+                                    ? arr(irow, j_lo) : 0.0;
+                const double v_hi = (j_hi >= 0 && j_hi < (int)fine_nticks)
+                                    ? arr(irow, j_hi) : 0.0;
+                wfs.at(i) = (1.0 - frac) * v_lo + frac * v_hi;
             }
 
             overall_resp[iplane].push_back(wfs);
-
-            // wfs.clear();
         }  // loop inside wire ...
 
         // calculated the wire shift ...
@@ -977,7 +1056,7 @@ void OmnibusSigProc::restore_baseline(Array::array_xxf& arr)
 }
 
 
-void OmnibusSigProc::rebase_waveform(Array::array_xxf& arr,const int& n_bins)
+void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int& n_bins)
 {
     	for (int i = 0; i != arr.rows(); ++i) {
             Waveform::realseq_t signal(arr.cols());
@@ -988,25 +1067,94 @@ void OmnibusSigProc::rebase_waveform(Array::array_xxf& arr,const int& n_bins)
             }
 
             signal.resize(ncount);
-	    Waveform::realseq_t front_sig(n_bins);
-	    Waveform::realseq_t back_sig(n_bins);
-            
-	    for (int j = 0; j < n_bins; ++j) {
-                front_sig.at(j) = signal.at(j);
-	        back_sig.at(j) = signal.at(arr.cols()-j-1);
+
+            // Estimate the baseline anchors of the first/last n_bins windows
+            // and the (mean) time at which each anchor sits.  Both methods
+            // are signal-safe against large peaks inside the windows; the
+            // historical plain-mean anchor was removed for being biased by
+            // any in-window signal.
+            double t1 = n_bins/2.0;
+            double t2 = m_nticks - n_bins/2.0;
+            float front_base = 0;
+            float back_base = 0;
+
+            if (m_rebase_method == RB_SIGMASK) {
+                // robust per-row scale from 16/50/84 percentiles (signal
+                // occupies few samples so it barely moves the percentiles)
+                const float p16 = WireCell::Waveform::percentile_binned(signal, 0.5 - 0.34);
+                const float p50 = WireCell::Waveform::percentile_binned(signal, 0.5);
+                const float p84 = WireCell::Waveform::percentile_binned(signal, 0.5 + 0.34);
+                // sigma = the cleaner (smaller) half-spread.  One-sided signal
+                // inflates only its own side, so min() stays a noise-only scale
+                // and the mask stays tight under a long bright pulse; a
+                // symmetric RMS of both half-spreads would be inflated there
+                // and let the signal bias the anchor (an over-subtraction that
+                // drove prolonged collection tails negative before decon).
+                const float sigma = std::min(p84 - p50, p50 - p16);
+                const float cut = m_rebase_nsigma * sigma;
+                const int min_count = n_bins / 4;
+
+                // mean of non-signal samples in a window, widening the window
+                // inward (2x, 4x) when signal leaves too few clean samples.
+                // front: j0=0 going forward; back: j0=m_nticks-1 going backward.
+                auto masked_anchor = [&](int j0, int dir, double& tout) {
+                    for (int widen = 1; widen <= 4; widen *= 2) {
+                        const int nwin = std::min(n_bins * widen, m_nticks);
+                        double sum = 0, tsum = 0;
+                        int count = 0;
+                        for (int k = 0; k < nwin; ++k) {
+                            const int j = j0 + dir * k;
+                            const float v = signal.at(j);
+                            if (fabs(v - p50) < cut) {
+                                sum += v;
+                                tsum += j;
+                                count++;
+                            }
+                        }
+                        if (count >= min_count || nwin == m_nticks) {
+                            if (count > 0) {
+                                tout = tsum / count;
+                                return (float) (sum / count);
+                            }
+                            break;
+                        }
+                    }
+                    // hopeless window (all signal): fall back to the row median
+                    return p50;
+                };
+
+                front_base = masked_anchor(0, +1, t1);
+                back_base = masked_anchor(m_nticks - 1, -1, t2);
+            }
+            else {  // RB_MEDIAN
+                Waveform::realseq_t front_sig(n_bins);
+                Waveform::realseq_t back_sig(n_bins);
+
+                for (int j = 0; j < n_bins; ++j) {
+                    front_sig.at(j) = signal.at(j);
+                    back_sig.at(j) = signal.at(arr.cols()-j-1);
+                }
+
+                front_base = WireCell::Waveform::median(front_sig);
+                back_base = WireCell::Waveform::median(back_sig);
             }
 
-	    float front_base = WireCell::Waveform::mean_rms(front_sig).first;
-	    float back_base = WireCell::Waveform::mean_rms(back_sig).first;
-	    double t1 = n_bins/2.0;
-	    double t2 = m_nticks - n_bins/2.0;
-	    double m = (back_base - front_base)/(t2-t1);
-	    double b = back_base - m*t2;
+	    double m = 0;
+	    double b = 0;
+	    if (t2 - t1 > 1.0) {
+	        m = (back_base - front_base)/(t2-t1);
+	        b = back_base - m*t2;
+	    }
+	    else {
+	        // degenerate anchors (both windows widened to the full
+	        // waveform): subtract a constant, no tilt.
+	        b = 0.5*(front_base + back_base);
+	    }
 
 	    for (int j = 0; j < m_nticks; ++j) {
 	        double corr = m*j+b;
 	        arr(i,j) -= corr;
-	    }	
+	    }
         }
 }
 
@@ -1037,15 +1185,25 @@ void OmnibusSigProc::decon_2D_init(int plane)
         auto ewave = (*m_elecresponse).waveform_samples(tbins);
         const WireCell::Waveform::compseq_t elec = fwd_r2c(m_dft, ewave);
 
-        for (auto och : m_channel_range[plane]) {
-            // const auto& ch_resp = cr->channel_response(och.ident);
-            Waveform::realseq_t tch_resp = cr->channel_response(och.ident);
-            tch_resp.resize(m_fft_nticks, 0);
-            const WireCell::Waveform::compseq_t ch_elec = fwd_r2c(m_dft, tch_resp);
+        // Stack per-channel responses into one 2D array and run a
+        // single batched fwd_r2c along the time axis, instead of
+        // ~960 separate 1D r2c FFTs.
+        const auto& chans = m_channel_range[plane];
+        const size_t nchans = chans.size();
+        Array::array_xxf ch_resp_2d = Array::array_xxf::Zero(nchans, m_fft_nticks);
+        for (size_t i = 0; i < nchans; ++i) {
+            const Waveform::realseq_t& tch_resp = cr->channel_response(chans[i].ident);
+            const int n = std::min<int>(tch_resp.size(), m_fft_nticks);
+            for (int j = 0; j < n; ++j) {
+                ch_resp_2d(i, j) = tch_resp[j];
+            }
+        }
+        Array::array_xxc ch_elec_2d = fwd_r2c(m_dft, ch_resp_2d, 1);
 
-            const int irow = och.wire + m_pad_nwires[plane];
+        for (size_t i = 0; i < nchans; ++i) {
+            const int irow = chans[i].wire + m_pad_nwires[plane];
             for (int icol = 0; icol != m_c_data[plane].cols(); icol++) {
-                const auto four = ch_elec.at(icol);
+                const auto four = ch_elec_2d(i, icol);
                 if (std::abs(four) != 0) {
                     m_c_data[plane](irow, icol) *= elec.at(icol) / four;
                 }
@@ -1057,7 +1215,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     }
 
     // second round of FFT on wire
-    m_c_data[plane] = fwd(m_dft, m_c_data[plane], 0);
+    fwd_inplace(m_dft, m_c_data[plane], 0);
 
     // response part ...
     Array::array_xxf r_resp = Array::array_xxf::Zero(m_r_data[plane].rows(), m_fft_nticks);
@@ -1070,10 +1228,40 @@ void OmnibusSigProc::decon_2D_init(int plane)
     // do first round FFT on the resposne on time
     Array::array_xxc c_resp = fwd_r2c(m_dft, r_resp, 1);
     // do second round FFT on the response on wire
-    c_resp = fwd(m_dft, c_resp, 0);
+    fwd_inplace(m_dft, c_resp, 0);
+
+    // Diagnostic dump (off in production): write the input, response and
+    // output 2D spectra to a NPZ.  Saved BEFORE the division so we capture
+    // the un-deconvolved input spectrum next to the response and decon.
+    Array::array_xxc c_input_dump;
+    if (m_dump_2d_spectra) {
+        c_input_dump = m_c_data[plane];   // copy before in-place division
+    }
 
     // make ratio to the response and apply wire filter
     m_c_data[plane] = m_c_data[plane] / c_resp;
+
+    if (m_dump_2d_spectra) {
+        const char* pn = (plane == 0) ? "U" : ((plane == 1) ? "V" : "W");
+        std::string fname = m_dump_2d_prefix + "_anode"
+                          + std::to_string(m_anode->ident()) + "_plane"
+                          + pn + ".npz";
+        Array::array_xxc c_resp_dump = c_resp;
+        Array::array_xxc c_decon_dump = m_c_data[plane];
+        WireCell::Numpy::save2d(c_input_dump, "input",    fname, "w");
+        WireCell::Numpy::save2d(c_resp_dump,  "response", fname, "a");
+        WireCell::Numpy::save2d(c_decon_dump, "decon",    fname, "a");
+        log->info("call={} dumped 2D spectra to {} (shape {}x{})",
+                  m_count, fname, c_input_dump.rows(), c_input_dump.cols());
+    }
+
+    // Special debug-mode tap: capture the deconvolved spectrum before any
+    // software filter (Wire / Wiener / LF) and before any ROI mask.
+    // c_rawdecon stays empty in production runs (m_rawdecon_tag == "").
+    Array::array_xxc c_rawdecon;
+    if (!m_rawdecon_tag.empty()) {
+        c_rawdecon = m_c_data[plane];
+    }
 
     // apply software filter on wire
     // const std::vector<std::string> filter_names{"Wire_ind", "Wire_ind", "Wire_col"};
@@ -1094,7 +1282,7 @@ void OmnibusSigProc::decon_2D_init(int plane)
     }
 
     // do the first round of inverse FFT on wire
-    m_c_data[plane] = inv(m_dft, m_c_data[plane], 0);
+    inv_inplace(m_dft, m_c_data[plane], 0);
 
     // do the second round of inverse FFT on time
     m_r_data[plane] = inv_c2r(m_dft, m_c_data[plane], 1);
@@ -1125,6 +1313,52 @@ void OmnibusSigProc::decon_2D_init(int plane)
     //Unpad the data if needed.
     //A check will be done internally to see if this is needed
     unpad_data(plane);
+
+    // Finalize rawdecon: replay the IFFT + wire-shift + time-shift + unpad
+    // path on the pre-Wire-filter spectrum we saved above.  The geometry
+    // matches the production wiener/gauss frames so they share a (wire, tick)
+    // grid for like-for-like comparison.
+    if (!m_rawdecon_tag.empty()) {
+        inv_inplace(m_dft, c_rawdecon, 0);                              // inv-FFT in wire
+        m_rawdecon_r_data[plane] = inv_c2r(m_dft, c_rawdecon, 1);        // inv-FFT in time
+
+        const int rd_nrows = m_rawdecon_r_data[plane].rows();
+        const int rd_ncols = m_rawdecon_r_data[plane].cols();
+        if (m_wire_shift[plane] > 0) {
+            Array::array_xxf arr1(m_wire_shift[plane], rd_ncols);
+            arr1 = m_rawdecon_r_data[plane].block(rd_nrows - m_wire_shift[plane], 0,
+                                                  m_wire_shift[plane], rd_ncols);
+            Array::array_xxf arr2(rd_nrows - m_wire_shift[plane], rd_ncols);
+            arr2 = m_rawdecon_r_data[plane].block(0, 0,
+                                                  rd_nrows - m_wire_shift[plane], rd_ncols);
+            m_rawdecon_r_data[plane].block(0, 0,
+                                           m_wire_shift[plane], rd_ncols) = arr1;
+            m_rawdecon_r_data[plane].block(m_wire_shift[plane], 0,
+                                           rd_nrows - m_wire_shift[plane], rd_ncols) = arr2;
+        }
+        int rd_time_shift = (m_coarse_time_offset + m_intrinsic_time_offset) / m_period;
+        if (rd_time_shift > 0) {
+            Array::array_xxf arr1(rd_nrows, rd_ncols - rd_time_shift);
+            arr1 = m_rawdecon_r_data[plane].block(0, 0, rd_nrows, rd_ncols - rd_time_shift);
+            Array::array_xxf arr2(rd_nrows, rd_time_shift);
+            arr2 = m_rawdecon_r_data[plane].block(0, rd_ncols - rd_time_shift,
+                                                  rd_nrows, rd_time_shift);
+            m_rawdecon_r_data[plane].block(0, 0, rd_nrows, rd_time_shift) = arr2;
+            m_rawdecon_r_data[plane].block(0, rd_time_shift,
+                                           rd_nrows, rd_ncols - rd_time_shift) = arr1;
+        }
+        // unpad_data() always operates on m_r_data[plane]; swap-in / swap-out
+        // so we reuse it without duplicating its body.
+        m_r_data[plane].swap(m_rawdecon_r_data[plane]);
+        unpad_data(plane);
+        m_r_data[plane].swap(m_rawdecon_r_data[plane]);
+        // Strip the FFT row-padding (m_pad_nwires) and trim time axis to
+        // m_nticks so save_data() reads the same (m_nwires × m_nticks) grid
+        // that production wiener/gauss live on.  Mirrors the .block() slice
+        // at the end of decon_2D_hits / decon_2D_tightROI.
+        m_rawdecon_r_data[plane] = m_rawdecon_r_data[plane].block(
+            m_pad_nwires[plane], 0, m_nwires[plane], m_nticks).eval();
+    }
 
     m_c_data[plane] = fwd_r2c(m_dft, m_r_data[plane], 1);
 
@@ -1393,17 +1627,28 @@ void OmnibusSigProc::decon_2D_looseROI(int plane)
     const int n_lfn_nn = 2;
     const int n_bad_nn = plane ? 1 : 2;
 
+    // Fill all rows with the default filter first, matching the pattern in
+    // decon_2D_tightROI / decon_2D_ROI_refine / decon_2D_charge.  Without
+    // this initial pass, rows of c_data_afterfilter beyond och.wire (the
+    // FFT-padding rows m_nwires..m_fft_nwires-1) remain UNINITIALIZED;
+    // their inv_c2r output is then garbage and gets selected by the
+    // m_pad_nwires-offset .block() extract into the LAST m_pad_nwires rows of
+    // m_r_data (OSP wires m_nwires-m_pad_nwires..m_nwires-1), corrupting
+    // those wires' values non-deterministically across runs (ASLR-dependent
+    // heap garbage).  Per-channel filter overrides for bad / lf_noisy
+    // neighbors are applied as a second pass below.
     Array::array_xxc c_data_afterfilter(m_c_data[plane].rows(), m_c_data[plane].cols());
-    for (auto och : m_channel_range[plane]) {
-        const int irow = och.wire;
-
-        roi_hf_filter_wf2 = roi_hf_filter_wf;
-        if (masked_neighbors("bad", och, n_bad_nn) or masked_neighbors("lf_noisy", och, n_lfn_nn)) {
-            roi_hf_filter_wf2 = roi_hf_filter_wf1;
-        }
-
+    for (int irow = 0; irow < m_c_data[plane].rows(); ++irow) {
         for (int icol = 0; icol < m_c_data[plane].cols(); ++icol) {
-            c_data_afterfilter(irow, icol) = m_c_data[plane](irow, icol) * roi_hf_filter_wf2.at(icol);
+            c_data_afterfilter(irow, icol) = m_c_data[plane](irow, icol) * roi_hf_filter_wf.at(icol);
+        }
+    }
+    for (auto och : m_channel_range[plane]) {
+        if (masked_neighbors("bad", och, n_bad_nn) or masked_neighbors("lf_noisy", och, n_lfn_nn)) {
+            const int irow = och.wire;
+            for (int icol = 0; icol < m_c_data[plane].cols(); ++icol) {
+                c_data_afterfilter(irow, icol) = m_c_data[plane](irow, icol) * roi_hf_filter_wf1.at(icol);
+            }
         }
     }
 
@@ -1607,6 +1852,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         break_roi_loop2_traces, shrink_roi_traces, extend_roi_traces;
     IFrame::trace_list_t mp2_roi_traces, mp3_roi_traces;
     IFrame::trace_list_t decon_charge_traces;
+    IFrame::trace_list_t rawdecon_traces;   // pre-filter pre-ROI tap (special mode)
 
     // initialize the overall response function ...
     init_overall_response(in);
@@ -1615,10 +1861,15 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
     ROI_formation roi_form(m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_nticks, m_th_factor_ind, m_th_factor_col,
                            m_pad, m_asy, m_rebin, m_l_factor, m_l_max_th, m_l_factor1, m_l_short_length,
                            m_l_jump_one_bin);
+    roi_form.set_mad_rms(m_roi_mad_rms);
     ROI_refinement roi_refine(
         m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_r_th_factor, m_r_fake_signal_low_th, m_r_fake_signal_high_th,
         m_r_fake_signal_low_th_ind_factor, m_r_fake_signal_high_th_ind_factor, m_r_pad, m_r_break_roi_loop, m_r_th_peak,
         m_r_sep_peak, m_r_low_peak_sep_threshold_pre, m_r_max_npeaks, m_r_sigma, m_r_th_percent, m_isWrapped);  //
+    // Apply optional per-plane refinement overrides (empty => no-op => scalar
+    // knobs used for every plane, bit-identical legacy behaviour).
+    if (!m_r_th_factor_planes.empty()) roi_refine.set_th_factor_planes(m_r_th_factor_planes);
+    if (!m_r_pad_planes.empty()) roi_refine.set_pad_planes(m_r_pad_planes);
 
     const std::vector<float>* perplane_thresholds[3] = {&roi_form.get_uplane_rms(), &roi_form.get_vplane_rms(),
                                                         &roi_form.get_wplane_rms()};
@@ -1645,6 +1896,23 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
 
         decon_2D_init(iplane);  // decon in large matrix
         check_data(iplane, "after 2D init");
+
+        // Special-mode tap: save the bare pre-Wire-filter, pre-ROI deconvolved
+        // waveform that decon_2D_init() stashed into m_rawdecon_r_data.  Done
+        // BEFORE decon_2D_*ROI overwrites the intermediate buffers.
+        if (!m_rawdecon_tag.empty()) {
+            IFrame::trace_list_t perframe;
+            std::vector<double> dummy_thr;
+            // save_data() reads from m_r_data[iplane]; swap so it picks up
+            // the rawdecon buffer, then swap back to keep the rest of the
+            // loop unaffected.
+            m_r_data[iplane].swap(m_rawdecon_r_data[iplane]);
+            save_data(*itraces, perframe, iplane, perwire_rmses, dummy_thr,
+                      m_rawdecon_tag, /*save_negative_charge=*/true);
+            m_r_data[iplane].swap(m_rawdecon_r_data[iplane]);
+            rawdecon_traces.insert(rawdecon_traces.end(),
+                                   perframe.begin(), perframe.end());
+        }
 
         // Form tight ROIs
         if (iplane != 2) {  // induction wire planes
@@ -1749,7 +2017,10 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
 
             const std::vector<float>& perwire_rmses = *perplane_thresholds[iplane];
 
-            for (int qx = 0; qx != m_r_break_roi_loop; qx++) {
+            const int break_roi_loop = m_r_break_roi_loop_planes.empty()
+                                           ? m_r_break_roi_loop
+                                           : m_r_break_roi_loop_planes.at(iplane);
+            for (int qx = 0; qx != break_roi_loop; qx++) {
                 roi_refine.BreakROIs(iplane, roi_form);
                 roi_refine.CheckROIs(iplane, roi_form);
                 roi_refine.CleanUpROIs(iplane);
@@ -1825,6 +2096,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
 
             m_c_data[iplane].resize(0, 0);  // clear memory
             m_r_data[iplane].resize(0, 0);  // clear memory
+            m_rawdecon_r_data[iplane].resize(0, 0);  // clear memory (no-op if unused)
         } // loop over planes
     } // m_use_roi_refinement
 
@@ -1857,6 +2129,10 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         if (!m_gauss_tag.empty()) {
             sframe->tag_traces(m_gauss_tag, gauss_traces);
         }
+    }
+
+    if (!m_rawdecon_tag.empty()) {
+        sframe->tag_traces(m_rawdecon_tag, rawdecon_traces);
     }
 
     if (m_use_roi_debug_mode) {

@@ -8,6 +8,7 @@
 #include "WireCellIface/IDepoSetFilter.h"
 #include "WireCellIface/INamed.h"
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IYZMap.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/BoundingBox.h"
 
@@ -29,21 +30,10 @@ namespace WireCell::Gen {
     std::vector<WireCell::BoundingBox> m_boxes;
     std::size_t m_count{0};
 
-    double bin_width;
-    double tpc_width;
-    double bin_height;
-    double yoffset;
-    double zoffset;    
-    int nbinsy;
-    int nbinsz;
-    int resp;
-    int plane;
+    int resp{0};
+    int plane{0};
     std::string anode_name;
-    //Json::Value map = Json::arrayValue;
-    //Json::arrayValue map;
-    Json::Value jmap;
-    
-    std::vector<std::vector<int>> yzmap;
+    IYZMap::pointer m_yzmap_svc{nullptr};
 
 
   };

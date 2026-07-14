@@ -38,10 +38,5 @@ export WCT_BATS_LOG_LEVEL="${WCT_BATS_LOG_LEVEL:-debug}"
 echo "bats-debug: test output retained at: $WCT_BATS_TMPDIR"
 mkdir -p "$WCT_BATS_TMPDIR"
 
-# echo "Running bats with args:"
-# for arg in "$@"; do
-#     echo $arg
-# done
-
 exec bats "$@"
 

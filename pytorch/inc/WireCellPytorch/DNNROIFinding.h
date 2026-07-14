@@ -12,6 +12,7 @@
 #include "WireCellAux/Logger.h"
 
 #include <unordered_set>
+#include <unordered_map>
 
 namespace WireCell {
     namespace Pytorch {
@@ -78,6 +79,14 @@ namespace WireCell {
             // The model downsamples/rebins in time by a number of ticks.
             int tick_per_slice{10};
 
+            // Round model_ticks up to a multiple of this value before
+            // running inference.  Use tick_per_slice (the default when
+            // unset, i.e. 0) when the model can absorb any post-rebin
+            // width.  Set larger (e.g. 128 for PDVD's MobileNetV3 UNet,
+            // whose 5 stride-2 levels post-rebin need width divisible
+            // by 32).
+            int tick_pad_multiple{0};
+
             // An output file used for special debugging.
             std::string debugfile{""};
 
@@ -90,6 +99,12 @@ namespace WireCell {
 
             // if true, save the negative parts of the charge traces
             bool save_negative_charge{false};
+
+            // when true, convert each row into sparse ROIs instead of dense traces
+            bool sparcify{false};
+
+            // maximum number of consecutive zeros allowed inside an ROI before it splits
+            int sparcify_zero_gap{2};
         };
 
         class DNNROIFinding : public Aux::Logger,
@@ -117,6 +132,7 @@ namespace WireCell {
             std::unordered_set<int> m_chset;
             // Ordered channel IDs defining rows of output dense array.
             std::vector<int> m_chlist;
+            std::unordered_map<int, size_t> m_channel_to_row;
 
             // size for dense trace array based on channel ID span (rows) and tick0/nticks (cols)
             size_t m_nrows{0}, m_ncols{0};
@@ -129,16 +145,19 @@ namespace WireCell {
             /// channel IDs in our set.
             ITrace::vector select(ITrace::vector traces);
             
-            // Convert traces to a dense array
-            Array::array_xxf traces_to_eigen(ITrace::vector traces);
+            // Convert traces to a dense (m_nrows x ntick) array.
+            Array::array_xxf traces_to_eigen(ITrace::vector traces, int ntick);
 
             // extract trace summary to mathch the eigen format order
             IFrame::trace_summary_t get_summary_e(const IFrame::pointer& inframe, const std::string &tag) const;
 
             // Convert dense array to (dense) traces
-            ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr, bool save_negative_charge);
+            ITrace::shared_vector eigen_to_traces(const Array::array_xxf& arr,
+                                                  bool save_negative_charge,
+                                                  bool sparcify);
 
             int m_save_count;  // count frames saved
+            bool m_warned_oversize{false};  // log input_ticks>nticks once per node lifetime
         };
     }  // namespace Pytorch
 }  // namespace WireCell

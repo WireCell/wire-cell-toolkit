@@ -195,11 +195,29 @@ void Sio::FrameFileSink::one_tag(const IFrame::pointer& frame,
     }
 
     if (summary.size()) { // the summary array
+        // Reorder summary to match the sorted `channels` array.
+        // The summary comes from frame->trace_summary() in trace-iteration order
+        // (e.g. OSP wire order), while `channels` was sorted above.  Without
+        // reordering, FrameFileSource would pair summary[i] with channels[i]
+        // (the i-th sorted channel), which is wrong.
+        IFrame::trace_summary_t sorted_summary;
+        if (summary.size() == traces.size()) {
+            std::unordered_map<int, double> chid_to_summ;
+            for (size_t i = 0; i < traces.size(); ++i) {
+                chid_to_summ[traces[i]->channel()] = summary[i];
+            }
+            sorted_summary.reserve(channels.size());
+            for (int ch : channels) {
+                auto it = chid_to_summ.find(ch);
+                sorted_summary.push_back(it != chid_to_summ.end() ? it->second : 0.0);
+            }
+        }
+        const auto& out_summary = sorted_summary.empty() ? summary : sorted_summary;
         const std::string aname = String::format("summary_%s_%d.npy", tag.c_str(), frame->ident());
-        write(m_out, aname, summary);
-        if (summary.size() != nrows) {
+        write(m_out, aname, out_summary);
+        if (out_summary.size() != nrows) {
             log->warn("summary for tag \"{}\" ident {} has {} but there are {} waveform rows in frame",
-                      tag, frame->ident(), summary.size(), nrows);
+                      tag, frame->ident(), out_summary.size(), nrows);
         }
     }
 

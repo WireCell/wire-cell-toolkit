@@ -17,6 +17,8 @@
 #include <string>
 #include <sstream>
 #include <fstream>
+#include <cstring>
+#include <memory>
 
 // see #239 for why this is here.
 extern "C" {
@@ -29,6 +31,7 @@ extern "C" {
     void jsonnet_ext_code(struct JsonnetVm* vmRef, char* key, char* value);
     void jsonnet_tla_var(struct JsonnetVm* vmRef, char* key, char* value);
     void jsonnet_tla_code(struct JsonnetVm* vmRef, char* key, char* value);
+    void jsonnet_max_stack(struct JsonnetVm* vmRef, unsigned v);
     char* jsonnet_evaluate_file(struct JsonnetVm* vmRef, char* filename, int* e);
     char* jsonnet_evaluate_snippet(struct JsonnetVm* vmRef, char* filename, char* code, int* e);
 }
@@ -170,6 +173,11 @@ static std::vector<std::string> get_path()
         return ret;
     }
     for (auto path : String::split(cpath)) {
+        if (! Persist::exists(path)) {
+            debug("skip non existent directory in load path: {}", path);
+            continue;
+        }
+
         ret.push_back(path);
     }
     return ret;
@@ -263,12 +271,20 @@ Json::Value WireCell::Persist::loads(const std::string& text,
     return parser.loads(text);
 }
 
-// bundles few lines into function to avoid some copy-paste
+// Parse JSON text directly via CharReader, avoiding the stringstream/stringbuf
+// pipeline that used to materialize 2-3 extra copies of the input text for
+// large configurations.
 Json::Value WireCell::Persist::json2object(const std::string& text)
 {
     Json::Value res;
-    stringstream ss(text);
-    ss >> res;
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    std::string errs;
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    if (!reader->parse(begin, end, &res, &errs)) {
+        THROW(IOError() << errmsg{"json parse failed: " + errs});
+    }
     return res;
 }
 
@@ -345,6 +361,10 @@ WireCell::Persist::Parser::Parser(const std::vector<std::string>& load_paths, co
                                   const externalvars_t& tlacode)
     : m_jvm{jsonnet_make()}
 {
+    // Default jsonnet max stack is 500 frames, which std.foldl chews through
+    // when fed lists with hundreds of elements (e.g. 360-fold fan-out configs
+    // hitting g.uses/popuses/std.foldl).
+    jsonnet_max_stack(m_jvm, 100000);
 
     // Loading: 1) cwd, 2) passed in paths 3) environment
     m_load_paths.push_back(boost::filesystem::current_path());
@@ -358,6 +378,11 @@ WireCell::Persist::Parser::Parser(const std::vector<std::string>& load_paths, co
     }
     // load paths into jsonnet backwards to counteract its reverse ordering
     for (auto pit = m_load_paths.rbegin(); pit != m_load_paths.rend(); ++pit) {
+        if (! exists(*pit)) {
+            debug("skip non existent directory in load path: {}", pit->native());
+            continue;
+        }
+
         auto path = boost::filesystem::canonical(*pit).string();
         add_load_path(path);
     }
@@ -415,11 +440,23 @@ Json::Value WireCell::Persist::Parser::load(const std::string& filename)
         char* jtext = jsonnet_evaluate_file(m_jvm, to_chars(fname), &rc);
         if (rc) {
             error(jtext);
-            THROW(ValueError() << errmsg{jtext});
+            std::string emsg(jtext);
+            jsonnet_realloc(m_jvm, jtext, 0);
+            THROW(ValueError() << errmsg{emsg});
         }
-        std::string output(jtext);
+        // Parse directly from the libjsonnet buffer; avoids materializing a
+        // ~1 GB std::string copy of the jsonnet output before parsing.
+        Json::Value res;
+        Json::CharReaderBuilder builder;
+        std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+        std::string errs;
+        const std::size_t len = std::strlen(jtext);
+        const bool ok = reader->parse(jtext, jtext + len, &res, &errs);
         jsonnet_realloc(m_jvm, jtext, 0);
-        return json2object(output);
+        if (!ok) {
+            THROW(IOError() << errmsg{"jsonnet output JSON parse failed: " + errs});
+        }
+        return res;
     }
 
     // also support JSON, possibly compressed

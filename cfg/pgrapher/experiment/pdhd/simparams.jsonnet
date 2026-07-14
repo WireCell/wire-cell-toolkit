@@ -106,6 +106,9 @@ base {
   },
 
   daq: super.daq {
+    // Simulation runs natively at 500 ns; no Resampler needed.
+    // Data path uses params.daq.tick=512 ns and runs the Resampler (512->500 ns).
+    tick: 0.5*wc.us,
 
     // Number of readout ticks.  See also sim.response.nticks.
     // In MB LArSoft simulation, they expect a different number of

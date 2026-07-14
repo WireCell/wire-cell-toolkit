@@ -1,5 +1,10 @@
+#+BEGIN_COMMENT
+\mainpage
+#+END_COMMENT
+
 #+TITLE: Wire-Cell Toolkit 
 #+SETUPFILE: docs/setup-readme.org
+
 
 
 Welcome to the Wire-Cell Toolkit (WCT) source repository at https://github.com/wirecell/wire-cell-toolkit.
@@ -54,15 +59,21 @@ Black arrows are library dependencies, blue are for applications and gray are fo
 
 The dependencies for the ~WireCellUtil~ package are required.  The rest are optional.  Missing optional dependencies, or ones specifically turned off, will cause the dependent WCT package to not be built.
 
-Some external dependencies have explicit minimum required versions:
+Wire-Cell Toolkit's MINIMUM required versions for dependencies:
 
-- TBB (oneAPI) 2021.1.1
+- C++ 17
 - Boost 1.80.0
 - Eigen 3.4.0
-- FFTW 3.3.10
-- JsonCPP 1.9.4
-- SPDLOG 1.9.2 with external fmtlib
-- Jsonnet (better, Go-Jsonnet) 0.19.1
+- JsonCPP 1.94
+- Go Jsonnet 0.19.1 (C++ jsonnet works but is much slower)
+- SPDLOG 1.9.2 (with external and not bundled fmt)
+- fftw 3.3.10 (no mpi)
+- fmt 9
+- TBB (oneAPI) 2021.1.1 (suggested)
+- ROOT 6.28.04 (optional)
+
+
+MINIMUM is really a bare minimum and means if you go lower you will almost certainly hit some problems.  Going higher is encouraged.  If you find any of these versions are no longer compatible (need raising) [[https://github.com/WireCell/wire-cell-toolkit/issues][make an issue]].
 
 You may provide the necessary external software dependencies in a manner of your own choosing and some options include:
 

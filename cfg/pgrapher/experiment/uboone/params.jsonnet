@@ -25,6 +25,11 @@ base {
         // relative gains available).
         gain: 1.0,
 
+        // ADC resolution (bits) -- the MicroBooNE TPC digitises to 12 bits.
+        // Previously inherited from the common base params, whose default
+        // was removed, so it is set explicitly here.
+        resolution: 12,
+
         // fixme: need double checking
         baselines: [999.3*wc.millivolt,999.3*wc.millivolt,231.02*wc.millivolt],
 

@@ -411,6 +411,8 @@ bool Gen::DepoFluxSplat::operator()(const input_pointer& in, output_pointer& out
     log->debug("splat {} ndepos={}/{}/[{}] ntraces={}", 
                out->ident(), ndepos_seen, in->depos()->size(), nplanes_skipped, accum->ntraces());
     ++m_count;
+
+    // (void)ndepos_skipped;
     return true;
 }
 

@@ -13,11 +13,6 @@
 
 namespace WireCell {
     namespace Gen {
-
-        /* struct GausDiffTimeCompare{ */
-        /* 	bool operator()(const std::shared_ptr<Gen::GaussianDiffusion>& lhs, const
-         * std::shared_ptr<Gen::GaussianDiffusion>& rhs) const; */
-        /* }; */
         /**  A BinnedDiffusion_transform maintains an association between impact
          * positions along the pitch direction of a wire plane and
          * the diffused depositions that drift to them.
@@ -113,9 +108,10 @@ namespace WireCell {
             std::pair<int, int> m_window;
             // the content of the current window
             std::map<int, ImpactData::mutable_pointer> m_impacts;
-            // std::vector<std::shared_ptr<GaussianDiffusion> > m_diffs;
+            // details in issue #447
+            std::vector<std::shared_ptr<GaussianDiffusion> > m_diffs;
             // std::set<std::shared_ptr<GaussianDiffusion>, GausDiffTimeCompare> m_diffs;
-            std::set<std::shared_ptr<GaussianDiffusion> > m_diffs;
+            // std::set<std::shared_ptr<GaussianDiffusion>> m_diffs;
 
             int m_outside_pitch;
             int m_outside_time;

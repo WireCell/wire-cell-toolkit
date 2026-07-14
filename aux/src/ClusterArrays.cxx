@@ -538,7 +538,9 @@ void ClusterArrays::to_arrays(const cluster_graph_t& cin_graph,
 
 cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
                                           const edge_array_set_t& eas,
-                                          const anodes_t& anodes)
+                                          const anodes_t& anodes,
+                                          double nudge,
+                                          bool restore_corners)
 {
     std::unordered_map<int, IAnodeFace::pointer> known_faces;
     for (const auto& anode : anodes) {
@@ -807,10 +809,36 @@ cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
             const RayGrid::Coordinates& coords = iface->raygrid();
             RayGrid::Blob bshape;
             for (const auto& [layer, strip] : strips) {
-                bshape.add(coords, strip);
+                bshape.add(coords, strip, nudge);
             }
 
-            IBlob::pointer iblob = std::make_shared<SimpleBlob>(ident, val, unc, bshape, islice, iface);
+            auto sblob = std::make_shared<SimpleBlob>(ident, val, unc, bshape, islice, iface);
+
+            // Optionally carry the original imaging-time corners stored in the
+            // 'b' array onto the blob, so the dead-area "corner" point cloud uses
+            // them instead of re-deriving from the reloaded shape.  Layout (write
+            // side, to_blob): count at col (sigu_col+1) + 4 scalar fields + 6 wire
+            // bounds, then that many (y,z) pairs.  Only y,z are stored; the dead
+            // bee patch consumes only y,z, so x is set to 0.  Used only for the
+            // dead corner PC; the shape and all geometry consumers are untouched.
+            if (restore_corners) {
+                const node_array_t::size_type nc_col = (sigu_col + 1) + 4 + 6;
+                if (arr.shape()[1] > nc_col) {
+                    const size_t ncorners = static_cast<size_t>(brow[nc_col]);
+                    if (arr.shape()[1] >= nc_col + 1 + 2*ncorners) {
+                        std::vector<Point> corners;
+                        corners.reserve(ncorners);
+                        for (size_t ci=0; ci<ncorners; ++ci) {
+                            const double y = brow[nc_col + 1 + 2*ci];
+                            const double z = brow[nc_col + 2 + 2*ci];
+                            corners.emplace_back(0.0, y, z);
+                        }
+                        sblob->set_stored_corners(std::move(corners));
+                    }
+                }
+            }
+
+            IBlob::pointer iblob = sblob;
             graph[bvtx].ptr = iblob;
         }
     }

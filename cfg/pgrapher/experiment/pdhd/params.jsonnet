@@ -2,7 +2,20 @@
 // generic set of parameters and overrides things specific to PDSP.
 
 local wc = import "wirecell.jsonnet";
-local base = import "../dune/params.jsonnet";
+local base = import "pgrapher/dune/params.jsonnet";
+
+// Electronics-noise file, selected by the front-end gain.  The cold
+// electronics has four gain settings -- 4.7 / 7.8 / 14 / 25 mV/fC -- and
+// noise-spectra files currently exist only for 7.8 and 14.  Any other gain
+// (a setting with no file, or a value that is not a valid setting) aborts the
+// configuration rather than silently using a wrong-gain spectrum.
+local pdhd_noise(gain) =
+    local g = gain / (wc.mV / wc.fC);
+    if std.abs(g - 7.8) < 0.05 then "protodunehd-noise-spectra-7d8mVfC-v1.json.bz2"
+    else if std.abs(g - 14.0) < 0.05 then "protodunehd-noise-spectra-14mVfC-v1.json.bz2"
+    else error ("PDHD noise: no spectra file for elec.gain = " + g
+                + " mV/fC.  Valid cold-electronics gain settings are"
+                + " 4.7/7.8/14/25 mV/fC; spectra files exist only for 7.8 and 14.");
 
 base {
     // This section will be overwritten in simparams.jsonnet
@@ -92,8 +105,29 @@ base {
         }
     },
 
+    lar: super.lar {
+        // Calibrated from PDHD data.  1.565 was the anode->cathode crossing-track
+        // x-span midpoint [~1.55 over-merge, ~1.57 crosser-truncation]; 1.585 was a
+        // first cathode-end-registration pass on two evt-983 crossers.  Adding two
+        // more evt-983 cathode crossers (n=4) showed 1.585 systematically OVER-shoots
+        // the cathode (3 of 4 cathode ends land +0.9..+2.9 cm PAST it).  The four ends
+        // hold a fixed ~3.5 cm spread (the irreducible +-2 cm t0/velocity/SCE residual),
+        // so no velocity collapses it; v only slides the centroid.  1.576 puts the most-
+        // overshooting crosser just INSIDE the cathode (clus62 +0.84 cm) instead of past
+        // it, so containment (QLMatching cathode_ext1) reverts to ~the C++ default 1.5 cm
+        // and the undershoot residual lands entirely on the benign flag-only window
+        // (cathode_ext2 widened -2.0->-3.0).  This biases global drift-x ~-0.6 cm vs the
+        // 4-crosser mean (well inside the +-2 cm degenerate band).  See
+        // pdhd/docs/clustering-algorithm.md.
+        drift_speed: 1.576 * wc.mm / wc.us,  // 1.580/1.585 (over-shot cathode), 1.565 (A-C x-span), 1.6 (default)
+    },
+
     daq: super.daq {
+        tick: 512*wc.ns,
         nticks: 6000,
+        // nf.nsamples inherits from nticks (=6000) but is auto-rebuilt at
+        // runtime to match the post-Resampler frame size (currently 5999).
+        // No manual override is needed.
     },
 
     adc: super.adc {
@@ -106,8 +140,11 @@ base {
     elecs: [
       super.elec {
         // The FE amplifier gain in units of Voltage/Charge.
-        // gain : 14.0*wc.mV/wc.fC,
-        gain : std.extVar("elecGain")*wc.mV/wc.fC,
+        // Override with: wire-cell -V elecGain=7.8 ...  (string ext-var) or
+        // --ext-code elecGain=7.8 (number, e.g. from dunesw).  Accept both:
+        // parseJson only a string; a number passes through unchanged.
+        gain : (local g = std.extVar("elecGain");
+                if std.isString(g) then std.parseJson(g) else g)*wc.mV/wc.fC,
 
         // The shaping (aka peaking) time of the amplifier shaper.
         shaping : 2.2*wc.us,
@@ -158,12 +195,9 @@ base {
 
         fltresp: "protodunehd-field-response-filters.json.bz2",
 
-        // Noise models for different FE amplifier gains
-        // Note: set gain value accordingly in the field of elecs
-        // noise: "protodunehd-noise-spectra-14mVfC-v1.json.bz2",
-        // noise: "protodunehd-noise-spectra-7d8mVfC-v1.json.bz2",
-        noise: if $.elec.gain > 8*wc.mV/wc.fC then "protodunehd-noise-spectra-14mVfC-v1.json.bz2"
-               else "protodunehd-noise-spectra-7d8mVfC-v1.json.bz2",
+        // Noise model, selected by the FE amplifier gain (`pdhd_noise`,
+        // above -- set the gain in the `elec` field).
+        noise: pdhd_noise($.elec.gain),
 
 
         chresp: null,

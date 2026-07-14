@@ -75,7 +75,7 @@ namespace WireCell {
             void init_overall_response(IFrame::pointer frame);
 
             void restore_baseline(WireCell::Array::array_xxf& arr);
-	    void rebase_waveform(WireCell::Array::array_xxf& arr, const int& nbins);
+	    void rebase_waveform(Eigen::Ref<Array::array_xxf> arr, const int& nbins);
             // This little struct is used to map between WCT channel idents
             // and internal OmnibusSigProc wire/channel numbers.  See
             // m_channel_map and m_channel_range below.
@@ -134,6 +134,11 @@ namespace WireCell {
             // some parameters for ROI creating
             float m_th_factor_ind{3};
             float m_th_factor_col{5};
+            // MAD-based cal_RMS in ROI_formation (robust against strong
+            // signals occupying >~16% of the waveform, which inflate the
+            // legacy percentile-spread RMS and so the ROI thresholds).
+            // Default false = bit-identical legacy behaviour.
+            bool m_roi_mad_rms{false};
             int m_pad{5};
             float m_asy{0.1};
             int m_rebin{6};
@@ -151,6 +156,13 @@ namespace WireCell {
             double m_r_fake_signal_high_th_ind_factor{1.0};
             int m_r_pad{5};
             int m_r_break_roi_loop{2};
+            // Optional per-plane (size 3, indexed by plane/slot) overrides for the
+            // three refinement knobs above.  Empty (default) => the scalar value
+            // is used for every plane (bit-identical legacy behaviour).  Used to
+            // confine a tune to a single plane (e.g. PDHD APA0 W = slot 1).
+            std::vector<float> m_r_th_factor_planes;
+            std::vector<int> m_r_pad_planes;
+            std::vector<int> m_r_break_roi_loop_planes;
             double m_r_th_peak{3.0};
             double m_r_sep_peak{6.0};
             double m_r_low_peak_sep_threshold_pre{1200};
@@ -220,6 +232,12 @@ namespace WireCell {
             Array::array_xxf m_r_data[3];
             Array::array_xxc m_c_data[3];
 
+            // Pre-Wire-filter, pre-ROI deconvolved waveform per plane.
+            // Populated by decon_2D_init() only when m_rawdecon_tag is set.
+            // Special debug-mode tap for offline filter tuning; off in
+            // production runs.
+            Array::array_xxf m_rawdecon_r_data[3];
+
             // average overall responses
             std::vector<Waveform::realseq_t> overall_resp[3];
             // filters for overall responses
@@ -229,6 +247,9 @@ namespace WireCell {
             std::string m_wiener_tag{"wiener"};
 //            std::string m_wiener_threshold_tag;
             std::string m_decon_charge_tag{"decon_charge"};
+            // Special-mode tag for pre-Wire-filter, pre-ROI deconvolved
+            // waveform.  Empty string disables (production default).
+            std::string m_rawdecon_tag{""};
             std::string m_gauss_tag{"gauss"};
             std::string m_frame_tag{"sigproc"};
 
@@ -251,11 +272,40 @@ namespace WireCell {
             double m_mp_th2{500.};
             int m_mp_tick_resolution{4};
 
-	    //Rebase waveforms for each channel of spesific wire-plane. 
-	    std::vector<int> m_rebase_planes{}; 
+	    //Rebase waveforms for each channel of spesific wire-plane.
+	    std::vector<int> m_rebase_planes{0,1,2};
             int m_rebase_nbins=200;
 
+            // How the front/back baseline anchors of rebase_waveform are
+            // estimated ("rebase_method" config).  The historical plain-mean
+            // anchor was removed: any signal pulse inside a window biased it
+            // and tilted the whole channel.
+            //   RB_MEDIAN - median of the window (safe while signal occupies
+            //               < 50% of the window)
+            //   RB_SIGMASK- mean of window samples after masking
+            //               |x - median| > rebase_nsigma * sigma outliers,
+            //               with sigma = min(p84-p50, p50-p16), the cleaner
+            //               half-spread (16/50/84 percentiles); the window
+            //               widens inward if too few clean samples survive.
+            //               One-sided signal inflates only its own half-
+            //               spread, so the smaller one stays a noise-only
+            //               scale and the mask stays tight under a long bright
+            //               pulse in a window (e.g. a prolonged collection
+            //               track at readout start).  A symmetric RMS of the
+            //               two half-spreads is inflated there and lets the
+            //               signal bias the anchor.  (Does NOT help symmetric/
+            //               bipolar high-occupancy: both half-spreads inflate.)
+            enum RebaseMethod { RB_MEDIAN, RB_SIGMASK };
+            RebaseMethod m_rebase_method{RB_SIGMASK};
+            double m_rebase_nsigma{4.0};
+
             bool m_isWrapped{false};
+
+            // Diagnostic: dump the 2D (wire x time-freq) input, response and
+            // deconvolved spectra inside decon_2D_init() to NPZ files named
+            // <m_dump_2d_prefix>_anode<N>_plane{U,V,W}.npz.  Off by default.
+            bool m_dump_2d_spectra{false};
+            std::string m_dump_2d_prefix{"sp_dump"};
 
             // If true, safe output as a sparse frame.  Traces will only
             // cover segments of waveforms which have non-zero signal

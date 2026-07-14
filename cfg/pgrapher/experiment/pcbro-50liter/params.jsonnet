@@ -15,6 +15,10 @@ base {
     },
 
     adc: super.adc {
+        // ADC resolution (bits): restores the default removed from the
+        // shared base params in commit 41e02736 (pre-41e02736 inherited 12).
+        resolution: 12,
+
         // per tdr, chapter 2
         // induction plane: 2350 ADC, collection plane: 900 ADC
         baselines: [1003.4*wc.millivolt,1003.4*wc.millivolt,507.7*wc.millivolt],
@@ -32,6 +36,9 @@ base {
     // in pgrapher/common/ui/wcls/nodes.jsonnet.
     // also, see later overwriting in simparams.jsonnet
     elec: super.elec {
+      // FE gain: restores the default removed from the shared base in
+      // commit 41e02736 (pre-41e02736 inherited 14 mV/fC).
+      gain: 14.0*wc.mV/wc.fC,
       postgain: 1.1365, // pulser calibration: 41.649 ADC*tick/1ke
                        // theoretical elec resp (14mV/fC): 36.6475 ADC*tick/1ke
       shaping: 2.2 * wc.us,

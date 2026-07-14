@@ -28,7 +28,18 @@ function(params, anode, field, rms_cuts=[])
     // Overide defaults for specific channels.  If an info is
     // mentioned for a particular channel in multiple objects in this
     // list then last mention wins.
-    channel_info: [             
+    channel_info: [
+
+        // Note: freqmasks entries below use the legacy {value, lobin, hibin}
+        // schema with bin indices baked at jsonnet eval time.  This is safe
+        // for uBooNE because (a) Microboone::OneChannelNoise uses a
+        // half-complex (fwd_r2c) FFT so only bins 0..nticks/2 are consumed,
+        // and (b) the intentional daq.nticks=9595 vs nf.nsamples=9592 offset
+        // has been verified safe under OmniChannelNoiseDB's runtime
+        // auto-rebuild (bin indices 169-173 and 513-516 map to effectively
+        // identical physical frequencies at either size).  If you add new
+        // notches, prefer wc.freqmasks_phys([freqs], delta) from wirecell.jsonnet
+        // for runtime-resolved bins and automatic conjugate-mirror.
 
         // First entry provides default channel info across ALL
         // channels.  Subsequent entries override a subset of channels

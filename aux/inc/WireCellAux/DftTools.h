@@ -66,6 +66,11 @@ namespace WireCell::Aux::DftTools {
     complex_array_t fwd(const IDFT::pointer& dft, const complex_array_t& cwave);
     complex_array_t fwd(const IDFT::pointer& dft, const complex_array_t& cwave, int axis);
 
+    // In-place forward DFT along one axis.  No allocation, no copy: the
+    // FFT runs directly on the caller's storage.  Use when the caller is
+    // about to overwrite its input anyway.
+    void fwd_inplace(const IDFT::pointer& dft, complex_array_t& cwave, int axis);
+
     // Perform forward DFT, returning a complex spectrum given a real
     // waveform.  The spectrum will have Hermitian symmetry along the
     // axis of transform but only up to round-off errors accrued
@@ -79,12 +84,22 @@ namespace WireCell::Aux::DftTools {
     complex_array_t inv(const IDFT::pointer& dft, const complex_array_t& spec);
     complex_array_t inv(const IDFT::pointer& dft, const complex_array_t& spec, int axis);
 
+    // In-place inverse DFT along one axis.  See fwd_inplace().
+    void inv_inplace(const IDFT::pointer& dft, complex_array_t& spec, int axis);
+
     // Perform inverse or reverse DFT, returning a real waveform given
     // a complex spectrum.  Prior to the DFT, the spectrum is forced
     // to have Hermitian symmetry and thus any input values above the
     // Nyquist frequency are ignored.
     real_vector_t inv_c2r(const IDFT::pointer& dft, const complex_vector_t& spec);
     real_array_t inv_c2r(const IDFT::pointer& dft, const complex_array_t& spec, int axis);
+
+    // True real-optimized 1D transforms via IDFT::fwd_r2c_1d /
+    // inv_c2r_1d.  Equal to fwd_r2c / inv_c2r above only up to
+    // round-off; about half the flops and transform memory for
+    // backends with native real transforms (FftwDFT).
+    complex_vector_t fwd_r2c_real(const IDFT::pointer& dft, const real_vector_t& wave);
+    real_vector_t inv_c2r_real(const IDFT::pointer& dft, const complex_vector_t& spec);
 
 
     /// Convolve in1 and in2 via DFT.  Returned vecgtor has size sum

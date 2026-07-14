@@ -67,7 +67,7 @@ local builder(mid, anode, stages, outputs, dense=true) = {
     reframer(stage) ::
         local reframers = {
             splat: [mid.reframer(anode, name=outputs[stage])],
-            sp: [mid.reframer(anode, name=outputs[stage], tags=["gauss0"])],
+            sp: [mid.reframer(anode, name=outputs[stage], tags=["gauss"])],
         };
         if dense
         then std.get(reframers, stage, [])

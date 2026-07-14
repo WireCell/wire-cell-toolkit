@@ -113,4 +113,3 @@ local wf(name, data={}) = {
   wf('Wire_ind', { sigma: 1.0 / wc.sqrtpi * 0.75 }), 
   wf('Wire_col', { sigma: 1.0 / wc.sqrtpi * 3.0 }),
 ]
-

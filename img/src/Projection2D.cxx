@@ -1,11 +1,13 @@
 #include "WireCellImg/Projection2D.h"
 #include "WireCellUtil/Exceptions.h"
-#include "WireCellUtil/GraphTools.h"
+
+#include <boost/graph/filtered_graph.hpp>
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/Stream.h"
 #include "WireCellUtil/String.h"
 
 #include <fstream>
+#include <limits>
 #include <unordered_set>
 #include <utility>
 #include <algorithm>
@@ -56,69 +58,22 @@ std::unordered_map<int, std::set<cluster_vertex_t> > WireCell::Img::Projection2D
     const WireCell::cluster_graph_t& cg)
 {
     std::unordered_map<int, std::set<cluster_vertex_t> > groups;
-    cluster_graph_t cg_blob;
 
-    size_t nblobs = 0;
-    std::unordered_map<cluster_vertex_t, cluster_vertex_t> old2new;
-    std::unordered_map<cluster_vertex_t, cluster_vertex_t> new2old;
-    for (const auto& vtx : GraphTools::mir(boost::vertices(cg))) {
-        const auto& node = cg[vtx];
-        if (node.code() == 'b') {
-            ++nblobs;
-            auto newvtx = boost::add_vertex(node, cg_blob);
-            old2new[vtx] = newvtx;
-            new2old[newvtx] = vtx;
-        }
-    }
-    // debug
-    // std::cout << "nblobs: " << nblobs << std::endl;
-
-    if (!nblobs) {
-        return groups;
-    }
-
-    for (auto edge : GraphTools::mir(boost::edges(cg))) {
-        auto old_tail = boost::source(edge, cg);
-        auto old_head = boost::target(edge, cg);
-
-        auto old_tit = old2new.find(old_tail);
-        if (old_tit == old2new.end()) {
-            continue;
-        }
-        auto old_hit = old2new.find(old_head);
-        if (old_hit == old2new.end()) {
-            continue;
-        }
-        const auto& hnode = cg_blob[old_hit->second];
-        const auto& tnode = cg_blob[old_tit->second];
-        if (hnode.code() == 'b' && tnode.code() == 'b') {
-            boost::add_edge(old_tit->second, old_hit->second, cg_blob);
-        }
-    }
-
-    // for debugging, return as one group
-    // for (const auto& desc : GraphTools::mir(boost::vertices(cg_blob))) {
-    //     groups[0].insert(new2old[desc]);
-    // }
-    // return groups;
+    // Blob-only subgraph as a lazy view: keep 'b' vertices (a b-b edge survives in a
+    // vertex-filtered graph only when both of its endpoints do, so this is exactly the
+    // blob + b-b-edge subgraph).  Was a materialized copy (add_vertex/add_edge into a
+    // fresh cg_blob) + connected_components; the filtered_graph yields identical
+    // components with no graph allocation, and the descriptors are already the
+    // original cg vertices so no new2old remap is needed.
+    using BFiltered =
+        boost::filtered_graph<cluster_graph_t, boost::keep_all, std::function<bool(cluster_vertex_t)> >;
+    BFiltered bcg(cg, {}, [&](auto vtx) { return cg[vtx].code() == 'b'; });
 
     std::unordered_map<cluster_vertex_t, int> desc2id;
-    boost::connected_components(cg_blob, boost::make_assoc_property_map(desc2id));
-    for (auto& [desc, id] : desc2id) {  // invert
-        groups[id].insert(new2old[desc]);
+    boost::connected_components(bcg, boost::make_assoc_property_map(desc2id));
+    for (auto& [desc, id] : desc2id) {  // invert: component id -> original blob descriptors
+        groups[id].insert(desc);
     }
-
-    // debug
-    // for (auto id2desc : groups) {
-    //     auto & descvec = id2desc.second;
-    //     if (descvec.size()>10) {
-    //         std::cout << id2desc.first << ": ";
-    //         for (auto &desc : descvec) {
-    //             std::cout << desc << " ";
-    //         }
-    //         std::cout << std::endl;
-    //     }
-    // }
 
     return groups;
 }
@@ -129,7 +84,9 @@ struct pair_hash {
     {
         std::size_t h1 = std::hash<T1>()(pair.first);
         std::size_t h2 = std::hash<T2>()(pair.second);
-        return h1 ^ h2;
+        // boost::hash_combine style mixing to avoid h1^h2 symmetry collisions
+        h1 ^= h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2);
+        return h1;
     }
 };
 
@@ -188,9 +145,14 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
         }
     }
 
+    // Default (zero) signal for channels absent from a slice's activity map.
+    // Matches the previous behavior where operator[] on a local copy of the
+    // map default-inserted a {0,0} value.
+    static const ISlice::value_t zero_signal{};
+
     for (const auto& [slice, bdescs] : map_s2vb) {
         int start = slice->start() / slice->span();
-        auto activity = slice->activity();
+        const auto& activity = slice->activity();
 
         for (const auto& bdesc : bdescs) {
             std::unordered_map<WirePlaneLayer_t, double> layer_charge;
@@ -203,8 +165,10 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
                 const auto& chan = std::get<channel_t>(cg[chan_desc].ptr);
                 WirePlaneLayer_t layer = chan->planeid().layer();
                 int cident = chan->index();
-                auto charge = activity[chan].value();
-                auto unc = activity[chan].uncertainty();
+                const auto ait = activity.find(chan);
+                const auto& sig = (ait == activity.end()) ? zero_signal : ait->second;
+                auto charge = sig.value();
+                auto unc = sig.uncertainty();
                 // TODO: make this configurable and robust
                 if (unc > uncer_cut) {
                     charge = dead_default_charge;
@@ -225,7 +189,7 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
 
             double sum_charge = 0;
             int sum_n = 0;
-            double min_charge = 1e12;
+            double min_charge = std::numeric_limits<double>::max();
             for (auto it = layer_charge.begin(); it != layer_charge.end(); it++) {
                 if (it->second != 0) {
                     sum_charge += it->second;
@@ -233,8 +197,8 @@ LayerProjection2DMap WireCell::Img::Projection2D::get_projection(const WireCell:
                     if (it->second < min_charge) min_charge = it->second;
                 }
             }
-            // protection ...
-            if (min_charge == 1e12) min_charge = 0;
+            // protection: no layer had non-zero charge
+            if (sum_n == 0) min_charge = 0;
             if (sum_n > 0) estimated_total_charge = sum_charge / sum_n;
             estimated_minimum_charge += min_charge;  // min_iter->second;
 
@@ -320,41 +284,6 @@ namespace {
         return smm;
     }
 
-    bool loop_exist(const sparse_mat_t& sm, std::function<bool(scaler_t)> f)
-    {
-        for (int k = 0; k < sm.outerSize(); ++k) {
-            for (sparse_mat_t::InnerIterator it(sm, k); it; ++it) {
-                if (f(it.value())) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    int loop_count(const sparse_mat_t& sm, std::function<bool(scaler_t)> f)
-    {
-        int ret = 0;
-        for (int k = 0; k < sm.outerSize(); ++k) {
-            for (sparse_mat_t::InnerIterator it(sm, k); it; ++it) {
-                if (f(it.value())) {
-                    ret += 1;
-                }
-            }
-        }
-        return ret;
-    }
-
-    scaler_t loop_sum(const sparse_mat_t& sm, std::function<scaler_t(scaler_t)> f)
-    {
-        scaler_t ret = 0;
-        for (int k = 0; k < sm.outerSize(); ++k) {
-            for (sparse_mat_t::InnerIterator it(sm, k); it; ++it) {
-                ret += f(it.value());
-            }
-        }
-        return ret;
-    }
 }  // namespace
 
 // 1: tar is part of ref: REF_COVERS_TAR
@@ -366,16 +295,54 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
                                                                                   const Projection2D& tar,
                                                                                   double uncer_cut)
 {
-    sparse_mat_t ref_mask = mask(ref.m_proj, [&](scaler_t x) { return x > -uncer_cut; });
-    sparse_mat_t tar_mask = mask(tar.m_proj, [&](scaler_t x) { return x > -uncer_cut; });
-
-    // non zero component in both
-    // bool ref_non_zero = loop_exist(ref.m_proj, [&](scaler_t x){return (x!=0 && x > -uncer_cut);}); // number of live
-    // elements bool tar_non_zero = loop_exist(tar.m_proj, [&](scaler_t x){return (x!=0 && x > -uncer_cut);}); // number
-    // of live elements ...
-
-    bool ref_non_zero = loop_exist(ref_mask, [](scaler_t x) { return (x != 0); });  // number of live elements
-    bool tar_non_zero = loop_exist(tar_mask, [](scaler_t x) { return (x != 0); });  // number of live elements ...
+    // Single union-pass over the two projections' stored entries, replacing the
+    // previous mask(ref)+mask(tar)+(ref_mask-tar_mask) (three sparse allocations).
+    // Bit-identical: mask() sets every STORED entry to 1 (live: value > -uncer_cut)
+    // or 0, keeping the same sparsity, so ref_mask-tar_mask is in {-1,0,1} over the
+    // UNION of stored positions, and the four booleans reduce exactly to:
+    //   ref_non_zero  = exists a position live in ref
+    //   tar_non_zero  = exists a position live in tar
+    //   ref_m_tar_pos = exists a position live in ref but NOT live in tar  (diff +1)
+    //   ref_m_tar_neg = exists a position live in tar but NOT live in ref  (diff -1)
+    // where "live in M" == stored in M.m_proj with value > -uncer_cut, and
+    // "not live" includes both not-stored and stored-but-<=-uncer_cut. Both
+    // projections share dims (nchan x nslice) and are column-major, so a per-column
+    // merge of the (row-sorted) InnerIterators visits each union position once.
+    bool ref_non_zero = false, tar_non_zero = false;
+    bool ref_m_tar_pos = false, ref_m_tar_neg = false;
+    const int ncols = ref.m_proj.outerSize();
+    for (int k = 0; k < ncols; ++k) {
+        sparse_mat_t::InnerIterator rit(ref.m_proj, k);
+        sparse_mat_t::InnerIterator tit(tar.m_proj, k);
+        while (rit || tit) {
+            const int rrow = rit ? (int) rit.row() : std::numeric_limits<int>::max();
+            const int trow = tit ? (int) tit.row() : std::numeric_limits<int>::max();
+            bool r_live = false, t_live = false;
+            if (rrow == trow) {
+                r_live = rit.value() > -uncer_cut;
+                t_live = tit.value() > -uncer_cut;
+                ++rit;
+                ++tit;
+            }
+            else if (rrow < trow) {
+                r_live = rit.value() > -uncer_cut;
+                ++rit;
+            }
+            else {
+                t_live = tit.value() > -uncer_cut;
+                ++tit;
+            }
+            ref_non_zero  = ref_non_zero  || r_live;
+            tar_non_zero  = tar_non_zero  || t_live;
+            ref_m_tar_pos = ref_m_tar_pos || (r_live && !t_live);
+            ref_m_tar_neg = ref_m_tar_neg || (t_live && !r_live);
+            // all flags saturated: both non-empty with exclusive live cells -> OTHER,
+            // and no later cell can change that.
+            if (ref_non_zero && tar_non_zero && ref_m_tar_pos && ref_m_tar_neg) {
+                return OTHER;
+            }
+        }
+    }
 
     if ((!ref_non_zero) && (!tar_non_zero)) {
         return BOTH_EMPTY;
@@ -386,38 +353,18 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
     else if ((!ref_non_zero) && tar_non_zero) {
         return TAR_COVERS_REF;
     }
-    else {
-        // ref - tar
-        //    sparse_mat_t ref_m_tar = ref.m_proj - tar.m_proj;
-        sparse_mat_t ref_m_tar = ref_mask - tar_mask;
-
-        // bool ref_m_tar_neg = loop_exist(ref_m_tar, [&](scaler_t x){return (x<0 && fabs(x)<fabs(uncer_cut));}); //
-        // number of live elements belong to tar, not belong to ref bool ref_m_tar_pos = loop_exist(ref_m_tar,
-        // [&](scaler_t x){return (x>0 && fabs(x)<fabs(uncer_cut));}); // number of live elements belong to ref, not
-        // belong to tar
-
-        bool ref_m_tar_neg = loop_exist(ref_m_tar, [](scaler_t x) {
-            return x < -0.01;
-        });  // number of live elements belong to tar, not belong to ref
-        bool ref_m_tar_pos = loop_exist(ref_m_tar, [](scaler_t x) {
-            return x > 0.01;
-        });  // number of live elements belong to ref, not belong to tar
-
-        if ((!ref_m_tar_neg) && (!ref_m_tar_pos)) {
-            return REF_EQ_TAR;
-        }
-        else if (ref_m_tar_neg && (!ref_m_tar_pos)) {
-            return TAR_COVERS_REF;
-        }
-        else if ((!ref_m_tar_neg) && ref_m_tar_pos) {
-            return REF_COVERS_TAR;
-        }
-        else {
-            return OTHER;
-        }
+    else if ((!ref_m_tar_neg) && (!ref_m_tar_pos)) {
+        return REF_EQ_TAR;
     }
-
-    return OTHER;
+    else if (ref_m_tar_neg && (!ref_m_tar_pos)) {
+        return TAR_COVERS_REF;
+    }
+    else if ((!ref_m_tar_neg) && ref_m_tar_pos) {
+        return REF_COVERS_TAR;
+    }
+    else {
+        return OTHER;
+    }
 
     // ref * tar
     // sparse_mat_t ref_t_tar = ref.m_proj.cwiseProduct(tar.m_proj);
@@ -466,17 +413,32 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
     sparse_mat_t inter_mask = ref_mask.cwiseProduct(tar_mask);
     sparse_mat_t inter_proj = ref.m_proj.cwiseProduct(inter_mask);
 
-    int num_ref = loop_count(ref.m_proj, [](scaler_t x) { return x > 0; });
-    int num_tar = loop_count(tar.m_proj, [](scaler_t x) { return x > 0; });
-    int num_dead_ref = loop_count(ref.m_proj, [&](scaler_t x) {
-        return x < (-1) * uncer_cut;
-    });  // -1e12 for dead pixels, TODO: make sure this is robust
-    int num_dead_tar = loop_count(tar.m_proj, [&](scaler_t x) { return x < (-1) * uncer_cut; });
-    int num_inter = loop_count(inter_proj, [](scaler_t x) { return x > 0; });
-
-    scaler_t charge_ref = loop_sum(ref.m_proj, [](scaler_t x) { return (x > 0) * x; });
-    scaler_t charge_tar = loop_sum(tar.m_proj, [](scaler_t x) { return (x > 0) * x; });
-    scaler_t charge_inter = loop_sum(inter_proj, [](scaler_t x) { return (x > 0) * x; });
+    // Single-pass stats for ref: count live, count dead, sum charge
+    int num_ref = 0, num_dead_ref = 0;
+    scaler_t charge_ref = 0;
+    for (int k = 0; k < ref.m_proj.outerSize(); ++k) {
+        for (sparse_mat_t::InnerIterator it(ref.m_proj, k); it; ++it) {
+            if (it.value() > 0) { ++num_ref; charge_ref += it.value(); }
+            else if (it.value() < (-1) * uncer_cut) { ++num_dead_ref; }
+        }
+    }
+    // Single-pass stats for tar: count live, count dead, sum charge
+    int num_tar = 0, num_dead_tar = 0;
+    scaler_t charge_tar = 0;
+    for (int k = 0; k < tar.m_proj.outerSize(); ++k) {
+        for (sparse_mat_t::InnerIterator it(tar.m_proj, k); it; ++it) {
+            if (it.value() > 0) { ++num_tar; charge_tar += it.value(); }
+            else if (it.value() < (-1) * uncer_cut) { ++num_dead_tar; }
+        }
+    }
+    // Single-pass stats for inter_proj: count and charge
+    int num_inter = 0;
+    scaler_t charge_inter = 0;
+    for (int k = 0; k < inter_proj.outerSize(); ++k) {
+        for (sparse_mat_t::InnerIterator it(inter_proj, k); it; ++it) {
+            if (it.value() > 0) { ++num_inter; charge_inter += it.value(); }
+        }
+    }
 
     if (num_ref != 0 && num_tar != 0 && num_inter == 0) return OTHER;
 
@@ -513,6 +475,8 @@ WireCell::Img::Projection2D::Coverage WireCell::Img::Projection2D::judge_coverag
 
         float common_counts = num_inter;
         float common_charge = charge_inter;
+
+        if (small_charge == 0 || small_counts == 0) return OTHER;
 
         if ((1 - common_charge / small_charge) <
                 std::min(cut_values[0] * (small_counts + dead_counts) / small_counts, cut_values[1]) &&

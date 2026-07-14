@@ -165,7 +165,7 @@ bool Root::UbooneBlobSource::in_views(int bind)
 {
     // Inclusion test depends if we are loading live or dead blobs.
     const int want = m_kind == "live" ? 1 : 0;
-    const auto& flag_uvw = m_files->trees->blob(m_kind).flag_uvw;
+    const auto flag_uvw = m_files->trees->blob(m_kind).get_flag_uvw();
 
     int cone = 0;
     for (int pln=0; pln<3; ++pln) {
@@ -200,6 +200,10 @@ void Root::UbooneBlobSource::bodge_activity(ISlice::map_t& activity, const RayGr
 void Root::UbooneBlobSource::dummy_activity(ISlice::map_t& activity)
 {
     for (auto ich : m_dummy->channels()) {
+
+        // if (activity[ich].value() != 0.0) {
+        //     std::cout << activity[ich] << " " << m_bodge << std::endl;
+        // }
         activity[ich] = m_bodge;
         // fixme: MaskSlices in principle can use different values for "dummy"
         // and "masked" aka "bad" activity.
@@ -389,7 +393,7 @@ void Root::UbooneBlobSource::load_dead()
 
 
             slice = std::make_shared<SimpleSlice>(iframe, tsid, start, span);
-            dummy_activity(slice->activity());
+            dummy_activity(slice->activity()); 
             slices[tsid] = slice;
             blobsets[tsid] = bset = std::make_shared<SimpleBlobSet>(tsid, slice);
         }
@@ -439,9 +443,7 @@ void Root::UbooneBlobSource::fill_queue()
     else {
         load_dead();
     }
-    if (m_frame_eos) {
-        m_queue.push_back(nullptr);
-    }
+    // Note: load_live()/load_dead() already push nullptr for EOS when m_frame_eos is true
 }
 
 bool Root::UbooneBlobSource::operator()(IBlobSet::pointer& blobset)

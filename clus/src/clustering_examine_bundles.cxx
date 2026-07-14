@@ -1,11 +1,69 @@
-#include <WireCellClus/ClusteringFuncs.h>
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/ClusteringFuncsMixins.h"
+
+#include "WireCellIface/IConfigurable.h"
+
+#include "WireCellUtil/NamedFactory.h"
+#include "WireCellAux/Logger.h"
+
+#include <unordered_map>
+
+
+class ClusteringExamineBundles;
+WIRECELL_FACTORY(ClusteringExamineBundles, ClusteringExamineBundles,
+                 WireCell::INamed, WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
+
 
 using namespace WireCell;
 using namespace WireCell::Clus;
-using namespace WireCell::Aux;
-using namespace WireCell::Aux::TensorDM;
-using namespace WireCell::PointCloud::Facade;
+using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
+
+
+static void clustering_examine_bundles(
+        Grouping& live_grouping,
+        IDetectorVolumes::pointer dv,
+        IPCTransformSet::pointer pcts,
+        const Tree::Scope& scope,
+        const bool use_ctpc,
+        const std::string& graph_name,
+        const bool use_flash_t0,
+        const double flash_t0_window,
+        WireCell::Log::logptr_t log);
+
+class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, public Aux::Logger, private NeedDV, private NeedPCTS, private NeedScope {
+public:
+    ClusteringExamineBundles()
+        : Aux::Logger("ClusteringExamineBundles", "clus")
+    {}
+    virtual ~ClusteringExamineBundles() {}
+    
+    void configure(const WireCell::Configuration& config) {
+        NeedDV::configure(config);
+        NeedPCTS::configure(config);
+        NeedScope::configure(config);
+
+        // If false, then DV and PCTS are not needed.
+        use_ctpc_ = get<bool>(config, "use_ctpc", use_ctpc_);
+        graph_name_ = get<std::string>(config, "graph_name", graph_name_);
+        use_flash_t0_ = get<bool>(config, "use_flash_t0", use_flash_t0_);
+        flash_t0_window_ = get<double>(config, "flash_t0_window", flash_t0_window_);
+    }
+
+    void visit(Ensemble& ensemble) const {
+        auto& live = *ensemble.with_name("live").at(0);
+        clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_,
+                                   use_flash_t0_, flash_t0_window_, log);
+    }
+
+private:
+    bool use_ctpc_{true};
+    std::string graph_name_{"relaxed"};
+    bool use_flash_t0_{false};
+    double flash_t0_window_{80*units::ns};
+};
+
 
 // The original developers do not care.
 #pragma GCC diagnostic push
@@ -18,52 +76,91 @@ using namespace WireCell::PointCloud::Tree;
 #define LogDebug(x)
 #endif
 
-void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_grouping,
-    const bool use_ctpc)
+// All APA Faces 
+static void clustering_examine_bundles(
+    Grouping& live_grouping,
+    IDetectorVolumes::pointer dv,
+    IPCTransformSet::pointer pcts,
+    const Tree::Scope& scope,
+    const bool use_ctpc,
+    const std::string& graph_name,
+    const bool use_flash_t0,
+    const double flash_t0_window,
+    WireCell::Log::logptr_t log)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
 
+    // Flash-aware pre-step: collapse each matched-flash-time group of clusters
+    // into a single cluster, so the per-cluster labeling below partitions one
+    // cluster per flash group (main sub-component = -1), like clustering_isolated
+    // but grouped by flash time instead of geometry.  merge_clusters() (see
+    // ClusteringFuncs.cxx) carries the longest contributing member's flash onto
+    // the merged cluster.  With use_flash_t0=false this is skipped entirely.
+    if (use_flash_t0) {
+        auto pre_clusters = live_grouping.children();
+        auto flash_t0_group = assign_flash_t0_groups(pre_clusters, flash_t0_window);
+
+        cluster_connectivity_graph_t g;
+        std::unordered_map<int, int> ilive2desc;
+        std::unordered_map<const Cluster*, int> map_cluster_index;
+        for (size_t ilive = 0; ilive < pre_clusters.size(); ++ilive) {
+            auto live = pre_clusters[ilive];
+            map_cluster_index[live] = ilive;
+            ilive2desc[ilive] = boost::add_vertex(ilive, g);
+        }
+        // Edge between every pair of in-scope clusters sharing a flash-time group.
+        // Unmatched clusters get unique singleton groups, so they are never linked.
+        for (size_t i = 0; i < pre_clusters.size(); ++i) {
+            auto c1 = pre_clusters[i];
+            if (!c1->get_scope_filter(scope)) continue;
+            for (size_t j = i + 1; j < pre_clusters.size(); ++j) {
+                auto c2 = pre_clusters[j];
+                if (!c2->get_scope_filter(scope)) continue;
+                if (flash_t0_group.at(c1) != flash_t0_group.at(c2)) continue;
+                boost::add_edge(ilive2desc[map_cluster_index[c1]],
+                                ilive2desc[map_cluster_index[c2]], g);
+            }
+        }
+
+        // Diagnostic: how many in-scope matched clusters fall into how many
+        // distinct flash-time groups (each multi-member group is merged into one).
+        std::set<int> matched_groups;
+        int n_matched_inscope = 0;
+        for (auto c : pre_clusters) {
+            if (c->get_scope_filter(scope) && c->get_scalar<int>("flash", -1) >= 0) {
+                ++n_matched_inscope;
+                matched_groups.insert(flash_t0_group.at(c));
+            }
+        }
+        log->debug("flash-t0 merge: {} in-scope matched clusters -> {} flash-time groups",
+                   n_matched_inscope, matched_groups.size());
+
+        // Save, per blob, the original (pre-merge) cluster ident of each
+        // flash-group member into a "real_cluster_id" array in the "perblob" PC.
+        // The Bee writer reads this so the merged group's far-apart members keep
+        // their distinct original ids (colors).  Only here, under use_flash_t0
+        // (all-APA), so per-APA / other-detector output is bit-identical.
+        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id");
+    }
+
     std::vector<Cluster *> live_clusters = live_grouping.children();
-    // for (size_t i = 0; i != live_clusters.size(); i++) {
-    //    auto blobs = live_clusters.at(i)->kd_blobs();
-    //    int nblobs = blobs.size();
-
-    //     //    if(nblobs > 10){
-    //         // std::cout << "Test: " << nblobs << " " <<  std::endl;
-
-    //     auto flash = live_clusters.at(i)->get_flash();
-    //     if (flash) {
-    //         std::cout << "Tests: " << nblobs << " at time " << flash.time() << "\n";
-
-    //         auto values = flash.values();
-    //         std::cout << values.size() << " ";
-    //         for (const auto& value : values) {
-    //             std::cout << value << " ";
-    //         }
-    //         std::cout << std::endl;
-    //     }
-
-    //         // auto local_pcs = live_clusters.at(i)->local_pcs();
-    //         // for (auto it = local_pcs.begin(); it !=local_pcs.end(); it++){
-    //         //     auto keys = it->second.keys();
-    //         //     for (auto it1 = keys.begin(); it1 != keys.end(); it1++){
-    //         //         std::cout << "Test: " << it->first << " " << *it1 << std::endl;
-    //         //     }
-    //         // }
-    //         // auto flash = live_clusters.at(i)->get_scalar<int>("flash");
-    //         // std::cout << "Test: Flash: " << flash << std::endl;
-    //         //    }
-    // }
-
 
     for (size_t i=0;i!=live_clusters.size();i++){
+        if (!live_clusters.at(i)->get_scope_filter(scope)) continue; // move on if the cluster is not in the scope filter ...
+        if (live_clusters.at(i)->get_default_scope().hash() != scope.hash()) {
+            live_clusters.at(i)->set_default_scope(scope);
+            // std::cout << "Test: Set default scope: " << pc_name << " " << coords[0] << " " << coords[1] << " " << coords[2] << " " << cluster->get_default_scope().hash() << " " << scope.hash() << std::endl;
+        }
+
         // if there is a cc component, record the main cluster as id of the blobs???
         auto old_cc_array = live_clusters.at(i)->get_pcarray("isolated", "perblob");
-        
+        log->trace("old_cc_array: {} clusters", std::set<int>(old_cc_array.begin(), old_cc_array.end()).size());
+
         // currently reset the cc component (todo: find the main component)
 
         // do the examine graph
-        auto b2groupid = live_clusters.at(i)->examine_graph(true);
+        auto b2groupid = live_clusters.at(i)->connected_blobs(dv, pcts, graph_name);
+        log->trace("b2groupid: {} clusters", std::set<int>(b2groupid.begin(), b2groupid.end()).size());
         
         bool flag_largest = false;
         // Compare old and new cluster groupings
@@ -104,21 +201,15 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
 
         //run the longest ...
         if (flag_largest){
-            // No main cluster existed, find longest cluster
+            // No main cluster existed, find longest cluster.
+            // Single sweep: compute length for each unique non-(-1) id and track the maximum.
             std::map<int, double> cluster_lengths;
-            std::set<int> unique_ids;
             for (const auto& id : b2groupid) {
-                if (id >= 0) {  // skip any existing -1 values
-                    unique_ids.insert(id);
+                if (id >= 0 && cluster_lengths.find(id) == cluster_lengths.end()) {
+                    cluster_lengths[id] = get_length(live_clusters.at(i), b2groupid, id);
                 }
             }
-            
-            // Calculate length for each unique cluster ID
-            for (const auto& id : unique_ids) {
-                double length = get_length(live_clusters.at(i) , b2groupid, id);
-                cluster_lengths[id] = length;
-            }
-            
+
             // Find cluster with maximum length
             double max_length = 0;
             int longest_cluster_id = -1;
@@ -140,18 +231,11 @@ void WireCell::PointCloud::Facade::clustering_examine_bundles(Grouping& live_gro
 
         live_clusters.at(i)->put_pcarray(b2groupid, "isolated", "perblob");
 
-        // auto blobs = live_clusters.at(i)->kd_blobs();
-        // int nblobs = blobs.size();
-
-        // for (const auto& id : b2groupid) {
-        //     std::cout << id << " ";
-        // }
-        // std::cout << std::endl;
-
-        // if (nblobs > 10){
-        //     // find the main cluster and set it to the cc tree ...
-        //     std::cout << "Test: " << nblobs << " " << old_cc_array.size() << " " << b2groupid.size() << std::endl;
-        // }
     }
+
+
+
+
+
 
 }

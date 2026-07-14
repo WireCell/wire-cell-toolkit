@@ -9,9 +9,6 @@
 local wc = import "wirecell.jsonnet";
 local g = import "pgraph.jsonnet";
 
-local cli = import "pgrapher/ui/cli/nodes.jsonnet";
-
-local io = import "pgrapher/common/fileio.jsonnet";
 local params_maker = import 'pgrapher/experiment/dune10kt-1x2x6/simparams.jsonnet';
 local params = params_maker({});
 local tools_maker = import "pgrapher/common/tools.jsonnet";
@@ -50,7 +47,7 @@ local tracklist = [
    //     ray: params.det.bounds,
    // },
 ];
-local output = "wct-sim-ideal-sig.npz";
+local output = "wct-sim-ideal-sig.tar.bz2";
 
     
 //local depos = g.join_sources(g.pnode({type:"DepoMerger", name:"BlipTrackJoiner"}, nin=2, nout=1),
@@ -58,15 +55,25 @@ local output = "wct-sim-ideal-sig.npz";
 local depos = sim.tracks(tracklist);
 
 
-local deposio = io.numpy.depos(output);
 local drifter = sim.drifter;
 local bagger = sim.make_bagger();
 local signal = sim.signal;
 
-local frameio = io.numpy.frames(output);
-local sink = sim.frame_sink;
+// Save the simulated raw frame.  Replaces the removed
+// pgrapher/common/fileio.jsonnet npz helper -- follows the inline
+// FrameFileSink pattern of the pdhd_sim configs (output: tar.bz2).
+local frame_sink = g.pnode({
+    type: "FrameFileSink",
+    name: "framesink",
+    data: {
+        outname: output,
+        tags: [],          // empty => save all traces
+        digitize: false,
+        masks: false,
+    },
+}, nin=1, nout=0);
 
-local graph = g.pipeline([depos, deposio, drifter, bagger, signal, frameio, sink]);
+local graph = g.pipeline([depos, drifter, bagger, signal, frame_sink]);
 
 local app = {
     type: "Pgrapher",
@@ -75,7 +82,17 @@ local app = {
     },
 };
 
+// The command-line node.  Replaces the removed pgrapher/ui/cli/nodes.jsonnet
+// helper -- inlined, following the pdhd_sim configs.
+local cmdline = {
+    type: "wire-cell",
+    data: {
+        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellTbb"],
+        apps: ["Pgrapher"],
+    },
+};
+
 // Finally, the configuration sequence which is emitted.
 
-[cli.cmdline] + g.uses(graph) + [app]
+[cmdline] + g.uses(graph) + [app]
 

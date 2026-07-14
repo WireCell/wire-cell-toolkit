@@ -1,13 +1,26 @@
 #ifndef WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 #define WIRECELL_CLUS_MULTIALGBLOBCLUSTERING
 
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/IClusGeomHelper.h"
+#include "WireCellClus/IEnsembleVisitor.h"
+#include "WireCellClus/IBeeSink.h"
+#include "WireCellClus/Facade.h"
+
 #include "WireCellAux/Logger.h"
+
 #include "WireCellIface/ITensorSetFilter.h"
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/ITerminal.h"
-#include "WireCellClus/IClusGeomHelper.h"
+
 #include "WireCellUtil/Bee.h"
+
+#include <vector>
+#include <set>
+#include <map>
+#include <string>
 
 namespace WireCell::Clus {
 
@@ -34,40 +47,224 @@ namespace WireCell::Clus {
         Bee::Sink m_sink;
         int m_last_ident{-1};
         int m_initial_index{0};  // Default to 0 for backward compatibility
-        Bee::Points m_bee_img, m_bee_ld;
-        Bee::Patches m_bee_dead;
+
+        // Optional shared Bee sink (config "bee_sink").  When set, all Bee
+        // writes go to this shared single-zip sink (at an explicit per-event
+        // index) instead of the per-node m_sink above, so a multi-node chain
+        // produces one .zip.  Default: unset -> own m_sink (back-compat).
+        IBeeSink::pointer m_shared_sink{nullptr};
+        bool m_use_shared_sink{false};
+        size_t m_bee_event_index{0};
+        
+        // Drift-side / APA grouping shared by the clustering bee output and the
+        // dead-area output.  When configured, each cluster (or dead blob) is
+        // routed by its APA into the matching group and dumped as a single bee
+        // instance named "<algorithm>-<group name>".  Unset -> behavior unchanged.
+        struct ApaGroup {
+            std::string name;       // bee instance suffix, e.g. "group02"
+            std::set<int> apas;     // APA idents that belong to this group
+        };
+
+        // Replace the existing bee points structures with a more flexible approach
+        struct BeePointsConfig {
+            // special name "img" dumps "live" before clustering
+            std::string name;   // bee type name
+            std::string detector;  // bee geom name
+            std::string algorithm; // bee alg name, defaults to type
+            std::string pcname;    // PC to take
+            std::string grouping;  // grouping to take (default to "live")
+            std::string visitor;   // if given, dump just after this visitor runs and any cluster ID enumeration
+            std::vector<std::string> coords;
+            bool individual;
+            int filter{1};// 1 for on, 0 for off, -1 for inverse filter
+            double dQdx_scale{1.0};
+            double dQdx_offset{0.0};
+            bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
+            bool use_graph_vertices{false};    // dump graph vertices; charge=15000 for main (kNeutrinoVertex), 0 otherwise
+
+            // Optional per-set drift-side / APA grouping (see ApaGroup above).
+            // Non-empty -> route this set's clusters into group buckets.
+            std::vector<ApaGroup> apa_groups;
+        };
+
+        // Vector to store configurations for multiple bee points sets
+        std::vector<BeePointsConfig> m_bee_points_configs;
+        
+         // Nested structure to store bee points objects for each configuration, by APA and face
+        // First key: bee points set name, second key: "anode_id-face_id" string
+        struct ApaBeePoints {
+             // Default constructor (add this)
+            ApaBeePoints() = default;
+            
+            // Global points (used when individual == false)
+            Bee::Points global;
+            
+            // Individual points (used when individual == true)
+            // Key is "anode_id-face_id" string
+            std::map<int, std::map<int , Bee::Points> > by_apa_face; // apa, face
+
+            // Grouped points (used when apa_groups is non-empty).
+            // Key is the group name.
+            std::map<std::string, Bee::Points> by_group;
+        };
+    
+        Facade::Grouping& load_grouping(
+            Facade::Ensemble& ensemble,
+            const std::string& name,
+            const std::string& path,
+            const ITensorSet::pointer ints);
+
+        std::map<std::string, ApaBeePoints> m_bee_points;
+
+        // New helper function to fill bee points
+        void fill_bee_points(const std::string& name, const Facade::Grouping& grouping);
+        void fill_bee_points_from_cluster(
+            Bee::Points& bpts, const Facade::Cluster& cluster,
+            const std::string& pcname, const std::vector<std::string>& coords,
+            int filter);
+        void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
+        void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
+
+        void fill_bee_patches_from_grouping(const Facade::Grouping& grouping);
+        void fill_bee_patches_from_cluster(const Facade::Cluster& cluster);
+
+        // ---- Particle-flow Bee output ----
+        // Triggered after TaggerCheckNeutrino (or any configured visitor) runs.
+        // Produces one file per event named "mc" (bare JSON array), matching the
+        // prototype "mc" format read by the Bee viewer.
+        struct BeePFConfig {
+            std::string name{"mc"};          // Bee file name (default "mc")
+            std::string visitor;             // dump after this visitor runs
+            std::string grouping{"live"};    // grouping to read PR graph from
+        };
+        std::vector<BeePFConfig> m_bee_pf_configs;
+
+        // Storage: flushed at end of each event (same lifecycle as m_bee_points)
+        std::map<std::string, WireCell::Bee::ParticleTree> m_bee_pf_trees;
+
+        void fill_bee_pf_tree(const BeePFConfig& cfg, const Facade::Grouping& grouping, bool flag_print = false);
+
+        std::map<int, std::map<int, Bee::Patches>> m_bee_dead_patches;
+        // Bee::Patches m_bee_dead; // dead region ...
+
+        // Dead-area drift-side grouping (mirrors the clustering grouping).  When
+        // m_dead_apa_groups is non-empty, dead blobs are routed by APA into one
+        // Bee::Patches per group ("channel-deadarea-<group name>") instead of one
+        // per (apa,face).  Empty -> per-(apa,face) output (unchanged).
+        std::vector<ApaGroup> m_dead_apa_groups;
+        std::map<std::string, Bee::Patches> m_bee_dead_groups;
+
+        // ---- Optical flash / charge-light "op" Bee dump ----
+        // When m_save_opflash is set, the merged-grouping root carries a
+        // self-contained per-flash "opflash" point cloud (gid, time, ch, pe)
+        // written by the upstream QLMatching, and matched clusters carry a
+        // "matched_flash_gid" scalar + a "flashpred" PC (predicted per-channel
+        // PE).  At the pre-pipeline "img" dump point we read these and emit the
+        // "op" display so the flash/QL-matching result lands in the same zip
+        // as the charge clusters.  Default OFF (no flash dump for detectors
+        // that don't attach an "opflash" PC, e.g. uboone).
+        bool m_save_opflash{false};
+        // When set, fill_bee_flashes emits one "op" row per flash carrying ALL
+        // matched cluster ids (op_cluster_ids array) with element-wise summed
+        // predicted PE, instead of one row per (flash, cluster).  Default OFF so
+        // existing output is bit-identical; enabled for the SBND all-APA match.
+        bool m_bee_flash_per_flash{false};
+        // When > 0, group the root opflash flashes across both TPC sides by this
+        // ±time window (stored as a per-flash "group" array on the root opflash
+        // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence
+        // together.  Default 0 = off, output bit-identical; set for SBND all-APA.
+        double m_flash_group_window{0.0};
+        // Flash-pair grouping policy when several matched flashes coincide within
+        // the window.  false (default) = ONE closest cross-side pair per
+        // coincidence neighborhood, the rest left solo.  true = GREEDY disjoint
+        // pairs: repeatedly take the next-closest available cross-side pair, so
+        // two distinct close crossers in one neighborhood both group.  Default
+        // false keeps the grouped output bit-identical to the one-pair policy.
+        bool m_flash_group_greedy{false};
+        Bee::Flashes m_bee_flash;
+        void fill_bee_flashes(const Facade::Grouping& grouping);
+
         // Add new member variables for run/subrun/event
         int m_runNo{0};
         int m_subRunNo{0};
         int m_eventNo{0};
         bool m_use_config_rse{false};  // Flag to determine if we use configured RSE
+        // When set, take the event number from the per-event tensor-set ident
+        // (m_eventNo = ident, run/subrun = 0).  Used by the bundled standalone
+        // chain whose ident already carries the real event id.  Default off keeps
+        // the existing use_config_rse / auto-increment behavior unchanged.
+        bool m_rse_from_ident{false};
 
         void flush(int ident = -1);
         void flush(WireCell::Bee::Points& bpts, int ident);
 
+        // Write one Bee object: routes to the shared sink (at the current
+        // per-event index) when m_use_shared_sink, else to the per-node m_sink.
+        size_t write_obj(const WireCell::Bee::Object& obj);
+
         bool m_save_deadarea{false};
+        // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for
+        //     single-TPC viewers like the original Bee).  2 = wire-cell-bee3 v2
+        //     wrapper {"version":2,"tpc":<apa>,"polygons":[...]} that places the
+        //     dead-area slab on the per-TPC anode face.  See wire-cell-bee3
+        //     docs/dead-area.md.  Currently we use the WCT anode ident as the
+        //     bee TPC index, which is correct for single-face anode detectors
+        //     (e.g. SBND) and may need a mapping table for multi-face anodes.
+        int m_dead_area_version{1};
 
 
         // Count how many times we are called
         size_t m_count{0};
 
+        /** Config: "groupings"
+         *
+         * List of groupings to select for processing.
+         *
+         * Default: ["live","dead"].
+         */
+        std::vector<std::string> m_groupings = {"live","dead"};
+
         /** Config: "inpath"
          *
-         * The datapath for the input point graph data.  This may be a
-         * regular expression which will be applied in a first-match
-         * basis against the input tensor datapaths.  If the matched
-         * tensor is a pcdataset it is interpreted as providing the
-         * nodes dataset.  Otherwise the matched tensor must be a
-         * pcgraph.
+         * The BASE datapath for the input pc tree data.  This may be a regular
+         * expression which will be applied in a first-match basis against the
+         * input tensor datapaths.  If the matched tensor is a pcdataset it is
+         * interpreted as providing the nodes dataset.  Otherwise the matched
+         * tensor must be a pcgraph.
+         *
+         * A "%d" will be interpolated with the ident number of the input tensor
+         * set.
+         * 
+         * See also "insubpaths".
          */
         std::string m_inpath{".*"};
 
         /** Config: "outpath"
          *
-         * The datapath for the resulting pcdataset.  A "%d" will be
-         * interpolated with the ident number of the input tensor set.
+         * The BASE datapath for the resulting pc tree data.
+         *
+         * A "%d" will be interpolated with the ident number of the input tensor
+         * set.
+         *
+         * See outsubpaths.
          */
         std::string m_outpath{""};
+
+        /** Config: insubpaths, outsubpaths.
+         *
+         * By default, a grouping of a given NAME is located at an input or
+         * output path spelled as: "{inpath,outpath}/NAME".
+         *
+         * If a grouping NAME is found in either insubpath or outsubpath then
+         * this default is overridden.  Both parameters are array of objects,
+         * each object has keys "name" and "subpath".  The subpath is a simple
+         * string suffix and thus should include a leading "/" if the user
+         * wishes to locate the grouping in a "subdirectory".
+         */
+        // See issue #375 and #416.  
+        std::map<std::string, std::string> m_insubpaths, m_outsubpaths;
+        std::string inpath(const std::string& name, int ident);
+        std::string outpath(const std::string& name, int ident);
 
         /** Config: "perf"
          *
@@ -91,23 +288,63 @@ namespace WireCell::Clus {
          */
         bool m_dump_json{false};
 
+        /** Config: "cluster_id_order"
+         *
+         * The various operations can lead to redundantly or non-sequentially
+         * numbered cluster idents.  The application of merge_clusters() will
+         * cause a resulting cluster to have the ID of its first contributing
+         * constituent.  The application of separate() will cause all clusters
+         * to have the ID of the original.
+         *
+         * When this parameter is given, the cluster IDs will be reset after
+         * each component operation, on a per-grouping basis, so that they
+         * represent a specific sort order.
+         *
+         * - "tree" :: use the as-is child-order which represents
+         *   child-insertion order unless some operation has explicitly
+         *   reordered the underlying PC tree.
+         *
+         * - "size" :: use the "size" of the cluster as determined by
+         *   cluster_less() to order the cluster IDs.  This considers the
+         *   cluster length, number of children, number of points followed by
+         *   per-view min then max bounds and finally cluster center.
+         *
+         * - "" :: cluster IDs are not modified.
+         *
+         * By default, no ID rewriting is performed.
+         *
+         * Notes:
+         *
+         * - When an ID cluster order is applied, the ID counting starts from 1.
+         * - The default (unset) ID is -1.
+         */
+        std::string m_clusters_id_order;
+
         // configurable parameters for dead-live clustering
         int m_dead_live_overlap_offset{2};
 
-        // clustering_examine_x_boundary
-        // double m_x_boundary_low_limit{-1*units::cm};
-        // double m_x_boundary_high_limit{257*units::cm};
-
-        Configuration m_func_cfgs;
+        // Keep track of configured clustering methods with their metadata to
+        // assist in debugging/logging.
+        struct EnsembleVisitor {
+            std::string name;
+            IEnsembleVisitor::pointer meth;
+        };
+        /** Config: pipeline
+         *
+         * Array of type/name of instances of IEnsembleVisitor to execute in the pipeline.
+         */
+        std::vector<EnsembleVisitor> m_pipeline;
 
         // the anode to be processed
-        IAnodePlane::pointer m_anode;
+        std::vector<IAnodePlane::pointer> m_anodes;
+
+        IDetectorVolumes::pointer m_dv;
 
         // the face to be processed
-        int m_face{0};
+        // int m_face{0};
 
         // the geometry helper
-        IClusGeomHelper::pointer m_geomhelper;
+        // IClusGeomHelper::pointer m_geomhelper;
     };
 }  // namespace WireCell::Clus
 

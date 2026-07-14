@@ -16,7 +16,7 @@ local input = std.extVar('input');
 //     process_crm: 'test1',
 // };
 local fcl_params = {
-    response_plane: 18.92*wc.cm,
+    response_plane: 18.1*wc.cm, // synced to protodunevd
     nticks: 8500,
     wires: 'dunevd10kt_3view_30deg_v5_refactored_1x8x6ref.json.bz2',
     ncrm: 24,
@@ -40,8 +40,8 @@ local params = params_maker(fcl_params) {
   },
   files: super.files {
       wires: fcl_params.wires,
-      fields: [ 'dunevd-resp-isoc3views-18d92.json.bz2', ],
-      noise: 'dunevd10kt-1x6x6-3view-noise-spectra-v1.json.bz2',
+      fields: [ 'protodunevd_FR_imbalance3p_260501.json.bz2', ], // synced to protodunevd
+      noise: 'pdvd-top-noise-spectra-v3.json.bz2',               // synced to protodunevd
   },
 };
 

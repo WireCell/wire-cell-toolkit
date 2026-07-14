@@ -57,7 +57,7 @@ local wcls_input = {
     type: 'wclsCookedFrameSource',
     name: '',
     data: {
-      art_tag: raw_input_label,
+      recobwire_tags: [raw_input_label], summary_tags: [''], trace_tags: [''],
       frame_tags: ['orig'],  // this is a WCT designator
       //nticks: params.daq.nticks,
       // nticks: nsample,
@@ -111,7 +111,7 @@ local wcls_output = {
       //nticks: params.daq.nticks,
       // nticks: nsample,
       chanmaskmaps: [],
-      summary_tags: ['wiener'],  // was threshold
+      summary_tags: ['threshold'],  // retagger makes this tag
       //  just one threshold value
       summary_operator: { threshold: 'set' },
       nticks: -1,
@@ -178,6 +178,8 @@ local multi_magnify3 = multimagnify('gauss', tools, magoutput);
 local magnify_pipes3 = multi_magnify3.magnify_pipelines;
 local multi_magnify4 = multimagnify('wiener', tools, magoutput);
 local magnify_pipes4 = multi_magnify4.magnify_pipelines;
+local multi_magnify5 = multimagnify('threshold', tools, magoutput);
+local magnify_pipes5 = multi_magnify5.magnifysummaries_pipelines;
 
 local chsel_pipes = [
   g.pnode({
@@ -200,6 +202,7 @@ local nfsp_pipes = [
                sp_pipes[n],
                //magnify_pipes3[n],
                //magnify_pipes4[n],
+               //magnify_pipes5[n],
              ],
              'nfsp_pipe_%d' % n)
   for n in std.range(0, std.length(tools.anodes) - 1)

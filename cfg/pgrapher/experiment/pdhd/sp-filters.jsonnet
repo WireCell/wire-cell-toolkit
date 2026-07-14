@@ -38,7 +38,7 @@ local wf(name, data={}) = {
 
 // Zeus take my eyes! Magic numbers are everywhere!
 [
-  lf('ROI_loose_lf', { tau: 0.002 * wc.megahertz }),  // 0.0025 
+  lf('ROI_loose_lf', { tau: 0.003 * wc.megahertz }),  // 0.0025
   lf('ROI_tight_lf', { tau: 0.016 * wc.megahertz }),  // 0.02 
   lf('ROI_tighter_lf', { tau: 0.08 * wc.megahertz }),  // 0.1 
 

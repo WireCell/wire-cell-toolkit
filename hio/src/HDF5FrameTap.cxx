@@ -45,6 +45,7 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
     m_scale = get(cfg, "scale", m_scale);
     m_offset = get(cfg, "offset", m_offset);
     m_gzip = get(cfg, "gzip", m_gzip);
+    m_shuffle = get<bool>(cfg, "shuffle", m_shuffle);
 
     auto jchunk = cfg["chunk"];
     if (jchunk.isInt()) {
@@ -56,14 +57,8 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
         m_chunk[0] = jchunk[0].asInt();
         m_chunk[1] = jchunk[1].asInt();
     }
-    if (!m_chunk[0] || !m_chunk[1]) {
-        // gzip (or any filter) requires chunked.
-        if (m_gzip) {
-            log->warn("gzip filter requires non-zero chunking, output will be uncompressed");
-        }
-        m_gzip = false;
-        m_chunk[0] = m_chunk[1] = 0;
-    }
+    // A zero chunk dimension (the default) means "use the dataset dimension",
+    // resolved per dataset in operator().  Filters stay enabled.
 
     if (m_gzip) {
         if (!H5Zfilter_avail(H5Z_FILTER_DEFLATE)) {
@@ -78,8 +73,20 @@ void Hio::HDF5FrameTap::configure(const WireCell::Configuration &cfg)
 
     }
 
-    log->debug("digitize={} baseline={} scale={} offset={} gzip={} chunking:[{},{}]",
-               m_digitize, m_baseline, m_scale, m_offset, m_gzip, m_chunk[0], m_chunk[1]);
+    if (m_shuffle) {
+        if (!H5Zfilter_avail(H5Z_FILTER_SHUFFLE)) {
+            raise<ValueError>("HDF5 shuffle filter not available");
+        }
+        unsigned int filter_info;
+        /*herr_t status = */H5Zget_filter_info (H5Z_FILTER_SHUFFLE, &filter_info);
+        if ( !(filter_info & H5Z_FILTER_CONFIG_ENCODE_ENABLED) ||
+             !(filter_info & H5Z_FILTER_CONFIG_DECODE_ENABLED) ) {
+            raise<ValueError>("HDF5 shuffle filter not available for encoding and decoding");
+        }
+    }
+
+    log->debug("digitize={} baseline={} scale={} offset={} gzip={} shuffle={} chunking:[{},{}]",
+               m_digitize, m_baseline, m_scale, m_offset, m_gzip, m_shuffle, m_chunk[0], m_chunk[1]);
 
     std::string fn = cfg["filename"].asString();
     if (fn.empty()) {
@@ -145,6 +152,7 @@ WireCell::Configuration Hio::HDF5FrameTap::default_configuration() const
     cfg["filename"] = "wct-frame.hdf5";
 
     cfg["gzip"] = m_gzip;
+    cfg["shuffle"] = m_shuffle;
 
     // ignored, ...for now?
     // cfg["chunk"] = Json::arrayValue;
@@ -247,15 +255,28 @@ bool Hio::HDF5FrameTap::operator()(const IFrame::pointer &inframe, IFrame::point
             if (dcpl == H5I_INVALID_HID) {
                 raise<IOError>("failed to create dataset creation property list");
             }
-            log->debug("gzip:{} chunks:[{},{}]", m_gzip, m_chunk[0], m_chunk[1]);
+            // A zero chunk dimension means "use the dataset dimension".  HDF5
+            // requires chunk dims <= dataset dims for fixed-size datasets, so
+            // clamp non-zero values.
+            hsize_t chunk[2] = {
+                (m_chunk[0] && m_chunk[0] < (hsize_t)nrows) ? m_chunk[0] : (hsize_t)nrows,
+                (m_chunk[1] && m_chunk[1] < (hsize_t)ncols) ? m_chunk[1] : (hsize_t)ncols};
+            log->debug("gzip:{} chunks:[{},{}]", m_gzip, chunk[0], chunk[1]);
 
-            if (m_gzip) {
-                // Note, gzip filter requires chunked layout
-                if (H5Pset_deflate (dcpl, m_gzip) < 0) {
-                    raise<IOError>("failed set gzip compression of %s", m_gzip);
+            if (m_gzip || m_shuffle) {
+                // Note, filters require chunked layout
+                if (m_shuffle) {
+                    if (H5Pset_shuffle (dcpl) < 0) {
+                        raise<IOError>("failed set shuffle filter");
+                    }
                 }
-                if (H5Pset_chunk (dcpl, 2, m_chunk.data()) < 0) {
-                    raise<IOError>("failed set chunk of [%d,%d]", m_chunk[0], m_chunk[1]);
+                if (m_gzip) {
+                    if (H5Pset_deflate (dcpl, m_gzip) < 0) {
+                        raise<IOError>("failed set gzip compression of %s", m_gzip);
+                    }
+                }
+                if (H5Pset_chunk (dcpl, 2, chunk) < 0) {
+                    raise<IOError>("failed set chunk of [%d,%d]", chunk[0], chunk[1]);
                 }
             }
 

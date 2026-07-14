@@ -73,7 +73,7 @@ bool Img::TestClusterShadow::operator()(const input_pointer& in, output_pointer&
         log->debug("EOS");
         return true;
     }
-    const auto in_graph = in->graph();
+    const auto& in_graph = in->graph();
     dump_cg(in_graph, log);
     auto& out_graph = in_graph;
     BlobShadow::graph_t bsgraph = BlobShadow::shadow(out_graph, 'w'); // or 'c'

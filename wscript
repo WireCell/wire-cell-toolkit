@@ -17,16 +17,28 @@ TOP = '.'
 APPNAME = 'WireCell'
 
 def determine_version():
+    '''
+    Determine the version of the source to bake into the build.
+    '''
+
+    # If in a git clone, git wins
     proc = subprocess.run(["git", "describe", "--tags"], capture_output=True)
+
+    # Otherwise, we may be in a release archive.
     if proc.returncode:
         if os.path.exists("version.txt"):
             return open("version.txt", "r").readlines()[0].strip()
         raise FileNotFoundError("Wire-Cell Toolkit must either be built from a git clone or a version.txt must be provided in the source distribution")
+
     version = proc.stdout.decode().strip()
     proc = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True)
     branch = proc.stdout.decode().strip()
+
+    # Check if in master or a release branch.
     if branch == "master" or branch[0].isdecimal():
         return version
+
+    # Feature branches get special marking
     return f'{branch}-{version}'
 
 VERSION = determine_version()
@@ -41,6 +53,7 @@ sys.path.insert(0, os.path.realpath("./waft"))
 
 def options(opt):
     opt.load("wcb")
+    opt.load("clang_compilation_database")
 
     # this used in cfg/wscript_build
     opt.add_option('--install-config', type=str, default="",
@@ -53,9 +66,9 @@ def options(opt):
     opt.add_option('--with-spdlog-static', type=str, default="",
                    help="Default is unset and answer comes from pkg-config, set true if you lack that tool")
     opt.add_option('--with-spdlog-active-level',
-                   default = "debug",
+                   default = "trace",
                    choices = log_levels,
-                   help="The compiled minimum log level for SPDLOG_<LEVEL>() macros (def=info)")
+                   help="The compiled minimum log level for SPDLOG_<LEVEL>() macros (def=trace)")
 
     opt.add_option('--cxxstd', default='c++17',
                    help="Set the value for the compiler's --std= option, default 'c++17'")
@@ -75,6 +88,7 @@ def is_development():
 
 
 def configure(cfg):
+
     # Save to BuildConfig.h and env
     cfg.define("WIRECELL_VERSION", VERSION)
     cfg.env.VERSION = VERSION
@@ -93,6 +107,7 @@ def configure(cfg):
         cfg.env.LIBDIR = cfg.env.LIBDIR[:-2]
         debug(f'configure: forcing: {cfg.env.LIBDIR=} instead of lib64/, use explicit --libdir if you really want it')
     
+
     # Set to DEBUG to activate SPDLOG_DEBUG() macros or TRACE to activate both
     # those and SPDLOG_TRACE() levels.
     lu = cfg.options.with_spdlog_active_level.upper()
@@ -100,6 +115,7 @@ def configure(cfg):
 
     # See comments at top of Exceptions.h for context.
     cfg.load('compiler_cxx')
+    cfg.load('clang_compilation_database')
     cfg.check_cxx(lib='backtrace', use='backtrace',
                   uselib_store='BACKTRACE',
                  define_name = 'HAVE_BACKTRACE_LIB',

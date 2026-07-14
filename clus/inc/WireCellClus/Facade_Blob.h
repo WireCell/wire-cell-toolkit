@@ -13,13 +13,12 @@
 #include "WireCellUtil/Graph.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
+#include "WireCellIface/WirePlaneId.h"
 
+#include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Util.h"
 
-
-// using namespace WireCell;  NO!  do not open up namespaces in header files!
-
-namespace WireCell::PointCloud::Facade {
+namespace WireCell::Clus::Facade {
 
     class Cluster;
 
@@ -28,7 +27,7 @@ namespace WireCell::PointCloud::Facade {
         float_t center_x{0};
         float_t center_y{0};
         float_t center_z{0};
-        int_t face{0};
+        WireCell::WirePlaneId wpid{0};
         int_t npoints{0};
 
         int_t slice_index_min{0};  // unit: tick
@@ -51,9 +50,11 @@ namespace WireCell::PointCloud::Facade {
 
 
     /// Give a node "Blob" semantics
-    class Blob : public NaryTree::Facade<points_t>, public Mixin<Blob, BlobCache> {
-       public:
-        Blob() : Mixin<Blob, BlobCache>(*this, "scalar") {}
+    class Blob : public NaryTree::Facade<points_t>
+               , public Mixins::Cached<Blob, BlobCache>
+    {
+      public:
+        Blob() : Mixins::Cached<Blob, BlobCache>(*this, "scalar") {}
         virtual ~Blob() {}
 
         // Return the cluster to which this blob is a child.  May be nullptr.
@@ -69,7 +70,8 @@ namespace WireCell::PointCloud::Facade {
         float_t center_y() const { return cache().center_y; }
         float_t center_z() const { return cache().center_z; }
         int_t npoints() const { return cache().npoints; }
-        int_t face() const {return cache().face;}
+        WireCell::WirePlaneId wpid() const {return cache().wpid;}
+        // int_t face() const { return cache().wpid.face(); }
 
         // units are number of ticks
         /// FIXME: change min, max to begin end
@@ -94,11 +96,20 @@ namespace WireCell::PointCloud::Facade {
         size_t hash() const;
 
         // Return the scope points.
-        std::vector<geo_point_t> points() const;
+        // std::vector<geo_point_t> points(const std::string& pc_name = "3d", const std::vector<std::string>& coords = {"x", "y", "z"}) const;
+        std::vector<geo_point_t> points(const std::string& pc_name, const std::vector<std::string>& coords) const;
         size_t nbpoints() const;
 
         // Check facade consistency
         bool sanity(Log::logptr_t log = nullptr) const;
+
+        // charge information, access cluster --> grouping, and use CTPC cache to access these information ... 
+        double estimate_total_charge() const;
+        double estimate_minimum_charge() const;
+        double get_wire_charge(int plane, const int_t wire_index) const;
+        double get_wire_charge_error(int plane, const int_t wire_index) const;
+        // void check_dead_wire_consistency() const;
+        //
 
        private:
         // moved to cache
@@ -117,14 +128,16 @@ namespace WireCell::PointCloud::Facade {
     void sort_blobs(std::vector<const Blob*>& blobs);
     void sort_blobs(std::vector<Blob*>& blobs);
 
-    struct blob_less_functor {
-        bool operator()(const Facade::Blob* a, const Facade::Blob* b) const {
-        return Facade::blob_less(a, b);  
+    struct BlobLess {
+        bool operator()(const Blob* a, const Facade::Blob* b) const {
+            return blob_less(a, b);  
         }
     };
+    using BlobSet = std::set<const Blob*, BlobLess>;
 
-}  // namespace WireCell::PointCloud::Facade
 
-template <> struct fmt::formatter<WireCell::PointCloud::Facade::Blob> : fmt::ostream_formatter {};
+}  // namespace WireCell::Clus::Facade
+
+template <> struct fmt::formatter<WireCell::Clus::Facade::Blob> : fmt::ostream_formatter {};
 
 #endif
