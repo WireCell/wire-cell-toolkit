@@ -7,8 +7,27 @@
 using spdlog::debug;
 using namespace WireCell;
 
+// RAII guard to save and restore WIRECELL_PATH so tests that mutate the global
+// environment do not poison sibling tests running in the same binary.
+struct EnvGuard {
+    const char* name;
+    bool had;
+    std::string saved;
+    EnvGuard(const char* n) : name(n) {
+        const char* v = std::getenv(name);
+        had = v != nullptr;
+        if (had) saved = v;
+    }
+    ~EnvGuard() {
+        if (had) setenv(name, saved.c_str(), 1);
+        else     unsetenv(name);
+    }
+};
+
 TEST_CASE("persist checks")
 {
+    EnvGuard wcpath_guard("WIRECELL_PATH");
+
     CHECK(Persist::exists("/etc"));
     CHECK(Persist::exists("/etc/hosts"));
 
@@ -60,6 +79,8 @@ TEST_CASE("persist tempdir")
 
 TEST_CASE("persist json")
 {
+    EnvGuard wcpath_guard("WIRECELL_PATH");
+
     boost::filesystem::path path; // persist beyond each scope
     {
         auto tdir = Persist::TempDir();
