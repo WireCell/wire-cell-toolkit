@@ -70,6 +70,9 @@ function(input,
         SPNGRebaseliner: {
             "rebaseline": "_applyroi",
         },
+        SPNGRebinner: {
+            "rebin": "_rebin"
+        }
     };
     local is_set(itype) = std.get({'SPNGCellViews': true}, itype, false);
     local make_wrapper = tio.pickle_wrapper("spng-%(itype)s-%(iname)s.pkl", is_set);
