@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <ctime>
 #include <boost/algorithm/string.hpp>
+#include "WireCellPgraph/TorchnvTools.h"
 
 using WireCell::demangle;
 using WireCell::String::format;
@@ -135,7 +136,7 @@ bool Graph::execute()
 
         for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit, ++count) {
             Node* node = *nit;
-
+            NVTX_SCOPED_RANGE((node->instance_name()).c_str());
             auto core = std::clock();
             auto wall = std::chrono::high_resolution_clock::now();
 
@@ -212,8 +213,8 @@ void Graph::print_timers(bool include_execmon) const
     for (auto it = m.rbegin(); it != m.rend(); ++it) {
         auto [node, tc] = it->second;
 
-        l_timer->info("Timer: {:.3f} wall-sec, {:.3f} core-sec: ({}) \"{}\"",
-                      tc.wall, tc.core, node->cpptype_name(), node->instance_name()); 
+        l_timer->info("Timer: {:.3f} wall-sec, {:.3f} core-sec:  ({}) \"{}\"",
+                      tc.wall, tc.core, node->cpptype_name(), node->instance_name());
         total_wall += tc.wall;
         total_core += tc.core;
     }

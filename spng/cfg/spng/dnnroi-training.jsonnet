@@ -76,12 +76,14 @@ function(input,
          rebin=4,
          scale=4000.0,
          tpcid=3,
+         /// U,V,W set to 1 if it has mp2/mp3 produced.
+         crossed_views=[1,1,0], //TLA Code, not tla str --> provide via "--tla-code"
          dump="",
          gzip=1,
+         seeds=[0,1,2,3,4], //TLA Code, not tla str --> provide via "--tla-code"
          verbosity=0)
 
-    /// U,V,W set to 1 if it has mp2/mp3 produced.
-    local crossed_views = [1,1,0];
+    local cross_view_ids = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
     local ncrossed = wc.sum(crossed_views);
 
     # Assure numbers
@@ -91,7 +93,7 @@ function(input,
     local iverbosity = wc.numberify(verbosity);
 
 
-    local controls = control_js(device=device, verbosity=iverbosity);
+    local controls = control_js(device=device, verbosity=iverbosity, seeds=seeds);
     local control = controls.config;
 
     // We focus here on just one TPC
@@ -201,7 +203,7 @@ function(input,
                                  % {view:view, feat:feat.value},
             }
         }, nin=1, nout=1)
-        for view in [0,1]
+        for view in cross_view_ids
         for feat in wc.enumerate(["dense", "mp2", "mp3"])
     ]);
 
@@ -211,7 +213,6 @@ function(input,
         final_metadata,
         sg.tensor_packer(multiplicity=ncrossed*3, extra_name="_fodder")
     ]);
-
     local fodder_filename = outpat % {tier:"fodder"};
     local fodder_body = {
         frame: pg.pipeline([

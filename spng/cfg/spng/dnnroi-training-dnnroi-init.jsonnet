@@ -1,13 +1,32 @@
-/// Process depo files to dnnroi-fodder (DNNROI training input).
+/// Process depo files to dnnroi-input and dnnroi-truth.
 ///
-/// This is a single-TPC job producing only the "fodder" tier from dnnroi-training.jsonnet.
+/// This is a single-TPC job.
 ///
 /// Example usage:
-/// wire-cell spng/cfg/spng/dnnroi-training-fodder.jsonnet -A input=depos.npz -A output=fodder.npz
+/// wire-cell spng/cfg/spng/dnnroi-training.jsonnet -A input=depos.npz
 ///
-/// The output contains input to DNNROI of shape (3, nchan, ntick) where the feature
-/// dimension of size 3 holds the "dense" (eg looseLF) and the mp2 and mp3 images.
-/// The dense image is scaled by 4000 and the mp2/mp3 are boolean.
+/// By default it produces dnnroi-training-{truth,fodder}.npz each with contents like:
+///
+/// $ unzip -v dnnroi-training-truth.npz
+/// Archive:  dnnroi-training-truth.npz
+///  Length   Method    Size  Cmpr    Date    Time   CRC-32   Name
+/// --------  ------  ------- ---- ---------- ----- --------  ----
+///        4  Defl:N        9 -125% 01-13-2026 12:31 25cbfc4f  tensorset_0_metadata.json
+///      291  Defl:N      175  40% 01-13-2026 12:31 f539e510  tensor_0_0_metadata.json
+///  9600128  Defl:N     9418 100% 01-13-2026 12:31 99d05f42  tensor_0_0_array.npy
+///      291  Defl:N      180  38% 01-13-2026 12:31 50445c69  tensor_0_1_metadata.json
+///  9600128  Defl:N     9418 100% 01-13-2026 12:31 99d05f42  tensor_0_1_array.npy
+///      291  Defl:N      180  38% 01-13-2026 12:31 e61e6ce6  tensor_0_2_metadata.json
+/// 11520128  Defl:N    11290 100% 01-13-2026 12:31 cab52a81  tensor_0_2_array.npy
+/// --------          -------  ---                            -------
+/// 30721261            30670 100%                            7 files
+///
+/// For training DNNROI, only the *_array.npy are useful.  The last letter
+/// implies the plane number.  The fodder only has 0 and 2.  Truth are ROI masks
+/// of shape (nchan, ntick) from depo flux splat, fodder is a input to DNNROI of
+/// shape (3, nchan, ntick) the feature dimension of size 3 holds the "dense"
+/// (eg looseLF) and the mp2 and mp3 images.  The dense image is scaled by 4000
+/// and the mp2/mp3 are boolean.
 ///
 /// To visualize, use: https://github.com/brettviren/teepeesee
 
@@ -17,6 +36,7 @@ local io = import "spng/io.jsonnet";
 local tio = import "spng/torchio.jsonnet";
 local det_js = import "spng/det.jsonnet";
 local drift_js = import "spng/drift.jsonnet";
+local splatroi_js = import "spng/splatroi.jsonnet";
 local subgraphs_js = import "spng/subgraphs.jsonnet";
 local control_js = import "spng/control.jsonnet";
 local frame_js = import "spng/frame.jsonnet";
@@ -26,18 +46,21 @@ local detconf = import "spng/detconf.jsonnet";
 // The TLAs:
 //
 // @param input The name of a file in WCT "depo file" format, usually .npz.
-// @param output The output file name.
+// @param outpat The output file name pattern with format variables.
 // @param schema The output file schema ("tensor" or "frame")
 // @param detname The name of a supported detector, default "pdhd".
 // @param engine The name of the graph execution engine, default Pgrapher or TbbFlow.
-// @param device The name of the device for SPNG nodes, default "cpu" or "gpu", "gpu1", etc.
+// @param device The name of the device for SPNG nodes, default "cpu" or "gpu", "gpu1", etc. 
 // @param rebin The downsample factor along the time dimension.
-// @param scale The amount to scale down the dense arrays (looseLF)
+// @param scale The amount to scale down the dense arrays (splat and looseLF)
 // @param tpcid The TPC ID number.
 // @param dump The list of intermediates to dump to file.
 // @param verbosity The verbosity level for additional logging.
 //
-// The only required TLA is "input".
+// The only required TLA is "input".  
+//
+// The outpat must include these format variables:
+// - %(tier)s will be filled with the label "fodder" or "truth".
 //
 // Notes:
 //
@@ -45,7 +68,7 @@ local detconf = import "spng/detconf.jsonnet";
 //
 // - A schema of "frame" may not work.
 function(input,
-         output="dnnroi-training-fodder.npz",
+         outpat="dnnroi-training-%(tier)s.npz",
          schema="tensor",
          detname='pdhd',
          engine='Pgrapher',
@@ -54,12 +77,12 @@ function(input,
          scale=4000.0,
          tpcid=3,
          /// U,V,W set to 1 if it has mp2/mp3 produced.
-         crossed_views=[1,1,0], //TLA Code, not tla str --> provide via "--tla-code"
+         crossed_views=[1,1,1], //TLA Code, not tla str --> provide via "--tla-code"
          dump="",
          gzip=1,
+         seeds=[0,1,2,3,4], //TLA Code, not tla str --> provide via "--tla-code"
          verbosity=0)
 
-    
     local cross_view_ids = [vi.index for vi in wc.enumerate(crossed_views) if vi.value == 1];
     local ncrossed = wc.sum(crossed_views);
 
@@ -70,7 +93,7 @@ function(input,
     local iverbosity = wc.numberify(verbosity);
 
 
-    local controls = control_js(device=device, verbosity=iverbosity);
+    local controls = control_js(device=device, verbosity=iverbosity, seeds=seeds);
     local control = controls.config;
 
     // We focus here on just one TPC
@@ -96,7 +119,7 @@ function(input,
         else dump_tensors(tier, inode, pnode);
 
     local have_tier(tier, labels, inode) =
-        std.findSubstr(tier, dump) != [] && std.findSubstr(labels[tier], inode.name) != [];
+        std.findSubstr(tier, dump) != [] && std.findSubstr(labels[tier], inode.name) != []; 
 
     // Wrap pnode if a key of labels is in dump list and value matches inode.name
     local dump_tensors_matched(labels, inode, pnode) =
@@ -113,7 +136,7 @@ function(input,
         SPNGResampler: function(inode, pnode)
             dump_tensors_matched({splat:"splat"}, inode, pnode),
         SPNGTransform: function(inode, pnode)
-            dump_tensors_matched({dscale:"dnnroi_scale"}, inode, pnode),
+            dump_tensors_matched({dscale:"dnnroi_scale", sscale:"splat_scale"}, inode, pnode),
         SPNGKernelConvolve: function(inode, pnode)
             dump_tensors_matched({dnnroi:"dnnroi",wiener:"wiener",decon:"_group"}, inode, pnode),
         SPNGThreshold: function(inode, pnode)
@@ -133,16 +156,42 @@ function(input,
 
     local upstream = pg.pipeline([source, drift]);
 
+    // Fan out depos to the splat and sim+sigproc subgraphs
+    local depo_fan = pg.pnode({
+        type:'DepoSetFanout',
+        name: det.name + "_depo",
+        data: {
+            multiplicity:2
+        }
+    },nin=1, nout=2);
+
 
     local sg = subgraphs_js(tpc, control, pg=wpg);
+
+    local truth_filename = outpat % {tier:"truth"};
+    local truth = {
+        frame: pg.pipeline([
+            sg.splat_frame(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_SPLAT"),
+            io.frame_sink(truth_filename)
+        ]),
+        tensor: pg.pipeline([
+            sg.splat_tensor(ratio=1.0/irebin, scale=1.0/fscale, extra_name="_SPLAT"),
+            io.ttensors_sink(truth_filename, gzip=wc.numberify(gzip), control=control),
+        ]),
+    }[schema];
 
     local detmod = det_js(det, control);
 
     local sim = detmod.inducer;
 
     local to_tdm = sg.frame_to_tdm();
-    local dnnroi_pre = sg.dnnroi_training_preface(crossed_views, rebin, extra_name="_preface");
-
+    local initial_models=[
+        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_uplane_032326.ts',
+        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_vplane_032326.ts',
+        '/nfs/data/1/calcuttj/wire-cell-python/test_dense_wplane_032326.ts'
+    ];
+    local dnnroi_pre = sg.dnnroi_training_preface_dnnroi_init(
+        initial_models=initial_models, do_transpose=false, extra_name="_preface");
     // This is a point of collusion between final metadata and the tdm to frame conversion.
     local fodder_tag = "fodder";
 
@@ -169,28 +218,40 @@ function(input,
         final_metadata,
         sg.tensor_packer(multiplicity=ncrossed*3, extra_name="_fodder")
     ]);
-
-    local fodder = {
+    local fodder_filename = outpat % {tier:"fodder"};
+    local fodder_body = {
         frame: pg.pipeline([
             sg.wrap_bypass(training_pre),
             sg.tdm_to_frame(),  // Warning: this does not yet work
-            io.frame_sink(output)
+            io.frame_sink(fodder_filename)
         ]),
         tensor: pg.pipeline([
             training_pre,
-            io.ttensors_sink(output,
+            io.ttensors_sink(fodder_filename,
                              include_rules=[], exclude_rules=[],
                              datapath_pattern="tensorsets/{ident}", gzip=wc.numberify(gzip))
         ]),
     }[schema];
 
+    local fodder = pg.pipeline([sim, to_tdm, fodder_body]);
 
-    local graph = pg.pipeline([upstream, sim, to_tdm, fodder]);
+
+
+    local body = pg.intern(innodes=[upstream], 
+                           centernodes=[depo_fan, truth, fodder],
+                           edges=[
+                               pg.edge(upstream, depo_fan),
+                               pg.edge(depo_fan, truth, 0, 0),
+                               pg.edge(depo_fan, fodder, 1, 0)]);
+
+    local graph = body;
 
     // fixme: strictly, only need HIO if saving to HDF.
     local result = pg.main(graph, app=engine,
                            plugins=["WireCellSpng", "WireCellGen", "WireCellHio"],
                            uses=controls.uses);
     result
+
+
 
 

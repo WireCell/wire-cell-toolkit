@@ -118,7 +118,7 @@ namespace WireCell::SPNG {
                 });
                 continue;
             }
-            if (opcfg.operation == "treshold") {
+            if (opcfg.operation == "treshold") {//TODO -- fix typo
                 m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
                     return tensor > scalar;
                 });
@@ -151,6 +151,12 @@ namespace WireCell::SPNG {
                         ten = ten.unsqueeze(dim);
                     }
                     return ten;
+                });
+                continue;
+            }
+            if (opcfg.operation == "view" ){
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor.view(dims);
                 });
                 continue;
             }

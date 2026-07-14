@@ -3,7 +3,6 @@
 #include "WireCellSpng/SimpleTorchTensorSet.h"
 #include "WireCellSpng/Util.h"
 #include "WireCellUtil/NamedFactory.h"
-#include "WireCellSpng/TorchnvTools.h"
 
 
 
@@ -54,7 +53,6 @@ void DNNROIPostProcess::configure(const Configuration& cfg)
 //TODO: Should I use std::vector<torch::Tensor>& as input instead?
 bool DNNROIPostProcess::operator()(const input_pointer &in, output_pointer& out)
 {
-    NVTX_SCOPED_RANGE("DNNROIPostProcess::postprocess");
     out = nullptr;
     if(!in){
         log->debug("DNNROIPostProcess: EOS ");

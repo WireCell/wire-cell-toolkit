@@ -3,6 +3,222 @@
 
 namespace WireCell::SPNG {
 
+    namespace {
+
+        std::vector<int64_t> rebaseline_permutation(int64_t ndim, int64_t dim)
+        {
+            std::vector<int64_t> permutation;
+            permutation.reserve(ndim);
+            for (int64_t d = 0; d < ndim; ++d) {
+                if (d != dim) {
+                    permutation.push_back(d);
+                }
+            }
+            permutation.push_back(dim);
+            return permutation;
+        }
+
+        torch::Tensor restore_rebaseline_shape(const torch::Tensor& batch_view,
+                                               const torch::Tensor& permuted_output,
+                                               const std::vector<int64_t>& permutation)
+        {
+            std::vector<int64_t> reverse_permutation(permutation.size());
+            for (int64_t k = 0; k < static_cast<int64_t>(permutation.size()); ++k) {
+                reverse_permutation[permutation[k]] = k;
+            }
+            return batch_view.view(permuted_output.sizes()).permute(reverse_permutation).contiguous();
+        }
+
+        template<typename Wave>
+        void apply_rebaseline_to_roi_like_original(Wave&& wave,
+                                                   int64_t start_idx,
+                                                   int64_t end_idx,
+                                                   int64_t min_roi_size,
+                                                   int64_t shrink_size,
+                                                   bool remove_small)
+        {
+            start_idx += shrink_size;
+            end_idx -= shrink_size;
+
+            if (start_idx > end_idx) {
+                return;
+            }
+
+            const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
+            if (end_idx - start_idx <= min_roi_size - 1) {
+                if (remove_small) {
+                    wave.index_put_({roi}, 0.0);
+                }
+                return;
+            }
+
+            float start_val = wave[start_idx].template item<float>();
+            float end_val = wave[end_idx].template item<float>();
+            const float length = static_cast<float>(end_idx - start_idx);
+            const float slope = (end_val - start_val) / length;
+            auto baseline = start_val + slope * torch::arange(0, end_idx - start_idx + 1,
+                                                              wave.options());
+            wave.index_put_({roi}, wave.index({roi}) - baseline);
+        }
+
+        void rebaseline_zero_cuda(torch::Tensor& batch_view,
+                                  int64_t nticks,
+                                  int64_t nbatches,
+                                  int64_t consequtive_zeros,
+                                  int64_t min_roi_size,
+                                  int64_t shrink_size,
+                                  bool remove_small)
+        {
+            auto zero_mask = batch_view.eq(0).to(torch::kUInt8).to(torch::kCPU).contiguous();
+            const auto* zeros = zero_mask.data_ptr<uint8_t>();
+
+            for (int64_t i = 0; i < nbatches; ++i) {
+                const auto* row_zeros = zeros + i * nticks;
+                auto wave = batch_view[i];
+
+                bool in_roi = false;
+                int64_t roi_start = -1;
+
+                int64_t k = 0;
+                while (k < nticks) {
+                    if (row_zeros[k]) {
+                        const int64_t run_start = k;
+                        while (k < nticks && row_zeros[k]) {
+                            ++k;
+                        }
+                        if (k - run_start >= consequtive_zeros) {
+                            if (in_roi) {
+                                apply_rebaseline_to_roi_like_original(wave, roi_start, run_start - 1,
+                                                                      min_roi_size, shrink_size, remove_small);
+                                in_roi = false;
+                            }
+                        }
+                        else if (!in_roi) {
+                            roi_start = run_start;
+                            in_roi = true;
+                        }
+                        continue;
+                    }
+
+                    if (!in_roi) {
+                        roi_start = k;
+                        in_roi = true;
+                    }
+                    ++k;
+                }
+
+                if (in_roi) {
+                    apply_rebaseline_to_roi_like_original(wave, roi_start, nticks - 1,
+                                                          min_roi_size, shrink_size, remove_small);
+                }
+            }
+
+        }
+
+        torch::Tensor rebaseline_zero_original_cpu(const torch::Tensor& tensor,
+                                                   int64_t dim,
+                                                   int64_t consequtive_zeros,
+                                                   int64_t min_roi_size,
+                                                   int64_t shrink_size,
+                                                   bool remove_small,
+                                                   bool remove_negative)
+        {
+            torch::Tensor output = tensor.clone();
+            dim = modulo(dim, output.dim());
+
+            std::vector<int64_t> permutation;
+            for (int64_t d = 0; d < output.dim(); ++d) {
+                if (d != dim) permutation.push_back(d);
+            }
+            permutation.push_back(dim);
+            torch::Tensor permuted_output = output.permute(permutation).contiguous();
+
+            const int64_t nticks = output.size(dim);
+            const int64_t nbatches = permuted_output.numel() / nticks;
+            torch::Tensor batch_view = permuted_output.view({nbatches, nticks});
+
+            for (int64_t i = 0; i < nbatches; ++i) {
+                torch::Tensor wave = batch_view[i];
+
+                // Mark separator positions: runs of exactly-zero values of length >= consequtive_zeros.
+                // These form the boundaries between ROIs (not part of any ROI).
+                std::vector<bool> is_sep(nticks, false);
+                {
+                    int64_t k = 0;
+                    while (k < nticks) {
+                        if (wave[k].item<float>() == 0.0f) {
+                            int64_t run_start = k;
+                            while (k < nticks && wave[k].item<float>() == 0.0f) {
+                                ++k;
+                            }
+                            if (k - run_start >= consequtive_zeros) {
+                                for (int64_t m = run_start; m < k; ++m) {
+                                    is_sep[m] = true;
+                                }
+                            }
+                        } else {
+                            ++k;
+                        }
+                    }
+                }
+
+                // Collect ROIs as inclusive (start, end) index pairs.
+                // Non-separator positions form ROIs; tensor edges act as implicit boundaries.
+                std::vector<std::pair<int64_t,int64_t>> rois;
+                bool in_roi = false;
+                int64_t roi_start = -1;
+                for (int64_t k = 0; k < nticks; ++k) {
+                    if (!is_sep[k]) {
+                        if (!in_roi) { roi_start = k; in_roi = true; }
+                    } else {
+                        if (in_roi) { rois.push_back({roi_start, k-1}); in_roi = false; }
+                    }
+                }
+                if (in_roi) { rois.push_back({roi_start, nticks-1}); }
+
+                for (auto [start_idx, end_idx] : rois) {
+                    // Shrink the ROI inward from both ends.
+                    start_idx += shrink_size;
+                    end_idx   -= shrink_size;
+
+                    // Skip ROIs that collapsed under shrinking.
+                    if (start_idx > end_idx) continue;
+
+                    // Handle small ROIs (same logic as rebaseline()).
+                    if (end_idx - start_idx <= min_roi_size - 1) {
+                        if (remove_small) {
+                            const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
+                            wave.index_put_({roi}, 0.0);
+                        }
+                        continue;
+                    }
+
+                    // Build a linear model anchored at the first/last sample of the ROI
+                    // and subtract it from the ROI region.
+                    float start_val = wave[start_idx].item<float>();
+                    float end_val   = wave[end_idx].item<float>();
+                    const float length = static_cast<float>(end_idx - start_idx);
+                    const float slope  = (end_val - start_val) / length;
+                    torch::Tensor baseline = start_val + slope * torch::arange(0, end_idx - start_idx + 1,
+                                                                                wave.options());
+                    const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
+                    wave.index_put_({roi}, wave.index({roi}) - baseline);
+                }
+            }
+
+            if (remove_negative) {
+                output.clamp_min_(0.0);
+            }
+
+            std::vector<int64_t> reverse_permutation(output.dim());
+            for (int64_t k = 0; k < output.dim(); ++k) {
+                reverse_permutation[permutation[k]] = k;
+            }
+            return batch_view.view(permuted_output.sizes()).permute(reverse_permutation).contiguous();
+        }
+
+    }
+
     torch::Tensor rebaseline( const torch::Tensor& tensor, 
                               int64_t dim, float threshold,
                               int64_t min_roi_size,
@@ -143,99 +359,48 @@ namespace WireCell::SPNG {
                                   bool remove_small,
                                   bool remove_negative)
     {
-        torch::Tensor output = tensor.clone();
-        dim = modulo(dim, output.dim());
-
-        std::vector<int64_t> permutation;
-        for (int64_t d = 0; d < output.dim(); ++d) {
-            if (d != dim) permutation.push_back(d);
+        // CPU path: intentionally call the direct original implementation.
+        // This preserves byte-for-byte behavior with the original CPU code,
+        // including the original remove_negative behavior after permute().contiguous().
+        if (!tensor.is_cuda()) {
+            return rebaseline_zero_original_cpu(tensor, dim, consequtive_zeros,
+                                                min_roi_size, shrink_size,
+                                                remove_small, remove_negative);
         }
-        permutation.push_back(dim);
+
+        if (!tensor.numel()) {
+            return tensor.clone();
+        }
+
+        dim = modulo(dim, tensor.dim());
+        auto permutation = rebaseline_permutation(tensor.dim(), dim);
+
+        // Keep the same storage relationship as the original CPU code:
+        // output is cloned first, then permuted_output is made from output.
+        // This matters for exact compatibility of remove_negative.  If the
+        // permutation is effectively contiguous, output.clamp_min_() can affect
+        // the returned view.  If permute(...).contiguous() creates independent
+        // storage, it will not.  That is the original behavior.
+        torch::Tensor output = tensor.clone();
         torch::Tensor permuted_output = output.permute(permutation).contiguous();
 
         const int64_t nticks = output.size(dim);
+        if (nticks == 0) {
+            return restore_rebaseline_shape(permuted_output, permuted_output, permutation);
+        }
+
         const int64_t nbatches = permuted_output.numel() / nticks;
         torch::Tensor batch_view = permuted_output.view({nbatches, nticks});
 
-        for (int64_t i = 0; i < nbatches; ++i) {
-            torch::Tensor wave = batch_view[i];
+        rebaseline_zero_cuda(batch_view, nticks, nbatches, consequtive_zeros,
+                             min_roi_size, shrink_size, remove_small);
 
-            // Mark separator positions: runs of exactly-zero values of length >= consequtive_zeros.
-            // These form the boundaries between ROIs (not part of any ROI).
-            std::vector<bool> is_sep(nticks, false);
-            {
-                int64_t k = 0;
-                while (k < nticks) {
-                    if (wave[k].item<float>() == 0.0f) {
-                        int64_t run_start = k;
-                        while (k < nticks && wave[k].item<float>() == 0.0f) {
-                            ++k;
-                        }
-                        if (k - run_start >= consequtive_zeros) {
-                            for (int64_t m = run_start; m < k; ++m) {
-                                is_sep[m] = true;
-                            }
-                        }
-                    } else {
-                        ++k;
-                    }
-                }
-            }
-
-            // Collect ROIs as inclusive (start, end) index pairs.
-            // Non-separator positions form ROIs; tensor edges act as implicit boundaries.
-            std::vector<std::pair<int64_t,int64_t>> rois;
-            bool in_roi = false;
-            int64_t roi_start = -1;
-            for (int64_t k = 0; k < nticks; ++k) {
-                if (!is_sep[k]) {
-                    if (!in_roi) { roi_start = k; in_roi = true; }
-                } else {
-                    if (in_roi) { rois.push_back({roi_start, k-1}); in_roi = false; }
-                }
-            }
-            if (in_roi) { rois.push_back({roi_start, nticks-1}); }
-
-            for (auto [start_idx, end_idx] : rois) {
-                // Shrink the ROI inward from both ends.
-                start_idx += shrink_size;
-                end_idx   -= shrink_size;
-
-                // Skip ROIs that collapsed under shrinking.
-                if (start_idx > end_idx) continue;
-
-                // Handle small ROIs (same logic as rebaseline()).
-                if (end_idx - start_idx <= min_roi_size - 1) {
-                    if (remove_small) {
-                        const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
-                        wave.index_put_({roi}, 0.0);
-                    }
-                    continue;
-                }
-
-                // Build a linear model anchored at the first/last sample of the ROI
-                // and subtract it from the ROI region.
-                float start_val = wave[start_idx].item<float>();
-                float end_val   = wave[end_idx].item<float>();
-                const float length = static_cast<float>(end_idx - start_idx);
-                const float slope  = (end_val - start_val) / length;
-                torch::Tensor baseline = start_val + slope * torch::arange(0, end_idx - start_idx + 1,
-                                                                            wave.options());
-                const auto roi = torch::indexing::Slice(start_idx, end_idx + 1);
-                wave.index_put_({roi}, wave.index({roi}) - baseline);
-            }
-        }
-
+        // Preserve original CPU semantics.  Do not clamp batch_view here.
         if (remove_negative) {
             output.clamp_min_(0.0);
         }
 
-        std::vector<int64_t> reverse_permutation(output.dim());
-        for (int64_t k = 0; k < output.dim(); ++k) {
-            reverse_permutation[permutation[k]] = k;
-        }
-        return batch_view.view(permuted_output.sizes()).permute(reverse_permutation).contiguous();
+        return restore_rebaseline_shape(batch_view, permuted_output, permutation);
     }
 
 }
-

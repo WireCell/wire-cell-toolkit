@@ -1,49 +1,142 @@
 #!/usr/bin/env -S snakemake  --software-deployment-method apptainer --apptainer-args=" -B /cvmfs,/home,/nfs,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid" --cores all --snakefile
 # -*- snakemake -*-
 
+
+# In the sgpu machine (use the following binding in the shebang above)
+#--apptainer-args=" -B /cvmfs,/home,/gpfs/mnt/gpfs01/lbne,/opt,/run/user,/etc/hostname,/etc/hosts,/etc/krb5.conf --ipc --pid"
+
 import os 
 SRC_DIR = workflow.basedir
 
 config.setdefault('nevents', '2')
-# container="/nfs/data/1/calcuttj/dunesw.sif"
+config.setdefault('detname', 'pdhd')
+
+WCGPU_DUNESW_CONTAINER = "/nfs/data/1/calcuttj/dunesw.sif"
+SGPU_DUNESW_CONTAINER = "/gpfs/mnt/gpfs01/lbne/users/spng/abashyal/wct-env/wire-cell-dev/container/dunesw.sif"
+SGPU_CORSIKA_DIR = "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard"
+
+# Keep the shebang bind list limited to paths common enough to be safe.
+# Machine-specific paths are selected below only when they exist on the host.
+def first_existing_path(paths, fallback):
+    for path in paths:
+        if path and os.path.exists(path):
+            return path
+    return fallback
+
+config.setdefault(
+    'dunesw_container',
+    os.environ.get(
+        'DUNESW_CONTAINER',
+        first_existing_path(
+            [SGPU_DUNESW_CONTAINER, WCGPU_DUNESW_CONTAINER],
+            WCGPU_DUNESW_CONTAINER,
+        ),
+    ),
+)
+
+config.setdefault(
+    'cosmics_fcl',
+    os.environ.get(
+        'COSMICS_FCL',
+        first_existing_path(
+            [
+                os.path.join(SRC_DIR, "prod_cosmics_protodunehd_local.fcl")
+                if os.path.isdir(SGPU_CORSIKA_DIR)
+                else None
+            ],
+            "prod_cosmics_protodunehd.fcl",
+        ),
+    ),
+)
+
 all_theta_xz_deg=( 0,  1,  3,  5, 10, 20, 30, 45, 60, 75, 80, 82, 84, 89 )
 all_planes = [0,1,2]
 
-rule all_linedepos:
-    input:
-        depos=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz', plane=all_planes, txz=all_theta_xz_deg, ty=90),
-        meta=expand('linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json', plane=all_planes, txz=all_theta_xz_deg, ty=90)
+def same_thetaxz_plane_norm(txz, tyy):
+    import numpy as np
+    txz = txz*np.pi/180.
+    tyy = tyy*np.pi/180.
+    ret = np.array([1.,0.,0.])
+    Ry = np.array([
+        [np.cos(txz), 0, np.sin(txz)],
+        [0.,1.,0.],
+        [-np.sin(txz), 0, np.cos(txz)],
+    ])
+    Rx =  np.array([
+        [1., 0., 0.],
+        [0., np.cos(tyy), np.sin(tyy)],
+        [0., -np.sin(tyy), np.cos(tyy)]
+    ])
 
-rule splat_all_lines:
-    input:
-        expand("splat-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90),
-        expand("drifted-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}-frame.npz", plane=all_planes, txz=all_theta_xz_deg, ty=90)
-    
-rule all_lines_final:
-    input:
-        expand("sigproc-spng-linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}.h5", plane=all_planes, txz=all_theta_xz_deg, ty=90)
+    return Rx @ (Ry @ ret)
 
-rule linedepos:
+def xz_y_from_samexz(v):
+    import numpy as np
+    y = np.acos(v[1])
+    xz = np.asin(v[0]/np.sin(y))
+    xz = xz*180./np.pi
+    y = y*180./np.pi
+    # print(f'{xzu},{xzv} --> {xz:.2f}, {y:.2f}') 
+    return xz, y
+
+def xz_y_from_xzw_xzu(xzw, xzu, tyy=35.7):
+    import numpy as np
+    vw = same_thetaxz_plane_norm(xzw, 0)
+    vu = same_thetaxz_plane_norm(xzu, tyy)
+    v = np.linalg.cross(vu, vw)
+    v /= np.linalg.norm(v)
+    xz, y = xz_y_from_samexz(v)
+    print(f'{xzw},{xzu} --> {xz:.2f}, {y:.2f}') 
+    return xz, y
+
+def xz_y_from_xzu_xzv_hyu(xzu, xzv, tyy=-35.7):
+    import numpy as np
+    vu = same_thetaxz_plane_norm(xzu, tyy)
+    vv = same_thetaxz_plane_norm(xzv, -tyy)
+    v = np.linalg.cross(vv, vu)
+    v /= np.linalg.norm(v)
+
+    xz, y = xz_y_from_samexz(v)
+    print(f'{xzu},{xzv} --> {xz:.2f}, {y:.2f}') 
+    return xz, y 
+
+high_end_xzu_xzv_deg=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 75], [87, 85], [87, 87])
+high_end_xzu_xzv_deg_uplane=([75, 75], [80, 80], [82,82], [85,85], [87, 75], [87, 85], [87, 87])
+high_end_xzw_xzu_deg_wplane=([75, 75], [80, 80], [82,82], [85,85], [87, 75], [87, 85], [87, 87])
+high_end_xzu_xzv_deg_vplane=([75, 75], [80, 80], [82,82], [85,85], [75, 87], [85, 87], [87, 87])
+
+def resolve_angles(w):
+    if w.plane in ['u', 'v']:
+        conversion = xz_y_from_xzu_xzv_hyu
+    elif w.plane == 'w':
+        conversion = xz_y_from_xzw_xzu
+    return conversion(float(w.t1), float(w.t2))
+
+rule linedepos_xzu_xzv:
     output:
-        depos='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.npz',
-        meta='linedepos-pdhd-plane{plane}-txz{txz}-ty{ty}_wct-depos.json',
+        depos='linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz',
+        meta='linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.json',
     params:
-        offset="--offset '1*m,0*m,0*m'"
+        offset="--offset '1*m,0*m,0*m'",
+        xz_y = resolve_angles
+        
     shell: '''
+
     wcpy gen detlinegen \
     {params.offset} \
     --detector=pdhd \
-    --plane={wildcards.plane} \
-    --angle-coords=wire-plane \
-    --theta_xz="{wildcards.txz}*deg" \
-    --theta_y="{wildcards.ty}*deg" \
+    --plane=0 \
+    --angle-coords=global \
+    --theta_xz="{params.xz_y[0]}*deg" \
+    --theta_y="{params.xz_y[1]}*deg" \
     --output_depos {output.depos} \
     --output_meta {output.meta}
     '''
 
+
 rule test_container:
     container:
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
     output:
         'lartest.txt'
     shell:
@@ -65,7 +158,9 @@ rule gen_cosmics:
     #TODO ADD CONFIGURATION FOR NUMBER OF EVENTS
     container:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
+    params:
+        fcl=config['cosmics_fcl'],
     output:
         "cosmics_{sample}_gen.root"
     shell:
@@ -75,14 +170,14 @@ rule gen_cosmics:
         # setup dunesw v10_14_00d00 -q e26:prof
         # set -euo pipefail  # Reenable Snakemake's strict mode
 
-        lar --no-timing --no-memcheck -n {config[nevents]} -c prod_cosmics_protodunehd.fcl -o {output} -T hist_{output}
+        lar --no-timing --no-memcheck -n {config[nevents]} -c {params.fcl} -o {output} -T hist_{output}
         rm hist_{output}
         """
 
 rule g4:
     container:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
     input:
         file="cosmics_{sample}_gen.root",
         fcl=os.path.join(SRC_DIR, "run_g4_only.fcl"),
@@ -103,13 +198,13 @@ rule g4:
 rule save_depos:
     container:
         # "/cvmfs/singularity.opensciencegrid.org/fermilab/fnal-dev-sl7:latest"
-        "/nfs/data/1/calcuttj/dunesw.sif"
+        config['dunesw_container']
     input:
-        inputfile="{name}_g4.root",
+        inputfile="cosmics_{sample}_g4.root",
         fcl=os.path.join(SRC_DIR, "pdhd_wirecell_save_depos.fcl"),
         js=os.path.join(SRC_DIR, "wcls-save-larg4-depos.jsonnet"),
     output:
-        npz="{name}_wct-depos.npz",
+        npz="cosmics_{sample}_wct-depos.npz",
         # bz2='{name}_wct-depos.tar.bz2'
     shadow: "minimal" #This runs in an auto-removed tmp dir
     shell:
@@ -127,84 +222,456 @@ rule save_depos:
         # mv wct-depos.tar.bz2 
         """
 
-def get_sourcestyle(wildcards):
-    style='linedepo' #'default'
-    if 'linedepo' in wildcards.name:
-        style = 'linedepo'
-    return f'-A "sourcestyle={style}"'
-rule splat_and_drift:
-    input:
-        "{name}_wct-depos.npz",
-    output:
-        "splat-{name}.h5",
-        "drifted-{name}-frame.npz"
-    params:
-        extra_flag=get_sourcestyle
-    shell:
-        """
-        export WIRECELL_PATH={SRC_DIR}:$WIRECELL_PATH
-        wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A outname={wildcards.name} {params.extra_flag} --ext-code nanodes=1 \
-        wct-sim-deposource-framesink.jsonnet
-        """
 
-
-rule osp_sigproc:
-    input:
-        "drifted-{name}-frame.npz",
-    output:
-        "sigproc-osp-{name}-0.h5",
-    shell:
-        """
-        wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A outname={wildcards.name} --ext-code nanodes=1 \
-        wct-sim-framesource-sigproc.jsonnet
-        """
-
-rule spng_sigproc:
-    input:
-        "drifted-{name}-frame.npz",
-    output:
-        temp("sigproc-spng-{name}.npz"),
-    shell:
-        """
-        wire-cell -l stdout  -L debug   \
-        -A "input={input}" -A style=spng -A outname={wildcards.name} --ext-code nanodes=1 \
-        wct-sim-framesource-sigproc.jsonnet
-        """
-
+config.setdefault('tpcid', '0')
+config.setdefault('device', 'cpu')
+config.setdefault('mpsigproc_training_js', 'dnnroi-training.jsonnet')
 rule spng_mpsigproc:
     input:
-        "{name}_wct-depos.npz",
+        "cosmics_{sample}_wct-depos.npz",
     output:
-        temp("sigproc-spng-mp-{name}.tar")
+        temp("sigproc-spng-mp-cosmics_{sample}.tar")
+    params:
+        # jsonnet='dnnroi-training.jsonnet',
+        jsonnet=config['mpsigproc_training_js'],
+        tpcid=config['tpcid'],
+        detname=config['detname'],
+        device=config['device']
+    shadow: "minimal"
     shell:
         """
-        wire-cell -l stdout -L debug ../../../cfg/spng/dnnroi-training.jsonnet -A "input={input}"
+        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
+            -A "device={params.device}"
         # tar the output files
         tar -cf {output} dnnroi-training-truth.npz \
         dnnroi-training-fodder.npz
         """
 
-rule convert_spng_to_hdf5:
+rule spng_mpsigproc_lines:
     input:
-        "sigproc-spng-{name}.npz",
+        'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
     output:
-        "sigproc-spng-{name}.h5",
+        "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
     params:
-        tags={
-            '*':'loose_lf'
-        }
-    script:
-        "scripts/convert_to_h5.py"
+        jsonnet=config['mpsigproc_training_js'],
+        tpcid=config['tpcid'],
+        detname=config['detname'],
+        device=config['device'],
+    shadow: "minimal"
+    shell:
+        """
+        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
+            -A "device={params.device}"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
 
-rule convert_spng_mp_to_hdf5:
+
+config.setdefault('external_loc', '')
+
+rule spng_densesigproc:
     input:
-        "sigproc-spng-mp-{name}.tar"
+        #TODO Remove external loc
+        os.path.join(config['external_loc'], "cosmics_{sample}_wct-depos.npz"),
     output:
-        rec0="{name}-g4-rec-0.h5",
-        rec1="{name}-g4-rec-1.h5",
-        tru0="{name}-g4-tru-0.h5",
-        tru1="{name}-g4-tru-1.h5"
+        temp("sigproc-spng-dense-cosmics_{sample}.tar")
+        # "sigproc-spng-dense-{name}.tar"
+    shadow: "minimal"
+    params:
+        jsonnet='dnnroi-training-dense-only.jsonnet',
+        detname=config['detname'],
+    shell:
+        """
+        wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
+            -A "tpcid=0" -A "detname={params.detname}"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
+
+rule spng_densesigproc_lines:
+    input:
+        #TODO Remove external loc
+        os.path.join(config['external_loc'], 'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'),
+    output:
+        "sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+    shadow: "minimal"
+    params:
+        jsonnet='dnnroi-training-dense-only.jsonnet',
+        detname=config['detname'],
+    shell:
+        """
+        wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
+            -A "tpcid=0" -A "detname={params.detname}"
+        # tar the output files
+        tar -cf {output} dnnroi-training-truth.npz \
+        dnnroi-training-fodder.npz
+        """
+
+## For more flexibility, create a separate rule to unpack into hdf5 for each plane
+for i in range(3):
+    rule:
+        name: f'convert_spng_mp_to_hdf5_{i}'
+        input:
+            "sigproc-spng-mp-cosmics_{sample}.tar"
+        output:
+            **{
+                f'rec{i}':f'cosmics_{{sample}}-g4-rec-{i}.h5',
+                f'tru{i}':f'cosmics_{{sample}}-g4-tru-{i}.h5',
+            }
+        script:
+            "scripts/convert_to_h5mpSnake.py"
+    rule:
+        name: f'convert_spng_mp_to_hdf5_lines_{i}'
+        input:
+            "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+        output:
+            **{
+                f'rec{i}':'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-'+f'{i}.h5',
+                f'tru{i}':'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-'+f'{i}.h5',
+            }
+        script:
+            "scripts/convert_to_h5mpSnake.py"
+
+# seeds = []
+# import random
+# config.setdefault('nseeds', 1)
+# for i in range(int(config['nseeds'])):
+
+#     these_seeds = '.'.join([str(random.randint(0,100)) for j in range(5)])
+#     seeds.append(these_seeds)
+
+rule high_end_mp_hdf5:
+    input:
+        rec0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        tru0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        rec1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        tru1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        rec2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+        tru2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+
+
+
+
+## TODO 
+rule convert_spng_dense_to_hdf5:
+    input:
+        "sigproc-spng-dense-cosmics_{sample}.tar"
+    output:
+        rec="cosmics_{sample}-g4-rec-dense-0.h5",
+        tru="cosmics_{sample}-g4-tru-dense-0.h5",
     script:
-        "scripts/convert_to_h5mpSnake.py"
+        "scripts/convert_to_h5denseSnake.py"
+# rule convert_spng_dense_to_hdf5_lines:
+#     input:
+#         "seeds_{seeds}/sigproc-spng-dense-linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}.tar"
+#     output:
+#         rec="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-dense-0.h5",
+#         tru="seeds_{seeds}/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-dense-0.h5",
+#     script:
+#         "scripts/convert_to_h5denseSnake.py"
+
+# rule high_end_dense_hdf5_seeded:
+#     input:
+#         rec = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-rec-dense-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg],
+#         tru = [expand("seeds_{seeds}" + f"/linedepos-pdhd-plane0-txzu{xzu}-txzv{xzv}-g4-tru-dense-0.h5", seeds=seeds) for xzu, xzv in high_end_xzu_xzv_deg]
+
+
+config.setdefault('test_input', 'blah')
+config.setdefault('test_tpcs', [0])
+
+def run_plot(angles):
+    import torch
+    import matplotlib.pyplot as plt
+    import numpy as np
+    all_effs = []
+    all_purs = []
+
+    xlabels = [f'{u},{v}' for u,v in angles]
+    xpos = [i for i in range(len(xlabels))]
+
+    ranges = [[0,800], [800,1600], [1600,2560]]
+    for f in input:
+        t = torch.load(f)
+        labels = t['labels'][0].detach().cpu()
+        y = t['y'][0].detach().cpu()
+
+        for plane in params.test_tpcs:
+            this_range = ranges[plane]
+            real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+            eff = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/labels[this_range[0]:this_range[1]].sum()
+            all_effs.append(eff)
+
+            pur = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/(y[this_range[0]:this_range[1]] > .5).sum()
+            all_purs.append(pur)
+    print(all_effs)
+    print(all_purs)
+
+    plt.subplot(2, 1, 1)
+    plt.plot(all_effs, label='Efficiency')
+    plt.xticks(xpos, xlabels)
+    plt.grid(True, axis='both')
+    plt.ylim(0., 1.5)
+    plt.subplot(2, 1, 2)
+    plt.plot(all_purs)
+    plt.grid(True, axis='both')
+    plt.yticks(np.arange(0.,1.5, .2))
+    plt.xticks(xpos, xlabels, label='Purity')
+    plt.ylim(0., 1.5)
+    plt.yticks(np.arange(0.,1.5, .2))
+    f = output[0]
+    print(type(f))
+    print(f)
+    plt.savefig(f)
+
+import os
+def get_angles_by_plane(plane):
+    if plane == 'u':
+        angles = high_end_xzu_xzv_deg_uplane
+    elif plane == 'v':
+        angles = high_end_xzu_xzv_deg_vplane
+    elif plane == 'w':
+        angles = high_end_xzw_xzu_deg_wplane
+    else:
+        raise RuntimeError(f'Unknown plane {plane}')
+    return angles
+
+
+#
+# Run an a reco/true h5 pair through a model
+#
+plane_to_view = {'u':0, 'v':1, 'w':2}
+config.setdefault('dnnapp', 'dnnroi_custom')
+config.setdefault('model', '')
+config.setdefault('cfg', '')
+rule run_one:
+    input:
+        rec=lambda w : ('linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-' + f'{plane_to_view[w.plane]}.h5'),
+        tru=lambda w : ('linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-' + f'{plane_to_view[w.plane]}.h5'),
+    output:
+        'test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+    params:
+        device='cpu',
+        model=config['model'],
+        app=config['dnnapp'],
+        cfg=config['cfg'],
+    shell: """
+    wcpy dnn run_one \
+    {input.rec} {input.tru} \
+    --app {params.app} \
+    -l {params.model} \
+    -c {params.cfg} \
+    -o {output}
+    """     
+
+
+def get_input_by_plane(wildcards):
+    angles = get_angles_by_plane(wildcards.plane)
+    return [
+        f'test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
+    ]
+
+rule plot_eff_pur:
+    input:
+        get_input_by_plane
+    output:
+        png='all_eff_pur_{plane}plane.png',
+        npz='all_eff_pur_{plane}plane.npz',
+    params:
+        test_tpcs = [int(i) for i in config['test_tpcs']]
+
+    run:
+        import torch
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+        import numpy as np
+        all_effs = []
+        all_purs = []
+
+        xlabels = [f'{u},{v}' for u,v in get_angles_by_plane(wildcards.plane)]
+        xpos = [i for i in range(len(xlabels))]
+
+        ranges = [[0,800], [800,1600], [1600,2560]]
+        for f in input:
+            t = torch.load(f)
+            labels = t['labels'][0].detach().cpu()
+            y = t['y'][0].detach().cpu()
+
+            for plane in params.test_tpcs:
+                this_range = ranges[plane]
+                real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+                eff = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/labels[this_range[0]:this_range[1]].sum()
+                all_effs.append(eff)
+
+                pur = (y[this_range[0]:this_range[1]][real_pixels] > .5).sum()/(y[this_range[0]:this_range[1]] > .5).sum()
+                all_purs.append(pur)
+        print(all_effs)
+        print(all_purs)
+
+        plt.subplot(2, 1, 1)
+        plt.plot(all_effs, label='Efficiency')
+        plt.xticks(xpos, xlabels)
+        plt.grid(True, axis='both')
+        plt.ylim(0., 1.5)
+        plt.subplot(2, 1, 2)
+        plt.plot(all_purs)
+        plt.grid(True, axis='both')
+        plt.yticks(np.arange(0.,1.5, .2))
+        plt.xticks(xpos, xlabels, label='Purity')
+        plt.ylim(0., 1.5)
+        plt.yticks(np.arange(0.,1.5, .2))
+        f = output.png
+        print(type(f))
+        print(f)
+        plt.savefig(f)
+
+        np.savez(output.npz, effs=all_effs, purs=all_purs)
+
+
+def get_input(wildcards):
+    return f'test_line_{wildcards.plane}plane_t1-{wildcards.t1}-t2-{wildcards.t2}.pt'
+
+
+rule plot_feat_y_labels:
+    input:
+        # 'test_line_txzu82-txzv82.pt'
+        get_input
+    output:
+        temp('line-display-{plane}plane-t1_{t1}-t2_{t2}.pickle')
+    run:
+        import torch
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import warnings
+
+        # 1. Force TrueType fonts (Type 42) instead of Type 3
+        matplotlib.rcParams['pdf.fonttype'] = 42
+        matplotlib.rcParams['ps.fonttype'] = 42
+
+        # 2. Aggressively suppress the warning that triggers the crash
+        # This prevents the 'warn_on_missing_glyph' function from ever running
+        warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
+        # 3. Use a standard font that is widely available on Linux
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+        t = torch.load(input[0])
+        feat = t['feat']; y = t['y']; labels = t['labels']
+        fig, axs = plt.subplots(3,1)
+        for i, f in enumerate([feat, y >.5, labels]):
+            im = axs[i].imshow(f[0].detach().cpu(), aspect='auto'); plt.colorbar(im)
+        # plt.title(f'XZu:{wildcards.txzu}, XZv:{wildcards.txzv}')
+
+        f = output[0]
+        # print(f)
+        # plt.savefig(f)
+        import pickle
+        pickle.dump(fig, open(f, 'wb'))
+
+def get_plot_input_by_plane(w):
+    if w.plane == 'u':
+        angles = high_end_xzu_xzv_deg_uplane
+    elif w.plane == 'v':
+        angles = high_end_xzu_xzv_deg_vplane
+    elif w.plane == 'w':
+        angles = high_end_xzw_xzu_deg_wplane
+    res = [f'line-display-{w.plane}plane-t1_{t1}-t2_{t2}.pickle' for t1, t2 in angles]
+    return res
+
+rule collect_feat_y_labels_uvplane:
+    input:
+        get_plot_input_by_plane
+    output:
+        'line-displays_{plane}plane.tar'
+    shell:
+        'tar -cf {output} {input}'
+
+rule all_plots_u:
+    input:
+        tar=f'line-displays_uplane.tar',
+        effpur=f'all_eff_pur_uplane.png',
+        npy=f'all_eff_pur_uplane.npz',
+rule all_plots_v:
+    input:
+        tar=f'line-displays_vplane.tar',
+        effpur=f'all_eff_pur_vplane.png',
+        npy=f'all_eff_pur_vplane.npz',
+rule all_plots_w:
+    input:
+        tar=f'line-displays_wplane.tar',
+        effpur=f'all_eff_pur_wplane.png',
+        npy=f'all_eff_pur_wplane.npz',
+
+def get_epochs(wildcards):
+    from glob import glob
+    return sorted(
+        glob(f'epoch_*/all_eff_pur_{wildcards.plane}plane.npz'),
+        key = lambda s : int(s.split('/')[0].split('_')[-1])
+    )
+
+
+rule compare_effpur_epochs:
+    input: get_epochs
+    output:
+        pdf='eff_pur_epochs_{plane}plane.pdf',
+        # npz='eff_pur_epochs_{plane}plane.npz',
+    run:
+        print(input)
+        import numpy as np, matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+        matplotlib.rcParams['pdf.fonttype'] = 42
+        files = [np.load(f) for f in input]
+        epoch_nums = [int(f.split('/')[0].split('_')[-1]) for f in input]
+        n_angles = len(files[0]['effs'])
+        n_epochs = len(files)
+        effs = np.array([
+            [f['effs'][i] for f in files]
+            for i in range(n_angles)
+        ])
+        purs = np.array([
+            [f['purs'][i] for f in files]
+            for i in range(n_angles)
+        ])
+
+        from matplotlib.backends.backend_pdf import PdfPages
+        with PdfPages(output.pdf) as pdf:
+            for i in range(len(effs)):
+                plt.figure()
+                plt.plot(epoch_nums, effs[i], label='Efficiency')
+                plt.plot(epoch_nums, purs[i], label='Purity')
+                plt.plot(epoch_nums, effs[i]*purs[i], label='eff x pur')
+                plt.ylim(0,1.2)
+                plt.grid(True, axis='both')
+                plt.title(f'Angle #{i}')
+                plt.xlabel('Epoch')
+                plt.legend()
+                pdf.savefig()
+                plt.close()
+            plt.figure()
+            plt.title('Efficiency -- all epochs')
+            plt.xlabel('Angle')
+            plt.ylim(0,1.2)
+            plt.ylabel('Efficiency')
+            plt.grid(True, axis='both')
+            for i, eff in enumerate(effs.T):
+                plt.plot(eff, label=f'Epoch {epoch_nums[i]}')
+            plt.legend()
+            pdf.savefig()
+            plt.close()
+
+            plt.figure()
+            plt.title('Purity -- all epochs')
+            plt.xlabel('Angle')
+            plt.ylim(0,1.2)
+            plt.ylabel('Purity')
+            plt.grid(True, axis='both')
+            for i, pur in enumerate(purs.T):
+                plt.plot(pur, label=f'Epoch {epoch_nums[i]}')
+            plt.legend()
+            pdf.savefig()
+            plt.close()

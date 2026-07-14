@@ -439,6 +439,10 @@ for sig in ('osp','spng'):
         wcpy test plot-metrics --coordinate-plane={wildcards.wplane} -o {output} {input.metrics}
         """
 
+rule spng_metrics:
+    input:
+        expand(format_path(filename='metrics-wp{wplane}.pdf', kind='line', unit='summary', nevent=1),
+                det=config['det'], tier=('spng'), wplane=config['plane'])
 rule all_metrics:
     input:
         expand(format_path(filename='metrics-wp{wplane}.pdf', kind='line', unit='summary', nevent=1),

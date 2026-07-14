@@ -3,7 +3,6 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellSpng/SimpleTorchTensor.h"
 #include "WireCellSpng/SimpleTorchTensorSet.h"
-#include "WireCellSpng/TorchnvTools.h"
 
 WIRECELL_FACTORY(SPNGDNNROIPreProcess,
      WireCell::SPNG::DNNROIPreProcess, 
@@ -46,7 +45,6 @@ void DNNROIPreProcess::configure(const WireCell::Configuration& cfg)
 //preprocessing
 bool DNNROIPreProcess::operator()(const input_pointer& in, output_pointer& out)
 {
-    NVTX_SCOPED_RANGE("DNNROIPreProcess::preprocess");
     out = nullptr;
     if(!in){
         log->debug("DNNROIPreProcess: EOS ");

@@ -37,6 +37,10 @@ namespace WireCell::SPNG {
 
             - noop :: Explicit no-operation on the tensor.  If you want to rely
               on Transform to change metadata, set this operation to avoid a warning.
+
+            - to :: casts as the given dtype
+
+            - view :: returns input_tensr.view(dims), where "dims" is a vector of dimension lengths
         */
 
         /// 

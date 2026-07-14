@@ -6,3 +6,4 @@ physics.simulate: [
    "IonAndScint",
    "IonAndScintExternal"
 ]
+services.SignalShapingServiceDUNE: @erase
