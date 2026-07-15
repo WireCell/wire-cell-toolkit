@@ -95,6 +95,14 @@ namespace WireCell::Match {
 
         std::vector<double>& get_pred_flash() { return pred_flash; }
         void set_pred_flash(const std::vector<double>& v) { pred_flash = v; }
+        // Full (per-flash rail-flag-unmasked) prediction for the calib dump /
+        // display. Empty unless QLMatching stores it (use_saturation_flag on);
+        // falls back to the fit vector so consumers can read unconditionally.
+        const std::vector<double>& get_pred_flash_full() const
+        {
+            return pred_flash_full.empty() ? pred_flash : pred_flash_full;
+        }
+        void set_pred_flash_full(const std::vector<double>& v) { pred_flash_full = v; }
 
         Opflash* get_flash() const { return flash; }
         void set_flash(Opflash* f) { flash = f; }
@@ -219,6 +227,7 @@ namespace WireCell::Match {
         // all channels eligible (historical behavior, bit-identical).
         std::vector<uint8_t> relax_channels;
         std::vector<double> pred_flash;
+        std::vector<double> pred_flash_full;
         std::vector<Cluster*> other_clusters;
         std::vector<Cluster*> more_clusters;
     };

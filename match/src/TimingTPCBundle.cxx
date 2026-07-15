@@ -183,6 +183,12 @@ void TimingTPCBundle::add_bundle(TimingTPCBundle* candidate_bundle)
 
     auto& pes = candidate_bundle->get_pred_flash();
     for (std::size_t i = 0; i < pred_flash.size(); ++i) pred_flash.at(i) += pes.at(i);
+    // Keep the dump-only full prediction in sync when both sides carry one
+    // (they do whenever QLMatching stored it; empty otherwise = legacy).
+    if (!pred_flash_full.empty() && !candidate_bundle->pred_flash_full.empty()) {
+        const auto& pf = candidate_bundle->pred_flash_full;
+        for (std::size_t i = 0; i < pred_flash_full.size(); ++i) pred_flash_full.at(i) += pf.at(i);
+    }
     examine_bundle();
 }
 

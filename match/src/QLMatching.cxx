@@ -1305,10 +1305,20 @@ void QLMatching::build_bundles(ApaRun& run)
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
         std::vector<unsigned int> flash_opdet_mask = run.opdet_mask;
+        // Prediction-evaluation mask: identical to flash_opdet_mask EXCEPT
+        // that the data DAPHNE-rail drop is not applied, so the full
+        // prediction on rail-flagged channels survives for the calib dump /
+        // viewer (the flag only excludes channels from chi2/KS/LASSO; a
+        // pred shown as 0 on a railed channel is confusing and wrong).
+        // Diverges from flash_opdet_mask only when use_saturation_flag is
+        // on => the legacy path is bit-identical.
+        std::vector<unsigned int> vis_opdet_mask = run.opdet_mask;
         for (std::size_t idet = 0; idet < std::size_t(flash->get_num_channels()); ++idet) {
             auto pe_det = flash->get_PE(idet);
-            if ((flash->get_total_PE() > m_mc_saturation_pe) && (pe_det == 0) && (m_data == false))
+            if ((flash->get_total_PE() > m_mc_saturation_pe) && (pe_det == 0) && (m_data == false)) {
                 flash_opdet_mask[idet] = 0;
+                vis_opdet_mask[idet] = 0;
+            }
             // Data DAPHNE-rail flag (flag_saturation chain): the clipped PE
             // is a x2-10 underestimate, so drop the channel from this
             // flash's pred/chi2/KS (bundle_mask_ks) -- the LASSO rows are
@@ -1429,20 +1439,21 @@ void QLMatching::build_bundles(ApaRun& run)
                         // Gridded library holds total photon arrival (incl. any
                         // reflected component) with the detector's own optical
                         // shadowing; reflected term stays 0.
-                        m_lib_model->visibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
+                        m_lib_model->visibilities(direct_visibilities, xyz_cm, &vis_opdet_mask);
                         reflected_visibilities.assign(nopdets, 0.0);
                     }
                     else {
                     // Skip masked opdets inside the model: their predicted light is
-                    // discarded by the flash_opdet_mask gate below, so evaluating the
+                    // discarded by the vis_opdet_mask gate below, so evaluating the
                     // per-opdet solid-angle/Gaisser-Hillas correction for them is wasted
-                    // (~half of the same-TPC opdets are masked). Bit-identical result.
-                    m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
-                    m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm, &flash_opdet_mask);
+                    // (~half of the same-TPC opdets are masked). Bit-identical result
+                    // (vis_opdet_mask == flash_opdet_mask unless use_saturation_flag).
+                    m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm, &vis_opdet_mask);
+                    m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm, &vis_opdet_mask);
                     }
 
                     for (std::size_t idet = 0; idet < nopdets; ++idet) {
-                        if (flash_opdet_mask.at(idet) == 0) continue;
+                        if (vis_opdet_mask.at(idet) == 0) continue;
                         const auto dir_vis = direct_visibilities.at(idet);
                         const auto ref_vis = reflected_visibilities.at(idet);
                         const auto dir_eff = m_VUVEfficiency.at(idet);
@@ -1468,6 +1479,16 @@ void QLMatching::build_bundles(ApaRun& run)
                     const double L = std::log(p / m_pmt_nl_knee);
                     pred_flash.at(idet) = m_pmt_nl_knee * std::exp(beta * L + gamma * L * L);
                 }
+            }
+
+            // Full (rail-unmasked) prediction for the calib dump / viewer;
+            // the fit continues on the masked vector below. Stored only when
+            // the knob is on (get_pred_flash_full falls back to the fit
+            // vector otherwise), so the legacy path is untouched.
+            if (m_use_saturation_flag) {
+                bundle->set_pred_flash_full(pred_flash);
+                for (std::size_t idet = 0; idet < nopdets; ++idet)
+                    if (flash_opdet_mask.at(idet) == 0) pred_flash.at(idet) = 0.0;
             }
 
             // Cluster-group selection drives matching; the KS==1 guard below is
@@ -2875,7 +2896,10 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             // Containment verdict from compute_endpoint_flags. Uncontained bundles
             // (dropped by require_containment) keep the ctor's zeroed metrics and a
             // zero-filled pred_flash; the flag is what tells them apart.
-            const auto& pred = b->get_pred_flash();
+            // Dump the FULL prediction: rail-flagged channels keep their
+            // predicted light (they are only excluded from chi2/KS/LASSO);
+            // identical to get_pred_flash when use_saturation_flag is off.
+            const auto& pred = b->get_pred_flash_full();
             jb["contained"]            = b->get_contained();
             jb["consistent"]           = b->get_consistent_flag();
             jb["potential_bad_match"]  = b->get_potential_bad_match_flag();
