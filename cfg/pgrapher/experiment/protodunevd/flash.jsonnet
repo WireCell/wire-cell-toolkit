@@ -133,7 +133,7 @@ local wc = import 'wirecell.jsonnet';
     // units (100 = 1 PE/tick); starting values from the WI noise floors
     // (pdvd-light-filter.md): cathode ~3.7, membrane ~4 (top-wall 5
     // sigma), PMT ~2.2.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false)::  g.pnode({
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false, emit_coverage=false)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
@@ -146,6 +146,12 @@ local wc = import 'wirecell.jsonnet';
             // OpFlashFinder flash_sat tensor -> QLMatching per-flash channel
             // mask.  C++ default false.  Key omitted when off => byte-identical.
             [if flag_saturation then 'flag_saturation']: true,
+            // Per-trace livetime rows -> OpFlashFinder flash_cov tensor ->
+            // QLMatching per-flash no-data mask (membrane XA / PMT channels
+            // are 16.4-us self-trigger snippets; without this an uncovered
+            // channel is scored measured = 0).  C++ default false.  Key
+            // omitted when off => byte-identical.
+            [if emit_coverage then 'emit_coverage']: true,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,

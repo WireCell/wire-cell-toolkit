@@ -39,6 +39,7 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     cfg["fixed_ped_sigma"] = m_fixed_ped_sigma;
     cfg["veto_saturation"] = m_veto_saturation;
     cfg["flag_saturation"] = m_flag_saturation;
+    cfg["emit_coverage"] = m_emit_coverage;
     // AlgoSlidingWindow parameters, dune_ophit_finder_deco values.
     Configuration algo;
     algo["adc_threshold"] = 3.0;
@@ -75,6 +76,7 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     m_fixed_ped_sigma = get(cfg, "fixed_ped_sigma", m_fixed_ped_sigma);
     m_veto_saturation = get(cfg, "veto_saturation", m_veto_saturation);
     m_flag_saturation = get(cfg, "flag_saturation", m_flag_saturation);
+    m_emit_coverage = get(cfg, "emit_coverage", m_emit_coverage);
     m_algo = defs["algo"];
     if (cfg.isMember("algo")) {
         for (const auto& key : cfg["algo"].getMemberNames()) {
@@ -308,8 +310,17 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
         if (it != mm.end()) sat_masks = it->second;
     }
     int nvetoed = 0, nflagged = 0;
+    // Per-trace live-time rows (channel, t_begin, t_end) in the ophit
+    // peak_time base; one row per input trace (self-trigger snippet or
+    // full stream).  Only filled when emit_coverage is on.
+    std::vector<double> coverage;
     for (const auto& trace : traces) {
         const auto& charge = trace->charge();
+        if (m_emit_coverage) {
+            coverage.push_back(trace->channel());
+            coverage.push_back(t0 + tick * trace->tbin());
+            coverage.push_back(t0 + tick * (trace->tbin() + (int) charge.size()));
+        }
 
         // Saturated tick sub-ranges for this channel (empty if none / off).  A
         // hit overlapping one is dropped (veto_saturation) or flagged
@@ -408,6 +419,12 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
     tmd["name"] = "ophits";
     tensors->push_back(std::make_shared<Aux::SimpleTensor>(
         ITensor::shape_t{hits.size() / ncol, ncol}, hits.data(), tmd));
+    if (m_emit_coverage) {
+        Configuration cmd;
+        cmd["name"] = "coverage";
+        tensors->push_back(std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{coverage.size() / 3, (size_t) 3}, coverage.data(), cmd));
+    }
 
     Configuration md;
     md["event"] = in->ident();

@@ -66,6 +66,15 @@ namespace WireCell::Match {
         /// All-zero unless the light chain ran with OpHitFinder
         /// flag_saturation; consumed by QLMatching use_saturation_flag.
         bool   get_sat(int ch)    const { return ch >= 0 && ch < (int)sat.size() && sat[ch]; }
+        /// Per-flash per-channel readout-coverage fraction (self-trigger
+        /// snippet livetime over this flash's window), carried on the
+        /// sparse "flashcov" PC by FlashTensorToOpticalPCs.  1.0 when the
+        /// PC is absent (legacy archives / full-stream channels); consumed
+        /// by QLMatching use_coverage_flag.
+        double get_cov(int ch)    const {
+            if (cov.empty() || ch < 0 || ch >= (int)cov.size()) return 1.0;
+            return cov[ch];
+        }
 
     private:
         // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
@@ -88,6 +97,7 @@ namespace WireCell::Match {
         std::vector<double> PE;
         std::vector<double> PE_err;
         std::vector<unsigned char> sat;  // per-channel saturation flags (empty = none)
+        std::vector<float> cov;          // per-channel coverage fractions (empty = all 1)
     };
 
     struct OpFlashCompare {

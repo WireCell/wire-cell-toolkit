@@ -79,6 +79,12 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
     std::vector<int>    lid;
     std::vector<double> lt, lq, lerr;
     std::vector<int>    fl_flash, fl_light;
+    // Sparse per-flash per-channel coverage rows (only cov < 1).  Unlike
+    // flash_sat this cannot ride the light PC "error" field: an uncovered
+    // channel has pe == 0 and therefore no light entry at all.
+    std::vector<int>    cov_flash, cov_chan;
+    std::vector<double> cov_val;
+    bool have_cov = false;
 
     // Optional per-frame time offset: add the tensor-set metadata
     // "frame_apply_at_caf" (ns) to every flash/light time so downstream code sees
@@ -119,6 +125,34 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
                 (int)t->shape()[1] == m_nchan) {
                 SAT = (const double*) t->data();
                 break;
+            }
+        }
+
+        // Optional per-flash per-channel coverage fractions ("flash_cov",
+        // written by OpFlashFinder when the light chain ran with OpHitFinder
+        // emit_coverage).  Collected as sparse (flash, channel, cov) rows
+        // where cov < 1; absent tensor => no "flashcov" PC below,
+        // byte-identical to the historical output.
+        const double* COV = nullptr;
+        for (const auto& t : *data_tens) {
+            if (t->metadata()["name"].asString() == "flash_cov" &&
+                t->shape().size() == 2 && t->shape()[0] == nflash &&
+                (int)t->shape()[1] == m_nchan) {
+                COV = (const double*) t->data();
+                break;
+            }
+        }
+        if (COV) {
+            have_cov = true;
+            for (size_t r = 0; r < nflash; ++r) {
+                for (int c = 0; c < m_nchan; ++c) {
+                    const double cov = COV[r * m_nchan + c];
+                    if (cov < 1.0) {
+                        cov_flash.push_back((int)r);
+                        cov_chan.push_back(c);
+                        cov_val.push_back(cov);
+                    }
+                }
             }
         }
 
@@ -174,6 +208,13 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
     lpcs["flash"]      = std::move(flash_ds);
     lpcs["light"]      = std::move(light_ds);
     lpcs["flashlight"] = std::move(flashlight_ds);
+    if (have_cov) {
+        PointCloud::Dataset cov_ds;
+        cov_ds.add("flash",   PointCloud::Array(cov_flash));
+        cov_ds.add("channel", PointCloud::Array(cov_chan));
+        cov_ds.add("cov",     PointCloud::Array(cov_val));
+        lpcs["flashcov"] = std::move(cov_ds);
+    }
 
     // Re-serialize live (now carrying the optical PCs) and pass /dead through.
     ITensor::vector outtens;

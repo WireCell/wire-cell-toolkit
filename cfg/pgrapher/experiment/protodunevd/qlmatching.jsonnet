@@ -52,7 +52,8 @@ local wc = import 'wirecell.jsonnet';
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
-         cathode_ext1=null, use_saturation_flag=false) {
+         cathode_ext1=null, use_saturation_flag=false,
+         use_coverage_flag=false, coverage_min=1.0) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -279,6 +280,15 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // pdvd-saturation-recovery.md).  C++ default false.  Key omitted
             // when off => byte-identical pre-fix config.
             [if use_saturation_flag then 'use_saturation_flag']: true,
+            // Per-flash readout-coverage masking: a membrane-XA / PMT channel
+            // is a 16.4-us self-trigger snippet stream (duty ~5-30%); with no
+            // snippet over a flash's window it has NO data and must not be
+            // scored as measured = 0 (needs a light archive made with
+            // OpHitFinder emit_coverage; see pdvd/docs/qlmatch/
+            // pdvd-lightpattern-sp-investigation.md).  C++ defaults false/1.0.
+            // Keys omitted when off => byte-identical pre-fix config.
+            [if use_coverage_flag then 'use_coverage_flag']: true,
+            [if use_coverage_flag && coverage_min != 1.0 then 'coverage_min']: coverage_min,
             // per-bundle chi2 relaxation: with vd_surface_flags the excess
             // widening applies only to the near-surface PD channels; the
             // dead-PD worst-channel drop is detector-agnostic.  chi2_pmt_excess

@@ -337,6 +337,19 @@ namespace WireCell::Match {
         // OFF -> bit-identical.
         bool m_use_saturation_flag{false};
 
+        // Mask readout-uncovered channels PER FLASH (Opflash::get_cov, fed
+        // by the OpHitFinder emit_coverage -> OpFlashFinder flash_cov
+        // chain): a self-triggered channel (PDVD membrane XA / PMT 16.4-us
+        // snippets, duty ~5-30%) with no waveform over the flash window
+        // carries NO data, but the legacy path scores it as measured = 0
+        // against a possibly large prediction, wrecking the pattern chi2/KS
+        // (pdvd/docs/qlmatch/pdvd-lightpattern-sp-investigation.md).  A
+        // channel with get_cov < coverage_min is dropped from that flash's
+        // opdet mask and its LASSO rows, exactly like a saturated one.
+        // Default OFF -> bit-identical; legacy archives have get_cov == 1.
+        bool m_use_coverage_flag{false};
+        double m_coverage_min{1.0};
+
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).
         double m_bundle_ks_merge_max{0.2};
         double m_bundle_chi2ndf_merge_max{20};

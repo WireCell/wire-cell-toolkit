@@ -64,6 +64,21 @@ Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
             }
         }
     }
+
+    // Per-channel readout-coverage fractions (sparse "flashcov" PC rows,
+    // only channels with coverage < 1 of this flash's window; see
+    // FlashTensorToOpticalPCs).  Empty (and get_cov == 1.0) unless the
+    // light chain ran with emit_coverage; consumed by QLMatching
+    // use_coverage_flag.
+    const auto cov_idents = flash.cov_idents();
+    const auto covs = flash.covs();
+    for (size_t i = 0; i < cov_idents.size() && i < covs.size(); ++i) {
+        const int ch = cov_idents[i];
+        if (ch >= 0 && ch < nchan) {
+            if (cov.empty()) cov.assign(nchan, 1.0f);
+            cov[ch] = (float)covs[i];
+        }
+    }
 }
 
 Opflash::~Opflash() = default;

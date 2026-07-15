@@ -997,6 +997,19 @@ Facade::Flash Facade::Grouping::flash_at(int flash_index) const
         flash.m_values.push_back(l_values[light_index]);
         flash.m_errors.push_back(l_errors[light_index]);
     }
+
+    // Sparse readout-coverage rows (channels with coverage < 1 of this
+    // flash's window).  Absent PC (legacy archives) => empty, fully covered.
+    if (this->has_pc("flashcov")) {
+        const auto c_flash = this->get_pcarray<int>("flash", "flashcov");
+        const auto c_chan  = this->get_pcarray<int>("channel", "flashcov");
+        const auto c_cov   = this->get_pcarray<double>("cov", "flashcov");
+        for (size_t r = 0; r < c_flash.size(); ++r) {
+            if (c_flash[r] != flash_index) continue;
+            flash.m_cov_idents.push_back(c_chan[r]);
+            flash.m_covs.push_back(c_cov[r]);
+        }
+    }
     return flash;
 }
 

@@ -99,12 +99,34 @@ bool Flash::OpHitMerge::operator()(const input_vector& in, output_pointer& out)
         off += n;
     }
 
+    // Coverage rows (channel, t_begin, t_end) emitted by OpHitFinder
+    // emit_coverage: row-concatenate whatever ports carry one.  No
+    // coverage tensors in => none out, output byte-identical.
+    std::vector<double> cov_merged;
+    for (const auto& ts : in) {
+        for (const auto& t : *ts->tensors()) {
+            if (t->metadata()["name"].asString() != "coverage") continue;
+            const auto cshape = t->shape();
+            if (cshape.size() != 2 || cshape[1] != 3) {
+                raise<ValueError>("OpHitMerge: coverage tensor shape not Nx3");
+            }
+            const double* d = (const double*) t->data();
+            cov_merged.insert(cov_merged.end(), d, d + cshape[0] * 3);
+        }
+    }
+
     ITensor::vector* tensors = new ITensor::vector;
     {
         Configuration md;
         md["name"] = "ophits";
         tensors->push_back(std::make_shared<Aux::SimpleTensor>(
             ITensor::shape_t{nrow_total, ncol}, merged.data(), md));
+    }
+    if (!cov_merged.empty()) {
+        Configuration md;
+        md["name"] = "coverage";
+        tensors->push_back(std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{cov_merged.size() / 3, (size_t) 3}, cov_merged.data(), md));
     }
 
     const auto& meta_ts = in[m_meta_port];

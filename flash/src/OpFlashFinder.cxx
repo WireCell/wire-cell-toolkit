@@ -668,6 +668,62 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     // any hit of flash f on OpDet od overlaps a DAPHNE rail.
     const bool have_sat = ncol >= 10;
     std::vector<double> flash_sat(have_sat ? nflash * m_nchan : 0, 0.0);
+    // Per-flash per-OpDet coverage fraction, present only when the input
+    // carries the OpHitFinder emit_coverage rows (channel, t_begin, t_end;
+    // default off => no extra tensor, output byte-identical).  A
+    // self-triggered channel (PDVD membrane XA / PMT snippets) with no
+    // waveform overlapping the flash window carries NO data -- downstream
+    // Q/L masks it instead of treating it as measured = 0.  An OpDet's
+    // fraction = min over its DAPHNE sub-channels (the OpDet PE is the sum
+    // over sub-channels, so one missing sub-channel biases the sum low by
+    // an unknowable gain-dependent share); window = [min, max] hit
+    // peak_time of the flash (point query when equal).
+    ITensor::pointer cov_ten = nullptr;
+    for (const auto& ten : *in->tensors()) {
+        if (ten->metadata()["name"].asString() == "coverage") {
+            cov_ten = ten;
+            break;
+        }
+    }
+    const bool have_cov = cov_ten != nullptr;
+    std::vector<double> flash_cov(have_cov ? nflash * m_nchan : 0, 0.0);
+    std::map<int, std::vector<std::pair<double, double>>> cov_intervals;
+    std::map<int, std::vector<int>> od_subch;
+    if (have_cov) {
+        const auto cshape = cov_ten->shape();
+        if (cshape.size() != 2 || cshape[1] != 3) {
+            raise<ValueError>("OpFlashFinder: coverage tensor shape not Nx3");
+        }
+        const double* C = (const double*) cov_ten->data();
+        for (size_t r = 0; r < cshape[0]; ++r) {
+            cov_intervals[int(C[r * 3])].push_back({C[r * 3 + 1], C[r * 3 + 2]});
+        }
+        for (auto& [ch, v] : cov_intervals) std::sort(v.begin(), v.end());
+        if (m_chmap.empty()) {
+            for (int od = 0; od < m_nchan; ++od) od_subch[od] = {od};
+        }
+        else {
+            for (const auto& [raw, od] : m_chmap) {
+                if (od >= 0 && od < m_nchan) od_subch[od].push_back(raw);
+            }
+        }
+    }
+    auto covered_fraction = [&](int raw_ch, double t_lo, double t_hi) -> double {
+        auto it = cov_intervals.find(raw_ch);
+        if (it == cov_intervals.end()) return 0.0;
+        if (t_hi <= t_lo) {  // point query
+            for (const auto& [a, b] : it->second)
+                if (a <= t_lo && t_lo < b) return 1.0;
+            return 0.0;
+        }
+        double live = 0.0;
+        for (const auto& [a, b] : it->second) {
+            if (a >= t_hi) break;
+            const double lo = std::max(a, t_lo), hi = std::min(b, t_hi);
+            if (hi > lo) live += hi - lo;
+        }
+        return std::min(1.0, live / (t_hi - t_lo));
+    };
     for (size_t f = 0; f < nflash; ++f) {
         const auto& fs = flashes[f];
         matrix[f * mcol] = fs.time;
@@ -686,6 +742,25 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
             if (have_sat && H[hit_index * ncol + 9] > 0) {
                 const int od = hits[hit_index].channel;  // OpDet after ganging
                 if (od >= 0 && od < m_nchan) flash_sat[f * m_nchan + od] = 1.0;
+            }
+        }
+        if (have_cov) {
+            double t_lo = 0.0, t_hi = 0.0;
+            bool first = true;
+            for (int hit_index : refined[f]) {
+                const double pt = hits[hit_index].peak_time;
+                if (first) { t_lo = t_hi = pt; first = false; }
+                else { t_lo = std::min(t_lo, pt); t_hi = std::max(t_hi, pt); }
+            }
+            for (int od = 0; od < m_nchan; ++od) {
+                double frac = 0.0;
+                auto sit = od_subch.find(od);
+                if (sit != od_subch.end() && !sit->second.empty()) {
+                    frac = 1.0;
+                    for (int raw : sit->second)
+                        frac = std::min(frac, covered_fraction(raw, t_lo, t_hi));
+                }
+                flash_cov[f * m_nchan + od] = frac;
             }
         }
     }
@@ -714,6 +789,12 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         md["name"] = "flash_sat";
         tensors->push_back(std::make_shared<Aux::SimpleTensor>(
             ITensor::shape_t{nflash, (size_t)m_nchan}, flash_sat.data(), md));
+    }
+    if (have_cov) {
+        Configuration md;
+        md["name"] = "flash_cov";
+        tensors->push_back(std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{nflash, (size_t)m_nchan}, flash_cov.data(), md));
     }
 
     Configuration md = in->metadata();

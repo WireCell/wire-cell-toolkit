@@ -103,6 +103,17 @@ namespace WireCell {
             // (veto off).  Default OFF -> 9 columns, bit-identical.
             // See pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
             bool m_flag_saturation{false};
+            // Emit a second output tensor named "coverage" with one row
+            // (channel, t_begin, t_end) per input trace, in the same time
+            // base as the ophit peak_time.  Self-triggered channels
+            // (PDVD membrane XA / PMT 16.4-us snippets) are LIVE only
+            // inside their snippets; without this the downstream flash
+            // scores an uncovered channel as measured = 0 instead of "no
+            // data".  OpFlashFinder turns the rows into a per-flash
+            // per-OpDet "flash_cov" fraction for Q/L masking.  Default
+            // OFF -> single-tensor output, bit-identical.
+            // See pdvd/docs/qlmatch/pdvd-lightpattern-sp-investigation.md.
+            bool m_emit_coverage{false};
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};
