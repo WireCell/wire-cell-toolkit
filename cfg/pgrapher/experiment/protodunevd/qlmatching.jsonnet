@@ -64,11 +64,21 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     //   dead in data (not in the DAPHNE readout): 24, 27, 28, 34
     //   Ar-blind (official eff_Ar = 0; no/quenched WLS at 128 nm):
     //     13 (membrane XA, no PTP), 29/39 (PEN+Q PMTs), 32 (uncoated PMT).
-    // These are the channels that do NOT see Ar 128 nm scintillation.  (For
+    //   persistently faulty/dim -- ~8-50x below their same-type peers in EVERY
+    //     run examined (039252/039253/039349), so a stable hardware state, not a
+    //     per-event fluctuation; previously only caught by the per-event
+    //     auto_mask below.  Masked here so their biased light never enters the
+    //     LASSO/chi2/KS: 2 (top membrane XA), 16/17 (z-wall PMTs), 33 (bottom
+    //     PMT).  Data justification: pdvd/docs/qlmatch/pdvd-pd-functionality-run39252.md
+    //     (wcp-porting repo).  ch0 is left LIVE (dimmer than its bright top-wall
+    //     peers but meas/pred ~0.83, i.e. functional); the other live PMTs are
+    //     also kept -- they respond in proportion to the library and carry the
+    //     only real -x light away from the walls.
+    // These are the channels that do NOT contribute usable Ar 128 nm light.  (For
     // Xe-doped running unmask 13/29/39 and switch to the 175 nm library --
     // that Xe verdict was adopted 2026-07-11 in 0adb15fa and REVERTED here;
     // see pdvd-questions-dune.md sec 3.)
-    local ch_mask_base = [13, 24, 27, 28, 29, 32, 34, 39],
+    local ch_mask_base = [2, 13, 16, 17, 24, 27, 28, 29, 32, 33, 34, 39],
     // Semi-analytical mode: additionally mask the LIVE membrane XAs -- the WCT
     // port fixes cosine=|dx|/d (orientation-0), which is wrong/divergent for
     // the y-normal wall XAs (see pdvd-photon-model.md sec 6).  13 is already
@@ -225,10 +235,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // static mask: bottom-PMT neighbour medians almost never reach the
             // earlier bright=20 (ch24 caught in 55% of events); at 10/3 the
             // known-dead ch24 is caught in 91/120 events with healthy channels
-            // masked in <6%.  Two genuinely DIM channels, ch16 and ch33
-            // (event-max PE median ~5.6, ~50x below their peers), get
-            // per-event masked when quiet -- the safe direction; their status
-            // is flagged in pdvd-questions-dune.md (per-run bad channels).
+            // masked in <6%.  The persistently DIM channels (ch2/16/17/33) are
+            // now in the static ch_mask_base above (confirmed stable across
+            // 039252/253/349, pdvd-pd-functionality-run39252.md); auto_mask
+            // remains the per-event safety net for anything transient/new.
             auto_mask: true,
             auto_mask_same_type: true,
             auto_mask_pe_low: 5,
