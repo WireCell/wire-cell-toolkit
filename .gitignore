@@ -22,7 +22,7 @@
 *.json
 *.junk
 *.local
-*.log
+*log
 *.nav
 *.npy
 *.npz
@@ -56,7 +56,9 @@
 .beads
 .cache
 .clangd
+.claude
 .fuse*
+.gitattributes
 .lock-waf*
 .snakemake
 .vscode
@@ -93,7 +95,7 @@ junk*
 larsoft-cfg
 latex
 latexmk-out
-log
+log*
 ltximg
 method.pdf
 old

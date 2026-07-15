@@ -398,6 +398,53 @@ def get_rpath(bld, uselst, local=True):
 
 
 @conf
+def build_wcdoctest_all(bld):
+    '''
+    Build a single "wcdoctest" program encompassing the doctests from every
+    package's test/ directory.
+
+    This must be called after all packages have been recursed so that
+    bld.all_doctest_srcs (and friends) are fully populated by smplpkg().
+    '''
+    if not getattr(bld, 'all_doctest_srcs', None):
+        return
+
+    def write_doctest_main(tsk):
+        out = tsk.outputs[0]
+        info(f'generating doctest main: {out}')
+        text = '''
+#define DOCTEST_CONFIG_IMPLEMENT
+#include "WireCellUtil/doctest.h"
+#include "WireCellUtil/Logging.h"
+int main(int argc, char** argv) {
+    WireCell::Log::default_logging("stderr","%s",true);
+    doctest::Context context;
+    context.applyCommandLine(argc, argv);
+    return context.run();
+
+}''' % bld.options.with_spdlog_active_level
+        out.write(text)
+        return
+
+    bld.cycle_group("applications")
+
+    mainbin = bld.path.find_or_declare('wcdoctest')
+    mainsrc = bld.path.find_or_declare('wcdoctest.cxx')
+    tname = 'make_wcdoctest_all_source'
+    bld(name=tname, rule=write_doctest_main, target=mainsrc)
+
+    srcs = [mainsrc] + bld.all_doctest_srcs
+    debug(f'smplpkgs: wcdoctest (all) <-- {len(bld.all_doctest_srcs)} doctest sources')
+    bld.program(features='cxx cxxprogram test',
+                name='wcdoctest',
+                source=srcs,
+                target=mainbin,
+                rpath=bld.get_rpath(bld.all_doctest_use),
+                includes=bld.all_doctest_includes,
+                use=bld.all_doctest_use + [tname])
+
+
+@conf
 def smplpkg(bld, name, use='', app_use='', test_use=''):
 
     # use = list(set(to_list(use)))
@@ -516,6 +563,7 @@ int main(int argc, char** argv) {
             pkgname = testdir.parent.name
             mainbin = bld.path.find_or_declare(f'wcdoctest-{pkgname}')
             mainsrc = bld.path.find_or_declare(f'wcdoctest-{pkgname}.cxx')
+            pkgdtsrcs = list(dtsrcs)
             dtsrcs.insert(0, mainsrc)
             tmp="\n\t".join([str(s) for s in dtsrcs])
             tname=f'make_wcdoctest_{pkgname}_source'
@@ -530,6 +578,20 @@ int main(int argc, char** argv) {
                         includes = includes,
                         use = test_use + [name, tname]
                         )
+
+            # Accumulate this package's doctest sources and dependencies so a
+            # single, all-encompassing "wcdoctest" program can be built once all
+            # packages have been recursed (see build_wcdoctest_all()).
+            if not hasattr(bld, 'all_doctest_srcs'):
+                bld.all_doctest_srcs = []
+                bld.all_doctest_use = []
+                bld.all_doctest_includes = [bld.out_dir]
+            bld.all_doctest_srcs += pkgdtsrcs
+            for u in test_use + [name]:
+                if u not in bld.all_doctest_use:
+                    bld.all_doctest_use.append(u)
+            if incdir and incdir.abspath() not in bld.all_doctest_includes:
+                bld.all_doctest_includes.append(incdir.abspath())
 
     # hack in to the env entries for the apps we build
     validation_envs = dict()

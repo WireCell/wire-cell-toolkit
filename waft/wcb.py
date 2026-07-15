@@ -231,6 +231,10 @@ def build(bld):
     debug ('wcb: subdirs %s' % (', '.join(subdirs), ))
     bld.recurse(subdirs)
 
+    # Build a single "wcdoctest" program spanning all packages' doctests, in
+    # addition to the per-package "wcdoctest-<pkg>" programs.
+    bld.build_wcdoctest_all()
+
     if hasattr(bld, "smplpkg_graph"):
         # fixme: this writes directly.  Should make it a task, including
         # running graphviz to produce PNG/PDF

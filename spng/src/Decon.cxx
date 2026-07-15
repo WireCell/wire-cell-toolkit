@@ -152,9 +152,15 @@ namespace WireCell::SPNG {
 
         auto orig_tensor = input_itensor->tensor();
         if (! orig_tensor.numel()) {
-            log->critical("empty torch tensor on input at call={}, passing through the tensor set. Fix your config?",
-                          m_count);
-            raise<ValueError>("decon gets itensor with empty torch tensor, fix configuration?");
+            // A trace-less group produces a zero-width tensor: e.g. a plane in
+            // a drift volume the event missed, or an entirely empty frame.
+            // There is nothing to deconvolve so pass the input tensor set
+            // through unchanged rather than failing.
+            log->debug("empty torch tensor on input at call={}, passing through the tensor set",
+                       m_count);
+            out = in;
+            ++m_count;
+            return true;
         }
 
         // Why do we clone?  Is there an early operation that is in-place?  Just to be safe?

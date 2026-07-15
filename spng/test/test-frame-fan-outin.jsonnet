@@ -85,7 +85,7 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
             }, nin=1, nout=1, uses=[anode]),
 
             local fanout = pg.pnode({
-                type: 'SPNGFanoutNode',
+                type: 'SPNGFanoutTensorSets',
                 name: "fanout",
                 data: {
                     multiplicity: multiplicity,
@@ -184,7 +184,7 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
                                      pg.edge(fanout, pipes[n], n, 0) for n in wc.iota(multiplicity)])]),
             fanin: pg.pipeline([
                 pg.pnode({
-                    type: 'SPNGFaninNode',
+                    type: 'SPNGFaninTensorSets',
                     name: "fanin",
                     data: {
                         multiplicity: multiplicity,
@@ -201,6 +201,7 @@ function(name="pdhd", input="test/data/muon-depos.npz", output="test-frame-fan-o
                     name: "fromtdm",
                     data: {
                         verbose: verbose,
+                        frame: {datapath: "/frames/\\d+/frame"},
                     },
                 }, nin=1, nout=1, uses=[]),
             ]),

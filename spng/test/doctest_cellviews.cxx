@@ -27,6 +27,7 @@
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IWire.h"
 #include "WireCellIface/IChannel.h"
+#include "WireCellIface/WirePlaneId.h"
 
 using namespace WireCell;
 using namespace WireCell::SPNG;
@@ -150,7 +151,21 @@ DOCTEST_TEST_SUITE("CellViews") {
         // Anode registered by Testing::anodes("pdsp").
         cfg["anode"] = "AnodePlane:0";
 
-        // face_idents default is {0,1} which matches our channel layout.
+        // view_wpids: one entry per view (U,V,W), each listing the packed WPID
+        // for face 0 then face 1 — matching the channels_per_view ordering
+        // built above (faces {0,1} in order, channels in natural order).
+        {
+            Json::Value vw(Json::arrayValue);
+            for (int view = 0; view < 3; ++view) {
+                Json::Value grp(Json::arrayValue);
+                for (int fid : face_idents) {
+                    WirePlaneId wpid(iplane2layer[view], fid, 0);
+                    grp.append(wpid.ident());
+                }
+                vw.append(grp);
+            }
+            cfg["view_wpids"] = vw;
+        }
 
         // Request output for all three views.
         {

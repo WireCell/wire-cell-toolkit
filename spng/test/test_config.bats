@@ -12,8 +12,8 @@ bats_load_library wct-bats.sh
     local ofile=test-detsim.json
     run_idempotently -s $ifile -t $ofile -- \
                      wcsonnet -o $ofile -P $cfgdir \
-                     -A input_filename=depos.npz \
-                     -A output_filename_pattern=frames-anode%d.npz \
+                     -A input=depos.npz \
+                     -A output=frames-anode%d.npz \
                      $cfile
     file_larger_than $ofile 0
 
