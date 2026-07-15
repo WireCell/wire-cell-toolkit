@@ -108,6 +108,21 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
         // padded spectrum itself is built lazily in ensure_fft() on the
         // template's first use.
         spe.amplitude = std::max(1.0f, *std::max_element(spe.wave.begin(), spe.wave.end()));
+        // The wiener-inspired PE normalization is 1/H(0) = 1/template-area:
+        // a non-positive area makes the DC gain negative and the channel's
+        // PE scale meaningless (seen for a template built from noise
+        // self-triggers with an unrepaired AC undershoot).  Warn only --
+        // behavior unchanged.
+        {
+            double dc = 0.0;
+            for (float v : spe.wave) dc += v;
+            if (dc <= 0.0) {
+                log->warn("SPE template {} has non-positive area {:.1f}: "
+                          "its deconvolved PE scale is invalid (fix the "
+                          "template; see pdvd-lightpattern-sp-investigation.md)",
+                          m_templates.size(), dc);
+            }
+        }
         if (m_saturation_repair) {
             // Exponential time constants for the rail repair, fit from the
             // template itself (same fits as the Python study --
