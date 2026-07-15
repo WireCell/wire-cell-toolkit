@@ -105,6 +105,18 @@ namespace WireCell {
             // the over-integrated hits extend beyond the railed samples; the pad
             // widens the vetoed range to cover them.
             int m_saturation_pad{0};
+            // Repair railed runs BEFORE deconvolving (requires
+            // detect_saturation): fill each run with the two-sided
+            // exponential bridge min(rising-edge extrapolation, falling-edge
+            // back-extrapolation), clamped >= the measured (railed) samples.
+            // Per-channel taus are fit from the SPE template (tail: log-linear
+            // beyond peak+25; rise: last 4 pre-peak samples).  Bias on
+            // synthetically clipped real pulses: +2% at depth 1.4, +9% at 2,
+            // +23% median at 4 -- vs -14%/-40% deconvolving through the clip.
+            // Default OFF -> bit-identical.  See
+            // pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
+            bool m_saturation_repair{false};
+            int m_repair_fit_samples{8};   // post-run anchor samples for the tail fit
 
             IDFT::pointer m_dft;
 
@@ -117,6 +129,10 @@ namespace WireCell {
                 std::vector<std::complex<float>> fft;  // full-size spectrum, lazy
                 double amplitude;                   // max(wave), >= 1
                 double wi_eps{0.0};                 // (wi_eps_rel * max|fft|)^2, lazy
+                // Exponential time constants (ticks) fit from the template,
+                // used by saturation_repair.  <= 0 => fit failed, no repair.
+                double tau_fall{0.0};
+                double tau_rise{0.0};
                 // AutoScale normalization cached when the Wiener filter is
                 // record-independent (fixed_snr > 0, flat noise): the filtered
                 // SPE response then depends only on the template, so the extra
@@ -126,6 +142,10 @@ namespace WireCell {
             };
             std::vector<SPETemplate> m_templates;
             void ensure_fft(SPETemplate& spe);
+            // Fill railed runs of `w` in place (two-sided exp bridge).
+            void repair_runs(std::vector<float>& w,
+                             const std::vector<std::pair<int, int>>& runs,
+                             double pedestal, const SPETemplate& spe) const;
             double auto_scale(const SPETemplate& spe,
                               const std::vector<std::complex<float>>& xG) const;
             // Transform via the complex (default) or real (use_real_dft) path.

@@ -53,6 +53,8 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["saturation_adc"] = m_saturation_adc;
     cfg["saturation_min_samples"] = m_saturation_min_samples;
     cfg["saturation_pad"] = m_saturation_pad;
+    cfg["saturation_repair"] = m_saturation_repair;
+    cfg["repair_fit_samples"] = m_repair_fit_samples;
     cfg["dft"] = "FftwDFT";
     return cfg;
 }
@@ -84,6 +86,8 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_saturation_adc = get(cfg, "saturation_adc", m_saturation_adc);
     m_saturation_min_samples = get(cfg, "saturation_min_samples", m_saturation_min_samples);
     m_saturation_pad = get(cfg, "saturation_pad", m_saturation_pad);
+    m_saturation_repair = get(cfg, "saturation_repair", m_saturation_repair);
+    m_repair_fit_samples = get(cfg, "repair_fit_samples", m_repair_fit_samples);
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
@@ -104,6 +108,33 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
         // padded spectrum itself is built lazily in ensure_fft() on the
         // template's first use.
         spe.amplitude = std::max(1.0f, *std::max_element(spe.wave.begin(), spe.wave.end()));
+        if (m_saturation_repair) {
+            // Exponential time constants for the rail repair, fit from the
+            // template itself (same fits as the Python study --
+            // pdvd/docs/qlmatch/saturation_recovery_study.py Channel).
+            const int n = (int)spe.wave.size();
+            const int ipk = (int)std::distance(
+                spe.wave.begin(), std::max_element(spe.wave.begin(), spe.wave.end()));
+            auto fit_logslope = [&](int t0, int t1) -> double {
+                // least-squares slope of ln(wave) vs t over [t0, t1), y > 2% amp
+                double st = 0, sl = 0, stt = 0, stl = 0;
+                int np = 0;
+                for (int t = std::max(0, t0); t < std::min(n, t1); ++t) {
+                    const double y = spe.wave[t];
+                    if (y <= 0.02 * spe.amplitude) continue;
+                    const double l = std::log(y);
+                    st += t; sl += l; stt += double(t) * t; stl += double(t) * l;
+                    ++np;
+                }
+                if (np < 2) return 0.0;
+                const double den = stt - st * st / np;
+                return den != 0.0 ? (stl - st * sl / np) / den : 0.0;
+            };
+            const double s_fall = fit_logslope(ipk + 25, ipk + 200);
+            if (s_fall < 0) spe.tau_fall = -1.0 / s_fall;
+            const double s_rise = fit_logslope(ipk - 4, ipk);
+            if (s_rise > 0) spe.tau_rise = 1.0 / s_rise;
+        }
         m_templates.push_back(std::move(spe));
     }
     m_chan2tmpl.clear();
@@ -263,6 +294,50 @@ double Flash::OpDecon::auto_scale(const SPETemplate& spe,
     return 1.0 / norm;
 }
 
+// Fill each railed run [i,j) with the two-sided exponential bridge: the
+// falling-edge back-extrapolation anchored on the first repair_fit_samples
+// samples after the run, intersected (min) with the rising-edge
+// extrapolation anchored on the last 4 samples before it, clamped >= the
+// measured (railed) samples.  Anchors use the robust median of the
+// per-sample amplitude estimates.  A run with < 2 positive anchor samples
+// (or a template whose tau fits failed) is left clipped.
+// Mirrors repair_runs of pdvd/docs/qlmatch/saturation_recovery_study.py.
+void Flash::OpDecon::repair_runs(std::vector<float>& w,
+                                 const std::vector<std::pair<int, int>>& runs,
+                                 double pedestal, const SPETemplate& spe) const
+{
+    if (spe.tau_fall <= 0) return;
+    const int n = (int)w.size();
+    auto median = [](std::vector<double>& v) {
+        std::sort(v.begin(), v.end());
+        const size_t m = v.size() / 2;
+        return v.size() % 2 ? v[m] : 0.5 * (v[m - 1] + v[m]);
+    };
+    for (const auto& [i, j] : runs) {
+        std::vector<double> ya;
+        for (int k = 0; k < m_repair_fit_samples && j + k < n; ++k) {
+            const double y = w[j + k] - pedestal;
+            if (y > 0) ya.push_back(y * std::exp(k / spe.tau_fall));
+        }
+        if (ya.size() < 2) continue;
+        const double A = median(ya);
+        double B = -1;
+        if (spe.tau_rise > 0) {
+            std::vector<double> yb;
+            for (int t = std::max(0, i - 4); t < i; ++t) {
+                const double y = w[t] - pedestal;
+                if (y > 0) yb.push_back(y * std::exp((i - t) / spe.tau_rise));
+            }
+            if (!yb.empty()) B = median(yb);
+        }
+        for (int t = i; t < j; ++t) {
+            double fill = A * std::exp(-(t - j) / spe.tau_fall);
+            if (B > 0) fill = std::min(fill, B * std::exp((t - i) / spe.tau_rise));
+            w[t] = std::max(w[t], (float)(pedestal + fill));
+        }
+    }
+}
+
 std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
                                               const std::vector<double>* noise) const
 {
@@ -388,6 +463,7 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
             ++nskipped;
             continue;
         }
+        std::vector<std::pair<int, int>> sat_runs;  // unpadded, trace-local
         if (m_detect_saturation) {
             // Flag each contiguous run of >= saturation_min_samples raw samples
             // at/above the rail as a saturated tick sub-range.  Marking the run
@@ -407,6 +483,7 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
                         const int lo = std::max(0, i - m_saturation_pad);
                         const int hi = std::min(n, j + m_saturation_pad);
                         cmm["saturation"][chan].push_back({tb + lo, tb + hi});
+                        sat_runs.emplace_back(i, j);
                         ++nsaturated;
                     }
                     i = j;
@@ -422,7 +499,21 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
             noise = &m_noise_templates[nit->second];
         }
         ensure_fft(m_templates[it->second]);
-        auto dec = deconvolve(trace->charge(), m_templates[it->second], noise);
+        // saturation_repair: deconvolve a repaired COPY; the flagged mask
+        // ranges above are emitted unchanged (repair AND flag, not
+        // repair-instead-of-flag).  Default off -> original waveform.
+        const std::vector<float>* wf = &trace->charge();
+        std::vector<float> repaired;
+        if (m_saturation_repair && !sat_runs.empty()) {
+            repaired = trace->charge();
+            const int nped = m_pre_trigger - m_pedestal_buffer;
+            double pedestal = 0;
+            for (int k = 0; k < nped; ++k) pedestal += repaired[k];
+            pedestal /= nped;
+            repair_runs(repaired, sat_runs, pedestal, m_templates[it->second]);
+            wf = &repaired;
+        }
+        auto dec = deconvolve(*wf, m_templates[it->second], noise);
         out_idx.push_back(all_traces.size());
         all_traces.push_back(std::make_shared<Aux::SimpleTrace>(chan, trace->tbin(), std::move(dec)));
     }

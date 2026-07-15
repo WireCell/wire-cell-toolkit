@@ -61,6 +61,11 @@ namespace WireCell::Match {
         double get_high_time()    const { return high_time; }
         int    get_num_channels() const { return m_nchan; }
         double get_threshold()    const { return m_threshold; }
+        /// Per-flash per-channel saturation flag (DAPHNE rail overlap),
+        /// carried on the light-PC "error" field by FlashTensorToOpticalPCs.
+        /// All-zero unless the light chain ran with OpHitFinder
+        /// flag_saturation; consumed by QLMatching use_saturation_flag.
+        bool   get_sat(int ch)    const { return ch >= 0 && ch < (int)sat.size() && sat[ch]; }
 
     private:
         // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
@@ -82,6 +87,7 @@ namespace WireCell::Match {
         std::vector<int>    fired_channels;
         std::vector<double> PE;
         std::vector<double> PE_err;
+        std::vector<unsigned char> sat;  // per-channel saturation flags (empty = none)
     };
 
     struct OpFlashCompare {

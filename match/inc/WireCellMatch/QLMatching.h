@@ -327,6 +327,15 @@ namespace WireCell::Match {
         // (optical ch 120-159) so its measured light matches the prediction.
         std::vector<double> m_measured_pe_scale;
         double m_flash_pe_threshold{0.0};      // Opflash "fired" threshold (PE)
+        // Mask DAPHNE-rail-saturated channels PER FLASH (Opflash::get_sat,
+        // fed by the OpHitFinder flag_saturation -> OpFlashFinder flash_sat
+        // chain): the channel is dropped from that flash's opdet mask
+        // (=> pred, chi2, KS via bundle_mask_ks) and its LASSO rows are
+        // zeroed.  A railed channel's clipped PE can be a x2-10 underestimate
+        // (pdvd/docs/qlmatch/pdvd-saturation-recovery.md) -- masking beats
+        // both the veto (exact 0) and trusting the clipped value.  Default
+        // OFF -> bit-identical.
+        bool m_use_saturation_flag{false};
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).
         double m_bundle_ks_merge_max{0.2};

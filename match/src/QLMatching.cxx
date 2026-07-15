@@ -316,6 +316,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         }
     }
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
+    m_use_saturation_flag = get(cfg, "use_saturation_flag", m_use_saturation_flag);
 
     m_bundle_ks_merge_max      = get(cfg, "bundle_ks_merge_max",      m_bundle_ks_merge_max);
     m_bundle_chi2ndf_merge_max = get(cfg, "bundle_chi2ndf_merge_max", m_bundle_chi2ndf_merge_max);
@@ -604,6 +605,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_err_lowpe_knee"]  = m_pe_err_lowpe_knee;
     cfg["measured_pe_scale"]  = Json::Value(Json::arrayValue);  // empty => identity
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
+    cfg["use_saturation_flag"] = m_use_saturation_flag;
 
     cfg["bundle_ks_merge_max"]      = m_bundle_ks_merge_max;
     cfg["bundle_chi2ndf_merge_max"] = m_bundle_chi2ndf_merge_max;
@@ -1307,6 +1309,12 @@ void QLMatching::build_bundles(ApaRun& run)
             auto pe_det = flash->get_PE(idet);
             if ((flash->get_total_PE() > m_mc_saturation_pe) && (pe_det == 0) && (m_data == false))
                 flash_opdet_mask[idet] = 0;
+            // Data DAPHNE-rail flag (flag_saturation chain): the clipped PE
+            // is a x2-10 underestimate, so drop the channel from this
+            // flash's pred/chi2/KS (bundle_mask_ks) -- the LASSO rows are
+            // zeroed separately.  Default off, bit-identical.
+            if (m_use_saturation_flag && flash->get_sat((int)idet))
+                flash_opdet_mask[idet] = 0;
         }
 
         log->debug("flash time {} flash PE {} flash_x_offset {}",
@@ -1696,6 +1704,10 @@ void QLMatching::fit_round1(ApaRun& run)
         auto& bundles = run.flash_bundles_map[flash];
         for (unsigned int j = 0; j < run.nopdet; ++j) {
             const int opdet_idx = run.opdet_idx_v.at(j);
+            // Saturated-channel row of a flagged flash: leave the whole LASSO
+            // row zero (measured, background and pred entries) -- the clipped
+            // PE must not constrain the fit.  Default off, bit-identical.
+            if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
             const double pe = flash->get_PE(opdet_idx);
             const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
             M(i * run.nopdet + j) = pe / pe_err;
@@ -1705,6 +1717,7 @@ void QLMatching::fit_round1(ApaRun& run)
             const auto& pred_flash = bundle->get_pred_flash();
             for (unsigned int j = 0; j < run.nopdet; ++j) {
                 const int opdet_idx = run.opdet_idx_v.at(j);
+                if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
                 P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
@@ -1830,6 +1843,8 @@ void QLMatching::fit_round2(ApaRun& run)
         auto& bundles = run.flash_bundles_map[flash];
         for (unsigned int j = 0; j < run.nopdet; ++j) {
             const int opdet_idx = run.opdet_idx_v.at(j);
+            // Saturated-channel rows stay zero (see fit_round1).
+            if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
             const double pe = flash->get_PE(opdet_idx);
             const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
             M(i * run.nopdet + j) = pe / pe_err;
@@ -1839,6 +1854,7 @@ void QLMatching::fit_round2(ApaRun& run)
             const auto& pred_flash = bundle->get_pred_flash();
             for (unsigned int j = 0; j < run.nopdet; ++j) {
                 const int opdet_idx = run.opdet_idx_v.at(j);
+                if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
                 P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
@@ -2077,6 +2093,8 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
         Opflash* f0 = pf.insts.front().second;
         for (unsigned int j = 0; j < nopdet; ++j) {
             const int opdet_idx = r0.opdet_idx_v.at(j);
+            // Saturated-channel rows stay zero (see fit_round1).
+            if (m_use_saturation_flag && f0->get_sat(opdet_idx)) continue;
             const double pe = f0->get_PE(opdet_idx);
             const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
             M(i * nopdet + j) = pe / pe_err;
@@ -2087,6 +2105,7 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
                 const auto& pred_flash = bundle->get_pred_flash();
                 for (unsigned int j = 0; j < nopdet; ++j) {
                     const int opdet_idx = r0.opdet_idx_v.at(j);
+                    if (m_use_saturation_flag && f0->get_sat(opdet_idx)) continue;
                     const double pred_pe = pred_flash.at(opdet_idx);
                     const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
                     P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
@@ -2785,6 +2804,13 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             for (int ch = 0; ch < m_nchan; ++ch) { pe.append(fl->get_PE(ch)); pe_err.append(fl->get_PE_err(ch)); }
             f["pe"]     = pe;
             f["pe_err"] = pe_err;
+            // Per-channel DAPHNE-rail flags (only when the saturation-flag
+            // masking is on; key absent otherwise => dump byte-identical).
+            if (m_use_saturation_flag) {
+                Json::Value sat(Json::arrayValue);
+                for (int ch = 0; ch < m_nchan; ++ch) sat.append(fl->get_sat(ch) ? 1 : 0);
+                f["sat"] = sat;
+            }
             f["group"]  = -1;                        // filled in the coincidence pass
             flashes.append(f);
         }

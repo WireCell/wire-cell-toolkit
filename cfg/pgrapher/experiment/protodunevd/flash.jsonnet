@@ -81,7 +81,8 @@ local wc = import 'wirecell.jsonnet';
     // samples: 1024 for snippets; 468864 for the cathode full streams
     // (the 468800-sample records are zero-padded by OpDecon).
     // DAPHNE 14-bit rail saturation flags as in PDHD.
-    opdecon(name='', samples=1024, wi_sigma=1.0, detect_saturation=false, saturation_pad=0)::  g.pnode({
+    opdecon(name='', samples=1024, wi_sigma=1.0, detect_saturation=false, saturation_pad=0,
+            saturation_repair=false)::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
@@ -99,6 +100,10 @@ local wc = import 'wirecell.jsonnet';
             use_real_dft: true,
             [if detect_saturation then 'detect_saturation']: detect_saturation,
             [if detect_saturation && saturation_pad != 0 then 'saturation_pad']: saturation_pad,
+            // Two-sided exp bridge over railed runs before decon.  C++ default
+            // false.  Key omitted when off => byte-identical pre-fix config.
+            // See pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
+            [if saturation_repair then 'saturation_repair']: true,
         },
     }, nin=1, nout=1, uses=[dft]),
 
@@ -128,7 +133,7 @@ local wc = import 'wirecell.jsonnet';
     // units (100 = 1 PE/tick); starting values from the WI noise floors
     // (pdvd-light-filter.md): cathode ~3.7, membrane ~4 (top-wall 5
     // sigma), PMT ~2.2.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false)::  g.pnode({
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
@@ -137,6 +142,10 @@ local wc = import 'wirecell.jsonnet';
             [if intag != 'decon' then 'intag']: intag,
             [if fixed_ped_sigma > 0 then 'fixed_ped_sigma']: fixed_ped_sigma,
             [if veto_saturation then 'veto_saturation']: veto_saturation,
+            // Keep-and-mark alternative to the veto: 10th ophit column ->
+            // OpFlashFinder flash_sat tensor -> QLMatching per-flash channel
+            // mask.  C++ default false.  Key omitted when off => byte-identical.
+            [if flag_saturation then 'flag_saturation']: true,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,

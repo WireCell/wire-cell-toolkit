@@ -47,6 +47,23 @@ Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
 {
     init(flash.time(), flash.pes(nchan), threshold, nchan, pe_err, pe_scale);
     flash_id = flash.ident();
+
+    // Per-channel saturation flags, carried on the light-PC "error" field
+    // (1 = the channel's hits overlap a DAPHNE rail in this flash; see
+    // FlashTensorToOpticalPCs).  All-zero (and unread) unless the light
+    // chain ran with flag_saturation and QLMatching enables
+    // use_saturation_flag.
+    const auto idents = flash.idents();
+    const auto errors = flash.errors();
+    for (size_t i = 0; i < idents.size() && i < errors.size(); ++i) {
+        if (errors[i] > 0.5) {
+            const int ch = idents[i];
+            if (ch >= 0 && ch < nchan) {
+                if (sat.empty()) sat.assign(nchan, 0);
+                sat[ch] = 1;
+            }
+        }
+    }
 }
 
 Opflash::~Opflash() = default;

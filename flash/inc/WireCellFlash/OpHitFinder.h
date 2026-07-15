@@ -94,6 +94,15 @@ namespace WireCell {
             // Default OFF -> reads no masks, bit-identical to every existing
             // config.  See pdhd/docs/run29107-evt1015-light-anomaly.md.
             bool m_veto_saturation{false};
+            // KEEP saturated hits but mark them: emit a 10th ophit column =
+            // 1 when the hit overlaps a "saturation" tick sub-range (same
+            // overlap test as the veto), 0 otherwise.  OpFlashFinder turns
+            // the column into a per-flash per-OpDet "flash_sat" tensor so
+            // Q/L matching can mask railed channels per flash instead of
+            // receiving them as zero (veto) or a clipped underestimate
+            // (veto off).  Default OFF -> 9 columns, bit-identical.
+            // See pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
+            bool m_flag_saturation{false};
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};

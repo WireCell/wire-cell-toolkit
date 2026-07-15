@@ -106,6 +106,22 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
         }
         const double* M = (const double*) ten->data(); // row-major [nflash][ncol]
 
+        // Optional per-flash per-channel saturation flags ("flash_sat",
+        // written by OpFlashFinder when the light chain ran with
+        // OpHitFinder flag_saturation).  Carried on the light PC "error"
+        // field (1 = saturated, 0 = clean; the field is otherwise unused
+        // and written 0).  Absent tensor => 0.0 everywhere, byte-identical
+        // to the historical output.
+        const double* SAT = nullptr;
+        for (const auto& t : *data_tens) {
+            if (t->metadata()["name"].asString() == "flash_sat" &&
+                t->shape().size() == 2 && t->shape()[0] == nflash &&
+                (int)t->shape()[1] == m_nchan) {
+                SAT = (const double*) t->data();
+                break;
+            }
+        }
+
         for (size_t r = 0; r < nflash; ++r) {
             const double time = M[r * ncol + 0] + t_offset;
             double sum = 0;
@@ -119,7 +135,7 @@ bool Aux::FlashTensorToOpticalPCs::operator()(const input_vector& invec, output_
                     lid.push_back(c);
                     lt.push_back(time);
                     lq.push_back(pe);
-                    lerr.push_back(0.0);
+                    lerr.push_back(SAT && SAT[r * m_nchan + c] > 0 ? 1.0 : 0.0);
                 }
             }
             ftime.push_back(time);

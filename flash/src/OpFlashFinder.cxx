@@ -662,6 +662,12 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     for (size_t r = 0; r < nhit; ++r) {
         std::copy(H + r * ncol, H + r * ncol + 9, &ohits[r * 9]);
     }
+    // Per-flash per-OpDet saturation flags, present only when the input
+    // ophits carry the OpHitFinder flag_saturation 10th column (default off
+    // => no extra tensor, output byte-identical).  flash_sat[f][od] = 1 when
+    // any hit of flash f on OpDet od overlaps a DAPHNE rail.
+    const bool have_sat = ncol >= 10;
+    std::vector<double> flash_sat(have_sat ? nflash * m_nchan : 0, 0.0);
     for (size_t f = 0; f < nflash; ++f) {
         const auto& fs = flashes[f];
         matrix[f * mcol] = fs.time;
@@ -675,7 +681,13 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         srow[5] = fs.z_width;
         srow[6] = -1;  // absolute DTS time not tracked here
         srow[7] = refined[f].size();
-        for (int hit_index : refined[f]) ohits[hit_index * 9 + 7] = f;
+        for (int hit_index : refined[f]) {
+            ohits[hit_index * 9 + 7] = f;
+            if (have_sat && H[hit_index * ncol + 9] > 0) {
+                const int od = hits[hit_index].channel;  // OpDet after ganging
+                if (od >= 0 && od < m_nchan) flash_sat[f * m_nchan + od] = 1.0;
+            }
+        }
     }
 
     ITensor::vector* tensors = new ITensor::vector;
@@ -696,6 +708,12 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
         md["name"] = "ophits";
         tensors->push_back(std::make_shared<Aux::SimpleTensor>(
             ITensor::shape_t{nhit, (size_t)9}, ohits.data(), md));
+    }
+    if (have_sat) {
+        Configuration md;
+        md["name"] = "flash_sat";
+        tensors->push_back(std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{nflash, (size_t)m_nchan}, flash_sat.data(), md));
     }
 
     Configuration md = in->metadata();

@@ -52,7 +52,7 @@ local wc = import 'wirecell.jsonnet';
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
-         cathode_ext1=null) {
+         cathode_ext1=null, use_saturation_flag=false) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -237,6 +237,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             lasso_boundary_weight: 0.2,
             // mask the KS shape metric on the same channels the chi2/LASSO drop,
             bundle_mask_ks: true,
+            // Per-flash DAPHNE-rail channel masking (needs a light archive made
+            // with OpHitFinder flag_saturation; see pdvd/docs/qlmatch/
+            // pdvd-saturation-recovery.md).  C++ default false.  Key omitted
+            // when off => byte-identical pre-fix config.
+            [if use_saturation_flag then 'use_saturation_flag']: true,
             // per-bundle chi2 relaxation: with vd_surface_flags the excess
             // widening applies only to the near-surface PD channels; the
             // dead-PD worst-channel drop is detector-agnostic.  chi2_pmt_excess
