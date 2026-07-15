@@ -81,18 +81,42 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     // (PDVD_PDS_Mapping_v04152025, read per channel from
     // pdvd-photlib-chanmap.json): XA (PTP) 0.03, TPB-coated PMT 0.12, PEN PMT
     // 0.036, Ar-blind 0 (13/29/32/39).  These set the relative PD-type
-    // weighting; the absolute scale rides on QtoL (data calibration pending).
-    // Masked channels keep their nominal value (inert).
+    // weighting.  Masked channels keep their nominal value (inert).
+    //
+    // Per-type DATA scale factors (owner-adopted 2026-07-14, Ar/128 nm kept):
+    // median Sum(meas)/Sum(pred) per PD type over the 192 strict geometric
+    // cathode-crosser anchors of the saturation-fixed 120-event `_satrep`
+    // reprocess (veto OFF + flag + twoside repair; railed channels excluded
+    // from BOTH sums -- the veto had biased the cathode ratio x5 low):
+    //   cathode XA  10.116 [7.62, 24.4]  n=191
+    //   membrane XA  1.655 [0.27,  8.1]  n=113
+    //   PMTs         0.352 [0.009, 2.0]  n=163 (TPB and PEN share the PMT
+    //     factor; the official 0.12/0.036 relative weighting is kept)
+    // fit: pdvd/ql_light_calib/fit_qtol_crossers.py, doc
+    // pdvd/docs/qlmatch/pdvd-qtol-recalibration.md.  The factors multiply the
+    // official effs so the per-type median meas/pred is 1 at UNCHANGED
+    // QtoL = 0.094; they are effective weights, not physical efficiencies
+    // (the ~x4 far-channel rise of the 128 nm visibility shape remains).
+    local eff_scale_cathode = 10.116,
+    local eff_scale_membrane = 1.655,
+    local eff_scale_pmt = 0.352,
+    local eff_xa_cath = 0.03 * eff_scale_cathode,
+    local eff_xa_memb = 0.03 * eff_scale_membrane,
+    local eff_pmt_tpb = 0.12 * eff_scale_pmt,
+    local eff_pmt_pen = 0.036 * eff_scale_pmt,
     local VUVEfficiency = [
-        0.03, 0.03, 0.03, 0.03,                    // 0-3   membrane XA (top)
-        0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.03,  // 4-11 cathode XA
-        0.03, 0.0,                                 // 12,13 membrane XA (13 no-WLS)
-        0.12, 0.036, 0.12, 0.12,                   // 14-17 z-wall PMTs (15 PEN)
-        0.03, 0.03,                                // 18,19 membrane XA
-        0.12, 0.036, 0.12, 0.12,                   // 20-23 z-wall PMTs (21 PEN)
-        0.036, 0.036, 0.036, 0.036, 0.036, 0.0,    // 24-29 bottom PMTs (29 PEN+Q)
-        0.036, 0.036, 0.0, 0.036, 0.036, 0.036,    // 30-35 (32 uncoated)
-        0.036, 0.036, 0.036, 0.0,                  // 36-39 (39 PEN+Q)
+        eff_xa_memb, eff_xa_memb, eff_xa_memb, eff_xa_memb,  // 0-3   membrane XA (top)
+        eff_xa_cath, eff_xa_cath, eff_xa_cath, eff_xa_cath,  // 4-7   cathode XA
+        eff_xa_cath, eff_xa_cath, eff_xa_cath, eff_xa_cath,  // 8-11  cathode XA
+        eff_xa_memb, 0.0,                                    // 12,13 membrane XA (13 no-WLS)
+        eff_pmt_tpb, eff_pmt_pen, eff_pmt_tpb, eff_pmt_tpb,  // 14-17 z-wall PMTs (15 PEN)
+        eff_xa_memb, eff_xa_memb,                            // 18,19 membrane XA
+        eff_pmt_tpb, eff_pmt_pen, eff_pmt_tpb, eff_pmt_tpb,  // 20-23 z-wall PMTs (21 PEN)
+        eff_pmt_pen, eff_pmt_pen, eff_pmt_pen,               // 24-26 bottom PMTs
+        eff_pmt_pen, eff_pmt_pen, 0.0,                       // 27-29 (29 PEN+Q)
+        eff_pmt_pen, eff_pmt_pen, 0.0,                       // 30-32 (32 uncoated)
+        eff_pmt_pen, eff_pmt_pen, eff_pmt_pen,               // 33-35
+        eff_pmt_pen, eff_pmt_pen, eff_pmt_pen, 0.0,          // 36-39 (39 PEN+Q)
     ],
     local VISEfficiency = std.makeArray(nchan, function(i) 0.0),
 
@@ -152,6 +176,9 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // mis-scaled QtoL the LASSO is amplitude-inert and the selection
             // is dominated by accidentals ~40x brighter than prediction (that
             // route gave QtoL~40, off by ~350x -- see pdvd-qlmatching.md).
+            // 2026-07-14: the crosser-anchor recalibration on the
+            // saturation-fixed dumps keeps this value; the per-type residuals
+            // are absorbed by the VUVEfficiency scale factors above.
             QtoL: 0.094,
             doReflectedLight: false,   // library vis is total photon arrival
             nchan: nchan,
