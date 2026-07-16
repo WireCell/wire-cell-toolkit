@@ -318,6 +318,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
     m_use_saturation_flag = get(cfg, "use_saturation_flag", m_use_saturation_flag);
+    m_saturation_mask_fit = get(cfg, "saturation_mask_fit", m_saturation_mask_fit);
     m_use_coverage_flag = get(cfg, "use_coverage_flag", m_use_coverage_flag);
     m_coverage_min = get(cfg, "coverage_min", m_coverage_min);
     m_coverage_mask_fit = get(cfg, "coverage_mask_fit", m_coverage_mask_fit);
@@ -340,6 +341,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_chi2_pmt_excess  = get(cfg, "chi2_pmt_excess",  m_chi2_pmt_excess);
     m_chi2_pmt_ratio   = get(cfg, "chi2_pmt_ratio",   m_chi2_pmt_ratio);
     m_chi2_pmt_inflate = get(cfg, "chi2_pmt_inflate", m_chi2_pmt_inflate);
+    m_chi2_sat_inflate = get(cfg, "chi2_sat_inflate", m_chi2_sat_inflate);
 
     m_readout_window_ticks = get(cfg, "readout_window_ticks", m_readout_window_ticks);
     m_window_edge_ticks    = get(cfg, "window_edge_ticks",    m_window_edge_ticks);
@@ -528,6 +530,12 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
                    "fit at measured 0 (pe_err_nodata={} PE, coverage_min={})",
                    m_pe_err_nodata, m_coverage_min);
     }
+    // Same sentinel for the rail-flag path (silent => legacy drop from chi2/KS).
+    if (m_use_saturation_flag && !m_saturation_mask_fit) {
+        log->debug("QLMatching saturation_mask_fit=false => railed channels stay in the "
+                   "chi2/KS at their clipped PE (chi2_sat_inflate={}); LASSO rows stay zeroed",
+                   m_chi2_sat_inflate);
+    }
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -626,6 +634,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["measured_pe_scale"]  = Json::Value(Json::arrayValue);  // empty => identity
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
     cfg["use_saturation_flag"] = m_use_saturation_flag;
+    cfg["saturation_mask_fit"] = m_saturation_mask_fit;
     cfg["use_coverage_flag"] = m_use_coverage_flag;
     cfg["coverage_min"] = m_coverage_min;
     cfg["coverage_mask_fit"] = m_coverage_mask_fit;
@@ -648,6 +657,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["chi2_pmt_excess"]  = m_chi2_pmt_excess;
     cfg["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
     cfg["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
+    cfg["chi2_sat_inflate"] = m_chi2_sat_inflate;
 
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
@@ -1161,7 +1171,8 @@ void QLMatching::compute_geometry(ApaRun& run)
         m_highconsist_ladder,
         m_hc_clean_ks, m_hc_clean_c2, m_hc_good_ks, m_hc_good_c2,
         m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf,
-        m_chi2_relax, m_chi2_pmt_excess, m_chi2_pmt_ratio, m_chi2_pmt_inflate};
+        m_chi2_relax, m_chi2_pmt_excess, m_chi2_pmt_ratio, m_chi2_pmt_inflate,
+        m_chi2_sat_inflate};
 
     // Shared-flash mode relies on the ident-based sign_offset above encoding the
     // physical relation sign_offset == -s (true for SBND TPC0/1 and the PDVD
@@ -1347,11 +1358,17 @@ void QLMatching::build_bundles(ApaRun& run)
                 flash_opdet_mask[idet] = 0;
                 vis_opdet_mask[idet] = 0;
             }
-            // Data DAPHNE-rail flag (flag_saturation chain): the clipped PE
-            // is a x2-10 underestimate, so drop the channel from this
-            // flash's pred/chi2/KS (bundle_mask_ks) -- the LASSO rows are
-            // zeroed separately.  Default off, bit-identical.
-            if (m_use_saturation_flag && flash->get_sat((int)idet))
+            // Data DAPHNE-rail flag (flag_saturation chain).  Under
+            // saturation_mask_fit the clipped channel leaves this flash's
+            // pred/chi2/KS (bundle_mask_ks); otherwise it stays in them at its
+            // measured PE, which is a LOWER BOUND on the true light (and a
+            // repaired estimate when OpDecon saturation_repair is on) rather
+            // than a missing measurement -- see QLMatching.h
+            // saturation_mask_fit / chi2_sat_inflate.  The LASSO rows are
+            // zeroed separately and stay zeroed either way: a lower bound must
+            // not constrain a least-squares solve.  Default (mask on)
+            // bit-identical.
+            if (m_use_saturation_flag && m_saturation_mask_fit && flash->get_sat((int)idet))
                 flash_opdet_mask[idet] = 0;
             // Readout-coverage flag (emit_coverage chain): a self-trigger
             // channel with no waveform over this flash's window reads 0 PE.
@@ -2790,6 +2807,8 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["chi2_pmt_excess"]  = m_chi2_pmt_excess;
     qp["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
     qp["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
+    qp["chi2_sat_inflate"] = m_chi2_sat_inflate;
+    qp["saturation_mask_fit"] = m_saturation_mask_fit;
     qp["auto_mask"]              = m_auto_mask;
     qp["auto_mask_pe_low"]       = m_auto_mask_pe_low;
     qp["auto_mask_neighbors"]    = m_auto_mask_neighbors;

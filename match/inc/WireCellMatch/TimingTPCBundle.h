@@ -71,6 +71,13 @@ namespace WireCell::Match {
         double chi2_pmt_excess  = 350.0;   // measured-excess PE threshold (RE-TUNE for SBND)
         double chi2_pmt_ratio   = 1.3;     // measured/predicted ratio threshold
         double chi2_pmt_inflate = 0.5;     // fraction of pe added in quadrature to the denom
+        // Rail-saturated channel widening: denom += (pe*chi2_sat_inflate)^2 when the
+        // flash flags this channel saturated (Opflash::get_sat). Gated on the flag ALONE
+        // -- the close_to_PMT excess/ratio tests fire on measured >> predicted, the
+        // opposite regime from a clipped channel, so they would never fire here.
+        // Independent of chi2_relax. Reaches the chi2 only when QLMatching leaves the
+        // channel in the opdet mask (saturation_mask_fit false). 0 = off, bit-identical.
+        double chi2_sat_inflate = 0.0;
     };
 
     class TimingTPCBundle {

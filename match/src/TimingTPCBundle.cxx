@@ -247,6 +247,14 @@ bool TimingTPCBundle::examine_bundle()
             pe[j] - pred_pe[j] > m_qp.chi2_pmt_excess &&
             pe[j] > m_qp.chi2_pmt_ratio * pred_pe[j])
             denom += std::pow(pe[j] * m_qp.chi2_pmt_inflate, 2);
+        // DAPHNE-rail widening: the clipped/repaired PE on a rail-flagged channel is a
+        // lower bound / biased estimate, not a measurement to hold the fit to. Gated on
+        // the flag ALONE (see BundleQualityParams::chi2_sat_inflate: the close_to_PMT
+        // excess/ratio tests above fire on measured >> predicted and would never fire on
+        // a clipped channel). Only reachable when QLMatching leaves the channel in
+        // opdet_mask (saturation_mask_fit false); 0 => bit-identical.
+        if (m_qp.chi2_sat_inflate > 0 && flash && flash->get_sat(j))
+            denom += std::pow(pe[j] * m_qp.chi2_sat_inflate, 2);
         const double cur = std::pow(pred_pe[j] - pe[j], 2) / denom;
         chi2 += cur;
         if (cur > max_chi2) { max_chi2 = cur; max_bin = j; }

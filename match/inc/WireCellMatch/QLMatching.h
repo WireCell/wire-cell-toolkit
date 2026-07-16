@@ -351,6 +351,29 @@ namespace WireCell::Match {
         // OFF -> bit-identical.
         bool m_use_saturation_flag{false};
 
+        // Whether a rail-flagged channel is also DROPPED from that flash's
+        // opdet mask (=> out of chi2 and, under bundle_mask_ks, out of KS),
+        // or stays in them at its measured PE.
+        //
+        // The clipped PE is NOT a missing measurement: it is a LOWER BOUND on
+        // the true PE (11_pdvd-saturation-recovery.md §2.1 -- `clip` is a
+        // "tight deterministic underestimate", -4% at depth d=1.4, -14% at
+        // d=2, -40% at d=4, +-2% band), and with OpDecon saturation_repair on
+        // (the PDVD production chain) it is a repaired estimate biased high by
+        // ~+9% at d=2 / ~+23% at d=4 with a [1.06,2.05] band.  Either way the
+        // channel carries real information, so dropping it discards a
+        // constraint AND makes a wrong prediction free there.
+        //
+        // LASSO is deliberately NOT re-opened by this knob: a lower-bound
+        // measurement in a least-squares solve biases the fitted charge DOWN.
+        // The rail-flagged LASSO rows stay zeroed at every fit site, so the
+        // railed channel acts as a CHECK on the charge-derived prediction
+        // without constraining it.
+        //
+        // Pair with chi2_sat_inflate for the extra per-channel error.
+        // Default TRUE = the legacy drop => bit-identical for existing cfgs.
+        bool m_saturation_mask_fit{true};
+
         // Track readout coverage PER FLASH (Opflash::get_cov, fed by the
         // OpHitFinder emit_coverage -> OpFlashFinder flash_cov chain): a
         // self-triggered channel (PDVD membrane XA / PMT 16.4-us snippets,
@@ -427,6 +450,17 @@ namespace WireCell::Match {
         double m_chi2_pmt_excess{350.0};
         double m_chi2_pmt_ratio{1.3};
         double m_chi2_pmt_inflate{0.5};
+        // Extra chi2 denominator width on a rail-flagged channel, in the same
+        // form as chi2_pmt_inflate: denom += (pe * chi2_sat_inflate)^2.  Unlike
+        // the close_to_PMT widening this is gated on the sat flag ALONE, with no
+        // excess/ratio test -- those fire on measured >> predicted (near-PMT
+        // over-response), the OPPOSITE regime from a clipped channel, so reusing
+        // them here would be a silent no-op.
+        //
+        // Independent of chi2_relax (a railed channel need not be near a PD).
+        // Only bites when saturation_mask_fit is false (a masked channel never
+        // reaches the chi2 loop).  Default 0 = no extra width => bit-identical.
+        double m_chi2_sat_inflate{0.0};
 
         // §H raw readout-window truncation flag (T0-independent, APA-agnostic),
         // always computed. Flags a bundle whose cluster's leading/trailing time

@@ -53,6 +53,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
+         saturation_mask_fit=true, chi2_sat_inflate=null,
          use_coverage_flag=false, coverage_min=1.0,
          coverage_mask_fit=true, pe_err_nodata=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
@@ -281,6 +282,22 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // pdvd-saturation-recovery.md).  C++ default false.  Key omitted
             // when off => byte-identical pre-fix config.
             [if use_saturation_flag then 'use_saturation_flag']: true,
+            // ...and whether a railed channel is DROPPED from the chi2/KS or
+            // kept there at its clipped PE.  Keeping it is right: the clipped
+            // value is a LOWER BOUND on the true light (11_pdvd-saturation-
+            // recovery.md §2.1 `clip` = a tight deterministic underestimate;
+            // and the production chain repairs it via OpDecon
+            // saturation_repair), so it carries real information -- dropping
+            // it also makes a WRONG prediction free on exactly the bright
+            // cathode channels that anchor Q/L matching.  The LASSO rows stay
+            // zeroed regardless (a lower bound must not pull the fitted charge
+            // down).  C++ default true = drop; key omitted then =>
+            // byte-identical.
+            [if !saturation_mask_fit then 'saturation_mask_fit']: false,
+            // Extra chi2 width on a railed channel: denom += (pe*inflate)^2,
+            // the same form as chi2_pmt_inflate but gated on the rail flag
+            // alone.  C++ default 0 = none; key omitted when null.
+            [if chi2_sat_inflate != null then 'chi2_sat_inflate']: chi2_sat_inflate,
             // Per-flash readout-coverage tracking: a membrane-XA / PMT channel
             // is a 16.4-us self-trigger snippet stream (duty ~5-30%); with no
             // snippet over a flash's window it reads measured = 0 (needs a
