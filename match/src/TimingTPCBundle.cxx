@@ -136,7 +136,16 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
         const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
-        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / (pe[j] + perr * perr);
+        double denom = pe[j] + perr * perr;
+        // Same rail widening as examine_bundle: once QLMatching keeps railed channels in
+        // opdet_mask (saturation_mask_fit false) they reach this metric too, where an
+        // un-widened term is just as large (O(1e4)) and can only suppress a merge. The
+        // close_to_PMT widening is absent here, but its un-widened population is narrow
+        // (the excess/ratio gate) while every railed channel lands in this one. 0 => the
+        // term is bit-identical to the historical form.
+        if (m_qp.chi2_sat_inflate > 0 && flash && flash->get_sat(j))
+            denom += std::pow(pe[j] * m_qp.chi2_sat_inflate, 2);
+        candidate_chi2 += std::pow(pred_pe[j] - pe[j], 2) / denom;
     }
 
     if ((candidate_ks_dis < ks_dis || candidate_chi2 < chi2) &&
