@@ -52,7 +52,7 @@ local wc = import 'wirecell.jsonnet';
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
-         cathode_ext1=null, use_saturation_flag=false,
+         cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
          use_coverage_flag=false, coverage_min=1.0) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
@@ -367,6 +367,21 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // byte-identical pre-knob config; the driver passes a value only
             // for the anode-pull / cushion study (run 039252 evt298567).
             [if cathode_ext1 != null then 'cathode_ext1']: cathode_ext1,
+
+            // Anode-side containment slack: extra tolerance BELOW anode_ext1,
+            // subtracted to form the anode floor for BOTH the containment gate
+            // (first_u > anode_ext1 - margin) and the anode flag-window inner edge
+            // (at_x_boundary / close_to_PMT).  The C++ ties the two deliberately --
+            // a cluster admitted by the slack must still acquire the boundary flags.
+            // C++ default 1.0 cm (QLMatching.h, prototype ProtectOverClustering.cxx
+            // :296 hard-codes it).  Key omitted when the arg is null =>
+            // byte-identical pre-knob config; the driver passes 2.0 cm for PDVD
+            // production (floor -2 -> -4 cm), so a full-gap cathode-crosser whose
+            // anode end pokes a few cm past the anode under the correct flash stays
+            // a candidate instead of being prefiltered onto a neighbouring flash
+            // (run 039252 evt298567 top:22 missed by 0.501 cm; the 2 cm anode pull
+            // is what pushes it out -- see pdvd-cathode-containment-flash-demotion).
+            [if anode_ext1_margin != null then 'anode_ext1_margin']: anode_ext1_margin,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
             //  - reject_overpred: the gold-pair pred/meas scatter is still

@@ -271,6 +271,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_anode_ext2   = get(cfg, "anode_ext2",   m_anode_ext2);
     m_cathode_ext1 = get(cfg, "cathode_ext1", m_cathode_ext1);
     m_cathode_ext2 = get(cfg, "cathode_ext2", m_cathode_ext2);
+    m_anode_ext1_margin = get(cfg, "anode_ext1_margin", m_anode_ext1_margin);
     m_y_cushion    = get(cfg, "y_cushion",    m_y_cushion);
     m_z_cushion    = get(cfg, "z_cushion",    m_z_cushion);
     m_two_boundary_margin = get(cfg, "two_boundary_margin", m_two_boundary_margin);
@@ -511,6 +512,13 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     log->debug("QLMatching configured: nopdets={}, semimodel_file={}, light_model={}",
                m_opdets.size(), m_semimodel_file, m_light_model);
+    // Sentinel: only when the anode floor is widened off its prototype default, so a
+    // smoke run can prove the knob reached the component (silent => legacy path).
+    if (m_anode_ext1_margin != 1.0 * units::cm) {
+        log->debug("QLMatching anode_ext1_margin={} cm => anode containment/flag floor {} cm",
+                   m_anode_ext1_margin / units::cm,
+                   (m_anode_ext1 - m_anode_ext1_margin) / units::cm);
+    }
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -572,6 +580,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["anode_ext2"]   = m_anode_ext2;
     cfg["cathode_ext1"] = m_cathode_ext1;
     cfg["cathode_ext2"] = m_cathode_ext2;
+    cfg["anode_ext1_margin"] = m_anode_ext1_margin;
     cfg["y_cushion"]    = m_y_cushion;
     cfg["z_cushion"]    = m_z_cushion;
     cfg["two_boundary_margin"] = m_two_boundary_margin;
@@ -3724,7 +3733,7 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     // TPC drift box. Its value is returned so the caller can discard uncontained
     // bundles when m_require_containment.
     const bool contained =
-        first_u > anode_in - 1.0 * units::cm &&
+        first_u > anode_in - m_anode_ext1_margin &&
         last_u  > 0.0 &&
         last_u  < cathode_in &&
         first_u < u_cathode;
@@ -3736,7 +3745,7 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         // the bottom volume's PMTs, the top CRP has none) sets flag_close_to_PMT,
         // and the chi2 relaxation is restricted to those channels. The at-x-boundary
         // (T0-constraining crosser) semantics are unchanged either way.
-        if (first_u <= m_anode_ext2 && first_u > anode_in - 1.0 * units::cm) {
+        if (first_u <= m_anode_ext2 && first_u > anode_in - m_anode_ext1_margin) {
             if (!m_vd_surface_flags) {
                 bundle->set_flag_close_to_PMT(true);
             }

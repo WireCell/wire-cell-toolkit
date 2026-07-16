@@ -237,6 +237,20 @@ namespace WireCell::Match {
         double m_anode_ext2{4.0 * units::cm};     // anode flag-window outer edge (low_x_cut_ext2)
         double m_cathode_ext1{1.2 * units::cm};   // PE-inclusion window edge, beyond the cathode (high_x_cut_ext1)
         double m_cathode_ext2{-2.0 * units::cm};  // cathode flag-window inner edge (high_x_cut_ext2)
+        // Extra tolerance BELOW anode_ext1, subtracted to form the anode-side floor
+        // used in TWO coupled places in compute_endpoint_flags: the containment gate
+        // (first_u > anode_ext1 - margin) and the anode flag-window inner edge
+        // (first_u > anode_ext1 - margin, which sets flag_at_x_boundary /
+        // flag_close_to_PMT). The two are deliberately the SAME bound: a cluster
+        // admitted by the containment slack must also acquire the at-x-boundary /
+        // close-to-PMT flags, else it would be a candidate that has silently dropped
+        // its T0-crosser constraint. Widening moves the floor outward (deeper past
+        // the anode) only -- the flag window's outer edge stays m_anode_ext2 -- so it
+        // cannot re-flag anode-SHORT ends the way a cathode_ext2 widening once did.
+        // Prototype hard-codes 1.0 cm (ProtectOverClustering.cxx:296); the knob keeps
+        // that as the default => byte-identical. PDVD production sets 2.0 cm (floor
+        // -2 -> -4 cm; run 039252 evt298567 full-gap crosser top:22 missed by 0.5 cm).
+        double m_anode_ext1_margin{1.0 * units::cm};
         double m_y_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each |y| edge
         double m_z_cushion{0.0 * units::cm};       // signed inward(+)/outward(-) shift of each z edge
         // Proximity band for the diagnostic flag_two_boundary edge test: a main-PCA
