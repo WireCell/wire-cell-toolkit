@@ -117,6 +117,28 @@ namespace WireCell {
             // pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
             bool m_saturation_repair{false};
             int m_repair_fit_samples{8};   // post-run anchor samples for the tail fit
+            // Overflow-encoded-as-zero repair (requires detect_saturation).
+            // Default OFF -> bit-identical.  PDVD membrane XA self-trigger
+            // snippets do NOT clamp an over-range pulse at saturation_adc: the
+            // raw ADC pins at the BOTTOM of the range (0, occasionally 1) for
+            // the whole excursion, then reappears just below the ceiling and
+            // decays.  detect_saturation never sees it (those snippets peak
+            // BELOW saturation_adc), so the chain deconvolves a -pedestal notch
+            // at the pulse peak as if it were data.  When on, each floor-pinned
+            // run whose IMMEDIATE neighbours on BOTH sides reach
+            // overflow_min_neighbor is rewritten to saturation_adc before the
+            // rail scan, so the existing detect/flag/repair chain handles it.
+            //
+            // Both sides must be high because the same floor pin also occurs in
+            // the deep post-pulse undershoot, where the true signal is BELOW 0;
+            // raising those to the rail would invent a huge fake pulse (and the
+            // saturation flag does not protect flash totals).  Evidence and the
+            // unconfirmed-mechanism caveat:
+            // pdvd/docs/qlmatch/14_pdvd-lightpattern-sp-investigation.md.
+            bool m_overflow_to_rail{false};
+            int m_overflow_adc{1};             // samples <= this are floor-pinned
+            int m_overflow_min_samples{5};     // run length to qualify
+            int m_overflow_min_neighbor{8000}; // both immediate neighbours must reach this
 
             IDFT::pointer m_dft;
 
@@ -146,6 +168,9 @@ namespace WireCell {
             void repair_runs(std::vector<float>& w,
                              const std::vector<std::pair<int, int>>& runs,
                              double pedestal, const SPETemplate& spe) const;
+            // Rewrite floor-pinned OVERFLOW runs of `w` to m_saturation_adc in
+            // place; returns the number rewritten.  Used by overflow_to_rail.
+            int unclip_overflow(std::vector<float>& w) const;
             double auto_scale(const SPETemplate& spe,
                               const std::vector<std::complex<float>>& xG) const;
             // Transform via the complex (default) or real (use_real_dft) path.

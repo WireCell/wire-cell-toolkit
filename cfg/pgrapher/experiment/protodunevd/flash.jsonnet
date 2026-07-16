@@ -82,7 +82,7 @@ local wc = import 'wirecell.jsonnet';
     // (the 468800-sample records are zero-padded by OpDecon).
     // DAPHNE 14-bit rail saturation flags as in PDHD.
     opdecon(name='', samples=1024, wi_sigma=1.0, detect_saturation=false, saturation_pad=0,
-            saturation_repair=false)::  g.pnode({
+            saturation_repair=false, overflow_to_rail=false)::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
@@ -104,6 +104,16 @@ local wc = import 'wirecell.jsonnet';
             // false.  Key omitted when off => byte-identical pre-fix config.
             // See pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
             [if saturation_repair then 'saturation_repair']: true,
+            // Remap floor-pinned OVERFLOW runs to saturation_adc before the
+            // rail scan, so detect/flag/repair handle the membrane self-trigger
+            // snippets whose over-range pulses pin at ADC 0 instead of clamping
+            // at the ceiling (and are therefore invisible to detect_saturation).
+            // Requires detect_saturation.  C++ default false.  Key omitted when
+            // off => byte-identical pre-fix config.  NOT enabled in production:
+            // the encoding mechanism is still unconfirmed -- see
+            // pdvd/docs/qlmatch/14_pdvd-lightpattern-sp-investigation.md
+            // ("The zero-run").
+            [if overflow_to_rail then 'overflow_to_rail']: true,
         },
     }, nin=1, nout=1, uses=[dft]),
 

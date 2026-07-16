@@ -55,6 +55,10 @@ WireCell::Configuration Flash::OpDecon::default_configuration() const
     cfg["saturation_pad"] = m_saturation_pad;
     cfg["saturation_repair"] = m_saturation_repair;
     cfg["repair_fit_samples"] = m_repair_fit_samples;
+    cfg["overflow_to_rail"] = m_overflow_to_rail;
+    cfg["overflow_adc"] = m_overflow_adc;
+    cfg["overflow_min_samples"] = m_overflow_min_samples;
+    cfg["overflow_min_neighbor"] = m_overflow_min_neighbor;
     cfg["dft"] = "FftwDFT";
     return cfg;
 }
@@ -88,6 +92,20 @@ void Flash::OpDecon::configure(const WireCell::Configuration& cfg)
     m_saturation_pad = get(cfg, "saturation_pad", m_saturation_pad);
     m_saturation_repair = get(cfg, "saturation_repair", m_saturation_repair);
     m_repair_fit_samples = get(cfg, "repair_fit_samples", m_repair_fit_samples);
+    m_overflow_to_rail = get(cfg, "overflow_to_rail", m_overflow_to_rail);
+    m_overflow_adc = get(cfg, "overflow_adc", m_overflow_adc);
+    m_overflow_min_samples = get(cfg, "overflow_min_samples", m_overflow_min_samples);
+    m_overflow_min_neighbor = get(cfg, "overflow_min_neighbor", m_overflow_min_neighbor);
+    if (m_overflow_to_rail && !m_detect_saturation) {
+        log->warn("overflow_to_rail requires detect_saturation; it is off, so the "
+                  "remapped runs would never be flagged -- overflow_to_rail disabled");
+        m_overflow_to_rail = false;
+    }
+    if (m_overflow_to_rail) {
+        SPDLOG_LOGGER_DEBUG(log, "overflow_to_rail on: adc<={} len>={} neighbor>={} -> {}",
+                            m_overflow_adc, m_overflow_min_samples,
+                            m_overflow_min_neighbor, m_saturation_adc);
+    }
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
     m_dft = Factory::find_tn<IDFT>(dft_tn);
@@ -353,6 +371,40 @@ void Flash::OpDecon::repair_runs(std::vector<float>& w,
     }
 }
 
+// Rewrite floor-pinned OVERFLOW runs to the rail so the ordinary rail scan
+// sees them.  A run of >= m_overflow_min_samples samples at <= m_overflow_adc
+// is an overflow ONLY if the true signal was above the ceiling across it; the
+// evidence for that is the pair of IMMEDIATE neighbours, which must BOTH reach
+// m_overflow_min_neighbor (the pulse enters and leaves the run near the
+// ceiling).  The same floor pin also occurs in the deep post-pulse undershoot,
+// where the signal is below 0 and the neighbours are low -- those must be left
+// alone, since raising them would fabricate a rail-height pulse.  Immediate
+// neighbours only: widening the window lets a one-sample spike next to an
+// undershoot run masquerade as the exit of an overflow.
+// A run touching either trace edge has no neighbour pair and is left alone, as
+// is a run reaching into the pedestal window (rewriting there would wreck the
+// head pedestal that deconvolve() derives).  See the doc cited in OpDecon.h.
+int Flash::OpDecon::unclip_overflow(std::vector<float>& w) const
+{
+    const int n = (int)w.size();
+    const int nped = m_pre_trigger - m_pedestal_buffer;
+    int nfix = 0;
+    int i = 0;
+    while (i < n) {
+        if (w[i] > m_overflow_adc) { ++i; continue; }
+        int j = i;
+        while (j < n && w[j] <= m_overflow_adc) ++j;
+        if (j - i >= m_overflow_min_samples && i > 0 && j < n && i >= nped) {
+            if (w[i - 1] >= m_overflow_min_neighbor && w[j] >= m_overflow_min_neighbor) {
+                for (int t = i; t < j; ++t) w[t] = (float) m_saturation_adc;
+                ++nfix;
+            }
+        }
+        i = j;
+    }
+    return nfix;
+}
+
 std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, const SPETemplate& spe,
                                               const std::vector<double>* noise) const
 {
@@ -471,12 +523,27 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
     // Saturation flags collected over the snippets (empty unless enabled).
     Waveform::ChannelMaskMap cmm;
     int nsaturated = 0;
+    int noverflow = 0;   // floor-pinned overflow runs rewritten to the rail
     for (const auto& trace : traces) {
         const int chan = trace->channel();
         auto it = m_chan2tmpl.find(chan);
         if (it == m_chan2tmpl.end() or it->second >= m_templates.size()) {
             ++nskipped;
             continue;
+        }
+        // overflow_to_rail: rewrite floor-pinned overflow runs to the rail on a
+        // COPY, before the rail scan below, so detect/flag/repair treat them as
+        // ordinary saturation.  Off (or nothing to rewrite) => `src` stays the
+        // input trace and every path below is bit-identical.
+        const std::vector<float>* src = &trace->charge();
+        std::vector<float> unclipped;
+        if (m_detect_saturation && m_overflow_to_rail) {
+            unclipped = trace->charge();
+            const int nfix = unclip_overflow(unclipped);
+            if (nfix) {
+                src = &unclipped;
+                noverflow += nfix;
+            }
         }
         std::vector<std::pair<int, int>> sat_runs;  // unpadded, trace-local
         if (m_detect_saturation) {
@@ -486,7 +553,7 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
             // vetoed wholesale on one stray sample: the broad over-integrated
             // hit a clipped flat-top produces overlaps the run and is dropped,
             // while real light elsewhere on the trace survives.
-            const auto& q = trace->charge();
+            const auto& q = *src;
             const int tb = trace->tbin();
             const int n = (int)q.size();
             int i = 0;
@@ -517,10 +584,10 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
         // saturation_repair: deconvolve a repaired COPY; the flagged mask
         // ranges above are emitted unchanged (repair AND flag, not
         // repair-instead-of-flag).  Default off -> original waveform.
-        const std::vector<float>* wf = &trace->charge();
+        const std::vector<float>* wf = src;
         std::vector<float> repaired;
         if (m_saturation_repair && !sat_runs.empty()) {
-            repaired = trace->charge();
+            repaired = *src;
             const int nped = m_pre_trigger - m_pedestal_buffer;
             double pedestal = 0;
             for (int k = 0; k < nped; ++k) pedestal += repaired[k];
@@ -549,7 +616,8 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
             }
         }
         sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick(), outcmm);
-        log->debug("frame {}: {} saturated tick-runs flagged", in->ident(), nsaturated);
+        log->debug("frame {}: {} saturated tick-runs flagged ({} floor-pinned overflow runs "
+                   "remapped to the rail)", in->ident(), nsaturated, noverflow);
     }
     else {
         sframe = new Aux::SimpleFrame(in->ident(), in->time(), all_traces, in->tick());
