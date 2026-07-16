@@ -55,7 +55,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
          saturation_mask_fit=true, chi2_sat_inflate=null,
          use_coverage_flag=false, coverage_min=1.0,
-         coverage_mask_fit=true, pe_err_nodata=null) {
+         coverage_mask_fit=true, pe_err_nodata=null,
+         robust_endpoint_trim=false, robust_endpoint_frac=null,
+         robust_endpoint_count=null, robust_endpoint_charge_frac=null,
+         robust_endpoint_charge_abs=null, robust_endpoint_gap=null,
+         robust_endpoint_gap_charge_frac=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -418,6 +422,47 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // (run 039252 evt298567 top:22 missed by 0.501 cm; the 2 cm anode pull
             // is what pushes it out -- see pdvd-cathode-containment-flash-demotion).
             [if anode_ext1_margin != null then 'anode_ext1_margin']: anode_ext1_margin,
+
+            // Robust-endpoint trim: snap a drift endpoint back inside the detector
+            // edge when the outer material is overclustered junk rather than a real
+            // track end, before the containment gate reads the endpoints.  The
+            // master switch is robust_endpoint_trim; the rest are its judges, and
+            // NONE of them do anything while it is false (QLMatching.cxx:3699 gates
+            // the whole block).  C++ default false => key suppressed when off =>
+            // byte-identical pre-knob config.
+            //
+            // PDVD leaves this OFF pending an A/B + a census of affected clusters.
+            // The driver turns it on for the evt298567 clus 34 demo: 8 points
+            // carrying 0.08% of that cluster's charge sit 28.4 cm off its anode end
+            // and stretch its drift extent to 371.7 cm -- past the 336.9 cm drift
+            // depth -- so no flash T0 can contain it and every candidate bundle is
+            // dropped before the fit.  Only the GAP judge can trim them: they are
+            // detached, not diffuse, so the density judge (charge_abs) protects them
+            // as it would a genuine track tip.
+            // See pdvd/docs/qlmatch/15_pdvd-clus34-unmatched-evt298567.md.
+            // PDHD's proven operating point is pdhd/qlmatching.jsonnet:306-332.
+            [if robust_endpoint_trim then 'robust_endpoint_trim']: true,
+            // Point-count judge: trim when outer points < max(frac*npoints, count).
+            // C++ defaults 0.05 / 0.0.
+            [if robust_endpoint_frac != null then 'robust_endpoint_frac']: robust_endpoint_frac,
+            [if robust_endpoint_count != null then 'robust_endpoint_count']: robust_endpoint_count,
+            // Charge-fraction judge, OR'd with the point-count one.  C++ default 0 =>
+            // disabled (the point-count judge stands alone).
+            [if robust_endpoint_charge_frac != null then 'robust_endpoint_charge_frac']:
+                robust_endpoint_charge_frac,
+            // Per-point charge-DENSITY ceiling guarding the charge-fraction path: only
+            // diffuse material is trimmed, never a charge-dense real track tip.
+            // C++ default 0 => disabled.
+            [if robust_endpoint_charge_abs != null then 'robust_endpoint_charge_abs']:
+                robust_endpoint_charge_abs,
+            // Gap (detachment) judge, anode end only: trim sub-anode material split
+            // from the body by a gap wider than robust_endpoint_gap that carries at
+            // most robust_endpoint_gap_charge_frac of the cluster charge.  Keyed on
+            // detachment, not density, so it reaches junk the density judge protects.
+            // C++ defaults 0 / 0 => disabled.
+            [if robust_endpoint_gap != null then 'robust_endpoint_gap']: robust_endpoint_gap,
+            [if robust_endpoint_gap_charge_frac != null then 'robust_endpoint_gap_charge_frac']:
+                robust_endpoint_gap_charge_frac,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
             //  - reject_overpred: the gold-pair pred/meas scatter is still
