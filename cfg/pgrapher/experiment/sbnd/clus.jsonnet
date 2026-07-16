@@ -341,6 +341,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // (written by QLMatching, keyed by global flash id) into the merged
             // all-APA grouping so the all-APA MABC can dump the op/flash Bee
             // display. Other per-anode root PCs are intentionally not merged.
+            // (NOTE: the xin chain is premerged=true and does NOT use this
+            // PointTreeMerging -- the joint QLMatching does the merge; see
+            // qlmatching.jsonnet matching_joint root_pcs_to_merge.)
             root_pcs_to_merge: ['opflash'],
         },
     }, nin=nanodes, nout=1),
@@ -519,6 +522,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             inpath: 'pointtrees/%d',
             grouping: 'live',
             anodes: [wc.tn(anode) for anode in anodes],
+            // detector volumes + PC transforms enable the "ctpc" blob-blob
+            // graph flavor for the nugraph sp_nexus_sp edges.
+            detector_volumes: wc.tn(dv),
+            pc_transforms: wc.tn(pcts),
             drift_speed: drift_speed,
             time_offset: time_offset,
             tick: 0.5 * wc.us,
@@ -543,7 +550,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // (no cosmic-muon truth); false -> full MCParticle table.
             truth_tracks_nu_only: true,
         } + (if bee_sink != null then { bee_sink: wc.tn(bee_sink) } else {}),
-    }, nin=1, nout=1, uses=anodes + [sce_field_fwd, fv_box] + (if bee_sink != null then [bee_sink] else [])),
+    }, nin=1, nout=1, uses=anodes + [dv, pcts, sce_field_fwd, fv_box] + (if bee_sink != null then [bee_sink] else [])),
     local end = if dump then g.pipeline(if truth_labeler then [mabc, labeler, sink] else [mabc, sink]) else g.pipeline([mabc]),
     // premerged: input is already one merged tree (joint QLMatching) -> feed MABC
     // directly, no PointTreeMerging.  Else: fan the per-APA inputs into pcmerging.

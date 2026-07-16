@@ -310,7 +310,12 @@ function(params) {
             anodes: [wc.tn(a) for a in anodes],
             // Concatenate the per-APA optical-flash display PC into the merged
             // grouping (mirrors clus_all_apa PointTreeMerging.root_pcs_to_merge).
-            root_pcs_to_merge: ['opflash'],
+            // Also carry every per-anode ctpc_a{A}f0p{U,V,W} merged-wire PC so
+            // the all-APA grouping has the 2D "hit" clouds of BOTH TPCs (used
+            // by wclsTensorSetLabeler's nugraph 2D nodes).
+            root_pcs_to_merge: ['opflash']
+                + ['ctpc_a%df%dp%s' % [a.data.ident, 0, p]
+                   for a in anodes for p in ['U', 'V', 'W']],
             // Hand-scan calibration dump path ('' => off, production-identical).
             // The joint node sees BOTH APAs in one operator() call, so a single
             // dump file holds both TPCs (sbnd_xin/ql_scan).
