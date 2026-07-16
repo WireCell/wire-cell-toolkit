@@ -351,18 +351,53 @@ namespace WireCell::Match {
         // OFF -> bit-identical.
         bool m_use_saturation_flag{false};
 
-        // Mask readout-uncovered channels PER FLASH (Opflash::get_cov, fed
-        // by the OpHitFinder emit_coverage -> OpFlashFinder flash_cov
-        // chain): a self-triggered channel (PDVD membrane XA / PMT 16.4-us
-        // snippets, duty ~5-30%) with no waveform over the flash window
-        // carries NO data, but the legacy path scores it as measured = 0
-        // against a possibly large prediction, wrecking the pattern chi2/KS
-        // (pdvd/docs/qlmatch/pdvd-lightpattern-sp-investigation.md).  A
-        // channel with get_cov < coverage_min is dropped from that flash's
-        // opdet mask and its LASSO rows, exactly like a saturated one.
-        // Default OFF -> bit-identical; legacy archives have get_cov == 1.
+        // Track readout coverage PER FLASH (Opflash::get_cov, fed by the
+        // OpHitFinder emit_coverage -> OpFlashFinder flash_cov chain): a
+        // self-triggered channel (PDVD membrane XA / PMT 16.4-us snippets,
+        // duty ~5-30%) that carried no waveform over the flash window reads
+        // measured = 0.  Turning this on makes the per-flash coverage
+        // available to coverage_mask_fit and to the calib dump / ql_scan
+        // "nodata" label.  Default OFF -> bit-identical; legacy archives have
+        // get_cov == 1.
         bool m_use_coverage_flag{false};
         double m_coverage_min{1.0};
+
+        // Whether an uncovered channel is also DROPPED from that flash's
+        // opdet mask and LASSO rows (like a saturated one), or stays in the
+        // fit at its measured PE of 0.
+        //
+        // Dropping was the original 2026-07-16 reading: no snippet => no
+        // measurement.  The measurement says otherwise (18 evts run 039252,
+        // pdvd/docs/qlmatch/scripts/analyze_coverage_deadtime.py, coverage
+        // rebuilt against the chain's own flash_cov on 266071/266071 cells):
+        //   - DAPHNE has no dead time -- the minimum gap between consecutive
+        //     snippets on a channel is 0.336 us, so a channel is never busy
+        //     when a flash arrives;
+        //   - uncovered channels are QUIETER, not busier: median gap since
+        //     their last snippet 93.8 us vs 54.2 us for covered ones;
+        //   - the self-trigger threshold is ~1 PE (median snippet holds 3.3
+        //     PE, 25% under 0.96 PE).
+        // So silence is a real measurement -- "this channel saw < ~1 PE" --
+        // and dropping it discards an upper limit the prediction must
+        // respect, biasing the fit toward over-prediction.  The ~12% duty
+        // cycle is an EFFECT of there being no light, not an independent
+        // blindness.  Keep the channel: pair with pe_err_nodata so the
+        // measured 0 carries the threshold band rather than a tight error.
+        // Default TRUE = the legacy drop => bit-identical for existing cfgs.
+        bool m_coverage_mask_fit{true};
+
+        // PE_err floor (in PE) applied to readout-uncovered channels when
+        // they stay in the fit (coverage_mask_fit false).  Their measurement
+        // is the upper limit "PE < self-trigger threshold", not "PE == 0 +-
+        // pe_err_floor": at the 0.3 PE default floor a 5 PE over-prediction
+        // on a no-data channel would contribute chi2 ~278 and over-punish
+        // the true match just as the legacy path did.  Widening PE_err to
+        // ~the threshold makes a prediction of that size cost chi2 ~1 and a
+        // gross one still cost dearly.  <= 0 => disabled (bit-identical);
+        // needs the coverage chain (cov empty => no-op).  PDVD: 2.0 PE, ~2x
+        // the ~1 PE measured threshold; NOT yet calibrated against a hand
+        // scan -- see doc 14 section 12 open items.
+        double m_pe_err_nodata{-1.0};
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).
         double m_bundle_ks_merge_max{0.2};

@@ -320,6 +320,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_use_saturation_flag = get(cfg, "use_saturation_flag", m_use_saturation_flag);
     m_use_coverage_flag = get(cfg, "use_coverage_flag", m_use_coverage_flag);
     m_coverage_min = get(cfg, "coverage_min", m_coverage_min);
+    m_coverage_mask_fit = get(cfg, "coverage_mask_fit", m_coverage_mask_fit);
+    m_pe_err_nodata = get(cfg, "pe_err_nodata", m_pe_err_nodata);
 
     m_bundle_ks_merge_max      = get(cfg, "bundle_ks_merge_max",      m_bundle_ks_merge_max);
     m_bundle_chi2ndf_merge_max = get(cfg, "bundle_chi2ndf_merge_max", m_bundle_chi2ndf_merge_max);
@@ -519,6 +521,13 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
                    m_anode_ext1_margin / units::cm,
                    (m_anode_ext1 - m_anode_ext1_margin) / units::cm);
     }
+    // Sentinel: only when readout-uncovered channels are kept in the fit, so a
+    // smoke run can prove the knob reached the component (silent => legacy drop).
+    if (m_use_coverage_flag && !m_coverage_mask_fit) {
+        log->debug("QLMatching coverage_mask_fit=false => uncovered channels stay in the "
+                   "fit at measured 0 (pe_err_nodata={} PE, coverage_min={})",
+                   m_pe_err_nodata, m_coverage_min);
+    }
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -619,6 +628,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["use_saturation_flag"] = m_use_saturation_flag;
     cfg["use_coverage_flag"] = m_use_coverage_flag;
     cfg["coverage_min"] = m_coverage_min;
+    cfg["coverage_mask_fit"] = m_coverage_mask_fit;
+    cfg["pe_err_nodata"] = m_pe_err_nodata;
 
     cfg["bundle_ks_merge_max"]      = m_bundle_ks_merge_max;
     cfg["bundle_chi2ndf_merge_max"] = m_bundle_chi2ndf_merge_max;
@@ -930,6 +941,10 @@ void QLMatching::read_flashes(ApaRun& run)
     const std::vector<double>* pe_scale = m_measured_pe_scale.empty() ? nullptr : &m_measured_pe_scale;
     for (const auto& ff : run.grouping->flashes()) {
         auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model, pe_scale);
+        // A readout-uncovered channel measured "< self-trigger threshold", not
+        // "0 +- pe_err_floor"; widen its error to the threshold band before the
+        // flash reaches the chi2/LASSO. No-op when pe_err_nodata <= 0 (default).
+        flash->inflate_nodata_err(m_pe_err_nodata, m_coverage_min);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
         run.flashes.push_back(flash);
@@ -1339,12 +1354,17 @@ void QLMatching::build_bundles(ApaRun& run)
             if (m_use_saturation_flag && flash->get_sat((int)idet))
                 flash_opdet_mask[idet] = 0;
             // Readout-coverage flag (emit_coverage chain): a self-trigger
-            // channel with no waveform over this flash's window has NO
-            // measurement -- drop it from pred/chi2/KS/LASSO rather than
-            // score it as 0 PE.  Like the rail flag, the full prediction
+            // channel with no waveform over this flash's window reads 0 PE.
+            // Under coverage_mask_fit it leaves pred/chi2/KS/LASSO like a
+            // railed channel; otherwise it stays in the fit at that 0, which
+            // is what the hardware reports -- the ~1 PE self-trigger
+            // threshold makes the silence an upper limit, not a missing
+            // measurement (QLMatching.h coverage_mask_fit; pair with
+            // pe_err_nodata for the error).  Either way the full prediction
             // survives in vis_opdet_mask for the calib dump / viewer.
-            // Default off, bit-identical.
-            if (m_use_coverage_flag && flash->get_cov((int)idet) < m_coverage_min)
+            // Default (mask on) bit-identical.
+            if (m_use_coverage_flag && m_coverage_mask_fit
+                && flash->get_cov((int)idet) < m_coverage_min)
                 flash_opdet_mask[idet] = 0;
         }
 
@@ -1751,7 +1771,7 @@ void QLMatching::fit_round1(ApaRun& run)
             // row zero (measured, background and pred entries) -- the clipped
             // PE must not constrain the fit.  Default off, bit-identical.
             if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
-            if (m_use_coverage_flag && flash->get_cov(opdet_idx) < m_coverage_min) continue;
+            if (m_use_coverage_flag && m_coverage_mask_fit && flash->get_cov(opdet_idx) < m_coverage_min) continue;
             const double pe = flash->get_PE(opdet_idx);
             const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
             M(i * run.nopdet + j) = pe / pe_err;
@@ -1762,8 +1782,7 @@ void QLMatching::fit_round1(ApaRun& run)
             for (unsigned int j = 0; j < run.nopdet; ++j) {
                 const int opdet_idx = run.opdet_idx_v.at(j);
                 if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
-                if (m_use_coverage_flag && flash->get_cov(opdet_idx) < m_coverage_min) continue;
-            if (m_use_coverage_flag && flash->get_cov(opdet_idx) < m_coverage_min) continue;
+                if (m_use_coverage_flag && m_coverage_mask_fit && flash->get_cov(opdet_idx) < m_coverage_min) continue;
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
                 P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
@@ -1891,7 +1910,7 @@ void QLMatching::fit_round2(ApaRun& run)
             const int opdet_idx = run.opdet_idx_v.at(j);
             // Saturated-channel rows stay zero (see fit_round1).
             if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
-            if (m_use_coverage_flag && flash->get_cov(opdet_idx) < m_coverage_min) continue;
+            if (m_use_coverage_flag && m_coverage_mask_fit && flash->get_cov(opdet_idx) < m_coverage_min) continue;
             const double pe = flash->get_PE(opdet_idx);
             const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
             M(i * run.nopdet + j) = pe / pe_err;
@@ -1902,8 +1921,7 @@ void QLMatching::fit_round2(ApaRun& run)
             for (unsigned int j = 0; j < run.nopdet; ++j) {
                 const int opdet_idx = run.opdet_idx_v.at(j);
                 if (m_use_saturation_flag && flash->get_sat(opdet_idx)) continue;
-                if (m_use_coverage_flag && flash->get_cov(opdet_idx) < m_coverage_min) continue;
-            if (m_use_coverage_flag && flash->get_cov(opdet_idx) < m_coverage_min) continue;
+                if (m_use_coverage_flag && m_coverage_mask_fit && flash->get_cov(opdet_idx) < m_coverage_min) continue;
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
                 P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
@@ -2144,7 +2162,7 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
             const int opdet_idx = r0.opdet_idx_v.at(j);
             // Saturated-channel rows stay zero (see fit_round1).
             if (m_use_saturation_flag && f0->get_sat(opdet_idx)) continue;
-            if (m_use_coverage_flag && f0->get_cov(opdet_idx) < m_coverage_min) continue;
+            if (m_use_coverage_flag && m_coverage_mask_fit && f0->get_cov(opdet_idx) < m_coverage_min) continue;
             const double pe = f0->get_PE(opdet_idx);
             const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
             M(i * nopdet + j) = pe / pe_err;
@@ -2156,8 +2174,7 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
                 for (unsigned int j = 0; j < nopdet; ++j) {
                     const int opdet_idx = r0.opdet_idx_v.at(j);
                     if (m_use_saturation_flag && f0->get_sat(opdet_idx)) continue;
-                    if (m_use_coverage_flag && f0->get_cov(opdet_idx) < m_coverage_min) continue;
-            if (m_use_coverage_flag && f0->get_cov(opdet_idx) < m_coverage_min) continue;
+                    if (m_use_coverage_flag && m_coverage_mask_fit && f0->get_cov(opdet_idx) < m_coverage_min) continue;
                     const double pred_pe = pred_flash.at(opdet_idx);
                     const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
                     P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
@@ -2863,10 +2880,11 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
                 for (int ch = 0; ch < m_nchan; ++ch) sat.append(fl->get_sat(ch) ? 1 : 0);
                 f["sat"] = sat;
             }
-            // Per-channel readout-coverage fractions (only when the
-            // coverage masking is on; key absent otherwise => dump
-            // byte-identical).  The viewer greys out cov < coverage_min
-            // channels as "no data".
+            // Per-channel readout-coverage fractions (only when coverage
+            // tracking is on; key absent otherwise => dump byte-identical).
+            // The viewer labels cov < coverage_min channels "nodata".  This
+            // is independent of coverage_mask_fit: the label is worth having
+            // on a hand scan whether or not the channel left the fit.
             if (m_use_coverage_flag) {
                 Json::Value cov(Json::arrayValue);
                 for (int ch = 0; ch < m_nchan; ++ch) cov.append(fl->get_cov(ch));

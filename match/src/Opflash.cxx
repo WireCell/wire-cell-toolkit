@@ -81,6 +81,14 @@ Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
     }
 }
 
+void Opflash::inflate_nodata_err(double err, double cov_min)
+{
+    if (err <= 0 || cov.empty()) return;
+    for (int i = 0; i < m_nchan; ++i) {
+        if (get_cov(i) < cov_min) PE_err[i] = std::max(PE_err[i], err);
+    }
+}
+
 Opflash::~Opflash() = default;
 
 bool Opflash::get_fired(int ch) const

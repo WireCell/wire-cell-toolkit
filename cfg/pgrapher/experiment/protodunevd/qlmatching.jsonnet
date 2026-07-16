@@ -53,7 +53,8 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
          cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
-         use_coverage_flag=false, coverage_min=1.0) {
+         use_coverage_flag=false, coverage_min=1.0,
+         coverage_mask_fit=true, pe_err_nodata=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -280,15 +281,33 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // pdvd-saturation-recovery.md).  C++ default false.  Key omitted
             // when off => byte-identical pre-fix config.
             [if use_saturation_flag then 'use_saturation_flag']: true,
-            // Per-flash readout-coverage masking: a membrane-XA / PMT channel
+            // Per-flash readout-coverage tracking: a membrane-XA / PMT channel
             // is a 16.4-us self-trigger snippet stream (duty ~5-30%); with no
-            // snippet over a flash's window it has NO data and must not be
-            // scored as measured = 0 (needs a light archive made with
-            // OpHitFinder emit_coverage; see pdvd/docs/qlmatch/
-            // pdvd-lightpattern-sp-investigation.md).  C++ defaults false/1.0.
-            // Keys omitted when off => byte-identical pre-fix config.
+            // snippet over a flash's window it reads measured = 0 (needs a
+            // light archive made with OpHitFinder emit_coverage; see
+            // pdvd/docs/qlmatch/14_pdvd-lightpattern-sp-investigation.md).
+            // C++ defaults false/1.0.  Keys omitted when off => byte-identical
+            // pre-fix config.
             [if use_coverage_flag then 'use_coverage_flag']: true,
             [if use_coverage_flag && coverage_min != 1.0 then 'coverage_min']: coverage_min,
+            // ...and whether an uncovered channel is DROPPED from the fit or
+            // kept at that 0.  Keeping it is right: DAPHNE has no dead time
+            // (min inter-snippet gap 0.336 us) and the self-trigger threshold
+            // is ~1 PE, so the silence measures "this channel saw < ~1 PE"
+            // rather than nothing at all -- dropping it lets a prediction
+            // over-shoot there for free (doc 14 section 12).  The channel is
+            // still labelled "nodata" in the calib dump / ql_scan either way.
+            // C++ default true = drop; key omitted then => byte-identical.
+            [if !coverage_mask_fit then 'coverage_mask_fit']: false,
+            // PE_err floor (PE) for kept no-data channels: their measurement is
+            // the upper limit "< self-trigger threshold", not "0 +- pe_err_floor".
+            // PDVD does NOT need this -- pe_err_floor below is already 2.0 with
+            // pe_err_knee at the C++ default 1.0, so a measured 0 carries +-2 PE,
+            // about twice the ~1 PE threshold.  Present for detectors whose
+            // pe_err_floor is tighter (the C++ default is 0.3, at which a 5 PE
+            // over-prediction on a no-data channel would cost chi2 ~278).
+            // C++ default -1 = disabled; key omitted when null.
+            [if pe_err_nodata != null then 'pe_err_nodata']: pe_err_nodata,
             // per-bundle chi2 relaxation: with vd_surface_flags the excess
             // widening applies only to the near-surface PD channels; the
             // dead-PD worst-channel drop is detector-agnostic.  chi2_pmt_excess
