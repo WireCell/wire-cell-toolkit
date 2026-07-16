@@ -295,6 +295,26 @@ namespace WireCell::Match {
         // existing density path is untouched.
         double m_robust_endpoint_gap{0.0};            // detachment-gap threshold (0 => disabled)
         double m_robust_endpoint_gap_charge_frac{0.0};// outer-charge cap for the gap path
+        // Where the anode-end walk stops calling material "outside" (default OFF =>
+        // byte-identical). The walk breaks at the first slice above anode_in
+        // (= m_anode_ext1), but the containment gate it feeds is
+        // first_u > anode_in - m_anode_ext1_margin -- a floor m_anode_ext1_margin cm
+        // LOWER. So a cluster whose body legitimately starts in that dead band is
+        // contained, yet the walk marches past the detached junk INTO the body before
+        // it can break, hands the judges a slab of dense real track charge, and every
+        // judge then (correctly) refuses to trim. The junk survives and containment
+        // fails on it. Whether the rescue works at all then depends on cluster SIZE --
+        // whether max(frac*npoints, count) happens to cover the swallowed body points
+        // -- which is not physics: PDVD 039252 evt298567 apa-0 ident 34 (2649 pts,
+        // allowance 26.5) is rescued while apa-4 ident 1 (1375 pts, allowance 15)
+        // is not, on the same 20 swallowed points.
+        // When true the walk instead breaks at the floor the gate actually uses, so it
+        // never swallows material that is already inside the gate; the judges are
+        // unchanged and still protect genuine track ends (a body starting BELOW the
+        // floor still fails, as it must). Cathode end needs no counterpart: its gate
+        // (last_u < cathode_in) and its walk share one threshold.
+        // See pdvd/docs/qlmatch/15_pdvd-clus34-unmatched-evt298567.md.
+        bool m_robust_endpoint_walk_to_floor{false};
 
         // §D pre-selection / bad-match gates.
         double m_mc_saturation_pe{5000};      // MC saturated-PMT mask trigger (total flash PE)

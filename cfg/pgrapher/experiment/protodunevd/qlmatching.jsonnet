@@ -59,7 +59,8 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          robust_endpoint_trim=false, robust_endpoint_frac=null,
          robust_endpoint_count=null, robust_endpoint_charge_frac=null,
          robust_endpoint_charge_abs=null, robust_endpoint_gap=null,
-         robust_endpoint_gap_charge_frac=null) {
+         robust_endpoint_gap_charge_frac=null,
+         robust_endpoint_walk_to_floor=false) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -463,6 +464,18 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if robust_endpoint_gap != null then 'robust_endpoint_gap']: robust_endpoint_gap,
             [if robust_endpoint_gap_charge_frac != null then 'robust_endpoint_gap_charge_frac']:
                 robust_endpoint_gap_charge_frac,
+            // Where the anode-end walk stops calling material "outside".  Default
+            // anode_in (= anode_ext1, -2 cm), which is anode_ext1_margin cm ABOVE the
+            // floor the containment gate uses (first_u > anode_ext1 - margin, -4 cm
+            // for PDVD) -- so a cluster whose body starts in that 2 cm dead band has
+            // the walk march past its detached junk INTO the body, and the judges then
+            // correctly refuse to trim real track charge.  Whether the rescue works
+            // ends up depending on cluster SIZE, which is not physics: evt298567 apa-0
+            // ident 34 (2649 pts) is rescued, apa-4 ident 1 (1375 pts) is not, on the
+            // same 20 swallowed points.  When true the walk breaks at that same floor.
+            // C++ default false => key omitted => byte-identical pre-knob config.
+            // See pdvd/docs/qlmatch/15_pdvd-clus34-unmatched-evt298567.md.
+            [if robust_endpoint_walk_to_floor then 'robust_endpoint_walk_to_floor']: true,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
             //  - reject_overpred: the gold-pair pred/meas scatter is still

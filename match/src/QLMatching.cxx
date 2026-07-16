@@ -282,6 +282,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_robust_endpoint_charge_abs  = get(cfg, "robust_endpoint_charge_abs",  m_robust_endpoint_charge_abs);
     m_robust_endpoint_gap         = get(cfg, "robust_endpoint_gap",         m_robust_endpoint_gap);
     m_robust_endpoint_gap_charge_frac = get(cfg, "robust_endpoint_gap_charge_frac", m_robust_endpoint_gap_charge_frac);
+    m_robust_endpoint_walk_to_floor   = get(cfg, "robust_endpoint_walk_to_floor",   m_robust_endpoint_walk_to_floor);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -608,6 +609,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["robust_endpoint_charge_abs"]  = m_robust_endpoint_charge_abs;
     cfg["robust_endpoint_gap"]         = m_robust_endpoint_gap;
     cfg["robust_endpoint_gap_charge_frac"] = m_robust_endpoint_gap_charge_frac;
+    cfg["robust_endpoint_walk_to_floor"]   = m_robust_endpoint_walk_to_floor;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
@@ -3742,12 +3744,24 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         }
         if (first_u <= anode_in) {                          // anode end (shallowest)
             int pts_out = 0; double q_out = 0.0; double in_u = first_u; bool reached = false;
+            // Where the walk stops calling material "outside". By default anode_in,
+            // which is m_anode_ext1_margin cm ABOVE the floor the containment gate below
+            // actually uses (first_u > anode_in - m_anode_ext1_margin) -- so material
+            // already inside the gate gets counted as outside, and a body starting in
+            // that dead band is fed to the judges as if it were straggle. With
+            // m_robust_endpoint_walk_to_floor the walk breaks at that same floor, so it
+            // never swallows what the gate would have accepted. The judges are unchanged:
+            // a body starting BELOW the floor still exceeds them and still fails, which
+            // is the point. Default (anode_in) => byte-identical. See QLMatching.h.
+            const double walk_in = m_robust_endpoint_walk_to_floor
+                                   ? anode_in - m_anode_ext1_margin
+                                   : anode_in;
             // gap_detached: the sub-anode material contains a gap wider than
             // m_robust_endpoint_gap, i.e. it is overclustered junk DETACHED from the
             // contiguous body rather than a real continuous track end. Density-blind.
             bool gap_detached = false; double prev_u = sv.front().u;
             for (const auto& sl : sv) {
-                if (sl.u > anode_in) { in_u = sl.u; reached = true; break; }
+                if (sl.u > walk_in) { in_u = sl.u; reached = true; break; }
                 if (m_robust_endpoint_gap > 0.0 && (sl.u - prev_u) > m_robust_endpoint_gap)
                     gap_detached = true;
                 pts_out += sl.npts; q_out += sl.q; prev_u = sl.u;
