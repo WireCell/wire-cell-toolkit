@@ -390,13 +390,20 @@ namespace WireCell::Match {
         // they stay in the fit (coverage_mask_fit false).  Their measurement
         // is the upper limit "PE < self-trigger threshold", not "PE == 0 +-
         // pe_err_floor": at the 0.3 PE default floor a 5 PE over-prediction
-        // on a no-data channel would contribute chi2 ~278 and over-punish
-        // the true match just as the legacy path did.  Widening PE_err to
-        // ~the threshold makes a prediction of that size cost chi2 ~1 and a
-        // gross one still cost dearly.  <= 0 => disabled (bit-identical);
-        // needs the coverage chain (cov empty => no-op).  PDVD: 2.0 PE, ~2x
-        // the ~1 PE measured threshold; NOT yet calibrated against a hand
-        // scan -- see doc 14 section 12 open items.
+        // on a no-data channel costs the LASSO a pred/0.3 ~ 17 residual and
+        // over-punishes the true match just as the legacy path did.
+        //
+        // SCOPE: this sets Opflash::PE_err, so it always reaches the LASSO
+        // (pe_err = sqrt(PE + PE_err^2)).  It reaches the bundle chi2/KS ONLY
+        // when pe_err_on_pred is false -- with it true, per_opdet_perr
+        // (TimingTPCBundle.cxx:39-45) derives the error from the PREDICTED pe
+        // and ignores the measured one entirely.
+        //
+        // <= 0 => disabled (bit-identical); needs the coverage chain (cov
+        // empty => no-op).  PDVD leaves it unset: pe_err_floor is already 2.0
+        // (with pe_err_knee at the default 1.0) so the LASSO sees +-2 PE,
+        // ~2x the ~1 PE measured threshold, and pe_err_on_pred makes the chi2
+        // price a no-data channel gently on its own.  See doc 14 section 12.
         double m_pe_err_nodata{-1.0};
 
         // §F bundle-quality thresholds (forwarded to TimingTPCBundle).

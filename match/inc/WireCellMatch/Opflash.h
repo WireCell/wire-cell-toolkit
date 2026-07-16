@@ -79,11 +79,12 @@ namespace WireCell::Match {
         /// Widen PE_err to at least `err` on channels this flash never read
         /// out (get_cov < cov_min).  Such a channel measured "PE < the
         /// self-trigger threshold" (~1 PE on PDVD DAPHNE), not "PE == 0" to
-        /// the tight PEErr floor; without this a prediction of a few PE on a
-        /// no-data channel contributes a chi2 of hundreds.  Call after
-        /// construction (the ctor fills cov after init() synthesizes
-        /// PE_err).  No-op when err <= 0 or the light chain carried no
-        /// coverage => bit-identical by default.
+        /// the tight PEErr floor.  Call after construction (the ctor fills
+        /// cov after init() synthesizes PE_err).  Reaches the LASSO always;
+        /// reaches the bundle chi2 only when pe_err_on_pred is off (else
+        /// TimingTPCBundle derives the error from the predicted pe instead).
+        /// No-op when err <= 0 or the light chain carried no coverage =>
+        /// bit-identical by default.
         void inflate_nodata_err(double err, double cov_min);
 
     private:
