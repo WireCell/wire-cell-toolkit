@@ -76,7 +76,13 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          pe_err_cath_floor=null, pe_err_cath_frac=null,
          pe_err_cath_lowpe_frac=null, pe_err_cath_lowpe_knee=null,
          pe_err_pmt_floor=null, pe_err_pmt_frac=null,
-         pe_err_pmt_lowpe_frac=null, pe_err_pmt_lowpe_knee=null) {
+         pe_err_pmt_lowpe_frac=null, pe_err_pmt_lowpe_knee=null,
+         // xtpc / selection quality gates (C++ defaults legacy-inert; doc 19).
+         // null / false => keys omitted => byte-identical.
+         xtpc_pin_min_strength=null,
+         xtpc_sc1_light_gate=false, xtpc_sc1_ks_max=null, xtpc_sc1_c2n_max=null,
+         xtpc_cathode_ks_max=null,
+         postcull_unflagged=false, postcull_ks_max=null, postcull_c2n_max=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -524,6 +530,31 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // (pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md §10).
             [if xtpc_cathode_tol != null then 'xtpc_cathode_tol']: xtpc_cathode_tol,
             [if xtpc_cathode_qfrac != null then 'xtpc_cathode_qfrac']: xtpc_cathode_qfrac,
+
+            // xtpc / selection quality gates (scan-tuning doc 19).  All C++
+            // defaults are legacy-inert; every key omitted when its arg is
+            // null/false => byte-identical pre-knob config.
+            // Pin strength floor: pinned bundle loses the strength-cutoff
+            // exemption when its LASSO solution <= floor (C++ default 0 = off).
+            [if xtpc_pin_min_strength != null then 'xtpc_pin_min_strength']:
+                xtpc_pin_min_strength,
+            // Scenario-1/xtpc-consistent light gate (C++ default false;
+            // ks/c2n ceilings default 0.3/50 in C++).
+            [if xtpc_sc1_light_gate then 'xtpc_sc1_light_gate']: true,
+            [if xtpc_sc1_light_gate && xtpc_sc1_ks_max != null then 'xtpc_sc1_ks_max']:
+                xtpc_sc1_ks_max,
+            [if xtpc_sc1_light_gate && xtpc_sc1_c2n_max != null then 'xtpc_sc1_c2n_max']:
+                xtpc_sc1_c2n_max,
+            // Cathode-rescue ks ceiling (C++ default 0 = off).
+            [if xtpc_cathode_ks_max != null then 'xtpc_cathode_ks_max']:
+                xtpc_cathode_ks_max,
+            // Post-fit cull of unflagged low-quality selections (C++ default
+            // false; ks/c2n ceilings default 0.30/20 in C++).
+            [if postcull_unflagged then 'postcull_unflagged']: true,
+            [if postcull_unflagged && postcull_ks_max != null then 'postcull_ks_max']:
+                postcull_ks_max,
+            [if postcull_unflagged && postcull_c2n_max != null then 'postcull_c2n_max']:
+                postcull_c2n_max,
 
             // Cathode-side containment tolerance (how far past the cathode a
             // cluster's drift end may reach and still count as contained;

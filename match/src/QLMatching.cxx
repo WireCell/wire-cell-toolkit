@@ -172,6 +172,24 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_pin_angle    = get(cfg, "xtpc_pin_angle",    m_xtpc_pin_angle);
     m_xtpc_cathode_tol   = get(cfg, "xtpc_cathode_tol",   m_xtpc_cathode_tol);
     m_xtpc_cathode_qfrac = get(cfg, "xtpc_cathode_qfrac", m_xtpc_cathode_qfrac);
+    // xtpc / selection quality gates (039252 scan tuning, doc 19); legacy defaults.
+    m_xtpc_pin_min_strength = get(cfg, "xtpc_pin_min_strength", m_xtpc_pin_min_strength);
+    m_xtpc_sc1_light_gate   = get(cfg, "xtpc_sc1_light_gate",   m_xtpc_sc1_light_gate);
+    m_xtpc_sc1_ks_max       = get(cfg, "xtpc_sc1_ks_max",       m_xtpc_sc1_ks_max);
+    m_xtpc_sc1_c2n_max      = get(cfg, "xtpc_sc1_c2n_max",      m_xtpc_sc1_c2n_max);
+    m_xtpc_cathode_ks_max   = get(cfg, "xtpc_cathode_ks_max",   m_xtpc_cathode_ks_max);
+    m_postcull_unflagged    = get(cfg, "postcull_unflagged",    m_postcull_unflagged);
+    m_postcull_ks_max       = get(cfg, "postcull_ks_max",       m_postcull_ks_max);
+    m_postcull_c2n_max      = get(cfg, "postcull_c2n_max",      m_postcull_c2n_max);
+    if (m_xtpc_pin_min_strength > 0 || m_xtpc_sc1_light_gate ||
+        m_xtpc_cathode_ks_max > 0 || m_postcull_unflagged) {
+        log->debug("quality gates on: pin_min_strength={} sc1_light_gate={} "
+                   "(ks<={} c2n<={}) cathode_ks_max={} postcull_unflagged={} "
+                   "(ks<={} c2n<={})",
+                   m_xtpc_pin_min_strength, m_xtpc_sc1_light_gate,
+                   m_xtpc_sc1_ks_max, m_xtpc_sc1_c2n_max, m_xtpc_cathode_ks_max,
+                   m_postcull_unflagged, m_postcull_ks_max, m_postcull_c2n_max);
+    }
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -645,6 +663,15 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_pin_angle"]    = m_xtpc_pin_angle;
     cfg["xtpc_cathode_tol"]   = m_xtpc_cathode_tol;
     cfg["xtpc_cathode_qfrac"] = m_xtpc_cathode_qfrac;
+    // quality gates (doc 19); legacy defaults => inert
+    cfg["xtpc_pin_min_strength"] = m_xtpc_pin_min_strength;
+    cfg["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
+    cfg["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
+    cfg["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
+    cfg["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
+    cfg["postcull_unflagged"]    = m_postcull_unflagged;
+    cfg["postcull_ks_max"]       = m_postcull_ks_max;
+    cfg["postcull_c2n_max"]      = m_postcull_c2n_max;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["light_model"]     = m_light_model;
@@ -1808,6 +1835,49 @@ void QLMatching::build_bundle_maps(ApaRun& run)
     sort_inner_by_flash_idx(run.cluster_bundles_map);
 }
 
+// Pin exemption from the strength-cutoff prune. Legacy (min_strength 0):
+// a pinned bundle is always exempt.  With the doc-19 floor, a pinned bundle
+// whose LASSO solution is at/below the floor loses the exemption (the scan
+// showed phantom pins carry strength ~0 while agreed pins sit at p10 0.88).
+bool QLMatching::pin_exempt(const TimingTPCBundle* b, double strength) const
+{
+    if (!b->get_flag_xtpc_pin()) return false;
+    if (m_xtpc_pin_min_strength <= 0.0) return true;   // legacy always-exempt
+    return strength > m_xtpc_pin_min_strength;
+}
+
+// Post-fit cull of unflagged low-quality selections (doc 19). A bundle still
+// in flash_bundles_map after the rounds/rescues is a matched output; one that
+// carries NO quality flag survived on LASSO strength alone -- the largest
+// phantom bucket in the 18-evt scan. Remove it when its light disagrees
+// (ks > postcull_ks_max OR chi2/ndf > postcull_c2n_max). Purely a filter,
+// iteration-order independent; OFF (default) => no-op, byte-identical.
+void QLMatching::cull_unflagged_lowquality(ApaRun& run)
+{
+    if (!m_postcull_unflagged) return;
+    TimingTPCBundleSelection to_be_removed;
+    for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+        for (const auto& b : run.flash_bundles_map.at(flash)) {
+            if (b->get_consistent_flag() || b->get_flag_xtpc_consistent() ||
+                b->get_flag_xtpc_scenario1() || b->get_flag_xtpc_pin())
+                continue;
+            const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
+            if (b->get_ks_dis() > m_postcull_ks_max || c2n > m_postcull_c2n_max) {
+                to_be_removed.push_back(b);
+                log->debug("QLPOSTCULL apa{} cluster {} flash {} ks={:.3f} chi2/ndf={:.1f} "
+                           "(unflagged, fails {:.2f}/{:.1f})",
+                           (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                           b->get_flash()->get_flash_id(), b->get_ks_dis(), c2n,
+                           m_postcull_ks_max, m_postcull_c2n_max);
+            }
+        }
+    }
+    if (to_be_removed.empty()) return;
+    remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
+                            run.flash_cluster_bundles_map);
+    remove_bundle_selection(to_be_removed, run.pre_bundles);
+}
+
 // xtpc cathode rescue resolution (see the operator() call site and QLMatching.h).
 // Removes provisional cathode-overshoot bundles that did not acquire
 // flag_xtpc_scenario1 in cull_cross_tpc; stamps survivors contained (accepted with
@@ -1819,7 +1889,10 @@ void QLMatching::purge_unconfirmed_cathode_rescue(ApaRun& run)
     for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
         for (const auto& b : run.flash_bundles_map.at(flash)) {
             if (!b->get_flag_xtpc_cathode_provisional()) continue;
-            if (b->get_flag_xtpc_scenario1()) {
+            // Optional doc-19 ks ceiling: a scenario-1-confirmed but light-dim
+            // provisional bundle is purged too (0 = off, legacy).
+            if (b->get_flag_xtpc_scenario1() &&
+                (m_xtpc_cathode_ks_max <= 0.0 || b->get_ks_dis() <= m_xtpc_cathode_ks_max)) {
                 b->set_contained(true);
                 log->debug("QLXTPC cathode-rescue KEEP apa{} cluster {} flash {} "
                            "(scenario-1 confirmed crosser half)",
@@ -2056,8 +2129,10 @@ void QLMatching::fit_round1(ApaRun& run)
             // xtpc joint-pin: a pinned crosser half keeps its flash regardless of LASSO
             // strength (the pin ignores light by design), so it survives the cutoff prune
             // and stays in flash_bundles_map -> apply_matched_t0s matches it. Off-path the
-            // flag is never set => identical.
-            if (solution(n) <= m_strength_cutoff && !m_beamonly && !bundle->get_flag_xtpc_pin())
+            // flag is never set => identical.  pin_exempt applies the optional
+            // xtpc_pin_min_strength floor (doc 19); 0 => legacy always-exempt.
+            if (solution(n) <= m_strength_cutoff && !m_beamonly &&
+                !pin_exempt(bundle.get(), solution(n)))
                 to_be_removed.push_back(bundle);
             ++n;
         }
@@ -2187,7 +2262,8 @@ void QLMatching::fit_round2(ApaRun& run)
         for (auto bundle : run.flash_bundles_map[flash]) {
             bundle->set_strength(solution(n));
             // xtpc joint-pin: keep a pinned crosser half regardless of strength (see round1).
-            if (!(solution(n) > m_strength_cutoff || m_beamonly || bundle->get_flag_xtpc_pin()))
+            if (!(solution(n) > m_strength_cutoff || m_beamonly ||
+                  pin_exempt(bundle.get(), solution(n))))
                 to_be_removed.push_back(bundle);
             ++n;
         }
@@ -2207,6 +2283,9 @@ void QLMatching::fit_round2(ApaRun& run)
     // left unmatched (its flash won by a rival), attaching it even onto a non-empty
     // flash. Same pre-LASSO snapshot source as the empty-flash rescue.
     if (m_cluster_rescue) rescue_unmatched_clusters(run, run.prefit_snapshot);
+
+    // Post-fit unflagged low-quality cull (doc 19; OFF default = bit-identical).
+    cull_unflagged_lowquality(run);
 
     // Keep best match per cluster.
     std::map<int, std::pair<Opflash*, double>> matched_pairs;
@@ -2436,7 +2515,8 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
 
     std::vector<TimingTPCBundleSelection> to_be_removed(runs.size());
     for (std::size_t n = 0; n < col_bundles.size(); ++n) {
-        if (solution(n) <= m_strength_cutoff && !m_beamonly && !col_bundles[n]->get_flag_xtpc_pin())
+        if (solution(n) <= m_strength_cutoff && !m_beamonly &&
+            !pin_exempt(col_bundles[n].get(), solution(n)))
             to_be_removed[col_run[n]].push_back(col_bundles[n]);
     }
     for (std::size_t k = 0; k < runs.size(); ++k) {
@@ -2569,7 +2649,8 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     std::vector<TimingTPCBundleSelection> to_be_removed(runs.size());
     for (std::size_t n = 0; n < col_bundles.size(); ++n) {
         col_bundles[n]->set_strength(solution(n));
-        if (!(solution(n) > m_strength_cutoff || m_beamonly || col_bundles[n]->get_flag_xtpc_pin()))
+        if (!(solution(n) > m_strength_cutoff || m_beamonly ||
+              pin_exempt(col_bundles[n].get(), solution(n))))
             to_be_removed[col_run[n]].push_back(col_bundles[n]);
     }
     for (std::size_t k = 0; k < runs.size(); ++k) {
@@ -2584,6 +2665,10 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     // fit_round2's matched_pairs/organize_bundles tail is likewise not replicated
     // (its result is discarded there — the matched output is what remains in
     // flash_bundles_map).
+
+    // Post-fit unflagged low-quality cull (doc 19; OFF default = bit-identical).
+    for (auto& run : runs) cull_unflagged_lowquality(run);
+
     log->debug("done with matching (shared)");
 }
 
@@ -3002,6 +3087,14 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
     qp["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
     qp["chi2_sat_inflate"] = m_chi2_sat_inflate;
+    qp["xtpc_pin_min_strength"] = m_xtpc_pin_min_strength;
+    qp["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
+    qp["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
+    qp["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
+    qp["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
+    qp["postcull_unflagged"]    = m_postcull_unflagged;
+    qp["postcull_ks_max"]       = m_postcull_ks_max;
+    qp["postcull_c2n_max"]      = m_postcull_c2n_max;
     qp["saturation_mask_fit"] = m_saturation_mask_fit;
     qp["auto_mask"]              = m_auto_mask;
     qp["auto_mask_pe_low"]       = m_auto_mask_pe_low;
@@ -3653,11 +3746,25 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
             const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc, &pair_d, &pin_ok,
                                                       &bx0, &bx1);
             if (scenario == 0) continue;
-            cands[i].mc.b->set_flag_xtpc_consistent(true);
-            cands[j].mc.b->set_flag_xtpc_consistent(true);
-            if (scenario == 1) {
-                cands[i].mc.b->set_flag_xtpc_scenario1(true);
-                cands[j].mc.b->set_flag_xtpc_scenario1(true);
+            // Doc-19 scenario light gate: geometry alone sets the xtpc flags at
+            // EVERY coincident flash whose T0 offset makes the halves touch;
+            // when the gate is on, a bundle acquires the flags (and with them
+            // the cull_inconsistent xtpc-tier privileges) only if its own
+            // light passes.  OFF (default) => always true, bit-identical.
+            // Joint-pin candidacy below is deliberately untouched (pin quality
+            // is handled by the xtpc_pin_min_strength floor in the fit).
+            auto sc1_light_pass = [this](const TimingTPCBundle* b) {
+                if (!m_xtpc_sc1_light_gate) return true;
+                const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
+                return b->get_ks_dis() <= m_xtpc_sc1_ks_max && c2n <= m_xtpc_sc1_c2n_max;
+            };
+            if (sc1_light_pass(cands[i].mc.b)) {
+                cands[i].mc.b->set_flag_xtpc_consistent(true);
+                if (scenario == 1) cands[i].mc.b->set_flag_xtpc_scenario1(true);
+            }
+            if (sc1_light_pass(cands[j].mc.b)) {
+                cands[j].mc.b->set_flag_xtpc_consistent(true);
+                if (scenario == 1) cands[j].mc.b->set_flag_xtpc_scenario1(true);
             }
             if (m_xtpc_joint_pin && pin_ok)
                 pins.push_back({cands[i].mc.b, cands[j].mc.b, cands[i].mc.c, cands[j].mc.c, pair_d});

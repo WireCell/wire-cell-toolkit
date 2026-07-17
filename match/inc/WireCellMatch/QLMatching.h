@@ -855,6 +855,44 @@ namespace WireCell::Match {
         double m_xtpc_cathode_tol{0.0};           // length; 0 = off
         double m_xtpc_cathode_qfrac{0.0};         // charge fraction discardable as junk
 
+        // -------- xtpc / selection quality gates (039252 scan tuning, doc 19) ----------
+        // All default to the legacy behaviour => byte-identical when unset.
+        //
+        // Pin strength floor: a pinned crosser half is exempt from the LASSO
+        // strength-cutoff prune ("the pin ignores light by design").  The 18-evt
+        // hand/AI scan showed that exemption is the pin path's phantom source:
+        // phantom pins have median strength 0.00 while agreed pins sit at p10
+        // 0.88.  When > 0, a pinned bundle whose solution <= this floor LOSES the
+        // exemption (pruned like any bundle; its cluster can then be rescued or
+        // stay unmatched).  0 (default) = pins always exempt.
+        double m_xtpc_pin_min_strength{0.0};
+        // Scenario-1/xtpc-consistent light gate: legacy sets the xtpc flags on
+        // both halves from GEOMETRY alone, at every coincident flash whose T0
+        // offset makes the halves touch -- junk bundles then monopolize
+        // cull_inconsistent's xtpc tiers (scan: sc1 phantoms ks p50 0.40 /
+        // chi2/ndf p50 76 vs agrees 0.17 / 1.3).  When on, a bundle acquires
+        // flag_xtpc_consistent / flag_xtpc_scenario1 only if its own light
+        // passes (ks <= sc1_ks_max AND chi2/ndf <= sc1_c2n_max).  The joint-pin
+        // candidacy itself is untouched (see pin_min_strength above).
+        bool   m_xtpc_sc1_light_gate{false};
+        double m_xtpc_sc1_ks_max{0.3};
+        double m_xtpc_sc1_c2n_max{50.0};
+        // Cathode-rescue ks ceiling: purge_unconfirmed_cathode_rescue keeps a
+        // provisional overshoot bundle on scenario-1 confirmation alone; scan
+        // shows those survivors at 69% phantom (ks p50 0.435 vs agrees 0.20).
+        // When > 0 a confirmed-but-dim bundle (ks > ceiling) is purged too.
+        double m_xtpc_cathode_ks_max{0.0};
+        // Post-fit cull of UNFLAGGED low-quality selections: a selected bundle
+        // carrying no quality flag (not consistent / xtpc_consistent /
+        // scenario1 / pin) survived on LASSO strength alone -- the largest
+        // phantom bucket (103/147 = 70% phantom; ks p50 0.35, chi2/ndf p50 27
+        // vs agrees 0.18 / 3.3).  When on, such a bundle is removed from the
+        // matched output if ks > postcull_ks_max OR chi2/ndf > postcull_c2n_max
+        // (cut 0.30/20 kills 72/92 flagged-phantoms at a cost of 8/40 agrees).
+        bool   m_postcull_unflagged{false};
+        double m_postcull_ks_max{0.30};
+        double m_postcull_c2n_max{20.0};
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -1045,6 +1083,11 @@ namespace WireCell::Match {
         // cull_cross_tpc and cull_inconsistent.
         void purge_unconfirmed_cathode_rescue(ApaRun& run);
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
+        // Pin exemption from the strength-cutoff prune, with the optional
+        // m_xtpc_pin_min_strength floor (doc 19); 0 => legacy always-exempt.
+        bool pin_exempt(const TimingTPCBundle* b, double strength) const;
+        // Post-fit cull of unflagged low-quality selections (m_postcull_unflagged).
+        void cull_unflagged_lowquality(ApaRun& run);
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]
 
