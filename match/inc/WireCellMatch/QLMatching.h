@@ -154,6 +154,18 @@ namespace WireCell::Match {
         double m_flash_minPE{500};
         double m_flash_mintime{-1.5 * units::ms};
         double m_flash_maxtime{1.5 * units::ms};
+        // Channel-scoped flash admission (on top of flash_minPE): admit a flash
+        // only if, over flash_sel_channels, sum(PE) >= flash_sel_minPE AND at
+        // least flash_sel_min_fired channels read >= flash_sel_fired_pe.  Meant
+        // for detectors where one PD family is the only reliable ruler (PDVD
+        // cathode X-ARAPUCAs: full-stream readout, 100% coverage, proportional
+        // response), so a flash whose evidence lives only on unreliable /
+        // self-trigger-silent families never enters matching.  Empty channel
+        // list (default) => no-op => bit-identical legacy admission.
+        std::vector<int> m_flash_sel_channels;
+        double m_flash_sel_minPE{0.0};
+        int m_flash_sel_min_fired{0};
+        double m_flash_sel_fired_pe{1.0};
         double m_beam_mintime{-5 * units::us};
         double m_beam_maxtime{5 * units::us};
         double m_QtoL{0.5};
@@ -582,6 +594,15 @@ namespace WireCell::Match {
         bool m_reject_overpred{false};
         double m_overpred_total_ratio{1e9};   // R_total ceiling (inert when huge)
         double m_overpred_maxch_ratio{1e9};   // R_max   ceiling (inert when huge)
+        // Channel scope for the two ratios: when non-empty, R_total/R_max are
+        // computed over (overpred_channels ∩ opdet_mask) instead of the full
+        // masked set.  Lets the prefilter judge on one trusted PD family only
+        // (PDVD: cathode XAs — the wall XAs are bimodal and the PMTs
+        // self-trigger-silent ~46% of the time, so their meas~0 would fake
+        // over-prediction on a good bundle).  Empty (default) => legacy full
+        // masked set => bit-identical.
+        std::vector<int> m_overpred_channels;
+        std::vector<char> m_overpred_ch_sel;  // per-channel flag form, built at configure
 
         // §I empty-flash light-quality rescue (the prototype's flash-centric pick,
         // ToyMatching.cxx organize_matched_bundles). The LASSO selects by strength,

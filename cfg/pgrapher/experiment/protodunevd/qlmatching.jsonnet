@@ -62,7 +62,12 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          robust_endpoint_gap_charge_frac=null,
          robust_endpoint_walk_to_floor=false,
          robust_endpoint_gap_cathode=false,
-         xtpc_cathode_tol=null, xtpc_cathode_qfrac=null) {
+         xtpc_cathode_tol=null, xtpc_cathode_qfrac=null,
+         mask_wall_xa=false, wall_flags=true,
+         flash_sel_cathode=false, flash_sel_minPE=null,
+         flash_sel_min_fired=null, flash_sel_fired_pe=null,
+         reject_overpred=false, overpred_total_ratio=null,
+         overpred_maxch_ratio=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -93,9 +98,26 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     // port fixes cosine=|dx|/d (orientation-0), which is wrong/divergent for
     // the y-normal wall XAs (see pdvd-photon-model.md sec 6).  13 is already
     // in the base mask.
+    //
+    // mask_wall_xa (library mode): mask the SAME live membrane/wall XAs on
+    // reliability grounds -- the evt298567 hand scan shows they are BIMODAL
+    // (zero response in 9/15 matches with >=20 PE predicted, x2.5 when they
+    // do respond; no scale factor fixes it) and dropping them improves the
+    // match/reject separation on every metric (AUC(ks) 0.751->0.795, good-rung
+    // matches 43%->59%; pdvd/docs/qlmatch/17_pdvd-pd-family-reliability-
+    // evt298567.md).  mask_ks (bundle_mask_ks below) is already true, so the
+    // masked channels leave the chi2, LASSO AND the KS shape test together.
+    // Default false => byte-identical pre-study config.
+    local wall_xa_live = [0, 1, 3, 12, 18, 19],   // 2, 13 already in ch_mask_base
     local ch_mask = if light_model == 'semi'
         then ch_mask_base + [0, 1, 2, 3, 12, 18, 19]
+        else if mask_wall_xa then ch_mask_base + wall_xa_live
         else ch_mask_base,
+    // Cathode X-ARAPUCAs: the one PD family with full-stream readout (100%
+    // flash coverage), proportional response, and per-channel medians within
+    // +-30% of each other -- the ruler family (doc 17).  Used by the
+    // flash_sel_* admission and the overpred_channels scope below.
+    local cathode_channels = std.range(4, 11),
 
     // Official per-OpDet detection efficiencies, Ar/128 nm column eff_Ar
     // (PDVD_PDS_Mapping_v04152025, read per channel from
@@ -233,8 +255,17 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // the hand scan shows a need).
             vd_surface_flags: true,
             pd_wall_cushion: 10 * wc.cm,
-            pd_wall_channels_ylo: wall_ylo_channels,
-            pd_wall_channels_yhi: wall_yhi_channels,
+            // wall_flags=false empties BOTH wall channel lists, which is the C++
+            // "wall inactive" idiom (QLMatching.h pd_wall_channels doc): the +-y
+            // wall proximity then sets no flag_close_to_PMT and adds no relax
+            // channels.  Adopted with mask_wall_xa: the wall XAs the relaxation
+            // was protecting are masked out of the fit anyway, and the wall flag
+            // only exempted junk from the overpred prefilter / widened the chi2
+            // on wall-PMT-free bundles for nothing.  The bottom-anode proximity
+            // flag (anode_pd_channels) is NOT touched.  Default true =>
+            // byte-identical pre-study config.
+            pd_wall_channels_ylo: if wall_flags then wall_ylo_channels else [],
+            pd_wall_channels_yhi: if wall_flags then wall_yhi_channels else [],
             anode_pd_channels: [bottom_pmt_channels, []],  // [bottom volume, top volume]
 
             // Dead-PD self-check: per-event dynamic auto-mask on top of the
@@ -261,6 +292,25 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // light base; the SBND default +-1.5 ms would clip the tail) and
             // the light-chain-study PE knee (~20-30) as the floor.
             flash_minPE: flash_minPE,
+            // Cathode-scoped flash admission ON TOP of flash_minPE: a flash must
+            // show real light on the cathode XAs (sum >= flash_sel_minPE PE and
+            // >= flash_sel_min_fired channels at >= flash_sel_fired_pe PE) to
+            // enter matching -- the all-PD floor alone admits flashes whose PE
+            // lives on the bimodal wall XAs / self-trigger-silent PMTs.
+            // Operating point 5 PE / 2 fired @ 1 PE keeps 289/297 (97.3%) of the
+            // keep-round confirmed crosser+boundary candle flashes (the 8 lost
+            // are dim wall-hugging tracks, <=160 PE total, two with literally
+            // zero cathode signal) and cuts ~7% of the previously admitted
+            // flashes (pdvd/docs/qlmatch/18_*.md).  C++ defaults: empty channel
+            // list / 0 / 0 / 1.0 => keys omitted when off => byte-identical
+            // pre-study config.
+            [if flash_sel_cathode then 'flash_sel_channels']: cathode_channels,
+            [if flash_sel_cathode && flash_sel_minPE != null then 'flash_sel_minPE']:
+                flash_sel_minPE,
+            [if flash_sel_cathode && flash_sel_min_fired != null then 'flash_sel_min_fired']:
+                flash_sel_min_fired,
+            [if flash_sel_cathode && flash_sel_fired_pe != null then 'flash_sel_fired_pe']:
+                flash_sel_fired_pe,
             flash_mintime: -1 * wc.s,
             flash_maxtime: 1 * wc.s,
             // Real PDVD readout window (post-resample SP frame length, 10000
@@ -274,6 +324,26 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // charge time base is calibrated -- the driver disables it for the
             // trigger-offset diagnostic runs.
             require_containment: require_containment,
+
+            // Light-pattern over-prediction prefilter, scoped to the CATHODE XAs
+            // (overpred_channels): a candidate bundle predicting far more cathode
+            // light than the flash measured cannot be the match.  The scope
+            // matters -- judged on all PDs, a self-trigger-silent PMT / bimodal
+            // wall XA reads 0 and fakes over-prediction on good bundles; the
+            // cathode XAs are always read out.  Ceilings from the 18-event
+            // keep-round scan (pdvd/docs/qlmatch/18_*.md): R_total <= 15 /
+            // R_max <= 50 keeps every evt298567 full-scan match (max 1.43/4.97)
+            // and culls ~16% of all non-exempt candidate bundles; the only
+            // confirmed candles above them are 3 wrong-amplitude picks
+            // (meas ~ 0, pred in the thousands).  Boundary/truncated bundles
+            // stay exempt (C++).  C++ defaults false / empty / 1e9 => keys
+            // omitted when off => byte-identical pre-study config.
+            [if reject_overpred then 'reject_overpred']: true,
+            [if reject_overpred then 'overpred_channels']: cathode_channels,
+            [if reject_overpred && overpred_total_ratio != null then 'overpred_total_ratio']:
+                overpred_total_ratio,
+            [if reject_overpred && overpred_maxch_ratio != null then 'overpred_maxch_ratio']:
+                overpred_maxch_ratio,
 
             // Generic SBND/PDHD-proven levers (all C++-default-OFF):
             // sparse LASSO (perf; the joint system is bigger than a per-side one),
@@ -509,10 +579,8 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if robust_endpoint_walk_to_floor then 'robust_endpoint_walk_to_floor']: true,
 
             // DELIBERATELY OFF for round 1 (C++ defaults):
-            //  - reject_overpred: the gold-pair pred/meas scatter is still
-            //    ~x3 either way around QtoL and the per-channel PE scale is
-            //    uncalibrated; enable with data-tuned ceilings after the hand
-            //    scan (SBND 2.9/4.3, PDHD 3.0/10 for reference).
+            //  (reject_overpred is NOT in this list any more -- the hand scan
+            //  provided the data-tuned cathode-scoped ceilings above.)
             //  - measured_pe_scale: beam-gold per-channel fit exists (see
             //    pdvd-qlmatching.md) but is single-topology (bright beam
             //    showers; possible saturation bias) -- refit on hand-scan GT.

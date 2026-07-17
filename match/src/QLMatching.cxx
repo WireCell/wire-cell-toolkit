@@ -227,6 +227,13 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
 
     m_flash_minPE   = get(cfg, "flash_minPE",   m_flash_minPE);
+    if (cfg.isMember("flash_sel_channels") && cfg["flash_sel_channels"].isArray()) {
+        m_flash_sel_channels.clear();
+        for (const auto& jch : cfg["flash_sel_channels"]) m_flash_sel_channels.push_back(jch.asInt());
+    }
+    m_flash_sel_minPE     = get(cfg, "flash_sel_minPE",     m_flash_sel_minPE);
+    m_flash_sel_min_fired = get(cfg, "flash_sel_min_fired", m_flash_sel_min_fired);
+    m_flash_sel_fired_pe  = get(cfg, "flash_sel_fired_pe",  m_flash_sel_fired_pe);
     m_flash_mintime = get(cfg, "flash_mintime", m_flash_mintime);
     m_flash_maxtime = get(cfg, "flash_maxtime", m_flash_maxtime);
     m_beam_mintime  = get(cfg, "beam_mintime",  m_beam_mintime);
@@ -361,6 +368,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
     m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
     m_overpred_maxch_ratio = get(cfg, "overpred_maxch_ratio", m_overpred_maxch_ratio);
+    if (cfg.isMember("overpred_channels") && cfg["overpred_channels"].isArray()) {
+        m_overpred_channels.clear();
+        for (const auto& jch : cfg["overpred_channels"]) m_overpred_channels.push_back(jch.asInt());
+    }
 
     m_empty_rescue          = get(cfg, "empty_rescue",          m_empty_rescue);
     m_opflash_phys_gid      = get(cfg, "opflash_phys_gid",      m_opflash_phys_gid);
@@ -542,6 +553,29 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
                    "fit at measured 0 (pe_err_nodata={} PE, coverage_min={})",
                    m_pe_err_nodata, m_coverage_min);
     }
+    // Sentinel: only when the channel-scoped flash admission is active, so a smoke
+    // run can prove the knob reached the component (silent => legacy admission).
+    if (!m_flash_sel_channels.empty()) {
+        log->debug("QLMatching flash_sel: admission over {} channels requires sum PE >= {} "
+                   "and >= {} channels fired at >= {} PE",
+                   m_flash_sel_channels.size(), m_flash_sel_minPE,
+                   m_flash_sel_min_fired, m_flash_sel_fired_pe);
+    }
+    // Per-channel flag form of overpred_channels (hoisted out of the per-bundle
+    // prefilter loop; empty <=> the scope knob is off).
+    m_overpred_ch_sel.clear();
+    if (!m_overpred_channels.empty()) {
+        m_overpred_ch_sel.assign(std::max(m_nchan, 1), 0);
+        for (int ch : m_overpred_channels)
+            if (ch >= 0 && ch < (int) m_overpred_ch_sel.size()) m_overpred_ch_sel[ch] = 1;
+    }
+    // Sentinel: only when the overpred prefilter is channel-scoped (silent =>
+    // legacy full-masked-set ratios).
+    if (m_reject_overpred && !m_overpred_channels.empty()) {
+        log->debug("QLMatching reject_overpred scoped to {} channels "
+                   "(R_total <= {}, R_max <= {})",
+                   m_overpred_channels.size(), m_overpred_total_ratio, m_overpred_maxch_ratio);
+    }
     // Same sentinel for the rail-flag path (silent => legacy drop from chi2/KS).
     if (m_use_saturation_flag && !m_saturation_mask_fit) {
         log->debug("QLMatching saturation_mask_fit=false => railed channels stay in the "
@@ -593,6 +627,10 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pd_wall_channels_yhi"]   = Json::arrayValue;
     cfg["anode_pd_channels"]      = Json::arrayValue;
     cfg["flash_minPE"]     = m_flash_minPE;
+    cfg["flash_sel_channels"]  = Json::arrayValue;
+    cfg["flash_sel_minPE"]     = m_flash_sel_minPE;
+    cfg["flash_sel_min_fired"] = m_flash_sel_min_fired;
+    cfg["flash_sel_fired_pe"]  = m_flash_sel_fired_pe;
     cfg["flash_mintime"]   = m_flash_mintime;
     cfg["flash_maxtime"]   = m_flash_maxtime;
     cfg["beam_mintime"]    = m_beam_mintime;
@@ -684,6 +722,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["vis_sample_min_pts"]   = m_vis_sample_min_pts;
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
+    cfg["overpred_channels"]    = Json::arrayValue;
     cfg["empty_rescue"]          = m_empty_rescue;
     cfg["opflash_phys_gid"]      = m_opflash_phys_gid;
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
@@ -983,6 +1022,19 @@ void QLMatching::read_flashes(ApaRun& run)
         flash->inflate_nodata_err(m_pe_err_nodata, m_coverage_min);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
+        // Channel-scoped admission (see the knob doc in the header): the flash must
+        // show real light on the trusted PD family, not just clear the all-PD floor.
+        if (!m_flash_sel_channels.empty()) {
+            double sel_sum = 0.0;
+            int sel_fired = 0;
+            for (int ch : m_flash_sel_channels) {
+                if (ch < 0 || ch >= m_nchan) continue;
+                const double p = flash->get_PE(ch);
+                sel_sum += p;
+                if (p >= m_flash_sel_fired_pe) ++sel_fired;
+            }
+            if (sel_sum < m_flash_sel_minPE || sel_fired < m_flash_sel_min_fired) continue;
+        }
         run.flashes.push_back(flash);
     }
 
@@ -1602,9 +1654,14 @@ void QLMatching::build_bundles(ApaRun& run)
                 !(bundle->get_flag_close_to_PMT() || bundle->get_flag_window_truncated() ||
                   bundle->get_flag_at_x_boundary())) {
                 const auto& mask = bundle->get_opdet_mask();
+                // Channel scope (see the knob doc in the header): non-empty
+                // overpred_channels restricts both ratios to that family (still
+                // requiring the per-bundle mask); empty => legacy full masked set.
                 double tot_pred = 0.0, tot_meas = 0.0, max_pred = 0.0, meas_at_max = 0.0;
                 for (std::size_t j = 0; j < pred_flash.size(); ++j) {
                     if (j >= mask.size() || mask[j] == 0) continue;
+                    if (!m_overpred_ch_sel.empty() &&
+                        (j >= m_overpred_ch_sel.size() || !m_overpred_ch_sel[j])) continue;
                     const double p = pred_flash[j];
                     const double m = flash->get_PE(static_cast<int>(j));
                     tot_pred += p;
