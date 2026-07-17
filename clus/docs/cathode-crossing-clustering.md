@@ -567,8 +567,9 @@ threaded into PDVD's `clus_all_tpc` → `cm.cathode_connect(...)`
 suppresses the keys ⇒ C++ defaults `tip_touch_cut=0` (OFF) / `tip_touch_angle_cut=angle_cut`
 (OFF). Unlike PDHD (hardcoded ON) the PDVD *operating point* lives in the runner default,
 matching the established PDVD Q/L convention (toolkit knobs OFF/byte-identical, runner sets
-the point). Enabling for PDVD is a **behavior change** justified by a crosser census
-(below); PDHD's 3 cm/12° are PDHD-tuned reproducers, not copied blindly.
+the point). Enabling for PDVD is a **behavior change** justified by the crosser census
+below — which confirmed PDHD's 3 cm/12° values also recover a genuine PDVD crosser with
+zero spurious merges, so they are adopted rather than copied blindly.
 
 **Repro (compiled-config proof, byte-identical when off):**
 ```
@@ -580,28 +581,36 @@ grep tip_touch on.json     # tip_touch_cut:30 (3cm→internal), tip_touch_angle_
 # enable a run:  PDVD_CC_TIP_TOUCH_CUT=3.0 PDVD_CC_TIP_TOUCH_ANGLE=12.0 ./run_clus_evt.sh -calib <run> all
 ```
 
-**Census verdict (2026-07-17): tip-touch is INERT for PDVD — runner default stays OFF.**
-Censused on the run-039252 18-event set (indices 0–17, imaging+light reused from the
-`_keep` tag): OFF (`ccprod`) vs ON (`cctt`, tip_touch_cut=3cm / angle=12°) `mabc-all-apa`
-member-content hashes are **identical on all 18/18 events** — tip-touch fires zero merges.
-Mechanism: the owner's hand-curated `input_data/run039252/evt_*/golden_crossers.txt`
-records PDVD's genuine cathode crossers meeting at **d ≈ 6–8 cm** (physical drift gap near
-the cathode + transverse offset), well beyond the `tip_touch_cut` "tips nearly touch"
-regime (~1 cm) where PDHD's branch engages — so the branch is never entered. Widening
-`tip_touch_cut` to 6–8 cm to force engagement would drop the `cc_pca` alignment guard for
-pairs that far apart and risk spurious merges (owner rule 7: do not tune to manufacture an
-effect). **Conclusion:** tip-touch is the wrong lever for PDVD's crosser population; the
-plumbing stays as byte-identical infrastructure with the runner default OFF, and enabling
-is not justified on available data.
+**Census verdict (2026-07-17): tip-touch recovers genuine PDVD crossers, 0 spurious —
+ENABLED for PDVD at 3 cm / 12° (runner default ON).** Censused on 28 QL-matched events
+(run 039252 indices 0–17, run 039349 indices 0–9; imaging+light reused from the `_keep`
+tag, QL matching ON via `PDVD_LIGHT_SUFFIX=_keep`), OFF (`ccprod`) vs ON (`cctt`,
+tip_touch_cut=3 cm / angle=12°), comparing `mabc-all-apa` member-content hashes:
 
-Separately observed (not fixed here): in evt298567 the base `cathode_connect` merged **0**
-of the 6 golden crossers — PDVD's post-QL cross-cathode stitch is effectively not firing on
-real crossers, for reasons in the **far regime** (d 5–25 cm: `conn_far_cut` / both-long PCA
-/ flash-t0 gating / cathode-reach in the corrected frame), independent of tip-touch. Making
-PDVD stitching effective is a separate far-regime investigation, not a tip-touch port.
-NB the evt298567 clus97↔139 crosser is a third, distinct case: those halves meet ~3.5 cm
-*below* the cathode and fail the `at_cathode`/containment admission — the QL-side
-`ql_xtpc_cathode_tol_cm` rescue (doc 16 §10), which relaxes admission, not alignment.
+- **27/28 events byte-identical**; tip-touch fired on exactly **one** event, 039252 evt
+  298707, where it merged **one** cluster pair (real-cluster count 119 → 118) and raised
+  the number of genuine cathode-spanning clusters 2 → 3.
+- The recovered crosser is unambiguously real: its two halves meet at (y≈207, z≈280) with
+  a **0.32 cm 3-D tip gap** (essentially touching at the cathode), **4.4° global-PCA angle**
+  between the halves, and a straight combined track (PCA s1/s0 = 0.19). It fired *because*
+  the touching tips make the `cc_pca` connection vector pure sub-cm jitter (≈⊥ even for a
+  real crosser), which the base path rejects — tip-touch drops that term and accepts on the
+  collinearity the halves already have. Exactly the PDHD mechanism (run29107 evt983/991).
+- **Zero spurious merges** in 28 events; the 12° local-Hough gate is the safeguard against
+  oblique cathode touchers.
+
+**IMPORTANT — not byte-identical:** enabling flips 039252 evt298707 (and any future
+tip-touching crosser); all other events unchanged. Toolkit C++/jsonnet defaults remain OFF
+(byte-identical); the PDVD operating point lives in the runner default
+(`PDVD_CC_TIP_TOUCH_CUT` defaults to 3.0 in `run_clus_evt.sh`), matching the PDVD Q/L
+convention. Reproduce with `PDVD_CC_TIP_TOUCH_CUT=3.0 ./run_clus_evt.sh -calib 039252 10`
+(evt 298707) — set `PDVD_CC_TIP_TOUCH_CUT=` (empty) to recover the legacy split.
+
+Not every PDVD crosser is a tip-touch case: evt298567's golden crossers meet at d ≈ 6–8 cm
+(a far-regime problem, `conn_far_cut` / both-long PCA), and its clus97↔139 crosser meets
+~3.5 cm *below* the cathode and fails the `at_cathode` admission (the QL-side
+`ql_xtpc_cathode_tol_cm` rescue, doc 16 §10). Tip-touch is the correct lever only for the
+*touching-at-cathode* subset; those other regimes remain separate follow-ups.
 
 ## Artifacts
 
