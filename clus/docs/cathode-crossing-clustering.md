@@ -580,13 +580,28 @@ grep tip_touch on.json     # tip_touch_cut:30 (3cm→internal), tip_touch_angle_
 # enable a run:  PDVD_CC_TIP_TOUCH_CUT=3.0 PDVD_CC_TIP_TOUCH_ANGLE=12.0 ./run_clus_evt.sh -calib <run> all
 ```
 
-**Census (in progress):** the tip-touch enablement is being censused on the run-039252
-18-event and run-039349 10-event sets — OFF vs ON cluster-count/merge diff, confirming
-recovered genuine crossers and zero spurious merges before the runner default flips ON.
-NB the evt298567 clus97↔139 crosser is *not* a tip-touch case: those halves meet ~3.5 cm
-*below* the cathode and fail the `at_cathode`/containment admission — that is the QL-side
-`ql_xtpc_cathode_tol_cm` rescue (doc 16 §10), which relaxes admission; tip-touch only
-relaxes the *alignment* terms for halves that already reach the cathode.
+**Census verdict (2026-07-17): tip-touch is INERT for PDVD — runner default stays OFF.**
+Censused on the run-039252 18-event set (indices 0–17, imaging+light reused from the
+`_keep` tag): OFF (`ccprod`) vs ON (`cctt`, tip_touch_cut=3cm / angle=12°) `mabc-all-apa`
+member-content hashes are **identical on all 18/18 events** — tip-touch fires zero merges.
+Mechanism: the owner's hand-curated `input_data/run039252/evt_*/golden_crossers.txt`
+records PDVD's genuine cathode crossers meeting at **d ≈ 6–8 cm** (physical drift gap near
+the cathode + transverse offset), well beyond the `tip_touch_cut` "tips nearly touch"
+regime (~1 cm) where PDHD's branch engages — so the branch is never entered. Widening
+`tip_touch_cut` to 6–8 cm to force engagement would drop the `cc_pca` alignment guard for
+pairs that far apart and risk spurious merges (owner rule 7: do not tune to manufacture an
+effect). **Conclusion:** tip-touch is the wrong lever for PDVD's crosser population; the
+plumbing stays as byte-identical infrastructure with the runner default OFF, and enabling
+is not justified on available data.
+
+Separately observed (not fixed here): in evt298567 the base `cathode_connect` merged **0**
+of the 6 golden crossers — PDVD's post-QL cross-cathode stitch is effectively not firing on
+real crossers, for reasons in the **far regime** (d 5–25 cm: `conn_far_cut` / both-long PCA
+/ flash-t0 gating / cathode-reach in the corrected frame), independent of tip-touch. Making
+PDVD stitching effective is a separate far-regime investigation, not a tip-touch port.
+NB the evt298567 clus97↔139 crosser is a third, distinct case: those halves meet ~3.5 cm
+*below* the cathode and fail the `at_cathode`/containment admission — the QL-side
+`ql_xtpc_cathode_tol_cm` rescue (doc 16 §10), which relaxes admission, not alignment.
 
 ## Artifacts
 
