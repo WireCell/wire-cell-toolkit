@@ -598,6 +598,11 @@ tip_touch_cut=3 cm / angle=12°), comparing `mabc-all-apa` member-content hashes
   collinearity the halves already have. Exactly the PDHD mechanism (run29107 evt983/991).
 - **Zero spurious merges** in 28 events; the 12° local-Hough gate is the safeguard against
   oblique cathode touchers.
+- **Determinism control (M4 / ab-verify §5):** evt298707 re-run twice per setting —
+  OFF reproduces byte-identical (119 clusters, 2 cathode-spanning) and ON reproduces
+  byte-identical (118, 3), so the split→merge flip is attributable to the knob, not an
+  FP-tie. (27/28 events hashing identical across the two independent OFF/ON passes is itself
+  evidence the chain is deterministic run-to-run here.)
 
 **IMPORTANT — not byte-identical:** enabling flips 039252 evt298707 (and any future
 tip-touching crosser); all other events unchanged. Toolkit C++/jsonnet defaults remain OFF
