@@ -317,6 +317,49 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pe_err_lowpe_frac = get(cfg, "pe_err_lowpe_frac", m_pe_err_lowpe_frac);
     m_pe_err_lowpe_knee = get(cfg, "pe_err_lowpe_knee", m_pe_err_lowpe_knee);
 
+    // Per-PD-family PE-error override (header doc). Absent/empty => byte-identical.
+    if (cfg.isMember("pe_err_family_channels") && cfg["pe_err_family_channels"].isArray()) {
+        m_pe_err_family_channels.clear();
+        for (const auto& fam : cfg["pe_err_family_channels"]) {
+            std::vector<int> chans;
+            for (const auto& ch : fam) chans.push_back(ch.asInt());
+            m_pe_err_family_channels.push_back(std::move(chans));
+        }
+        auto grab = [&cfg](const char* key, std::vector<double>& dst) {
+            if (cfg.isMember(key) && cfg[key].isArray()) {
+                dst.clear();
+                for (const auto& v : cfg[key]) dst.push_back(v.asDouble());
+            }
+        };
+        grab("pe_err_family_floor",      m_pe_err_family_floor);
+        grab("pe_err_family_frac",       m_pe_err_family_frac);
+        grab("pe_err_family_lowpe_frac", m_pe_err_family_lowpe_frac);
+        grab("pe_err_family_lowpe_knee", m_pe_err_family_lowpe_knee);
+    }
+    if (!m_pe_err_family_channels.empty()) {
+        auto resolve = [this](const std::vector<double>& fam_vals,
+                              std::vector<double>& ch_vals) {
+            ch_vals.assign(m_nchan, -1.0);
+            for (std::size_t i = 0; i < m_pe_err_family_channels.size(); ++i) {
+                if (i >= fam_vals.size() || fam_vals[i] < 0) continue;
+                for (int ch : m_pe_err_family_channels[i]) {
+                    if (ch >= 0 && ch < m_nchan) ch_vals[ch] = fam_vals[i];
+                }
+            }
+        };
+        resolve(m_pe_err_family_floor,      m_pe_err_ch_floor);
+        resolve(m_pe_err_family_frac,       m_pe_err_ch_frac);
+        resolve(m_pe_err_family_lowpe_frac, m_pe_err_ch_lowpe_frac);
+        resolve(m_pe_err_family_lowpe_knee, m_pe_err_ch_lowpe_knee);
+        int nover = 0;
+        for (int ch = 0; ch < m_nchan; ++ch) {
+            if (m_pe_err_ch_floor[ch] >= 0 || m_pe_err_ch_frac[ch] >= 0 ||
+                m_pe_err_ch_lowpe_frac[ch] >= 0 || m_pe_err_ch_lowpe_knee[ch] >= 0) ++nover;
+        }
+        log->debug("pe_err_family override active: {} families, {} channels overridden",
+                   m_pe_err_family_channels.size(), nover);
+    }
+
     // Optional per-channel measured-PE gain correction (length nchan). Empty =>
     // identity (byte-identical). A length mismatch is a config error.
     if (cfg["measured_pe_scale"].isArray()) {
@@ -685,6 +728,12 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_err_on_pred"]     = m_pe_err_on_pred;
     cfg["pe_err_lowpe_frac"]  = m_pe_err_lowpe_frac;
     cfg["pe_err_lowpe_knee"]  = m_pe_err_lowpe_knee;
+    // empty => no per-family override (byte-identical legacy error model)
+    cfg["pe_err_family_channels"]   = Json::Value(Json::arrayValue);
+    cfg["pe_err_family_floor"]      = Json::Value(Json::arrayValue);
+    cfg["pe_err_family_frac"]       = Json::Value(Json::arrayValue);
+    cfg["pe_err_family_lowpe_frac"] = Json::Value(Json::arrayValue);
+    cfg["pe_err_family_lowpe_knee"] = Json::Value(Json::arrayValue);
     cfg["measured_pe_scale"]  = Json::Value(Json::arrayValue);  // empty => identity
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
     cfg["use_saturation_flag"] = m_use_saturation_flag;
@@ -1012,7 +1061,10 @@ void QLMatching::build_opdet_mask(ApaRun& run)
 // Grouping::flashes(). Each flash is wrapped in an Opflash matching-adapter.
 void QLMatching::read_flashes(ApaRun& run)
 {
-    const PEErr pe_err_model{m_pe_err_floor, m_pe_err_frac, m_pe_err_knee};
+    PEErr pe_err_model{m_pe_err_floor, m_pe_err_frac, m_pe_err_knee};
+    // Per-family override arrays (empty => Opflash keeps the scalar rule).
+    pe_err_model.ch_floor = m_pe_err_ch_floor;
+    pe_err_model.ch_frac  = m_pe_err_ch_frac;
     const std::vector<double>* pe_scale = m_measured_pe_scale.empty() ? nullptr : &m_measured_pe_scale;
     for (const auto& ff : run.grouping->flashes()) {
         auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model, pe_scale);
@@ -1251,6 +1303,12 @@ void QLMatching::compute_geometry(ApaRun& run)
         m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf,
         m_chi2_relax, m_chi2_pmt_excess, m_chi2_pmt_ratio, m_chi2_pmt_inflate,
         m_chi2_sat_inflate};
+    // Per-channel family overrides sit after the positional members (see
+    // BundleQualityParams); empty (default) => scalar model, bit-identical.
+    run.qp.pe_err_ch_floor      = m_pe_err_ch_floor;
+    run.qp.pe_err_ch_frac       = m_pe_err_ch_frac;
+    run.qp.pe_err_ch_lowpe_frac = m_pe_err_ch_lowpe_frac;
+    run.qp.pe_err_ch_lowpe_knee = m_pe_err_ch_lowpe_knee;
 
     // Shared-flash mode relies on the ident-based sign_offset above encoding the
     // physical relation sign_offset == -s (true for SBND TPC0/1 and the PDVD
@@ -2912,6 +2970,21 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["pe_err_frac"]         = m_pe_err_frac;
     qp["pe_err_knee"]         = m_pe_err_knee;
     qp["pe_err_on_pred"]      = m_pe_err_on_pred;
+    qp["pe_err_lowpe_frac"]   = m_pe_err_lowpe_frac;
+    qp["pe_err_lowpe_knee"]   = m_pe_err_lowpe_knee;
+    // Per-family override, resolved per channel (empty arrays => off). Dumped
+    // so ql_pull_diag.py can rebuild sigma without guessing the active model.
+    if (!m_pe_err_family_channels.empty()) {
+        auto arr = [](const std::vector<double>& v) {
+            Json::Value a(Json::arrayValue);
+            for (double x : v) a.append(x);
+            return a;
+        };
+        qp["pe_err_ch_floor"]      = arr(m_pe_err_ch_floor);
+        qp["pe_err_ch_frac"]       = arr(m_pe_err_ch_frac);
+        qp["pe_err_ch_lowpe_frac"] = arr(m_pe_err_ch_lowpe_frac);
+        qp["pe_err_ch_lowpe_knee"] = arr(m_pe_err_ch_lowpe_knee);
+    }
     {
         Json::Value mps(Json::arrayValue);
         for (double s : m_measured_pe_scale) mps.append(s);

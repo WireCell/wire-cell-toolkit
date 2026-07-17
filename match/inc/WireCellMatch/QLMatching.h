@@ -389,6 +389,25 @@ namespace WireCell::Match {
         // fit_lowpe.py): PDHD 2.1/4.0. Feeds the chi2 only; LASSO weight stays measured.
         double m_pe_err_lowpe_frac{-1.0};
         double m_pe_err_lowpe_knee{4.0};
+        // Per-PD-family PE-error override (PDVD cathode-XA vs PMT calibration;
+        // pdvd/docs/qlmatch/19_pdvd-scan-tuning-039252.md).  Parallel arrays:
+        // family i covers the channels of pe_err_family_channels[i]; the
+        // matching entry of pe_err_family_{floor,frac,lowpe_frac,lowpe_knee}
+        // overrides the global value on those channels in BOTH error paths
+        // (Opflash LASSO floor/frac; bundle-chi2 per_opdet_perr, all four).
+        // A missing/negative entry falls back to the global.  Empty channel
+        // list (default) => byte-identical legacy model.
+        std::vector<std::vector<int>> m_pe_err_family_channels;
+        std::vector<double> m_pe_err_family_floor;
+        std::vector<double> m_pe_err_family_frac;
+        std::vector<double> m_pe_err_family_lowpe_frac;
+        std::vector<double> m_pe_err_family_lowpe_knee;
+        // Resolved per-channel overrides (length m_nchan when any family is
+        // configured, else empty; -1 entry => use the global value).
+        std::vector<double> m_pe_err_ch_floor;
+        std::vector<double> m_pe_err_ch_frac;
+        std::vector<double> m_pe_err_ch_lowpe_frac;
+        std::vector<double> m_pe_err_ch_lowpe_knee;
         // Optional per-channel measured-PE gain correction (length nchan), applied
         // to every flash's measured PE as it is read. Empty => identity (byte-
         // identical). PDHD uses it to scale up the gain-biased -x full-stream half

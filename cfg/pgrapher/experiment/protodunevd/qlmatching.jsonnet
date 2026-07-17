@@ -67,7 +67,16 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          flash_sel_cathode=false, flash_sel_minPE=null,
          flash_sel_min_fired=null, flash_sel_fired_pe=null,
          reject_overpred=false, overpred_total_ratio=null,
-         overpred_maxch_ratio=null) {
+         overpred_maxch_ratio=null,
+         // Per-PD-family PE-error overrides (C++ pe_err_family_* knob,
+         // families = [cathode XAs 4-11, PMTs]).  All null (default) => keys
+         // omitted => byte-identical global error model above.  A single
+         // non-null value activates the family arrays; null members become
+         // -1 = "use the global value" in C++.
+         pe_err_cath_floor=null, pe_err_cath_frac=null,
+         pe_err_cath_lowpe_frac=null, pe_err_cath_lowpe_knee=null,
+         pe_err_pmt_floor=null, pe_err_pmt_frac=null,
+         pe_err_pmt_lowpe_frac=null, pe_err_pmt_lowpe_knee=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -118,6 +127,18 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     // +-30% of each other -- the ruler family (doc 17).  Used by the
     // flash_sel_* admission and the overpred_channels scope below.
     local cathode_channels = std.range(4, 11),
+
+    // Per-PD-family PE-error override plumbing (scan-tuning doc 19).  Hoisted
+    // to function scope: computed field names below cannot see object-locals.
+    // Family order [cathode XAs (4-11), PMTs (14-17, 20-39)]; nn(null) = -1 =
+    // "use the global value" in C++.
+    local pe_err_pmt_channels = std.range(14, 17) + std.range(20, 39),
+    local pe_err_nn(v) = if v == null then -1 else v,
+    local pe_err_fam_on =
+        pe_err_cath_floor != null || pe_err_cath_frac != null ||
+        pe_err_cath_lowpe_frac != null || pe_err_cath_lowpe_knee != null ||
+        pe_err_pmt_floor != null || pe_err_pmt_frac != null ||
+        pe_err_pmt_lowpe_frac != null || pe_err_pmt_lowpe_knee != null,
 
     // Official per-OpDet detection efficiencies, Ar/128 nm column eff_Ar
     // (PDVD_PDS_Mapping_v04152025, read per channel from
@@ -425,6 +446,20 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             pe_err_frac: 0.60,
             pe_err_lowpe_frac: 2.0,
             pe_err_lowpe_knee: 10.0,
+            // Per-PD-family override of the model above (scan-tuning doc 19).
+            // C++ default: empty arrays.  Keys omitted when all family params
+            // are null => byte-identical pre-knob config.  Family order:
+            // [cathode XAs (4-11), PMTs (14-17, 20-39)]; -1 => global value.
+            [if pe_err_fam_on then 'pe_err_family_channels']:
+                [cathode_channels, pe_err_pmt_channels],
+            [if pe_err_fam_on then 'pe_err_family_floor']:
+                [pe_err_nn(pe_err_cath_floor), pe_err_nn(pe_err_pmt_floor)],
+            [if pe_err_fam_on then 'pe_err_family_frac']:
+                [pe_err_nn(pe_err_cath_frac), pe_err_nn(pe_err_pmt_frac)],
+            [if pe_err_fam_on then 'pe_err_family_lowpe_frac']:
+                [pe_err_nn(pe_err_cath_lowpe_frac), pe_err_nn(pe_err_pmt_lowpe_frac)],
+            [if pe_err_fam_on then 'pe_err_family_lowpe_knee']:
+                [pe_err_nn(pe_err_cath_lowpe_knee), pe_err_nn(pe_err_pmt_lowpe_knee)],
             // KS-led high-consistency ladder (purity cull before the fit).  KS
             // ceilings = SBND/PDHD; chi2/ndf ceilings at the loose PDHD scale --
             // with the uncalibrated PDVD PE scale the chi2 is inflated, so the

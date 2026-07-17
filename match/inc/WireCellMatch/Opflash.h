@@ -16,6 +16,11 @@ namespace WireCell::Match {
         double floor = 0.3;  // PE_err for sub-knee channels
         double frac  = 0.3;  // fractional PE_err for channels at/above knee
         double knee  = 1.0;  // PE level (in PE) separating the two regimes
+        // Optional per-channel overrides (QLMatching pe_err_family_* knob,
+        // resolved to length-nchan arrays; -1 entry => scalar value above).
+        // Both empty (default) => the scalar rule, byte-identical.
+        std::vector<double> ch_floor;
+        std::vector<double> ch_frac;
     };
 
     /// The matcher's per-flash working object: a thin adapter over the canonical

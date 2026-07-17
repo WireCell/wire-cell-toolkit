@@ -29,10 +29,26 @@ void Opflash::init(double time_, std::vector<double> pe, double threshold, int n
     }
 
     total_PE = 0;
-    for (int i = 0; i < nchan; ++i) {
-        PE_err[i] = (PE[i] < pe_err.knee) ? pe_err.floor : pe_err.frac * PE[i];
-        total_PE += PE[i];
-        if (PE[i] > threshold) fired_channels.push_back(i);
+    if (pe_err.ch_floor.empty() && pe_err.ch_frac.empty()) {
+        // legacy scalar rule (byte-identical default)
+        for (int i = 0; i < nchan; ++i) {
+            PE_err[i] = (PE[i] < pe_err.knee) ? pe_err.floor : pe_err.frac * PE[i];
+            total_PE += PE[i];
+            if (PE[i] > threshold) fired_channels.push_back(i);
+        }
+    }
+    else {
+        // per-channel family override (QLMatching pe_err_family_* knob);
+        // -1 / out-of-range entry falls back to the scalar value.
+        for (int i = 0; i < nchan; ++i) {
+            double fl = pe_err.floor;
+            double fr = pe_err.frac;
+            if (i < (int)pe_err.ch_floor.size() && pe_err.ch_floor[i] >= 0) fl = pe_err.ch_floor[i];
+            if (i < (int)pe_err.ch_frac.size() && pe_err.ch_frac[i] >= 0) fr = pe_err.ch_frac[i];
+            PE_err[i] = (PE[i] < pe_err.knee) ? fl : fr * PE[i];
+            total_PE += PE[i];
+            if (PE[i] > threshold) fired_channels.push_back(i);
+        }
     }
 }
 

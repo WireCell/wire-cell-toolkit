@@ -34,15 +34,29 @@ namespace {
     // pe_err_lowpe_frac<0 -> predicted-based floor/frac/knee branch (SBND).
     // else -> efficiency-aware low-PE inflation: rel grows as pred falls so a low-pred
     //         channel that measures zero is tolerated (PD inefficiency at low light).
-    double per_opdet_perr(const Match::BundleQualityParams& qp, double pred, double meas_err)
+    double per_opdet_perr(const Match::BundleQualityParams& qp, int ch, double pred, double meas_err)
     {
         if (!qp.pe_err_on_pred) return meas_err;
-        if (qp.pe_err_lowpe_frac >= 0.0) {
-            const double rel = qp.pe_err_frac
-                + (qp.pe_err_lowpe_frac - qp.pe_err_frac) * std::exp(-pred / qp.pe_err_lowpe_knee);
-            return std::sqrt(std::pow(rel * pred, 2) + std::pow(qp.pe_err_floor, 2));
+        // Per-channel family overrides (QLMatching pe_err_family_* knob).
+        // Empty arrays / -1 entries (default) resolve to the scalar params,
+        // making the arithmetic below bit-identical to the legacy form.
+        double floor = qp.pe_err_floor;
+        double frac  = qp.pe_err_frac;
+        double lowpe_frac = qp.pe_err_lowpe_frac;
+        double lowpe_knee = qp.pe_err_lowpe_knee;
+        auto override_with = [ch](const std::vector<double>& v, double& dst) {
+            if (ch >= 0 && ch < (int)v.size() && v[ch] >= 0) dst = v[ch];
+        };
+        override_with(qp.pe_err_ch_floor,      floor);
+        override_with(qp.pe_err_ch_frac,       frac);
+        override_with(qp.pe_err_ch_lowpe_frac, lowpe_frac);
+        override_with(qp.pe_err_ch_lowpe_knee, lowpe_knee);
+        if (lowpe_frac >= 0.0) {
+            const double rel = frac
+                + (lowpe_frac - frac) * std::exp(-pred / lowpe_knee);
+            return std::sqrt(std::pow(rel * pred, 2) + std::pow(floor, 2));
         }
-        return pred < qp.pe_err_knee ? qp.pe_err_floor : qp.pe_err_frac * pred;
+        return pred < qp.pe_err_knee ? floor : frac * pred;
     }
 } // namespace
 
@@ -135,7 +149,7 @@ bool TimingTPCBundle::examine_bundle(TimingTPCBundle* candidate_bundle)
         if (opdet_mask[j] == 0) continue;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
+        const double perr = per_opdet_perr(m_qp, j, pred_pe[j], pe_err[j]);
         double denom = pe[j] + perr * perr;
         // Same rail widening as examine_bundle: once QLMatching keeps railed channels in
         // opdet_mask (saturation_mask_fit false) they reach this metric too, where an
@@ -244,7 +258,7 @@ bool TimingTPCBundle::examine_bundle()
         ++nvalidopdets;
         if (pe[j] < m_qp.pe_ndf_knee && pred_pe[j] < m_qp.pe_ndf_knee) { /* no-op */ }
         else ndf++;
-        const double perr = per_opdet_perr(m_qp, pred_pe[j], pe_err[j]);
+        const double perr = per_opdet_perr(m_qp, j, pred_pe[j], pe_err[j]);
         double denom = pe[j] + perr * perr;
         // Prototype close-to-PMT relaxation: a big measured excess near the PMTs widens
         // the denominator (near-PMT over-response is not a real charge/light mismatch).

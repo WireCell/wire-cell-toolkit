@@ -78,6 +78,15 @@ namespace WireCell::Match {
         // Independent of chi2_relax. Reaches the chi2 only when QLMatching leaves the
         // channel in the opdet mask (saturation_mask_fit false). 0 = off, bit-identical.
         double chi2_sat_inflate = 0.0;
+        // Per-channel PE-error overrides resolved by QLMatching from its
+        // pe_err_family_* knob (length nchan; -1 entry => the scalar value
+        // above).  All empty (default) => scalar model, bit-identical.
+        // Appended AFTER the positionally brace-initialized members so the
+        // QLMatching run.qp initializer stays valid; assigned separately.
+        std::vector<double> pe_err_ch_floor;
+        std::vector<double> pe_err_ch_frac;
+        std::vector<double> pe_err_ch_lowpe_frac;
+        std::vector<double> pe_err_ch_lowpe_knee;
     };
 
     class TimingTPCBundle {
