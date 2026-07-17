@@ -447,6 +447,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cluster_rescue_ratio_lo   = get(cfg, "cluster_rescue_ratio_lo",   m_cluster_rescue_ratio_lo);
     m_cluster_rescue_ratio_hi   = get(cfg, "cluster_rescue_ratio_hi",   m_cluster_rescue_ratio_hi);
     m_cluster_rescue_precull    = get(cfg, "cluster_rescue_precull",    m_cluster_rescue_precull);
+    m_cluster_rescue_precull_additive = get(cfg, "cluster_rescue_precull_additive", m_cluster_rescue_precull_additive);
     if (m_shared_flash && (m_empty_rescue || m_cluster_rescue)) {
         log->warn("QLMatching: empty_rescue/cluster_rescue are not shared_flash-aware "
                   "and will be SKIPPED in the joint fit");
@@ -822,6 +823,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["cluster_rescue_ratio_lo"]   = m_cluster_rescue_ratio_lo;
     cfg["cluster_rescue_ratio_hi"]   = m_cluster_rescue_ratio_hi;
     cfg["cluster_rescue_precull"]    = m_cluster_rescue_precull;
+    cfg["cluster_rescue_precull_additive"] = m_cluster_rescue_precull_additive;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -2921,8 +2923,15 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
     // non-consistent rivals, so it restores cull-victim candidates (valid ks/chi2/pred,
     // since the non-bad bundles were fully examine_bundle'd) the snapshot can't reach.
     // Both pools are vectors in deterministic build order.
-    std::map<Cluster*, std::vector<TimingTPCBundle::pointer>> by_cluster;
-    if (m_cluster_rescue_precull) {
+    //
+    // m_cluster_rescue_precull_additive: keep the snapshot pool as the PRIMARY and use
+    // the pre-cull universe only as a per-cluster FALLBACK. The primary decides every
+    // cluster the shipped snapshot rescue already handles (so precull can only add,
+    // never re-decide/mis-switch); the fallback supplies the cull-victim clusters the
+    // snapshot cannot reach.
+    std::map<Cluster*, std::vector<TimingTPCBundle::pointer>> by_cluster, by_cluster_fallback;
+    const bool additive = m_cluster_rescue_precull && m_cluster_rescue_precull_additive;
+    if (m_cluster_rescue_precull && !additive) {
         for (auto& b : run.all_bundles)
             if (!b->get_potential_bad_match_flag())
                 by_cluster[b->get_main_cluster()].push_back(b);
@@ -2931,25 +2940,31 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
         for (auto& kv : snapshot)
             for (auto& b : kv.second) by_cluster[b->get_main_cluster()].push_back(b);
     }
+    if (additive) {
+        for (auto& b : run.all_bundles)
+            if (!b->get_potential_bad_match_flag())
+                by_cluster_fallback[b->get_main_cluster()].push_back(b);
+    }
 
     // Iterate unmatched clusters in the canonical global_cluster_idx order (not pointer
-    // order) for determinism.
+    // order) for determinism. In additive mode the fallback pool is the superset, so
+    // draw the cluster list from it; otherwise the single primary pool.
+    const auto& cluster_source = additive ? by_cluster_fallback : by_cluster;
     std::vector<Cluster*> clusters;
-    for (auto& kv : by_cluster)
+    for (auto& kv : cluster_source)
         if (!matched.count(kv.first)) clusters.push_back(kv.first);
     std::sort(clusters.begin(), clusters.end(), [&run](Cluster* a, Cluster* b) {
         return run.global_cluster_idx_map.at(a) < run.global_cluster_idx_map.at(b);
     });
 
-    int n_rescued = 0;
-    for (auto* C : clusters) {
+    // Best accepting bundle for one cluster (lower score wins; deterministic tie-break
+    // by flash id then cluster_index_id). Returns null when no candidate accepts.
+    auto pick_best = [&accept, &score](const std::vector<TimingTPCBundle::pointer>& pool) {
         TimingTPCBundle::pointer best;
         double best_s = 0;
-        for (const auto& b : by_cluster[C]) {
+        for (const auto& b : pool) {
             if (!accept(b)) continue;
             const double s = score(b);
-            // Tie-break by FLASH id (the tie here is between flashes for ONE cluster),
-            // then cluster_index_id for log stability.
             if (!best || s < best_s ||
                 (s == best_s && b->get_flash()->get_flash_id() < best->get_flash()->get_flash_id()) ||
                 (s == best_s && b->get_flash()->get_flash_id() == best->get_flash()->get_flash_id()
@@ -2958,11 +2973,20 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
                 best_s = s;
             }
         }
+        return best;
+    };
+
+    int n_rescued = 0;
+    for (auto* C : clusters) {
+        // Primary pool (snapshot when additive, else the selected pool); fall back to
+        // the pre-cull pool only when additive and the primary rescued nothing.
+        TimingTPCBundle::pointer best = pick_best(by_cluster[C]);
+        if (!best && additive) best = pick_best(by_cluster_fallback[C]);
         if (!best) continue;
         run.flash_bundles_map[best->get_flash()].push_back(best);  // attach (flash may be non-empty)
         ++n_rescued;
         log->debug("QLclusrescue: flash id {} adopted cluster ident {} (score {})",
-                   best->get_flash()->get_flash_id(), C->ident(), best_s);
+                   best->get_flash()->get_flash_id(), C->ident(), score(best));
     }
 
     // Re-sort inner vectors by cluster_index_id for build-stable output (as §I does).

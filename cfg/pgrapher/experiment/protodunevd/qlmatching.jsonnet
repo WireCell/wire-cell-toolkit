@@ -102,7 +102,8 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          empty_rescue_shared=false, rescue_metric_max=null,
          cluster_rescue_shared=false, cluster_rescue_ks_max=null,
          cluster_rescue_chi2ndf_max=null, cluster_rescue_ratio_lo=null,
-         cluster_rescue_ratio_hi=null, cluster_rescue_precull=false) {
+         cluster_rescue_ratio_hi=null, cluster_rescue_precull=false,
+         cluster_rescue_precull_additive=false) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -534,6 +535,12 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // :2925).  C++ default false.  Key omitted when off => byte-identical
             // pre-fix config.  Only meaningful with cluster_rescue_shared on.
             [if cluster_rescue_shared && cluster_rescue_precull then 'cluster_rescue_precull']: true,
+            // Additive precull: snapshot pool primary, pre-cull pool fallback-only, so
+            // precull can add but never re-decide a cluster the snapshot rescue handled
+            // (kills the wrong-flash switches of pure precull; doc 20).  C++ default
+            // false => key omitted when off => byte-identical.  Needs precull on too.
+            [if cluster_rescue_shared && cluster_rescue_precull && cluster_rescue_precull_additive
+             then 'cluster_rescue_precull_additive']: true,
 
             // --- Cathode-crosser (xTPC) machinery, ENABLED 2026-07-11 ---
             // Works under shared_flash: cull_cross_tpc pairs candidate bundles

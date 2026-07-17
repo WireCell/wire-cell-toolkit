@@ -678,6 +678,17 @@ namespace WireCell::Match {
         // by the same PE-scale bar, so purity stays bounded. Default OFF (snapshot pool,
         // = the shipped behaviour); PDHD-on.
         bool   m_cluster_rescue_precull{false};
+        // ADDITIVE precull (needs m_cluster_rescue_precull too): try the post-cull
+        // snapshot pool FIRST for each unmatched cluster, and only fall back to the
+        // pre-cull universe for clusters the snapshot cannot rescue. This keeps the
+        // shipped snapshot decision for every cluster it already handles, so the
+        // larger pre-cull pool can only ADD recoveries -- it can never re-decide (and
+        // mis-switch to a wrong flash) a cluster the snapshot rescue got right. In the
+        // many-flash PDVD regime the per-bundle score cannot always tell a track's
+        // true flash from a rival, so pure precull switches a few already-good rescues
+        // to the wrong flash (039252 doc 20); this guard removes that. Default OFF =>
+        // pure precull (the PDHD behaviour) when precull is on.
+        bool   m_cluster_rescue_precull_additive{false};
 
         // Bee-op flash gid: when a single global optical flash list is fed to
         // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides
