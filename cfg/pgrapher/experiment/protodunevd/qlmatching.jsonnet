@@ -103,7 +103,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          cluster_rescue_shared=false, cluster_rescue_ks_max=null,
          cluster_rescue_chi2ndf_max=null, cluster_rescue_ratio_lo=null,
          cluster_rescue_ratio_hi=null, cluster_rescue_precull=false,
-         cluster_rescue_precull_additive=false) {
+         cluster_rescue_precull_additive=false,
+         // Relaxed second-chance rescue tier (doc 21).  C++ defaults false/0 =
+         // inert; gate values C++ 0 = vacuously-false accept; min_length in
+         // NATIVE units (caller converts from cm).  Keys omitted when off =>
+         // byte-identical.
+         cluster_rescue_relaxed=false, cluster_rescue_relaxed_ks_max=null,
+         cluster_rescue_relaxed_chi2ndf_max=null, cluster_rescue_relaxed_ratio_lo=null,
+         cluster_rescue_relaxed_ratio_hi=null, cluster_rescue_relaxed_min_length=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -541,6 +548,25 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // false => key omitted when off => byte-identical.  Needs precull on too.
             [if cluster_rescue_shared && cluster_rescue_precull && cluster_rescue_precull_additive
              then 'cluster_rescue_precull_additive']: true,
+            // Relaxed SECOND-CHANCE rescue tier (doc 21): clusters the tight
+            // cluster_rescue gates leave unmatched get one more accept() with
+            // these relaxed gates, restricted to LONG clusters
+            // (get_length() >= min_length); adoptions are stamped
+            // flag_cluster_rescue_relaxed (low-confidence) and the dump gains a
+            // `cluster_rescue_relaxed` bool per bundle.  Additive-only: existing
+            // matches can never change.  C++ defaults false/0; keys omitted when
+            // off => byte-identical pre-fix config.  Needs cluster_rescue_shared.
+            [if cluster_rescue_shared && cluster_rescue_relaxed then 'cluster_rescue_relaxed']: true,
+            [if cluster_rescue_shared && cluster_rescue_relaxed && cluster_rescue_relaxed_ks_max != null
+             then 'cluster_rescue_relaxed_ks_max']: cluster_rescue_relaxed_ks_max,
+            [if cluster_rescue_shared && cluster_rescue_relaxed && cluster_rescue_relaxed_chi2ndf_max != null
+             then 'cluster_rescue_relaxed_chi2ndf_max']: cluster_rescue_relaxed_chi2ndf_max,
+            [if cluster_rescue_shared && cluster_rescue_relaxed && cluster_rescue_relaxed_ratio_lo != null
+             then 'cluster_rescue_relaxed_ratio_lo']: cluster_rescue_relaxed_ratio_lo,
+            [if cluster_rescue_shared && cluster_rescue_relaxed && cluster_rescue_relaxed_ratio_hi != null
+             then 'cluster_rescue_relaxed_ratio_hi']: cluster_rescue_relaxed_ratio_hi,
+            [if cluster_rescue_shared && cluster_rescue_relaxed && cluster_rescue_relaxed_min_length != null
+             then 'cluster_rescue_relaxed_min_length']: cluster_rescue_relaxed_min_length,
 
             // --- Cathode-crosser (xTPC) machinery, ENABLED 2026-07-11 ---
             // Works under shared_flash: cull_cross_tpc pairs candidate bundles
