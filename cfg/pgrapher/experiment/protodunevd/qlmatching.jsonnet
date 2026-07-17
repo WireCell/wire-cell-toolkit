@@ -82,7 +82,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          xtpc_pin_min_strength=null,
          xtpc_sc1_light_gate=false, xtpc_sc1_ks_max=null, xtpc_sc1_c2n_max=null,
          xtpc_cathode_ks_max=null,
-         postcull_unflagged=false, postcull_ks_max=null, postcull_c2n_max=null) {
+         postcull_unflagged=false, postcull_ks_max=null, postcull_c2n_max=null,
+         // Sweepable ladder ceilings (doc 19 phase 4).  null => the literal
+         // operating values below (compiled JSON unchanged).
+         hc_clean_ks=null, hc_clean_c2=null, hc_good_ks=null, hc_good_c2=null,
+         hc_tb_ks=null, hc_tb_c2=null, hc_miss_ks=null, hc_miss_c2=null,
+         hc_miss_min_ndf=null,
+         // Sweepable LASSO regularization (doc 19 phase 4).  null => key
+         // omitted => the C++ defaults (lambda 0.1, delta_charge 0.01,
+         // delta_light 0.025, delta_shape 0.01, bkg_weight 0.5,
+         // strength_cutoff 0.05, lasso_boundary_weight 0.2).
+         lasso_lambda=null, delta_charge=null, delta_light=null,
+         delta_shape=null, bkg_weight=null, strength_cutoff=null,
+         lasso_boundary_weight=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -473,11 +485,27 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             highconsist_ladder: true,
             highconsist_ks_max: 0.06,
             highconsist_min_ndf: 3,
-            hc_clean_ks: 0.06, hc_clean_c2: 35.0,
-            hc_good_ks:  0.10, hc_good_c2:  35.0,
-            hc_tb_ks:    0.10, hc_tb_c2:    35.0,
-            hc_miss_ks:  0.08, hc_miss_c2:  60.0,
-            hc_miss_min_ndf: 5,
+            // Ceilings sweepable via the null-default function args (doc 19
+            // phase 4); null (default) compiles to exactly these literals.
+            hc_clean_ks: if hc_clean_ks == null then 0.06 else hc_clean_ks,
+            hc_clean_c2: if hc_clean_c2 == null then 35.0 else hc_clean_c2,
+            hc_good_ks:  if hc_good_ks == null then 0.10 else hc_good_ks,
+            hc_good_c2:  if hc_good_c2 == null then 35.0 else hc_good_c2,
+            hc_tb_ks:    if hc_tb_ks == null then 0.10 else hc_tb_ks,
+            hc_tb_c2:    if hc_tb_c2 == null then 35.0 else hc_tb_c2,
+            hc_miss_ks:  if hc_miss_ks == null then 0.08 else hc_miss_ks,
+            hc_miss_c2:  if hc_miss_c2 == null then 60.0 else hc_miss_c2,
+            hc_miss_min_ndf: if hc_miss_min_ndf == null then 5 else hc_miss_min_ndf,
+            // Sweepable LASSO regularization (doc 19 phase 4); keys omitted
+            // when null => C++ defaults => byte-identical pre-knob config.
+            [if lasso_lambda != null then 'lasso_lambda']: lasso_lambda,
+            [if delta_charge != null then 'delta_charge']: delta_charge,
+            [if delta_light != null then 'delta_light']: delta_light,
+            [if delta_shape != null then 'delta_shape']: delta_shape,
+            [if bkg_weight != null then 'bkg_weight']: bkg_weight,
+            [if strength_cutoff != null then 'strength_cutoff']: strength_cutoff,
+            [if lasso_boundary_weight != null then 'lasso_boundary_weight']:
+                lasso_boundary_weight,
 
             // --- Cathode-crosser (xTPC) machinery, ENABLED 2026-07-11 ---
             // Works under shared_flash: cull_cross_tpc pairs candidate bundles
