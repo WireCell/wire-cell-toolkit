@@ -328,7 +328,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // per-APA cluster trees into one, so skip the PointTreeMerging fanin and feed the
 // single pre-merged input straight to the all-APA MABC.  Default false = the
 // historical per-APA path (two QLMatching nodes -> PointTreeMerging -> MABC).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, use_sce=true, truth_labeler=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, use_sce=true, reality='data', run_labeler=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -500,10 +500,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         data: {
             outname: 'trash-all-apa.tar.gz',
             prefix: 'clustering_',
-            // When the truth labeler is in the pipeline the tensor output is
-            // the deliverable (labeled pctree + truth_per_track + metadata),
-            // so actually write it; otherwise keep the historical discard.
-            dump_mode: !truth_labeler,
+            // When the labeler is in the pipeline the tensor output is the
+            // deliverable (sim: labeled pctree + truth_per_track + metadata;
+            // data: pctree + RSE metadata), so actually write it; otherwise
+            // keep the historical discard.
+            dump_mode: !run_labeler,
         },
     }, nin=1, nout=0),
     // Optional truth labeling (MC only): larwirecell wclsTensorSetLabeler
@@ -521,6 +522,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         data: {
             inpath: 'pointtrees/%d',
             grouping: 'live',
+            // sim: full truth outputs; data: RSE metadata + input-only HDF5
+            // (no truth, no Bee).  Independent of the reco use_sce/pos_offset.
+            reality: reality,
             anodes: [wc.tn(anode) for anode in anodes],
             // detector volumes + PC transforms enable the "ctpc" blob-blob
             // graph flavor for the nugraph sp_nexus_sp edges.
@@ -549,9 +553,12 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // truth_per_track tensor: only main-nu-interaction particles
             // (no cosmic-muon truth); false -> full MCParticle table.
             truth_tracks_nu_only: true,
-        } + (if bee_sink != null then { bee_sink: wc.tn(bee_sink) } else {}),
-    }, nin=1, nout=1, uses=anodes + [dv, pcts, sce_field_fwd, fv_box] + (if bee_sink != null then [bee_sink] else [])),
-    local end = if dump then g.pipeline(if truth_labeler then [mabc, labeler, sink] else [mabc, sink]) else g.pipeline([mabc]),
+          // Bee sets are all truth-derived -> attach the shared sink to the
+          // labeler in sim only (the reco MABC still writes its own reco sets
+          // in both realities).
+        } + (if bee_sink != null && reality == 'sim' then { bee_sink: wc.tn(bee_sink) } else {}),
+    }, nin=1, nout=1, uses=anodes + [dv, pcts, sce_field_fwd, fv_box] + (if bee_sink != null && reality == 'sim' then [bee_sink] else [])),
+    local end = if dump then g.pipeline(if run_labeler then [mabc, labeler, sink] else [mabc, sink]) else g.pipeline([mabc]),
     // premerged: input is already one merged tree (joint QLMatching) -> feed MABC
     // directly, no PointTreeMerging.  Else: fan the per-APA inputs into pcmerging.
     ret:: if premerged then end else g.intern(
@@ -567,17 +574,31 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // the configured runNo/eventNo auto-increment.  Used by the bundled standalone chain
 // (one wire-cell call over many events) whose ident already carries the real event
 // id.  Default false keeps production byte-identical (the key is omitted).
-// use_sce (default true): run the all-APA pipeline in SCE-corrected true space
-// (x_sce); false -> the T0-corrected reco scope.
-// truth_labeler (default false): insert the larwirecell wclsTensorSetLabeler
-// between the all-APA MABC and its TensorFileSink (MC only; needs the
-// "WireCellAIML" plugin and a "wclsTensorSetLabeler" entry in fcl inputers).
-function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data', use_sce=true, truth_labeler=false) {
-    // pos_offset (per-TPC transverse y,z calibration) is data-only -- see the
-    // pos_offset_a0/a1 comment above.  reality='data' (default; keeps the data
-    // chain byte-identical to the previous always-on state) -> on; reality='sim'
-    // (MC) -> off, so the MC chain carries no transverse shift.
-    local pos_offset_on = reality == 'data',
+// reality ("sim"/"data", default "data"): selects the grouped reco config
+// (use_sce + pos_offset_on; see the `reco` local) AND is passed to the
+// labeler so it knows to emit truth (sim) or an input-only graph (data).
+// run_labeler (default false): insert the larwirecell wclsTensorSetLabeler
+// between the all-APA MABC and its TensorFileSink (needs the "WireCellAIML"
+// plugin and a "wclsTensorSetLabeler" entry in fcl inputers).  Runs in BOTH
+// realities -- sim adds truth, data adds an input-only nugraph HDF5.
+function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, reality='data', run_labeler=false) {
+    // Reco-chain reality configuration -- ONE place that groups every
+    // reality-dependent toggle of the reco chain (imaging/clustering/matching/
+    // TGM/Bee).  This does NOT affect the wclsTensorSetLabeler pseudo-sim
+    // (SCE/drift/smear/readout), which has its own knobs on the labeler node.
+    //   use_sce       : run in SCE true space (x_sce) vs T0-corrected reco
+    //                   (x_t0cor).
+    //   pos_offset_on : per-TPC transverse (y,z) calibration (see the
+    //                   pos_offset_a0/a1 comment above).
+    // Suggested additions when they become reality-dependent: the sptpc2d vs
+    // simtpc2d product tags (today set in the fcl structs), any data-only
+    // lifetime/e-attenuation correction, and the flash/PMT calibration inputs.
+    local reco = {
+        sim:  { use_sce: true,  pos_offset_on: false },
+        data: { use_sce: false, pos_offset_on: true },
+    }[reality],
+    local use_sce = reco.use_sce,
+    local pos_offset_on = reco.pos_offset_on,
     // bee_sink (default null): when set to a shared IBeeSink node, all Bee
     // output for this node goes into that single shared zip instead of this
     // node's own bee_zip.  Default null -> own zip (production byte-identical).
@@ -597,6 +618,6 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     all_apa(anodes, dump=true, bee_sink=null, premerged=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on, use_sce=use_sce, truth_labeler=truth_labeler),
+                     bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on, use_sce=use_sce, reality=reality, run_labeler=run_labeler),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
