@@ -220,6 +220,14 @@ namespace WireCell::Match {
         // downstream.
         void set_flag_xtpc_cathode_provisional(bool v) { flag_xtpc_cathode_provisional = v; }
         bool get_flag_xtpc_cathode_provisional() const { return flag_xtpc_cathode_provisional; }
+        // Relaxed second-chance cluster rescue (QLMatching cluster_rescue_relaxed
+        // knob, default off => never set => bit-identical). True = this bundle was
+        // adopted for a still-unmatched LONG cluster by the RELAXED accept() tier,
+        // i.e. it failed the tight cluster-rescue gates and is a lower-confidence
+        // match; the calib dump exposes it so downstream scans can distinguish
+        // relaxed adoptions from LASSO/tight-rescue matches.
+        void set_flag_cluster_rescue_relaxed(bool v) { flag_cluster_rescue_relaxed = v; }
+        bool get_flag_cluster_rescue_relaxed() const { return flag_cluster_rescue_relaxed; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -249,6 +257,7 @@ namespace WireCell::Match {
         bool flag_xtpc_pin{false};
         bool flag_xtpc_cathode_cand{false};
         bool flag_xtpc_cathode_provisional{false};
+        bool flag_cluster_rescue_relaxed{false};
 
         double ks_dis;
         double chi2;

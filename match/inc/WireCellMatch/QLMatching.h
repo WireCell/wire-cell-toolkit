@@ -689,6 +689,23 @@ namespace WireCell::Match {
         // to the wrong flash (039252 doc 20); this guard removes that. Default OFF =>
         // pure precull (the PDHD behaviour) when precull is on.
         bool   m_cluster_rescue_precull_additive{false};
+        // Relaxed SECOND-CHANCE tier of the cluster rescue (039252 doc 21). The
+        // tight cluster_rescue_* gates sit at the per-bundle recall ceiling in the
+        // many-flash PDVD regime: most remaining non-matches DO have a candidate at
+        // the true flash time, but its light metrics fail the tight bar. This tier
+        // re-offers ONLY the clusters the tight pass left unmatched one more
+        // accept() with these relaxed gates, restricted to LONG clusters
+        // (main-cluster get_length() >= min_length, native units). Additive-only
+        // like the tight pass — it can never alter an existing match — and every
+        // adoption is stamped flag_cluster_rescue_relaxed so scans can treat it as
+        // lower-confidence. Same inert-default scheme as the tight gates: bool off
+        // AND ks_max 0 => vacuously-false gate => byte-identical.
+        bool   m_cluster_rescue_relaxed{false};
+        double m_cluster_rescue_relaxed_ks_max{0.0};
+        double m_cluster_rescue_relaxed_chi2ndf_max{0.0};
+        double m_cluster_rescue_relaxed_ratio_lo{0.0};
+        double m_cluster_rescue_relaxed_ratio_hi{0.0};
+        double m_cluster_rescue_relaxed_min_length{0.0};
 
         // Bee-op flash gid: when a single global optical flash list is fed to
         // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides

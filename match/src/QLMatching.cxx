@@ -448,6 +448,12 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cluster_rescue_ratio_hi   = get(cfg, "cluster_rescue_ratio_hi",   m_cluster_rescue_ratio_hi);
     m_cluster_rescue_precull    = get(cfg, "cluster_rescue_precull",    m_cluster_rescue_precull);
     m_cluster_rescue_precull_additive = get(cfg, "cluster_rescue_precull_additive", m_cluster_rescue_precull_additive);
+    m_cluster_rescue_relaxed            = get(cfg, "cluster_rescue_relaxed",            m_cluster_rescue_relaxed);
+    m_cluster_rescue_relaxed_ks_max     = get(cfg, "cluster_rescue_relaxed_ks_max",     m_cluster_rescue_relaxed_ks_max);
+    m_cluster_rescue_relaxed_chi2ndf_max = get(cfg, "cluster_rescue_relaxed_chi2ndf_max", m_cluster_rescue_relaxed_chi2ndf_max);
+    m_cluster_rescue_relaxed_ratio_lo   = get(cfg, "cluster_rescue_relaxed_ratio_lo",   m_cluster_rescue_relaxed_ratio_lo);
+    m_cluster_rescue_relaxed_ratio_hi   = get(cfg, "cluster_rescue_relaxed_ratio_hi",   m_cluster_rescue_relaxed_ratio_hi);
+    m_cluster_rescue_relaxed_min_length = get(cfg, "cluster_rescue_relaxed_min_length", m_cluster_rescue_relaxed_min_length);
     if (m_shared_flash && (m_empty_rescue || m_cluster_rescue)) {
         log->warn("QLMatching: empty_rescue/cluster_rescue are not shared_flash-aware "
                   "and will be SKIPPED in the joint fit");
@@ -824,6 +830,12 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["cluster_rescue_ratio_hi"]   = m_cluster_rescue_ratio_hi;
     cfg["cluster_rescue_precull"]    = m_cluster_rescue_precull;
     cfg["cluster_rescue_precull_additive"] = m_cluster_rescue_precull_additive;
+    cfg["cluster_rescue_relaxed"]            = m_cluster_rescue_relaxed;
+    cfg["cluster_rescue_relaxed_ks_max"]     = m_cluster_rescue_relaxed_ks_max;
+    cfg["cluster_rescue_relaxed_chi2ndf_max"] = m_cluster_rescue_relaxed_chi2ndf_max;
+    cfg["cluster_rescue_relaxed_ratio_lo"]   = m_cluster_rescue_relaxed_ratio_lo;
+    cfg["cluster_rescue_relaxed_ratio_hi"]   = m_cluster_rescue_relaxed_ratio_hi;
+    cfg["cluster_rescue_relaxed_min_length"] = m_cluster_rescue_relaxed_min_length;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -2989,6 +3001,65 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
                    best->get_flash()->get_flash_id(), C->ident(), score(best));
     }
 
+    // Relaxed SECOND-CHANCE tier (§J2, doc 21; default OFF => byte-identical).
+    // Clusters the tight pass above left unmatched get one more accept() with the
+    // relaxed gates, restricted to LONG clusters. Same pools, same score() and
+    // deterministic tie-break, same additive-only guarantee (only ADD onto
+    // flash_bundles_map, never reassign) — an existing match can never change.
+    // Adoptions are stamped flag_cluster_rescue_relaxed = the low-confidence mark.
+    if (m_cluster_rescue_relaxed) {
+        log->debug("QLclusrescue-relaxed on: ks<{} c2ndf<{} ratio {}-{} min_len {} cm",
+                   m_cluster_rescue_relaxed_ks_max, m_cluster_rescue_relaxed_chi2ndf_max,
+                   m_cluster_rescue_relaxed_ratio_lo, m_cluster_rescue_relaxed_ratio_hi,
+                   m_cluster_rescue_relaxed_min_length / units::cm);
+        auto accept_relaxed = [this](const TimingTPCBundle::pointer& b) {
+            const int ndf = std::max(b->get_ndf(), 1);
+            const double c2ndf = b->get_chi2() / ndf;
+            const double meas = b->get_flash()->get_total_PE();
+            const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+            return b->get_ks_dis() < m_cluster_rescue_relaxed_ks_max
+                && c2ndf < m_cluster_rescue_relaxed_chi2ndf_max
+                && ratio > m_cluster_rescue_relaxed_ratio_lo
+                && ratio < m_cluster_rescue_relaxed_ratio_hi;
+        };
+        auto pick_best_relaxed = [&accept_relaxed, &score](const std::vector<TimingTPCBundle::pointer>& pool) {
+            TimingTPCBundle::pointer best;
+            double best_s = 0;
+            for (const auto& b : pool) {
+                if (!accept_relaxed(b)) continue;
+                const double s = score(b);
+                if (!best || s < best_s ||
+                    (s == best_s && b->get_flash()->get_flash_id() < best->get_flash()->get_flash_id()) ||
+                    (s == best_s && b->get_flash()->get_flash_id() == best->get_flash()->get_flash_id()
+                                 && b->get_cluster_index_id() < best->get_cluster_index_id())) {
+                    best = b;
+                    best_s = s;
+                }
+            }
+            return best;
+        };
+        // Re-derive the matched set AFTER the tight pass (its adoptions are already
+        // inside flash_bundles_map), so the tight loop above stays textually legacy.
+        std::set<Cluster*> matched_now;   // membership only, never iterated
+        for (auto& kv : run.flash_bundles_map)
+            for (auto& b : kv.second) matched_now.insert(b->get_main_cluster());
+        int n_relaxed = 0;
+        for (auto* C : clusters) {
+            if (matched_now.count(C)) continue;
+            if (C->get_length() < m_cluster_rescue_relaxed_min_length) continue;
+            TimingTPCBundle::pointer best = pick_best_relaxed(by_cluster[C]);
+            if (!best && additive) best = pick_best_relaxed(by_cluster_fallback[C]);
+            if (!best) continue;
+            best->set_flag_cluster_rescue_relaxed(true);
+            run.flash_bundles_map[best->get_flash()].push_back(best);
+            ++n_relaxed;
+            log->debug("QLclusrescue-relaxed: flash id {} adopted cluster ident {} (len {} cm, score {})",
+                       best->get_flash()->get_flash_id(), C->ident(),
+                       C->get_length() / units::cm, score(best));
+        }
+        log->debug("QLclusrescue-relaxed: rescued {} long unmatched cluster(s)", n_relaxed);
+    }
+
     // Re-sort inner vectors by cluster_index_id for build-stable output (as §I does).
     for (auto& kv : run.flash_bundles_map) {
         std::sort(kv.second.begin(), kv.second.end(),
@@ -3526,6 +3597,11 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             // keep contained=false and are skipped above).
             if (m_xtpc_cathode_tol > 0.0)
                 jb["xtpc_cathode_rescued"] = b->get_flag_xtpc_cathode_provisional();
+            // Key emitted only when the relaxed rescue tier is on => knob-off dumps
+            // stay byte-identical. True = adopted by the RELAXED second-chance
+            // gates (low-confidence match; failed the tight cluster_rescue bar).
+            if (m_cluster_rescue_relaxed)
+                jb["cluster_rescue_relaxed"] = b->get_flag_cluster_rescue_relaxed();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
