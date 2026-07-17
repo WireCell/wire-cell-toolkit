@@ -311,7 +311,10 @@ double Flash::OpDecon::auto_scale(const SPETemplate& spe,
 {
     const int N = m_samples;
     std::vector<std::complex<float>> xGH(N);
-    for (int k = 0; k < N; ++k) {
+    // Under use_real_dft the inverse ignores bins above Nyquist (IDFT.h
+    // contract), so filling them is dead work; bit-identical either way.
+    const int kmax = m_use_real_dft ? N / 2 + 1 : N;
+    for (int k = 0; k < kmax; ++k) {
         // phase shift by half window: exp(+i 2 pi k (N/2) / N) = (-1)^k
         const float sign = (k % 2 == 0) ? 1.0f : -1.0f;
         xGH[k] = xG[k] * spe.fft[k] * sign;
@@ -449,9 +452,21 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
     // Wiener-inspired mode: G = conj(H) F / (|H|^2 + eps) instead.
     auto xV = dft_fwd(xv);
     const bool fold = m_apply_postfilter && m_fold_postfilter;
-    std::vector<std::complex<float>> xG(N), xY(N);
+    // Bins above Nyquist are dead work unless something reads them: the real
+    // inverse transform ignores them by contract (IDFT.h: "values above the
+    // Nyquist frequency are ignored"; both the widening default and FftwDFT's
+    // native c2r enforce it), so under use_real_dft the only full-spectrum
+    // consumer is the folded-postfilter pedestal accumulator. Halving the loop
+    // in the other cases is bit-identical; the complex path (use_real_dft off)
+    // keeps the full loop.
+    const int kmax = (m_use_real_dft && !(fold && m_apply_post_blcorr)) ? N / 2 + 1 : N;
+    // xG exists only for auto_scale (not cached, not wiener-inspired); on every
+    // other path the filter value multiplies xV directly -- same two floats
+    // multiplied, so the result is bit-identical without the N-complex buffer.
+    const bool need_xG = m_auto_scale && !m_wiener_inspired && !spe.scale_cached;
+    std::vector<std::complex<float>> xG(need_xG ? N : 0), xY(N);
     std::complex<double> ped_acc(0.0, 0.0);
-    for (int k = 0; k < N; ++k) {
+    for (int k = 0; k < kmax; ++k) {
         const std::complex<double> H = spe.fft[k];
         const double H2 = std::norm(H);
         std::complex<double> g;
@@ -462,8 +477,9 @@ std::vector<float> Flash::OpDecon::deconvolve(const std::vector<float>& adc, con
             const double N2 = noise ? (*noise)[k <= N / 2 ? k : N - k] : N2_flat;
             g = std::conj(H) * S2 / (H2 * S2 + N2);
         }
-        xG[k] = std::complex<float>(g);
-        xY[k] = xG[k] * xV[k];
+        const std::complex<float> gf(g);
+        if (need_xG) xG[k] = gf;
+        xY[k] = gf * xV[k];
         if (fold) {
             // Head pedestal of the UNfiltered decon, evaluated spectrally.
             if (m_apply_post_blcorr) ped_acc += std::complex<double>(xY[k]) * m_ped_w[k];
@@ -538,11 +554,20 @@ bool Flash::OpDecon::operator()(const IFrame::pointer& in, IFrame::pointer& out)
         const std::vector<float>* src = &trace->charge();
         std::vector<float> unclipped;
         if (m_detect_saturation && m_overflow_to_rail) {
-            unclipped = trace->charge();
-            const int nfix = unclip_overflow(unclipped);
-            if (nfix) {
-                src = &unclipped;
-                noverflow += nfix;
+            // Copy only when a floor-pinned sample exists at all: without one
+            // unclip_overflow cannot form a run (nfix would be 0 and the copy
+            // discarded), so the const-first scan is bit-identical and skips
+            // the full-trace copy on the typical overflow-free channel.
+            const auto& q0 = trace->charge();
+            const bool any_floor = std::any_of(
+                q0.begin(), q0.end(), [this](float v) { return v <= m_overflow_adc; });
+            if (any_floor) {
+                unclipped = q0;
+                const int nfix = unclip_overflow(unclipped);
+                if (nfix) {
+                    src = &unclipped;
+                    noverflow += nfix;
+                }
             }
         }
         std::vector<std::pair<int, int>> sat_runs;  // unpadded, trace-local
