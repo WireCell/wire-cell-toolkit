@@ -170,6 +170,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_hough_radius = get(cfg, "xtpc_hough_radius", m_xtpc_hough_radius);
     m_xtpc_joint_pin    = get(cfg, "xtpc_joint_pin",    m_xtpc_joint_pin);
     m_xtpc_pin_angle    = get(cfg, "xtpc_pin_angle",    m_xtpc_pin_angle);
+    m_xtpc_cathode_tol   = get(cfg, "xtpc_cathode_tol",   m_xtpc_cathode_tol);
+    m_xtpc_cathode_qfrac = get(cfg, "xtpc_cathode_qfrac", m_xtpc_cathode_qfrac);
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -283,6 +285,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_robust_endpoint_gap         = get(cfg, "robust_endpoint_gap",         m_robust_endpoint_gap);
     m_robust_endpoint_gap_charge_frac = get(cfg, "robust_endpoint_gap_charge_frac", m_robust_endpoint_gap_charge_frac);
     m_robust_endpoint_walk_to_floor   = get(cfg, "robust_endpoint_walk_to_floor",   m_robust_endpoint_walk_to_floor);
+    m_robust_endpoint_gap_cathode     = get(cfg, "robust_endpoint_gap_cathode",     m_robust_endpoint_gap_cathode);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -381,6 +384,14 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     const auto cathode_fv_tn = get<std::string>(cfg, "cathode_fiducial", std::string(""));
     if (!cathode_fv_tn.empty()) {
         m_cathode_fv = Factory::find_tn<IFiducial>(cathode_fv_tn);
+    }
+    if (m_xtpc_cathode_tol > 0.0 && m_cross_side_filter) {
+        // Not composed: a provisional (uncontained) bundle lacks flag_at_x_boundary,
+        // so the opaque-cathode cross-side drop would cull it before pairing. No
+        // current detector enables both (cross_side_filter is SBND, whose CPA
+        // fiducial also excludes it from the rescue's flat-window path).
+        log->warn("QLMatching: xtpc_cathode_tol with cross_side_filter is untested; "
+                  "cross-side-lit provisional bundles are dropped before pairing");
     }
 
     if (cfg["VUVEfficiency"].isArray()) {
@@ -555,6 +566,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_hough_radius"] = m_xtpc_hough_radius;
     cfg["xtpc_joint_pin"]    = m_xtpc_joint_pin;
     cfg["xtpc_pin_angle"]    = m_xtpc_pin_angle;
+    cfg["xtpc_cathode_tol"]   = m_xtpc_cathode_tol;
+    cfg["xtpc_cathode_qfrac"] = m_xtpc_cathode_qfrac;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["light_model"]     = m_light_model;
@@ -610,6 +623,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["robust_endpoint_gap"]         = m_robust_endpoint_gap;
     cfg["robust_endpoint_gap_charge_frac"] = m_robust_endpoint_gap_charge_frac;
     cfg["robust_endpoint_walk_to_floor"]   = m_robust_endpoint_walk_to_floor;
+    cfg["robust_endpoint_gap_cathode"]     = m_robust_endpoint_gap_cathode;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
@@ -776,6 +790,16 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     const double t_prefit = ms_since(t_prefit0);
     const auto t_cull0 = wallclock::now();
     if (m_xtpc_flag && runs.size() > 1) cull_cross_tpc(runs);
+    // xtpc cathode rescue resolution (xtpc_cathode_tol > 0 only; otherwise no
+    // provisional flag exists and this is a no-op): a provisional cathode-overshoot
+    // bundle survives ONLY if cull_cross_tpc confirmed it as a scenario-1 crosser
+    // half (opposite-volume partner on the SAME flash, clouds meeting within
+    // xtpc_dmax). Unconfirmed provisionals are removed here, BEFORE
+    // cull_inconsistent/fit, so downstream sees exactly the legacy candidate set.
+    // Note if xtpc_flag is off or there is a single run, cull_cross_tpc never ran
+    // and EVERY provisional is purged => legacy again.
+    if (m_xtpc_cathode_tol > 0.0)
+        for (auto& run : runs) purge_unconfirmed_cathode_rescue(run);
     // Per-TPC consistency cull, now AFTER the cross-TPC flag pass so it can honour the
     // xtpc flags (xtpc-priority). When no xtpc flag is set (non-SBND / xtpc_flag:false)
     // this reproduces the historical cull_inconsistent exactly => bit-identical.
@@ -1434,8 +1458,13 @@ void QLMatching::build_bundles(ApaRun& run)
             if (!m_calib_dump.empty() || m_highconsist_ladder)
                 compute_two_boundary_flag(bundle.get(), main_cluster, flash_x_offset, run);
             // Discard bundles whose cluster is not contained in the TPC box once
-            // the flash T0 x-offset is applied. Off by default.
-            if (m_require_containment && !contained) continue;
+            // the flash T0 x-offset is applied. Off by default. xtpc cathode rescue
+            // (xtpc_cathode_tol > 0, else the flag is never set): a provisional
+            // cathode-overshoot bundle is kept through the vis/eval below so
+            // cull_cross_tpc can try to confirm it as a crosser half; operator()
+            // purges it before cull_inconsistent/fit if unconfirmed.
+            if (m_require_containment && !contained &&
+                !bundle->get_flag_xtpc_cathode_provisional()) continue;
 
             // Opaque-cathode cross-side mismatch (hoisted form): a flash lit on the
             // opposite drift side from this cluster can only match a cathode-crosser
@@ -1662,6 +1691,39 @@ void QLMatching::build_bundle_maps(ApaRun& run)
     };
     sort_inner_by_cluster_idx(run.flash_bundles_map);
     sort_inner_by_flash_idx(run.cluster_bundles_map);
+}
+
+// xtpc cathode rescue resolution (see the operator() call site and QLMatching.h).
+// Removes provisional cathode-overshoot bundles that did not acquire
+// flag_xtpc_scenario1 in cull_cross_tpc; stamps survivors contained (accepted with
+// the overshoot tolerance) so dump_calib shows them. Purely a filter: result is
+// independent of iteration order.
+void QLMatching::purge_unconfirmed_cathode_rescue(ApaRun& run)
+{
+    TimingTPCBundleSelection to_be_removed;
+    for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+        for (const auto& b : run.flash_bundles_map.at(flash)) {
+            if (!b->get_flag_xtpc_cathode_provisional()) continue;
+            if (b->get_flag_xtpc_scenario1()) {
+                b->set_contained(true);
+                log->debug("QLXTPC cathode-rescue KEEP apa{} cluster {} flash {} "
+                           "(scenario-1 confirmed crosser half)",
+                           (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                           b->get_flash()->get_flash_id());
+            }
+            else {
+                to_be_removed.push_back(b);
+                log->debug("QLXTPC cathode-rescue DROP apa{} cluster {} flash {} "
+                           "(no cross-volume confirmation)",
+                           (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                           b->get_flash()->get_flash_id());
+            }
+        }
+    }
+    if (to_be_removed.empty()) return;
+    remove_bundle_selection(to_be_removed, run.flash_bundles_map, run.cluster_bundles_map,
+                            run.flash_cluster_bundles_map);
+    remove_bundle_selection(to_be_removed, run.pre_bundles);
 }
 
 // [Stage 1] Per-cluster consistency cull, cross-TPC-aware (runs AFTER cull_cross_tpc's
@@ -2991,6 +3053,13 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["xtpc_consistent"]      = b->get_flag_xtpc_consistent();
             jb["xtpc_scenario1"]       = b->get_flag_xtpc_scenario1();
             jb["xtpc_pin"]             = b->get_flag_xtpc_pin();
+            // Key emitted only when the rescue knob is on => knob-off dumps stay
+            // byte-identical. True = this bundle failed raw containment by a cathode
+            // overshoot within tolerance and survived only via the scenario-1
+            // cross-volume confirmation (purged provisionals never reach here: they
+            // keep contained=false and are skipped above).
+            if (m_xtpc_cathode_tol > 0.0)
+                jb["xtpc_cathode_rescued"] = b->get_flag_xtpc_cathode_provisional();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
@@ -3358,7 +3427,10 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double off = run.sign_offset * (flash->get_time() + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
-                if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated())
+                // xtpc cathode rescue (xtpc_cathode_tol > 0, else the flag is never
+                // set): admit near/past-cathode halves that miss at_x_boundary.
+                if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated()
+                    && !bundle->get_flag_xtpc_cathode_cand())
                     continue;
                 cands.push_back({XtpcMC{bundle.get(), bundle->get_main_cluster(), off,
                                         run.dy, run.dz, bundle->get_flag_window_truncated()},
@@ -3415,6 +3487,12 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
             if (cands[j].side != 1) continue;
             ++n_pairs_eval;
             if (std::abs(cands[i].t_us - cands[j].t_us) > win_us) continue;  // coincident
+            // xtpc cathode rescue: never confirm two PROVISIONAL (uncontained) halves
+            // with each other -- at least one half of the pair must be a fully
+            // contained bundle. No-op when the knob is off (flags never set).
+            if (cands[i].mc.b->get_flag_xtpc_cathode_provisional() &&
+                cands[j].mc.b->get_flag_xtpc_cathode_provisional())
+                continue;
             ++n_pairs_coincident;
             log->debug("QLXTPC coincident 0/{} (t={:.3f}us) 1/{} (t={:.3f}us)",
                        cands[i].mc.c->ident(), cands[i].t_us,
@@ -3736,11 +3814,32 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         };
         if (last_u >= cathode_in) {                         // cathode end (deepest)
             int pts_out = 0; double q_out = 0.0; double in_u = last_u; bool reached = false;
+            // gap_detached: mirror of the anode-end detachment path below, enabled by
+            // m_robust_endpoint_gap_cathode (default false => this block is exactly the
+            // legacy sparse()-only test, byte-identical; PDHD, which sets
+            // m_robust_endpoint_gap for its anode cases, is unaffected until it opts in).
+            // The over-cathode material contains a gap wider than m_robust_endpoint_gap,
+            // i.e. it is overclustered junk DETACHED from the contiguous body rather than
+            // a real continuous track end. Density-blind, as at the anode. Walking from
+            // the deepest slice inward, consecutive u DECREASE, so the gap is
+            // (prev_u - it->u).
+            bool gap_detached = false; double prev_u = sv.back().u;
             for (auto it = sv.rbegin(); it != sv.rend(); ++it) {
                 if (it->u < cathode_in) { in_u = it->u; reached = true; break; }
-                pts_out += it->npts; q_out += it->q;
+                if (m_robust_endpoint_gap_cathode && m_robust_endpoint_gap > 0.0
+                    && (prev_u - it->u) > m_robust_endpoint_gap)
+                    gap_detached = true;
+                pts_out += it->npts; q_out += it->q; prev_u = it->u;
             }
-            if (reached && sparse(pts_out, q_out)) last_u = in_u;
+            // Gap path: trim detached junk whose charge stays within the gap budget,
+            // regardless of its per-point density (which the charge_abs gate would
+            // refuse). The fraction cap is the safety bound: a real over-cathode stretch
+            // carrying more charge is left to fail -- that is what stops a wrong-T0
+            // hypothesis from being rescued here.
+            const bool gap_trim = gap_detached
+                && m_robust_endpoint_gap_charge_frac > 0.0
+                && q_out <= m_robust_endpoint_gap_charge_frac * q_total;
+            if (reached && (gap_trim || sparse(pts_out, q_out))) last_u = in_u;
         }
         if (first_u <= anode_in) {                          // anode end (shallowest)
             int pts_out = 0; double q_out = 0.0; double in_u = first_u; bool reached = false;
@@ -3853,6 +3952,59 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
             // cathode-PD treatment be designed from the calib dump. Set for every
             // detector; harmless where unused.
             bundle->set_flag_at_cathode(true);
+        }
+    }
+
+    // ---- xtpc cathode rescue admission (default 0 => byte-identical; see the
+    // m_xtpc_cathode_tol block in QLMatching.h and
+    // wcp-porting-img/pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md §10) ----
+    // Flat-cathode window only: with a CPA fiducial configured (SBND) the at_cathode
+    // geometry is 3-D and this 1-D tolerance is not meaningful.
+    if (m_xtpc_cathode_tol > 0.0 && !m_cathode_fv) {
+        if (!contained && m_require_containment) {
+            // Provisional admission: containment failed ONLY by cathode overshoot,
+            // and the junk-tolerant cathode endpoint sits within the tolerance.
+            // Junk tolerance: overclustered satellites merged into the cluster can
+            // drag the RAW extreme tens of cm past the gate while carrying a tiny
+            // charge fraction (evt298567 uid 4000097: 2.6% of charge at up to
+            // u=386 vs gate 338.91, real end 342.24). Walk from the deep end
+            // discarding slices while the discarded charge stays within
+            // m_xtpc_cathode_qfrac of the cluster total; the endpoint is the first
+            // slice that cannot be discarded. qfrac <= 0 => the raw endpoint
+            // (strict). The discarded material is NOT removed from anything -- this
+            // endpoint exists only for this admission test.
+            const bool others_pass =
+                first_u > anode_in - m_anode_ext1_margin &&
+                last_u  > 0.0 &&
+                first_u < u_cathode;
+            if (others_pass && last_u >= cathode_in) {
+                double end_u = last_u;
+                if (m_xtpc_cathode_qfrac > 0.0) {
+                    double q_total = 0.0;
+                    for (const auto& sl : sv) q_total += sl.q;
+                    const double q_budget = m_xtpc_cathode_qfrac * q_total;
+                    double q_disc = 0.0;
+                    for (auto it = sv.rbegin(); it != sv.rend(); ++it) {
+                        if (q_disc + it->q > q_budget) { end_u = it->u; break; }
+                        q_disc += it->q;
+                    }
+                }
+                if (end_u < cathode_in + m_xtpc_cathode_tol) {
+                    bundle->set_flag_xtpc_cathode_provisional(true);
+                    bundle->set_flag_xtpc_cathode_cand(true);
+                    bundle->set_flag_at_cathode(true);   // inert diagnostic, accurate here
+                }
+            }
+        }
+        else if (contained &&
+                 last_u >= u_cathode + m_cathode_ext2 - m_xtpc_cathode_tol &&
+                 last_u < cathode_in) {
+            // Candidate admission only (the short side of the cathode window): the
+            // partner half of a displaced crossing ends BELOW u_cathode+cathode_ext2,
+            // misses at_x_boundary, and would be invisible to cull_cross_tpc. Do NOT
+            // set at_x_boundary itself -- it also feeds the ladder / cross-side /
+            // LASSO-weight paths, which must stay legacy.
+            bundle->set_flag_xtpc_cathode_cand(true);
         }
     }
     return contained;

@@ -60,7 +60,9 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          robust_endpoint_count=null, robust_endpoint_charge_frac=null,
          robust_endpoint_charge_abs=null, robust_endpoint_gap=null,
          robust_endpoint_gap_charge_frac=null,
-         robust_endpoint_walk_to_floor=false) {
+         robust_endpoint_walk_to_floor=false,
+         robust_endpoint_gap_cathode=false,
+         xtpc_cathode_tol=null, xtpc_cathode_qfrac=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -400,6 +402,23 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // must rely on window_truncated for xtpc admission -- revisit if the
             // gid83-style short-half pool needs recovering.
             cathode_ext2: -2 * wc.cm,
+            // xtpc CATHODE RESCUE (C++ default 0 = OFF; keys omitted when null =>
+            // byte-identical pre-knob config). A crosser pair whose halves meet a
+            // few cm off the nominal cathode fails BOTH xtpc admission gates at
+            // once: the overshooting half fails containment, the short half misses
+            // the at_cathode window above (the -12 cm cathode_ext2 experiment tried
+            // to fix the short half but over-flagged non-crossers BECAUSE it went
+            // through at_x_boundary; the rescue widens a dedicated xtpc-candidacy
+            // flag instead, leaving at_x_boundary and its ladder/LASSO consumers
+            // legacy). tol = length past the containment gate / below the
+            // at_cathode window tolerated FOR XTPC CANDIDACY ONLY; qfrac = charge
+            // fraction discardable as overclustered junk when measuring the
+            // overshoot. A provisionally kept uncontained half is purged before the
+            // fit unless cull_cross_tpc confirms it (scenario 1, one half
+            // contained). PDVD 039252 evt298567 top-97+bot-139 vs flash 96
+            // (pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md §10).
+            [if xtpc_cathode_tol != null then 'xtpc_cathode_tol']: xtpc_cathode_tol,
+            [if xtpc_cathode_qfrac != null then 'xtpc_cathode_qfrac']: xtpc_cathode_qfrac,
 
             // Cathode-side containment tolerance (how far past the cathode a
             // cluster's drift end may reach and still count as contained;
@@ -456,14 +475,26 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // C++ default 0 => disabled.
             [if robust_endpoint_charge_abs != null then 'robust_endpoint_charge_abs']:
                 robust_endpoint_charge_abs,
-            // Gap (detachment) judge, anode end only: trim sub-anode material split
-            // from the body by a gap wider than robust_endpoint_gap that carries at
-            // most robust_endpoint_gap_charge_frac of the cluster charge.  Keyed on
+            // Gap (detachment) judge: trim outer material split from the body by a gap
+            // wider than robust_endpoint_gap that carries at most
+            // robust_endpoint_gap_charge_frac of the cluster charge.  Keyed on
             // detachment, not density, so it reaches junk the density judge protects.
+            // Applies to the ANODE end only unless robust_endpoint_gap_cathode is set.
             // C++ defaults 0 / 0 => disabled.
             [if robust_endpoint_gap != null then 'robust_endpoint_gap']: robust_endpoint_gap,
             [if robust_endpoint_gap_charge_frac != null then 'robust_endpoint_gap_charge_frac']:
                 robust_endpoint_gap_charge_frac,
+            // Mirror that gap judge at the CATHODE end, reusing the same two thresholds.
+            // The knobs above were added for anode-end cases, but nothing in their
+            // justification is direction-specific, and the upstream cause is symmetric:
+            // clustering_isolated merges any "small" cluster into the nearest big one
+            // within a hardcoded 80 cm (no angle/direction/gap test), at whichever end
+            // it lies.  cf. PDHD evt 1007 uid-126 (anode) vs PDVD evt298567 apa-4
+            // ident 97 (cathode): same pathology, only the first had a judge.
+            // C++ default false => key omitted => byte-identical pre-knob config, and
+            // PDHD (which sets the two keys above) is unaffected until it opts in.
+            // See pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md.
+            [if robust_endpoint_gap_cathode then 'robust_endpoint_gap_cathode']: true,
             // Where the anode-end walk stops calling material "outside".  Default
             // anode_in (= anode_ext1, -2 cm), which is anode_ext1_margin cm ABOVE the
             // floor the containment gate uses (first_u > anode_ext1 - margin, -4 cm

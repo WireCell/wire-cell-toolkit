@@ -295,6 +295,28 @@ namespace WireCell::Match {
         // existing density path is untouched.
         double m_robust_endpoint_gap{0.0};            // detachment-gap threshold (0 => disabled)
         double m_robust_endpoint_gap_charge_frac{0.0};// outer-charge cap for the gap path
+        // Mirror the gap path at the CATHODE end (default OFF => byte-identical, and in
+        // particular PDHD -- which sets the two keys above -- is unaffected until it opts
+        // in). The two knobs above were added for anode-end cases only, but nothing in
+        // their justification is direction-specific: a real cathode-REACHING track end is
+        // just as continuous as a real anode-piercing one, and the junk is just as
+        // detached. The exposure is symmetric by construction, because the upstream cause
+        // -- clustering_isolated's small->big merge (clustering_isolated.cxx: hardcoded
+        // small_big_dis_cut = 80 cm, no angle/direction/gap test) -- has no directional
+        // preference: it absorbs any "small" cluster into the nearest big one within
+        // 80 cm, at whichever end it happens to lie. The always-on legacy trims above
+        // already treat both ends as mirror images; only this knob-gated robust layer
+        // broke that symmetry, as an accident of where the first cases turned up.
+        // Compare PDHD evt 1007 uid-126 ("7 gap-separated groups marching from u=-111cm
+        // up to the body", ~2000 q/pt, anode end) with PDVD 039252 evt298567 apa-4
+        // ident 97 (6 gap-separated isolated-merged clumps, 5847 q/pt, CATHODE end):
+        // same pathology, same upstream cause, opposite ends -- only the first had a
+        // judge. When true the cathode-end walk reuses m_robust_endpoint_gap and
+        // m_robust_endpoint_gap_charge_frac (same thresholds, same safety bound: a real
+        // over-cathode stretch carrying more charge is left to fail, which is what stops
+        // a wrong-T0 hypothesis being rescued). Density path untouched.
+        // See pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md.
+        bool m_robust_endpoint_gap_cathode{false};
         // Where the anode-end walk stops calling material "outside" (default OFF =>
         // byte-identical). The walk breaks at the first slice above anode_in
         // (= m_anode_ext1), but the containment gate it feeds is
@@ -760,6 +782,39 @@ namespace WireCell::Match {
         bool   m_xtpc_joint_pin{false};
         double m_xtpc_pin_angle{20.0};            // degrees, folded track-axis collinearity
 
+        // Cross-TPC CATHODE RESCUE (off unless xtpc_cathode_tol > 0; needs xtpc_flag +
+        // 2 sides to ever confirm anything). Motivation: a genuine cathode crosser
+        // whose two halves meet a few cm off the nominal cathode plane fails BOTH
+        // admission gates at once -- the overshooting half fails containment
+        // (require_containment drops the bundle at build), and the short half misses
+        // the at_cathode window so it never gets flag_at_x_boundary and never enters
+        // cull_cross_tpc's candidate set. The pair the xtpc joint-pin exists for is
+        // then invisible to it (PDVD 039252 evt298567 top-97 + bot-139 vs flash 96:
+        // ends agree to 0.4 cm but meet ~3.5 cm below the cathode face; see
+        // wcp-porting-img/pdvd/docs/qlmatch/16_pdvd-clus97-crosser-evt298567.md §10).
+        // Mechanism, all gated on m_xtpc_cathode_tol > 0 (flat-cathode window only,
+        // never when m_cathode_fv is configured):
+        //  - a bundle failing containment ONLY by cathode overshoot is kept
+        //    PROVISIONALLY when its junk-tolerant cathode endpoint (the deepest slice
+        //    that cannot be discarded within a charge budget of m_xtpc_cathode_qfrac
+        //    of the cluster charge, walking from the deep end; qfrac<=0 => the raw
+        //    endpoint) lies within m_xtpc_cathode_tol past the containment gate;
+        //  - a CONTAINED bundle whose cathode end sits within m_xtpc_cathode_tol
+        //    BELOW the at_cathode window gets xtpc candidate admission only
+        //    (flag_xtpc_cathode_cand, NOT flag_at_x_boundary -- that flag also feeds
+        //    the ladder/cross-side/LASSO-weight paths, which stay legacy);
+        //  - cull_cross_tpc admits candidates by the new flag, but never confirms two
+        //    provisional (uncontained) halves with each other;
+        //  - after cull_cross_tpc, provisional bundles WITHOUT a scenario-1
+        //    confirmation are purged (purge_unconfirmed_cathode_rescue), BEFORE
+        //    cull_inconsistent/fit -- downstream then sees exactly the legacy set.
+        // So the tolerance is only ever exercised for a pair the existing scenario-1 /
+        // joint-pin geometry independently confirms (opposite-volume partner on the
+        // SAME flash, clouds meeting within xtpc_dmax at the cathode). Default 0 =>
+        // no flag is ever set, no bundle is kept or removed => byte-identical.
+        double m_xtpc_cathode_tol{0.0};           // length; 0 = off
+        double m_xtpc_cathode_qfrac{0.0};         // charge fraction discardable as junk
+
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
         std::string m_semimodel_file{"sbnd/photodet/semi-analytical-sbnd.json"};
@@ -944,6 +999,11 @@ namespace WireCell::Match {
                                        WireCell::Clus::Facade::Cluster* main_cluster,
                                        double flash_x_offset, const ApaRun& run) const;
         void build_bundle_maps(ApaRun& run);         // flash/cluster/pair maps + deterministic sort
+        // xtpc cathode rescue resolution (m_xtpc_cathode_tol > 0 only): drop
+        // provisional cathode-overshoot bundles that cull_cross_tpc did not confirm
+        // as scenario-1 crosser halves; stamp survivors contained. Runs between
+        // cull_cross_tpc and cull_inconsistent.
+        void purge_unconfirmed_cathode_rescue(ApaRun& run);
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
         void fit_round1(ApaRun& run);                // LASSO, per-flash background DOF           [Stage 2]
         void fit_round2(ApaRun& run);                // LASSO + KS-shape, keep best per cluster   [Stage 3]

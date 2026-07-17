@@ -195,6 +195,22 @@ namespace WireCell::Match {
         // never sets it => bit-identical.
         void set_flag_xtpc_pin(bool v) { flag_xtpc_pin = v; }
         bool get_flag_xtpc_pin() const { return flag_xtpc_pin; }
+        // xtpc cathode rescue (QLMatching xtpc_cathode_tol knob, default 0 = off =>
+        // neither flag is ever set => bit-identical).
+        // cand: this bundle's cluster ends near/past the cathode within the widened
+        // window, so cull_cross_tpc admits it as a crosser-half candidate WITHOUT
+        // flag_at_x_boundary (which also feeds ladder/cross-side/LASSO-weight paths
+        // that must stay legacy).
+        void set_flag_xtpc_cathode_cand(bool v) { flag_xtpc_cathode_cand = v; }
+        bool get_flag_xtpc_cathode_cand() const { return flag_xtpc_cathode_cand; }
+        // provisional (subset of cand): the bundle FAILED containment, only by a
+        // cathode overshoot within the tolerance, and was kept provisionally so
+        // cull_cross_tpc can try to confirm it. QLMatching purges any provisional
+        // bundle that does not acquire flag_xtpc_scenario1, before
+        // cull_inconsistent/fit, so unconfirmed provisionals are unobservable
+        // downstream.
+        void set_flag_xtpc_cathode_provisional(bool v) { flag_xtpc_cathode_provisional = v; }
+        bool get_flag_xtpc_cathode_provisional() const { return flag_xtpc_cathode_provisional; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -222,6 +238,8 @@ namespace WireCell::Match {
         bool flag_xtpc_consistent{false};
         bool flag_xtpc_scenario1{false};
         bool flag_xtpc_pin{false};
+        bool flag_xtpc_cathode_cand{false};
+        bool flag_xtpc_cathode_provisional{false};
 
         double ks_dis;
         double chi2;
