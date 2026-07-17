@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <set>
 
 WIRECELL_FACTORY(QLMatching,
@@ -863,6 +864,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
     m_pca_endpoints_cache.clear();
     m_wall_flag_cache.clear();
+    m_endpoint_slice_cache.clear();
 
     // Match each APA's input independently in its own fresh, isolated ApaRun (one
     // per input port). The per-APA masks, geometry and flash_gid stride are
@@ -1508,6 +1510,58 @@ void QLMatching::build_bundles(ApaRun& run)
     // them via assign), avoiding a per-point allocation pair.
     std::vector<double> direct_visibilities;
     std::vector<double> reflected_visibilities;
+
+    // Flash-independent per-cluster point cache for the vis loop below. The
+    // legacy loop re-fetched blob->points("3d") per (flash x group x blob) --
+    // a string-keyed dataset lookup plus a fresh point-array copy for data that
+    // only ever shifts by the per-flash constant flash_x_offset (round-0
+    // profile, pdvd/docs/15_pdvd-light-ql-perf.md). Fetch each cluster's blob
+    // coordinates once per ApaRun into contiguous arrays (same values, same
+    // blob and point order) and record each blob's coordinate bounds for the
+    // conservative AABB pre-gate in the loop. Keyed lookup only (never
+    // iterated); local to this call, freed on return.
+    struct BlobPts {
+        double charge;
+        int npts;
+        std::vector<double> xs, ys, zs;
+        double xlo, xhi, ylo, yhi, zlo, zhi;
+    };
+    std::unordered_map<const Cluster*, std::vector<BlobPts>> cluster_pts;
+    for (const auto& mg : run.match_groups) {
+        std::vector<Cluster*> gcs{mg.first};
+        gcs.insert(gcs.end(), mg.second.begin(), mg.second.end());
+        for (auto* gc : gcs) {
+            auto [it, fresh] = cluster_pts.try_emplace(gc);
+            if (!fresh) continue;
+            auto& blobs = it->second;
+            for (auto blob : gc->children()) {
+                BlobPts b;
+                b.charge = blob->charge();
+                b.npts = blob->npoints();
+                b.xlo = b.ylo = b.zlo = std::numeric_limits<double>::infinity();
+                b.xhi = b.yhi = b.zhi = -std::numeric_limits<double>::infinity();
+                auto points = blob->points("3d", {"x", "y", "z"});
+                b.xs.reserve(b.npts);
+                b.ys.reserve(b.npts);
+                b.zs.reserve(b.npts);
+                for (int i = 0; i < b.npts; ++i) {
+                    const auto& p = points.at(i);
+                    const double x = p.x(), y = p.y(), z = p.z();
+                    b.xs.push_back(x);
+                    b.ys.push_back(y);
+                    b.zs.push_back(z);
+                    if (x < b.xlo) b.xlo = x;
+                    if (x > b.xhi) b.xhi = x;
+                    if (y < b.ylo) b.ylo = y;
+                    if (y > b.yhi) b.yhi = y;
+                    if (z < b.zlo) b.zlo = z;
+                    if (z > b.zhi) b.zhi = z;
+                }
+                blobs.push_back(std::move(b));
+            }
+        }
+    }
+
     for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
         // trigger_offset_for folds the per-event readout-vs-trigger offset into the
@@ -1652,18 +1706,42 @@ void QLMatching::build_bundles(ApaRun& run)
                     ? m_vis_sample_stride : 1;
             const auto t_vis0 = wallclock::now();
             for (auto* gc : group_clusters) {
-              for (auto blob : gc->children()) {
-                run.total_charge_blob += blob->charge();
-                const double q = blob->charge() / blob->npoints();
-                auto points = blob->points("3d", {"x", "y", "z"});
+              for (const auto& b : cluster_pts.find(gc)->second) {
+                run.total_charge_blob += b.charge;
+                const double q = b.charge / b.npts;
 
-                for (int i = 0; i < blob->npoints(); i += vstride) {
+                // Conservative AABB pre-gate against the PE-inclusion box at
+                // this flash's offset. Every per-coordinate op below (add a
+                // constant, subtract a constant, multiply by run.s) is monotone
+                // in FP, so u of every blob point lies within [ulo, uhi] built
+                // from the cached x bounds, and a box strictly outside the gate
+                // on any one axis implies every point fails that axis' test
+                // exactly as the per-point compares would. Skipped blobs replay
+                // only the total_charge_point accumulation, which never touched
+                // the coordinates -- the running sums, and hence the debug
+                // totals, are FP-identical to the legacy per-point loop.
+                const double ua = run.s * ((b.xlo + flash_x_offset) - run.anode_x);
+                const double ub = run.s * ((b.xhi + flash_x_offset) - run.anode_x);
+                const double ulo = std::min(ua, ub);
+                const double uhi = std::max(ua, ub);
+                if (uhi < m_anode_ext1 || ulo > run.u_cathode + m_cathode_ext1 ||
+                    b.yhi < run.y_lo || b.ylo > run.y_hi ||
+                    b.zhi < run.z_lo || b.zlo > run.z_hi) {
+                    for (int i = 0; i < b.npts; i += vstride) {
+                        const double qw =
+                            (vstride == 1) ? q : q * double(std::min(vstride, b.npts - i));
+                        run.total_charge_point += qw;
+                    }
+                    continue;
+                }
+
+                for (int i = 0; i < b.npts; i += vstride) {
                     const double qw =
-                        (vstride == 1) ? q : q * double(std::min(vstride, blob->npoints() - i));
+                        (vstride == 1) ? q : q * double(std::min(vstride, b.npts - i));
                     run.total_charge_point += qw;
-                    const double x = points.at(i).x() + flash_x_offset;
-                    const double y = points.at(i).y();
-                    const double z = points.at(i).z();
+                    const double x = b.xs[i] + flash_x_offset;
+                    const double y = b.ys[i];
+                    const double z = b.zs[i];
 
                     // PE-inclusion gate in the per-TPC drift coordinate u.
                     const double u = run.s * (x - run.anode_x);
@@ -4031,27 +4109,27 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     // rather than the prototype's strict time order is a faithful adaptation: for a
     // normally drifting track time and u are monotonic, and the boundary tests are
     // themselves in u.
-    const auto& tbm = cluster->time_blob_map();
-    if (tbm.empty()) return false;  // no blobs at all: cannot be contained
+    // The time_blob_map walk below is flash-independent except for the constant
+    // flash_x_offset shift of the drift coordinate, yet this function runs once
+    // per (flash x group) bundle (~10k calls/event on PDVD) and the per-slice
+    // Blob::points() fetch (string-keyed dataset lookup + full point-array copy,
+    // read only at index 0) dominated build_bundles CPU (66% on 039253 evt
+    // 49846, round-0 profile of pdvd/docs/15_pdvd-light-ql-perf.md). Scan once
+    // per cluster into m_endpoint_slice_cache (raw x0 and tallies, traversal
+    // order) and rebuild u per flash with the identical FP ops; the per-call
+    // sort below is kept so any rounding-induced tie ordering matches the
+    // legacy per-call behavior exactly.
+    auto cit = m_endpoint_slice_cache.find(cluster);
+    if (cit == m_endpoint_slice_cache.end()) {
+        EndpointSliceCache ec;
+        const auto& tbm = cluster->time_blob_map();
 
-    // Raw readout-window truncation flag (T0-independent, APA-agnostic). The
-    // blob slice indices are raw ticks (SamplingHelpers writes slice_index =
-    // islice->start()/tick), so a cluster is window-truncated if its leading
-    // slice sits within m_window_edge_ticks of tick 0, or its trailing slice
-    // within m_window_edge_ticks of the window end. No flash_x_offset enters:
-    // this is a property of the raw window, identical for both reversed-drift
-    // APAs. Computed independently of the u-walk below (which skips slices with
-    // no 3d points and can early-return on sv.empty()).
-    //
-    // The window end is the post-resample frame length, m_readout_window_ticks.
-    // Its default is an SBND number (3427); a detector with a longer window
-    // (PDHD: 5999) would mislabel every mid-drift cluster past tick 3427, so PDHD
-    // feeds the real value (read from the SP frame by its run script) via the
-    // readout_window_ticks config -- see cfg/.../pdhd/qlmatching.jsonnet.
-    {
-        const int win = m_readout_window_ticks;
-        bool have = false;
-        int min_tick = 0, max_tick = 0;
+        // Raw readout-window truncation bounds (T0-independent, APA-agnostic).
+        // The blob slice indices are raw ticks (SamplingHelpers writes
+        // slice_index = islice->start()/tick). No flash_x_offset enters: this is
+        // a property of the raw window, identical for both reversed-drift APAs.
+        // Collected over all slices with blobs, independently of the u-walk data
+        // (which keeps only slices with 3d points).
         for (const auto& [anode, faces] : tbm) {
             (void)anode;
             for (const auto& [face, slices] : faces) {
@@ -4059,40 +4137,57 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                     if (bset.empty()) continue;
                     const int lo = t;                               // slice_index_min (raw tick)
                     const int hi = (*bset.begin())->slice_index_max();
-                    if (!have) { min_tick = lo; max_tick = hi; have = true; }
-                    else { if (lo < min_tick) min_tick = lo; if (hi > max_tick) max_tick = hi; }
+                    if (!ec.have_ticks) { ec.min_tick = lo; ec.max_tick = hi; ec.have_ticks = true; }
+                    else { if (lo < ec.min_tick) ec.min_tick = lo; if (hi > ec.max_tick) ec.max_tick = hi; }
                 }
             }
         }
-        if (have) {
-            const bool truncated =
-                (min_tick - 0 <= m_window_edge_ticks) ||
-                (win - max_tick <= m_window_edge_ticks);
-            bundle->set_flag_window_truncated(truncated);
+
+        for (const auto& [anode, faces] : tbm) {
+            (void)anode;
+            for (const auto& [face, slices] : faces) {
+                for (const auto& [t, bset] : slices) {
+                    if (bset.empty()) continue;
+                    const Blob* b0 = *bset.begin();
+                    auto pts = b0->points("3d", {"x", "y", "z"});
+                    if (pts.empty()) continue;
+                    // Slice point count (charge mass of the slice) for the robust-endpoint
+                    // trim; npoints() is a cached int per blob, so this stays cheap.
+                    int slice_npts = 0;
+                    double slice_q = 0.0;
+                    for (const Blob* b : bset) { slice_npts += b->npoints(); slice_q += b->charge(); }
+                    ec.slices.push_back({ pts.at(0).x(), static_cast<int>(bset.size()),
+                                          slice_npts, slice_q });
+                }
+            }
         }
+        cit = m_endpoint_slice_cache.emplace(cluster, std::move(ec)).first;
+    }
+    const EndpointSliceCache& ec = cit->second;
+
+    // Window-truncation flag from the cached raw-tick bounds. The window end is
+    // the post-resample frame length, m_readout_window_ticks. Its default is an
+    // SBND number (3427); a detector with a longer window (PDHD: 5999) would
+    // mislabel every mid-drift cluster past tick 3427, so PDHD feeds the real
+    // value (read from the SP frame by its run script) via the
+    // readout_window_ticks config -- see cfg/.../pdhd/qlmatching.jsonnet.
+    // (An all-empty time_blob_map leaves have_ticks false: no flag, as before.)
+    if (ec.have_ticks) {
+        const int win = m_readout_window_ticks;
+        const bool truncated =
+            (ec.min_tick - 0 <= m_window_edge_ticks) ||
+            (win - ec.max_tick <= m_window_edge_ticks);
+        bundle->set_flag_window_truncated(truncated);
     }
 
     struct SliceU { double u; int nblobs; int npts; double q; };
     std::vector<SliceU> sv;
-    for (const auto& [anode, faces] : tbm) {
-        (void)anode;
-        for (const auto& [face, slices] : faces) {
-            for (const auto& [t, bset] : slices) {
-                if (bset.empty()) continue;
-                const Blob* b0 = *bset.begin();
-                auto pts = b0->points("3d", {"x", "y", "z"});
-                if (pts.empty()) continue;
-                const double x = pts.at(0).x() + flash_x_offset;
-                // Slice point count (charge mass of the slice) for the robust-endpoint
-                // trim; npoints() is a cached int per blob, so this stays cheap.
-                int slice_npts = 0;
-                double slice_q = 0.0;
-                for (const Blob* b : bset) { slice_npts += b->npoints(); slice_q += b->charge(); }
-                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()), slice_npts, slice_q });
-            }
-        }
+    sv.reserve(ec.slices.size());
+    for (const auto& sl : ec.slices) {
+        const double x = sl.x0 + flash_x_offset;
+        sv.push_back({ s * (x - anode_x), sl.nblobs, sl.npts, sl.q });
     }
-    if (sv.empty()) return false;  // no 3d points here: cannot be contained
+    if (sv.empty()) return false;  // no blobs / no 3d points: cannot be contained
 
     std::sort(sv.begin(), sv.end(),
               [](const SliceU& a, const SliceU& b) { return a.u < b.u; });

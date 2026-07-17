@@ -771,6 +771,25 @@ namespace WireCell::Match {
         mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*, uint8_t>
             m_wall_flag_cache;
 
+        // Per-cluster cache of the flash-independent part of the
+        // compute_endpoint_flags slice scan: the raw min/max slice ticks of the
+        // window-truncation block, and per (non-empty, with-3d-points) slice the
+        // raw first-point x plus blob/point/charge tallies, in time_blob_map
+        // traversal order (pre-sort).  The per-flash drift coordinate is an
+        // affine shift of x0, recomputed per call with the identical FP ops, so
+        // results are bit-identical while the O(nslices) map walk and the
+        // per-slice Blob::points() fetch run once per cluster instead of once
+        // per (flash x group).  Keyed lookup only (never iterated); cleared each
+        // event in operator() alongside m_extreme_cache.
+        struct EndpointSliceCache {
+            bool have_ticks{false};
+            int min_tick{0}, max_tick{0};
+            struct SliceRaw { double x0; int nblobs; int npts; double q; };
+            std::vector<SliceRaw> slices;
+        };
+        mutable std::unordered_map<const WireCell::Clus::Facade::Cluster*, EndpointSliceCache>
+            m_endpoint_slice_cache;
+
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
         float m_cluster_t0{-1e12};
