@@ -450,6 +450,15 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
         log->warn("QLMatching: empty_rescue/cluster_rescue are not shared_flash-aware "
                   "and will be SKIPPED in the joint fit");
     }
+    // Shared-flash-aware rescue variants (doc 19 phase 5); default OFF.
+    // Reuse the per-run threshold knobs (rescue_metric_max/exponent/
+    // boundary_weight; cluster_rescue_*).
+    m_empty_rescue_shared   = get(cfg, "empty_rescue_shared",   m_empty_rescue_shared);
+    m_cluster_rescue_shared = get(cfg, "cluster_rescue_shared", m_cluster_rescue_shared);
+    if (!m_shared_flash && (m_empty_rescue_shared || m_cluster_rescue_shared)) {
+        log->warn("QLMatching: empty_rescue_shared/cluster_rescue_shared need "
+                  "shared_flash and will be inert");
+    }
 
     // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
     // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
@@ -805,6 +814,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
     cfg["cluster_rescue"]            = m_cluster_rescue;
+    cfg["empty_rescue_shared"]       = m_empty_rescue_shared;
+    cfg["cluster_rescue_shared"]     = m_cluster_rescue_shared;
     cfg["cluster_rescue_ks_max"]     = m_cluster_rescue_ks_max;
     cfg["cluster_rescue_chi2ndf_max"] = m_cluster_rescue_chi2ndf_max;
     cfg["cluster_rescue_ratio_lo"]   = m_cluster_rescue_ratio_lo;
@@ -2365,6 +2376,12 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
     const double delta_charge = m_delta_charge;
     const double delta_light  = m_delta_light;
 
+    // Pre-LASSO snapshot for the shared rescues (doc 19 phase 5), mirroring
+    // fit_round1's capture; gated so the OFF path allocates nothing new.
+    if (m_empty_rescue_shared || m_cluster_rescue_shared) {
+        for (auto& run : runs) run.prefit_snapshot = run.flash_bundles_map;
+    }
+
     // OpDet universe: identical across runs by construction (opdet_all_volumes +
     // deterministic auto-mask on identical flash lists); guard config mistakes.
     const ApaRun& r0 = runs.front();
@@ -2666,6 +2683,15 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     // (its result is discarded there — the matched output is what remains in
     // flash_bundles_map).
 
+    // Shared-flash-aware rescues (doc 19 phase 5; default OFF = bit-identical).
+    // Empty-flash rescue uses JOINT emptiness (no side holds the flash); the
+    // cluster-centric rescue is side-local by construction (ADD-only, a shared
+    // flash legitimately holds bundles of both sides) so §J applies per run.
+    if (m_empty_rescue_shared) rescue_empty_flashes_shared(runs);
+    if (m_cluster_rescue_shared) {
+        for (auto& run : runs) rescue_unmatched_clusters(run, run.prefit_snapshot);
+    }
+
     // Post-fit unflagged low-quality cull (doc 19; OFF default = bit-identical).
     for (auto& run : runs) cull_unflagged_lowquality(run);
 
@@ -2869,6 +2895,119 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
                   });
     }
     log->debug("QLclusrescue: rescued {} unmatched cluster(s)", n_rescued);
+}
+
+// Shared-flash empty-flash rescue (m_empty_rescue_shared; doc 19 phase 5).
+// The per-run §I notion of "empty flash" is wrong under shared_flash: a flash
+// explained by the OTHER drift side's clusters is not empty.  Here a physical
+// flash (keyed by flash row id, identical across ports by construction — see
+// fit_round1_shared's guard) is empty only when NO run has a surviving bundle
+// for its instance.  The best snapshot candidate ACROSS sides is adopted with
+// the same metric / metric_max bar / reassign-only-if-strictly-better /
+// pin-locked rules as §I, applied within the candidate's own run.
+void QLMatching::rescue_empty_flashes_shared(std::vector<ApaRun>& runs)
+{
+    auto metric = [this](const TimingTPCBundle::pointer& b) {
+        const int ndf = std::max(b->get_ndf(), 1);
+        double m = b->get_ks_dis() * std::pow(b->get_chi2() / ndf, m_rescue_exponent);
+        if (b->get_flag_at_x_boundary()) m *= m_rescue_boundary_weight;
+        if (b->get_flag_close_to_PMT()) m *= m_rescue_boundary_weight;
+        return m;
+    };
+
+    // Where each currently-matched cluster lives (clusters are per-run objects,
+    // so one global map is collision-free): cluster -> (run idx, flash, metric).
+    struct Cur { std::size_t k; Opflash* flash; double m; };
+    std::map<Cluster*, Cur> matched;
+    std::set<Cluster*> pin_locked;
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        for (auto& kv : runs[k].flash_bundles_map) {
+            for (auto& b : kv.second) {
+                matched[b->get_main_cluster()] = {k, kv.first, metric(b)};
+                if (b->get_flag_xtpc_pin()) pin_locked.insert(b->get_main_cluster());
+            }
+        }
+    }
+
+    // Physical flashes present in any snapshot, by ascending flash row id;
+    // live occupancy checked across ALL runs.
+    struct Phys { std::vector<std::pair<std::size_t, Opflash*>> insts; };
+    std::map<int, Phys> phys;
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        for (auto& kv : runs[k].prefit_snapshot) {
+            phys[kv.first->get_flash_id()].insts.emplace_back(k, kv.first);
+        }
+    }
+
+    int n_rescued = 0;
+    for (auto& [fid, pf] : phys) {
+        bool live = false;
+        for (auto& [k, f] : pf.insts) {
+            auto it = runs[k].flash_bundles_map.find(f);
+            if (it != runs[k].flash_bundles_map.end() && !it->second.empty()) {
+                live = true;
+                break;
+            }
+        }
+        if (live) continue;
+
+        // Best candidate across sides; deterministic tie-break (run idx, then
+        // cluster_index_id) — insts are in ascending run order by construction.
+        TimingTPCBundle::pointer best;
+        std::size_t best_k = 0;
+        Opflash* best_f = nullptr;
+        double best_m = 0;
+        for (auto& [k, f] : pf.insts) {
+            auto sit = runs[k].prefit_snapshot.find(f);
+            if (sit == runs[k].prefit_snapshot.end()) continue;
+            for (const auto& b : sit->second) {
+                const double m = metric(b);
+                if (!best || m < best_m ||
+                    (m == best_m && b->get_cluster_index_id() < best->get_cluster_index_id())) {
+                    best = b;
+                    best_k = k;
+                    best_f = f;
+                    best_m = m;
+                }
+            }
+        }
+        if (!best || best_m > m_rescue_metric_max) continue;
+
+        auto* C = best->get_main_cluster();
+        if (pin_locked.count(C)) continue;
+        auto mit = matched.find(C);
+        if (mit == matched.end()) {
+            runs[best_k].flash_bundles_map[best_f].push_back(best);
+        }
+        else {
+            if (!(best_m < mit->second.m)) continue;
+            auto& run_x = runs[mit->second.k];
+            auto* X = mit->second.flash;
+            auto& xv = run_x.flash_bundles_map[X];
+            xv.erase(std::remove_if(xv.begin(), xv.end(),
+                                    [C](const TimingTPCBundle::pointer& b) {
+                                        return b->get_main_cluster() == C;
+                                    }),
+                     xv.end());
+            if (xv.empty()) run_x.flash_bundles_map.erase(X);
+            runs[best_k].flash_bundles_map[best_f].push_back(best);
+        }
+        matched[C] = {best_k, best_f, best_m};
+        ++n_rescued;
+        log->debug("QLrescue-shared: flash id {} adopted cluster ident {} "
+                   "(run {} metric {})",
+                   fid, C->ident(), best_k, best_m);
+    }
+
+    for (auto& run : runs) {
+        for (auto& kv : run.flash_bundles_map) {
+            std::sort(kv.second.begin(), kv.second.end(),
+                      [](const TimingTPCBundle::pointer& a, const TimingTPCBundle::pointer& b) {
+                          return a->get_cluster_index_id() < b->get_cluster_index_id();
+                      });
+        }
+    }
+    log->debug("QLrescue-shared: rescued {} empty flash(es)", n_rescued);
 }
 
 // Stamp the matched flash/t0 onto each cluster (and its associated sub-clusters):
@@ -3095,6 +3234,8 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["postcull_unflagged"]    = m_postcull_unflagged;
     qp["postcull_ks_max"]       = m_postcull_ks_max;
     qp["postcull_c2n_max"]      = m_postcull_c2n_max;
+    qp["empty_rescue_shared"]   = m_empty_rescue_shared;
+    qp["cluster_rescue_shared"] = m_cluster_rescue_shared;
     qp["saturation_mask_fit"] = m_saturation_mask_fit;
     qp["auto_mask"]              = m_auto_mask;
     qp["auto_mask_pe_low"]       = m_auto_mask_pe_low;

@@ -652,6 +652,18 @@ namespace WireCell::Match {
         // ks_max=0 => the gate ks<0 is vacuously false => no-op (doubly inert with the
         // bool guard) so production stays bit-identical; PDHD jsonnet turns it on.
         bool   m_cluster_rescue{false};
+        // Shared-flash-aware rescue variants (doc 19 phase 5; PDVD).  The legacy
+        // rescues above are per-run "empty flash" concepts and are SKIPPED under
+        // shared_flash; these run in the JOINT rounds instead.  empty_rescue_shared:
+        // a flash is empty only when NO drift side has a surviving bundle for it;
+        // the best snapshot candidate ACROSS sides is adopted (same metric/
+        // reassign-only-if-strictly-better/pin-locked rules as §I, same
+        // rescue_metric_max bar).  cluster_rescue_shared: per-run cluster-centric
+        // adoption exactly as §J (ADD-only; a shared flash legitimately holds
+        // bundles of both sides), gated by the same cluster_rescue_* thresholds.
+        // Both default OFF => byte-identical.
+        bool   m_empty_rescue_shared{false};
+        bool   m_cluster_rescue_shared{false};
         double m_cluster_rescue_ks_max{0.0};        // 0 => gate false => inert
         double m_cluster_rescue_chi2ndf_max{0.0};
         double m_cluster_rescue_ratio_lo{0.0};
@@ -1116,6 +1128,10 @@ namespace WireCell::Match {
         // onto an already-non-empty flash. snapshot is the same pre-strength-cutoff
         // flash->candidate map; this mutates run.flash_bundles_map in place.
         void rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& snapshot);
+        // Shared-flash empty-flash rescue (m_empty_rescue_shared): joint emptiness
+        // across all runs, best candidate across sides; mutates the owning run's
+        // flash_bundles_map.
+        void rescue_empty_flashes_shared(std::vector<ApaRun>& runs);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
 

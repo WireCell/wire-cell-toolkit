@@ -94,7 +94,15 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // strength_cutoff 0.05, lasso_boundary_weight 0.2).
          lasso_lambda=null, delta_charge=null, delta_light=null,
          delta_shape=null, bkg_weight=null, strength_cutoff=null,
-         lasso_boundary_weight=null) {
+         lasso_boundary_weight=null,
+         // Shared-flash-aware rescues (doc 19 phase 5).  C++ defaults OFF;
+         // threshold args reuse the per-run rescue knobs (rescue_metric_max
+         // C++ 1e9; cluster_rescue_* C++ 0 = inert gate — supply values when
+         // enabling cluster_rescue_shared).
+         empty_rescue_shared=false, rescue_metric_max=null,
+         cluster_rescue_shared=false, cluster_rescue_ks_max=null,
+         cluster_rescue_chi2ndf_max=null, cluster_rescue_ratio_lo=null,
+         cluster_rescue_ratio_hi=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -506,6 +514,20 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if strength_cutoff != null then 'strength_cutoff']: strength_cutoff,
             [if lasso_boundary_weight != null then 'lasso_boundary_weight']:
                 lasso_boundary_weight,
+            // Shared-flash-aware rescues (doc 19 phase 5).  C++ defaults
+            // false/1e9/0; keys omitted when off => byte-identical.
+            [if empty_rescue_shared then 'empty_rescue_shared']: true,
+            [if empty_rescue_shared && rescue_metric_max != null then 'rescue_metric_max']:
+                rescue_metric_max,
+            [if cluster_rescue_shared then 'cluster_rescue_shared']: true,
+            [if cluster_rescue_shared && cluster_rescue_ks_max != null then 'cluster_rescue_ks_max']:
+                cluster_rescue_ks_max,
+            [if cluster_rescue_shared && cluster_rescue_chi2ndf_max != null then 'cluster_rescue_chi2ndf_max']:
+                cluster_rescue_chi2ndf_max,
+            [if cluster_rescue_shared && cluster_rescue_ratio_lo != null then 'cluster_rescue_ratio_lo']:
+                cluster_rescue_ratio_lo,
+            [if cluster_rescue_shared && cluster_rescue_ratio_hi != null then 'cluster_rescue_ratio_hi']:
+                cluster_rescue_ratio_hi,
 
             // --- Cathode-crosser (xTPC) machinery, ENABLED 2026-07-11 ---
             // Works under shared_flash: cull_cross_tpc pairs candidate bundles
