@@ -595,6 +595,11 @@ local clus_all_tpc (
     eventNo = 1,
     save_opflash = false,
     premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
+    // Tip-touch relaxation for the cathode-crossing connector (see the
+    // cm.cathode_connect call below).  null => the C++ defaults leave the
+    // relaxation OFF, so the compiled config is byte-identical when unset.
+    cc_tip_touch_cut = null,
+    cc_tip_touch_angle_cut = null,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -635,10 +640,21 @@ local clus_all_tpc (
         // NB PDVD has ONE all-PD flash, so a genuine crosser's two halves
         // normally share the SAME matched flash — the 1 us window is a
         // formality that also admits a rare split match.
+        //
+        // cc_tip_touch_cut / cc_tip_touch_angle_cut port the PDHD tip-touch
+        // relaxation (pdhd/clus.jsonnet): when the two cathode tips nearly touch
+        // (~1cm gap) drop the cc_pca connection-alignment term (tip_touch_cut)
+        // and accept on the local charge-weighted Hough within
+        // tip_touch_angle_cut even if a curved half inflates the global PCA
+        // above angle_cut.  null => C++ defaults tip_touch_cut=0 (OFF) and
+        // tip_touch_angle_cut=angle_cut (OFF) => byte-identical when unset.
+        // PDVD values are set from the runner (census-tuned operating point).
         cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
                            conn_short_cut=30.0, use_flash_t0=premerged,
-                           flash_t0_window=1*wc.us),
+                           flash_t0_window=1*wc.us,
+                           tip_touch_cut=cc_tip_touch_cut,
+                           tip_touch_angle_cut=cc_tip_touch_angle_cut),
     ],
 
     local mabc = g.pnode({
@@ -749,7 +765,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),

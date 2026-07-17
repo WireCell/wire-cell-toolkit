@@ -538,6 +538,56 @@ veto every pair; with the gate off, pairing rests entirely on the geometric conj
   global cluster count = sum of drift-group counts (no merges fired, as expected for
   out-of-time cosmics; repeat runs hash-identical).
 
+### 6.1 Post-QLMatching operating point + PDVD tip-touch relaxation (2026-07-17)
+
+The 2026-06-09 enablement above predates Q/L matching feeding the clustering. Both
+detectors now run **joint QLMatching before the stage-4 all-TPC clustering**, so every
+cluster carries its matched `cluster_t0` when `cathode_connect` runs and the
+flash-coincidence gate is a real safety mechanism rather than a veto:
+
+- **PDHD** flipped `use_flash_t0=false → true` (`flash_t0_window=1us`) and added the
+  **tip-touch relaxation** `tip_touch_cut=3cm` + `tip_touch_angle_cut=12°` hardcoded ON
+  (`cfg/pgrapher/experiment/pdhd/clus.jsonnet`, commit `00a8e078`). Tip-touch drops the
+  uninformative `cc_pca` connection-alignment term when the two cathode tips nearly touch
+  (~1 cm gap, where that vector is sub-cm jitter noise) and accepts on the local
+  charge-weighted Hough within 12° even when a curved half inflates the global PCA above
+  `angle_cut` — recovering same-flash crossers run29107 evt983 cl36↔cl89, evt991 cl26↔cl67.
+- **PDVD** runs the same pass gated on the matched T0 (`use_flash_t0=premerged`, true in
+  production) but **omitted the tip-touch relaxation** — the one live delta from PDHD.
+  There is no same-face problem to solve here: `ClusteringCathodeConnect` gates only on
+  `wpid.apa()` *differing* (opposite drift volumes) with no same-face check, so PDVD's
+  y-half faces are already handled and `allow_mixed_faces` is irrelevant to this pass.
+
+**Plumbing (byte-identical, done):** `cc_tip_touch_cut` / `cc_tip_touch_angle_cut` are
+threaded into PDVD's `clus_all_tpc` → `cm.cathode_connect(...)`
+(`cfg/pgrapher/experiment/protodunevd/clus.jsonnet`) and exposed as `--tla`
+`cc_tip_touch_cut_cm` / `cc_tip_touch_angle_cut` in `pdvd/wct-clustering.jsonnet`
+(cm→internal conversion) and env vars `PDVD_CC_TIP_TOUCH_CUT` / `_ANGLE` in
+`pdvd/run_clus_evt.sh`. Both default `null`/empty ⇒ the common `cathode_connect()` method
+suppresses the keys ⇒ C++ defaults `tip_touch_cut=0` (OFF) / `tip_touch_angle_cut=angle_cut`
+(OFF). Unlike PDHD (hardcoded ON) the PDVD *operating point* lives in the runner default,
+matching the established PDVD Q/L convention (toolkit knobs OFF/byte-identical, runner sets
+the point). Enabling for PDVD is a **behavior change** justified by a crosser census
+(below); PDHD's 3 cm/12° are PDHD-tuned reproducers, not copied blindly.
+
+**Repro (compiled-config proof, byte-identical when off):**
+```
+cd pdvd
+wcsonnet -S do_qlmatch=true -o off.json wct-clustering.jsonnet
+wcsonnet -S do_qlmatch=true -S cc_tip_touch_cut_cm=3.0 -S cc_tip_touch_angle_cut=12.0 -o on.json wct-clustering.jsonnet
+diff off.json <baseline>   # byte-identical (196553 B); grep tip_touch off.json => 0 hits
+grep tip_touch on.json     # tip_touch_cut:30 (3cm→internal), tip_touch_angle_cut:12
+# enable a run:  PDVD_CC_TIP_TOUCH_CUT=3.0 PDVD_CC_TIP_TOUCH_ANGLE=12.0 ./run_clus_evt.sh -calib <run> all
+```
+
+**Census (in progress):** the tip-touch enablement is being censused on the run-039252
+18-event and run-039349 10-event sets — OFF vs ON cluster-count/merge diff, confirming
+recovered genuine crossers and zero spurious merges before the runner default flips ON.
+NB the evt298567 clus97↔139 crosser is *not* a tip-touch case: those halves meet ~3.5 cm
+*below* the cathode and fail the `at_cathode`/containment admission — that is the QL-side
+`ql_xtpc_cathode_tol_cm` rescue (doc 16 §10), which relaxes admission; tip-touch only
+relaxes the *alignment* terms for halves that already reach the cathode.
+
 ## Artifacts
 
 - Implementation: `clus/src/clustering_cathode_connect.cxx`, `cathode_connect()` in
