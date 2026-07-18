@@ -55,6 +55,18 @@ namespace WireCell {
                                                   double ped_mean, const Pulse& pulse,
                                                   const Configuration& pars);
 
+            // Slice one over-wide pulse into consecutive fixed-width
+            // sub-pulses of nticks_slice ticks (the last slice takes the
+            // remainder), each with its own area/peak/times; slices whose
+            // baseline-subtracted area is <= 0 carry no light and are
+            // dropped.  Used by the slice_wide_hits knob so a slow pulse
+            // filling a self-trigger snippet books its PE per time slice
+            // instead of as one hit at its peak time (doc 25 §7).  Public
+            // and static for unit testing.
+            static std::vector<Pulse> slice_pulse(const std::vector<short>& wf,
+                                                  double ped_mean, const Pulse& pulse,
+                                                  int nticks_slice);
+
           private:
             std::string m_intag{"decon"};
             // dune_ophit_finder_deco values.
@@ -114,6 +126,27 @@ namespace WireCell {
             // OFF -> single-tensor output, bit-identical.
             // See pdvd/docs/qlmatch/pdvd-lightpattern-sp-investigation.md.
             bool m_emit_coverage{false};
+            // Wide-hit handling mode.  A slow/diffuse pulse spanning a
+            // 16.4-us self-trigger snippet becomes ONE OpHit stamped at its
+            // PEAK time, and OpFlashFinder books the whole snippet integral
+            // to the 1-us flash bin holding that peak -- the wrong (or no)
+            // flash for 74% of the PDVD wall-XA PE (doc 25 §3).  For hits
+            // wider than wide_hit_min_width:
+            //   "start" -- emit the hit with its time at the pulse ONSET, so
+            //     the full integral books to the flash that produced it (the
+            //     cathode full-stream convention, and the one comparable to
+            //     a total-light photon-library prediction);
+            //   "slice" -- cut the pulse into slice_width sub-hits, each
+            //     with its own area and peak time, so PE books per time
+            //     slice (time-faithful, but a flash then carries only its
+            //     prompt window's share -- NOT comparable to a total-light
+            //     prediction);
+            //   ""      -- (default) legacy single hit at peak time,
+            //     bit-identical to every existing config.
+            // See pdvd/docs/qlmatch/25_pdvd-wall-xa-usability.md.
+            std::string m_wide_hit_mode{""};
+            double m_wide_hit_min_width{2000.0};  // WCT ns; only wider hits treated
+            double m_slice_width{1000.0};         // WCT ns per slice ("slice" mode)
             Configuration m_algo;        // SlidingWindow parameters
 
             int m_count{0};

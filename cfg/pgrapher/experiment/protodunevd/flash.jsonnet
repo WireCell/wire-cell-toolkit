@@ -143,7 +143,7 @@ local wc = import 'wirecell.jsonnet';
     // units (100 = 1 PE/tick); starting values from the WI noise floors
     // (pdvd-light-filter.md): cathode ~3.7, membrane ~4 (top-wall 5
     // sigma), PMT ~2.2.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false, emit_coverage=false)::  g.pnode({
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false, emit_coverage=false, wide_hit_mode='', wide_hit_min_width_us=2.0, slice_width_us=1.0)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
@@ -152,6 +152,15 @@ local wc = import 'wirecell.jsonnet';
             [if intag != 'decon' then 'intag']: intag,
             [if fixed_ped_sigma > 0 then 'fixed_ped_sigma']: fixed_ped_sigma,
             [if veto_saturation then 'veto_saturation']: veto_saturation,
+            // Wide-hit handling: a slow pulse spanning a self-trigger
+            // snippet otherwise books its whole PE at its PEAK time's flash
+            // bin (doc 25 §3/§7 wall-XA misbooking).  "start" books the
+            // full integral at the pulse onset (total-light convention);
+            // "slice" books per slice_width slice.  C++ default '' (off).
+            // Keys omitted when off => byte-identical pre-fix config.
+            [if wide_hit_mode != '' then 'wide_hit_mode']: wide_hit_mode,
+            [if wide_hit_mode != '' then 'wide_hit_min_width']: wide_hit_min_width_us * wc.us,
+            [if wide_hit_mode != '' then 'slice_width']: slice_width_us * wc.us,
             // Keep-and-mark alternative to the veto: 10th ophit column ->
             // OpFlashFinder flash_sat tensor -> QLMatching per-flash channel
             // mask.  C++ default false.  Key omitted when off => byte-identical.
