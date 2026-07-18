@@ -600,6 +600,41 @@ local clus_all_tpc (
     // relaxation OFF, so the compiled config is byte-identical when unset.
     cc_tip_touch_cut = null,
     cc_tip_touch_angle_cut = null,
+    // Cathode-crossing connector distance gates (cm.cathode_connect below).
+    // PDVD's cathode is ~6 cm thick, so a genuine crosser's two halves stop at
+    // their own cathode face (~+-3 cm) and meet 6-9 cm apart in drift-x -- past
+    // the SBND-tuned defaults.  These args default to the CURRENT effective PDVD
+    // values (cathode_x_cut=5 cm, drift_cut=8 cm, dis_cut=5 cm), so leaving them
+    // unset keeps the compiled config byte-identical; the runner supplies an
+    // enlarged census operating point.  All three are always-emitted keys in the
+    // common cathode_connect() helper, so pass native internal units here.
+    cc_cathode_x_cut = 5*wc.cm,
+    cc_drift_cut = 8*wc.cm,
+    cc_dis_cut = 5*wc.cm,
+    // 6cm-cathode crosser relaxation (cm.cathode_connect below): loosen the
+    // cc_pca connection-vector bound for a drift-gated crosser (both tips at the
+    // cathode, same drift depth, same flash), because the two half-tracks stop at
+    // the two faces of the 6 cm cathode so the tip-to-tip connection spans pure
+    // cathode geometry (drift gap + SCE transverse shift), not track direction --
+    // an SCE-noisy estimate (34-69 deg on confirmed PDVD crossers) while the
+    // cluster PCA stays tight (<10 deg).  null => C++ default 0 => relaxation OFF
+    // => byte-identical when unset; the runner supplies the census operating point.
+    cc_crosser_conn_relax = null,
+    // 6cm-cathode crosser tt_pca bound raise (cm.cathode_connect below): admit a bent
+    // crosser (delta-ray / SCE curvature) whose two halves' cluster-PCA axes differ by
+    // up to ~15 deg while still one track.  QL-pin truth: real crossers reach ttP~18
+    // (p90); coincidences sit at ttP p50~24, so a ~15 deg bound recovers bent crossers
+    // without admitting coincidences.  null => C++ default 0 => bound stays angle_cut
+    // => byte-identical when unset; runner supplies the census operating point.
+    cc_crosser_pca_angle = null,
+    // 6cm-cathode near-cathode closest-approach retry (cm.cathode_connect below): when
+    // the GLOBAL closest 3D point pair hard-gates (a long inclined crosser whose closest
+    // approach falls mid-track, tip>=cathode_x_cut or drift>=drift_cut), retry with the
+    // closest approach restricted to points within this distance of the cathode, then
+    // re-apply the gates to the near-cathode tips.  Additive (only rescues would-be
+    // rejects).  null => C++ default 0 => retry OFF => byte-identical; runner supplies
+    // the census operating point (~10 cm).
+    cc_cathode_band_dis = null,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -649,12 +684,16 @@ local clus_all_tpc (
         // above angle_cut.  null => C++ defaults tip_touch_cut=0 (OFF) and
         // tip_touch_angle_cut=angle_cut (OFF) => byte-identical when unset.
         // PDVD values are set from the runner (census-tuned operating point).
-        cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
+        cm.cathode_connect(cathode_x_cut=cc_cathode_x_cut, drift_cut=cc_drift_cut,
+                           dis_cut=cc_dis_cut,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
                            conn_short_cut=30.0, use_flash_t0=premerged,
                            flash_t0_window=1*wc.us,
                            tip_touch_cut=cc_tip_touch_cut,
-                           tip_touch_angle_cut=cc_tip_touch_angle_cut),
+                           tip_touch_angle_cut=cc_tip_touch_angle_cut,
+                           crosser_conn_relax=cc_crosser_conn_relax,
+                           crosser_pca_angle=cc_crosser_pca_angle,
+                           cathode_band_dis=cc_cathode_band_dis),
     ],
 
     local mabc = g.pnode({
@@ -765,7 +804,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),

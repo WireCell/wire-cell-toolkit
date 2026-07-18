@@ -636,3 +636,82 @@ Not every PDVD crosser is a tip-touch case: evt298567's golden crossers meet at 
 - Code: `clustering_regular.cxx:248-287` (the 3 cm lenient path + strict paths),
   `clustering_examine_bundles.cxx:99-240`, `connect_graph_relaxed.cxx` (inter-TPC fully-bad
   branch), `MultiAlgBlobClustering.cxx:1463-1473` (Bee id semantics).
+
+---
+
+# PDVD 6 cm-cathode crosser recall campaign (cc1a → cc3a, 2026-07-17)
+
+**Repro:** `PDVD_LIGHT_SUFFIX=_keep ./run_clus_evt.sh -calib -s cc3a 039252 all`
+(the runner defaults the operating point ON; set `PDVD_CC_DIS_CUT=5
+PDVD_CC_DRIFT_CUT=8 PDVD_CC_CATHODE_X_CUT=5 PDVD_CC_CROSSER_CONN_RELAX=
+PDVD_CC_CROSSER_PCA_ANGLE=` to recover the legacy split). Feature study +
+scorers: `/home/xqian/tmp/ccknob/`, scratchpad `labeled_features.py`,
+`correspondence.py`, `cathode_band_test.py`.
+
+## Symptom
+In the PDVD `clustering-global` Bee display, cross-cathode cosmics show as **two
+colors** — the two drift-volume halves were never merged after Q/L matching.
+`cathode_connect` is the SOLE merge path at all-TPC scope (pipeline
+`[switch_scope, cathode_connect]`, no `examine_bundles`), and it declined them.
+
+## Root cause
+PDVD's cathode is a **6 cm-thick plane**; each crosser half stops at its own
+cathode face (±3 cm), so the two cathode tips sit 6–9 cm apart in drift-x, past
+the SBND-tuned gates (`dis_cut 5 / drift_cut 8 / cathode_x_cut 5`). The
+whole-volume flash is handled correctly at Q/L (`xtpc_joint_pin`); the merge
+failure is 100 % geometry.
+
+## Fix — four data-driven, default-OFF knobs on `ClusteringCathodeConnect`
+Tuned on the QL-confirmed `xtpc_pin` crossers (28- then 120-event feature study;
+recall measured vs nm4b ground truth on 212 pairs):
+
+| point | knob added | recall | spurious |
+|---|---|---|---|
+| cc1a | `dis_cut 16 / drift_cut 14 / cathode_x_cut 8` (span the 6 cm cathode) | 76 % | ~0 |
+| cc2a | `+ crosser_conn_relax 75` | 84 % | ~0 |
+| **cc3a** | `+ crosser_pca_angle 15` | **89 %** | ~0 |
+| cc4a | `+ cathode_band_dis 10` | 89 % (null) | ~0 |
+
+- **`crosser_conn_relax`** (deg, 0=off): the two truncated cathode tips are
+  displaced transversely by space charge, so the p1→p2 connection is an
+  SCE-noisy direction estimate (34–69° on confirmed crossers) while the cluster
+  PCA stays tight (<10°). In the CLOSE both-long branch, RELAX the `cc_pca`
+  bound from `conn_far_cut` to this value (relax, not drop — parallel coincidences
+  are also PCA-collinear; their ~perpendicular connection at ~90° is the only
+  guard).
+- **`crosser_pca_angle`** (deg, 0=off=`angle_cut`): a genuine crosser can bend
+  (δ-ray / SCE curvature) so its halves' PCA axes differ 10–15°. The QL-pin
+  labeled table (748 real vs 52 coincidence pairs) shows real crossers reach
+  ttP p90≈19° while coincidences sit at p50≈35°, so raising the tt_pca bound to
+  15° recovers bent crossers without admitting coincidences.
+- **`cathode_band_dis`** (dist, 0=off): when the GLOBAL closest pair hard-gates
+  (a long inclined crosser whose closest approach falls mid-track), retry with
+  the closest approach restricted to points within this distance of the cathode.
+  Additive. **Validated NULL**: the near-cathode tips lie on opposite faces of
+  the 6 cm cathode, so their tip-to-tip connection is ~perpendicular (`ccP≥75°`)
+  — geometrically indistinguishable from parallel coincidences. Kept default-OFF
+  as a documented lever; recovers ~0 without a purity cost we are unwilling to pay.
+
+## Why 89 % is the ceiling
+The residual ~11 % splits ~evenly into (a) **QL over-pins** — halves that do not
+reach the cathode (a matching issue upstream of clustering), and (b) crossers
+whose cathode-tip connection is perpendicular and thus indistinguishable from
+coincidences by any information `cathode_connect` has. Pushing past cc3a trades
+purity; we did not.
+
+## Verification
+- **Knob OFF byte-identical:** compiled config diff-empty vs git-HEAD; runtime
+  `hash_archive.py` on `clustering-global` identical between the new lib
+  knobs-OFF and the pre-campaign `nm4b` output (`65d53ac8…`, run 039252 evt0).
+- **Knob ON:** recall 161→179→188 / 212 (cc1a/cc2a/cc3a); unexplained merges
+  flat at 9 (≤5 % of spanning), engulfing (PCA-linearity <0.90) = 0; determinism
+  control (idx0 twice) bit-identical spanning set. `wcdoctest-clus` passes.
+- Adoption is runner-default only (`run_clus_evt.sh` CC_DIST_ARG); toolkit
+  C++/jsonnet defaults stay OFF.
+
+## Artifacts
+- Impl: `clus/src/clustering_cathode_connect.cxx` (knobs + `cathode_band_closest`;
+  env-gated `[cc]`/`[ccx]`/`[feat]` tracers, removable), `cathode_connect()` in
+  `cfg/pgrapher/common/clus.jsonnet`, `clus_all_tpc`/`all_tpc` args +
+  `cm.cathode_connect(...)` in `cfg/pgrapher/experiment/protodunevd/clus.jsonnet`.
+- wcp: `pdvd/wct-clustering.jsonnet` TLAs, `pdvd/run_clus_evt.sh` envs + cc3a default.

@@ -352,7 +352,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                         min_length=10*wc.cm, min_length_short=null,
                         short_dir_len=null, conn_short_cut=30.0,
                         tip_touch_cut=null, tip_touch_angle_cut=null,
-                        use_flash_t0=true, flash_t0_window=80*wc.ns) :: {
+                        use_flash_t0=true, flash_t0_window=80*wc.ns,
+                        crosser_conn_relax=null, crosser_pca_angle=null,
+                        cathode_band_dis=null) :: {
             type: "ClusteringCathodeConnect",
             name: prefix+name,
             data: {
@@ -374,6 +376,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if tip_touch_cut != null then "tip_touch_cut"]: tip_touch_cut,
                 // null => C++ defaults tip_touch_angle_cut to angle_cut (local-Hough fallback OFF)
                 [if tip_touch_angle_cut != null then "tip_touch_angle_cut"]: tip_touch_angle_cut,
+                // null => C++ defaults crosser_conn_relax to 0 (6cm-cathode cc_pca relaxation OFF)
+                [if crosser_conn_relax != null then "crosser_conn_relax"]: crosser_conn_relax,
+                // null => C++ defaults crosser_pca_angle to 0 (6cm-cathode tt_pca bound raise OFF)
+                [if crosser_pca_angle != null then "crosser_pca_angle"]: crosser_pca_angle,
+                // null => C++ defaults cathode_band_dis to 0 (near-cathode closest-approach retry OFF)
+                [if cathode_band_dis != null then "cathode_band_dis"]: cathode_band_dis,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
             } + scope_cfg,
