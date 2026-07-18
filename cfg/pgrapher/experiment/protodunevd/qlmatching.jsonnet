@@ -83,6 +83,9 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          xtpc_sc1_light_gate=false, xtpc_sc1_ks_max=null, xtpc_sc1_c2n_max=null,
          xtpc_cathode_ks_max=null,
          postcull_unflagged=false, postcull_ks_max=null, postcull_c2n_max=null,
+         // Rescue blind-spot fix (doc 23 phase 1a): early postcull pass before
+         // the rescues.  C++ default false; key omitted when off => byte-identical.
+         postcull_before_rescue=false,
          // Sweepable ladder ceilings (doc 19 phase 4).  null => the literal
          // operating values below (compiled JSON unchanged).
          hc_clean_ks=null, hc_clean_c2=null, hc_good_ks=null, hc_good_c2=null,
@@ -644,6 +647,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
                 postcull_ks_max,
             [if postcull_unflagged && postcull_c2n_max != null then 'postcull_c2n_max']:
                 postcull_c2n_max,
+            [if postcull_unflagged && postcull_before_rescue then 'postcull_before_rescue']: true,
 
             // Cathode-side containment tolerance (how far past the cathode a
             // cluster's drift end may reach and still count as contained;

@@ -182,6 +182,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_postcull_unflagged    = get(cfg, "postcull_unflagged",    m_postcull_unflagged);
     m_postcull_ks_max       = get(cfg, "postcull_ks_max",       m_postcull_ks_max);
     m_postcull_c2n_max      = get(cfg, "postcull_c2n_max",      m_postcull_c2n_max);
+    m_postcull_before_rescue = get(cfg, "postcull_before_rescue", m_postcull_before_rescue);
+    if (m_postcull_before_rescue && !m_postcull_unflagged) {
+        log->warn("QLMatching: postcull_before_rescue needs postcull_unflagged "
+                  "and will be inert");
+    }
     if (m_xtpc_pin_min_strength > 0 || m_xtpc_sc1_light_gate ||
         m_xtpc_cathode_ks_max > 0 || m_postcull_unflagged) {
         log->debug("quality gates on: pin_min_strength={} sc1_light_gate={} "
@@ -689,6 +694,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["postcull_unflagged"]    = m_postcull_unflagged;
     cfg["postcull_ks_max"]       = m_postcull_ks_max;
     cfg["postcull_c2n_max"]      = m_postcull_c2n_max;
+    cfg["postcull_before_rescue"] = m_postcull_before_rescue;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["light_model"]     = m_light_model;
@@ -2376,6 +2382,13 @@ void QLMatching::fit_round2(ApaRun& run)
     remove_bundle_selection(to_be_removed, run.pre_bundles);
     to_be_removed.clear();
 
+    // Rescue blind-spot fix (doc 23 phase 1a; default OFF = bit-identical): cull the
+    // postcull-doomed unflagged selections BEFORE the rescues, so a bundle destined
+    // for removal cannot mark its cluster "matched" and hide it from §I/§J. The
+    // legacy post-rescue call below still runs (rescue adoptions stay subject to
+    // the same quality bar as before).
+    if (m_postcull_before_rescue) cull_unflagged_lowquality(run);
+
     // Empty-flash light-quality rescue (§I; default OFF = bit-identical, SBND-on).
     // Uses the pre-LASSO snapshot captured at fit_round1 start, so it can reach the
     // strength-0 but light-good bundles both rounds pruned.
@@ -2774,6 +2787,14 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     // fit_round2's matched_pairs/organize_bundles tail is likewise not replicated
     // (its result is discarded there — the matched output is what remains in
     // flash_bundles_map).
+
+    // Rescue blind-spot fix (doc 23 phase 1a; default OFF = bit-identical): see
+    // the fit_round2 counterpart. Cull postcull-doomed unflagged selections
+    // BEFORE the rescues so they cannot mark their cluster off-limits; the
+    // legacy post-rescue call below still runs.
+    if (m_postcull_before_rescue) {
+        for (auto& run : runs) cull_unflagged_lowquality(run);
+    }
 
     // Shared-flash-aware rescues (doc 19 phase 5; default OFF = bit-identical).
     // Empty-flash rescue uses JOINT emptiness (no side holds the flash); the

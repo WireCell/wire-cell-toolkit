@@ -28,4 +28,9 @@ TEST_CASE("qlmatching default configuration knobs")
     REQUIRE(cfg.isMember("trigger_offsets"));
     CHECK(cfg["trigger_offsets"].isArray());
     CHECK(cfg["trigger_offsets"].size() == 0);
+
+    // Rescue blind-spot fix (doc 23 phase 1a): knob must round-trip and
+    // default OFF (bit-identical legacy ordering when absent).
+    REQUIRE(cfg.isMember("postcull_before_rescue"));
+    CHECK(cfg["postcull_before_rescue"].asBool() == false);
 }

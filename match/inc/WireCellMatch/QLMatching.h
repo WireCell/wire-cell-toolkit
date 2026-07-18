@@ -951,6 +951,14 @@ namespace WireCell::Match {
         bool   m_postcull_unflagged{false};
         double m_postcull_ks_max{0.30};
         double m_postcull_c2n_max{20.0};
+        // Rescue blind-spot fix (doc 23 phase 1a): run the unflagged
+        // low-quality cull BEFORE the §I/§J rescues (extra early pass; the
+        // legacy post-rescue call stays).  Without it a strength-selected but
+        // postcull-doomed bundle still counts as "matched" during the rescues,
+        // making its cluster off-limits even when a gate-passing candidate at
+        // the true flash exists (039252: 4 such long clusters).  Only
+        // meaningful with postcull_unflagged; default OFF = bit-identical.
+        bool   m_postcull_before_rescue{false};
 
         // Path to the JSON file holding VUVHits, VISHits, geometry and the
         // SBND OpDet array.
