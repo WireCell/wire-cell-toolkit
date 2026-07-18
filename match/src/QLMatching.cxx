@@ -459,6 +459,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_cluster_rescue_relaxed_ratio_lo   = get(cfg, "cluster_rescue_relaxed_ratio_lo",   m_cluster_rescue_relaxed_ratio_lo);
     m_cluster_rescue_relaxed_ratio_hi   = get(cfg, "cluster_rescue_relaxed_ratio_hi",   m_cluster_rescue_relaxed_ratio_hi);
     m_cluster_rescue_relaxed_min_length = get(cfg, "cluster_rescue_relaxed_min_length", m_cluster_rescue_relaxed_min_length);
+    m_cluster_rescue_sat_ratio_relax = get(cfg, "cluster_rescue_sat_ratio_relax", m_cluster_rescue_sat_ratio_relax);
+    m_cluster_rescue_sat_frac_min    = get(cfg, "cluster_rescue_sat_frac_min",    m_cluster_rescue_sat_frac_min);
+    m_cluster_rescue_sat_ratio_mult  = get(cfg, "cluster_rescue_sat_ratio_mult",  m_cluster_rescue_sat_ratio_mult);
     if (m_shared_flash && (m_empty_rescue || m_cluster_rescue)) {
         log->warn("QLMatching: empty_rescue/cluster_rescue are not shared_flash-aware "
                   "and will be SKIPPED in the joint fit");
@@ -842,6 +845,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["cluster_rescue_relaxed_ratio_lo"]   = m_cluster_rescue_relaxed_ratio_lo;
     cfg["cluster_rescue_relaxed_ratio_hi"]   = m_cluster_rescue_relaxed_ratio_hi;
     cfg["cluster_rescue_relaxed_min_length"] = m_cluster_rescue_relaxed_min_length;
+    cfg["cluster_rescue_sat_ratio_relax"] = m_cluster_rescue_sat_ratio_relax;
+    cfg["cluster_rescue_sat_frac_min"]    = m_cluster_rescue_sat_frac_min;
+    cfg["cluster_rescue_sat_ratio_mult"]  = m_cluster_rescue_sat_ratio_mult;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -2925,7 +2931,27 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
     // Acceptance bar: ks < ks_max AND chi2/ndf < chi2ndf_max AND ratio_lo < pred/meas <
     // ratio_hi, with ratio = total predicted light / flash total measured PE (the same
     // pairing the LASSO PE-mismatch weight uses).
-    auto accept = [this](const TimingTPCBundle::pointer& b) {
+    // Saturation-aware ratio-high extension (doc 23 phase 1b; default OFF =>
+    // the plain ratio < ratio_hi test). When the railed fraction of the
+    // flash's measured PE exceeds sat_frac_min the measurement is
+    // right-censored (railed channels report a lower bound) and pred/meas is
+    // an overestimate: extend the high gate to ratio_hi * sat_ratio_mult.
+    auto sat_ratio_hi_ok = [this](const TimingTPCBundle::pointer& b,
+                                  double ratio, double ratio_hi) {
+        if (ratio < ratio_hi) return true;
+        if (!m_cluster_rescue_sat_ratio_relax) return false;
+        if (!(ratio < ratio_hi * m_cluster_rescue_sat_ratio_mult)) return false;
+        auto* f = b->get_flash();
+        const double tot = f->get_total_PE();
+        if (tot <= 0.0) return false;
+        double satpe = 0;
+        const int nch = f->get_num_channels();
+        for (int j = 0; j < nch; ++j)
+            if (f->get_sat(j)) satpe += f->get_PE(j);
+        return satpe / tot > m_cluster_rescue_sat_frac_min;
+    };
+
+    auto accept = [this, &sat_ratio_hi_ok](const TimingTPCBundle::pointer& b) {
         const int ndf = std::max(b->get_ndf(), 1);
         const double c2ndf = b->get_chi2() / ndf;
         const double meas = b->get_flash()->get_total_PE();
@@ -2933,7 +2959,7 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
         return b->get_ks_dis() < m_cluster_rescue_ks_max
             && c2ndf < m_cluster_rescue_chi2ndf_max
             && ratio > m_cluster_rescue_ratio_lo
-            && ratio < m_cluster_rescue_ratio_hi;
+            && sat_ratio_hi_ok(b, ratio, m_cluster_rescue_ratio_hi);
     };
     // Light-quality score (lower = better): KS shape, chi2/ndf, and PE-scale agreement.
     auto score = [](const TimingTPCBundle::pointer& b) {
@@ -3033,7 +3059,7 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
                    m_cluster_rescue_relaxed_ks_max, m_cluster_rescue_relaxed_chi2ndf_max,
                    m_cluster_rescue_relaxed_ratio_lo, m_cluster_rescue_relaxed_ratio_hi,
                    m_cluster_rescue_relaxed_min_length / units::cm);
-        auto accept_relaxed = [this](const TimingTPCBundle::pointer& b) {
+        auto accept_relaxed = [this, &sat_ratio_hi_ok](const TimingTPCBundle::pointer& b) {
             const int ndf = std::max(b->get_ndf(), 1);
             const double c2ndf = b->get_chi2() / ndf;
             const double meas = b->get_flash()->get_total_PE();
@@ -3041,7 +3067,7 @@ void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& s
             return b->get_ks_dis() < m_cluster_rescue_relaxed_ks_max
                 && c2ndf < m_cluster_rescue_relaxed_chi2ndf_max
                 && ratio > m_cluster_rescue_relaxed_ratio_lo
-                && ratio < m_cluster_rescue_relaxed_ratio_hi;
+                && sat_ratio_hi_ok(b, ratio, m_cluster_rescue_relaxed_ratio_hi);
         };
         auto pick_best_relaxed = [&accept_relaxed, &score](const std::vector<TimingTPCBundle::pointer>& pool) {
             TimingTPCBundle::pointer best;

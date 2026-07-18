@@ -707,6 +707,21 @@ namespace WireCell::Match {
         double m_cluster_rescue_relaxed_ratio_hi{0.0};
         double m_cluster_rescue_relaxed_min_length{0.0};
 
+        // Saturation-aware ratio-high extension for the rescue gates (doc 23
+        // phase 1b). A DAPHNE-railed channel measures a LOWER BOUND, so when
+        // most of a flash's measured PE sits on saturation-flagged channels
+        // the pred/meas ratio is an overestimate and the ratio-HIGH gate
+        // rejects honest candidates (039252 evt298651 uid33: ks 0.041,
+        // ratio 3.51 vs gate 3.0 on a 100%-railed flash). Excluding railed
+        // channels is NOT viable -- the light lives on them (uid33 clean-
+        // channel ratio ~106 over 18 residual PE). Instead, when the railed
+        // fraction of measured PE exceeds sat_frac_min, both rescue tiers
+        // accept ratio up to ratio_hi * sat_ratio_mult (the low gate and
+        // ks/chi2 are untouched). Default OFF => byte-identical.
+        bool   m_cluster_rescue_sat_ratio_relax{false};
+        double m_cluster_rescue_sat_frac_min{0.5};
+        double m_cluster_rescue_sat_ratio_mult{2.0};
+
         // Bee-op flash gid: when a single global optical flash list is fed to
         // multiple per-side QLMatching nodes (PDHD all-PD light: both drift sides
         // read the same opflash archive), EACH node's write_opflash_pc emits the

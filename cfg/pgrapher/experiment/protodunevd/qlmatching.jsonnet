@@ -113,7 +113,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // byte-identical.
          cluster_rescue_relaxed=false, cluster_rescue_relaxed_ks_max=null,
          cluster_rescue_relaxed_chi2ndf_max=null, cluster_rescue_relaxed_ratio_lo=null,
-         cluster_rescue_relaxed_ratio_hi=null, cluster_rescue_relaxed_min_length=null) {
+         cluster_rescue_relaxed_ratio_hi=null, cluster_rescue_relaxed_min_length=null,
+         // Saturation-aware rescue ratio-high extension (doc 23 phase 1b).
+         // C++ defaults false/0.5/2.0; keys omitted when off => byte-identical.
+         cluster_rescue_sat_ratio_relax=false, cluster_rescue_sat_frac_min=null,
+         cluster_rescue_sat_ratio_mult=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -570,6 +574,17 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
              then 'cluster_rescue_relaxed_ratio_hi']: cluster_rescue_relaxed_ratio_hi,
             [if cluster_rescue_shared && cluster_rescue_relaxed && cluster_rescue_relaxed_min_length != null
              then 'cluster_rescue_relaxed_min_length']: cluster_rescue_relaxed_min_length,
+
+            // Saturation-aware rescue ratio-high extension (doc 23 phase 1b).
+            // On a mostly-railed flash the measured PE is a lower bound, so the
+            // pred/meas high gate extends to ratio_hi * mult.  C++ defaults
+            // false/0.5/2.0; keys omitted when off => byte-identical.
+            [if cluster_rescue_shared && cluster_rescue_sat_ratio_relax
+             then 'cluster_rescue_sat_ratio_relax']: true,
+            [if cluster_rescue_shared && cluster_rescue_sat_ratio_relax && cluster_rescue_sat_frac_min != null
+             then 'cluster_rescue_sat_frac_min']: cluster_rescue_sat_frac_min,
+            [if cluster_rescue_shared && cluster_rescue_sat_ratio_relax && cluster_rescue_sat_ratio_mult != null
+             then 'cluster_rescue_sat_ratio_mult']: cluster_rescue_sat_ratio_mult,
 
             // --- Cathode-crosser (xTPC) machinery, ENABLED 2026-07-11 ---
             // Works under shared_flash: cull_cross_tpc pairs candidate bundles

@@ -33,4 +33,11 @@ TEST_CASE("qlmatching default configuration knobs")
     // default OFF (bit-identical legacy ordering when absent).
     REQUIRE(cfg.isMember("postcull_before_rescue"));
     CHECK(cfg["postcull_before_rescue"].asBool() == false);
+
+    // Saturation-aware rescue ratio-high extension (doc 23 phase 1b):
+    // default OFF with inert thresholds round-tripped.
+    REQUIRE(cfg.isMember("cluster_rescue_sat_ratio_relax"));
+    CHECK(cfg["cluster_rescue_sat_ratio_relax"].asBool() == false);
+    CHECK(cfg["cluster_rescue_sat_frac_min"].asDouble() == doctest::Approx(0.5));
+    CHECK(cfg["cluster_rescue_sat_ratio_mult"].asDouble() == doctest::Approx(2.0));
 }
