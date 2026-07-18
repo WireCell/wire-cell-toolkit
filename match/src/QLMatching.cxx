@@ -183,6 +183,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_postcull_ks_max       = get(cfg, "postcull_ks_max",       m_postcull_ks_max);
     m_postcull_c2n_max      = get(cfg, "postcull_c2n_max",      m_postcull_c2n_max);
     m_postcull_before_rescue = get(cfg, "postcull_before_rescue", m_postcull_before_rescue);
+    m_postcull_wtrunc_overpred = get(cfg, "postcull_wtrunc_overpred", m_postcull_wtrunc_overpred);
+    m_postcull_wtrunc_ratio_hi = get(cfg, "postcull_wtrunc_ratio_hi", m_postcull_wtrunc_ratio_hi);
+    m_postcull_wtrunc_sat_frac = get(cfg, "postcull_wtrunc_sat_frac", m_postcull_wtrunc_sat_frac);
+    m_postcull_pin_overpred    = get(cfg, "postcull_pin_overpred",    m_postcull_pin_overpred);
+    m_postcull_pin_ratio_hi    = get(cfg, "postcull_pin_ratio_hi",    m_postcull_pin_ratio_hi);
     if (m_postcull_before_rescue && !m_postcull_unflagged) {
         log->warn("QLMatching: postcull_before_rescue needs postcull_unflagged "
                   "and will be inert");
@@ -698,6 +703,11 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["postcull_ks_max"]       = m_postcull_ks_max;
     cfg["postcull_c2n_max"]      = m_postcull_c2n_max;
     cfg["postcull_before_rescue"] = m_postcull_before_rescue;
+    cfg["postcull_wtrunc_overpred"] = m_postcull_wtrunc_overpred;
+    cfg["postcull_wtrunc_ratio_hi"] = m_postcull_wtrunc_ratio_hi;
+    cfg["postcull_wtrunc_sat_frac"] = m_postcull_wtrunc_sat_frac;
+    cfg["postcull_pin_overpred"]    = m_postcull_pin_overpred;
+    cfg["postcull_pin_ratio_hi"]    = m_postcull_pin_ratio_hi;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
     cfg["light_model"]     = m_light_model;
@@ -1969,21 +1979,76 @@ bool QLMatching::pin_exempt(const TimingTPCBundle* b, double strength) const
 // iteration-order independent; OFF (default) => no-op, byte-identical.
 void QLMatching::cull_unflagged_lowquality(ApaRun& run)
 {
-    if (!m_postcull_unflagged) return;
+    if (!m_postcull_unflagged && !m_postcull_wtrunc_overpred && !m_postcull_pin_overpred) return;
     TimingTPCBundleSelection to_be_removed;
     for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
         for (const auto& b : run.flash_bundles_map.at(flash)) {
-            if (b->get_consistent_flag() || b->get_flag_xtpc_consistent() ||
-                b->get_flag_xtpc_scenario1() || b->get_flag_xtpc_pin())
-                continue;
-            const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
-            if (b->get_ks_dis() > m_postcull_ks_max || c2n > m_postcull_c2n_max) {
-                to_be_removed.push_back(b);
-                log->debug("QLPOSTCULL apa{} cluster {} flash {} ks={:.3f} chi2/ndf={:.1f} "
-                           "(unflagged, fails {:.2f}/{:.1f})",
-                           (int)run.anode->ident(), b->get_main_cluster()->ident(),
-                           b->get_flash()->get_flash_id(), b->get_ks_dis(), c2n,
-                           m_postcull_ks_max, m_postcull_c2n_max);
+            const bool qflag = b->get_consistent_flag() || b->get_flag_xtpc_consistent() ||
+                               b->get_flag_xtpc_scenario1() || b->get_flag_xtpc_pin();
+            if (m_postcull_unflagged && !qflag) {
+                const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
+                if (b->get_ks_dis() > m_postcull_ks_max || c2n > m_postcull_c2n_max) {
+                    to_be_removed.push_back(b);
+                    log->debug("QLPOSTCULL apa{} cluster {} flash {} ks={:.3f} chi2/ndf={:.1f} "
+                               "(unflagged, fails {:.2f}/{:.1f})",
+                               (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                               b->get_flash()->get_flash_id(), b->get_ks_dis(), c2n,
+                               m_postcull_ks_max, m_postcull_c2n_max);
+                    continue;
+                }
+            }
+            // Window-truncated overprediction cull (doc 23 phase 2; default OFF).
+            // A selection flagged window_truncated whose total pred/meas exceeds
+            // the ceiling is the dominant clean phantom signature (039252: ratio
+            // p90 11.3 vs 1.5 for scan-agreed wtrunc matches). xtpc pin/scenario-1
+            // pairs are protected (geometric evidence overrides), and a
+            // sat-dominated flash is exempt (railed meas is a lower bound, its
+            // ratio is an overestimate -- same physics as the phase-1b rescue
+            // extension). Applies regardless of the high-consistent flag.
+            if (m_postcull_wtrunc_overpred && b->get_flag_window_truncated() &&
+                !b->get_flag_xtpc_pin() && !b->get_flag_xtpc_scenario1()) {
+                auto* f = b->get_flash();
+                const double meas = f->get_total_PE();
+                const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+                if (ratio > m_postcull_wtrunc_ratio_hi) {
+                    double satpe = 0;
+                    const int nch = f->get_num_channels();
+                    for (int j = 0; j < nch; ++j)
+                        if (f->get_sat(j)) satpe += f->get_PE(j);
+                    const double satfrac = (meas > 0.0) ? satpe / meas : 0.0;
+                    if (satfrac <= m_postcull_wtrunc_sat_frac) {
+                        to_be_removed.push_back(b);
+                        log->debug("QLPOSTCULL-WTRUNC apa{} cluster {} flash {} ratio={:.2f} "
+                                   "(window-truncated overpred, ceiling {:.1f}, satfrac {:.2f})",
+                                   (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                                   f->get_flash_id(), ratio, m_postcull_wtrunc_ratio_hi, satfrac);
+                        continue;
+                    }
+                }
+            }
+            // xtpc-pin overprediction cull (doc 23 phase 2): ratio-ONLY (a ks
+            // gate on pins kills legitimate geometric matches); same
+            // sat-dominated exemption as the wtrunc branch. The pin's partner
+            // half keeps its own flag -- this removes only the overpredicting
+            // half's selection.
+            if (m_postcull_pin_overpred && b->get_flag_xtpc_pin()) {
+                auto* f = b->get_flash();
+                const double meas = f->get_total_PE();
+                const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+                if (ratio > m_postcull_pin_ratio_hi) {
+                    double satpe = 0;
+                    const int nch = f->get_num_channels();
+                    for (int j = 0; j < nch; ++j)
+                        if (f->get_sat(j)) satpe += f->get_PE(j);
+                    const double satfrac = (meas > 0.0) ? satpe / meas : 0.0;
+                    if (satfrac <= m_postcull_wtrunc_sat_frac) {
+                        to_be_removed.push_back(b);
+                        log->debug("QLPOSTCULL-PIN apa{} cluster {} flash {} ratio={:.2f} "
+                                   "(pin overpred, ceiling {:.1f}, satfrac {:.2f})",
+                                   (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                                   f->get_flash_id(), ratio, m_postcull_pin_ratio_hi, satfrac);
+                    }
+                }
             }
         }
     }

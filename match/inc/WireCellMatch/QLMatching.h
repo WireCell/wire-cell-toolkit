@@ -966,6 +966,26 @@ namespace WireCell::Match {
         bool   m_postcull_unflagged{false};
         double m_postcull_ks_max{0.30};
         double m_postcull_c2n_max{20.0};
+        // Window-truncated overprediction cull (doc 23 phase 2): remove a
+        // selected bundle flagged window_truncated whose total pred/meas
+        // ratio exceeds the ceiling -- the dominant clean phantom signature
+        // (039252 scan comparison: wtrunc phantoms ratio p90 11.3 vs 1.5 for
+        // agreed wtrunc matches; ceiling 2.0 kills 14 phantoms / 0 agreed in
+        // the offline replay). Applies regardless of the high-consistent
+        // flag; xtpc pin/scenario-1 protected; flashes whose railed channels
+        // carry more than wtrunc_sat_frac of the measured PE are exempt
+        // (right-censored measurement). Default OFF => bit-identical.
+        bool   m_postcull_wtrunc_overpred{false};
+        double m_postcull_wtrunc_ratio_hi{2.0};
+        double m_postcull_wtrunc_sat_frac{0.5};
+        // xtpc-pin overprediction cull (doc 23 phase 2, same round): a pinned
+        // crosser half whose total pred/meas exceeds the ceiling is 30%
+        // phantom in the scan record (agree pins p90 1.4); ratio-ONLY -- a ks
+        // gate on pins is catastrophic (geometric pins legitimately carry bad
+        // ks, that is why they were pinned). Same sat-dominated exemption as
+        // the wtrunc branch (shared postcull_wtrunc_sat_frac). Default OFF.
+        bool   m_postcull_pin_overpred{false};
+        double m_postcull_pin_ratio_hi{2.0};
         // Rescue blind-spot fix (doc 23 phase 1a): run the unflagged
         // low-quality cull BEFORE the §I/§J rescues (extra early pass; the
         // legacy post-rescue call stays).  Without it a strength-selected but

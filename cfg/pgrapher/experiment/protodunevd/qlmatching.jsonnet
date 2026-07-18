@@ -86,6 +86,13 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // Rescue blind-spot fix (doc 23 phase 1a): early postcull pass before
          // the rescues.  C++ default false; key omitted when off => byte-identical.
          postcull_before_rescue=false,
+         // Window-truncated overprediction cull (doc 23 phase 2).  C++ defaults
+         // false/2.0/0.5; keys omitted when off => byte-identical.
+         postcull_wtrunc_overpred=false, postcull_wtrunc_ratio_hi=null,
+         postcull_wtrunc_sat_frac=null,
+         // xtpc-pin overprediction cull (doc 23 phase 2).  C++ defaults
+         // false/2.0; keys omitted when off => byte-identical.
+         postcull_pin_overpred=false, postcull_pin_ratio_hi=null,
          // Sweepable ladder ceilings (doc 19 phase 4).  null => the literal
          // operating values below (compiled JSON unchanged).
          hc_clean_ks=null, hc_clean_c2=null, hc_good_ks=null, hc_good_c2=null,
@@ -663,6 +670,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if postcull_unflagged && postcull_c2n_max != null then 'postcull_c2n_max']:
                 postcull_c2n_max,
             [if postcull_unflagged && postcull_before_rescue then 'postcull_before_rescue']: true,
+            [if postcull_wtrunc_overpred then 'postcull_wtrunc_overpred']: true,
+            [if postcull_wtrunc_overpred && postcull_wtrunc_ratio_hi != null
+             then 'postcull_wtrunc_ratio_hi']: postcull_wtrunc_ratio_hi,
+            [if postcull_wtrunc_overpred && postcull_wtrunc_sat_frac != null
+             then 'postcull_wtrunc_sat_frac']: postcull_wtrunc_sat_frac,
+            [if postcull_pin_overpred then 'postcull_pin_overpred']: true,
+            [if postcull_pin_overpred && postcull_pin_ratio_hi != null
+             then 'postcull_pin_ratio_hi']: postcull_pin_ratio_hi,
 
             // Cathode-side containment tolerance (how far past the cathode a
             // cluster's drift end may reach and still count as contained;

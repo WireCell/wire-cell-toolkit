@@ -40,4 +40,15 @@ TEST_CASE("qlmatching default configuration knobs")
     CHECK(cfg["cluster_rescue_sat_ratio_relax"].asBool() == false);
     CHECK(cfg["cluster_rescue_sat_frac_min"].asDouble() == doctest::Approx(0.5));
     CHECK(cfg["cluster_rescue_sat_ratio_mult"].asDouble() == doctest::Approx(2.0));
+
+    // Window-truncated overprediction cull (doc 23 phase 2): default OFF.
+    REQUIRE(cfg.isMember("postcull_wtrunc_overpred"));
+    CHECK(cfg["postcull_wtrunc_overpred"].asBool() == false);
+    CHECK(cfg["postcull_wtrunc_ratio_hi"].asDouble() == doctest::Approx(2.0));
+    CHECK(cfg["postcull_wtrunc_sat_frac"].asDouble() == doctest::Approx(0.5));
+
+    // xtpc-pin overprediction cull (doc 23 phase 2): default OFF.
+    REQUIRE(cfg.isMember("postcull_pin_overpred"));
+    CHECK(cfg["postcull_pin_overpred"].asBool() == false);
+    CHECK(cfg["postcull_pin_ratio_hi"].asDouble() == doctest::Approx(2.0));
 }
