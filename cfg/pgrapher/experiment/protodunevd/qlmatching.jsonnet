@@ -77,6 +77,18 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          pe_err_cath_lowpe_frac=null, pe_err_cath_lowpe_knee=null,
          pe_err_pmt_floor=null, pe_err_pmt_frac=null,
          pe_err_pmt_lowpe_frac=null, pe_err_pmt_lowpe_knee=null,
+         // Optional THIRD pe_err family: the live membrane/wall XAs
+         // (0,1,3,12,18,19), for the wall-XA inclusion study (doc 25 sec 8;
+         // only meaningful with mask_wall_xa=false).  All null (default) =>
+         // the family arrays keep exactly two members => byte-identical.
+         pe_err_wall_floor=null, pe_err_wall_frac=null,
+         pe_err_wall_lowpe_frac=null, pe_err_wall_lowpe_knee=null,
+         // Per-channel multiplier on the MEASURED PE (length nchan array,
+         // applied at Opflash read, before thresholds/chi2/LASSO/KS).  C++
+         // default empty = identity; null (default) => key omitted =>
+         // byte-identical.  Wall-XA study: brings the wide-hit-fixed wall
+         // measurements onto the eff_scale_membrane prediction scale.
+         measured_pe_scale=null,
          // xtpc / selection quality gates (C++ defaults legacy-inert; doc 19).
          // null / false => keys omitted => byte-identical.
          xtpc_pin_min_strength=null,
@@ -182,11 +194,20 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
     // "use the global value" in C++.
     local pe_err_pmt_channels = std.range(14, 17) + std.range(20, 39),
     local pe_err_nn(v) = if v == null then -1 else v,
+    // Optional third family: the live membrane/wall XAs (same list as
+    // wall_xa_live below).  Appended to the family arrays only when one of
+    // its members is set, so the adopted two-family config stays
+    // byte-identical.
+    local pe_err_wall_channels = [0, 1, 3, 12, 18, 19],
+    local pe_err_wall_on =
+        pe_err_wall_floor != null || pe_err_wall_frac != null ||
+        pe_err_wall_lowpe_frac != null || pe_err_wall_lowpe_knee != null,
     local pe_err_fam_on =
         pe_err_cath_floor != null || pe_err_cath_frac != null ||
         pe_err_cath_lowpe_frac != null || pe_err_cath_lowpe_knee != null ||
         pe_err_pmt_floor != null || pe_err_pmt_frac != null ||
-        pe_err_pmt_lowpe_frac != null || pe_err_pmt_lowpe_knee != null,
+        pe_err_pmt_lowpe_frac != null || pe_err_pmt_lowpe_knee != null ||
+        pe_err_wall_on,
 
     // Official per-OpDet detection efficiencies, Ar/128 nm column eff_Ar
     // (PDVD_PDS_Mapping_v04152025, read per channel from
@@ -497,17 +518,31 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // Per-PD-family override of the model above (scan-tuning doc 19).
             // C++ default: empty arrays.  Keys omitted when all family params
             // are null => byte-identical pre-knob config.  Family order:
-            // [cathode XAs (4-11), PMTs (14-17, 20-39)]; -1 => global value.
+            // [cathode XAs (4-11), PMTs (14-17, 20-39)] + optional third
+            // wall-XA family (0,1,3,12,18,19) appended only when a
+            // pe_err_wall_* member is set; -1 => global value.
             [if pe_err_fam_on then 'pe_err_family_channels']:
-                [cathode_channels, pe_err_pmt_channels],
+                [cathode_channels, pe_err_pmt_channels]
+                + (if pe_err_wall_on then [pe_err_wall_channels] else []),
             [if pe_err_fam_on then 'pe_err_family_floor']:
-                [pe_err_nn(pe_err_cath_floor), pe_err_nn(pe_err_pmt_floor)],
+                [pe_err_nn(pe_err_cath_floor), pe_err_nn(pe_err_pmt_floor)]
+                + (if pe_err_wall_on then [pe_err_nn(pe_err_wall_floor)] else []),
             [if pe_err_fam_on then 'pe_err_family_frac']:
-                [pe_err_nn(pe_err_cath_frac), pe_err_nn(pe_err_pmt_frac)],
+                [pe_err_nn(pe_err_cath_frac), pe_err_nn(pe_err_pmt_frac)]
+                + (if pe_err_wall_on then [pe_err_nn(pe_err_wall_frac)] else []),
             [if pe_err_fam_on then 'pe_err_family_lowpe_frac']:
-                [pe_err_nn(pe_err_cath_lowpe_frac), pe_err_nn(pe_err_pmt_lowpe_frac)],
+                [pe_err_nn(pe_err_cath_lowpe_frac), pe_err_nn(pe_err_pmt_lowpe_frac)]
+                + (if pe_err_wall_on then [pe_err_nn(pe_err_wall_lowpe_frac)] else []),
             [if pe_err_fam_on then 'pe_err_family_lowpe_knee']:
-                [pe_err_nn(pe_err_cath_lowpe_knee), pe_err_nn(pe_err_pmt_lowpe_knee)],
+                [pe_err_nn(pe_err_cath_lowpe_knee), pe_err_nn(pe_err_pmt_lowpe_knee)]
+                + (if pe_err_wall_on then [pe_err_nn(pe_err_wall_lowpe_knee)] else []),
+            // Per-channel multiplier on the MEASURED PE (Opflash read, before
+            // admission thresholds/chi2/LASSO/KS).  C++ default empty array =
+            // identity; key omitted when null => byte-identical pre-knob
+            // config.  Wall-XA inclusion study (doc 25 sec 8): rescales the
+            // wide-hit-fixed wall measurements onto the (pre-fix-fit)
+            // eff_scale_membrane prediction scale.
+            [if measured_pe_scale != null then 'measured_pe_scale']: measured_pe_scale,
             // KS-led high-consistency ladder (purity cull before the fit).  KS
             // ceilings = SBND/PDHD; chi2/ndf ceilings at the loose PDHD scale --
             // with the uncalibrated PDVD PE scale the chi2 is inflated, so the
