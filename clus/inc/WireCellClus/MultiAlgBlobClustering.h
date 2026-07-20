@@ -68,6 +68,12 @@ namespace WireCell::Clus {
         // Replace the existing bee points structures with a more flexible approach
         struct BeePointsConfig {
             // special name "img" dumps "live" before clustering
+            // prepipeline=true dumps this set at that SAME pre-clustering point
+            // (the raw per-anode matched clusters) without needing name=="img",
+            // so a second raw set (e.g. per-drift-side img-side-* split by
+            // apa_groups) can coexist with img-global.  Default false =>
+            // set follows the legacy name=="img" pre/post routing (byte-identical).
+            bool prepipeline{false};
             std::string name;   // bee type name
             std::string detector;  // bee geom name
             std::string algorithm; // bee alg name, defaults to type

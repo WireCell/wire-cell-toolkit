@@ -69,6 +69,19 @@ local apa_drift_groups = [
     { name: "group4567", apas: [4, 5, 6, 7] },
 ];
 
+// Per-drift-side raw-imaging Bee groups (opt-in bee_img_per_side).  Same anode
+// split as apa_drift_groups, but named for the display: bottom drift = anodes
+// 0-3 (x0=-341.5cm), top drift = anodes 4-7 (x0=+341.5cm).  Routed by physical
+// anode (wpid.apa()), NOT by reconstructed x -- the two volumes overlap in the
+// pre-T0 apparent-x frame, so only anode membership separates them.  Emitted as
+// a second pre-pipeline "img" set => instances img-side-bot / img-side-top in
+// the SAME raw coordinate frame as img-global (they join after T0 in
+// clustering-global).
+local img_side_groups = [
+    { name: "side-bot", apas: [0, 1, 2, 3] },
+    { name: "side-top", apas: [4, 5, 6, 7] },
+];
+
 
 // ProtoDUNE-VD geometry parameters
 // 8 anodes total: anodes 0-3 are bottom drift (centerline x=-3415.5mm, drift in +x direction)
@@ -635,6 +648,10 @@ local clus_all_tpc (
     // rejects).  null => C++ default 0 => retry OFF => byte-identical; runner supplies
     // the census operating point (~10 cm).
     cc_cathode_band_dis = null,
+    // Add a second pre-pipeline raw-imaging Bee set split by drift side
+    // (img-side-bot / img-side-top), alongside the whole img-global.  false =>
+    // the bee_points_sets list is unchanged => compiled config byte-identical.
+    bee_img_per_side = false,
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -768,7 +785,25 @@ local clus_all_tpc (
                     coords: ["x", "y", "z"],    // raw drift coords, matching the op dump point
                     individual: false,
                 }
-            ],
+            ] + (if bee_img_per_side then [
+                {
+                    // Opt-in second pre-pipeline raw set, split by drift side via
+                    // apa_groups (routed by physical anode).  prepipeline:true lets
+                    // it dump at the same pre-clustering point as "img" without the
+                    // name=="img" collision.  algorithm "img" + group names =>
+                    // instances img-side-bot / img-side-top, in the SAME raw
+                    // apparent-x frame as img-global (the two halves overlap here and
+                    // join after T0 in clustering-global -- that overlap is intended).
+                    name: "imgside",
+                    detector: "protodunevd",
+                    algorithm: "img",
+                    pcname: "3d",
+                    coords: ["x", "y", "z"],
+                    individual: false,
+                    prepipeline: true,
+                    apa_groups: img_side_groups,
+                },
+            ] else []),
             pipeline: wc.tns(cm_pipeline),
         },
     }, nin=1, nout=1, uses=anodes+[dv, pcts]+cm_pipeline),
@@ -804,7 +839,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_group(anodes, group_name, dump=true) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),

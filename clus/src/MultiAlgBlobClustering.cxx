@@ -252,6 +252,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
+            // Dump this set at the pre-clustering point (like the special "img"
+            // set) even if its name isn't "img".  Absent => false => legacy
+            // name-based routing => byte-identical.
+            bpc.prepipeline = get<bool>(bps, "prepipeline", false);
 
             // Optional drift-side / APA grouping (additive; absent -> unchanged)
             if (bps.isMember("apa_groups")) {
@@ -2201,7 +2205,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     perf.dump("pre clustering", ensemble);
 
     for (const auto& config : m_bee_points_configs) {
-        if (config.name != "img") {
+        if (config.name != "img" && !config.prepipeline) {
             continue;
         }
         auto gs = ensemble.with_name("live");
@@ -2241,7 +2245,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
         // Dump bee points right after specific visitor runs
         for (const auto& config : m_bee_points_configs) {
-            if (config.name == "img") continue;
+            if (config.name == "img" || config.prepipeline) continue;
             if (config.visitor.empty() || config.visitor != cmeth.name) continue;
 
             auto gs = ensemble.with_name(config.grouping);
@@ -2291,7 +2295,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
     // Fill all configured bee points sets (except those with visitor-specific handling)
     for (const auto& config : m_bee_points_configs) {
-        if(config.name == "img") continue;
+        if(config.name == "img" || config.prepipeline) continue;
 
         // Skip configs with visitor specified - they were already handled in the visitor loop
         if (!config.visitor.empty()) continue;
