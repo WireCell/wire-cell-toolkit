@@ -33,6 +33,7 @@ WireCell::Configuration Root::SBNDReco1OpFlashSource::default_configuration() co
     cfg["ptb_product"] = m_ptb_product;
     cfg["tdc_product"] = m_tdc_product;
     cfg["rawheader_prefix"] = m_rawheader_prefix;
+    cfg["frameshift_product"] = m_frameshift_product;
     cfg["npmts"] = m_npmts;
     cfg["caf_offset_mode"] = m_caf_offset_mode;
     cfg["caf_offset_override"] = m_caf_offset_override;
@@ -50,6 +51,7 @@ void Root::SBNDReco1OpFlashSource::configure(const WireCell::Configuration& cfg)
     m_ptb_product = get(cfg, "ptb_product", m_ptb_product);
     m_tdc_product = get(cfg, "tdc_product", m_tdc_product);
     m_rawheader_prefix = get(cfg, "rawheader_prefix", m_rawheader_prefix);
+    m_frameshift_product = get(cfg, "frameshift_product", m_frameshift_product);
     m_npmts = get(cfg, "npmts", m_npmts);
     m_caf_offset_mode = get(cfg, "caf_offset_mode", m_caf_offset_mode);
     m_caf_offset_override = get(cfg, "caf_offset_override", m_caf_offset_override);
@@ -60,8 +62,8 @@ void Root::SBNDReco1OpFlashSource::configure(const WireCell::Configuration& cfg)
     if (m_entry < 0 and m_run >= 0 and m_event < 0) {
         THROW(ValueError() << errmsg{"SBNDReco1OpFlashSource: \"run\" selection also needs \"event\""});
     }
-    if (m_caf_offset_mode != "none" and m_caf_offset_mode != "auto" and
-        m_caf_offset_mode != "override") {
+    if (m_caf_offset_mode != "none" and m_caf_offset_mode != "product" and
+        m_caf_offset_mode != "auto" and m_caf_offset_mode != "override") {
         THROW(ValueError() << errmsg{"SBNDReco1OpFlashSource: bad caf_offset_mode \"" +
                                      m_caf_offset_mode + "\""});
     }
@@ -163,6 +165,20 @@ bool Root::SBNDReco1OpFlashSource::operator()(ITensorSet::pointer& out)
         log->debug("run {} event {}: frame_apply_at_caf override {} ns",
                    run, event, m_caf_offset_override);
     }
+    else if (m_caf_offset_mode == "product") {
+        // The authoritative per-event value, written by the sbndcode
+        // FrameShift producer.  Fail loudly rather than emit un-offset
+        // flashes: a file without the product needs mode "auto"/"none".
+        art::Wrapper<sbnd::timing::FrameShiftInfo> fsi;
+        if (!SBNDReco1::read_wrapper(fp.events, m_frameshift_product, entry, fsi) or !fsi.present) {
+            THROW(IOError() << errmsg{"SBNDReco1OpFlashSource: caf_offset_mode=product but no product " +
+                                      m_frameshift_product + " in " + m_filename});
+        }
+        setmd["frame_apply_at_caf"] = fsi.obj.fFrameApplyAtCaf;
+        setmd["caf_timing_type"] = fsi.obj.fTimingType;
+        log->debug("run {} event {}: timing_type {} frame_apply_at_caf {} ns (product)",
+                   run, event, fsi.obj.fTimingType, fsi.obj.fFrameApplyAtCaf);
+    }
     else if (m_caf_offset_mode == "auto") {
         const uint64_t raw_ts = SBNDReco1::raw_header_timestamp(fp.events, entry, m_rawheader_prefix);
         art::Wrapper<std::vector<raw::ptb::sbndptb> > ptbs;
@@ -184,16 +200,13 @@ bool Root::SBNDReco1OpFlashSource::operator()(ITensorSet::pointer& out)
                           run, event, fs.status);
             }
             else {
-                // Candidate FrameApplyAtCaf reduction: flash times are
-                // PMT-aligned to the event-trigger frame; re-referencing
-                // them to the stream default (beam-gate) frame adds the
-                // etrig-vs-gate separation.  Sign fixed empirically: the
-                // in-time beam flash (raw ~ -0.73 us) must land in the
-                // +0.3..1.9 us window (flash-coincidence.md), which
-                // frame_etrig - frame_default does (+2.0 us on run 18306
-                // evt 256587) and the opposite sign does not.  Pending
-                // confirmation against sbnobj FrameApplyAtCaf (local mod,
-                // not public).  See SBNDReco1FrameShift.h.
+                // Approximation for pre-FrameShift files.  The true
+                // FrameApplyAtCaf (caf_offset_mode=product) equals the
+                // decoded-frame-to-SPEC-TDC-RWM shift; on the 48-event
+                // dev sample frame_etrig - frame_default sits 43..482 ns
+                // (mean 262) below it -- close enough to land the in-time
+                // beam flash in the +0.3..1.9 us window, not exact.
+                // Prefer "product" whenever the producer has run.
                 const double offset_ns = static_cast<double>(fs.frame_etrig) -
                                          static_cast<double>(fs.frame_default);
                 setmd["frame_apply_at_caf"] = offset_ns;

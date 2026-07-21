@@ -47,4 +47,8 @@
 #pragma link C++ class art::Wrapper<vector<raw::ptb::sbndptb> >+;
 #pragma link C++ class art::Wrapper<vector<sbnd::timing::DAQTimestamp> >+;
 #pragma link C++ class art::Wrapper<artdaq::detail::RawEventHeader>+;
+#pragma link C++ class sbnd::timing::TimingInfo+;
+#pragma link C++ class sbnd::timing::FrameShiftInfo+;
+#pragma link C++ class art::Wrapper<sbnd::timing::TimingInfo>+;
+#pragma link C++ class art::Wrapper<sbnd::timing::FrameShiftInfo>+;
 #endif

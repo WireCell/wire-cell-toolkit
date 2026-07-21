@@ -18,9 +18,13 @@ export SBND_INPUT_DIR=$PWD/input_files_reco1/extracted-<tag>
 ./run_ql_evt.sh  data <idx>
 ```
 
-Development file: `sbnd_xin/input_files_reco1/data_filtered_decoded_reco1-
-fe6033f3-07a0-4971-cea5-16ce59269fba_eventidfiltered.root` (48 real-data events,
-runs 18255/18306, SBND 2025 fall production, BNBLight stream, ~254 MB).
+Development files: `sbnd_xin/input_files_reco1/data_filtered_decoded_reco1-
+fe6033f3-07a0-4971-cea5-16ce59269fba_eventidfiltered.root` (48 real-data
+neutrino-candidate events across 12 runs 18253..18409 — mostly 18255 —
+SBND 2025 fall production, BNBLight stream, ~254 MB) and its
+`*_eventidfiltered_frameshift.root` companion: the same 48 events with the
+sbndcode `FrameShift` producer run over them (process `FRAMESHIFT`), adding
+the `sbnd::timing::FrameShiftInfo` + `TimingInfo` products (~34 KB).
 
 ## How reading works (and its two hard-won gotchas)
 
@@ -56,6 +60,7 @@ Products read (data reco1 branch names, all configurable):
 | PTB decode | `raw::ptb::sbndptbs_ptbdecoder__DECODE.` | FrameShift port |
 | TDC decode | `sbnd::timing::DAQTimestamps_tdcdecoder__DECODE.` | FrameShift port |
 | DAQ header | `artdaq::detail::RawEventHeader_daq_RawEventHeader_*` (per-EVB scan) | FrameShift port |
+| FrameShift product | `sbnd::timing::FrameShiftInfo_frameshift__FRAMESHIFT.` (only in `*_frameshift.root`) | `caf_offset_mode="product"` |
 | run/subrun/event | `EventAuxiliary`, Runs-tree `RunAuxiliary` | idents, frame time |
 
 ## Output conventions (compatibility contract)
@@ -92,19 +97,41 @@ frames gate/etrig/crtt1 with the fcl TDC-vs-PTB shifts.
 Knob `caf_offset_mode` (C++ default `"none"` = key omitted, byte-identical to
 the older no-key dumps):
 
-- `"auto"` — write `frame_etrig - frame_default` (ns).
+- `"product"` — read `FrameShiftInfo::fFrameApplyAtCaf` from the file's
+  `frameshift_product` branch (throws if absent — requires a
+  `*_frameshift.root` input).  **Authoritative.**
+- `"auto"` — write `frame_etrig - frame_default` (ns) from the ported
+  derivation.  Approximation for pre-FrameShift files.
 - `"override"` — write `caf_offset_override` verbatim.
 
-**Status of the `auto` reduction**: `FrameApplyAtCaf()` exists only in a local
-sbnobj modification (absent from every public sbnobj branch as of 2026-07), so
-the reduction was fixed *empirically*: on all 48 development-file events the
-raw in-time flash sits at median −0.715 us (matches the documented −0.71) and
-`frame_etrig − frame_default` (0–2560 ns, median 1536) moves it to median
-+0.98 us with 42/48 inside the +0.3–1.9 us beam window — the documented
-validation signature (`sbnd_xin/docs/flash-coincidence.md`); the opposite sign
-pushes flashes out of the window.  **Pending confirmation against the actual
-`FrameApplyAtCaf()` implementation** (ask the SBND timing authors); until then
-treat `auto` values as validated-but-unconfirmed.
+**The reduction question, answered (2026-07-21).**  A FRAMESHIFT-processed
+companion of the dev file resolved what `FrameApplyAtCaf()` actually returns:
+on all 48 events (`fTimingType = 0`, SPEC-TDC-ETRIG-decoded frames)
+`fFrameApplyAtCaf == fFrameTdcRwm` **exactly** — the shift from the decoded
+frame to the SPEC-TDC RWM signal (per-spill beam arrival; the PTB
+`fFrameHltBeamGate` tracks it within ±20 ns).  The `auto` candidate
+`frame_etrig − frame_default` (256-ns-quantized, 0–2560 ns) underestimates it
+by 43–482 ns (mean 262): right scale — hence the passed beam-window
+validation — wrong formula.  The exact value is *not derivable* from the
+DECODE-stage products `auto` reads: the module's decoded-frame reference sits
+a few hundred ns below the nearest SPEC-TDC ch3 (FTRIG) entry and comes from
+PMT-decoder products the extraction does not consume.  So `auto` stays a
+±0.5 us fallback for pre-FrameShift files; use `product` whenever the
+producer has run.
+
+## Verification — product mode (2026-07-21, `*_frameshift.root`)
+
+- Mirror-class reads (`FrameShiftInfo`, `TimingInfo`, both split-level-1
+  single-object wrappers): values identical to a dictionary-free
+  `TTree::Scan` on all 48 events; the port's TDC RWM/ETRIG picks equal the
+  module's `TimingInfo` timestamps u64-exactly on 48/48.
+- Extraction `-caf product` (tag `extracted-2025fall-48evt-fsprod`):
+  `frame_apply_at_caf` metadata equals `fFrameApplyAtCaf` on 48/48 events in
+  both APA tarballs.
+- Physics: raw in-time flash median −0.715 us; corrected median +1.28 us with
+  **45/48 in the +0.3..1.9 us beam window** (the `auto` approximation gave
+  42/48).  All 48 events are neutrino candidates.  Outliers: 214469/111412
+  marginal (1.94/2.04 us), 131357 (−0.40 us, min-|t| flash likely a cosmic).
 
 ## Verification (2026-07-21)
 
@@ -123,7 +150,9 @@ treat `auto` values as validated-but-unconfirmed.
   `setarch x86_64 -R`: `mabc-all-apa.zip` member-hash identical
   (`4b006453…`, 5 members; snapshots `ab_A1`/`ab_B1`/`ab_B2`, B1=B2 confirms
   determinism).  The dictionary embedded in `libWireCellRoot` does not alter
-  any existing output.
+  any existing output.  Re-gated after the FrameShiftInfo/TimingInfo mirror +
+  `product`-mode additions: same evt 686 rerun (setarch, fresh work root)
+  reproduces `4b006453…` exactly.
 - `root/` has no doctest binary (`wcdoctest-root` does not exist; package
   carries only legacy `test_*` tools) — nothing additional to run.
 

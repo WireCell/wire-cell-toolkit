@@ -9,11 +9,14 @@
  * FrameShiftInfo::FrameApplyAtCaf() of these frames is written into the
  * opflash tensor-set metadata as "frame_apply_at_caf" (ns).
  *
- * That reduction only exists in a local sbnobj modification (absent from
- * all public sbnobj branches as of 2026-07); the candidate implemented
- * here is frame_default - frame_etrig, to be validated against the
- * in-time-flash beam window (+0.3..1.9 us) and confirmed with the
- * authors.  See root/docs/sbnd-reco1-source.md.
+ * 2026-07-21 status: a FRAMESHIFT-processed file (the producer run over
+ * the same 48 events) shows FrameApplyAtCaf == fFrameTdcRwm (the decoded
+ * frame -> SPEC-TDC RWM shift) exactly, which the frame_etrig -
+ * frame_default candidate here underestimates by 43..482 ns (mean 262).
+ * When the input file carries the FrameShiftInfo product, use
+ * SBNDReco1OpFlashSource caf_offset_mode="product" instead of this
+ * derivation ("auto" remains the pre-FrameShift-file approximation).
+ * See root/docs/sbnd-reco1-source.md.
  *
  * Only SBNDReco1OpFlashSource uses this header.
  */
