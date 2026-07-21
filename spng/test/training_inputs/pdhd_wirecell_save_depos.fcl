@@ -1,0 +1,65 @@
+#include "services_refactored_pdune.fcl"
+#include "wirecell_dune.fcl"
+#include "protodune_tools_dune.fcl"
+
+process_name: Img
+
+services:
+{
+  TFileService: { fileName: "reco_protoDUNE_hist.root" }
+  TimeTracker:       @local::dune_time_tracker
+  MemoryTracker:     @local::dune_memory_tracker
+  RandomNumberGenerator: {} #ART native random number generator
+  message:              @local::dune_message_services_prod
+  FileCatalogMetadata:  @local::art_file_catalog_mc
+                        @table::protodunehd_reco_services
+  #ChannelStatusService: @local::pdsp_channel_status
+  IFDH: {}
+  DetectorPropertiesService:  @local::protodune_detproperties
+}
+
+
+source:
+{
+  module_type: RootInput
+  maxEvents: 100
+  saveMemoryObjectThreshold: 0
+  fileNames: ["detsim_single_protoDUNE.root"]
+}
+
+physics: {
+
+  producers: {
+    rns:            { module_type: "RandomNumberSaver" }
+    wirecell:         @local::wirecell_pdhd_sim_deposplat
+  }
+
+reco: [ rns,
+        wirecell
+        ]
+
+  stream1:  [ out1 ]
+
+  trigger_paths: [reco]
+
+  end_paths:     [stream1]
+}
+
+outputs:
+{
+ out1:
+ {
+   module_type: RootOutput
+   fileName:    "%ifb_deposplat.root"
+   dataTier:    "simulated"
+   outputCommands: [ "keep *", "drop *_reco3d_noreg_*", "drop *_reco3d_pre_*" ]
+   compressionLevel: 1 #zlib argument (0-9)
+   fastCloning: true
+ }
+}
+
+#Uncomment for testing. Run in same dir as jsonnet
+physics.producers.wirecell.wcls_main.configs: [
+    #"pgrapher/experiment/pdhd/wcls-sim-drift-depos.jsonnet"
+    "wcls-save-larg4-depos.jsonnet"
+]

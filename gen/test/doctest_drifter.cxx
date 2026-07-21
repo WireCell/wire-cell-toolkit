@@ -165,17 +165,26 @@ static void test_bent(double sign)
 
 
 
+    int nerrors = 0;
+
     for (const auto& idepo : drifted) {
         if (!idepo) { continue; } // skip EOS
         auto pos = idepo->prior()->pos();
 
         double xcat = catx(pos.y(), pos.z());
 
-        if (sign > 0)
-            CHECK(pos.x() < (xcat + epsilon));
-        else
-            CHECK(pos.x() > (xcat - epsilon));
+        if (sign > 0) {
+            if (pos.x() > (xcat + epsilon)) {
+                ++nerrors;
+            }
+        }
+        else {
+            if (pos.x() < (xcat - epsilon)) {
+                ++nerrors;
+            }
+        }
     }
+    CHECK(nerrors == 0);
 
 }
 

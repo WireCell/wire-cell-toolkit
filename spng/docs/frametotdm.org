@@ -1,0 +1,183 @@
+#+title: Conversion between IFrame and SPNG Tensor Data Model
+
+* Overview
+
+SPNG subgraphs exchange tensors following [[file:datamodel.org][SPNG tensor data model]] (SPNG TDM).
+This should not to be confused with WCT's similar but non-Torch TDM.  We will
+say simply TDM in the remainder of this document.  Some older SPNG nodes do not
+follow the TDM and are out of scope for this document.  
+
+An SPNG subgraph typically must reside inside a larger graph context that uses
+non-SPNG =IData= types, in particular =IDepoSet= and =IFrame=.  SPNG provide two key
+converter node classes: ~FrameToTdm~ and ~TdmToFrame~.  When referenced in Jsonnet
+they are spelled ={type: "SPNGFrameToTdm"}= and ={type: "SPNGTdmToFrame"}=.
+
+The ~FrameToTdm~ provides flexible, configurable rule-based extraction of ~IFrame~
+parts into a TDM tensor set (=ITorchTensorSet=).  ~IFrame~ structure is mapped to
+TDM conventions.  Of primary importance is the assignment of the TDM metadata
+attribute ~datapath~ to each tensor in the set in order to uniquely identify the
+set elements.  The =FrameToTdm= class provides a sophisticated set of
+configuration parameters but defaults are often sufficient.
+
+The =TdmToFrame= provides the inverse operation to =FrameToTdm=.  The former
+implements a "gather" pattern to latter's "scatter".  It is also based on
+applying configurable rules to map tensors in a set into elements of the =IFrame=
+structure.  This mapping largely depends on the value of the =datapath= tensor
+metadata attribute.  Inside an SPNG subgraph, =datapath= is not necessarily
+preserved an a penultimate =Transform= node may be used to define =datapath= in a
+way that allows the configured rules given to =TdmToFrame= to be written simply
+and robustly.  The =TdmToFrame= requires tensors of types ~datatype = "frame"~ and
+~datatype = "chids"~ while the core internal SPNG subgraphs pass only ~datatype =
+"traces"~ tensors.  In most cases, =frame= and =chids= tensors can be supplied by
+forwarding the original output of =TdmToFrame= to the output of the SPNG subgraph
+and merging that tensor set with the tensors resulting from the subgraph.
+
+The rest of this document gives recommendation for a =datapath= convention to for
+=FrameToTdm= and =TdmToFrame= followed by guidance to configure these two bookend
+nodes.
+
+* Datapaths
+
+Each =ITorchTensor= in the tensor set produced by =FrameToTdm= is given a =datapath=
+metadata attribute to provide the tensor a unique name.  We define a convention
+that encodes other metadata attributes in a specified pattern so that string
+identifies the nature of the tensor.
+
+** Default datapath construction
+
+The default datapaths are formed as a chain or path of "kind/value" pairs.  The
+"kind" part is a static label marking kind of value that follows.  The "value"
+part is determined from the ~IFrame~ data, stored as other metadata parameters and
+then string-interpolation on a "datapath pattern" is performed.
+
+A couple examples should make this clear.  In the first case, we have datapaths
+from an ~IFrame~ that holds ADC waveforms such as produced by WCT simulation or a
+DAQ file.  In this example, ~FrameToTdm~ is configured to separate out the
+waveforms for each contiguous wire plane.  In the case of wrapped APAs, that
+results in 4 "groups" (collection planes on either face are not contiguous).
+
+#+begin_example
+/frames/0/frame
+/frames/0/tags/null/groups/0/traces
+/frames/0/tags/null/groups/0/chids
+/frames/0/tags/null/groups/0/summaries
+/frames/0/tags/null/groups/1/traces
+...
+/frames/0/tags/null/groups/2/traces
+...
+/frames/0/tags/null/groups/3/traces
+...
+#+end_example
+
+Here are the "kind" labels
+
+- frames :: a folder of data from ~IFrame~ followed by the frame's "ident" number
+- tags :: this folder holds subfolders named by the trace tags in the frame.  When a frame lacks trace tags, then all traces are extracted.  The tag name is then interpreted to be "null".
+- groups :: followed by a group index.  Each group is a configurable selection of channels.
+- chmasks :: not shown in the above example, but this holds channel mask tensors each by its label.
+  
+The next example shows what might be seen when a ~FrameToTdm~ converts an ~IFrame~
+that was produced by a signal processing job.
+
+#+begin_example
+/frames/0/frame
+/frames/0/chmasks/bad
+/frames/0/chmasks/noisy
+/frames/0/tags/gauss/groups/0/traces
+/frames/0/tags/gauss/groups/0/chids
+/frames/0/tags/gauss/groups/0/summaries
+/frames/0/tags/gauss/groups/1/traces
+...
+/frames/0/tags/wiener/groups/0/traces
+...
+#+end_example
+
+** Datapath construction
+
+A datapath for any output tensor is constructed from two configurable parts:
+
+- basepath :: a single "folder" path common to all tensors.
+- relpath :: a "sub-folder" path of the basepath for each kind of tensor which may be specified in a variety of ways.
+Each tensor is then given a full path as:
+#+begin_example
+ <fullpath> = <basepath> / <relpath>
+#+end_example
+
+Paths (base or relative) are specified as a string with embedded parameters that
+will be resolved through string interpolations (by a call to ~fmt::format()~).
+The examples above may be configured with:
+
+#+begin_example
+ basepath = "/frames/{ident}
+ frame_relpath = "frame"
+ chmask_relpath = "chmasks/{label}"
+ relpath = "tags/{tag}/rules/{rule}/groups/{group}/{datatype}"
+#+end_example
+The last ~relpath~ may be specified on a per-rule (per-tag) basis.  Rules are
+described below.  The formatting is applied to the full path.
+
+The parameters available for formatting:
+
+- ident :: the ~IFrame::ident()~
+- label :: the channel mask label (only for chmasks paths)
+- tag :: the name for the trace tag of a rule.  If the trace tag for selection was "" (all traces) then ~tag~ as used for formatting is "null".
+- rule :: the rule index number
+- group :: the group index number (not unique across rules).
+- datatype :: the TDM "datatype" of the tensor (frame, traces, summaries, chids, chmasks).  This may be used for any tensor but most useful for use in rules.
+
+
+* ~FrameToTdm~ configuration
+
+** Basics
+
+- ~anode~ :: type/name of the anode providing context for the frame.
+  
+- ~basepath~ :: the base or root path for all output tensors
+
+- ~frame_relpath~ :: the relative path for the "frame" datatype tensor
+
+** Rules
+
+The ~FrameToTdm~ extacts channel-level information from ~IFrame~ to tensors
+according to "rules".  Each rule consists of a trace "tag" and a "groups" array.
+
+The "tag" determines which trace tag the rule applies.  The special empty string
+("") tag will select all traces.  Note, an emptry string ~tag~ used formatting
+becomes the string "null".
+
+Each element ("group") in the "groups" array defines a set of channels and,
+optionally, a relative path for tensors derived via the group.  The tensors
+produced by the rule group will span the intersection of the set of channels
+defined in the group and the set of channels populated by the tagged traces.
+These channels are ordered according to their "wire attachment number" aka
+~IChannel::index()~ and this ordering is used in any of the derived tensors.
+Three types of TDM tensors can be derived from each group in a rule:
+
+- traces :: 2D float32 tensor of waveform samples, each row is one channel.
+
+- chids :: 1D int32 tensor of channel IDs corresponding to the rows of the traces tensor.
+
+- summaries :: 1D float64 of the "trace summaries" corresponding to the channels.
+
+If no summaries were stored on the IFrame for the given tag, or if the special
+empty string tag was given, no "summaries" tensor will be produced.
+
+A group defines channels as the union of processing one or two array parameters:
+"wpids" and "channels".  The "wpids" array gives an array of ~WirePlaneId~ packed
+integers.  All channels consistent with the any wpid are included.  The
+"channels" array is simply a list of channel ID numbers.
+
+The optional "relpath" rule group option specifies the relpath for the derived
+tensors.  If omitted the default, as described above, is used.
+
+** Chmasks
+
+The ~chmasks~ configuration provides an object that provides channel mask map
+information.  It maps a CMM "label" key to the relative path for a corresponding
+output channel masks tensor.
+
+** Non-config
+
+- device :: FrameToTdm implicitly uses CPU-only.  Downstream consumers that
+  require GPU should inherit from ~ContextBase~ and use ~to()~ on input tensors.
+

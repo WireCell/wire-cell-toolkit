@@ -11,6 +11,18 @@ std::vector<std::string> WireCell::String::split(const std::string& in, const st
     return chunks;
 }
 
+std::string WireCell::String::replace(std::string s,
+                                      const std::string& have, const std::string& want)
+{
+    size_t pos = 0;
+    while ((pos = s.find(have, pos)) != std::string::npos) {
+        s.replace(pos, have.length(), want);
+        pos += want.length(); // Advance past the newly inserted text
+    }
+    return s;
+}
+
+
 std::pair<std::string, std::string> WireCell::String::parse_pair(const std::string& in, const std::string& delim)
 {
     std::vector<std::string> chunks = split(in, delim);

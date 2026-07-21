@@ -1,0 +1,105 @@
+#+title: How to write SPNG nodes
+
+Besides using Torch, SPNG data flow graph nodes try to rise above the OG WCT
+nodes to reach a new level of standardization.  This describes how you can write
+SPNG nodes at this level.
+
+* Inheritance
+
+- If your node will log (never use =std::cerr/std::cout=) inherit from =SPNG::Logger=
+- If your node toes any Torch operation, inherit from =SPNG::ContextBase=
+- If your node fans in or out inherit from =SPNG::FaninBase= or =SPNG::FanoutBase=
+
+
+* Configuration
+
+Guidelines for configuration are given for C++ and Jsonnet. 
+
+** Jsonnet configuration
+
+The Jsonnet configuration is structured to abstract and separate different
+concerns:
+
+- Detector object :: The ~detconf.jsonnet~ file produces an object with each attribute
+  providing a description of one detector (or one of its variants).  A detector
+  object is constructed with the =detector()= method in the object defined by
+  =detector.jsonnet=.
+
+- TPC object :: A *detector object* is primarily a collection of *tpc objects*, each
+  of which describes one unit of a larger detector in terms of its *anode object*
+  and related parameters.  In DUNE HD, a *tpc object* describes one APA and the
+  drift volumes viewed by its two faces.  Etc, DUNE VD it describes one CRU.
+
+- Control object :: A *control object* encapsulates information that an end user
+  might want to specify independent of any choice of detector or job graph.  It
+  is where things such as the rng, dft (for non-torch FFT), device and verbosity
+  is injected.
+
+- Node factory function :: A *node factory function* returns a primitive Pnode
+  configuration object for one DFP type.  Its calling signature assures the
+  schema for the node's configuration object is satisfied.
+
+- Subgraph factory function :: A *subgraph factory function* is one that calls one
+  or more other factory functions to assemble a subgraph of nodes as a single
+  Pnode.  It will typically take a *tpc object* and a *control object* to provide
+  context.
+
+- *Top-level function* :: A *top-level function* is any Jsonnet file that produces a
+  function with arguments that can all be provided as "simple" *top level
+  arguments* (TLAs).  Here, "simple" means using "-A" option of =jsonnet=,
+  =wcsonnet=, =wire-cell=.  This function is typically composed of one or more
+  *subgraph factory functions*.
+
+- Top-level closure :: A *top-level closure* is a file that produces a full
+  configuration object.  It is typically made by collecting one or more
+  *top-level functions* and hard-wiring their options.  A *top-level closure* has no
+  user accessible options, indeed it is meant to freeze out any such choice.
+  The user will likely encode some summary of the choices in the name of the
+  Jsonnet file providing any given *top-level closure*.
+
+*** Node factory function
+
+Provide or add to an existing file under =spng/cfg/*.jsonnet= the following:
+
+A configuration factory function to express the configuration schema:
+
+#+begin_src jsonnet
+{
+  mynode(tpc, arg, /*...other args...,*/ extra_name="", control={})::
+      pg.pnode({
+          type: 'MyType',
+          name: tpc.name + extra_name,
+          data: {
+              myarg: arg, // etc for other args
+          } + wc.object_with(control, ["verbosity", "device"])
+      }, nin=1, nout=1, uses=[/*...*/]),
+}
+#+end_src
+
+Include in =wc.object_with()=:
+- ="verbosity"= :: your class inherits from =Logger=
+- ="device"= :: your class inherits from =ContextBase=
+
+** C++ configuration
+
+t.b.d, but in brief
+
+1. Make a =struct MyNodeConfig { int arg=0, ... };= holding parameters.
+2. Add =BOOST_HANA_ADAPT_STRUCT(WireCell::SPNG::MyNode, arg, ...);=
+3. Implement =IConfigure= methods like:
+   #+begin_src c++
+     void MyNode::configure(const WireCell::Configuration& config) {
+         WireCell::configure_bases<MyNode, ContextBase, Logger>(this, config);
+         HanaJsonCPP::from_json(m_config, config);
+         // Add any custom response to configure
+     }
+
+     WireCell::Configuration MyNode::default_configuration() const
+     {
+         auto cfg = WireCell::default_configuration_bases<MyNode, ContextBase, Logger>(this);
+         auto cfg2 = HanaJsonCPP::to_json(m_config);
+         update(cfg, cfg2);
+         return cfg;
+     }
+   #+end_src
+

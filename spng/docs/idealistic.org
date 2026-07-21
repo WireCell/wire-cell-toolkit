@@ -1,0 +1,201 @@
+#+title: Idealistic SPNG flow
+
+* meta :noexport:
+
+#+begin_src sh :results output drawer
+scp idealistic.* hierocles.phy.bnl.gov:public_html/wire-cell/docs/spng/
+#+end_src
+
+#+RESULTS:
+:results:
+:end:
+
+
+* Overview
+
+SPNG, like the original SP (Wire-Cell Toolkit's ~OmnibusSigProc~) has two major stages of processing
+
+- filtered deconvolution :: a model of the detector response to ionization electrons is deconvolved from the measurement and a filter is applied to regulate effects due to the presence of noise.
+
+- signal regions of interest :: adaptive time-domain filters are applied to mitigate unregulated noise that is amplified by the deconvolution.
+
+* Filtered deconvolution
+
+** tl;dr
+
+The decon is described in details starting in the next section.  Assuming that is already understood, the basic jist is that the calculation is performed in a monolithic way:
+
+- Transform any 1D array to
+  - The "time" and "wire" filters form 2D via their outer product.
+  - 1D (eg, nominal ER vs tick) is replicated over the other dimension.
+- Add the total sizes of all arrays along each dimension.
+- Pad all arrays to that size to allow for cyclic DFT safety (inc. face-edge padding if needed).
+- Calculate a "total Gauss" and a "total Wiener" kernel including filters and all responses.
+- Apply DFT and hold on to these two kernels as 2D spectra.
+- Apply DFT to a similarly padded 2D ADC array
+- Multiply in 2D Fourier and invDFT back to interval.
+- Save / add tails via "overlap-add" in chunked-streamed mode.
+
+
+** Basics
+
+The measurement $M$ from a detector that responds as $R$ to true signal $S_{true}$ and which has untreated $\mathcal{N}$ is modeled as
+
+#+name: eq:sim
+\begin{equation}
+M = RS + \mathcal{N}
+\end{equation}
+
+The terms represent 2D arrays with rows running along the dimension of channel in interval domain (periodicity in Fourier domain) and columns running along the dimension of time (frequency).
+The /filtered deconvolution/ approximates $S$ by neglecting noise and solving:
+
+#+name: eq:sp
+\begin{equation}
+\hat{S} = \frac{M F}{R}
+\end{equation}
+
+
+** Filters
+
+The filter $F$ is intended to attenuate noise while preserving signal.  Typically the 2D filter array is formed as the outer product of two independent 1D vectors.
+
+\[ F = f_t \otimes f_c \]
+
+Each 1D $f_d$ provides a filter array to apply along dimension $d$ at each element of the other dimension.  That is, $f_t$ is identically convolved along the time dimension with each channel row.
+SP defines two filter variants:
+
+- $F_w$ :: a Wiener-inspired filter that maximizes a signal-to-noise metric.
+- $F_g$ :: a Gaussian filter that preserves signal in the measure.
+  
+Downstream, application of $F_w$ in equation [[eq:sp]] produces an estimate of the signal array $\hat{S}_w$.  Peaks in this array are used to identify signal regions-of-interest (ROIs).  These ROIs are then applied to the estimated signal array $\hat{S}_g$ that results from applying $F_g$.  
+
+** Responses
+
+The response of a detector can be decomposed into a number of response models.  They are composed by convolution to produce a total response expressed in the 2D Fourier domain as
+
+#+name: eq:rtot
+\begin{equation}
+R = \prod_i R_i
+\end{equation}
+
+The following response components $R_i$ are typically considered.
+
+- $R_{fr}$ :: the "field response" that models the induction of current on the array of electrodes due to drifting ionized electron charge.
+- $R_s$ :: the "short" or "high frequency" response typically attributed to the electronics amplifier and shaping circuit.
+- $R_l$ :: the "long" or "low frequency" response typically attributed to passive components in the electronics (eg, the "RC" response).
+
+The two dimensions of the $R_{s}$ and $R_l$ responses are typically independent.  They may vary along the channel dimension
+(per-channel response) or all row vectors may be identical in the case of a more uniform detector.  On the other hand, and for the "2D signal processing" family of algorithms, $R_{fr}$ dimensions are not independent.
+
+*** Preparing $R_{fr}$
+
+The $R_{fr}$ is derived from an electrostatic field calculation and tabulates the instantaneous current induced on the electrodes as a function of the time of a step along a drift path that starts at a given location.  The path starting points form a grid which is typically irregular.  Grid spacing and step sizes are both finer than can be observed from a measure.  Thus $R_{fr}$ is derived from a given $R_{fr,fine}$ by averaging over paths within each electrode (wire/strip) region and the result is downsampled from the step sized used in the calculation to the one that of the sampling period of the measure $M$.
+
+*** Preparing $R_s$
+
+In SP, the short response is called the "electronics response" (ER) when referring to a nominal response applicable to all channels (in one anode wire plane).  For some detectors, SP supports a second short response called the "per-channel response".  As the name implies, there is one 1D time response for each channel.  It is provided in the form of a waveform that can be deconvolved from the nominal ER to form a corrected ER.
+
+*** Preparing $R_l$
+
+** Measure
+
+Each row in the measure $M$ provides the ADC waveform from one channel over a fixed duration.  This array may come in on one of two basic forms.
+
+A measure array may be from a cyclic detector such as the U and V wire planes of a DUNE APA.  Topologically, these planes have no "edge".  Every channel has a wire segment that has one neighboring wire on either side.  This is despite the fact that the wire segments themselves are arrayed into two disparate wire planes (faces).
+
+On the other hand, the two faces of a W (collection) plane of a DUNE APA are not composed of wrapped wires.  Each side of each face is measured by a channel that has one wire with exactly one neighbor. 
+
+ 
+** Array sizes and padding
+
+SPNG implements equation [[eq:sp]] literally.  That is, the DFT is applied to all three terms, their results are multiplied in the 2D Fourier domain and the inverse DFT is applied.
+
+This DFT method is a cyclic and not a linear convolution.  To avoid cyclic artifacts in the convolution of an array of size $N$ with an array of size $M$ they must both be /padded/ to at least size $N+M-1$.  To avoid unwanted spectal distortion or equivalently interval domain ringing the padded samples are set to a particular value, often zero.
+
+The minimum size $N+M-1$ assumes that each array holds significant values at both its begin and its end.  The required size inflation can be mitigated providing arrays that do not have leading or trailing zero values.  That is, by avoiding any sort of "pre padding".
+
+Padding is required along the time dimension in all cases.  When the measure $M$ is from a cyclic plane, no padding is required on the channel dimension.  Otherwise, a special two-region padding is required along the channel dimension.  The arrays must be split along the pair of channels at a face edge and padding inserted after each half.  The width of this padding must be at least the size of the total of all array's convolved along the channel direction.  Typically, this is channel dimension of $R_{fr}$ and the "channel filter".
+
+
+* Responses
+
+** Arrays of interest
+
+These are the arrays with which the SPNG operates.  For 2D arrays, each row represents information at a given "transverse" position (be that impact position or channel) and each column represents information at a given time (step or tick).  
+
+- $M_{raw}$ :: 2D (channel vs time), the measured and possibly noise-filtered ADC measurements across the channels of one anode plane.  
+
+- $M_{pad}$ :: 2D (channel vs time), the ADC array with rows inserted between channels at anode "face" boundaries in order to avoid cyclic convolution artifacts.
+
+- $R_{f,sim}$ :: 2D (path vs time), fine (used in simulation) field response (sampled current).  A row is one path starting at an impact position.  A column is a time step.  The impact positions do not form a regular grid, nor do they form a uniform grid.
+
+- $R_f$ :: 2D, (channel vs time) average (used in signal processing) field response (sampled current).  This averages $R_{f,sim}$ over each wire region and downsamples from $T_{fine}$ to $T$.  We will also refer to this as $R_f$.
+
+- $R_s$ :: a single or $N_{ch}$ 1D "short duration" ("high frequency") response.  This may be a single 1D response in which case it is applied identically to all channels.  In OmnibusSigProc this it $ER *  PCR$.
+
+- $R_l$ :: a single or $N_{ch}$ 1D (time, one per channel) "long duration" ("low frequency") response.  This may be a single 1D response in which case it is applied identically to all channels.  In OmnibusSigProc this is eg RC.
+
+- $F_w$ :: a single or $N_{ch}$ 1D, (time, all channels) the "Wiener-inspired filter".  This is used to counter the divergence in deconvolving the FR while preserving the charge measure and produce input to region-of-interest finding.
+
+- $F_g$ :: a single or $N_{ch}$ 1D, (time, all channels) the "Gaussian filter".  This is used to counter the divergence in deconvolving the FR while preserving the charge measure and produce the final signals within regions-of-interest.
+
+- $F_c$ :: a single 1D, (channel, all times) "channel filter" 
+
+- $R_g$ :: 2D Gaussian-filtered response formed by time-domain convolution $R_g = R_s * R_l * F_g$
+
+- $R_g$ :: 2D Wiener-filtered response formed by time-domain convolution $R_w = R_s * R_l * F_w$
+
+- $S_g$ :: a 2D "Gaussian" signal
+
+- $S_w$ :: a 2D "Wiener" signal  
+
+
+** Array sizes
+
+The following array dimension sizes are defined with typical values in parenthesis.
+
+- $N_{p,fine}$ :: paths in the fine FR ($6\times21 = 126$)
+
+- $N_{path}$ :: path bins in the fine FR ($10 \times 21 = 210$)
+
+- $N_{frc}$ :: channels (rows) in the $R_f$ ($21$)
+
+- $N_{frt,fine}$ :: time steps in the FR ($10cm / (1.6mm/us) = 625 \times 100ns$)
+
+- $N_{frt}$ :: time steps (columns) in the $R_f$ ($10cm / (1.6mm/us) = 125 \times 500ns$)
+
+- $N_{ch}$ :: channels (rows) in an $M_{raw}$  ADC plane and in per-channel response ($1000$)
+
+- $N_{tick}$ :: ticks in the ADC readout ($10,000$)
+
+- $N_{er}$ :: ticks in the ER ($10us / 500ns = 20$)
+
+- $N_{pert}$ :: ticks in the per-channel response ($20$ same as $N_{er}$)
+
+- $N_{rc}$ :: ticks in the RC ($1ms/500ns = 2000$)
+
+- $T$ :: sampling period, ($500ns$ for simulation and signal processing, $100ns$ for fine FR steps).
+
+
+** Convolutions
+
+The ADC (or equivalently the PAD) array is convolved (or deconvolved) with the other arrays along one or both channel and time dimension.  Conceptually, is performed as a series of pair-wise convolutions.  To assure that no artifacts arise due to this cyclic convolution both arrays in a pair must be padded to minimum distance.  When convolving an array of size $N$ with an array of size $M$ both must be padded sizes at least $N+M-1$.  For simplicity, we will drop the $-1$ and perform the entire convolution in these steps:
+
+
+1. Predetermine the shape ($N_{ch}, N_{tick}$) of the $M_{raw}$ array and the shape ($N_{frc}, N_{frt}$) of the FR array.
+2. Calculate $N_t$ as the sum of the sizes of the time dimensions of the kernel arrays ER, PCR, RC an $F_g$/$F_w$.
+3. Calculate $N_c = N_{frc} + N_{fc}$ if the plane is not cyclic (wrapped) else set $N_c = 0$
+4. Pad the time dimension of the arrays ER, PCR, RC, $F_g$ and $F_w$ to have size $N_{tick} + N_t$.
+5. Pad the channel dimension of $F_c$ to be size $N_{ch} + 2N_c$
+6. Apply DFT to $F_c$ and retain.
+7. Apply DFT along the time dimension to these arrays and multiply to get $GR=ER\odot PCR\odot RC\odot FG$ and $GW=ER\odot PCR\odot RC\odot FW$ as $N_{ch}$ 1D complex value spectra  Retain these two arrays.
+8. Pad the time dimension of the ADC array to size $N_{tick} + N_t$.
+9. Apply DFT to this ADC array along the time dimension and multiply to get $ADCG = ADC\odot GR$ and $ADCW = ADC \odot WR$.
+10. If the plane is not cyclic, insert to $ADCG$ and $ADCW$ $N_c$ rows, each of of size $N_{tick}+N_t$, of padding in its middle and at its end.
+11. Apply the DFT along the channel dimension of these two ADC arrays and multiply each, tick-wise, by the saved DFT of $F_c$.
+12. Apply the invDFT to the two arrays along the channel dimension.
+13. If the plane is not cyclic, remove the previously inserted $2N_c$ rows.
+14. Apply the invDFT to the two arrays along the time dimension.
+15. Trim off and retain the subarray spanning the $N_t$ samples after $N_{tick}$ and retain.
+16. If operating in streaming mode, add the $N_t$ subarray retained from the prior chunk to the first $N_t$ portion of the current array.
+   

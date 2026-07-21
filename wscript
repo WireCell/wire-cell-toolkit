@@ -63,8 +63,8 @@ def options(opt):
                    help="Force the build mode (default, detect based on git branch)")
 
     # fixme: add to spdlog entry in wcb.py
-    opt.add_option('--with-spdlog-static', type=str, default="yes",
-                   help="Def is true, set to false if your spdlog is not compiled (not recomended)")
+    opt.add_option('--with-spdlog-static', type=str, default="",
+                   help="Default is unset and answer comes from pkg-config, set true if you lack that tool")
     opt.add_option('--with-spdlog-active-level',
                    default = "trace",
                    choices = log_levels,
@@ -72,8 +72,8 @@ def options(opt):
 
     opt.add_option('--cxxstd', default='c++17',
                    help="Set the value for the compiler's --std= option, default 'c++17'")
-    
-
+    opt.add_option("--with-nvtx", action="store_true", default=False,
+                   help="Use NVTX if available (default: False)")
 
 def is_development():
     '''
@@ -142,13 +142,16 @@ int main(int argc,const char *argv[])
     cfg.env.CXXFLAGS += ['-std=c++17']
     cfg.env.CXXFLAGS += ['-DEIGEN_HAS_CXX11']
 
-
     if cfg.options.with_spdlog_static.lower() in ("yes","on","true"):
         cfg.env.CXXFLAGS += ['-DSPDLOG_COMPILED_LIB=1']
+
+    if cfg.options.with_nvtx:
+        cfg.env.CXXFLAGS += ['-DHAVE_NVTX=1']
 
     # in principle, this should be the only line here.  Any cruft
     # above that has accrued should be seen as a fixme: move to
     # wcb/waf-tools.
+
     cfg.load("wcb")
 
     cfg.env.CXXFLAGS += ['-I.']
@@ -159,7 +162,8 @@ int main(int argc,const char *argv[])
 def build(bld):
     ### we used to be set sloppiness globally.  Now we use #pragma to
     ### selectively quell warnings.  See util/docs/pragma.org for some info.
-    bld.env.CXXFLAGS += '-Wall -Wpedantic'.split()
+    #bld.env.CXXFLAGS += '-Wall -Wpedantic'.split()
+    bld.env.CXXFLAGS += '-Wall'.split()
 
     bld.load('wcb')
 
@@ -169,4 +173,7 @@ def dumpenv(bld):
 
 
 def packrepo(bld):
+    bld.load('wcb')
+
+def compile_flags(bld):
     bld.load('wcb')

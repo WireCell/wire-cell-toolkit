@@ -1,0 +1,9 @@
+#include "prod_cosmics_protodunehd.fcl"
+
+physics.producers.cosmicgenerator.ShowerInputFiles: [
+  "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard/p_showers_*db",
+  "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard/He_showers_*db",
+  "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard/N_showers_*db",
+  "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard/Mg_showers_*db",
+  "/gpfs01/lbne/users/spng/stash/Cosmics/CERN/CORSIKA/standard/Fe_showers_*db"
+]

@@ -12,7 +12,7 @@
 
 namespace WireCell {
 
-    /** The Wire Cell Toolkit configuration layer uses Json::Value
+    /** The Wire Cell Toolkit configuration layer uses CppJSON Json::Value
         objects for its transient data model.
 
         The Configuration type is a recursive in that one
@@ -47,6 +47,10 @@ namespace WireCell {
          each IConfigurable implementation.
 
        - name :: an optional Instance Name.  If not given, the default instance of the type will be used.
+
+       See also WireCellUtil/HanaJsonCPP.h for a way to serialize between
+       Configuration and C++ struct.  Components are encouraged to use structs
+       and HanaJsonCPP::{to,from}_json() for all configuration parsing needs.
      */
 
     typedef Json::Value Configuration;
@@ -75,6 +79,12 @@ namespace WireCell {
     {
         if (cfg.isNull()) return def;
         return cfg.asInt();
+    }
+    template <>
+    inline int64_t convert<int64_t>(const Configuration& cfg, const int64_t& def)
+    {
+        if (cfg.isNull()) return def;
+        return cfg.asInt64();
     }
     template <>
     inline float convert<float>(const Configuration& cfg, const float& def)
@@ -117,6 +127,16 @@ namespace WireCell {
     }
     template <>
     inline  // fixme: ignores default
+        std::vector<int64_t>
+        convert<std::vector<int64_t> >(const Configuration& cfg, const std::vector<int64_t>& def)
+    {
+        std::vector<int64_t> ret(cfg.size());
+        std::transform(cfg.begin(), cfg.end(), ret.begin(),
+                       [](const auto& e) { return e.asInt64(); });
+        return ret;
+    }
+    template <>
+    inline  // fixme: ignores default
         std::vector<float>
         convert<std::vector<float> >(const Configuration& cfg, const std::vector<float>& def)
     {
@@ -143,6 +163,7 @@ namespace WireCell {
 
     /// Merge dictionary b into a, return a
     Configuration update(Configuration& a, Configuration& b);
+    Configuration update(Configuration& a, const Configuration& b);
 
     /// Return an array which is composed of the array b appended to the array a.
     // fixme: this should be called "extend".
@@ -220,6 +241,8 @@ namespace WireCell {
 
     /// Return a hash of the content of the config.
     size_t hash(const Configuration& cfg);
+
+
 
 }  // namespace WireCell
 

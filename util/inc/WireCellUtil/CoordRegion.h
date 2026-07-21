@@ -144,7 +144,7 @@ namespace WireCell {
     };
 
     // Accept a standard schema to make one of the coords.
-    std::unique_ptr<CoordBounds> make_coordbounds(const Configuration& cfg, int axis=0) {
+    inline std::unique_ptr<CoordBounds> make_coordbounds(const Configuration& cfg, int axis=0) {
         if (cfg.isNumeric()) {
             return std::make_unique<CoordBoundsScalar>(cfg.asDouble(), axis);
         }

@@ -19,7 +19,10 @@ namespace WireCell {
             virtual bool operator()() = 0;
 
             // Concrete node must return some instance identifier.
-            virtual std::string ident() = 0;
+            virtual std::string ident() const = 0;
+            virtual std::string instance_name() const = 0;
+            virtual std::string cpptype_name() const = 0;
+
 
             Port& iport(size_t ind = 0) { return port(Port::input, ind); }
             Port& oport(size_t ind = 0) { return port(Port::output, ind); }
