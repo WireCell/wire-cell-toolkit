@@ -108,3 +108,18 @@ venv*
 version.txt
 waf
 wct-deps.dot
+
+
+.dolt/
+*.db
+.beads*
+.claude
+
+# CMake build (parallel to waf): the blanket *.txt rule above otherwise hides
+# CMake's mandatory CMakeLists.txt files, so re-include them explicitly.
+!CMakeLists.txt
+!**/CMakeLists.txt
+
+# The CMake parity harness scripts (the blanket *.sh rule would hide them).
+!cmake/test/*.sh
+
