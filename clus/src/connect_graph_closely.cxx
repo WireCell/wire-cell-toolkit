@@ -6,6 +6,7 @@
 #include "connect_graphs.h"
 
 #include <unordered_map>
+#include <algorithm>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -492,7 +493,11 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
             return std::hash<const void*>{}(static_cast<const void*>(b));
         }
     };
-    using mcell_wire_wcps_map_t = std::unordered_map<const Facade::Blob*, std::map<int, std::set<int>>, BlobPtrHash>;
+    // Per-wire buckets hold vectors instead of std::set: within one plane a
+    // point index lands in exactly one wire bucket, so bucket contents are
+    // disjoint and consumers recover the set-equivalent sorted-unique order
+    // by concatenate+sort (see candidate gathering below).
+    using mcell_wire_wcps_map_t = std::unordered_map<const Facade::Blob*, std::map<int, std::vector<int>>, BlobPtrHash>;
     mcell_wire_wcps_map_t map_mcell_uindex_wcps, map_mcell_vindex_wcps, map_mcell_windex_wcps;
 
     const auto& points = cluster.points();
@@ -500,49 +505,26 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
 
     // Build wire index maps for each blob
     for (const Facade::Blob* mcell : cluster.children()) {
-        std::map<int, std::set<int>> map_uindex_wcps;
-        std::map<int, std::set<int>> map_vindex_wcps;
-        std::map<int, std::set<int>> map_windex_wcps;
+        std::map<int, std::vector<int>> map_uindex_wcps;
+        std::map<int, std::vector<int>> map_vindex_wcps;
+        std::map<int, std::vector<int>> map_windex_wcps;
 
         std::vector<int> pinds = cluster.get_blob_indices(mcell);
         for (const int pind : pinds) {
-            // Build U wire index map
-            auto u_it = map_uindex_wcps.find(winds[0][pind]);
-            if (u_it == map_uindex_wcps.end()) {
-                std::set<int> wcps;
-                wcps.insert(pind);
-                map_uindex_wcps[winds[0][pind]] = wcps;
-            } else {
-                u_it->second.insert(pind);
-            }
-
-            // Build V wire index map
-            auto v_it = map_vindex_wcps.find(winds[1][pind]);
-            if (v_it == map_vindex_wcps.end()) {
-                std::set<int> wcps;
-                wcps.insert(pind);
-                map_vindex_wcps[winds[1][pind]] = wcps;
-            } else {
-                v_it->second.insert(pind);
-            }
-
-            // Build W wire index map
-            auto w_it = map_windex_wcps.find(winds[2][pind]);
-            if (w_it == map_windex_wcps.end()) {
-                std::set<int> wcps;
-                wcps.insert(pind);
-                map_windex_wcps[winds[2][pind]] = wcps;
-            } else {
-                w_it->second.insert(pind);
-            }
+            map_uindex_wcps[winds[0][pind]].push_back(pind);
+            map_vindex_wcps[winds[1][pind]].push_back(pind);
+            map_windex_wcps[winds[2][pind]].push_back(pind);
         }
-        
-        map_mcell_uindex_wcps[mcell] = map_uindex_wcps;
-        map_mcell_vindex_wcps[mcell] = map_vindex_wcps;
-        map_mcell_windex_wcps[mcell] = map_windex_wcps;
+
+        map_mcell_uindex_wcps[mcell] = std::move(map_uindex_wcps);
+        map_mcell_vindex_wcps[mcell] = std::move(map_vindex_wcps);
+        map_mcell_windex_wcps[mcell] = std::move(map_windex_wcps);
     }
 
     int num_edges = 0;
+
+    // Reusable candidate buffers for the Phase 1 / Phase 3 point loops.
+    std::vector<int> wcps_set1, wcps_set2, common_set;
 
     // Phase 1: Create graph for points inside the same mcell (blob)
     for (const Facade::Blob* mcell : cluster.children()) {
@@ -551,9 +533,9 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
         int min_wire_interval = mcell->get_min_wire_interval();
 
         // Get appropriate wire index maps based on wire types
-        std::map<int, std::set<int>>* map_max_index_wcps;
-        std::map<int, std::set<int>>* map_min_index_wcps;
-        
+        std::map<int, std::vector<int>>* map_max_index_wcps;
+        std::map<int, std::vector<int>>* map_min_index_wcps;
+
         if (mcell->get_max_wire_type() == 0) {
             map_max_index_wcps = &map_mcell_uindex_wcps[mcell];
         } else if (mcell->get_max_wire_type() == 1) {
@@ -590,34 +572,29 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
                 index_min_wire = winds[2][pind1];
             }
 
-            // Find candidate points within wire intervals using O(log W) bounds
-            std::vector<std::set<int>*> max_wcps_set;
+            // Gather candidate points within wire intervals.  Buckets are
+            // disjoint, so concatenate+sort reproduces the former std::set
+            // union's sorted-unique order exactly.
+            wcps_set1.clear();
             {
                 auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
                 auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
-                for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&it2->second);
+                for (auto it2 = lo; it2 != hi; ++it2) wcps_set1.insert(wcps_set1.end(), it2->second.begin(), it2->second.end());
             }
-            std::vector<std::set<int>*> min_wcps_set;
+            wcps_set2.clear();
             {
                 auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
                 auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
-                for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&it2->second);
+                for (auto it2 = lo; it2 != hi; ++it2) wcps_set2.insert(wcps_set2.end(), it2->second.begin(), it2->second.end());
             }
-
-            // Create candidate sets
-            std::set<int> wcps_set1, wcps_set2;
-            for (const auto* wcp_set : max_wcps_set) {
-                wcps_set1.insert(wcp_set->begin(), wcp_set->end());
-            }
-            for (const auto* wcp_set : min_wcps_set) {
-                wcps_set2.insert(wcp_set->begin(), wcp_set->end());
-            }
+            std::sort(wcps_set1.begin(), wcps_set1.end());
+            std::sort(wcps_set2.begin(), wcps_set2.end());
 
             // Find intersection of candidate sets
-            std::set<int> common_set;
-            std::set_intersection(wcps_set1.begin(), wcps_set1.end(), 
+            common_set.clear();
+            std::set_intersection(wcps_set1.begin(), wcps_set1.end(),
                                 wcps_set2.begin(), wcps_set2.end(),
-                                std::inserter(common_set, common_set.begin()));
+                                std::back_inserter(common_set));
 
             // Connect to all valid points in the same mcell
             for (const int pind2 : common_set) {
@@ -740,9 +717,9 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
             int max_wire_interval = source_mcell->get_max_wire_interval();
             int min_wire_interval = source_mcell->get_min_wire_interval();
             
-            std::map<int, std::set<int>>* map_max_index_wcps;
-            std::map<int, std::set<int>>* map_min_index_wcps;
-            
+            std::map<int, std::vector<int>>* map_max_index_wcps;
+            std::map<int, std::vector<int>>* map_min_index_wcps;
+
             // Select appropriate wire index maps based on source mcell's wire types
             if (source_mcell->get_max_wire_type() == 0) {
                 map_max_index_wcps = &map_mcell_uindex_wcps.at(target_mcell);
@@ -780,34 +757,28 @@ void Graphs::connect_graph_closely_pid(const Facade::Cluster& cluster, Weighted:
                     index_min_wire = winds[2][pind1];
                 }
                 
-                // Find candidate points within wire intervals using O(log W) bounds
-                std::vector<std::set<int>*> max_wcps_set;
+                // Gather candidate points within wire intervals (see Phase 1
+                // note: buckets are disjoint, concatenate+sort == set union).
+                wcps_set1.clear();
                 {
                     auto lo = map_max_index_wcps->lower_bound(index_max_wire - max_wire_interval);
                     auto hi = map_max_index_wcps->upper_bound(index_max_wire + max_wire_interval);
-                    for (auto it2 = lo; it2 != hi; ++it2) max_wcps_set.push_back(&it2->second);
+                    for (auto it2 = lo; it2 != hi; ++it2) wcps_set1.insert(wcps_set1.end(), it2->second.begin(), it2->second.end());
                 }
-                std::vector<std::set<int>*> min_wcps_set;
+                wcps_set2.clear();
                 {
                     auto lo = map_min_index_wcps->lower_bound(index_min_wire - min_wire_interval);
                     auto hi = map_min_index_wcps->upper_bound(index_min_wire + min_wire_interval);
-                    for (auto it2 = lo; it2 != hi; ++it2) min_wcps_set.push_back(&it2->second);
+                    for (auto it2 = lo; it2 != hi; ++it2) wcps_set2.insert(wcps_set2.end(), it2->second.begin(), it2->second.end());
                 }
-                
-                // Create candidate sets
-                std::set<int> wcps_set1, wcps_set2;
-                for (const auto* wcp_set : max_wcps_set) {
-                    wcps_set1.insert(wcp_set->begin(), wcp_set->end());
-                }
-                for (const auto* wcp_set : min_wcps_set) {
-                    wcps_set2.insert(wcp_set->begin(), wcp_set->end());
-                }
-                
+                std::sort(wcps_set1.begin(), wcps_set1.end());
+                std::sort(wcps_set2.begin(), wcps_set2.end());
+
                 // Find intersection
-                std::set<int> common_set;
-                std::set_intersection(wcps_set1.begin(), wcps_set1.end(), 
+                common_set.clear();
+                std::set_intersection(wcps_set1.begin(), wcps_set1.end(),
                                     wcps_set2.begin(), wcps_set2.end(),
-                                    std::inserter(common_set, common_set.begin()));
+                                    std::back_inserter(common_set));
                 
                 // Build closest index map for PID-specific connection limiting
                 for (const int pind2 : common_set) {

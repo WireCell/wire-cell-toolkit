@@ -23,7 +23,7 @@ ITensorSet::pointer Pytorch::to_itensor(const std::vector<torch::IValue> &inputs
 {
     ITensor::vector *itv = new ITensor::vector;
 
-    int ind = 0;
+    // int ind = 0;
     for (auto ival : inputs) {
         auto ten = ival.toTensor().cpu();
         if (ten.dim() != 4) {
@@ -38,7 +38,7 @@ ITensorSet::pointer Pytorch::to_itensor(const std::vector<torch::IValue> &inputs
         auto data = (float *) st->data();
         memcpy(data, (float *) ten[0][0].data_ptr<float>(), nbyte);
         itv->push_back(ITensor::pointer(st));
-        ++ind;
+        // ++ind;
     }
 
     // FIXME use a correct seqno

@@ -62,6 +62,10 @@ namespace WireCell {
             m_cv.notify_one();
         }
 
+        /// Get the number of semaphores left.  Note, this is subject to race
+        /// but can be useful for debugging.
+        virtual int get_count() const { return m_count; }
+
       private:
         int m_count;
         std::mutex m_mutex;
@@ -99,6 +103,10 @@ namespace WireCell {
             }
         }
  
+        /// Get the number of semaphores left.  Note, this is subject to race
+        /// but can be useful for debugging.
+        virtual int get_count() const { return m_count; }
+
       private:
         std::atomic<int> m_count;
         Semaphore m_semaphore;

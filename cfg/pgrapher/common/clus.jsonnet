@@ -330,6 +330,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                         cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
                         min_length=10*wc.cm, min_length_short=null,
                         short_dir_len=null, conn_short_cut=30.0,
+                        tip_touch_cut=null, tip_touch_angle_cut=null,
                         use_flash_t0=true, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringCathodeConnect",
             name: prefix+name,
@@ -348,6 +349,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // null => C++ defaults short_dir_len to 0 (short-stub prolongation OFF)
                 [if short_dir_len != null then "short_dir_len"]: short_dir_len,
                 conn_short_cut: conn_short_cut,
+                // null => C++ defaults tip_touch_cut to 0 (cc_pca tip-touch relaxation OFF)
+                [if tip_touch_cut != null then "tip_touch_cut"]: tip_touch_cut,
+                // null => C++ defaults tip_touch_angle_cut to angle_cut (local-Hough fallback OFF)
+                [if tip_touch_angle_cut != null then "tip_touch_angle_cut"]: tip_touch_angle_cut,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
             } + scope_cfg,

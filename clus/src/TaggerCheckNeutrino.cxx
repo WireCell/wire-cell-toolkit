@@ -21,6 +21,47 @@ struct edge_base_t {
     typedef boost::edge_property_tag kind;
 };
 
+// Temporary determinism-debug helper, enabled with WCT_DET_DEBUG=1.
+// Prints a content checksum of the PR graph so two runs can be diffed to find
+// the first PR phase that diverges run-to-run.
+namespace {
+    inline uint64_t detg_fnv(uint64_t h, const void* p, size_t n) {
+        const unsigned char* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ULL; }
+        return h;
+    }
+    void detg_dump(const char* tag, WireCell::Clus::PR::Graph& g) {
+        static const bool on = (std::getenv("WCT_DET_DEBUG") != nullptr);
+        if (!on) return;
+        uint64_t h = 1469598103934665603ULL;
+        size_t nvtx = 0, nseg = 0;
+        for (auto nd : WireCell::Clus::PR::ordered_nodes(g)) {
+            auto vtx = g[nd].vertex;
+            if (!vtx) continue;
+            ++nvtx;
+            uint64_t idx = vtx->get_graph_index();
+            h = detg_fnv(h, &idx, sizeof(idx));
+            const auto& p = vtx->wcpt().point;
+            double xyz[3] = {p.x(), p.y(), p.z()};
+            h = detg_fnv(h, xyz, sizeof(xyz));
+        }
+        for (auto ed : WireCell::Clus::PR::ordered_edges(g)) {
+            auto seg = g[ed].segment;
+            if (!seg) continue;
+            ++nseg;
+            uint64_t v[3] = {seg->get_graph_index(), seg->wcpts().size(), seg->fits().size()};
+            h = detg_fnv(h, v, sizeof(v));
+            int cid = seg->cluster() ? seg->cluster()->get_cluster_id() : -1;
+            h = detg_fnv(h, &cid, sizeof(cid));
+            for (const auto& w : seg->wcpts()) {
+                double xyz[3] = {w.point.x(), w.point.y(), w.point.z()};
+                h = detg_fnv(h, xyz, sizeof(xyz));
+            }
+        }
+        fprintf(stderr, "WCT_DETG %-28s nvtx=%zu nseg=%zu h=%016lx\n", tag, nvtx, nseg, (unsigned long)h);
+    }
+}
+
 void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
 {
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
@@ -184,31 +225,25 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     {
         // initial pattern recognitions
         pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *m_track_fitter, m_dv, true, 2, true);
-
-        // std::cout << "After first round of main cluster A: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
-
+        detg_dump("main:find_proto_vertex", *pr_graph);
 
         // shower related operations
         pattern_algos.clustering_points(*pr_graph, *main_cluster, m_dv);
+        detg_dump("main:clustering_points", *pr_graph);
         pattern_algos.separate_track_shower(*pr_graph, *main_cluster);
+        detg_dump("main:separate_track_shower", *pr_graph);
 
-        // std::cout << "After first round of main cluster B: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
-
-        
         // direction determination
         pattern_algos.determine_direction(*pr_graph, *main_cluster, particle_data(), m_recomb_model);
-
-        // std::cout << "After first round of main cluster C: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
-
+        detg_dump("main:determine_direction", *pr_graph);
 
         // shower clustering
         pattern_algos.shower_determining_in_main_cluster(*pr_graph, *main_cluster, particle_data(), m_recomb_model, m_dv);
-
-        // std::cout << "After first round of main cluster D: " << std::endl;        pattern_algos.print_segs_info(*pr_graph, *main_cluster, main_vertex);
-
+        detg_dump("main:shower_determining", *pr_graph);
 
         // main vertex determination
         pattern_algos.determine_main_vertex(*pr_graph, *main_cluster, main_vertex, vertices_in_long_muon, segments_in_long_muon, *m_track_fitter, m_dv, particle_data(), m_recomb_model);
+        detg_dump("main:determine_main_vertex", *pr_graph);
 
         if (main_vertex !=nullptr){
             map_cluster_main_vertices[main_cluster] = main_vertex;
@@ -236,6 +271,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     map_cluster_main_vertices[cluster] = main_vertex;
                     main_vertex = nullptr;
                 }
+                detg_dump("other:long_cluster", *pr_graph);
             } else {
                 // Short cluster: no track breaking, 1 round; fall back to init_point_segment if needed
                 if (!pattern_algos.find_proto_vertex(*pr_graph, *cluster, *m_track_fitter, m_dv, false, 1, false)) {
@@ -251,6 +287,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                     map_cluster_main_vertices[cluster] = main_vertex;
                     main_vertex = nullptr;
                 }
+                detg_dump("other:short_cluster", *pr_graph);
             }
         }
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: other_clusters PR took {} ms", MS(Clock::now() - t0).count());
@@ -262,6 +299,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         all_clusters.insert(all_clusters.end(), other_clusters.begin(), other_clusters.end());
 
         pattern_algos.deghosting(*pr_graph, map_cluster_main_vertices, all_clusters, *m_track_fitter, m_dv);
+        detg_dump("deghosting", *pr_graph);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: deghosting took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
     }
@@ -298,6 +336,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             final_main_vertex = it->second;
         }
     }
+    detg_dump("overall_main_vertex", *pr_graph);
     if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: overall main vertex took {} ms", MS(Clock::now() - t0).count());
     t0 = Clock::now();
 
@@ -330,6 +369,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         SPDLOG_LOGGER_TRACE(log, "Overall main vertex cluster={}", main_cluster->get_cluster_id());
         
         std::cout << "After examine direction: " << std::endl;pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+        detg_dump("improve_vertex", *pr_graph);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: improve_vertex + examine_direction took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
 
@@ -347,6 +387,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                 m_recomb_model);
 
         std::cout << "After shower clustering with NV: " << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+        detg_dump("shower_clustering_with_nv", *pr_graph);
         if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: shower_clustering_with_nv took {} ms", MS(Clock::now() - t0).count());
         t0 = Clock::now();
 

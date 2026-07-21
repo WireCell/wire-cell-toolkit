@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = git@github.com:WireCell/spng.git
+	branch = master
+	commit = e250352875d3c8576764bd1b2793b66053e57411
+	parent = 7032605fbed8a9a8e6025d8195224340856a0328
+	method = merge
+	cmdver = 0.4.7

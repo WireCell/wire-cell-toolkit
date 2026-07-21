@@ -1,0 +1,58 @@
+#+title: SPNG Torch Data Model Retrofit
+
+This gives detailed notes and work plan to bring TDM into SPNG
+
+* Reconoiter
+
+The set of SPNG nodes from the ~wct-framesource_new.jsonnet~ and ~wct-framesource_1anode_dnnroi.jsonnet~ configs.
+
+- FrameToTorchSetFanout :: ~IFrame~ *fanout* to ~ITorchTensorSet~'s
+
+- SPNGDecon :: per-plane ~ITorchTensorSet~ *filter* but takes/makes 0'th tensor
+
+- SPNGApply1DSpectrum :: per-plane ~ITorchTensorSet~ *filter*, searches for a configured "tag" metadata, single tensor input and output.
+
+- TorchTensorSetReplicator :: per-plane ~ITorchTensorSet~ *fanout* simply copies input vector to the fan.
+
+- TorchTensorSetCollator :: ~ITorchTensorSet~ *fanin*, does some in/out tag combination, transfers a "channel map" metadata.  Adds all input ~ITorchTensor~'s to the output set.  
+  
+- SPNGApplyROI :: ~ITorchTensorSet~ *fanin* assumes ROI and value tensors at a given index, single output tensor, no input MD transferred, output "tags" set in node config are set.
+
+- SPNGNoTileMPCoincidence :: ~ITorchTensorSet~ *filter*, 3 input tensors at configurable indices, two output tensors ("active" and "inactive").  Note: in the dnnroi graph, there is only one input.
+
+- SPNGDNNROI :: ~ITorchTensorSet~ *filter*, a very convoluted multi-tensor input selection and multi-tensor output. 
+
+* Observations and conclusions
+
+- The current "tag wrangling" adds a lot of complication.
+  - Using ~datapath~ to identify individual tensors simplifies this.
+  - Standardize configuration for nodes that get/put tensors by ~datapath~.
+    - [X] ~FunctionNode~ gets ~register_{input,output}()~ and ~{intput,output}_datapath()~ methods.
+
+- Several existing (non-TDM) nodes do "too much".  
+  - The TDM equivalents will move unrelated operations to pre/post functions.
+  - Generic fanin/fanout
+  - Generic node to marshal tensors in/out of ~ITorchForward~ 
+
+- Want to extend ~FunctionNode~ to filter children, not just parent level.
+  - Motivated by simplicity but also to keep ~TensorIndex~ overhead low.
+
+- Some tensors from ~IFrame~ are irrelevant for many internal nodes but needed to reconstruct final frame.
+  - Mostly I am thinking of all but ~traces~ and even some of the ~traces~ as well as the ~frame~ tensor's metadata.
+    - They just clutter the internal data and introduce overhead to tensor indexing.
+  - But, of this info needs to be available for reassembling ~IFrame~.
+    - Will send the initial "full" ~IFrame~ TDM representation all the way from input to output to assure whatever data provenance is needed.
+    - Needs a fanout at input, fanin at output followed by a function that resolves provenance items.
+
+* Plan and progress
+
+There is an initial list in [[https://github.com/WireCell/spng/issues/19][issue 19]] but easier to work here in this file.
+
+- [-] Empty frame fanout/fanin job
+  - [X] Jsonnet and bats test runs non-TDM frame fanout/fanin.
+  - [-] TDM equivalent nodes developed
+    - [ ] Node to convert IFrame to TDM tensor set.
+    - [X] Generic fanout/funcs/fanin with funcs to filter
+    - [ ] Node to convert TDM tensorset to IFrame
+  - [ ] Jsonnet and bats test runs TDM frame fanout/fanin.
+  - [ ] Assure output of each are consistent.

@@ -195,12 +195,12 @@ std::pair<int, double> PatternAlgorithms::calculate_num_daughter_showers(Graph& 
             VertexPtr curr_vertex = find_other_vertex(graph, current_sg, prev_vtx);
             if (used_vertices.find(curr_vertex) != used_vertices.end()) continue;
             
-            // Get all segments connected to curr_vertex
+            // Get all segments connected to curr_vertex (stable edge-index
+            // order: acc_length is summed in BFS-frontier order).
             if (curr_vertex && curr_vertex->descriptor_valid()) {
                 auto vd = curr_vertex->get_descriptor();
-                auto edge_range = boost::out_edges(vd, graph);
-                for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-                    SegmentPtr seg = graph[*eit].segment;
+                for (auto edesc : sorted_out_edges(vd, graph)) {
+                    SegmentPtr seg = graph[edesc].segment;
                     if (seg) {
                         temp_segments.push_back(std::make_pair(curr_vertex, seg));
                     }
@@ -256,8 +256,9 @@ std::pair<int, double> PatternAlgorithms::calculate_num_daughter_tracks(
 
             if (curr_vertex->descriptor_valid()) {
                 auto vd = curr_vertex->get_descriptor();
-                for (auto [eit, eit_end] = boost::out_edges(vd, graph); eit != eit_end; ++eit) {
-                    SegmentPtr next_sg = graph[*eit].segment;
+                // Stable edge-index order: acc_length sums in frontier order.
+                for (auto edesc : sorted_out_edges(vd, graph)) {
+                    SegmentPtr next_sg = graph[edesc].segment;
                     if (next_sg) temp_segments.push_back({curr_vertex, next_sg});
                 }
             }
@@ -290,8 +291,10 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
 
     if (!vtx->descriptor_valid()) return {nullptr, nullptr};
     auto vd = vtx->get_descriptor();
-    for (auto [eit, eit_end] = boost::out_edges(vd, graph); eit != eit_end; ++eit) {
-        SegmentPtr sg2 = graph[*eit].segment;
+    // Stable edge-index order: strict '>' argmax below keeps the first
+    // candidate on a tie, so iteration order must not be pointer order.
+    for (auto edesc : sorted_out_edges(vd, graph)) {
+        SegmentPtr sg2 = graph[edesc].segment;
         if (!sg2 || sg2 == sg) continue;
         VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
 
@@ -503,10 +506,11 @@ void PatternAlgorithms::fix_maps_multiple_tracks_in(Graph& graph, Facade::Cluste
 }
 
 void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Cluster& cluster){
-    // Iterate through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    // Iterate through all vertices in the graph.  Stable node-index order:
+    // flipping a shower's dirsign at one vertex changes what its other
+    // vertex sees, so vertex processing order affects the outcome.
+    for (const auto& nd : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[nd].vertex;
         
         // Skip if vertex is null or doesn't belong to this cluster
         if (!vtx || !vtx->cluster() || vtx->cluster() != &cluster) continue;
@@ -827,15 +831,16 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
     
     while(flag_update) {
         flag_update = false;
-        
-        // Iterate through all edges (segments) in the graph
-        auto [ebegin, eend] = boost::edges(graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
-            
+
+        // Iterate through all edges (segments) in the graph.  Stable
+        // edge-index order: reclassifying a segment mid-pass changes what
+        // later segments sharing a vertex see, so order affects convergence.
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg = graph[ed].segment;
+
             // Skip if segment is null or doesn't belong to this cluster
             if (!sg || !sg->cluster() || sg->cluster() != &cluster) continue;
-            
+
             // Skip showers (trajectory, topology, or electron by dQ/dx)
             // matches prototype get_flag_shower() = flag_shower_trajectory || flag_shower_topology || (particle_type==11)
             if (sg->flags_any(SegmentFlags::kShowerTrajectory) || sg->flags_any(SegmentFlags::kShowerTopology) ||
@@ -1550,12 +1555,13 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
     double maximal_length = 0;
     SegmentPtr maximal_length_track = nullptr;
     
-    // Count segments and their properties
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // Count segments and their properties.  Stable edge-index order: the
+    // length sums FP-accumulate and maximal_length_track is a tie-broken
+    // argmax, both consumed by classification thresholds below.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         double length = segment_track_length(sg);
         // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
         bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1662,9 +1668,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                 
                 if (pair_vertices.second->descriptor_valid()) {
                     auto vd2 = pair_vertices.second->get_descriptor();
-                    auto edge_range = boost::out_edges(vd2, graph);
-                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                        SegmentPtr sg = graph[*e_it].segment;
+                    // Stable edge-index order: tie-broken argmax below.
+                    for (auto edesc : sorted_out_edges(vd2, graph)) {
+                        SegmentPtr sg = graph[edesc].segment;
                         if (!sg) continue;
 
                         bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1695,9 +1701,9 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
                 
                 if (pair_vertices.first->descriptor_valid()) {
                     auto vd1 = pair_vertices.first->get_descriptor();
-                    auto edge_range = boost::out_edges(vd1, graph);
-                    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-                        SegmentPtr sg = graph[*e_it].segment;
+                    // Stable edge-index order: tie-broken argmax below.
+                    for (auto edesc : sorted_out_edges(vd1, graph)) {
+                        SegmentPtr sg = graph[edesc].segment;
                         if (!sg) continue;
 
                         bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1793,8 +1799,8 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
 
             // matches prototype: set true then verify each non-shower touches a shower neighbor
             flag_change_showers = true;
-            for (auto eit = ebegin; eit != eend; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            for (const auto& ed : ordered_edges(graph)) {
+                SegmentPtr sg = graph[ed].segment;
                 if (!sg || sg->cluster() != &cluster) continue;
 
                 bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||
@@ -1843,8 +1849,8 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
     }
     
     if (flag_change_showers) {
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg = graph[ed].segment;
             if (!sg || sg->cluster() != &cluster) continue;
 
             bool is_shower = sg->flags_any(SegmentFlags::kShowerTrajectory) ||

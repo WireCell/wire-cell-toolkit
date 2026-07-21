@@ -6,7 +6,7 @@ using namespace WireCell;
 using namespace WireCell::Match;
 
 void Opflash::init(double time_, std::vector<double> pe, double threshold, int nchan,
-                   const PEErr& pe_err)
+                   const PEErr& pe_err, const std::vector<double>* pe_scale)
 {
     flash_id    = 0;
     m_nchan     = nchan;
@@ -20,6 +20,14 @@ void Opflash::init(double time_, std::vector<double> pe, double threshold, int n
     PE.resize(nchan, 0);
     PE_err.resize(nchan, 1);
 
+    // Optional per-channel measured-PE gain correction, applied before PE_err /
+    // total / fired are derived so they all stay self-consistent with the
+    // corrected measurement. nullptr (or short vector) => identity.
+    if (pe_scale) {
+        const int ns = static_cast<int>(pe_scale->size());
+        for (int i = 0; i < nchan && i < ns; ++i) PE[i] *= (*pe_scale)[i];
+    }
+
     total_PE = 0;
     for (int i = 0; i < nchan; ++i) {
         PE_err[i] = (PE[i] < pe_err.knee) ? pe_err.floor : pe_err.frac * PE[i];
@@ -29,15 +37,15 @@ void Opflash::init(double time_, std::vector<double> pe, double threshold, int n
 }
 
 Opflash::Opflash(double time_, std::vector<double> pe, double threshold, int nchan,
-                 const PEErr& pe_err)
+                 const PEErr& pe_err, const std::vector<double>* pe_scale)
 {
-    init(time_, std::move(pe), threshold, nchan, pe_err);
+    init(time_, std::move(pe), threshold, nchan, pe_err, pe_scale);
 }
 
 Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
-                 const PEErr& pe_err)
+                 const PEErr& pe_err, const std::vector<double>* pe_scale)
 {
-    init(flash.time(), flash.pes(nchan), threshold, nchan, pe_err);
+    init(flash.time(), flash.pes(nchan), threshold, nchan, pe_err, pe_scale);
     flash_id = flash.ident();
 }
 

@@ -44,8 +44,9 @@ namespace WireCell {
 
         // Solve m = R*s for s, return s.
         vector_t solve(
-            // matrix R
-            matrix_t response,
+            // matrix R (passed by const ref: the Gram can be GBs on busy QL events,
+            // and solve() only forwards it to the model -- no need to copy it here)
+            const matrix_t& response,
             // measured vector m
             vector_t measured,
             // params
@@ -53,6 +54,17 @@ namespace WireCell {
             // optional initial source s
             vector_t source = Eigen::VectorXd(),
             // optional initial measurement weights
+            vector_t weights = Eigen::VectorXd());
+
+        // Sparse-response overload of the above: same LASSO solve, but the response
+        // matrix R is sparse (a block-sparse Gram).  The model then forms X^T X / X^T y
+        // by sparse products instead of the dense Gram-of-Gram, a large time+memory win
+        // on busy QLMatching events.  Only the lasso model is supported here.
+        vector_t solve(
+            const Eigen::SparseMatrix<double>& response,
+            vector_t measured,
+            const Params& params = Params(),
+            vector_t source = Eigen::VectorXd(),
             vector_t weights = Eigen::VectorXd());
 
         // These function provide values derived from a solution

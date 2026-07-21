@@ -283,9 +283,18 @@ namespace WireCell {
             //   RB_MEDIAN - median of the window (safe while signal occupies
             //               < 50% of the window)
             //   RB_SIGMASK- mean of window samples after masking
-            //               |x - median| > rebase_nsigma * sigma outliers
-            //               (sigma from 16/50/84 percentiles); window widens
-            //               inward if too few clean samples survive.
+            //               |x - median| > rebase_nsigma * sigma outliers,
+            //               with sigma = min(p84-p50, p50-p16), the cleaner
+            //               half-spread (16/50/84 percentiles); the window
+            //               widens inward if too few clean samples survive.
+            //               One-sided signal inflates only its own half-
+            //               spread, so the smaller one stays a noise-only
+            //               scale and the mask stays tight under a long bright
+            //               pulse in a window (e.g. a prolonged collection
+            //               track at readout start).  A symmetric RMS of the
+            //               two half-spreads is inflated there and lets the
+            //               signal bias the anchor.  (Does NOT help symmetric/
+            //               bipolar high-occupancy: both half-spreads inflate.)
             enum RebaseMethod { RB_MEDIAN, RB_SIGMASK };
             RebaseMethod m_rebase_method{RB_SIGMASK};
             double m_rebase_nsigma{4.0};

@@ -1,0 +1,210 @@
+{
+ "comment": "DAPHNE offline OpChannel -> OpDet ganging map for Flash::OpFlashFinder channel_map_file.  X-ARAPUCAs (10xx cathode, 20xx membrane) have two channels per OpDet; PMTs (30xx) one.",
+ "source": "np02vd_raw_run039252_1176_df-s03-d3_dw_0_20250830T054542_rawwf.root",
+ "channels": [
+  {
+   "opch": 1010,
+   "opdet": 6
+  },
+  {
+   "opch": 1011,
+   "opdet": 6
+  },
+  {
+   "opch": 1020,
+   "opdet": 4
+  },
+  {
+   "opch": 1021,
+   "opdet": 4
+  },
+  {
+   "opch": 1030,
+   "opdet": 8
+  },
+  {
+   "opch": 1031,
+   "opdet": 8
+  },
+  {
+   "opch": 1040,
+   "opdet": 10
+  },
+  {
+   "opch": 1041,
+   "opdet": 10
+  },
+  {
+   "opch": 1050,
+   "opdet": 7
+  },
+  {
+   "opch": 1051,
+   "opdet": 7
+  },
+  {
+   "opch": 1060,
+   "opdet": 5
+  },
+  {
+   "opch": 1061,
+   "opdet": 5
+  },
+  {
+   "opch": 1070,
+   "opdet": 9
+  },
+  {
+   "opch": 1071,
+   "opdet": 9
+  },
+  {
+   "opch": 1080,
+   "opdet": 11
+  },
+  {
+   "opch": 1081,
+   "opdet": 11
+  },
+  {
+   "opch": 2010,
+   "opdet": 0
+  },
+  {
+   "opch": 2011,
+   "opdet": 0
+  },
+  {
+   "opch": 2020,
+   "opdet": 2
+  },
+  {
+   "opch": 2021,
+   "opdet": 2
+  },
+  {
+   "opch": 2030,
+   "opdet": 1
+  },
+  {
+   "opch": 2040,
+   "opdet": 3
+  },
+  {
+   "opch": 2041,
+   "opdet": 3
+  },
+  {
+   "opch": 2050,
+   "opdet": 12
+  },
+  {
+   "opch": 2051,
+   "opdet": 12
+  },
+  {
+   "opch": 2060,
+   "opdet": 18
+  },
+  {
+   "opch": 2061,
+   "opdet": 18
+  },
+  {
+   "opch": 2070,
+   "opdet": 13
+  },
+  {
+   "opch": 2071,
+   "opdet": 13
+  },
+  {
+   "opch": 2080,
+   "opdet": 19
+  },
+  {
+   "opch": 2081,
+   "opdet": 19
+  },
+  {
+   "opch": 3010,
+   "opdet": 14
+  },
+  {
+   "opch": 3020,
+   "opdet": 15
+  },
+  {
+   "opch": 3030,
+   "opdet": 16
+  },
+  {
+   "opch": 3040,
+   "opdet": 17
+  },
+  {
+   "opch": 3050,
+   "opdet": 20
+  },
+  {
+   "opch": 3060,
+   "opdet": 21
+  },
+  {
+   "opch": 3070,
+   "opdet": 22
+  },
+  {
+   "opch": 3080,
+   "opdet": 23
+  },
+  {
+   "opch": 3100,
+   "opdet": 25
+  },
+  {
+   "opch": 3110,
+   "opdet": 26
+  },
+  {
+   "opch": 3140,
+   "opdet": 29
+  },
+  {
+   "opch": 3150,
+   "opdet": 30
+  },
+  {
+   "opch": 3160,
+   "opdet": 31
+  },
+  {
+   "opch": 3170,
+   "opdet": 32
+  },
+  {
+   "opch": 3180,
+   "opdet": 33
+  },
+  {
+   "opch": 3200,
+   "opdet": 35
+  },
+  {
+   "opch": 3210,
+   "opdet": 36
+  },
+  {
+   "opch": 3220,
+   "opdet": 37
+  },
+  {
+   "opch": 3230,
+   "opdet": 38
+  },
+  {
+   "opch": 3240,
+   "opdet": 39
+  }
+ ]
+}

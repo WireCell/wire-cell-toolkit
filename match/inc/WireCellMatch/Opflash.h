@@ -30,15 +30,18 @@ namespace WireCell::Match {
         /// Construct from the canonical flash facade: pulls time + the dense
         /// per-channel PE vector (pes(nchan)) and the flash ident, then
         /// synthesizes PE_err/fired via the matching convention below.
+        /// pe_scale (optional, length nchan) multiplies the measured PE per
+        /// channel before PE_err/total/fired are derived — a per-channel gain
+        /// correction; nullptr => no scaling (byte-identical).
         Opflash(const WireCell::Clus::Facade::Flash& flash, double threshold, int nchan,
-                const PEErr& pe_err = {});
+                const PEErr& pe_err = {}, const std::vector<double>* pe_scale = nullptr);
 
         /// Construct from a flash time and a per-channel PE vector
         /// (resized/zero-filled to nchan). The facade ctor delegates to this.
         /// PE_err is synthesized here (the PEErr rule), keeping that convention
-        /// in one place.
+        /// in one place. pe_scale as above.
         Opflash(double time, std::vector<double> pe, double threshold, int nchan,
-                const PEErr& pe_err = {});
+                const PEErr& pe_err = {}, const std::vector<double>* pe_scale = nullptr);
 
         ~Opflash();
 
@@ -63,7 +66,7 @@ namespace WireCell::Match {
         // Shared ctor body: fills PE/PE_err/total_PE/fired from a per-channel
         // PE vector (resized to nchan). flash_id is left 0 for callers to set.
         void init(double time, std::vector<double> pe, double threshold, int nchan,
-                  const PEErr& pe_err);
+                  const PEErr& pe_err, const std::vector<double>* pe_scale);
 
     protected:
         int    m_nchan;

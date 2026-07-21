@@ -1,0 +1,49 @@
+digraph fileio {
+    label="Wire-Cell Toolkit File Sinks, blue indicates SPNG\nDespite WCT not supporting file I/O it has a plethora of file I/O.\nThis graph shows what is possible.  Dashed edges may fully work (yet).\nAdditional sinks in zio and larwirecell are not included."
+
+    // tensor set paradigms
+    frame[label="IFrame"]
+    depos[label="IDepoSet"]
+    wts[label="ITensorSet"]
+    tts[label="ITorchTensorSet", color=blue]
+
+    node[shape=folder]
+
+    // file paradigms
+    wcs[label="numpy arrays in\nzip,npz,tar,tgz"]
+    hio[label="HDF5"]
+    pkl[label="Python Pickle"]
+
+    node[shape=box]
+    DepoFileSink[label="DepoFileSink\n(sio)"]
+    FrameFileSink[label="FramefileSink\n(sio)"]
+    TensorFileSink[label="TensorFileSink\n(sio)"]
+    FrameTensor[label="FrameTensor\n(aux)"]
+    TensorFrame[label="TensorFrame\n(aux)"]
+    HioTensorSink[label="HioTensorSink\n(hio)"]
+    HDF5FrameTap[label="HDF5FrameTap\n(hio)"]
+
+    node[color=blue]
+    FrameToTdm[label="FrameToTdm\n(spng)"]
+    TensorSetPickleSink[label="TensorSetPickleSink\n(spng)"]
+    TdmToFrame[label="TdmToFrame\n(spng)"]
+    TdmToTensorSet[label="TdmToTensorSet\n(spng)"]
+    TorchToTensor[label="TorchToTensor\n(spng)"]
+
+    depos -> DepoFileSink -> wcs
+
+    frame -> FrameFileSink -> wcs
+    frame -> HDF5FrameTap -> hio
+    frame -> FrameTensor -> wts
+    wcs -> TensorFrame -> frame
+    wts -> TensorFileSink -> wcs
+    wts -> HioTensorSink -> hio
+
+    frame -> FrameToTdm -> tts
+    tts -> TensorSetPickleSink -> pkl
+    tts -> TdmToFrame -> frame[style=dashed]
+    tts -> TdmToTensorSet -> wts
+    tts -> TorchToTensor -> wts
+    
+
+}

@@ -1,0 +1,24 @@
+digraph mini {
+    rankdir=LR
+
+    label="Fanout"
+    node[shape=ellipse]
+    o_ts_in[label="input\nTensorSet"]
+    o_ts_out1[label="output\nTensorSet"]
+    o_ts_out2[label="output\nTensorSet"]
+    o_ts_out3[label="output\nTensorSet"]
+
+    node[shape=box]
+    o_sep[label="separate"]
+
+    node[shape=diamond]
+    o_port_in[label="input\nport"]
+    o_port_out1[label="output\nport"]
+    o_port_out2[label="output\nport"]
+    o_port_out3[label="output\nport"]
+    
+    o_port_in -> o_ts_in -> o_sep
+    o_sep -> o_ts_out1 -> o_port_out1
+    o_sep -> o_ts_out2 -> o_port_out2
+    o_sep -> o_ts_out3 -> o_port_out3
+}

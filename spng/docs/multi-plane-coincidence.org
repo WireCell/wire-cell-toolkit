@@ -1,0 +1,55 @@
+#+title: Multi-plane coincidence algorithm
+
+This produces the "mp2/mp3" data input to DNNROI using an algorithm by Haiwang
+Yu reinvented by Jake Calcutt based on WCT's "ray grid coordinates".  
+
+
+* NoTileMPCoincidence
+
+Here we describe algorithm implemented in the SPNG DFP node =NoTileMPCoincidence=.
+The negated name comes from an earlier algorithm that relied on ray grid full
+tiling which was somewhat slow.
+
+** Overview
+
+3 images are input: "target",  "other1" (called "l" in the code) and "other2" (called "m").
+
+2 images are output: mp2 and mp3, boolean.
+
+** Configuration
+
+- Collect info to identify images in input.
+  - WARNING: this assumes images are at tensor set index equal to plane index!
+- Construct the ray grid views tensor given anode and face.
+  - Note: the construction places target view as layer=4, "others" are 2 and 3. 
+- Construct bidirectional map between wire index and channel index.
+
+** Operation
+
+- Construct ray grid coordinates from ray grid views  and move to device.
+  - Note: could move to configure.
+- Move wire/channel map to device.
+  - Note: could move to configure.
+- Unpack tensors from input set.
+- Downsample time dimension via pooling.
+- Construct the mp2/mp3 tensors on wire basis.
+  - Note, these are made as double precision but conceptually hold bool value.
+- Sample the input tensors using wire-to-channel map to make =*_rows= tensors.
+  - This changes dim=1 from nchan to nwire.
+- Apply *transpose* and *reshape* =*_rows= tensors to flatten the batch dimension and make (ntick, nwire) shape.
+- *LOOP* over "rows" (ticks) of the =*_rows= tensors.
+- Find indices above a threshold (0) to make =l_hi= and =m_hi=
+  - Note, thresholding can be delegated to a preceding node so input tensors are binary.
+- Form  the "cross" tensor holding ray grid coordinates of the 2-plane crossing points.
+- Use ray grid coordinates to find pitch locations of l/m crossings in target view.
+- Use ray grid coordinates to find index of these pitches in target view.
+- Select indices that are inside the bounds of the target view.
+- Select target values in target row for these indices.
+- Assign mp3 indices where target values are above threshold (nonzero)
+- Assign mp2 indices where target values are below threshold (zero)
+- Put 1.0 in output mp2 and mp3 tensors at corresponding indices.
+- *END LOOP* over "rows"
+- Transform from flattened (tick,wire) to (tick,chan)
+- Reshape to batched from (tick,chan) to (batch,chan,tick)
+- Pack for output.  
+

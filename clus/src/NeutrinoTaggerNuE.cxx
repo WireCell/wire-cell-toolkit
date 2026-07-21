@@ -2052,11 +2052,12 @@ static bool low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo
         if (!vtx1->cluster() || vtx1->cluster() != sg->cluster()) continue;
         if (!vtx1->descriptor_valid()) continue;
 
-        // Collect shower-internal segments at vtx1
+        // Collect shower-internal segments at vtx1.  Stable edge-index order:
+        // front()/back() below pick the two direction segments (the prototype
+        // used an ordered set here).
         std::vector<SegmentPtr> vtx_ss;
-        for (auto [eit, eend] = boost::out_edges(vtx1->get_descriptor(), ctx.graph);
-             eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        for (auto edesc : sorted_out_edges(vtx1->get_descriptor(), ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[edesc].segment;
             if (sg1 && shower_segs.count(sg1)) vtx_ss.push_back(sg1);
         }
         if (vtx_ss.empty()) continue;
@@ -3408,9 +3409,9 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
     auto shower_segs_at = [&](VertexPtr vtx) -> std::vector<SegmentPtr> {
         std::vector<SegmentPtr> out;
         if (!vtx || !vtx->descriptor_valid()) return out;
-        for (auto [eit,eend] = boost::out_edges(vtx->get_descriptor(), ctx.graph);
-             eit != eend; ++eit) {
-            SegmentPtr sg1 = ctx.graph[*eit].segment;
+        // Stable edge-index order (consumers may pick first/last elements).
+        for (auto edesc : sorted_out_edges(vtx->get_descriptor(), ctx.graph)) {
+            SegmentPtr sg1 = ctx.graph[edesc].segment;
             if (sg1 && shower_segs.count(sg1)) out.push_back(sg1);
         }
         return out;

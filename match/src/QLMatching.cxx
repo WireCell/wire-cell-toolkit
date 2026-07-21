@@ -125,6 +125,26 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
     m_anode = m_anodes.front();
     m_multiplicity = m_anodes.size();
+    // Optional extra anodes to register on each run's Grouping (for multi-APA
+    // drift-side group trees), stored per input port. "grouping_anodes" may be a flat
+    // array (same list for every input -- single-side node) or an array of arrays (one
+    // list per input -- JOINT multi-side node). Empty => only the run's own anode
+    // (SBND-identical).
+    m_grouping_anodes.assign(m_multiplicity, {});
+    if (cfg.isMember("grouping_anodes") && cfg["grouping_anodes"].isArray()
+        && !cfg["grouping_anodes"].empty()) {
+        const auto& ga = cfg["grouping_anodes"];
+        if (ga[0].isArray()) {   // per-input: one anode list per port
+            for (std::size_t k = 0; k < m_multiplicity && k < ga.size(); ++k)
+                for (const auto& a : ga[(Json::ArrayIndex)k])
+                    m_grouping_anodes[k].push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+        }
+        else {                   // flat: same list applied to every input (back-compat)
+            std::vector<IAnodePlane::pointer> flat;
+            for (const auto& a : ga) flat.push_back(Factory::find_tn<IAnodePlane>(a.asString()));
+            for (std::size_t k = 0; k < m_multiplicity; ++k) m_grouping_anodes[k] = flat;
+        }
+    }
     if (cfg.isMember("root_pcs_to_merge") && cfg["root_pcs_to_merge"].isArray()) {
         m_root_pcs_to_merge.clear();
         for (const auto& jname : cfg["root_pcs_to_merge"]) m_root_pcs_to_merge.insert(jname.asString());
@@ -136,6 +156,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_outpath       = get(cfg, "outpath", m_outpath);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
+    m_light_model   = get(cfg, "light_model", m_light_model);
+    m_photon_library_file = get(cfg, "photon_library_file", m_photon_library_file);
     m_calib_dump    = get(cfg, "calib_dump", m_calib_dump);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_cathode_diag  = get(cfg, "cathode_diag", m_cathode_diag);
@@ -145,6 +167,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_dmax2        = get(cfg, "xtpc_dmax2",        m_xtpc_dmax2);
     m_xtpc_angle_max    = get(cfg, "xtpc_angle_max",    m_xtpc_angle_max);
     m_xtpc_hough_radius = get(cfg, "xtpc_hough_radius", m_xtpc_hough_radius);
+    m_xtpc_joint_pin    = get(cfg, "xtpc_joint_pin",    m_xtpc_joint_pin);
+    m_xtpc_pin_angle    = get(cfg, "xtpc_pin_angle",    m_xtpc_pin_angle);
 
     m_pmts     = get(cfg, "pmts", m_pmts);
     m_data     = get(cfg, "data", m_data);
@@ -166,6 +190,38 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_auto_mask_pe_bright    = get(cfg, "auto_mask_pe_bright",    m_auto_mask_pe_bright);
     m_auto_mask_min_contrast = get(cfg, "auto_mask_min_contrast", m_auto_mask_min_contrast);
     m_auto_mask_min_flash    = get(cfg, "auto_mask_min_flash",    m_auto_mask_min_flash);
+    m_auto_mask_same_type    = get(cfg, "auto_mask_same_type",    m_auto_mask_same_type);
+
+    // ---- PDVD / vertical-drift knobs (all default OFF => byte-identical). ----
+    m_shared_flash      = get(cfg, "shared_flash",      m_shared_flash);
+    m_opdet_all_volumes = get(cfg, "opdet_all_volumes", m_opdet_all_volumes);
+    m_vd_surface_flags  = get(cfg, "vd_surface_flags",  m_vd_surface_flags);
+    m_pd_wall_cushion   = get(cfg, "pd_wall_cushion",   m_pd_wall_cushion);
+    if (cfg.isMember("pd_wall_channels_ylo") && cfg["pd_wall_channels_ylo"].isArray()) {
+        m_pd_wall_channels_ylo.clear();
+        for (const auto& jch : cfg["pd_wall_channels_ylo"]) m_pd_wall_channels_ylo.push_back(jch.asInt());
+    }
+    if (cfg.isMember("pd_wall_channels_yhi") && cfg["pd_wall_channels_yhi"].isArray()) {
+        m_pd_wall_channels_yhi.clear();
+        for (const auto& jch : cfg["pd_wall_channels_yhi"]) m_pd_wall_channels_yhi.push_back(jch.asInt());
+    }
+    // Per-input anode PD channels: array of arrays, one per input port (empty inner
+    // list => that anode hosts no PDs). A flat array applies to every input.
+    m_anode_pd_channels.assign(m_multiplicity, {});
+    if (cfg.isMember("anode_pd_channels") && cfg["anode_pd_channels"].isArray()
+        && !cfg["anode_pd_channels"].empty()) {
+        const auto& apc = cfg["anode_pd_channels"];
+        if (apc[0].isArray()) {
+            for (std::size_t k = 0; k < m_multiplicity && k < apc.size(); ++k)
+                for (const auto& jch : apc[(Json::ArrayIndex)k])
+                    m_anode_pd_channels[k].push_back(jch.asInt());
+        }
+        else {
+            std::vector<int> flat;
+            for (const auto& jch : apc) flat.push_back(jch.asInt());
+            for (std::size_t k = 0; k < m_multiplicity; ++k) m_anode_pd_channels[k] = flat;
+        }
+    }
 
     m_flash_minPE   = get(cfg, "flash_minPE",   m_flash_minPE);
     m_flash_mintime = get(cfg, "flash_mintime", m_flash_mintime);
@@ -178,8 +234,17 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
 
     m_QtoL = get(cfg, "QtoL", m_QtoL);
+    m_doReflectedLight = get(cfg, "doReflectedLight", m_doReflectedLight);
+    m_tpc_face = get(cfg, "tpc_face", m_tpc_face);
+    // Optional per-input face list for a JOINT multi-side node (PDHD -x face 0 / +x
+    // face 1). Empty => m_tpc_face for every input (bit-identical).
+    m_tpc_faces.clear();
+    if (cfg.isMember("tpc_faces") && cfg["tpc_faces"].isArray())
+        for (const auto& f : cfg["tpc_faces"]) m_tpc_faces.push_back(f.asInt());
     m_strength_cutoff = get(cfg, "strength_cutoff", m_strength_cutoff);
+    m_sparse_lasso = get(cfg, "sparse_lasso", m_sparse_lasso);
     m_drift_speed = get(cfg, "drift_speed", m_drift_speed);
+    m_trigger_offset = get(cfg, "trigger_offset", m_trigger_offset);
     m_nchan = get(cfg, "nchan", m_nchan);
 
     // §A active-volume cushions (see match/docs/improve_progress.md). The raw
@@ -193,6 +258,13 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_y_cushion    = get(cfg, "y_cushion",    m_y_cushion);
     m_z_cushion    = get(cfg, "z_cushion",    m_z_cushion);
     m_two_boundary_margin = get(cfg, "two_boundary_margin", m_two_boundary_margin);
+    m_robust_endpoint_trim  = get(cfg, "robust_endpoint_trim",  m_robust_endpoint_trim);
+    m_robust_endpoint_frac  = get(cfg, "robust_endpoint_frac",  m_robust_endpoint_frac);
+    m_robust_endpoint_count = get(cfg, "robust_endpoint_count", m_robust_endpoint_count);
+    m_robust_endpoint_charge_frac = get(cfg, "robust_endpoint_charge_frac", m_robust_endpoint_charge_frac);
+    m_robust_endpoint_charge_abs  = get(cfg, "robust_endpoint_charge_abs",  m_robust_endpoint_charge_abs);
+    m_robust_endpoint_gap         = get(cfg, "robust_endpoint_gap",         m_robust_endpoint_gap);
+    m_robust_endpoint_gap_charge_frac = get(cfg, "robust_endpoint_gap_charge_frac", m_robust_endpoint_gap_charge_frac);
 
     m_mc_saturation_pe      = get(cfg, "mc_saturation_pe",      m_mc_saturation_pe);
 
@@ -214,6 +286,19 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
     m_pe_err_knee       = get(cfg, "pe_err_knee",       m_pe_err_knee);
     m_pe_err_on_pred    = get(cfg, "pe_err_on_pred",    m_pe_err_on_pred);
+    m_pe_err_lowpe_frac = get(cfg, "pe_err_lowpe_frac", m_pe_err_lowpe_frac);
+    m_pe_err_lowpe_knee = get(cfg, "pe_err_lowpe_knee", m_pe_err_lowpe_knee);
+
+    // Optional per-channel measured-PE gain correction (length nchan). Empty =>
+    // identity (byte-identical). A length mismatch is a config error.
+    if (cfg["measured_pe_scale"].isArray()) {
+        m_measured_pe_scale.clear();
+        for (const auto& v : cfg["measured_pe_scale"]) m_measured_pe_scale.push_back(v.asDouble());
+        if (!m_measured_pe_scale.empty() && (int)m_measured_pe_scale.size() != m_nchan) {
+            raise<ValueError>("QLMatching: measured_pe_scale length %d != nchan %d",
+                              (int)m_measured_pe_scale.size(), m_nchan);
+        }
+    }
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
 
     m_bundle_ks_merge_max      = get(cfg, "bundle_ks_merge_max",      m_bundle_ks_merge_max);
@@ -239,14 +324,29 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_require_containment  = get(cfg, "require_containment",  m_require_containment);
 
+    m_cross_side_filter    = get(cfg, "cross_side_filter",    m_cross_side_filter);
+    m_crossside_skip_vis   = get(cfg, "crossside_skip_vis",   m_crossside_skip_vis);
+
     m_reject_overpred      = get(cfg, "reject_overpred",      m_reject_overpred);
     m_overpred_total_ratio = get(cfg, "overpred_total_ratio", m_overpred_total_ratio);
     m_overpred_maxch_ratio = get(cfg, "overpred_maxch_ratio", m_overpred_maxch_ratio);
 
     m_empty_rescue          = get(cfg, "empty_rescue",          m_empty_rescue);
+    m_opflash_phys_gid      = get(cfg, "opflash_phys_gid",      m_opflash_phys_gid);
     m_rescue_metric_max     = get(cfg, "rescue_metric_max",     m_rescue_metric_max);
     m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
     m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
+
+    m_cluster_rescue            = get(cfg, "cluster_rescue",            m_cluster_rescue);
+    m_cluster_rescue_ks_max     = get(cfg, "cluster_rescue_ks_max",     m_cluster_rescue_ks_max);
+    m_cluster_rescue_chi2ndf_max = get(cfg, "cluster_rescue_chi2ndf_max", m_cluster_rescue_chi2ndf_max);
+    m_cluster_rescue_ratio_lo   = get(cfg, "cluster_rescue_ratio_lo",   m_cluster_rescue_ratio_lo);
+    m_cluster_rescue_ratio_hi   = get(cfg, "cluster_rescue_ratio_hi",   m_cluster_rescue_ratio_hi);
+    m_cluster_rescue_precull    = get(cfg, "cluster_rescue_precull",    m_cluster_rescue_precull);
+    if (m_shared_flash && (m_empty_rescue || m_cluster_rescue)) {
+        log->warn("QLMatching: empty_rescue/cluster_rescue are not shared_flash-aware "
+                  "and will be SKIPPED in the joint fit");
+    }
 
     // Optional CPA structure-exclusion fiducial (SBND). Empty => disabled, and the
     // cathode-end flag_at_x_boundary keeps the original flat-cathode 1-D test.
@@ -285,7 +385,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     const auto vis_cfg = top["VISHits"];
     const auto geom_cfg = top["Geometry"];
     const auto opdets_cfg = top["OpDets"];
-    if (!vuv_cfg.isObject() || !vis_cfg.isObject() || !geom_cfg.isObject() || !opdets_cfg.isArray()) {
+    // VISHits is only needed when reflected light is computed (m_doReflectedLight);
+    // detectors without a reflected component (PDHD) may omit it or pass empty {}.
+    if (!vuv_cfg.isObject() || !geom_cfg.isObject() || !opdets_cfg.isArray()
+        || (m_doReflectedLight && !vis_cfg.isObject())) {
         raise<ValueError>("QLMatching: semimodel_file '%s' missing required sections", m_semimodel_file);
     }
 
@@ -311,10 +414,28 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     }
 
     m_semi_model = std::make_unique<SemiAnalyticalModel>(
-        vuv_cfg, vis_cfg, geom, m_opdets, /*doReflectedLight=*/true);
+        vuv_cfg, vis_cfg, geom, m_opdets, m_doReflectedLight);
 
-    log->debug("QLMatching configured: nopdets={}, semimodel_file={}",
-               m_opdets.size(), m_semimodel_file);
+    // Optional gridded-library visibility backend (default "semi" leaves the
+    // path above untouched).  The semi model and OpDet table stay loaded --
+    // masks, cathode-side and boundary-flag logic use them either way.
+    m_lib_model.reset();
+    if (m_light_model == "library") {
+        if (m_photon_library_file.empty()) {
+            raise<ValueError>("QLMatching: light_model 'library' needs photon_library_file");
+        }
+        m_lib_model = std::make_unique<PhotonLibraryModel>(m_photon_library_file);
+        if (m_lib_model->nchan() != m_opdets.size()) {
+            raise<ValueError>("QLMatching: photon library nchan %d != nopdets %d",
+                              (int) m_lib_model->nchan(), (int) m_opdets.size());
+        }
+    }
+    else if (m_light_model != "semi") {
+        raise<ValueError>("QLMatching: unknown light_model '%s'", m_light_model);
+    }
+
+    log->debug("QLMatching configured: nopdets={}, semimodel_file={}, light_model={}",
+               m_opdets.size(), m_semimodel_file, m_light_model);
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -331,8 +452,12 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_dmax2"]        = m_xtpc_dmax2;
     cfg["xtpc_angle_max"]    = m_xtpc_angle_max;
     cfg["xtpc_hough_radius"] = m_xtpc_hough_radius;
+    cfg["xtpc_joint_pin"]    = m_xtpc_joint_pin;
+    cfg["xtpc_pin_angle"]    = m_xtpc_pin_angle;
     cfg["nchan"]           = m_nchan;
     cfg["semimodel_file"]  = m_semimodel_file;
+    cfg["light_model"]     = m_light_model;
+    cfg["photon_library_file"] = m_photon_library_file;
     cfg["pmts"]            = m_pmts;
     cfg["active_opdet_types"] = Json::arrayValue;
     for (int t : m_active_opdet_types) cfg["active_opdet_types"].append(t);
@@ -345,14 +470,26 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["auto_mask_pe_bright"]    = m_auto_mask_pe_bright;
     cfg["auto_mask_min_contrast"] = m_auto_mask_min_contrast;
     cfg["auto_mask_min_flash"]    = m_auto_mask_min_flash;
+    cfg["auto_mask_same_type"]    = m_auto_mask_same_type;
+    cfg["shared_flash"]           = m_shared_flash;
+    cfg["opdet_all_volumes"]      = m_opdet_all_volumes;
+    cfg["vd_surface_flags"]       = m_vd_surface_flags;
+    cfg["pd_wall_cushion"]        = m_pd_wall_cushion;
+    cfg["pd_wall_channels_ylo"]   = Json::arrayValue;
+    cfg["pd_wall_channels_yhi"]   = Json::arrayValue;
+    cfg["anode_pd_channels"]      = Json::arrayValue;
     cfg["flash_minPE"]     = m_flash_minPE;
     cfg["flash_mintime"]   = m_flash_mintime;
     cfg["flash_maxtime"]   = m_flash_maxtime;
     cfg["beam_mintime"]    = m_beam_mintime;
     cfg["beam_maxtime"]    = m_beam_maxtime;
     cfg["QtoL"]            = m_QtoL;
+    cfg["doReflectedLight"] = m_doReflectedLight;
+    cfg["tpc_face"]        = m_tpc_face;
     cfg["strength_cutoff"] = m_strength_cutoff;
+    cfg["sparse_lasso"]    = m_sparse_lasso;
     cfg["drift_speed"]     = m_drift_speed;
+    cfg["trigger_offset"]  = m_trigger_offset;
 
     cfg["anode_ext1"]   = m_anode_ext1;
     cfg["anode_ext2"]   = m_anode_ext2;
@@ -361,6 +498,13 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["y_cushion"]    = m_y_cushion;
     cfg["z_cushion"]    = m_z_cushion;
     cfg["two_boundary_margin"] = m_two_boundary_margin;
+    cfg["robust_endpoint_trim"]  = m_robust_endpoint_trim;
+    cfg["robust_endpoint_frac"]  = m_robust_endpoint_frac;
+    cfg["robust_endpoint_count"] = m_robust_endpoint_count;
+    cfg["robust_endpoint_charge_frac"] = m_robust_endpoint_charge_frac;
+    cfg["robust_endpoint_charge_abs"]  = m_robust_endpoint_charge_abs;
+    cfg["robust_endpoint_gap"]         = m_robust_endpoint_gap;
+    cfg["robust_endpoint_gap_charge_frac"] = m_robust_endpoint_gap_charge_frac;
 
     cfg["mc_saturation_pe"]      = m_mc_saturation_pe;
 
@@ -382,6 +526,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_err_frac"]        = m_pe_err_frac;
     cfg["pe_err_knee"]        = m_pe_err_knee;
     cfg["pe_err_on_pred"]     = m_pe_err_on_pred;
+    cfg["pe_err_lowpe_frac"]  = m_pe_err_lowpe_frac;
+    cfg["pe_err_lowpe_knee"]  = m_pe_err_lowpe_knee;
+    cfg["measured_pe_scale"]  = Json::Value(Json::arrayValue);  // empty => identity
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
 
     cfg["bundle_ks_merge_max"]      = m_bundle_ks_merge_max;
@@ -405,12 +552,21 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["readout_window_ticks"] = m_readout_window_ticks;
     cfg["window_edge_ticks"]    = m_window_edge_ticks;
     cfg["require_containment"]  = m_require_containment;
+    cfg["cross_side_filter"]    = m_cross_side_filter;
+    cfg["crossside_skip_vis"]   = m_crossside_skip_vis;
     cfg["reject_overpred"]      = m_reject_overpred;
     cfg["overpred_total_ratio"] = m_overpred_total_ratio;
     cfg["empty_rescue"]          = m_empty_rescue;
+    cfg["opflash_phys_gid"]      = m_opflash_phys_gid;
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
+    cfg["cluster_rescue"]            = m_cluster_rescue;
+    cfg["cluster_rescue_ks_max"]     = m_cluster_rescue_ks_max;
+    cfg["cluster_rescue_chi2ndf_max"] = m_cluster_rescue_chi2ndf_max;
+    cfg["cluster_rescue_ratio_lo"]   = m_cluster_rescue_ratio_lo;
+    cfg["cluster_rescue_ratio_hi"]   = m_cluster_rescue_ratio_hi;
+    cfg["cluster_rescue_precull"]    = m_cluster_rescue_precull;
     cfg["overpred_maxch_ratio"] = m_overpred_maxch_ratio;
     cfg["cathode_fiducial"]     = "";
     cfg["pmt_nonlinearity"]     = m_pmt_nonlinearity;
@@ -452,6 +608,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
 
     m_extreme_cache.clear();  // cluster facades are per-event; drop stale endpoints
     m_pca_endpoints_cache.clear();
+    m_wall_flag_cache.clear();
 
     // Match each APA's input independently in its own fresh, isolated ApaRun (one
     // per input port). The per-APA masks, geometry and flash_gid stride are
@@ -462,6 +619,7 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     std::vector<ApaRun> runs(invec.size());
     for (std::size_t k = 0; k < invec.size(); ++k) {
         ApaRun& run = runs[k];
+        run.input_idx    = k;
         run.anode        = m_anodes.at(k);
         run.charge_ident = invec[k]->ident();
         run.inpath       = m_inpath;
@@ -511,8 +669,37 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     const double t_cull = ms_since(t_cull0);
 
     const auto t_fit0 = wallclock::now();
-    for (std::size_t k = 0; k < invec.size(); ++k) run_one_apa_fit(runs[k]);
+    if (m_shared_flash && runs.size() > 1) {
+        // Shared-flash JOINT fit (PDVD): one LASSO system over the physical flashes
+        // with columns from every port, so both drift sides share each flash's
+        // explanation. The per-run output stages then run unchanged per port.
+        auto t = wallclock::now();
+        fit_round1_shared(runs);  const double t_r1 = ms_since(t); t = wallclock::now();
+        fit_round2_shared(runs);  const double t_r2 = ms_since(t); t = wallclock::now();
+        for (auto& run : runs) {
+            apply_matched_t0s(run);
+            write_opflash_pc(run);
+        }
+        log->debug("QLtiming fit(shared): fit_round1 {:.1f} fit_round2 {:.1f} out {:.1f} ms",
+                   t_r1, t_r2, ms_since(t));
+    }
+    else {
+        for (std::size_t k = 0; k < invec.size(); ++k) run_one_apa_fit(runs[k]);
+    }
     const double t_fit = ms_since(t_fit0);
+
+    // Hand-scan calibration / cathode diagnostic dumps read the per-APA runs while
+    // the matching decomposition is still materialized (main + associated are
+    // separate Facade clusters), so run them BEFORE recompose restores the merged
+    // grouping. Read-only; never perturb the matching. (Moved up from after output
+    // assembly; the matched tensor output is independent of them.)
+    if (!m_calib_dump.empty()) dump_calib(runs);
+    if (!m_cathode_diag.empty()) dump_cathode_diag(runs);
+
+    // Restore the stage-3 cluster grouping (undo decompose's Grouping::separate)
+    // so QLMatching emits a T0/flash-annotated copy of its INPUT tree rather than
+    // the matching-internal main/associated split. See recompose_cluster_groups().
+    for (std::size_t k = 0; k < invec.size(); ++k) recompose_cluster_groups(runs[k]);
 
     // ---- Build / merge outputs ----
     const auto t_out0 = wallclock::now();
@@ -551,10 +738,8 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     }
     out = Aux::TensorDM::as_tensorset(outtens, out_ident);
 
-    // Hand-scan calibration dump (off unless calib_dump is set). Reads the finished
-    // per-APA runs only; never perturbs the matching above.
-    if (!m_calib_dump.empty()) dump_calib(runs);
-    if (!m_cathode_diag.empty()) dump_cathode_diag(runs);
+    // (calib / cathode-diag dumps moved above, before recompose_cluster_groups,
+    // so they still see the matching-internal main/associated split.)
 
     // Per-event timing + memory. `took` is the full operator() wall time. RSS is the
     // resident set of the WHOLE matching process at this point (dominated by the
@@ -651,14 +836,25 @@ void QLMatching::build_opdet_mask(ApaRun& run)
 void QLMatching::read_flashes(ApaRun& run)
 {
     const PEErr pe_err_model{m_pe_err_floor, m_pe_err_frac, m_pe_err_knee};
+    const std::vector<double>* pe_scale = m_measured_pe_scale.empty() ? nullptr : &m_measured_pe_scale;
     for (const auto& ff : run.grouping->flashes()) {
-        auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model);
+        auto flash = std::make_shared<Opflash>(ff, m_flash_pe_threshold, m_nchan, pe_err_model, pe_scale);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
         run.flashes.push_back(flash);
     }
 
-    run.grouping->set_anodes({run.anode});
+    // Register the run's own anode plus any extra group anodes (PDHD drift-side
+    // group spanning >1 APA) so every blob's wpid resolves in get_anode().
+    const std::vector<IAnodePlane::pointer>& grp = m_grouping_anodes.at(run.input_idx);
+    if (grp.empty()) {
+        run.grouping->set_anodes({run.anode});
+    }
+    else {
+        std::vector<IAnodePlane::pointer> all = grp;
+        all.push_back(run.anode);
+        run.grouping->set_anodes(all);
+    }
     run.grouping->set_detector_volumes(m_dv);
 }
 
@@ -741,6 +937,34 @@ void QLMatching::decompose_cluster_groups(ApaRun& run)
     for (std::size_t i = 0; i < run.clusters.size(); ++i) run.global_cluster_idx_map[run.clusters[i]] = i;
 }
 
+// Inverse of decompose_cluster_groups(): merge each match-group's associated
+// sub-clusters back into their main, restoring the stage-3 cluster grouping
+// before the matched tree is serialized. decompose() split via Grouping::separate()
+// ONLY to anchor each bundle's geometry on its main cluster; that split is a
+// matching-internal device and must NOT leak into the emitted cluster tree, where
+// it would land in the downstream all-TPC clustering (PDHD's stage 4 has no
+// flash-T0 merge to re-absorb it, so a single stage-3 cluster came out split —
+// see match/QLMatching split-cluster bug). After this, grouping->children() ==
+// the stage-3 cluster set: each main keeps its original ident and the matched
+// cluster_t0 / flash scalars written by apply_matched_t0s, so QLMatching is a pure
+// T0/flash ANNOTATION step. The matching results are untouched. Groups with no
+// associated sub-clusters (the common / single-component / single-anode case) are
+// a no-op. Must run AFTER dump_calib / dump_cathode_diag (which read the split
+// main+associated clusters) and BEFORE output assembly.
+void QLMatching::recompose_cluster_groups(ApaRun& run)
+{
+    auto* grouping = run.grouping;
+    for (auto& [main_cluster, others] : run.match_groups) {
+        if (others.empty()) continue;
+        // merge(): main adopts every associated cluster's blobs (take_children),
+        // then the emptied associated facades are destroyed (keep=false default).
+        grouping->merge(others.begin(), others.end(), main_cluster);
+    }
+    // run.clusters / global_cluster_idx_map / the bundles now hold dangling pointers
+    // to the destroyed associated clusters; nothing reads them after this point
+    // (output assembly walks the tree via root_live only).
+}
+
 // Active-volume geometry from the IDetectorVolumes service, in a per-TPC drift
 // coordinate u = s*(x-anode_x) (u=0 at the anode, u=u_cathode at the cathode) so
 // the prototype's single-TPC inequalities port directly and both reversed-drift
@@ -751,8 +975,28 @@ void QLMatching::compute_geometry(ApaRun& run)
     const unsigned int tpc = run.anode->ident();
     run.sign_offset  = (tpc == 0) ? -1 : 1;
 
-    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, 0, static_cast<int>(tpc));
-    const BoundingBox bb = m_dv->inner_bounds(wpid);
+    // Active-volume bounds are the UNION of the sensitive boxes of every APA in this
+    // drift-side group. PDHD images two APAs per drift volume, offset in Z (e.g. APA0
+    // z[-1,2306] mm + APA2 z[2320,4626] mm share the -x side); using only the
+    // representative anode's box would gate out all charge in the group's other APA (a
+    // different Z half) from the predicted-light sum at build_bundles. With an empty
+    // grouping list (SBND / single-APA) this reduces to the representative anode's box
+    // => bit-identical. X is identical across same-side APAs, so the drift math
+    // (anode_x / u_cathode / s) is unchanged; only the Y/Z extent widens.
+    // Per-input imaging face (joint multi-side node) or the single m_tpc_face. The
+    // run's group anodes are all on its own drift side, so they share this face.
+    const int face = m_tpc_faces.empty() ? m_tpc_face : m_tpc_faces.at(run.input_idx);
+    const WirePlaneId wpid(WirePlaneLayer_t::kAllLayers, face, static_cast<int>(tpc));
+    const std::vector<IAnodePlane::pointer>& grp = m_grouping_anodes.at(run.input_idx);
+    const std::vector<IAnodePlane::pointer> group_anodes =
+        grp.empty() ? std::vector<IAnodePlane::pointer>{run.anode} : grp;
+    BoundingBox bb;
+    for (const auto& a : group_anodes) {
+        const WirePlaneId awpid(WirePlaneLayer_t::kAllLayers, face,
+                                static_cast<int>(a->ident()));
+        const BoundingBox abb = m_dv->inner_bounds(awpid);
+        if (!abb.empty()) bb(abb.bounds());
+    }
     if (bb.empty()) {
         raise<ValueError>("QLMatching: empty detector-volume bounds for anode %d", tpc);
     }
@@ -785,9 +1029,9 @@ void QLMatching::compute_geometry(ApaRun& run)
     }
     log->debug("anode {} pos_offset (dy,dz) = ({:.3f},{:.3f}) cm [parked, not yet applied]",
                tpc, run.dy / units::cm, run.dz / units::cm);
-    log->debug("anode {} bbox x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
+    log->debug("anode {} group-bbox ({} apa) x[{:.2f},{:.2f}] y[{:.2f},{:.2f}] z[{:.2f},{:.2f}] cm; "
                "anode_x {:.2f} cathode_x {:.2f} u_cathode {:.2f} cm s {}",
-               tpc, x_lo / units::cm, x_hi / units::cm,
+               tpc, group_anodes.size(), x_lo / units::cm, x_hi / units::cm,
                bray.first.y() / units::cm, bray.second.y() / units::cm,
                bray.first.z() / units::cm, bray.second.z() / units::cm,
                run.anode_x / units::cm, cathode_x / units::cm, run.u_cathode / units::cm, run.s);
@@ -797,17 +1041,31 @@ void QLMatching::compute_geometry(ApaRun& run)
         m_bundle_ks_merge_max, m_bundle_chi2ndf_merge_max, m_bundle_addmerge_exponent,
         m_highconsist_ks_max, m_highconsist_min_ndf, m_bundle_pe_ndf_knee,
         m_bundle_mask_ks, m_pe_err_floor, m_pe_err_frac, m_pe_err_knee, m_pe_err_on_pred,
+        m_pe_err_lowpe_frac, m_pe_err_lowpe_knee,
         m_highconsist_ladder,
         m_hc_clean_ks, m_hc_clean_c2, m_hc_good_ks, m_hc_good_c2,
         m_hc_tb_ks, m_hc_tb_c2, m_hc_miss_ks, m_hc_miss_c2, m_hc_miss_min_ndf,
         m_chi2_relax, m_chi2_pmt_excess, m_chi2_pmt_ratio, m_chi2_pmt_inflate};
 
+    // Shared-flash mode relies on the ident-based sign_offset above encoding the
+    // physical relation sign_offset == -s (true for SBND TPC0/1 and the PDVD
+    // bottom/top representative anodes 0/4); guard against a future detector
+    // whose idents break it.
+    if (m_shared_flash && run.sign_offset != -(int)run.s) {
+        raise<ValueError>("QLMatching: shared_flash sign_offset %d != -s %d for anode %d",
+                          run.sign_offset, -(int)run.s, tpc);
+    }
+
     // Reduce mask to OpDets on this TPC: an OpDet belongs to TPC 0 / TPC 1 if it
-    // sits on the low / high side of the cathode plane.
-    for (std::size_t idet = 0; idet < run.opdet_mask.size(); ++idet) {
-        const bool low_side = m_opdets[idet].center.x() < m_cathode_x;
-        if ((tpc == 0) && !low_side) run.opdet_mask[idet] = 0;
-        if ((tpc == 1) &&  low_side) run.opdet_mask[idet] = 0;
+    // sits on the low / high side of the cathode plane. opdet_all_volumes (PDVD:
+    // double-sided cathode XAs at x=0, one flash over both drift volumes) keeps
+    // every active OpDet on every run instead.
+    if (!m_opdet_all_volumes) {
+        for (std::size_t idet = 0; idet < run.opdet_mask.size(); ++idet) {
+            const bool low_side = m_opdets[idet].center.x() < m_cathode_x;
+            if ((tpc == 0) && !low_side) run.opdet_mask[idet] = 0;
+            if ((tpc == 1) &&  low_side) run.opdet_mask[idet] = 0;
+        }
     }
 
     // Per-event dynamic dead-PMT auto-mask (optional; off => bit-identical). Folds into
@@ -852,6 +1110,7 @@ void QLMatching::compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc)
                          m_opdets[ch].type) != m_active_opdet_types.end();
     };
     auto in_tpc = [&](int ch) {
+        if (m_opdet_all_volumes) return true;   // all PDs belong to every run (PDVD)
         const bool low_side = m_opdets[ch].center.x() < m_cathode_x;
         return (tpc == 0) ? low_side : !low_side;
     };
@@ -874,6 +1133,9 @@ void QLMatching::compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc)
         d.reserve(live.size());
         for (int c : live) {
             if (c == ch) continue;
+            // Same-type pool (PDVD: XA vs PMT efficiencies differ ~4x, so a
+            // cross-type (Y,Z) neighbour is not a meaningful brightness reference).
+            if (m_auto_mask_same_type && m_opdets[c].type != m_opdets[ch].type) continue;
             const double dy = m_opdets[c].center.y() - o.y();
             const double dz = m_opdets[c].center.z() - o.z();
             d.push_back({dy * dy + dz * dz, c});
@@ -907,6 +1169,28 @@ void QLMatching::compute_dynamic_opdet_mask(ApaRun& run, unsigned int tpc)
                   tpc, to_mask.size(), run.flashes.size());
 }
 
+// Opaque-cathode mismatched-candidate filter (see header). The flash's lit drift
+// side is read from where its measured PE actually is -- OpDet x vs the cathode plane
+// -- the SAME rule the merged-root opflash PC uses to tag a flash's side (the flash's
+// gid encodes the processing node's anode, not its lit volume). A cross-side bundle is
+// kept only when the cluster is a CATHODE-CROSSER at this flash's T0 (at_x_boundary):
+// only then can its far half be the source of the opposite side's light. Every other
+// cross-side bundle is dropped; same-side bundles are always kept.
+bool QLMatching::cross_side_mismatch_drop(const Opflash* flash, int cluster_side,
+                                          bool at_x_boundary) const
+{
+    if (!m_cross_side_filter) return false;
+    double pe_lo = 0.0, pe_hi = 0.0;
+    for (int ch = 0; ch < m_nchan; ++ch) {
+        const double p = flash->get_PE(ch);
+        if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+        else pe_lo += p;
+    }
+    const int flash_side = (pe_hi > pe_lo) ? 1 : 0;   // lit drift side (ties -> side 0)
+    if (flash_side == cluster_side) return false;       // same-side: always keep
+    return !at_x_boundary;                              // cross-side: keep only cathode-crossers
+}
+
 // [Stage 1] Build a candidate (flash, cluster-group) bundle for every pair,
 // predict its light (summed over the whole group), fill the boundary flags, and
 // drop the KS==1 degenerate (no measured/predicted overlap). Surviving bundles
@@ -925,7 +1209,10 @@ void QLMatching::build_bundles(ApaRun& run)
     std::vector<double> reflected_visibilities;
     for (auto flash : run.flashes) {
         const auto flash_time = flash->get_time();
-        const double flash_x_offset = run.sign_offset * flash_time * m_drift_speed;
+        // m_trigger_offset folds the per-event readout-vs-trigger offset into the
+        // drift x correction for detectors that don't bake it into the charge x at
+        // imaging time (default 0 => bit-identical). See QLMatching.h.
+        const double flash_x_offset = run.sign_offset * (flash_time + m_trigger_offset) * m_drift_speed;
 
         // per-flash mask (also catches simulated saturated PMTs in MC).
         std::vector<unsigned int> flash_opdet_mask = run.opdet_mask;
@@ -939,6 +1226,21 @@ void QLMatching::build_bundles(ApaRun& run)
                    int(flash_time) / 100.,
                    int(flash->get_total_PE() * 100) / 100.,
                    int(flash_x_offset * 100) / 100.);
+
+        // Lit drift side of this flash from its PE pattern (the same test as
+        // cross_side_mismatch_drop), hoisted out of the per-group loop so the
+        // cross-side skip below can run BEFORE the per-point visibility loop. Only
+        // computed when the hoisted skip is active; left at 0 (and unused) otherwise.
+        int flash_side = 0;
+        if (m_cross_side_filter && m_crossside_skip_vis) {
+            double pe_lo = 0.0, pe_hi = 0.0;
+            for (int ch = 0; ch < m_nchan; ++ch) {
+                const double p = flash->get_PE(ch);
+                if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+                else pe_lo += p;
+            }
+            flash_side = (pe_hi > pe_lo) ? 1 : 0;   // lit drift side (ties -> side 0)
+        }
 
         for (std::size_t ig = 0; ig < run.match_groups.size(); ++ig) {
             Cluster* main_cluster = run.match_groups[ig].first;
@@ -959,8 +1261,7 @@ void QLMatching::build_bundles(ApaRun& run)
             // from the main cluster's drift endpoints (the group anchor). The
             // return is the prototype flag_good_bundle / TPC-containment verdict.
             const bool contained =
-                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run.s, run.anode_x, run.u_cathode,
-                                       static_cast<int>(run.anode->ident()));
+                compute_endpoint_flags(bundle.get(), main_cluster, flash_x_offset, run);
             bundle->set_contained(contained);   // diagnostic only (calib dump)
             // flag_two_boundary (both PCA ends at a detector edge). The calib dump and the
             // high-consistent ladder's B3 branch consume it; compute it only when one of those
@@ -970,6 +1271,24 @@ void QLMatching::build_bundles(ApaRun& run)
             // Discard bundles whose cluster is not contained in the TPC box once
             // the flash T0 x-offset is applied. Off by default.
             if (m_require_containment && !contained) continue;
+
+            // Opaque-cathode cross-side mismatch (hoisted form): a flash lit on the
+            // opposite drift side from this cluster can only match a cathode-crosser
+            // (at_x_boundary). The verdict uses only the flash lit-side, the run's fixed
+            // cluster side, and the already-computed at_x_boundary flag -- it never
+            // touches the predicted light -- so when crossside_skip_vis is on we drop it
+            // HERE, before the expensive per-point visibility loop (exactly as
+            // require_containment is hoisted above), skipping the visibility of bundles
+            // the post-loop test below would discard anyway. Same final candidate set,
+            // so the matching is bit-identical; the time saved is the vis_loop cost of
+            // the cross-side-but-contained bundles. Default OFF => the post-loop test
+            // runs instead and the result is byte-for-byte the legacy path.
+            if (m_cross_side_filter && m_crossside_skip_vis
+                    && flash_side != (int) run.anode->ident()
+                    && !bundle->get_flag_at_x_boundary()) {
+                bundle->set_potential_bad_match_flag(true);
+                continue;
+            }
 
             const std::size_t nopdets = flash->get_num_channels();
             std::vector<double> pred_flash(nopdets, 0.0);
@@ -1000,12 +1319,21 @@ void QLMatching::build_bundles(ApaRun& run)
 
                     // SemiAnalyticalModel expects positions in cm; blob points are mm.
                     const WireCell::Point xyz_cm(x / units::cm, y / units::cm, z / units::cm);
+                    if (m_lib_model) {
+                        // Gridded library holds total photon arrival (incl. any
+                        // reflected component) with the detector's own optical
+                        // shadowing; reflected term stays 0.
+                        m_lib_model->visibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
+                        reflected_visibilities.assign(nopdets, 0.0);
+                    }
+                    else {
                     // Skip masked opdets inside the model: their predicted light is
                     // discarded by the flash_opdet_mask gate below, so evaluating the
                     // per-opdet solid-angle/Gaisser-Hillas correction for them is wasted
                     // (~half of the same-TPC opdets are masked). Bit-identical result.
                     m_semi_model->detectedDirectVisibilities(direct_visibilities, xyz_cm, &flash_opdet_mask);
                     m_semi_model->detectedReflectedVisibilities(reflected_visibilities, xyz_cm, &flash_opdet_mask);
+                    }
 
                     for (std::size_t idet = 0; idet < nopdets; ++idet) {
                         if (flash_opdet_mask.at(idet) == 0) continue;
@@ -1088,6 +1416,19 @@ void QLMatching::build_bundles(ApaRun& run)
                        int(bundle->get_chi2() / bundle->get_ndf() * 100) / 100.,
                        bundle->get_ndf());
 
+            // Opaque-cathode mismatched-candidate filter (legacy post-loop form): drop a
+            // bundle whose flash is lit on the opposite drift side from the cluster
+            // unless the cluster is a cathode-crosser at this flash's T0 (at_x_boundary).
+            // OFF by default => no-op. When crossside_skip_vis is on, the identical drop
+            // already fired above (before the vis loop) so this is a no-op for those
+            // bundles; same-side bundles fall through here either way. dump_calib applies
+            // the same test so the hand-scan candidate tables match this fit candidate set.
+            if (cross_side_mismatch_drop(flash.get(), (int)run.anode->ident(),
+                                         bundle->get_flag_at_x_boundary())) {
+                bundle->set_potential_bad_match_flag(true);
+                continue;
+            }
+
             run.pre_bundles.insert(bundle);
         } // cluster loop
     }     // flash loop
@@ -1155,12 +1496,26 @@ void QLMatching::cull_inconsistent(ApaRun& run)
     TimingTPCBundleSelection to_be_removed;
     for (auto* cluster : cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map)) {
         auto& bundles = run.cluster_bundles_map[cluster];
-        bool has_sc1 = false, has_keep = false;
+        bool has_pin = false, has_sc1 = false, has_keep = false;
         for (auto& b : bundles) {
+            if (b->get_flag_xtpc_pin()) has_pin = true;
             if (b->get_flag_xtpc_scenario1()) has_sc1 = true;
             if (keep_flag(b)) has_keep = true;
         }
-        if (has_sc1) {
+        if (has_pin) {
+            // Joint-pin (xtpc_joint_pin only): a direction-confirmed crosser half keeps ONLY
+            // its pinned bundle, binding the pair to one coincident flash. Overrides even the
+            // scenario-1 priority below (which keeps all sc1 bundles, allowing a split).
+            for (auto& b : bundles)
+                if (!b->get_flag_xtpc_pin()) {
+                    to_be_removed.push_back(b);
+                    log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
+                               "(cluster kept xtpc JOINT-PIN crosser)",
+                               (int)run.anode->ident(), cluster->ident(),
+                               b->get_flash()->get_flash_id());
+                }
+        }
+        else if (has_sc1) {
             for (auto& b : bundles)
                 if (!b->get_flag_xtpc_scenario1()) {
                     to_be_removed.push_back(b);
@@ -1204,9 +1559,11 @@ double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) con
 void QLMatching::fit_round1(ApaRun& run)
 {
     const auto t_build0 = wallclock::now();
-    // Snapshot the full pre-LASSO candidate universe for the empty-flash rescue,
-    // before either round prunes by strength (§I; only when enabled).
-    if (m_empty_rescue) run.prefit_snapshot = run.flash_bundles_map;
+    // Snapshot the full pre-LASSO candidate universe for the empty-flash (§I) and
+    // cluster-centric (§J) rescues, before either round prunes by strength. Capturing
+    // it is unobservable unless a rescue consumes it, so this stays byte-identical for
+    // configs with both rescues off.
+    if (m_empty_rescue || m_cluster_rescue) run.prefit_snapshot = run.flash_bundles_map;
 
     const double lambda       = m_lasso_lambda;
     const double delta_charge = m_delta_charge;
@@ -1226,10 +1583,14 @@ void QLMatching::fit_round1(ApaRun& run)
     for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
 
     Ress::vector_t M = Ress::vector_t::Zero(run.nopdet * nflash);
-    Ress::matrix_t P = Ress::matrix_t::Zero(run.nopdet * nflash, nbundle + nflash);
     Ress::vector_t MF = Ress::vector_t::Zero(ncluster + nflash);
-    Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster + nflash, nbundle + nflash);
     Ress::vector_t weights = Ress::vector_t::Zero(nbundle + nflash);
+    // P (nopdet*nflash x nbundle+nflash) and PF (ncluster+nflash x nbundle+nflash)
+    // are block-sparse; collect their entries as triplets and realise them sparse
+    // (m_sparse_lasso) or dense (default) below.  The (row,col,value) set is the
+    // same either way, so the dense realisation is byte-identical to the historical
+    // dense fill.
+    std::vector<Eigen::Triplet<double>> P_trip, PF_trip;
 
     std::vector<std::pair<Opflash*, Cluster*>> pairs;
     std::size_t i = 0, ik = 0;
@@ -1240,7 +1601,7 @@ void QLMatching::fit_round1(ApaRun& run)
             const double pe = flash->get_PE(opdet_idx);
             const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
             M(i * run.nopdet + j) = pe / pe_err;
-            P(i * run.nopdet + j, nbundle + i) = pe / pe_err;
+            P_trip.emplace_back((int)(i * run.nopdet + j), (int)(nbundle + i), pe / pe_err);
         }
         for (auto bundle : bundles) {
             const auto& pred_flash = bundle->get_pred_flash();
@@ -1248,7 +1609,7 @@ void QLMatching::fit_round1(ApaRun& run)
                 const int opdet_idx = run.opdet_idx_v.at(j);
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                P(i * run.nopdet + j, pairs.size()) = pred_pe / pe_err;
+                P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
             }
             pairs.emplace_back(flash, bundle->get_main_cluster());
             const auto meas_pe_tot = flash->get_total_PE();
@@ -1258,20 +1619,24 @@ void QLMatching::fit_round1(ApaRun& run)
                                     : m_pe_mismatch_floor;
             weights(ik++) = base * lasso_flag_factor(bundle);
         }
-        PF(ncluster + i, nbundle + i) = 1. / delta_light;
+        PF_trip.emplace_back((int)(ncluster + i), (int)(nbundle + i), 1. / delta_light);
         flash_idx_map[flash] = nbundle + i;
         ++i;
     }
     for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = m_bkg_weight;
     for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
     for (std::size_t n = 0; n < pairs.size(); ++n) {
-        PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
+        PF_trip.emplace_back(cluster_idx_map[pairs.at(n).second], (int)n, 1. / delta_charge);
     }
 
-    Ress::matrix_t PT  = P.transpose();
-    Ress::matrix_t PFT = PF.transpose();
-    Ress::vector_t y = PT * M + PFT * MF;
-    Ress::matrix_t X = PT * P + PFT * PF;
+    // Realise P/PF and form the normal equations.  Default: dense (byte-identical
+    // to the historical Ress path).  m_sparse_lasso: sparse products -- removes the
+    // dense P/PT spike and the O(nbeta²·nopdet·nflash) build on busy events (FP
+    // accumulation order differs, so X may move at the ULP level; assignments do not).
+    Eigen::SparseMatrix<double> P_sp((int)(run.nopdet * nflash), (int)(nbundle + nflash));
+    Eigen::SparseMatrix<double> PF_sp((int)(ncluster + nflash), (int)(nbundle + nflash));
+    P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
+    PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
     Ress::vector_t initial = Ress::vector_t::Zero(nbundle + nflash);
     for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 
@@ -1279,19 +1644,49 @@ void QLMatching::fit_round1(ApaRun& run)
     params.model = Ress::lasso;
     params.lambda = lambda;
     log->debug("solving (round 1)");
-    const double t_build = ms_since(t_build0);
-    const auto t_solve0 = wallclock::now();
-    Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
-    log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
-               "lasso_solve {:.1f} ms (X {}x{})",
-               run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
-               (int)X.rows(), (int)X.cols());
+    const int xdim = (int)(nbundle + nflash);
+    Ress::vector_t solution;
+    if (m_sparse_lasso) {
+        // Sparse normal equations fed straight to the solver (B2): no dense X, and the
+        // solver forms XᵀX / Xᵀy by sparse products -- skipping the ~98% zero work.
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(Xs, y, params, initial, weights);
+        log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   xdim, xdim);
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Ress::matrix_t X = PT * P + PFT * PF;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(X, y, params, initial, weights);
+        log->debug("QLtiming fit_round1: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   (int)X.rows(), (int)X.cols());
+    }
 
     TimingTPCBundleSelection to_be_removed;
     int n = 0;
     for (auto* flash : flashes_ordered) {
         for (auto bundle : run.flash_bundles_map[flash]) {
-            if (solution(n) <= m_strength_cutoff && !m_beamonly) to_be_removed.push_back(bundle);
+            // xtpc joint-pin: a pinned crosser half keeps its flash regardless of LASSO
+            // strength (the pin ignores light by design), so it survives the cutoff prune
+            // and stays in flash_bundles_map -> apply_matched_t0s matches it. Off-path the
+            // flag is never set => identical.
+            if (solution(n) <= m_strength_cutoff && !m_beamonly && !bundle->get_flag_xtpc_pin())
+                to_be_removed.push_back(bundle);
             ++n;
         }
     }
@@ -1325,10 +1720,11 @@ void QLMatching::fit_round2(ApaRun& run)
     for (auto* f : flashes_ordered)  flash_idx_map[f]   = idx++;
 
     Ress::vector_t M = Ress::vector_t::Zero(run.nopdet * nflash);
-    Ress::matrix_t P = Ress::matrix_t::Zero(run.nopdet * nflash, nbundle);
     Ress::vector_t MF = Ress::vector_t::Zero(ncluster);
-    Ress::matrix_t PF = Ress::matrix_t::Zero(ncluster, nbundle);
     Ress::vector_t weights = Ress::vector_t::Zero(nbundle);
+    // Block-sparse P (nopdet*nflash x nbundle) / PF (ncluster x nbundle) as triplets;
+    // realised dense (default, byte-identical) or sparse (m_sparse_lasso) below.
+    std::vector<Eigen::Triplet<double>> P_trip, PF_trip;
     std::vector<std::pair<Opflash*, Cluster*>> pairs;
 
     std::size_t i = 0, ik = 0;
@@ -1347,7 +1743,7 @@ void QLMatching::fit_round2(ApaRun& run)
                 const int opdet_idx = run.opdet_idx_v.at(j);
                 const double pred_pe = pred_flash.at(opdet_idx);
                 const double pe_err = std::sqrt(flash->get_PE(opdet_idx) + std::pow(flash->get_PE_err(opdet_idx), 2));
-                P(i * run.nopdet + j, pairs.size()) = pred_pe / pe_err;
+                P_trip.emplace_back((int)(i * run.nopdet + j), (int)pairs.size(), pred_pe / pe_err);
             }
             pairs.emplace_back(flash, bundle->get_main_cluster());
 
@@ -1362,13 +1758,13 @@ void QLMatching::fit_round2(ApaRun& run)
     }
     for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
     for (std::size_t n = 0; n < pairs.size(); ++n) {
-        PF(cluster_idx_map[pairs.at(n).second], n) = 1. / delta_charge;
+        PF_trip.emplace_back(cluster_idx_map[pairs.at(n).second], (int)n, 1. / delta_charge);
     }
 
-    Ress::matrix_t PT  = P.transpose();
-    Ress::matrix_t PFT = PF.transpose();
-    Ress::vector_t y = PT * M + PFT * MF;
-    Ress::matrix_t X = PT * P + PFT * PF;
+    Eigen::SparseMatrix<double> P_sp((int)(run.nopdet * nflash), (int)nbundle);
+    Eigen::SparseMatrix<double> PF_sp((int)ncluster, (int)nbundle);
+    P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
+    PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
     Ress::vector_t initial = Ress::vector_t::Zero(nbundle);
     for (std::size_t n = 0; n < pairs.size(); ++n) initial(n) = 1.0;
 
@@ -1376,20 +1772,46 @@ void QLMatching::fit_round2(ApaRun& run)
     params.model = Ress::lasso;
     params.lambda = lambda;
     log->debug("solving (round 2)");
-    const double t_build = ms_since(t_build0);
-    const auto t_solve0 = wallclock::now();
-    Ress::vector_t solution = Ress::solve(X, y, params, initial, weights);
-    log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
-               "lasso_solve {:.1f} ms (X {}x{})",
-               run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
-               (int)X.rows(), (int)X.cols());
+    const int xdim = (int)nbundle;
+    Ress::vector_t solution;
+    if (m_sparse_lasso) {
+        // Sparse normal equations straight to the solver (B2): no dense X.
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(Xs, y, params, initial, weights);
+        log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   xdim, xdim);
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Ress::matrix_t X = PT * P + PFT * PF;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(X, y, params, initial, weights);
+        log->debug("QLtiming fit_round2: ident {} nbundle {} nflash {} nopdet {} matrix_build {:.1f} "
+                   "lasso_solve {:.1f} ms (X {}x{})",
+                   run.charge_ident, nbundle, nflash, run.nopdet, t_build, ms_since(t_solve0),
+                   (int)X.rows(), (int)X.cols());
+    }
 
     TimingTPCBundleSelection to_be_removed;
     int n = 0;
     for (auto* flash : flashes_ordered) {
         for (auto bundle : run.flash_bundles_map[flash]) {
             bundle->set_strength(solution(n));
-            if (!(solution(n) > m_strength_cutoff || m_beamonly)) to_be_removed.push_back(bundle);
+            // xtpc joint-pin: keep a pinned crosser half regardless of strength (see round1).
+            if (!(solution(n) > m_strength_cutoff || m_beamonly || bundle->get_flag_xtpc_pin()))
+                to_be_removed.push_back(bundle);
             ++n;
         }
     }
@@ -1402,6 +1824,12 @@ void QLMatching::fit_round2(ApaRun& run)
     // Uses the pre-LASSO snapshot captured at fit_round1 start, so it can reach the
     // strength-0 but light-good bundles both rounds pruned.
     if (m_empty_rescue) rescue_empty_flashes(run, run.prefit_snapshot);
+
+    // Cluster-centric rescue (§J; default OFF = bit-identical, PDHD-on). After the
+    // empty-flash pass, adopt the best accepted candidate for each cluster the LASSO
+    // left unmatched (its flash won by a rival), attaching it even onto a non-empty
+    // flash. Same pre-LASSO snapshot source as the empty-flash rescue.
+    if (m_cluster_rescue) rescue_unmatched_clusters(run, run.prefit_snapshot);
 
     // Keep best match per cluster.
     std::map<int, std::pair<Opflash*, double>> matched_pairs;
@@ -1452,6 +1880,331 @@ void QLMatching::fit_round2(ApaRun& run)
     log->debug("done with matching");
 }
 
+// ---------------------------------------------------------------------------
+// Shared-flash JOINT LASSO rounds (m_shared_flash; PDVD). Every input port reads
+// the SAME global flash list (identical filters), so a physical flash is keyed
+// by its input tensor row id (get_flash_id) and appears as one per-run Opflash
+// instance per port. The joint system has ONE measured block per physical flash
+// and bundle columns from EVERY port, so clusters in both drift volumes share
+// the explanation of one flash (a per-run fit would let each side independently
+// absorb the full PE — biased for every cathode-crosser). The matrix recipe
+// (rows, weights, background columns, sparse/dense realisation, strength prune)
+// mirrors fit_round1/fit_round2 verbatim; only the column universe is joint.
+// fit_round2's matched_pairs/organize_bundles tail is NOT replicated: its result
+// is discarded there too (the matched output is the strength-cutoff survivors
+// left in flash_bundles_map). The §I/§J rescues are per-run "empty flash"
+// concepts, wrong under a shared flash — skipped (configure warns).
+namespace {
+    // One physical flash: per-run (run index, per-run Opflash instance) pairs,
+    // in input-port order.
+    struct SharedFlash {
+        std::vector<std::pair<std::size_t, WireCell::Match::Opflash*>> insts;
+    };
+}
+
+void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
+{
+    const auto t_build0 = wallclock::now();
+    const double lambda       = m_lasso_lambda;
+    const double delta_charge = m_delta_charge;
+    const double delta_light  = m_delta_light;
+
+    // OpDet universe: identical across runs by construction (opdet_all_volumes +
+    // deterministic auto-mask on identical flash lists); guard config mistakes.
+    const ApaRun& r0 = runs.front();
+    for (const auto& run : runs) {
+        if (run.opdet_idx_v != r0.opdet_idx_v) {
+            raise<ValueError>("QLMatching: shared_flash requires identical OpDet masks "
+                              "across inputs (set opdet_all_volumes)");
+        }
+    }
+    const unsigned int nopdet = r0.nopdet;
+
+    // Physical flashes = union of the runs' candidate flashes, keyed by flash row
+    // id (ascending => same ordering semantics as flash_iter_order).
+    std::map<int, SharedFlash> phys;
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        for (auto* f : flash_iter_order(runs[k].flash_bundles_map)) {
+            phys[f->get_flash_id()].insts.emplace_back(k, f);
+        }
+    }
+    for (auto& [fid, pf] : phys) {
+        Opflash* f0 = pf.insts.front().second;
+        for (std::size_t n = 1; n < pf.insts.size(); ++n) {
+            Opflash* fn = pf.insts[n].second;
+            if (std::abs(fn->get_time() - f0->get_time()) > 1e-6 ||
+                std::abs(fn->get_total_PE() - f0->get_total_PE()) >
+                    1e-9 * std::max(1.0, std::abs(f0->get_total_PE()))) {
+                raise<ValueError>("QLMatching: shared_flash flash id %d differs across "
+                                  "inputs (time/PE) — ports must read one flash list", fid);
+            }
+        }
+    }
+
+    const unsigned int nflash = phys.size();
+    unsigned int nbundle = 0;
+    for (auto& [fid, pf] : phys) {
+        (void)fid;
+        for (auto& [k, f] : pf.insts) nbundle += runs[k].flash_bundles_map.at(f).size();
+    }
+
+    // Joint cluster index: run-major, each run's clusters in its own stable order.
+    // Cluster facades are distinct objects across runs, so a flat map suffices.
+    std::map<Cluster*, int> cluster_idx_map;
+    {
+        int idx = 0;
+        for (auto& run : runs) {
+            for (auto* c : cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map)) {
+                cluster_idx_map[c] = idx++;
+            }
+        }
+    }
+    const unsigned int ncluster = cluster_idx_map.size();
+
+    Ress::vector_t M = Ress::vector_t::Zero(nopdet * nflash);
+    Ress::vector_t MF = Ress::vector_t::Zero(ncluster + nflash);
+    Ress::vector_t weights = Ress::vector_t::Zero(nbundle + nflash);
+    std::vector<Eigen::Triplet<double>> P_trip, PF_trip;
+
+    // Column bookkeeping: the bundle behind each column and its owning run (for
+    // the post-solve prune routing).
+    std::vector<TimingTPCBundle::pointer> col_bundles;
+    std::vector<std::size_t> col_run;
+    col_bundles.reserve(nbundle);
+    col_run.reserve(nbundle);
+
+    std::size_t i = 0, ik = 0;
+    for (auto& [fid, pf] : phys) {
+        (void)fid;
+        Opflash* f0 = pf.insts.front().second;
+        for (unsigned int j = 0; j < nopdet; ++j) {
+            const int opdet_idx = r0.opdet_idx_v.at(j);
+            const double pe = f0->get_PE(opdet_idx);
+            const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
+            M(i * nopdet + j) = pe / pe_err;
+            P_trip.emplace_back((int)(i * nopdet + j), (int)(nbundle + i), pe / pe_err);
+        }
+        for (auto& [k, f] : pf.insts) {
+            for (auto bundle : runs[k].flash_bundles_map.at(f)) {
+                const auto& pred_flash = bundle->get_pred_flash();
+                for (unsigned int j = 0; j < nopdet; ++j) {
+                    const int opdet_idx = r0.opdet_idx_v.at(j);
+                    const double pred_pe = pred_flash.at(opdet_idx);
+                    const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
+                    P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
+                }
+                const auto meas_pe_tot = f0->get_total_PE();
+                const auto pred_pe_tot = bundle->get_total_pred_light();
+                const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
+                                        ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
+                                        : m_pe_mismatch_floor;
+                weights(ik++) = base * lasso_flag_factor(bundle);
+                col_bundles.push_back(bundle);
+                col_run.push_back(k);
+            }
+        }
+        PF_trip.emplace_back((int)(ncluster + i), (int)(nbundle + i), 1. / delta_light);
+        ++i;
+    }
+    for (unsigned int k = 0; k < nflash; ++k) weights(nbundle + k) = m_bkg_weight;
+    for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
+    for (std::size_t n = 0; n < col_bundles.size(); ++n) {
+        PF_trip.emplace_back(cluster_idx_map.at(col_bundles[n]->get_main_cluster()), (int)n, 1. / delta_charge);
+    }
+
+    Eigen::SparseMatrix<double> P_sp((int)(nopdet * nflash), (int)(nbundle + nflash));
+    Eigen::SparseMatrix<double> PF_sp((int)(ncluster + nflash), (int)(nbundle + nflash));
+    P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
+    PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
+    Ress::vector_t initial = Ress::vector_t::Zero(nbundle + nflash);
+    for (std::size_t n = 0; n < col_bundles.size(); ++n) initial(n) = 1.0;
+
+    Ress::Params params;
+    params.model = Ress::lasso;
+    params.lambda = lambda;
+    log->debug("solving (round 1, shared)");
+    const int xdim = (int)(nbundle + nflash);
+    Ress::vector_t solution;
+    if (m_sparse_lasso) {
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(Xs, y, params, initial, weights);
+        log->debug("QLtiming fit_round1_shared: nbundle {} nflash {} nopdet {} ncluster {} "
+                   "matrix_build {:.1f} lasso_solve {:.1f} ms (X {}x{})",
+                   nbundle, nflash, nopdet, ncluster, t_build, ms_since(t_solve0), xdim, xdim);
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Ress::matrix_t X = PT * P + PFT * PF;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(X, y, params, initial, weights);
+        log->debug("QLtiming fit_round1_shared: nbundle {} nflash {} nopdet {} ncluster {} "
+                   "matrix_build {:.1f} lasso_solve {:.1f} ms (X {}x{})",
+                   nbundle, nflash, nopdet, ncluster, t_build, ms_since(t_solve0), xdim, xdim);
+    }
+
+    std::vector<TimingTPCBundleSelection> to_be_removed(runs.size());
+    for (std::size_t n = 0; n < col_bundles.size(); ++n) {
+        if (solution(n) <= m_strength_cutoff && !m_beamonly && !col_bundles[n]->get_flag_xtpc_pin())
+            to_be_removed[col_run[n]].push_back(col_bundles[n]);
+    }
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        remove_bundle_selection(to_be_removed[k], runs[k].flash_bundles_map,
+                                runs[k].cluster_bundles_map, runs[k].flash_cluster_bundles_map);
+        remove_bundle_selection(to_be_removed[k], runs[k].pre_bundles);
+    }
+}
+
+void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
+{
+    const auto t_build0 = wallclock::now();
+    const double lambda       = m_lasso_lambda;
+    const double delta_charge = m_delta_charge;
+    const double delta_shape  = m_delta_shape;
+
+    const ApaRun& r0 = runs.front();
+    const unsigned int nopdet = r0.nopdet;
+
+    // Rebuild the physical-flash universe (round 1 may have emptied flashes).
+    std::map<int, SharedFlash> phys;
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        for (auto* f : flash_iter_order(runs[k].flash_bundles_map)) {
+            phys[f->get_flash_id()].insts.emplace_back(k, f);
+        }
+    }
+    const unsigned int nflash = phys.size();
+    unsigned int nbundle = 0;
+    for (auto& [fid, pf] : phys) {
+        (void)fid;
+        for (auto& [k, f] : pf.insts) nbundle += runs[k].flash_bundles_map.at(f).size();
+    }
+    std::map<Cluster*, int> cluster_idx_map;
+    {
+        int idx = 0;
+        for (auto& run : runs) {
+            for (auto* c : cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map)) {
+                cluster_idx_map[c] = idx++;
+            }
+        }
+    }
+    const unsigned int ncluster = cluster_idx_map.size();
+
+    Ress::vector_t M = Ress::vector_t::Zero(nopdet * nflash);
+    Ress::vector_t MF = Ress::vector_t::Zero(ncluster);
+    Ress::vector_t weights = Ress::vector_t::Zero(nbundle);
+    std::vector<Eigen::Triplet<double>> P_trip, PF_trip;
+    std::vector<TimingTPCBundle::pointer> col_bundles;
+    std::vector<std::size_t> col_run;
+    col_bundles.reserve(nbundle);
+    col_run.reserve(nbundle);
+
+    std::size_t i = 0, ik = 0;
+    for (auto& [fid, pf] : phys) {
+        (void)fid;
+        Opflash* f0 = pf.insts.front().second;
+        for (unsigned int j = 0; j < nopdet; ++j) {
+            const int opdet_idx = r0.opdet_idx_v.at(j);
+            const double pe = f0->get_PE(opdet_idx);
+            const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
+            M(i * nopdet + j) = pe / pe_err;
+        }
+        for (auto& [k, f] : pf.insts) {
+            for (auto bundle : runs[k].flash_bundles_map.at(f)) {
+                const auto ks_dis = bundle->get_ks_dis();
+                const auto& pred_flash = bundle->get_pred_flash();
+                for (unsigned int j = 0; j < nopdet; ++j) {
+                    const int opdet_idx = r0.opdet_idx_v.at(j);
+                    const double pred_pe = pred_flash.at(opdet_idx);
+                    const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
+                    P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
+                }
+                const auto meas_pe_tot = f0->get_total_PE();
+                const auto pred_pe_tot = bundle->get_total_pred_light();
+                const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
+                                        ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
+                                        : m_pe_mismatch_floor;
+                weights(ik++) = (base + delta_shape * nopdet * ks_dis / lambda) * lasso_flag_factor(bundle);
+                col_bundles.push_back(bundle);
+                col_run.push_back(k);
+            }
+        }
+        ++i;
+    }
+    for (unsigned int k = 0; k < ncluster; ++k) MF(k) = 1. / delta_charge;
+    for (std::size_t n = 0; n < col_bundles.size(); ++n) {
+        PF_trip.emplace_back(cluster_idx_map.at(col_bundles[n]->get_main_cluster()), (int)n, 1. / delta_charge);
+    }
+
+    Eigen::SparseMatrix<double> P_sp((int)(nopdet * nflash), (int)nbundle);
+    Eigen::SparseMatrix<double> PF_sp((int)ncluster, (int)nbundle);
+    P_sp.setFromTriplets(P_trip.begin(), P_trip.end());
+    PF_sp.setFromTriplets(PF_trip.begin(), PF_trip.end());
+    Ress::vector_t initial = Ress::vector_t::Zero(nbundle);
+    for (std::size_t n = 0; n < col_bundles.size(); ++n) initial(n) = 1.0;
+
+    Ress::Params params;
+    params.model = Ress::lasso;
+    params.lambda = lambda;
+    log->debug("solving (round 2, shared)");
+    const int xdim = (int)nbundle;
+    Ress::vector_t solution;
+    if (m_sparse_lasso) {
+        Eigen::SparseMatrix<double> PT  = P_sp.transpose();
+        Eigen::SparseMatrix<double> PFT = PF_sp.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Eigen::SparseMatrix<double> Xs = PT * P_sp + PFT * PF_sp;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(Xs, y, params, initial, weights);
+        log->debug("QLtiming fit_round2_shared: nbundle {} nflash {} nopdet {} ncluster {} "
+                   "matrix_build {:.1f} lasso_solve {:.1f} ms (X {}x{})",
+                   nbundle, nflash, nopdet, ncluster, t_build, ms_since(t_solve0), xdim, xdim);
+    }
+    else {
+        Ress::matrix_t P  = P_sp.toDense();
+        Ress::matrix_t PF = PF_sp.toDense();
+        Ress::matrix_t PT  = P.transpose();
+        Ress::matrix_t PFT = PF.transpose();
+        Ress::vector_t y = PT * M + PFT * MF;
+        Ress::matrix_t X = PT * P + PFT * PF;
+        const double t_build = ms_since(t_build0);
+        const auto t_solve0 = wallclock::now();
+        solution = Ress::solve(X, y, params, initial, weights);
+        log->debug("QLtiming fit_round2_shared: nbundle {} nflash {} nopdet {} ncluster {} "
+                   "matrix_build {:.1f} lasso_solve {:.1f} ms (X {}x{})",
+                   nbundle, nflash, nopdet, ncluster, t_build, ms_since(t_solve0), xdim, xdim);
+    }
+
+    std::vector<TimingTPCBundleSelection> to_be_removed(runs.size());
+    for (std::size_t n = 0; n < col_bundles.size(); ++n) {
+        col_bundles[n]->set_strength(solution(n));
+        if (!(solution(n) > m_strength_cutoff || m_beamonly || col_bundles[n]->get_flag_xtpc_pin()))
+            to_be_removed[col_run[n]].push_back(col_bundles[n]);
+    }
+    for (std::size_t k = 0; k < runs.size(); ++k) {
+        remove_bundle_selection(to_be_removed[k], runs[k].flash_bundles_map,
+                                runs[k].cluster_bundles_map, runs[k].flash_cluster_bundles_map);
+        remove_bundle_selection(to_be_removed[k], runs[k].pre_bundles);
+    }
+
+    // §I/§J rescues: per-run "empty flash" concepts, wrong when the flash is
+    // shared across drift sides (a flash explained by the other side's clusters
+    // is not empty). Skipped here; configure() warned if they were requested.
+    // fit_round2's matched_pairs/organize_bundles tail is likewise not replicated
+    // (its result is discarded there — the matched output is what remains in
+    // flash_bundles_map).
+    log->debug("done with matching (shared)");
+}
+
 // Empty-flash light-quality rescue (§I; the prototype's flash-centric light pick).
 // The LASSO selects by strength and can leave a flash with NO surviving bundle even
 // when a cluster is an excellent LIGHT match for it (that cluster was won, on strength
@@ -1478,6 +2231,12 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
     for (auto& kv : run.flash_bundles_map) {
         for (auto& b : kv.second) matched[b->get_main_cluster()] = {kv.first, metric(b)};
     }
+    // xtpc joint-pin: clusters bound to a pinned crosser flash must never be reassigned to
+    // an empty flash by the light-quality guard below (the pin overrides light). Empty if off.
+    std::set<Cluster*> pin_locked;
+    for (auto& kv : run.flash_bundles_map)
+        for (auto& b : kv.second)
+            if (b->get_flag_xtpc_pin()) pin_locked.insert(b->get_main_cluster());
 
     // Empty flashes (in snapshot, absent/empty in the live map), in flash-id order.
     std::vector<Opflash*> empty_flashes;
@@ -1507,6 +2266,7 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
         if (!best || best_m > m_rescue_metric_max) continue;  // quality bar
 
         auto* C = best->get_main_cluster();
+        if (pin_locked.count(C)) continue;  // xtpc joint-pin owns C: do not reassign
         // One flash per cluster: never leave C double-matched.
         auto mit = matched.find(C);
         if (mit == matched.end()) {
@@ -1545,6 +2305,105 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
     log->debug("QLrescue: rescued {} empty flash(es)", n_rescued);
 }
 
+// Cluster-centric rescue (§J; the complement of the flash-centric empty-flash pick).
+// The empty-flash rescue fills only flashes left WHOLLY empty; a big cluster with an
+// excellent light candidate but driven to strength 0 by the LASSO L1 sparsity (a rival
+// already explains its flash) stays unmatched even when that flash is non-empty. For
+// each cluster still unmatched after the empty-flash pass, adopt its best ACCEPTED
+// candidate from the pre-cutoff snapshot, attaching it even onto an already-non-empty
+// flash (many-clusters-per-flash is physical and GT-endorsed). We only ADD (no reassign),
+// for clusters with zero live bundles, one bundle each => one-flash-per-cluster holds and
+// the addition set is independent of cluster iteration order. Mutates run.flash_bundles_map.
+void QLMatching::rescue_unmatched_clusters(ApaRun& run, const FlashBundlesMap& snapshot)
+{
+    // Acceptance bar: ks < ks_max AND chi2/ndf < chi2ndf_max AND ratio_lo < pred/meas <
+    // ratio_hi, with ratio = total predicted light / flash total measured PE (the same
+    // pairing the LASSO PE-mismatch weight uses).
+    auto accept = [this](const TimingTPCBundle::pointer& b) {
+        const int ndf = std::max(b->get_ndf(), 1);
+        const double c2ndf = b->get_chi2() / ndf;
+        const double meas = b->get_flash()->get_total_PE();
+        const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+        return b->get_ks_dis() < m_cluster_rescue_ks_max
+            && c2ndf < m_cluster_rescue_chi2ndf_max
+            && ratio > m_cluster_rescue_ratio_lo
+            && ratio < m_cluster_rescue_ratio_hi;
+    };
+    // Light-quality score (lower = better): KS shape, chi2/ndf, and PE-scale agreement.
+    auto score = [](const TimingTPCBundle::pointer& b) {
+        const int ndf = std::max(b->get_ndf(), 1);
+        const double meas = b->get_flash()->get_total_PE();
+        const double ratio = (meas > 0.0) ? b->get_total_pred_light() / meas : 1e9;
+        return b->get_ks_dis() * std::sqrt(std::max(b->get_chi2() / ndf, 1.0))
+             + std::abs(std::log(ratio));
+    };
+
+    // Clusters already matched (any live bundle) are off-limits.
+    std::set<Cluster*> matched;
+    for (auto& kv : run.flash_bundles_map)
+        for (auto& b : kv.second) matched.insert(b->get_main_cluster());
+
+    // Group candidates by main cluster. Default pool = the post-cull snapshot (the
+    // shipped behaviour). With m_cluster_rescue_precull, use the PRE-cull universe
+    // instead: run.all_bundles minus the build-prefilter rejects (potential_bad_match).
+    // {all_bundles : !bad} == pre_bundles BEFORE cull_inconsistent removed the
+    // non-consistent rivals, so it restores cull-victim candidates (valid ks/chi2/pred,
+    // since the non-bad bundles were fully examine_bundle'd) the snapshot can't reach.
+    // Both pools are vectors in deterministic build order.
+    std::map<Cluster*, std::vector<TimingTPCBundle::pointer>> by_cluster;
+    if (m_cluster_rescue_precull) {
+        for (auto& b : run.all_bundles)
+            if (!b->get_potential_bad_match_flag())
+                by_cluster[b->get_main_cluster()].push_back(b);
+    }
+    else {
+        for (auto& kv : snapshot)
+            for (auto& b : kv.second) by_cluster[b->get_main_cluster()].push_back(b);
+    }
+
+    // Iterate unmatched clusters in the canonical global_cluster_idx order (not pointer
+    // order) for determinism.
+    std::vector<Cluster*> clusters;
+    for (auto& kv : by_cluster)
+        if (!matched.count(kv.first)) clusters.push_back(kv.first);
+    std::sort(clusters.begin(), clusters.end(), [&run](Cluster* a, Cluster* b) {
+        return run.global_cluster_idx_map.at(a) < run.global_cluster_idx_map.at(b);
+    });
+
+    int n_rescued = 0;
+    for (auto* C : clusters) {
+        TimingTPCBundle::pointer best;
+        double best_s = 0;
+        for (const auto& b : by_cluster[C]) {
+            if (!accept(b)) continue;
+            const double s = score(b);
+            // Tie-break by FLASH id (the tie here is between flashes for ONE cluster),
+            // then cluster_index_id for log stability.
+            if (!best || s < best_s ||
+                (s == best_s && b->get_flash()->get_flash_id() < best->get_flash()->get_flash_id()) ||
+                (s == best_s && b->get_flash()->get_flash_id() == best->get_flash()->get_flash_id()
+                             && b->get_cluster_index_id() < best->get_cluster_index_id())) {
+                best = b;
+                best_s = s;
+            }
+        }
+        if (!best) continue;
+        run.flash_bundles_map[best->get_flash()].push_back(best);  // attach (flash may be non-empty)
+        ++n_rescued;
+        log->debug("QLclusrescue: flash id {} adopted cluster ident {} (score {})",
+                   best->get_flash()->get_flash_id(), C->ident(), best_s);
+    }
+
+    // Re-sort inner vectors by cluster_index_id for build-stable output (as §I does).
+    for (auto& kv : run.flash_bundles_map) {
+        std::sort(kv.second.begin(), kv.second.end(),
+                  [](const TimingTPCBundle::pointer& a, const TimingTPCBundle::pointer& b) {
+                      return a->get_cluster_index_id() < b->get_cluster_index_id();
+                  });
+    }
+    log->debug("QLclusrescue: rescued {} unmatched cluster(s)", n_rescued);
+}
+
 // Stamp the matched flash/t0 onto each cluster (and its associated sub-clusters):
 // cluster_t0, the "flash" row index (Cluster::get_flash()), a globally-unique
 // matched_flash_gid (survives the all-APA merge), and the per-channel flashpred.
@@ -1554,7 +2413,16 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
         for (auto bundle : run.flash_bundles_map[flash]) {
             auto* cluster = bundle->get_main_cluster();
             const double t0 = flash->get_time() * units::ns;
-            const int flash_gid = run.anode->ident() * kFlashGidStride + run.global_flash_idx_map.at(flash);
+            // gid side: legacy = this node's anode ident; m_opflash_phys_gid = the
+            // flash's PHYSICAL side, so a cross-side (xTPC) match on the opposite
+            // node still keys the same gid the owning side emits in write_opflash_pc.
+            // m_shared_flash = side 0 always: one global flash list shared by every
+            // port, emitted once (input 0) in write_opflash_pc, so every run's
+            // matched_flash_gid resolves to that single emission.
+            const int gid_side = m_shared_flash ? 0
+                                 : m_opflash_phys_gid ? flash_phys_side(flash)
+                                                      : (int) run.anode->ident();
+            const int flash_gid = gid_side * kFlashGidStride + run.global_flash_idx_map.at(flash);
             cluster->set_cluster_t0(t0);
             cluster->set_scalar<int>("flash", flash->get_flash_id());
             cluster->set_scalar<int>("matched_flash_gid", flash_gid);
@@ -1589,24 +2457,59 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
 // Persist the per-flash measured light into a merge-safe, self-contained per-root
 // "opflash" PC (one row per (flash, channel): gid, time, ch, pe), so the all-APA
 // MABC can dump the op/flash Bee display after the per-APA trees are merged.
+// Physical drift side (0 = low-x / TPC0, 1 = high-x / TPC1) of a flash, from where
+// its measured light sits relative to the cathode.  m_opdets[ch].center.x() is the
+// OpDet position; ties (e.g. an all-zero flash) resolve to side 0.
+int QLMatching::flash_phys_side(const Opflash* flash) const
+{
+    double pe_lo = 0.0, pe_hi = 0.0;
+    for (int ch = 0; ch < m_nchan; ++ch) {
+        const double p = flash->get_PE(ch);
+        if (ch < (int) m_opdets.size() && m_opdets[ch].center.x() >= m_cathode_x) pe_hi += p;
+        else pe_lo += p;
+    }
+    return (pe_hi > pe_lo) ? 1 : 0;
+}
+
 void QLMatching::write_opflash_pc(ApaRun& run)
 {
-    std::vector<int> op_gid, op_ch;
+    // Shared-flash mode: every port carries the SAME global flash list, so emit it
+    // once (from input 0, gid side 0) — otherwise the merged root would hold every
+    // physical flash N times. merge_pct simply skips roots without an opflash PC.
+    if (m_shared_flash && run.input_idx != 0) return;
+    std::vector<int> op_gid, op_ch, op_apa;
     std::vector<double> op_time, op_pe;
     for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
         const auto& flash = run.flashes[fi];
-        const int gid = run.anode->ident() * kFlashGidStride + static_cast<int>(fi);
+        // Physical drift side of the flash (TPC 0 = low-x, TPC 1 = high-x of the
+        // cathode), taken from where its measured light actually is rather than
+        // from the node's anode ident (the per-side matcher runs against one global
+        // flash list, so the node ident is NOT the lit volume).  Used for the Bee
+        // "apa" side tag always, and for the gid when m_opflash_phys_gid so the two
+        // per-side nodes emit ONE gid per physical flash and the duplicate collapses
+        // in fill_bee_flashes.  Legacy gid = node anode ident (byte-identical when
+        // each node's flash list is already one-per-side, e.g. SBND per-TPC flashes).
+        const int apa = flash_phys_side(flash.get());
+        const int gid_side = m_shared_flash ? 0
+                             : m_opflash_phys_gid ? apa : (int) run.anode->ident();
+        const int gid = gid_side * kFlashGidStride + static_cast<int>(fi);
         for (int ch = 0; ch < m_nchan; ++ch) {
             op_gid.push_back(gid);
-            op_time.push_back(flash->get_time());
+            // Fold the per-event readout-vs-trigger offset into the displayed flash
+            // time so the Bee red box lands on the (raw-x) charge it matches; the
+            // matching geometry already carries m_trigger_offset (see flash_x_offset).
+            // 0 => bit-identical.
+            op_time.push_back(flash->get_time() + m_trigger_offset);
             op_ch.push_back(ch);
             op_pe.push_back(flash->get_PE(ch));
+            op_apa.push_back(apa);
         }
     }
     run.grouping->put_pcarray<int>(op_gid, "gid", "opflash");
     run.grouping->put_pcarray<double>(op_time, "time", "opflash");
     run.grouping->put_pcarray<int>(op_ch, "ch", "opflash");
     run.grouping->put_pcarray<double>(op_pe, "pe", "opflash");
+    run.grouping->put_pcarray<int>(op_apa, "apa", "opflash");
 }
 
 // ---------------------------------------------------------------------------
@@ -1620,7 +2523,10 @@ void QLMatching::write_opflash_pc(ApaRun& run)
 // Conventions: all spatial quantities in cm, flash time in us, drift speed in
 // cm/us, so the viewer recovers a bundle's T0 x-shift as
 //   dx_cm = sign_offset * flash_time_us * drift_speed_cm_per_us
-// and adds it to the (fixed-box) cluster points. Cluster idents are per-APA, so a
+// and adds it to the (fixed-box) cluster points. The per-event readout-vs-trigger
+// offset is ALREADY folded into f["time"] below (so the viewer needs no separate
+// trigger term); top["trigger_offset"] is therefore 0 here.
+// Cluster idents are per-APA, so a
 // globally-unique cluster uid = apa*kFlashGidStride + ident disambiguates the two
 // TPCs (same stride convention as the flash gid).
 void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
@@ -1633,8 +2539,15 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     Json::Value top;
     top["nchan"]        = m_nchan;
     top["drift_speed"]  = v_cm_us;             // cm/us
+    // The per-event readout-vs-trigger offset is folded into f["time"] below, so the
+    // viewer must NOT re-add it; keep this 0 so a folding viewer stays a no-op.
+    top["trigger_offset"] = 0.0;   // us (already in f["time"])
     top["count"]        = (Json::UInt64)m_count;
     top["charge_ident"] = runs.empty() ? 0 : runs.front().charge_ident;
+    // Readout window used by the window-truncation flag (raw post-resample ticks).
+    // For PDHD this is the value the run script read from the SP frame and passed
+    // via readout_window_ticks; lets the viewer/validation see the window in use.
+    top["readout_nticks"] = m_readout_window_ticks;
 
     // Quality params / uncertainty model (so the viewer shows the chi2 /
     // flag_high_consistent ingredients and the PE_err rule next to the metrics).
@@ -1650,6 +2563,11 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["pe_err_frac"]         = m_pe_err_frac;
     qp["pe_err_knee"]         = m_pe_err_knee;
     qp["pe_err_on_pred"]      = m_pe_err_on_pred;
+    {
+        Json::Value mps(Json::arrayValue);
+        for (double s : m_measured_pe_scale) mps.append(s);
+        qp["measured_pe_scale"] = mps;  // empty => no correction applied
+    }
     qp["QtoL"]                = m_QtoL;
     qp["highconsist_ladder"]  = m_highconsist_ladder;
     qp["hc_clean_ks"] = m_hc_clean_ks;  qp["hc_clean_c2"] = m_hc_clean_c2;
@@ -1719,13 +2637,16 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         geometry[std::to_string(apa)] = g;
 
         // Per-flash measured light + coincidence group id (computed below).
+        // Shared-flash mode: the ports carry the SAME global flash list — emit it
+        // once (input 0) with side-0 gids, matching write_opflash_pc/apply_matched_t0s.
         for (std::size_t fi = 0; fi < run.flashes.size(); ++fi) {
+            if (m_shared_flash && run.input_idx != 0) break;
             const auto& fl = run.flashes[fi];
             Json::Value f;
-            f["gid"]      = apa * kFlashGidStride + (int)fi;
+            f["gid"]      = (m_shared_flash ? 0 : apa) * kFlashGidStride + (int)fi;
             f["id"]       = fl->get_flash_id();
             f["apa"]      = apa;
-            f["time"]     = fl->get_time() / us;     // us
+            f["time"]     = (fl->get_time() + m_trigger_offset) / us;   // us (trigger-folded)
             f["total_PE"] = fl->get_total_PE();
             Json::Value pe(Json::arrayValue), pe_err(Json::arrayValue);
             for (int ch = 0; ch < m_nchan; ++ch) { pe.append(fl->get_PE(ch)); pe_err.append(fl->get_PE_err(ch)); }
@@ -1771,10 +2692,16 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         // before the fit), so skipping them here loses no matcher decision.
         for (const auto& b : run.all_bundles) {
             if (!b->get_contained()) continue;
+            // Same opaque-cathode mismatched-candidate filter the fit uses in
+            // build_bundles, so the hand-scan tables show the same bundle universe:
+            // keep same-side and cross-side cathode-crossers, drop other cross-side.
+            if (cross_side_mismatch_drop(b->get_flash(), apa, b->get_flag_at_x_boundary()))
+                continue;
             auto* fl = b->get_flash();
             Json::Value jb;
             jb["apa"]          = apa;
-            jb["flash_gid"]    = apa * kFlashGidStride + run.global_flash_idx_map.at(fl);
+            jb["flash_gid"]    = (m_shared_flash ? 0 : apa) * kFlashGidStride
+                                 + run.global_flash_idx_map.at(fl);
             jb["flash_id"]     = fl->get_flash_id();
             jb["main_cluster"] = cluster_uid(apa, b->get_main_cluster()->ident());
             Json::Value others(Json::arrayValue);
@@ -1795,11 +2722,13 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["potential_bad_match"]  = b->get_potential_bad_match_flag();
             jb["close_to_PMT"]         = b->get_flag_close_to_PMT();
             jb["at_x_boundary"]        = b->get_flag_at_x_boundary();
+            jb["at_cathode"]           = b->get_flag_at_cathode();
             jb["spec_end"]             = b->get_spec_end_flag();
             jb["window_truncated"]     = b->get_flag_window_truncated();
             jb["two_boundary"]         = b->get_flag_two_boundary();
             jb["xtpc_consistent"]      = b->get_flag_xtpc_consistent();
             jb["xtpc_scenario1"]       = b->get_flag_xtpc_scenario1();
+            jb["xtpc_pin"]             = b->get_flag_xtpc_pin();
             jb["auto_selected"]        = (bool)selected.count(b.get());
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
@@ -1861,18 +2790,20 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
     const double dmax = 10 * cm;                 // closest-pair distance cut
     const double win_us = m_flash_group_window / us;
 
-    // Matched clusters from both APAs with their per-cluster T0 x-offset.
-    struct CC { Cluster* c; int apa; double off; double t_us; };
+    // Matched clusters from both drift sides with their per-cluster T0 x-offset. Side
+    // (low-x volume 0 / high-x volume 1) comes from the run's anode-vs-cathode position,
+    // not the raw APA ident -- consistent with cull_cross_tpc's cross-side pairing.
+    struct CC { Cluster* c; int side; double off; double t_us; };
     std::vector<CC> ccs;
     for (const auto& run : runs) {
-        const int apa = (int)run.anode->ident();
+        const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double ft  = flash->get_time();
-            const double off = run.sign_offset * ft * v;
+            const double off = run.sign_offset * (ft + m_trigger_offset) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
-                ccs.push_back({bundle->get_main_cluster(), apa, off, ft / us});
+                ccs.push_back({bundle->get_main_cluster(), side, off, ft / us});
                 for (auto* oc : bundle->get_other_clusters())
-                    ccs.push_back({oc, apa, off, ft / us});
+                    ccs.push_back({oc, side, off, ft / us});
             }
         }
     }
@@ -1885,16 +2816,16 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
         return std::acos(c) * 180.0 / M_PI;
     };
 
-    log->info("QLCATHODE header: count apa0/id0 apa1/id1 t0_us t1_us d_cm "
+    log->info("QLCATHODE header: count side0_id side1_id t0_us t1_us d_cm "
               "p0(x,y,z)_cm p1(x,y,z)_cm dir0 dir1 conn_cm "
               "ang(d0,d1) ang(d0,conn) ang(d1,conn) ang(conn,dhat)_deg "
               "along_cm perp_cm | dX_cm[DRIFT t0/v-DEGENERATE] dY_cm dZ_cm[transverse]");
 
     std::set<std::pair<Cluster*, Cluster*>> seen;
     for (size_t i = 0; i < ccs.size(); ++i) {
-        if (ccs[i].apa != 0) continue;
+        if (ccs[i].side != 0) continue;
         for (size_t j = 0; j < ccs.size(); ++j) {
-            if (ccs[j].apa != 1) continue;
+            if (ccs[j].side != 1) continue;
             if (std::abs(ccs[i].t_us - ccs[j].t_us) > win_us) continue;
             Cluster* c0 = ccs[i].c;
             Cluster* c1 = ccs[j].c;
@@ -1965,10 +2896,12 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
 // present — tight, self-vetoing), 2 = scenario 2 (a half window-truncated AND
 // conn,dir0,dir1 mutually collinear < angle_max AND d < dmax2), 0 = not consistent. A
 // wrong-flash pairing carries the wrong T0 x-offset => large d => no match (self-vetoing).
-int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
+int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1,
+                                     double* d_out, bool* pin_collinear_out) const
 {
     const double R = m_xtpc_hough_radius;
     const double amax = m_xtpc_angle_max;
+    if (pin_collinear_out) *pin_collinear_out = false;
 
     auto deg = [](const geo_vector_t& a, const geo_vector_t& b) {
         const double m = a.magnitude() * b.magnitude();
@@ -2004,6 +2937,7 @@ int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
     }
     if (bi < 0) return false;
     const double d = std::sqrt(best);
+    if (d_out) *d_out = d;
 
     // Three-vector collinearity at the closest pair (scenario 2). Hough axes are
     // computed on raw points (a constant T0 x-shift does not rotate them).
@@ -2028,13 +2962,36 @@ int QLMatching::xtpc_pair_consistent(const XtpcMC& m0, const XtpcMC& m1) const
                            a01 < amax && a0c < amax && a1c < amax;
     const bool pass = scenario1 || scenario2;
 
+    // Joint-pin direction confirmation (only when xtpc_joint_pin): a scenario-1 pair is a
+    // genuine collinear crosser if the two TRACK AXES agree within m_xtpc_pin_angle. The
+    // connecting-vector angles (a0c,a1c) are deliberately NOT used -- a ~1cm inter-TPC
+    // transverse shift makes the closest-point connector ~perpendicular even for true
+    // crossers. Take the OR (min) of two axis estimates: the LOCAL vhough direction (a01
+    // above, at the cathode-end closest point) and the GLOBAL cluster PCA axis. Fold both
+    // to [0,90] (a Hough/PCA axis has no sign). The local estimate over-reads on straight
+    // crossers whose ends fan/curl (so global rescues them); the global estimate is
+    // meaningless on bent/messy clusters (so local rescues them).
+    double a01_global = 180.0;
+    if (m_xtpc_joint_pin) {
+        const geo_vector_t g0 = m0.c->get_pca().axis.at(0);
+        const geo_vector_t g1 = m1.c->get_pca().axis.at(0);
+        a01_global = deg(g0, g1);
+    }
+    auto foldd = [](double a) { return std::min(a, 180.0 - a); };
+    const double a01_pin = std::min(foldd(a01), foldd(a01_global));
+    if (pin_collinear_out)
+        *pin_collinear_out = scenario1 && a01_pin < m_xtpc_pin_angle;
+
     // Diagnostic: log EVERY coincident pair we evaluate (not only passes), with the
     // cut values, so a near-miss (geometry just outside dmax/angle) is visible.
     log->debug("QLXTPC pair 0/{} 1/{} d={:.2f}cm (dmax={:.1f} dmax2={:.1f}) "
-               "a01={:.1f} a0c={:.1f} a1c={:.1f} (amax={:.1f}) trunc={} sc1={} sc2={} pass={}",
+               "a01={:.1f} a0c={:.1f} a1c={:.1f} (amax={:.1f}) trunc={} sc1={} sc2={} pass={} "
+               "a01g={:.1f} a01pin={:.1f} (pinmax={:.1f}) pin={}",
                m0.c->ident(), m1.c->ident(), d / units::cm,
                m_xtpc_dmax / units::cm, m_xtpc_dmax2 / units::cm,
-               a01, a0c, a1c, amax, (m0.wt || m1.wt), scenario1, scenario2, pass);
+               a01, a0c, a1c, amax, (m0.wt || m1.wt), scenario1, scenario2, pass,
+               foldd(a01_global), a01_pin, m_xtpc_pin_angle,
+               (scenario1 && a01_pin < m_xtpc_pin_angle));
     // Scenario 1 takes precedence (it is the tight, self-vetoing match that drives the
     // xtpc-priority cull); scenario 2 is the looser collinear-truncated fallback.
     if (scenario1) return 1;
@@ -2060,25 +3017,31 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     // scenario 1) OR a truncated half (window_truncated, scenario 2). A clean
     // non-crossing bundle carries neither and cannot be a crosser half, so dropping it
     // here keeps the O(n0*n1*npts^2) pairing bounded without losing any real pair.
-    struct Cand { XtpcMC mc; int apa; double t_us; };
+    // Tag each candidate by its DRIFT SIDE (low-x volume = 0, high-x volume = 1),
+    // derived from the run's anode position vs the cathode -- NOT the raw APA ident.
+    // For SBND the two APAs sit on opposite sides of the cathode, so side == ident and
+    // the pairing is unchanged; for a JOINT PDHD node side 0 = {APA0,APA2} and side 1 =
+    // {APA1,APA3}, so the two cathode-crossing halves (each in its own drift volume) are
+    // paired across the central cathode.
+    struct Cand { XtpcMC mc; int side; double t_us; };
     std::vector<Cand> cands;
     for (auto& run : runs) {
-        const int apa = (int)run.anode->ident();
+        const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
-            const double off = run.sign_offset * flash->get_time() * v;
+            const double off = run.sign_offset * (flash->get_time() + m_trigger_offset) * v;
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {
                 if (!bundle->get_flag_at_x_boundary() && !bundle->get_flag_window_truncated())
                     continue;
                 cands.push_back({XtpcMC{bundle.get(), bundle->get_main_cluster(), off,
                                         run.dy, run.dz, bundle->get_flag_window_truncated()},
-                                 apa, flash->get_time() / units::us});
+                                 side, flash->get_time() / units::us});
             }
         }
     }
     // Diagnostic: list every cross-TPC candidate (main-cluster bundle surviving prefit).
     for (const auto& c : cands)
-        log->debug("QLXTPC cand apa{} t={:.3f}us mainclus={} npts={} trunc={}",
-                   c.apa, c.t_us, c.mc.c->ident(), c.mc.c->npoints(), c.mc.wt);
+        log->debug("QLXTPC cand side{} t={:.3f}us mainclus={} npts={} trunc={}",
+                   c.side, c.t_us, c.mc.c->ident(), c.mc.c->npoints(), c.mc.wt);
 
     // Profiling: the pairing loop calls xtpc_pair_consistent, whose closest-approach
     // step is a brute-force O(npts0 x npts1) double loop over both clusters' 3D points.
@@ -2087,10 +3050,16 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     const auto t_pair0 = wallclock::now();
     long long n_pairs_eval = 0, n_pairs_coincident = 0;
     double point_pairs = 0;  // double: can exceed 2^31
+    // Joint-pin: collect direction-confirmed scenario-1 pairs (with their closest-approach
+    // d and the two bundles) for the greedy min-d pin below. Empty unless m_xtpc_joint_pin.
+    struct PinRec { TimingTPCBundle* b0; TimingTPCBundle* b1;
+                    WireCell::Clus::Facade::Cluster* c0; WireCell::Clus::Facade::Cluster* c1;
+                    double d; };
+    std::vector<PinRec> pins;
     for (size_t i = 0; i < cands.size(); ++i) {
-        if (cands[i].apa != 0) continue;
+        if (cands[i].side != 0) continue;
         for (size_t j = 0; j < cands.size(); ++j) {
-            if (cands[j].apa != 1) continue;
+            if (cands[j].side != 1) continue;
             ++n_pairs_eval;
             if (std::abs(cands[i].t_us - cands[j].t_us) > win_us) continue;  // coincident
             ++n_pairs_coincident;
@@ -2098,7 +3067,8 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
                        cands[i].mc.c->ident(), cands[i].t_us,
                        cands[j].mc.c->ident(), cands[j].t_us);
             point_pairs += (double)cands[i].mc.c->npoints() * cands[j].mc.c->npoints();
-            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc);
+            double pair_d = 0; bool pin_ok = false;
+            const int scenario = xtpc_pair_consistent(cands[i].mc, cands[j].mc, &pair_d, &pin_ok);
             if (scenario == 0) continue;
             cands[i].mc.b->set_flag_xtpc_consistent(true);
             cands[j].mc.b->set_flag_xtpc_consistent(true);
@@ -2106,11 +3076,65 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
                 cands[i].mc.b->set_flag_xtpc_scenario1(true);
                 cands[j].mc.b->set_flag_xtpc_scenario1(true);
             }
+            if (m_xtpc_joint_pin && pin_ok)
+                pins.push_back({cands[i].mc.b, cands[j].mc.b, cands[i].mc.c, cands[j].mc.c, pair_d});
         }
     }
     log->debug("QLtiming cull_cross_tpc: ncands {} pairs_eval {} pairs_coincident {} "
                "point_pairs {:.3g} pairing_loop {:.1f} ms",
                cands.size(), n_pairs_eval, n_pairs_coincident, point_pairs, ms_since(t_pair0));
+
+    // Joint-pin: greedily bind the direction-confirmed crosser pairs, tightest (smallest
+    // closest-approach d) first, so each cluster is pinned at most once -- to the coincident
+    // flash where its halves actually meet at the cathode. A pinned bundle gets flag_xtpc_pin;
+    // cull_inconsistent then keeps ONLY pinned bundles for a pinned cluster, binding both
+    // halves to one flash (and keeping an otherwise-culled dim-flash partner alive). Empty
+    // unless m_xtpc_joint_pin, so the off path is bit-identical. Deterministic: sort by
+    // (d, ident0, ident1, flash_id0, flash_id1).
+    if (m_xtpc_joint_pin && !pins.empty()) {
+        // Per cluster-PAIR, choose the FLASH by best combined light (min ks-sum), not by
+        // closest approach: every confirmed pairing already has d<dmax and collinear axes, so
+        // among the coincident flashes light only picks which same-time wall -- it can never
+        // pull the match off the crosser time (a non-coincident bright flash is not a pairing
+        // here). This avoids forcing a same-time tie onto a worse-light wall (run29107 evt983
+        // gid55 ks=1.0 vs gid56 ks=0.06). Tie-break d, then flash-ids.
+        auto kssum = [](const PinRec& p) { return p.b0->get_ks_dis() + p.b1->get_ks_dis(); };
+        std::map<std::pair<WireCell::Clus::Facade::Cluster*, WireCell::Clus::Facade::Cluster*>,
+                 PinRec> best;
+        for (const auto& p : pins) {
+            auto key = std::make_pair(p.c0, p.c1);
+            auto it = best.find(key);
+            if (it == best.end()) { best.emplace(key, p); continue; }
+            const PinRec& q = it->second;
+            const double kp = kssum(p), kq = kssum(q);
+            const int pf0 = p.b0->get_flash()->get_flash_id(), qf0 = q.b0->get_flash()->get_flash_id();
+            bool better = (kp != kq) ? (kp < kq)
+                        : (p.d != q.d) ? (p.d < q.d)
+                        : (pf0 != qf0) ? (pf0 < qf0)
+                        : (p.b1->get_flash()->get_flash_id() < q.b1->get_flash()->get_flash_id());
+            if (better) it->second = p;
+        }
+        // Greedy over cluster-pairs, tightest geometry (min d) first, each cluster pinned once.
+        std::vector<PinRec> reps;
+        for (auto& kv : best) reps.push_back(kv.second);
+        std::stable_sort(reps.begin(), reps.end(), [](const PinRec& a, const PinRec& b) {
+            if (a.d != b.d) return a.d < b.d;
+            if (a.c0->ident() != b.c0->ident()) return a.c0->ident() < b.c0->ident();
+            return a.c1->ident() < b.c1->ident();
+        });
+        std::set<WireCell::Clus::Facade::Cluster*> pinned;
+        for (const auto& p : reps) {
+            if (pinned.count(p.c0) || pinned.count(p.c1)) continue;
+            p.b0->set_flag_xtpc_pin(true);
+            p.b1->set_flag_xtpc_pin(true);
+            pinned.insert(p.c0);
+            pinned.insert(p.c1);
+            log->debug("QLXTPCPIN pair 0/{} (flash {}) 1/{} (flash {}) d={:.2f}cm kssum={:.3f}",
+                       p.c0->ident(), p.b0->get_flash()->get_flash_id(),
+                       p.c1->ident(), p.b1->get_flash()->get_flash_id(),
+                       p.d / units::cm, kssum(p));
+        }
+    }
     // The actual culling (dropping a flagged cluster's rivals) is done by the unified
     // cull_inconsistent, which operator() runs per-APA right after this flag pass.
 }
@@ -2157,19 +3181,26 @@ QLMatching::cluster_extreme_points(Cluster* cluster) const
 bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
                                         Cluster* cluster,
                                         double flash_x_offset,
-                                        double s, double anode_x, double u_cathode,
-                                        int anode_ident) const
+                                        const ApaRun& run) const
 {
+    const double s = run.s, anode_x = run.anode_x, u_cathode = run.u_cathode;
     // Collect the per-time-slice representative drift coordinate u and blob
-    // count. The toolkit's time_blob_map is nested apa->face->time->BlobSet; the
-    // matched anode has a single active face for SBND but we iterate all faces
-    // under the apa for robustness. We then walk in u-order from each drift end
-    // (anode = min u, cathode = max u). Walking by u rather than the prototype's
-    // strict time order is a faithful adaptation: for a normally drifting track
-    // time and u are monotonic, and the boundary tests are themselves in u.
+    // count. The toolkit's time_blob_map is nested apa->face->time->BlobSet. A
+    // PDHD drift group spans TWO APAs offset in Z (e.g. APA1 z[0,232]cm + APA3
+    // z[232,462]cm share the +x side), and the two APAs share the drift geometry
+    // (anode_x / u_cathode / s) -- so union the slices over EVERY anode the
+    // cluster touches. Keying on a single representative anode (as the SBND-origin
+    // code did) declared any cluster living wholly in the group's second APA
+    // "not contained" (no blobs under that key), hiding it from the matcher's
+    // boundary flags and the calib dump. This mirrors the build_bundles
+    // PE-inclusion box, which already unions grouping_anodes; for single-anode
+    // runs (SBND) the cluster has one key, so the union is identical. We then walk
+    // in u-order from each drift end (anode = min u, cathode = max u). Walking by u
+    // rather than the prototype's strict time order is a faithful adaptation: for a
+    // normally drifting track time and u are monotonic, and the boundary tests are
+    // themselves in u.
     const auto& tbm = cluster->time_blob_map();
-    auto ait = tbm.find(anode_ident);
-    if (ait == tbm.end()) return false;  // no blobs under this anode: cannot be contained
+    if (tbm.empty()) return false;  // no blobs at all: cannot be contained
 
     // Raw readout-window truncation flag (T0-independent, APA-agnostic). The
     // blob slice indices are raw ticks (SamplingHelpers writes slice_index =
@@ -2178,38 +3209,55 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     // within m_window_edge_ticks of the window end. No flash_x_offset enters:
     // this is a property of the raw window, identical for both reversed-drift
     // APAs. Computed independently of the u-walk below (which skips slices with
-    // no 3d points and can early-return on sv.empty()). Always filled; inert (no
-    // consumer reads it yet), so filling it leaves production output unchanged.
+    // no 3d points and can early-return on sv.empty()).
+    //
+    // The window end is the post-resample frame length, m_readout_window_ticks.
+    // Its default is an SBND number (3427); a detector with a longer window
+    // (PDHD: 5999) would mislabel every mid-drift cluster past tick 3427, so PDHD
+    // feeds the real value (read from the SP frame by its run script) via the
+    // readout_window_ticks config -- see cfg/.../pdhd/qlmatching.jsonnet.
     {
+        const int win = m_readout_window_ticks;
         bool have = false;
         int min_tick = 0, max_tick = 0;
-        for (const auto& [face, slices] : ait->second) {
-            for (const auto& [t, bset] : slices) {
-                if (bset.empty()) continue;
-                const int lo = t;                               // slice_index_min (raw tick)
-                const int hi = (*bset.begin())->slice_index_max();
-                if (!have) { min_tick = lo; max_tick = hi; have = true; }
-                else { if (lo < min_tick) min_tick = lo; if (hi > max_tick) max_tick = hi; }
+        for (const auto& [anode, faces] : tbm) {
+            (void)anode;
+            for (const auto& [face, slices] : faces) {
+                for (const auto& [t, bset] : slices) {
+                    if (bset.empty()) continue;
+                    const int lo = t;                               // slice_index_min (raw tick)
+                    const int hi = (*bset.begin())->slice_index_max();
+                    if (!have) { min_tick = lo; max_tick = hi; have = true; }
+                    else { if (lo < min_tick) min_tick = lo; if (hi > max_tick) max_tick = hi; }
+                }
             }
         }
         if (have) {
             const bool truncated =
                 (min_tick - 0 <= m_window_edge_ticks) ||
-                (m_readout_window_ticks - max_tick <= m_window_edge_ticks);
+                (win - max_tick <= m_window_edge_ticks);
             bundle->set_flag_window_truncated(truncated);
         }
     }
 
-    struct SliceU { double u; int nblobs; };
+    struct SliceU { double u; int nblobs; int npts; double q; };
     std::vector<SliceU> sv;
-    for (const auto& [face, slices] : ait->second) {
-        for (const auto& [t, bset] : slices) {
-            if (bset.empty()) continue;
-            const Blob* b0 = *bset.begin();
-            auto pts = b0->points("3d", {"x", "y", "z"});
-            if (pts.empty()) continue;
-            const double x = pts.at(0).x() + flash_x_offset;
-            sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()) });
+    for (const auto& [anode, faces] : tbm) {
+        (void)anode;
+        for (const auto& [face, slices] : faces) {
+            for (const auto& [t, bset] : slices) {
+                if (bset.empty()) continue;
+                const Blob* b0 = *bset.begin();
+                auto pts = b0->points("3d", {"x", "y", "z"});
+                if (pts.empty()) continue;
+                const double x = pts.at(0).x() + flash_x_offset;
+                // Slice point count (charge mass of the slice) for the robust-endpoint
+                // trim; npoints() is a cached int per blob, so this stays cheap.
+                int slice_npts = 0;
+                double slice_q = 0.0;
+                for (const Blob* b : bset) { slice_npts += b->npoints(); slice_q += b->charge(); }
+                sv.push_back({ s * (x - anode_x), static_cast<int>(bset.size()), slice_npts, slice_q });
+            }
         }
     }
     if (sv.empty()) return false;  // no 3d points here: cannot be contained
@@ -2273,6 +3321,75 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         if (n_blobs_def_out < 0.0015 * N && n_blobs_def_out > 0) last_u = u_cathode;  // snap to cathode
     }
 
+    // ---- robust-endpoint trim (default OFF, byte-identical when m_robust_endpoint_trim
+    // is false) ----
+    // The gap-based trims above only fire for an *isolated* deep straggle separated
+    // from the body by a >0.75 cm gap. A thin off-axis overclustering tail that stays
+    // within 0.75 cm of the body is never trimmed, so a 0.3%-of-points straggle drags
+    // the endpoint past the detector edge and falsely fails containment. This pass is
+    // gap-independent: at each end it sums the POINTS in the outer region (beyond the
+    // in-edge) and, if that material is sparse -- below max(frac*cluster_points, count)
+    // -- snaps the endpoint back to the first slice inside the edge. Point-mass (not
+    // blob count) is the sparsity measure, so a dense genuine track-end (hundreds of
+    // points past the edge => grossly mis-positioned t0) exceeds the allowance and is
+    // left to fail containment, while the thin tail is removed.
+    if (m_robust_endpoint_trim) {
+        const double allow =
+            std::max(m_robust_endpoint_frac * static_cast<double>(cluster->npoints()),
+                     m_robust_endpoint_count);
+        // Charge budget for the outer-straggle judge: low-charge overclustered satellites
+        // (~0.1% of cluster charge here) slip past the point-count allowance but stay under a
+        // charge fraction, while a dense genuine track-end exceeds it. Disabled when
+        // m_robust_endpoint_charge_frac == 0 (byte-identical to the point-count-only judge).
+        double q_total = 0.0;
+        for (const auto& sl : sv) q_total += sl.q;
+        const double q_allow = m_robust_endpoint_charge_frac * q_total;
+        // Absolute per-point charge-DENSITY gate (size-independent, does NOT scale with
+        // cluster size or tail length): only trim outer material that is charge-sparse
+        // (diffuse overclustered satellites, ~150 q/pt here), never a charge-dense real
+        // track tip running into the boundary (~2500-8800 q/pt). Disabled when
+        // m_robust_endpoint_charge_abs <= 0 (then the fraction/count judge stands alone).
+        auto sparse = [&](int pts_out, double q_out) {
+            if (pts_out <= allow) return true;   // original point-count path, untouched
+            if (m_robust_endpoint_charge_frac <= 0.0) return false;
+            if (q_out > q_allow) return false;   // new charge-fraction path
+            // Density gate applies ONLY to the charge-fraction path: trim charge-sparse
+            // (overclustered-satellite) material, never a charge-dense real track tip.
+            return m_robust_endpoint_charge_abs <= 0.0 ||
+                   (pts_out > 0 && q_out / pts_out < m_robust_endpoint_charge_abs);
+        };
+        if (last_u >= cathode_in) {                         // cathode end (deepest)
+            int pts_out = 0; double q_out = 0.0; double in_u = last_u; bool reached = false;
+            for (auto it = sv.rbegin(); it != sv.rend(); ++it) {
+                if (it->u < cathode_in) { in_u = it->u; reached = true; break; }
+                pts_out += it->npts; q_out += it->q;
+            }
+            if (reached && sparse(pts_out, q_out)) last_u = in_u;
+        }
+        if (first_u <= anode_in) {                          // anode end (shallowest)
+            int pts_out = 0; double q_out = 0.0; double in_u = first_u; bool reached = false;
+            // gap_detached: the sub-anode material contains a gap wider than
+            // m_robust_endpoint_gap, i.e. it is overclustered junk DETACHED from the
+            // contiguous body rather than a real continuous track end. Density-blind.
+            bool gap_detached = false; double prev_u = sv.front().u;
+            for (const auto& sl : sv) {
+                if (sl.u > anode_in) { in_u = sl.u; reached = true; break; }
+                if (m_robust_endpoint_gap > 0.0 && (sl.u - prev_u) > m_robust_endpoint_gap)
+                    gap_detached = true;
+                pts_out += sl.npts; q_out += sl.q; prev_u = sl.u;
+            }
+            // Gap path: trim detached junk whose charge stays within the gap budget,
+            // regardless of its per-point density (which the charge_abs gate would
+            // refuse). The fraction cap is the safety bound: a real sub-anode stretch
+            // carrying more charge is left to fail. Disabled (=> sparse()-only,
+            // byte-identical) when m_robust_endpoint_gap <= 0.
+            const bool gap_trim = gap_detached
+                && m_robust_endpoint_gap_charge_frac > 0.0
+                && q_out <= m_robust_endpoint_gap_charge_frac * q_total;
+            if (reached && (gap_trim || sparse(pts_out, q_out))) first_u = in_u;
+        }
+    }
+
     // ---- flag block (prototype 272-290), guarded by the in-window check ----
     // This guard is the prototype's flag_good_bundle / TPC-containment gate
     // (ToyMatching.cxx 272-275): the (post-trim) endpoints must lie inside the
@@ -2286,10 +3403,37 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
     if (contained) {
         bundle->set_spec_end_flag(flag_spec_end);
         // Anode end inside the flag window => close to the PMTs (which sit at the
-        // anode plane) and at the x-boundary.
+        // anode plane) and at the x-boundary. vd_surface_flags: only an anode that
+        // actually hosts PDs (non-empty anode_pd_channels for this input; PDVD:
+        // the bottom volume's PMTs, the top CRP has none) sets flag_close_to_PMT,
+        // and the chi2 relaxation is restricted to those channels. The at-x-boundary
+        // (T0-constraining crosser) semantics are unchanged either way.
         if (first_u <= m_anode_ext2 && first_u > anode_in - 1.0 * units::cm) {
-            bundle->set_flag_close_to_PMT(true);
+            if (!m_vd_surface_flags) {
+                bundle->set_flag_close_to_PMT(true);
+            }
+            else if (run.input_idx < m_anode_pd_channels.size() &&
+                     !m_anode_pd_channels[run.input_idx].empty()) {
+                bundle->set_flag_close_to_PMT(true);
+                bundle->add_relax_channels(m_anode_pd_channels[run.input_idx]);
+            }
             bundle->set_flag_at_x_boundary(true);
+        }
+        // vd_surface_flags: activity close to a PD-bearing side wall (PDVD membrane
+        // XAs at the two y walls) => close to those PDs. y is drift-invariant so the
+        // verdict is flash-independent (memoized per cluster); it does NOT imply
+        // at_x_boundary (a wall graze constrains no T0).
+        if (m_vd_surface_flags &&
+            (!m_pd_wall_channels_ylo.empty() || !m_pd_wall_channels_yhi.empty())) {
+            const uint8_t wf = wall_proximity(cluster, run);
+            if ((wf & 1) && !m_pd_wall_channels_ylo.empty()) {
+                bundle->set_flag_close_to_PMT(true);
+                bundle->add_relax_channels(m_pd_wall_channels_ylo);
+            }
+            if ((wf & 2) && !m_pd_wall_channels_yhi.empty()) {
+                bundle->set_flag_close_to_PMT(true);
+                bundle->add_relax_channels(m_pd_wall_channels_yhi);
+            }
         }
         // Cathode end => at the x-boundary (no PMTs there). With a CPA fiducial
         // configured (SBND) this is a 3-D point-in-volume test: among the cluster's
@@ -2315,9 +3459,36 @@ bool QLMatching::compute_endpoint_flags(TimingTPCBundle* bundle,
         } else {
             at_cathode = (last_u >= u_cathode + m_cathode_ext2 && last_u < cathode_in);
         }
-        if (at_cathode) bundle->set_flag_at_x_boundary(true);
+        if (at_cathode) {
+            bundle->set_flag_at_x_boundary(true);
+            // Inert diagnostic (nothing in the matching path reads it): lets a PDVD
+            // cathode-PD treatment be designed from the calib dump. Set for every
+            // detector; harmless where unused.
+            bundle->set_flag_at_cathode(true);
+        }
     }
     return contained;
+}
+
+// Wall-proximity verdict for vd_surface_flags (bit 0 = low-y wall, bit 1 = high-y
+// wall): does the cluster's y extent reach within m_pd_wall_cushion of the active
+// volume's y edge? Uses the cached significant extreme points (which include the
+// coordinate extremes); flash-independent, memoized per cluster.
+uint8_t QLMatching::wall_proximity(Cluster* cluster, const ApaRun& run) const
+{
+    auto it = m_wall_flag_cache.find(cluster);
+    if (it != m_wall_flag_cache.end()) return it->second;
+    double y_min = 1e300, y_max = -1e300;
+    for (const auto& p : cluster_extreme_points(cluster)) {
+        if (p.y() < y_min) y_min = p.y();
+        if (p.y() > y_max) y_max = p.y();
+    }
+    uint8_t f = 0;
+    if (y_min <= y_max) {   // non-empty
+        if (y_min < run.y_lo + m_pd_wall_cushion) f |= 1;
+        if (y_max > run.y_hi - m_pd_wall_cushion) f |= 2;
+    }
+    return m_wall_flag_cache.emplace(cluster, f).first->second;
 }
 
 // ----- diagnostic flag_two_boundary (both PCA ends at a detector edge) -----

@@ -114,6 +114,14 @@ namespace WireCell::NaryTree {
             notify<Value>(Action::constructed, this);
         }
 
+        /// No copy due to holding unique pointer.
+        Node(const Node&) = delete;
+        Node& operator=(const Node&) = delete;
+
+        /// Move okay.
+        Node(Node&&) = default;
+        Node& operator=(Node&&) = default;
+
         // Insert a child node of default value
         Node* insert(bool notify_value=true) {
             owned_ptr nptr = std::make_unique<self_type>();

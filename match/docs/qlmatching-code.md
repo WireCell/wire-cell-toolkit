@@ -103,7 +103,13 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `rescue_metric_max` | `1e9` (SBND `0.5`) | `m_rescue_metric_max` | rescue light-quality bar `ks·(chi2/ndf)^exp`; huge ⇒ inert. SBND `0.5` is below the lowest data-regression metric (recovers MC evt11 only, at zero regression) |
 | `rescue_exponent` | `0.8` | `m_rescue_exponent` | chi2/ndf exponent in the rescue metric (prototype 0.8) |
 | `rescue_boundary_weight` | `0.8` | `m_rescue_boundary_weight` | per-flag rescue down-weight, applied for `at_x_boundary` then `close_to_PMT` (prototype 0.8/0.64) |
+| `cluster_rescue` | `false` (PDHD `true`) | `m_cluster_rescue` | **post-fit cluster-centric rescue** (§4.4b). Adopt a best PE-scale-consistent candidate for a cluster the LASSO stranded at strength 0, even onto a **non-empty** flash. Default OFF ⇒ bit-identical; **changes matching** when on. |
+| `cluster_rescue_ks_max` | `0.0` (PDHD `0.20`) | `m_cluster_rescue_ks_max` | rescue acceptance: KS ceiling. `0` ⇒ gate `ks<0` vacuously false ⇒ no-op |
+| `cluster_rescue_chi2ndf_max` | `0.0` (PDHD `8.0`) | `m_cluster_rescue_chi2ndf_max` | rescue acceptance: chi2/ndf ceiling |
+| `cluster_rescue_ratio_lo` / `_hi` | `0.0` / `0.0` (PDHD `0.4` / `2.5`) | `m_cluster_rescue_ratio_lo/hi` | rescue acceptance: predicted/measured total-PE window |
+| `cluster_rescue_precull` | `false` (PDHD `true`) | `m_cluster_rescue_precull` | draw the rescue pool from the **pre-cull** universe (`all_bundles` minus bad) instead of the post-cull snapshot, to reach `cull_inconsistent`-removed candidates (§4.4b) |
 | `drift_speed` | `1.563e-3` | `m_drift_speed` | drift speed for the per-flash X correction, in WCT units (mm/ns). Pass `params.lar.drift_speed` from the common config. |
+| `trigger_offset` | `0` | `m_trigger_offset` | per-event readout-vs-trigger offset (WCT ns, ~+250000) folded into **every** flash drift-`x` correction: `flash_x_offset = sign_offset·(flash_time + m_trigger_offset)·drift_speed`. For detectors that leave the raw imaging `x` offset-free (`time_offset = 0`, e.g. PDHD); the partner `T0Correction` adds the same value to `x_t0cor` via its `trigger_offset` DV-metadata key, while `cluster_t0` stays the clean flash time. Default 0 ⇒ detectors that bake the offset into `x_raw` (e.g. SBND) are bit-identical. PDHD passes the opflash `offset_us·wc.us`. **Display time:** the per-flash time written for the *displays* — the Bee `op_t` (root `opflash` PC `time`, consumed by `fill_bee_flashes`) and the ql_scan calib `flashes[].time` — also has `m_trigger_offset` folded in, so the Bee red box / ql_scan charge land on the **raw-`x`** charge those viewers plot (PDHD dumps `["x","y","z"]`, offset-free, not `x_t0cor`). The calib top-level `trigger_offset` field is therefore written as `0` (already in `time`; the viewer must not re-add it). `cluster_t0`, `x_t0cor`, and the matching geometry are unchanged. |
 | `VUVEfficiency` / `VISEfficiency` | 312-elt arrays | … | per-OpDet QE (direct / reflected) |
 | `anode_ext1` | `-2.0 cm` | `m_anode_ext1` | anode-side inclusion / flag-window edge in `u` (`anode_in`); see §4.1a |
 | `anode_ext2` | `4.0 cm` | `m_anode_ext2` | anode flag-window outer edge in `u` (close-to-PMT / x-boundary) |
@@ -136,6 +142,30 @@ factory type string is `"FlashTensorToOpticalPCs"` (unchanged by the package mov
 | `xtpc_dmax2` | `300 cm` | `m_xtpc_dmax2` | scenario-2 closest-approach **ceiling** — the candidate population admits far-apart collinear truncated pairs that angle cannot reject (§16). |
 | `xtpc_angle_max` | `20` (deg) | `m_xtpc_angle_max` | scenario-2 collinearity cut (truncated half): `conn`,`dir0`,`dir1` mutual angles all below this. |
 | `xtpc_hough_radius` | `15 cm` | `m_xtpc_hough_radius` | radius for the local `vhough_transform` direction at each closest-point. |
+| `xtpc_joint_pin` | `false` (PDHD: **true**) | `m_xtpc_joint_pin` | **cross-TPC joint-flash pin** (§4.4c). A direction-confirmed scenario-1 pair is bound to ONE coincident flash — both halves keep only that bundle and it survives the strength cutoff + rescues. Fixes crossers split across two flashes (incl. the low-light partner). Default OFF ⇒ no `flag_xtpc_pin` ⇒ bit-identical. **Changes matching.** |
+| `xtpc_pin_angle` | `20` (deg) | `m_xtpc_pin_angle` | joint-pin track-axis collinearity cut: `min(folded vhough_a01, folded global-PCA_a01) < this`. Connector angles a0c/a1c are NOT used (a ~1 cm inter-TPC transverse shift makes them ~⊥ even for true crossers). |
+
+**§4.4c — Cross-TPC joint-flash pin (`xtpc_joint_pin`, PDHD-on).** `xtpc_flag`'s scenario-1 priority is
+applied to each cluster *independently*: it keeps **all** of a cluster's scenario-1 bundles, so a half with
+several coincident scenario-1 partners drifts to whichever flash the light prefers — splitting a true crosser
+across two flashes (run-29107 evt999 cluster22↔cluster83: the bright half won the 1259 pe flash while the dim
+half sat alone on the 99 pe flash). The joint-pin closes this. After `cull_cross_tpc` flags the pairs, a greedy
+pass (`QLMatching.cxx`, end of `cull_cross_tpc`) confirms each scenario-1 pair by **track-axis collinearity** —
+`min(local vhough a01, global cluster-PCA a01) < xtpc_pin_angle`, folded to [0,90]. Both estimates are needed:
+the local `vhough_transform` (15 cm at the cathode-end closest point) reads a spurious end-curl kink on straight
+crossers (evt999 7↔2 vhough 37° but global 2°; evt1007 116↔131 43° vs 1.7°), while a global PCA axis is
+meaningless on bent/messy clusters — the OR passes a genuine crosser via either. The connector angles a0c/a1c are
+dropped (the inter-TPC shift makes them unreliable). For each confirmed pair the **flash is chosen by best
+combined light** (min ks-sum) among the coincident pairings — geometry already holds, so light only picks which
+same-time wall, never pulling the match off the crosser time. Each cluster is pinned once (greedy, tightest `d`
+first); the chosen bundle gets `flag_xtpc_pin`. `cull_inconsistent` then keeps ONLY pinned bundles for a pinned
+cluster (top priority, above scenario-1); the pinned bundle is **exempted from the round-1/round-2 strength-cutoff
+prune** and pinned clusters are **excluded from both rescues** (`rescue_unmatched_clusters` sees them as matched;
+`rescue_empty_flashes` will not reassign them) — so a pinned bundle survives to `flash_bundles_map` and
+`apply_matched_t0s` matches it regardless of LASSO strength (the "ignore light, geometry wins" requirement; also
+rescues the low-light partner that would otherwise be unmatched). Validated on the 4 run-29107 hand-scan events:
+all 6 split/unmatched scenario-1 pairs become co-flashed, the 6 already-together stay put, A/B footprint = 10
+clusters changed (6 intended + 4 small ripples ≤261 pts), `xtpc_pin` dumped per bundle in the `-calib` JSON.
 
 `flag_xtpc_consistent` is dumped per bundle in the `-calib` JSON as `xtpc_consistent`; it is **not**
 written to the cluster output PC (the earlier post-fit confirm-stamp's per-cluster `xtpc_consistent`
@@ -148,6 +178,31 @@ comparing code defaults to observed runs.
 
 The `semimodel_file` JSON top-level keys `VUVHits`, `VISHits`, `Geometry`,
 `OpDets` are handed straight to the `SemiAnalyticalModel` ctor (`:78-112`).
+
+## 2a. Photon-library visibility backend (f52c4a47) and PDVD vertical-drift knobs (e06ea900)
+
+All default-OFF ⇒ PDHD/SBND/legacy configs bit-identical (verified: PDHD 29107
+evt0 all mabc archives, SBND data evt686, PDVD no-QL abtest). PDVD turns them
+all on (`cfg/pgrapher/experiment/protodunevd/qlmatching.jsonnet`, which also
+carries the per-channel role/efficiency rationale); chain-level docs live in
+`pdvd/docs/pdvd-qlmatching.md` (wcp-porting-img).
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `light_model` | `'semi'` | visibility backend: `'semi'` = SemiAnalyticalModel (unchanged path); `'library'` = gridded photon library (nearest-neighbor lookup in a `(nx,ny,nz,nchan)` visibility grid). The semimodel is still loaded either way (OpDet table source). |
+| `photon_library_file` | `''` | library-mode grid JSON+npy (e.g. `pdvd/photodet/pdvd-photlib-vis-v5-128nm.json`; metadata `origin_cm`/`step_cm`/shape) |
+| `shared_flash` | `false` | **joint LASSO over all input ports**: physical flashes are shared by every port (identical archives asserted by id/time/PE), `fit_round1_shared`/`fit_round2_shared` build columns from ALL runs' bundles per flash so one all-PD flash is explained jointly, not absorbed once per side. Output PC + calib dump emitted once (side-0 gid). `empty_rescue`/`cluster_rescue` are not shared-flash-aware — `configure()` warns and skips them. |
+| `opdet_all_volumes` | `false` | skip the per-TPC OpDet cull (`compute_geometry` cathode-x split) and treat every OpDet as in-TPC for the auto-mask: needed when PDs serve both drift volumes (PDVD double-sided cathode XAs at x=0). |
+| `vd_surface_flags` | `false` | PD-surface-aware `flag_close_to_PMT`: the anode-end window sets it only where that input's anode hosts PDs (`anode_pd_channels`, per-input array; empty = no PDs), and a NEW check flags clusters whose extreme y is within `pd_wall_cushion` of a ±y wall (channels `pd_wall_channels_ylo`/`_yhi`). Each trigger records its surface's channels into `TimingTPCBundle::relax_channels`, so the `chi2_relax` per-channel widening applies **only to the relevant PDs** (empty relax set = legacy all-channel behavior). Also enables the inert `flag_at_cathode`. |
+| `pd_wall_cushion` | `10 cm` | ±y wall proximity band for the wall-XA flag |
+| `pd_wall_channels_ylo` / `_yhi` | `[]` | OpDet indices relaxed when the y− / y+ wall triggers |
+| `anode_pd_channels` | `[]` | per-input-port OpDet index lists relaxed when the anode window triggers (PDVD: `[bottom PMTs 24-39, []]`) |
+| `auto_mask_same_type` | `false` | restrict the auto-mask neighbour pool to the candidate's OpDet `type` — for mixed XA/PMT detectors where a cross-type (Y,Z) neighbour is not a brightness reference (~4× efficiency gap) |
+
+`flag_at_cathode` (TimingTPCBundle, set in the cathode-end branch under
+`vd_surface_flags`) is diagnostic-only: no behavioral consumer, exported as
+`at_cathode` in the calib dump (key present only in vd mode — legacy dumps
+byte-identical).
 
 ---
 
@@ -441,6 +496,41 @@ double-listed, and only when the empty flash is a strictly better light match
 > (single-flash reassignment); the remaining degenerate misses need a drift/timing
 > discriminator (and the cross-TPC ones the `xtpc` machinery), not a light rescue.
 > C++ default OFF (`rescue_metric_max` huge ⇒ inert) ⇒ production byte-identical.
+
+### 4.4b Cluster-centric rescue (`rescue_unmatched_clusters`, PDHD-on)
+§4.4a fills only **wholly-empty** flashes. A big cluster whose correct flash is
+**non-empty** — a rival already won that flash on strength, so the L1 sparsity drives the
+big cluster's own strength to 0 and the cutoff drops it — is invisible to the flash-centric
+rescue. When `cluster_rescue` is on, immediately after `rescue_empty_flashes`, this pass
+keys on the **cluster**: for each cluster with **no** surviving bundle in
+`flash_bundles_map`, it scans the same `prefit_snapshot`, accepts candidates passing a
+**PE-scale-aware** bar — `ks < cluster_rescue_ks_max` AND `chi2/ndf <
+cluster_rescue_chi2ndf_max` AND `cluster_rescue_ratio_lo < pred/meas <
+cluster_rescue_ratio_hi` (ratio = `get_total_pred_light()` / `flash->get_total_PE()`) — and
+appends the lowest-`score` one (`score = ks·√max(chi2/ndf,1) + |ln ratio|`, tie-break
+`flash_id` then `cluster_index_id`) to its flash, **even if that flash is already
+non-empty** (many-clusters-per-flash is physical and GT-endorsed). Only **adds** (never
+reassigns), one bundle per still-unmatched cluster, so one-flash-per-cluster holds and the
+addition set is order-independent; cluster iteration is in `global_cluster_idx_map` order
+for determinism, and each flash vector is re-sorted by `cluster_index_id` at the end (as
+§4.4a does). The snapshot is now captured when **either** rescue is on
+(`if (m_empty_rescue || m_cluster_rescue)` at `fit_round1` start). C++ default OFF
+(`m_cluster_rescue=false` and `ks_max=0` ⇒ gate vacuously false ⇒ no-op, doubly inert) ⇒
+SBND/ICARUS byte-identical.
+
+**Candidate pool — `cluster_rescue_precull`.** By default the pool is the post-cull
+`prefit_snapshot`. With `m_cluster_rescue_precull` it is the **pre-cull** universe:
+`run.all_bundles` filtered to `!get_potential_bad_match_flag()` — which equals `pre_bundles`
+*before* `cull_inconsistent` removed the non-consistent rivals. This restores a cluster's good
+light match that the consistency cull dropped before it reached the fit or the snapshot (the
+non-bad bundles in `all_bundles` were fully `set_pred_flash`/`examine_bundle`'d, so ks/χ²/pred
+are valid). Default OFF (snapshot pool = shipped behaviour); PDHD ON.
+
+PDHD tuning (run-29107 4-event scan, 0.20/8.0/0.4–2.5, end-to-end C++): snapshot pool recovers
+**15 of 22** LASSO-stranded GT; `cluster_rescue_precull` lifts that to **19 of 22** (the +4 are
+the *only* new matches — total matched +4, **0** `rejected_auto` re-introduced, 0 spurious). The
+`delta_charge` charge-constraint lever was investigated and rejected: the 4 cull-victims are not
+in the LASSO (strength stays 0 at every δ). See `pdhd/docs/qlmatching-chain.md` §3g.
 
 ### 4.5 t0 + output (`:656-680`)
 Clusters are pre-initialized with `set_scalar<int>("flash", -1)` (alongside the

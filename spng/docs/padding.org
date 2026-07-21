@@ -1,0 +1,117 @@
+#+title: Issues of padding
+
+* Overview
+
+When convolving a waveform of size $W$ with a kernel of size $K$ the, in order
+to avoid cyclic artifacts, both must be padded to as size at least:
+
+\[ C = W + K -1 \]
+
+Larger is padding will not introduce artifacts and is often beneficial in order
+to hit a "faster DFT size".
+
+One must choose a padding scheme and this opens up surprising amount of
+complications due this artificial modification.  The ideal padding scheme would
+satisfy two conflicting requirements:
+
+1. Do not change *signal energy*.
+
+2. Do not induce *spectral leakage*.
+
+The remaining sections discuss padding methods and how they make compromises in
+how they violate these ideal requirements.
+
+
+* Zero padding
+
+To avoid changing the signal energy, pad samples (be they in interval or Fourier
+space) must have zero value.  In the precise case that the signal has already
+smoothly reached zero value, zero-padding will satisfy both requirements.
+
+* Spectral leakage
+
+However, when one or both edge samples are not naturally zero value, an abrupt
+change in value is caused at the pad boundaries.  The unnatural discontinuity of
+the pad adds high-frequency energy to the signal.  No energy is added to the
+interval space representation and thus this energy must come from lower
+frequencies.  This distortion is called "spectral leakage".
+
+Reducing the discontinuity between measured and padded samples is required in
+order to minimize spectral leakage.  This must come at the cost of changing
+signal energy.
+
+* Mitigating distortion 
+
+There are two basic approaches to mitigate the distortion: baseline subtraction
+and tapering.
+
+** Baseline subtraction
+
+Baseline subtraction is most applicable when the zero-frequency, aka "DC" energy
+or baseline value is not physically relevant.  This is the case for ADC
+waveforms because their baseline is originally chosen arbitrarily.  If the
+arbitrary baseline is not known or can vary between signals (such as in the
+presence of noise below the resolvable frequency), an effective baseline can be
+well estimated when the signal is sparse using the median value.
+
+However, in relatively rare but still occurring cases, signal may be present in
+edge samples.  After baseline subtraction, the discontinuity remains and
+spectral leakage occurs.
+
+Baseline subtraction is not applicable to padding the field response kernel.
+The values of the FR samples are meaningful in an absolute sense and there is no
+reasonable way to determine a baseline to subtract.  At the same time, the
+domain over which FRs are calculated is typically limited for reasons of
+computational efficiency and that leads to the edge samples having finite
+energy.  Thus, simple zero-padding of an FR will always introduce spectral
+leakage.  Typically, an electronics response is convolved along the time
+dimension.  This effectively acts as a low pass filter and naturally attenuates
+edge values.  But this alone does not remove spectral leakage from zero-padding.
+
+** Tapering
+
+Tapering methods directly address the discontinuity.  They can be grouped into
+two types based on if they attenuate original signal samples or introduce
+artificial, non-zero padding values.  Both violate the two requirements at some
+level and to different degrees.
+
+*** Windowing
+
+Tapering the signal is called "windowing" and is performed by sample-wise
+multiplication of a windowing function (some named functions include Hann,
+Hamming and Blackman).  This technique necessarily removes real signal energy at
+the ends of the original waveform.
+
+*** Extrapolating
+
+Extrapolation on the other hand invents signal in the padded region.  Examples
+include linear interpolation between edge samples, or some decay function that
+reduces edge samples to zero over some number of sample periods.  This approach
+necessarily adds artificial energy at the both ends of the of padded region.
+
+In principle, the difference can be shared and a hybrid of tapering of signal
+and extrapolation of padding can be applied.  Which technique to apply depends
+on the content of the waveform.
+
+*** Application
+
+In the case of ADC waveforms, activity that is cut off by the edge of a readout
+is not directly useful for downstream reconstruction.  Tapering it is a
+reasonable approach.  However, the long range "RC" response means that
+point-like activity will extend into the ADC waveform for many samples.
+Tapering the primary peak reduces the ability to deconvovle the RC response.  On
+the other hand, activity peaks can be fully missed by a readout while a strong
+RC response tail can be acquired.  Tapering would be closely equivalent to this
+case.
+
+Extrapolating ADC measurement may be attempted.  For example, edge sample values
+can be "decayed" down to baseline using a smooth function that itself has a
+bandwidth similar to that of the signal.  This models the case that the edge
+sample value would have been the signal peak had the readout window been
+enlarged.  Of course, in practice, this accident is rare.  
+
+On the other hand, extrapolation of FR is more natural because the FR itself is
+an artificial and imperfect model of the real field response.  Here, a smooth,
+in-bandwidth decay would mimic a natural fall-off of response.
+
+

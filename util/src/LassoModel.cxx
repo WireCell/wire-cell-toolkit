@@ -4,6 +4,7 @@
 
 using namespace Eigen;
 
+#include <algorithm>
 #include <iostream>
 using namespace std;
 
@@ -28,6 +29,16 @@ void WireCell::LassoModel::Set_init_values(std::vector<double> values)
     }
 }
 
+void WireCell::LassoModel::SetXsparse(const Eigen::SparseMatrix<double>& X)
+{
+    // Mirror ElasticNetModel::SetX (reset beta + unit lambda weights) but store the
+    // response sparsely; the caller may override the weights afterwards.
+    _Xsp = X;
+    _use_sparse = true;
+    _beta = Eigen::VectorXd::Zero(X.cols());
+    SetLambdaWeight(Eigen::VectorXd::Constant(X.cols(), 1.));
+}
+
 std::vector<size_t> WireCell::LassoModel::Fit()
 {
     std::vector<size_t> below_threshold;
@@ -35,7 +46,7 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     // initialize solution to zero unless user set beta already
     Eigen::VectorXd beta = _beta;
     if (0 == beta.size()) {
-        beta = VectorXd::Zero(_X.cols());
+        beta = VectorXd::Zero(_use_sparse ? _Xsp.cols() : _X.cols());
     }
 
     // initialize active_beta to true
@@ -43,11 +54,31 @@ std::vector<size_t> WireCell::LassoModel::Fit()
     _active_beta = vector<bool>(nbeta, true);
 
     Eigen::VectorXd y = Gety();
-    Eigen::MatrixXd X = GetX();
+
+    // Build the per-column norm, the X^T y vector (ydX) and the X^T X Gram (XdX) the
+    // coordinate descent needs.  Two paths, identical up to FP accumulation order: the
+    // historical DENSE path over _X (kept verbatim below), and a SPARSE path over _Xsp
+    // that forms ydX/XdX by sparse products -- skipping the ~98% zero work on a block-
+    // sparse response (QLMatching sparse_lasso) and never densifying X.
+    double tol2 = TOL * TOL * nbeta;
+    VectorXd norm(nbeta);
+    Eigen::VectorXd ydX(nbeta);
+    Eigen::SparseMatrix<double> XdX(nbeta, nbeta);
+
+    if (_use_sparse) {
+        const Eigen::SparseMatrix<double>& X = _Xsp;
+        for (int j = 0; j < nbeta; j++) {
+            norm(j) = X.col(j).squaredNorm();
+            if (norm(j) < 1e-6) { below_threshold.push_back(j); norm(j) = 1; }
+        }
+        ydX = X.transpose() * y;   // X^T y  (== y.dot(X.col(i)) per row, sparsely)
+        XdX = X.transpose() * X;   // X^T X  (skips the ~98% zero dot-products)
+    }
+    else {
+    const Eigen::MatrixXd& X = GetX();   // reference, not a copy of the (GB-scale) Gram
 
     // cooridate decsent
     // int N = y.size();
-    VectorXd norm(nbeta);
     for (int j = 0; j < nbeta; j++) {
         norm(j) = X.col(j).squaredNorm();
         if (norm(j) < 1e-6) {
@@ -56,13 +87,10 @@ std::vector<size_t> WireCell::LassoModel::Fit()
             norm(j) = 1;
         }
     }
-    double tol2 = TOL * TOL * nbeta;
 
     // const double inner_product_complexity = nbeta * nbeta * X.rows();
 
     // calculate the inner product
-    Eigen::VectorXd ydX(nbeta);
-    Eigen::SparseMatrix<double> XdX(nbeta, nbeta);
     // std::cout << "Lasso begin inner product nbeta "  << nbeta << " X.rows " << X.rows() << " X.cols " << X.cols() << std::endl;
     // double sum_non_zeros = 0;
 
@@ -83,15 +111,30 @@ std::vector<size_t> WireCell::LassoModel::Fit()
 
     // triplet
     {
-        // std::cout << " triplet method " << std::endl;
-        XdX.reserve(Eigen::VectorXi::Constant(nbeta, nbeta/2));
+        // Right-size the XdX / triplet reservations to the actual sparsity of X.
+        // XdX = X^T X.  For a DENSE X (e.g. the imaging CSGraph response) it is ~dense,
+        // so keep the historical nbeta-scale reservations (no growth reallocs at the
+        // hd-max sizes the author tuned for).  For a block-sparse X (the QL normal-
+        // equations Gram, ~2% full) the nbeta^2 triplet reserve and the nbeta/2-per-
+        // column XdX reserve over-allocate by >10x (multiple GB on run 29107 evt 1015);
+        // detect that case and reserve a small seed, letting both grow (amortized;
+        // transient peak << nbeta^2).  Capacity only -> the assembled XdX, and the fit,
+        // are byte-identical either way.  size_t: int nbeta*nbeta overflows beyond 46340.
+        size_t xnnz = 0;
+        for (int c = 0; c < nbeta; ++c)
+            for (int r = 0; r < X.rows(); ++r)
+                if (X(r, c) != 0.0) ++xnnz;
+        const size_t nb2 = size_t(nbeta) * size_t(nbeta);
+        const bool dense_X = (xnnz * 2 > nb2);
+        const long col_reserve =
+            dense_X ? (long)(nbeta / 2)
+                    : std::max(8L, std::min((long)nbeta, (long)(4 * xnnz / std::max(nbeta, 1))));
+        XdX.reserve(Eigen::VectorXi::Constant(nbeta, (int)col_reserve));
         typedef Eigen::Triplet<double> T;
         std::vector<T> tripletList;
-        // Worst case is nbeta diagonal + 2 mirrored per off-diagonal
-        // pair = nbeta^2 triplets; the former nbeta^2/2 estimate forced
-        // one ~0.5 GB growth-doubling realloc at hd-max sizes.  size_t
-        // arithmetic: int nbeta*nbeta overflows beyond 46340.
-        tripletList.reserve(size_t(nbeta) * size_t(nbeta));
+        // Worst case (dense X) is nbeta diagonal + 2 mirrored per off-diagonal pair =
+        // nbeta^2 triplets; for sparse X size to ~2 per XdX nonzero (mirrored).
+        tripletList.reserve(dense_X ? nb2 : (size_t)(2L * nbeta * col_reserve + nbeta));
         // XdX is symmetric and dot() is element-wise commutative (identical
         // multiply/accumulate sequence under operand swap), so compute each
         // off-diagonal dot once and mirror it -- bit-identical to the full
@@ -118,7 +161,8 @@ std::vector<size_t> WireCell::LassoModel::Fit()
         }
         XdX.setFromTriplets(tripletList.begin(), tripletList.end());
     }
-    // std::cout << "Lasso end inner product. sum_non_zeros " << sum_non_zeros << " XdX.nonZeros() " << XdX.nonZeros() 
+    }  // end dense Gram build (the sparse path is handled above)
+    // std::cout << "Lasso end inner product. sum_non_zeros " << sum_non_zeros << " XdX.nonZeros() " << XdX.nonZeros()
     //           << " XdX.rows() " << XdX.rows() << " XdX.cols() " << XdX.cols() << std::endl;
 
     // start interation ...

@@ -853,6 +853,12 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     Facade::geo_vector_t dir1_prev(0, 0, 0);
     bool has_dir1_prev = false;
 
+    // Capture the cluster being worked on before remaining_segments is
+    // consumed: the post-process merge below must NOT pick a cluster off an
+    // arbitrary (pointer-ordered) edge of the SHARED multi-cluster graph.
+    Facade::Cluster* entry_cluster =
+        remaining_segments.empty() ? nullptr : remaining_segments.back()->cluster();
+
     while(!remaining_segments.empty() && count < 2) {
         SegmentPtr curr_sg = remaining_segments.back();
         auto cluster = curr_sg->cluster();
@@ -1120,12 +1126,11 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
     // objects at identical wcpt locations; merging them collapses the zigzag
     // into the correct linear topology and triggers a refit.
     {
-        // remaining_segments is always empty here; get the cluster from any graph edge.
-        Facade::Cluster* cluster_ptr = nullptr;
-        auto [eb, ee] = boost::edges(graph);
-        if (eb != ee) cluster_ptr = graph[*eb].segment ? graph[*eb].segment->cluster() : nullptr;
-        if (cluster_ptr) {
-            merge_nearby_vertices(graph, *cluster_ptr, track_fitter, dv);
+        // remaining_segments is always empty here; use the cluster captured at
+        // entry (the shared graph holds many clusters, and "first edge" is
+        // pointer-ordered — it used to pick a different cluster run-to-run).
+        if (entry_cluster) {
+            merge_nearby_vertices(graph, *entry_cluster, track_fitter, dv);
         }
     }
 
@@ -1207,11 +1212,13 @@ bool PatternAlgorithms::merge_nearby_vertices(Graph& graph, Facade::Cluster& clu
         flag_covered = false;
 
         // Collect all edges in a stable vector so we can iterate safely.
+        // Stable edge-index order throughout: the loop below removes/merges
+        // the FIRST covered segment, so iteration order is a graph mutation
+        // decision and must not be pointer order.
         std::vector<SegmentPtr> all_segments;
         for (const auto& vd : ordered_nodes(graph)) {
-            auto [oe_begin, oe_end] = boost::out_edges(vd, graph);
-            for (auto eit = oe_begin; eit != oe_end; ++eit) {
-                SegmentPtr sg = graph[*eit].segment;
+            for (auto edesc : sorted_out_edges(vd, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
                 if (sg && sg->cluster() == &cluster) {
                     // Only add once (undirected graph exposes both directions)
                     if (std::find(all_segments.begin(), all_segments.end(), sg) == all_segments.end()) {
@@ -1235,8 +1242,9 @@ bool PatternAlgorithms::merge_nearby_vertices(Graph& graph, Facade::Cluster& clu
             int n_neighbors = 0;
             for (VertexPtr end_vtx : {vtx_a_pre, vtx_b_pre}) {
                 auto vd = end_vtx->get_descriptor();
-                for (auto [eit, eend] = boost::out_edges(vd, graph); eit != eend; ++eit) {
-                    SegmentPtr sg = graph[*eit].segment;
+                // Stable edge-index order: the first covered neighbor wins below.
+                for (auto edesc : sorted_out_edges(vd, graph)) {
+                    SegmentPtr sg = graph[edesc].segment;
                     if (!sg || sg == seg) continue;
                     bool dup = false;
                     for (int k = 0; k < n_neighbors; ++k) if (neighbors[k] == sg) { dup = true; break; }
@@ -1353,17 +1361,29 @@ bool PatternAlgorithms::merge_vertex_into_another(Graph& graph, VertexPtr& vtx_f
     
     auto vd_from = vtx_from->get_descriptor();
     std::vector<std::pair<SegmentPtr, VertexPtr>> segments_to_reconnect;
-    
-    // Collect all segments and their other endpoints
-    auto edge_range = boost::out_edges(vd_from, graph);
-    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-        SegmentPtr seg = graph[*eit].segment;
+
+    // Collect all segments and their other endpoints.  Stable edge-index
+    // order: the reconnect loop below re-adds/recreates segments, assigning
+    // NEW graph indices in this order — pointer order would permute segment
+    // ids run-to-run.
+    for (auto edesc : sorted_out_edges(vd_from, graph)) {
+        SegmentPtr seg = graph[edesc].segment;
         if (seg) {
             VertexPtr other_vtx = find_other_vertex(graph, seg, vtx_from);
             if (other_vtx) {
                 segments_to_reconnect.push_back(std::make_pair(seg, other_vtx));
             }
         }
+    }
+    if (std::getenv("WCT_DET_DEBUG") && std::getenv("WCT_DET_DEBUG")[0] == '2') {
+        fprintf(stderr, "WCT_DETM merge from=(%.4f,%.4f,%.4f) to=(%.4f,%.4f,%.4f) nrec=%zu:",
+                vtx_from->wcpt().point.x(), vtx_from->wcpt().point.y(), vtx_from->wcpt().point.z(),
+                vtx_to->wcpt().point.x(), vtx_to->wcpt().point.y(), vtx_to->wcpt().point.z(),
+                segments_to_reconnect.size());
+        for (auto& [s, ov] : segments_to_reconnect)
+            fprintf(stderr, " oldidx=%zu->(%.2f,%.2f,%.2f)", s->get_graph_index(),
+                    ov->wcpt().point.x(), ov->wcpt().point.y(), ov->wcpt().point.z());
+        fprintf(stderr, "\n");
     }
     
     // Process each segment
@@ -1405,14 +1425,15 @@ Facade::geo_vector_t PatternAlgorithms::vertex_get_dir(VertexPtr& vertex, Graph&
     // Get vertex position (use fit if available, otherwise wcpt)
     Facade::geo_point_t vtx_point = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
     
-    // Loop through all segments in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
-        
+    // Loop through all segments in the graph.  Stable edge/node-index order:
+    // 'center' FP-accumulates continuous coordinates, so pointer-order
+    // iteration would shift the averaged direction run-to-run.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
+
         // Skip if segment doesn't belong to same cluster
         if (!sg || sg->cluster() != vertex->cluster()) continue;
-        
+
         // Get points from segment (skip first and last)
         const auto& fits = sg->fits();
         if (fits.size() > 2) {
@@ -1427,11 +1448,10 @@ Facade::geo_vector_t PatternAlgorithms::vertex_get_dir(VertexPtr& vertex, Graph&
             }
         }
     }
-    
+
     // Loop through all vertices in the graph
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr other_vtx = graph[*vit].vertex;
+    for (const auto& vd : ordered_nodes(graph)) {
+        VertexPtr other_vtx = graph[vd].vertex;
         
         // Skip if vertex doesn't belong to same cluster
         if (!other_vtx || other_vtx->cluster() != vertex->cluster()) continue;
@@ -1798,10 +1818,10 @@ void PatternAlgorithms::transfer_info_from_segment_to_cluster(Graph& graph, Faca
 
 
 void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, VertexPtr vertex){
-    // Iterate through all segments in the graph
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // Iterate through all segments in the graph (stable order for
+    // reproducible diagnostic output)
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         
         // Skip if segment is null or doesn't belong to this cluster
         if (!sg || sg->cluster() != &cluster) continue;
@@ -1923,10 +1943,11 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
     int num = 0;
     const double dis_cut_sq = dis_cut * dis_cut;
 
-    // Iterate through all segments in the graph that belong to this cluster
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // Iterate through all segments in the graph that belong to this cluster.
+    // Stable edge/node-index order: ave_p FP-accumulates continuous
+    // coordinates, so pointer-order iteration would shift the direction.
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
 
         // Use fitted points (mirrors prototype's fit_pt_vec / get_point_vec()),
@@ -1945,9 +1966,8 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
     }
 
     // Iterate through all vertices in the graph that belong to this cluster
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    for (const auto& vd : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[vd].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
 
         // Prefer fit point if available, otherwise fall back to wcpt

@@ -2,23 +2,22 @@
 #define WIRECELLGEN_DUMPFRAMES
 
 #include "WireCellIface/IFrameSink.h"
-#include "WireCellUtil/Logging.h"
+#include "WireCellAux/Logger.h"
 
-namespace WireCell {
-    namespace Gen {
+namespace WireCell::Gen {
 
-        class DumpFrames : public IFrameSink {
-           public:
-            DumpFrames();
-            virtual ~DumpFrames();
+    class DumpFrames : public Aux::Logger, public IFrameSink {
+    public:
+        DumpFrames();
+        virtual ~DumpFrames();
 
-            /// Do something thrilling with a frame.
-            virtual bool operator()(const IFrame::pointer& frame);
+        // IFrameSink 
+        virtual bool operator()(const IFrame::pointer& frame);
 
-           private:
-            Log::logptr_t log;
-        };
-    }  // namespace Gen
-}  // namespace WireCell
+    private:
+        size_t m_count{0};
+
+    };
+}
 
 #endif

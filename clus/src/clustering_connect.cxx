@@ -22,7 +22,8 @@ static void clustering_connect1(Grouping& live_grouping,
                                 double flash_t0_window = 80*units::ns,
                                 double iso_max_dis = -1,
                                 bool allow_mixed_faces = false,
-                                bool respect_separate_family = false);
+                                bool respect_separate_family = false,
+                                bool deterministic_order = false);
 
 class ClusteringConnect1 : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
 public:
@@ -45,12 +46,19 @@ public:
         // Decline to re-merge two clusters that a same-stage ClusteringSeparate
         // (tag_family) just deliberately split (default OFF => byte-identical).
         respect_separate_family_ = get(config, "respect_separate_family", false);
+        // Sort the merge-candidate clusters with a content tie-break (length, then
+        // nchildren/npoints/geometry via sort_clusters) instead of length only. The
+        // length-only std::sort is not stable, so equal-length clusters keep their
+        // input (serialization/pointer) order, which shifts across rebuilds and flips
+        // a borderline merge -- the same cross-recompile non-determinism family as the
+        // BlobLess fix. Default OFF => byte-identical (legacy length-only sort).
+        deterministic_order_ = get(config, "deterministic_order", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_connect1(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_, iso_max_dis_,
-                            allow_mixed_faces_, respect_separate_family_);
+                            allow_mixed_faces_, respect_separate_family_, deterministic_order_);
     }
     virtual Configuration default_configuration() const {
         Configuration cfg;
@@ -63,6 +71,7 @@ private:
     double iso_max_dis_{-1};
     bool allow_mixed_faces_{false};
     bool respect_separate_family_{false};
+    bool deterministic_order_{false};
 };
 
 
@@ -88,7 +97,8 @@ void clustering_connect1(
     double flash_t0_window,
     double iso_max_dis,
     bool allow_mixed_faces,
-    bool respect_separate_family)
+    bool respect_separate_family,
+    bool deterministic_order)
 {
     // Multiple wpids are allowed only when they form one drift volume.
     if (live_grouping.wpids().size() > 1) {
@@ -179,9 +189,16 @@ void clustering_connect1(
     }
     // sort the clusters length ...
     std::vector<Cluster *> live_clusters = live_grouping.children();  // copy
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() > cluster2->get_length();
-    });
+    if (deterministic_order) {
+        // length-descending WITH the standard content tie-break (nchildren, npoints,
+        // wire/geometry, PCA) so equal-length clusters no longer order by the build-
+        // dependent input/pointer order.  Mirrors cathode_connect / close / extend.
+        sort_clusters(live_clusters);
+    } else {
+        std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+            return cluster1->get_length() > cluster2->get_length();
+        });
+    }
 
 
     // auto global_skeleton_cloud = std::make_shared<DynamicPointCloudLegacy>(angle_u, angle_v, angle_w);
@@ -720,9 +737,13 @@ void clustering_connect1(
     auto new_clusters = merge_clusters(g, live_grouping);
     live_clusters.clear();
     live_clusters = live_grouping.children();  // copy
-    std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
-        return cluster1->get_length() > cluster2->get_length();
-    });
+    if (deterministic_order) {
+        sort_clusters(live_clusters);  // content tie-break, as above (second pass)
+    } else {
+        std::sort(live_clusters.begin(), live_clusters.end(), [](const Cluster *cluster1, const Cluster *cluster2) {
+            return cluster1->get_length() > cluster2->get_length();
+        });
+    }
     cluster_connectivity_graph_t  g2;
     ilive2desc.clear();  // added live index to graph descriptor
     map_cluster_index.clear();

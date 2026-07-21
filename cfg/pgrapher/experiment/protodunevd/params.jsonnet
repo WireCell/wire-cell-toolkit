@@ -27,7 +27,12 @@ base {
 
         // between center lines
         local apa_cpa = 341.55*wc.cm,
-        local cpa_thick = 50.8*wc.mm,
+        // GDML CathodeBlock (protodunevd_v4_refactored.gdml); corrected 2026-07
+        // from the legacy 50.8 mm (= DocDB 203 / ProtoDUNE-SP nominal, which no
+        // PDVD GDML uses).  Drift-facing surface -> |x| = 3.0 cm, drift distance
+        // cpa_plane = 338.55 cm ~ GDML CRMActive 338.5.  See
+        // pdvd/docs/pdvd-tpc-geometry-fiducial.md.
+        local cpa_thick = 60.0*wc.mm,
         local apa_w2w = 85.725*wc.mm,
         local plane_gap = 4.76*wc.mm,
         local apa_g2g = 114.3*wc.mm, 
@@ -101,6 +106,17 @@ base {
             tail: wc.point(-3.15, -3.42, 0, wc.m),
             head: wc.point(3.13, 3.42, 3.04, wc.m),
         }
+    },
+
+    lar: super.lar {
+        // Calibrated from PDVD data: anode->cathode crossing tracks' reconstructed
+        // drift x-span (both drift volumes, 142 events) vs the collection-plane ->
+        // cathode-surface distance gives v = v_reco * D / S.  The cathode surface
+        // moved from 2.54 -> 3.0 cm (cpa_thick 50.8 -> 60 mm, GDML), so D:
+        // 339.01 -> 338.55 cm and v rescales 1.57 -> 1.568 (v proportional to D).
+        // Consistent with the Walkowiak nominal at the PDVD field.  See
+        // pdvd/docs/clus-workflow.md (drift-velocity calibration).
+        drift_speed: 1.568 * wc.mm / wc.us,  // was 1.57 (D=339.01); 1.6 orig default
     },
 
     daq: super.daq {

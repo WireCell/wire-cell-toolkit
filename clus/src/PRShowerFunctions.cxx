@@ -6,6 +6,19 @@ using namespace WireCell::Clus::PR;
 
 namespace WireCell::Clus::PR {
 
+    // Stable-order iteration over a shower's edges: shower.edges() is an
+    // unordered (pointer-hashed) set, so iterate sorted by the stable
+    // EdgeBundle::index (filtered-graph flavor of PR::ordered_edges).
+    template <typename ViewGraph>
+    static std::vector<edge_descriptor> shower_ordered_edges(const Shower& shower, const ViewGraph& g) {
+        std::vector<edge_descriptor> result(shower.edges().begin(), shower.edges().end());
+        std::sort(result.begin(), result.end(),
+                  [&g](const edge_descriptor& a, const edge_descriptor& b) {
+                      return g[a].index < g[b].index;
+                  });
+        return result;
+    }
+
     std::pair<double, WireCell::Point> shower_get_closest_point(Shower& shower, const WireCell::Point& point, const std::string& cloud_name /* = "fit" */){
         // Get the dynamic point cloud from the shower
         auto pcloud = shower.get_pcloud(cloud_name);
@@ -83,24 +96,26 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = shower.view_graph();
         
-        // First iteration: find the closest point in any shower segment to test_p
-        for (auto edesc : shower.edges()) {
+        // First iteration: find the closest point in any shower segment to
+        // test_p.  Stable edge-index order: min_point is a tie-broken argmin
+        // that seeds the second-stage query.
+        for (auto edesc : shower_ordered_edges(shower, view)) {
             SegmentPtr sg = view[edesc].segment;
             if (!sg) continue;
-            
+
             auto results = segment_get_closest_point(sg, test_p, cloud_name);
             if (results.first < min_dis) {
                 min_dis = results.first;
                 min_point = results.second;
             }
         }
-        
+
         // Get closest point in input segment to that minimum point
         auto results1 = segment_get_closest_point(seg, min_point, cloud_name);
         test_p = results1.second;
-        
+
         // Second iteration: find the closest distance from any shower segment to the new test point
-        for (auto edesc : shower.edges()) {
+        for (auto edesc : shower_ordered_edges(shower, view)) {
             SegmentPtr sg = view[edesc].segment;
             if (!sg) continue;
             
@@ -122,8 +137,10 @@ namespace WireCell::Clus::PR {
         // Get the view graph to access segments
         const auto& view = shower.view_graph();
 
-        // Loop through all segments in the shower
-        for (auto edesc : shower.edges()) {
+        // Loop through all segments in the shower.  Stable edge-index order:
+        // p_sum FP-accumulates continuous coordinates into a direction that
+        // feeds angle thresholds at many call sites.
+        for (auto edesc : shower_ordered_edges(shower, view)) {
             SegmentPtr seg = view[edesc].segment;
             if (!seg) continue;
 

@@ -19,6 +19,40 @@ using namespace WireCell::Clus;
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
+// Temporary determinism-debug helper (WCT_DET_DEBUG=1): content hash of the
+// PR graph including wcpt/fit coordinates, to localize run-to-run divergence.
+namespace {
+    inline uint64_t detv_fnv(uint64_t h, const void* p, size_t n) {
+        const unsigned char* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ULL; }
+        return h;
+    }
+    void detv_dump(const char* tag, WireCell::Clus::PR::Graph& g) {
+        static const bool on = (std::getenv("WCT_DET_DEBUG") != nullptr);
+        if (!on) return;
+        uint64_t h = 1469598103934665603ULL;
+        size_t nvtx = 0, nseg = 0;
+        for (auto nd : WireCell::Clus::PR::ordered_nodes(g)) {
+            auto vtx = g[nd].vertex;
+            if (!vtx) continue;
+            ++nvtx;
+            const auto& p = vtx->wcpt().point;
+            double xyz[3] = {p.x(), p.y(), p.z()};
+            h = detv_fnv(h, xyz, sizeof(xyz));
+        }
+        for (auto ed : WireCell::Clus::PR::ordered_edges(g)) {
+            auto seg = g[ed].segment;
+            if (!seg) continue;
+            ++nseg;
+            for (const auto& w : seg->wcpts()) {
+                double xyz[3] = {w.point.x(), w.point.y(), w.point.z()};
+                h = detv_fnv(h, xyz, sizeof(xyz));
+            }
+        }
+        fprintf(stderr, "WCT_DETV %-28s nvtx=%zu nseg=%zu h=%016lx\n", tag, nvtx, nseg, (unsigned long)h);
+    }
+}
+
 bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& graph, VertexPtr vertex, std::vector<SegmentPtr>& segments_set, Facade::Cluster& cluster, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, double search_range){
     s_log->trace("search_for_vertex_activities: cluster {} vertex ({:.2f}, {:.2f}, {:.2f}) search_range={:.2f} cm nsegs={}",
         cluster.ident(),
@@ -247,10 +281,11 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
         vertex->wcpt().point.x()/units::cm, vertex->wcpt().point.y()/units::cm, vertex->wcpt().point.z()/units::cm);
     
     auto vd = vertex->get_descriptor();
-    auto edge_range = boost::out_edges(vd, graph);
-    
-    for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+
+    // Stable edge-index order: the early 'break' below leaves ntracks/nshowers
+    // as partial counts, so the iteration order escapes into the result.
+    for (auto edesc : sorted_out_edges(vd, graph)) {
+        SegmentPtr sg = graph[edesc].segment;
         if (!sg) continue;
         
         // matches prototype get_flag_shower() = kShowerTrajectory || kShowerTopology || particle_type==11
@@ -323,24 +358,23 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     // Collect all points from segments and vertices in the cluster
     std::vector<Facade::geo_point_t> pts;
     
-    // Collect points from segments
-    auto [ebegin, eend] = boost::edges(graph);
-    for (auto eit = ebegin; eit != eend; ++eit) {
-        SegmentPtr sg = graph[*eit].segment;
+    // Collect points from segments.  Stable edge/node-index order: pts feeds
+    // FP accumulation downstream, so pointer-order iteration would leak.
+    for (auto ed : ordered_edges(graph)) {
+        SegmentPtr sg = graph[ed].segment;
         if (!sg || sg->cluster() != &cluster) continue;
-        
+
         const auto& wcpts = sg->wcpts();
         if (wcpts.size() <= 2) continue;
-        
+
         for (size_t i = 1; i + 1 < wcpts.size(); i++) {
             pts.push_back(wcpts[i].point);
         }
     }
-    
+
     // Collect points from vertices
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        VertexPtr vtx = graph[*vit].vertex;
+    for (auto nd : ordered_nodes(graph)) {
+        VertexPtr vtx = graph[nd].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
         pts.push_back(vtx->wcpt().point);
     }
@@ -510,12 +544,13 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
     
     if (!vertex || !vertex->descriptor_valid()) return num_conflicts;
     
-    // Start from the assumed neutrino vertex
+    // Start from the assumed neutrino vertex.  Stable edge-index order: on a
+    // graph with cycles the BFS first-writer wins in map_seg_dir, so frontier
+    // order affects the recorded directions (and the conflict score).
     std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
     auto vd = vertex->get_descriptor();
-    auto edge_range = boost::out_edges(vd, graph);
-    for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-        SegmentPtr seg = graph[*e_it].segment;
+    for (auto edesc : sorted_out_edges(vd, graph)) {
+        SegmentPtr seg = graph[edesc].segment;
         if (seg) {
             segments_to_be_examined.push_back(std::make_pair(vertex, seg));
         }
@@ -541,11 +576,11 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
             if (used_vertices.find(curr_vertex) != used_vertices.end()) continue;
             
             // Add all segments connected to curr_vertex for examination
+            // (stable edge-index order — see seed loop above).
             if (curr_vertex->descriptor_valid()) {
                 auto curr_vd = curr_vertex->get_descriptor();
-                auto curr_edge_range = boost::out_edges(curr_vd, graph);
-                for (auto e_it = curr_edge_range.first; e_it != curr_edge_range.second; ++e_it) {
-                    SegmentPtr seg = graph[*e_it].segment;
+                for (auto edesc : sorted_out_edges(curr_vd, graph)) {
+                    SegmentPtr seg = graph[edesc].segment;
                     if (seg) {
                         temp_segments.push_back(std::make_pair(curr_vertex, seg));
                     }
@@ -1096,13 +1131,14 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
     std::set<VertexPtr> used_vertices;
     std::set<SegmentPtr> used_segments;
     
-    // Start propagation from the main vertex
+    // Start propagation from the main vertex.  Stable edge-index order: the
+    // BFS assigns each segment's direction/particle type on first discovery,
+    // so frontier order is a physics decision on any multi-path graph.
     std::vector<std::pair<VertexPtr, SegmentPtr>> segments_to_be_examined;
     if (vertex->descriptor_valid()) {
         auto vd = vertex->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
-        for (auto e_it = edge_range.first; e_it != edge_range.second; ++e_it) {
-            SegmentPtr seg = graph[*e_it].segment;
+        for (auto edesc : sorted_out_edges(vd, graph)) {
+            SegmentPtr seg = graph[edesc].segment;
             if (seg) {
                 segments_to_be_examined.push_back(std::make_pair(vertex, seg));
             }
@@ -1350,9 +1386,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             
             if (curr_vertex->descriptor_valid()) {
                 auto curr_vd = curr_vertex->get_descriptor();
-                auto curr_edge_range = boost::out_edges(curr_vd, graph);
-                for (auto ce_it = curr_edge_range.first; ce_it != curr_edge_range.second; ++ce_it) {
-                    SegmentPtr seg = graph[*ce_it].segment;
+                // Stable edge-index order: BFS discovery order assigns
+                // direction/particle type.
+                for (auto edesc : sorted_out_edges(curr_vd, graph)) {
+                    SegmentPtr seg = graph[edesc].segment;
                     if (seg) {
                         temp_segments.push_back(std::make_pair(curr_vertex, seg));
                     }
@@ -1654,10 +1691,11 @@ bool PatternAlgorithms::eliminate_short_vertex_activities(Graph& graph, Facade::
         std::set<SegmentPtr> to_be_removed_segments;
         std::set<VertexPtr> to_be_removed_vertices;
         
-        // Iterate through all edges (segments) in the graph
-        auto [ebegin, eend] = boost::edges(graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        // Iterate through all edges (segments) in the graph.  Stable
+        // edge-index order: the first removable segment wins (remove +
+        // restart), so iteration order is a topology decision.
+        for (const auto& ed : ordered_edges(graph)) {
+            SegmentPtr sg = graph[ed].segment;
             if (!sg || sg->cluster() != &cluster) continue;
             if (existing_segments.find(sg) != existing_segments.end()) continue;
 
@@ -1935,9 +1973,11 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     
     // Search for vertex activities
     if (flag_search_vertex_activity) {
+    detv_dump("iv:entry", graph);
         if (examine_structure_4(main_vertex, flag_final_vertex, graph, cluster, track_fitter, dv)) {
             flag_found_vertex_activities = true;
             track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            detv_dump("iv:examine_structure_4a", graph);
         }
     }
     
@@ -1948,15 +1988,17 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         VertexPtr vtx = graph[v].vertex;
         if (!vtx || vtx->cluster() != &cluster) continue;
 
-        // Get segments connected to this vertex
+        // Get segments connected to this vertex.  Order matters: it feeds
+        // MyFCN's normal-equation accumulation in fit_vertex, so use the
+        // stable edge-index order, not boost::out_edges pointer order.
         std::vector<SegmentPtr> vertex_segments;
-        for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-            SegmentPtr sg = graph[*it].segment;
+        for (auto edesc : sorted_out_edges(v, graph)) {
+            SegmentPtr sg = graph[edesc].segment;
             if (sg && sg->cluster() == &cluster) {
                 vertex_segments.push_back(sg);
             }
         }
-        
+
         if (vertex_segments.size() <= 2 && vtx != main_vertex) continue;
         
         int ntracks = 0, nshowers = 0;
@@ -2008,6 +2050,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
     if (flag_update_fit) {
         // Do the overall fit again
         track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+        detv_dump("iv:post_fitloop_dmt", graph);
 
         bool flag_keep_main_vertex = false;
         Facade::geo_point_t main_vtx_pt;
@@ -2017,6 +2060,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         }
         
         examine_vertices(graph, cluster, track_fitter, dv, main_vertex);
+        detv_dump("iv:examine_vertices_a", graph);
         
         if (flag_keep_main_vertex) {
             // Check if main_vertex still exists in graph
@@ -2054,6 +2098,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (examine_structure_4(main_vertex, flag_final_vertex, graph, cluster, track_fitter, dv)) {
                 flag_found_vertex_activities = true;
                 
+                 detv_dump("iv:examine_structure_4b", graph);
                 // Get segments connected to main_vertex
                 std::vector<SegmentPtr> main_vertex_segments;
                 for (auto v : ordered_nodes(graph)) {
@@ -2077,10 +2122,12 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             VertexPtr vtx = graph[v].vertex;
             if (!vtx || vtx->cluster() != &cluster) continue;
 
-            // Get segments connected to this vertex
+            // Get segments connected to this vertex.  Stable edge-index order:
+            // this vector feeds search_for_vertex_activities, whose decisions
+            // must not depend on boost pointer order.
             std::vector<SegmentPtr> vertex_segments;
-            for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-                SegmentPtr sg = graph[*it].segment;
+            for (auto edesc : sorted_out_edges(v, graph)) {
+                SegmentPtr sg = graph[edesc].segment;
                 if (sg && sg->cluster() == &cluster) {
                     vertex_segments.push_back(sg);
                 }
@@ -2105,6 +2152,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (vertex_segments.size() == 1) search_range = 3.0*units::cm;
 
             bool flag_update = search_for_vertex_activities(graph, vtx, vertex_segments, cluster, track_fitter, dv, search_range);
+            detv_dump("iv:search_vtx_act", graph);
 
             if (flag_update) {
                 // Get updated segments
@@ -2124,6 +2172,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         if (flag_update_fit) {
             // Do the overall fit again
             track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            detv_dump("iv:post_search_dmt", graph);
             flag_update_fit = false;
 
             // Redo the fit
@@ -2131,8 +2180,9 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 std::vector<SegmentPtr> vertex_segments;
                 for (auto v : ordered_nodes(graph)) {
                     if (graph[v].vertex == vtx) {
-                        for (auto it = boost::out_edges(v, graph).first; it != boost::out_edges(v, graph).second; ++it) {
-                            SegmentPtr sg = graph[*it].segment;
+                        // Stable order: feeds MyFCN accumulation via fit_vertex.
+                        for (auto edesc : sorted_out_edges(v, graph)) {
+                            SegmentPtr sg = graph[edesc].segment;
                             if (sg && sg->cluster() == &cluster) {
                                 vertex_segments.push_back(sg);
                             }
@@ -2162,6 +2212,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
         // Eliminate short tracks
         if (eliminate_short_vertex_activities(graph, cluster, main_vertex, existing_segments, track_fitter, dv)) {
             track_fitter.do_multi_tracking(true, true, true, false, false, &cluster);
+            detv_dump("iv:final_dmt", graph);
         }
         
         // Determine directions for segments
@@ -3197,9 +3248,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     std::vector<std::vector<float>> vec_xyzq(4);
     std::vector<VertexPtr> cand_vertices;
 
-    auto [vbegin, vend] = boost::vertices(graph);
-    for (auto vit = vbegin; vit != vend; ++vit) {
-        auto vtx = graph[*vit].vertex;
+    // Stable node-index order: cand_vertices drives argmin vertex picks and
+    // vec_xyzq is the DL model input point cloud.
+    for (const auto& nd : ordered_nodes(graph)) {
+        auto vtx = graph[nd].vertex;
         if (!vtx) continue;
         cand_vertices.push_back(vtx);
         auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;

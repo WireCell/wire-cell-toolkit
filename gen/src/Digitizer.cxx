@@ -105,12 +105,12 @@ bool Gen::Digitizer::operator()(const input_pointer& vframe, output_pointer& adc
     // auto vtraces = Aux::untagged_traces(vframe);
     const auto& vtraces = *vframe->traces();
     if (vtraces.empty()) {
-        log->error("no traces in input frame {} at call={}",
-                   vframe->ident(), m_count);
-        Aux::dump_frame(vframe, log);
-        log->debug(Aux::taginfo(vframe));
+        // Empty is not EOS, must output a corresponding empty frame.
+        adcframe = std::make_shared<SimpleFrame>(vframe->ident(), vframe->time(), vframe->tick());
+
+        log->warn("no traces in at call={}: {}", m_count, Aux::taginfo(adcframe));
         ++m_count;
-        return false;
+        return true;
     }
 
     // Get extent in channel and tbin

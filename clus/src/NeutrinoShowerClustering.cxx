@@ -1937,7 +1937,9 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
     
     // Second part: merge existing showers if nothing was added
     if (!flag_added) {
-        std::map<ShowerPtr, std::set<ShowerPtr>> map_shower_showers;
+        // Index-ordered (not pointer-ordered): acc_energy below FP-sums over
+        // the associated set, so iteration order must be content-stable.
+        std::map<ShowerPtr, std::set<ShowerPtr, ShowerIndexCmp>, ShowerIndexCmp> map_shower_showers;
         WireCell::Point main_vtx_pt = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
         
         auto it = map_vertex_to_shower.find(main_vertex);

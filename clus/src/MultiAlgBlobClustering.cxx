@@ -202,6 +202,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
+    m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
     m_dead_live_overlap_offset = get(cfg, "dead_live_overlap_offset", m_dead_live_overlap_offset);
 
@@ -735,9 +736,11 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         }
     }
 
-    // Iterate through all segments (edges) in the graph
+    // Iterate through all segments (edges) in the graph.  Stable edge-index
+    // order: boost::edges on setS iterates in pointer order, which reorders
+    // the emitted Bee point arrays run-to-run.
     int segment_count = 0;
-    for (auto edge_desc : mir(boost::edges(*pr_graph))) {
+    for (auto edge_desc : PR::ordered_edges(*pr_graph)) {
         const auto& edge_bundle = (*pr_graph)[edge_desc];
         auto segment = edge_bundle.segment;
 
@@ -984,10 +987,10 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     visited_vtxs.insert(main_vertex);
     std::vector<std::pair<PR::VertexPtr, PR::SegmentPtr>> bfs_cur;
 
-    // Seed BFS: all non-shower edges adjacent to main_vertex
-    for (auto [eit, end] = boost::out_edges(vtx_to_nd.at(main_vertex), *pr_graph);
-         eit != end; ++eit) {
-        auto seg = (*pr_graph)[*eit].segment;
+    // Seed BFS: all non-shower edges adjacent to main_vertex.  Stable
+    // edge-index order so the PF-tree child order is run-reproducible.
+    for (auto edesc : PR::sorted_out_edges(vtx_to_nd.at(main_vertex), *pr_graph)) {
+        auto seg = (*pr_graph)[edesc].segment;
         if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
         auto far = PR::find_other_vertex(*pr_graph, seg, main_vertex);
         if (!far) continue;
@@ -1005,9 +1008,8 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
             visited_vtxs.insert(cur_vtx);
             auto nd_it = vtx_to_nd.find(cur_vtx);
             if (nd_it == vtx_to_nd.end()) continue;
-            for (auto [eit, end] = boost::out_edges(nd_it->second, *pr_graph);
-                 eit != end; ++eit) {
-                auto seg = (*pr_graph)[*eit].segment;
+            for (auto edesc : PR::sorted_out_edges(nd_it->second, *pr_graph)) {
+                auto seg = (*pr_graph)[edesc].segment;
                 if (!seg || used_segs.count(seg) || conn4_skip_segs.count(seg)) continue;
                 auto far = PR::find_other_vertex(*pr_graph, seg, cur_vtx);
                 if (!far) continue;
@@ -1733,7 +1735,18 @@ void MultiAlgBlobClustering::fill_bee_patches_from_cluster(
 // arrays are missing, so it is off by default and adds nothing to the output.
 // Run pre-pipeline: the array then survives the whole pipeline and is read by
 // fill_bee_flashes (and is available to later steps for reuse).
-static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, double window)
+// Group the two per-side flashes of a cathode-crosser for the Bee display.
+// A crosser scintillates independently in each drift volume and is matched as
+// two cluster halves, one per side, each carrying its own matched flash.  We
+// pair ONLY such matched flashes ("good bundles"): within each window-coincident
+// neighborhood keep the single closest cross-side pair (one flash per side,
+// minimal |dt|) and leave everything else ungrouped.  This replaces the old
+// blind single-linkage chaining, which at a wide (1 us) window merged unrelated
+// busy-event flashes.  window<=0 => no grouping (bit-identical ungrouped dump).
+// greedy=false: one closest cross-side pair per coincidence neighborhood (the
+// rest solo).  greedy=true: disjoint pairs, repeatedly taking the next-closest
+// available cross-side pair, so two distinct close crossers both group.
+static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, double window, bool greedy)
 {
     if (window <= 0) return;
 
@@ -1743,35 +1756,99 @@ static void store_flash_groups(WireCell::Clus::Facade::Grouping& grouping, doubl
     auto& ds = it->second;
     auto a_gid = ds.get("gid");
     auto a_time = ds.get("time");
+    auto a_apa = ds.get("apa");           // physical drift side (0/1)
     if (!a_gid || !a_time) return;
     const auto gid = a_gid->elements<int>();
     const auto time = a_time->elements<double>();
     const size_t nrow = gid.size();
     if (nrow == 0) return;
+    const bool have_apa = (a_apa != nullptr);
+    std::vector<int> apa_col;
+    if (have_apa) { auto ac = a_apa->elements<int>(); apa_col.assign(ac.begin(), ac.end()); }
 
-    // Unique flashes: gid -> time (first occurrence).
-    std::map<int, double> flash_time;
-    for (size_t i = 0; i < nrow; ++i) {
-        if (flash_time.find(gid[i]) == flash_time.end()) flash_time[gid[i]] = time[i];
+    // Eligible flashes = those matched to a charge cluster with predicted light
+    // >= 100 (the same criterion that yields a "matching: N" row in the Bee op
+    // display).  Only these participate in grouping.
+    std::set<int> matched_gids;
+    for (const auto* cluster : grouping.children()) {
+        const int mgid = cluster->get_scalar<int>("matched_flash_gid", -1);
+        if (mgid < 0) continue;
+        if (!cluster->has_pcarray<double>("pe", "flashpred")) continue;
+        auto pred = cluster->get_pcarray<double>("pe", "flashpred");
+        double pred_tot = 0; for (double v : pred) pred_tot += v;
+        if (pred_tot < 100) continue;
+        matched_gids.insert(mgid);
     }
 
-    // Sort unique flashes by time (tie-break on gid) for deterministic grouping.
-    std::vector<std::pair<int, double>> flashes(flash_time.begin(), flash_time.end());
-    std::sort(flashes.begin(), flashes.end(), [](const auto& a, const auto& b) {
-        if (a.second != b.second) return a.second < b.second;
-        return a.first < b.first;
+    // Unique flashes (first row per gid): time + drift side.
+    struct F { int gid; double t; int side; };
+    std::map<int, F> uniq;
+    for (size_t i = 0; i < nrow; ++i) {
+        if (uniq.find(gid[i]) == uniq.end())
+            uniq[gid[i]] = F{gid[i], time[i], have_apa ? apa_col[i] : -1};
+    }
+
+    // Eligible (matched, known side) flashes, time-sorted (tie-break gid).
+    std::vector<F> elig;
+    for (const auto& kv : uniq)
+        if (matched_gids.count(kv.first) && kv.second.side >= 0) elig.push_back(kv.second);
+    std::sort(elig.begin(), elig.end(), [](const F& a, const F& b) {
+        if (a.t != b.t) return a.t < b.t;
+        return a.gid < b.gid;
     });
 
-    // Greedily start a new group whenever the gap to the previous flash time
-    // exceeds the window (same logic as assign_flash_t0_groups, on flash times).
     std::map<int, int> group_of;
     int next_group = 0;
-    double prev_t = 0;
-    for (size_t i = 0; i < flashes.size(); ++i) {
-        if (i == 0 || (flashes[i].second - prev_t) > window) ++next_group;
-        group_of[flashes[i].first] = next_group;
-        prev_t = flashes[i].second;
+    std::set<int> paired;
+    auto make_pair = [&](size_t a, size_t b) {
+        const int g = ++next_group;
+        group_of[elig[a].gid] = g; group_of[elig[b].gid] = g;
+        paired.insert(elig[a].gid); paired.insert(elig[b].gid);
+    };
+    if (greedy) {
+        // Greedy disjoint pairs: take the next-closest available cross-side pair
+        // (|dt| <= window) until none remain; each flash used at most once.
+        struct Cand { double dt; size_t a, b; };
+        std::vector<Cand> cands;
+        for (size_t a = 0; a < elig.size(); ++a)
+            for (size_t b = a + 1; b < elig.size(); ++b) {
+                const double dt = elig[b].t - elig[a].t;   // elig is time-sorted
+                if (dt > window) break;                    // no later b can fit
+                if (elig[a].side != elig[b].side) cands.push_back({dt, a, b});
+            }
+        std::sort(cands.begin(), cands.end(), [&](const Cand& x, const Cand& y) {
+            if (x.dt != y.dt) return x.dt < y.dt;
+            if (elig[x.a].gid != elig[y.a].gid) return elig[x.a].gid < elig[y.a].gid;
+            return elig[x.b].gid < elig[y.b].gid;
+        });
+        std::set<size_t> used;
+        for (const auto& c : cands) {
+            if (used.count(c.a) || used.count(c.b)) continue;
+            make_pair(c.a, c.b);
+            used.insert(c.a); used.insert(c.b);
+        }
+    } else {
+        // Single-linkage neighborhoods over eligible flashes; in each, keep only
+        // the closest cross-side pair (one per side, |dt| <= window).
+        size_t i = 0;
+        while (i < elig.size()) {
+            size_t j = i + 1;
+            while (j < elig.size() && (elig[j].t - elig[j - 1].t) <= window) ++j;
+            double best = -1; int bi = -1, bj = -1;
+            for (size_t a = i; a < j; ++a)
+                for (size_t b = a + 1; b < j; ++b) {
+                    if (elig[a].side == elig[b].side) continue;
+                    double dt = elig[b].t - elig[a].t; if (dt < 0) dt = -dt;
+                    if (dt <= window && (bi < 0 || dt < best)) { best = dt; bi = (int) a; bj = (int) b; }
+                }
+            if (bi >= 0) make_pair((size_t) bi, (size_t) bj);
+            i = j;
+        }
     }
+
+    // Everyone else gets a unique singleton id so the viewer never merges them.
+    for (const auto& kv : uniq)
+        if (!paired.count(kv.first)) group_of[kv.first] = ++next_group;
 
     // Per-row group array, aligned to the opflash rows.
     std::vector<int> group(nrow);
@@ -1808,8 +1885,21 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     const auto pe = a_pe->elements<double>();
     const size_t nrow = gid.size();
 
-    // Optional ±80 ns flash-flash grouping across TPC sides, stored on the root
-    // by ClusteringSwitchScope (flash_group_window>0).  Absent => no grouping
+    // Per-flash physical drift side (TPC 0 = low-x, TPC 1 = high-x), written by
+    // QLMatching from the flash's measured light pattern.  Use it when present;
+    // fall back to the gid-derived side for older dumps that lack the column.
+    // The gid alone encodes the processing node's anode, not the lit volume, so
+    // on the merged root it tags every flash with one side (e.g. all "TPC0").
+    auto a_apa = ds.get("apa");
+    const bool have_apa = (a_apa != nullptr);
+    std::vector<int> apa_col;
+    if (have_apa) {
+        auto ac = a_apa->elements<int>();
+        apa_col.assign(ac.begin(), ac.end());
+    }
+
+    // Optional matched cross-side flash-pair grouping, stored on the root
+    // by store_flash_groups (flash_group_window>0).  Absent => no grouping
     // is emitted and the op JSON stays bit-identical to the ungrouped case.
     auto a_group = ds.get("group");
     const bool have_group = (a_group != nullptr);
@@ -1824,6 +1914,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     std::vector<int> flash_order;
     std::map<int, double> flash_time;
     std::map<int, int> flash_group;                  // gid -> flash-group id
+    std::map<int, int> flash_apa;                    // gid -> physical drift side
     std::map<int, std::map<int, double>> flash_pe;   // gid -> (ch -> pe)
     for (size_t i = 0; i < nrow; ++i) {
         const int g = gid[i];
@@ -1831,6 +1922,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
             flash_order.push_back(g);
             flash_time[g] = time[i];
             if (have_group) flash_group[g] = group_col[i];
+            if (have_apa) flash_apa[g] = apa_col[i];
         }
         flash_pe[g][ch[i]] = pe[i];
     }
@@ -1838,7 +1930,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // Order flashes by ascending flash time so the Bee viewer steps through them
     // low->high (it walks the op arrays by index and does no sorting of its own).
     // stable_sort keeps the original first-seen order among equal-time flashes
-    // (e.g. the two sides of a ±80 ns TPC0/TPC1 group).
+    // (e.g. the two sides of a cross-side TPC0/TPC1 pair).
     std::stable_sort(flash_order.begin(), flash_order.end(),
                      [&](int a, int b) { return flash_time[a] < flash_time[b]; });
 
@@ -1862,12 +1954,14 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
 
     // Emit ALL flashes (matched + unmatched). A matched flash emits one row per
     // matched cluster; an unmatched flash emits one row with empty cluster_id.
-    // The global flash id encodes the APA as gid = anode_ident*kFlashGidStride +
-    // idx (see QLMatching.cxx), so apa = gid / kFlashGidStride.
+    // The flash's drift side (apa) comes from the "apa" column when present
+    // (QLMatching derives it from the measured light pattern); otherwise fall
+    // back to the legacy gid encoding gid = anode_ident*kFlashGidStride + idx,
+    // so apa = gid / kFlashGidStride (correct only for single-face anodes).
     constexpr int kFlashGidStride = 1000000;
     std::vector<int> appended_groups;   // one per appended row, same order
     for (const int g : flash_order) {
-        const int apa = g / kFlashGidStride;
+        const int apa = have_apa ? flash_apa[g] : (g / kFlashGidStride);
         const int grp = have_group ? flash_group[g] : -1;
         int maxch = -1;
         for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;
@@ -2106,7 +2200,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         if (gs.size()) {
             // Stash the ±window TPC0/TPC1 flash grouping on the root opflash PC
             // first, so the op dump (and every later pipeline step) can read it.
-            store_flash_groups(*gs[0], m_flash_group_window);
+            store_flash_groups(*gs[0], m_flash_group_window, m_flash_group_greedy);
             fill_bee_flashes(*gs[0]);
             perf("dump op flashes to bee");
         }

@@ -35,6 +35,18 @@ namespace WireCell::Match {
         double pe_err_frac  = 0.3;
         double pe_err_knee  = 1.0;
         bool   pe_err_on_pred = false;
+        // Efficiency-aware low-PE error inflation (PD detection inefficiency at low
+        // light: a channel with a few PE predicted often measures zero -- far more
+        // than Poisson). When pe_err_lowpe_frac >= 0 (and pe_err_on_pred) the relative
+        // error grows as the predicted PE falls:
+        //   rel(pred) = pe_err_frac + (pe_err_lowpe_frac - pe_err_frac)*exp(-pred/lowpe_knee)
+        //   PE_err    = sqrt((rel*pred)^2 + pe_err_floor^2)
+        // so rel -> frac at high pred (unchanged) and -> lowpe_frac (~unity) at low pred,
+        // letting "predicted a few PE, measured zero" be tolerated rather than penalized.
+        // pe_err_lowpe_frac < 0 => disabled (use the floor/frac/knee branch, bit-identical).
+        // Calibrated on run-29107 hand scans (pdhd/ql_light_calib/fit_lowpe.py): PDHD 2.1/4.0.
+        double pe_err_lowpe_frac = -1.0;
+        double pe_err_lowpe_knee = 4.0;
         // Flag-aware multi-branch "high-consistent" ladder (ported from the MicroBooNE
         // prototype FlashTPCBundle, re-tuned for the SBND post-recipe chi2 scale from the
         // 10 hand-scan data events). When highconsist_ladder is false the single-branch
@@ -133,6 +145,21 @@ namespace WireCell::Match {
         // (calib dump); nothing in the matching path reads it. Default false.
         void set_flag_two_boundary(bool v) { flag_two_boundary = v; }
         bool get_flag_two_boundary() const { return flag_two_boundary; }
+        // Cathode-end proximity (set alongside the cathode-end at_x_boundary in
+        // compute_endpoint_flags). Inert diagnostic for now — nothing in the
+        // matching path reads it; exported in the calib dump so a PDVD
+        // cathode-PD treatment can be designed from hand-scan data. Default false.
+        void set_flag_at_cathode(bool v) { flag_at_cathode = v; }
+        bool get_flag_at_cathode() const { return flag_at_cathode; }
+        // Per-channel chi2-relax eligibility (QLMatching vd_surface_flags mode).
+        // EMPTY (default) => every channel is eligible, which is the historical
+        // behavior — the close-to-PMT chi2 denominator inflation may fire on any
+        // channel with a big measured excess. When filled (PDVD: only the PD
+        // channels of the surface the activity is actually near — that wall's
+        // membrane XAs, or the bottom PMTs), the inflation is restricted to those
+        // channels. add_relax_channels unions surfaces across calls.
+        void add_relax_channels(const std::vector<int>& chs);
+        const std::vector<uint8_t>& get_relax_channels() const { return relax_channels; }
         // Cross-TPC cathode-crossing confirmation (post-matching): the matched main
         // cluster connects geometrically, across the cathode, to the coincident other
         // TPC's matched main cluster. Confirm-stamp only; nothing in the matching path
@@ -145,6 +172,14 @@ namespace WireCell::Match {
         // cluster's high-consistent bundle on a different flash). Default false.
         void set_flag_xtpc_scenario1(bool v) { flag_xtpc_scenario1 = v; }
         bool get_flag_xtpc_scenario1() const { return flag_xtpc_scenario1; }
+        // Joint-pin winner: this bundle is the chosen (cluster,flash) of a confirmed
+        // direction-collinear cross-TPC pair (scenario 1 AND track axes collinear by the
+        // combined local-vhough / global-PCA test). Set only when xtpc_joint_pin is on;
+        // drives the TOP-priority cull (a cluster owning a pinned bundle keeps ONLY it),
+        // binding both crosser halves to one coincident flash. Default false => off-path
+        // never sets it => bit-identical.
+        void set_flag_xtpc_pin(bool v) { flag_xtpc_pin = v; }
+        bool get_flag_xtpc_pin() const { return flag_xtpc_pin; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -168,8 +203,10 @@ namespace WireCell::Match {
         bool flag_high_consistent;
         bool flag_contained;
         bool flag_two_boundary;
+        bool flag_at_cathode{false};
         bool flag_xtpc_consistent{false};
         bool flag_xtpc_scenario1{false};
+        bool flag_xtpc_pin{false};
 
         double ks_dis;
         double chi2;
@@ -178,6 +215,9 @@ namespace WireCell::Match {
 
         int m_nchan;
         BundleQualityParams m_qp;
+        // Per-channel chi2-relax eligibility (see add_relax_channels). Empty =>
+        // all channels eligible (historical behavior, bit-identical).
+        std::vector<uint8_t> relax_channels;
         std::vector<double> pred_flash;
         std::vector<Cluster*> other_clusters;
         std::vector<Cluster*> more_clusters;

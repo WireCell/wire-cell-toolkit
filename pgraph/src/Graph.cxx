@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <ctime>
 #include <boost/algorithm/string.hpp>
+#include "WireCellPgraph/TorchnvTools.h"
 
 using WireCell::demangle;
 using WireCell::String::format;
@@ -29,11 +30,27 @@ void Graph::set_enable_em(bool flag) { m_enable_em = flag; }
 
 bool Graph::connect(Node* tail, Node* head, size_t tpind, size_t hpind)
 {
-    Port& tport = tail->output_ports()[tpind];
-    Port& hport = head->input_ports()[hpind];
+    auto& tports = tail->output_ports();
+    auto& hports = head->input_ports();
+
+    if (tpind >= tports.size()) {
+        l->critical("tail port multiplicity mismatch with {}: {} >= {}", tail->ident(), tpind, tports.size());
+        raise<ValueError>("tail port signature mismatch");
+    }
+
+    if (hpind >= hports.size()) {
+        l->critical("head port multiplicity mismatch with {}: {} >= {}", head->ident(), hpind, hports.size());
+        raise<ValueError>("tail port signature mismatch");
+    }
+
+    Port& tport = tports[tpind];
+    Port& hport = hports[hpind];
+
     if (tport.signature() != hport.signature()) {
-        l->critical("port signature mismatch: \"{}\" != \"{}\"", tport.signature(), hport.signature());
-        THROW(ValueError() << errmsg{"port signature mismatch"});
+        l->critical("port signature mismatch: {}[{}] -> {}[{}]",
+                    tail->ident(), tport.signature(),
+                    head->ident(), hport.signature());
+        raise<ValueError>("port signature mismatch");
         return false;
     }
 
@@ -113,22 +130,23 @@ bool Graph::execute()
     auto nodes = sort_kahn();
     l->debug("executing with {} nodes", nodes.size());
 
-    for (Node* node : nodes) {
-        m_nodes_timer[node] = 0.0;
-    }
-
     while (true) {
         int count = 0;
         bool did_something = false;
 
         for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit, ++count) {
             Node* node = *nit;
-
-            auto start = std::clock();
+            NVTX_SCOPED_RANGE((node->instance_name()).c_str());
+            auto core = std::clock();
+            auto wall = std::chrono::high_resolution_clock::now();
 
             bool ok = call_node(node);
 
-            m_nodes_timer[node] += (std::clock() - start) / (double) CLOCKS_PER_SEC;
+            m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
+
+            auto delta = std::chrono::high_resolution_clock::now() - wall;
+            const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
+            m_nodes_timer[node].wall += wall_ms / 1000.0;
 
             if (ok) {
                 if (m_enable_em) {
@@ -171,7 +189,13 @@ bool Graph::connected()
         okay = false;
         l->warn("disconnected node #{}: {}", instance, node->ident());
         for (const auto& p : bad) {
-            l->warn("\tport: {}", p.ident());
+            l->warn("\tempty: {}", p.ident());
+        }
+        for (const auto& p : node->input_ports()) {
+            l->warn("\tiport: {}", p.ident());
+        }
+        for (const auto& p : node->output_ports()) {
+            l->warn("\toport: {}", p.ident());
         }
     }
     return okay;
@@ -179,21 +203,22 @@ bool Graph::connected()
 
 void Graph::print_timers(bool include_execmon) const
 {
-    std::multimap<float, Node*> m;
-    double total_time = 0;
-    for (auto it : m_nodes_timer) {
-        m.emplace(it.second, it.first);
+    std::multimap<float, std::pair<Node*, TimerClocks>> m;
+    for (auto it : m_nodes_timer) { // to sort by wall time
+        m.emplace(it.second.wall, std::make_pair(it.first, it.second));
     }
-    std::vector<Node*> ordered;
+
+    double total_wall = 0;
+    double total_core = 0;
     for (auto it = m.rbegin(); it != m.rend(); ++it) {
-        ordered.push_back(it->second);
-        std::string iden = it->second->ident();
-        std::vector<std::string> tags;
-        boost::split(tags, iden, [](char c) { return c == ' '; });
-        l_timer->info("Timer: {} : {} sec", tags[2].substr(5), it->first);
-        total_time += it->first;
+        auto [node, tc] = it->second;
+
+        l_timer->info("Timer: {:.3f} wall-sec, {:.3f} core-sec:  ({}) \"{}\"",
+                      tc.wall, tc.core, node->cpptype_name(), node->instance_name());
+        total_wall += tc.wall;
+        total_core += tc.core;
     }
-    l_timer->info("Timer: Total node execution : {} sec", total_time);
+    l_timer->info("Timer: Total {:.3f} wall-sec, {:.3f} core-sec", total_wall, total_core);
 
     if (include_execmon) {
         l_timer->debug("ExecMon:\n{}", m_em.summary());

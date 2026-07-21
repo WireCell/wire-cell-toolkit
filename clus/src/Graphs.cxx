@@ -314,17 +314,19 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
     
     // std::cout << "Level " << 0 << " " << start_vertex << std::endl;
 
-    // Use BFS to find neighbors level by level
+    // Use BFS to find neighbors level by level.  Visited marks are a flat
+    // flag array (vertex descriptors are vecS indices) — result content is
+    // unchanged, only the bookkeeping is O(1) per neighbor probe.
     std::queue<vertex_type> current_level;
     std::queue<vertex_type> next_level;
-    std::set<vertex_type> visited;
-    
+    std::vector<char> visited(boost::num_vertices(m_graph), 0);
+
     // Initialize with the starting vertex
     current_level.push(start_vertex);
     if (include_self) {
         result.insert(start_vertex);
     }
-    visited.insert(start_vertex);
+    visited[start_vertex] = 1;
     
     // Process each level
     for (int level = 1; level <= nlevel; ++level) {
@@ -341,8 +343,8 @@ Weighted::GraphAlgorithms::find_neighbors_nlevel(size_t index, int nlevel, bool 
                 vertex_type neighbor = *vi;
                 
                 // If we haven't visited this neighbor yet
-                if (visited.find(neighbor) == visited.end()) {
-                    visited.insert(neighbor);
+                if (!visited[neighbor]) {
+                    visited[neighbor] = 1;
                     result.insert(neighbor);
                     next_level.push(neighbor);
                 }

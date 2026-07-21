@@ -1,0 +1,41 @@
+#+title: ArrayFire's OpenCL backend
+
+ArrayFire supports a number of "backends".  A "default" CPU and a "CUDA" backend are tested above.  It also support an OpenCL backend.  Given the rather poor performance of the "default" CPU backend relative to LibTorch, we are driven to try the OpenCL backend.
+
+OpenCL is a standard API with different implementations.  The Spack packaging for ArrayFire includes support to build against the [[https://portablecl.org/][PoCL]] implementation with this incantation:
+
+#+begin_example
+spack install arrayfire+cuda+opencl cuda_arch=89 ^[virtuals=opencl] pocl@6.0
+#+end_example
+
+PoCL itself has its own "backends" or "device drivers" including ~cpu~, ~cpu-tbb~, ~cuda~, ~remote~.  The environment variable ~POCL_DEVICES~ sets the "device driver" at runtime.
+
+OpenCL has the concept called "Installable Client Driver (ICD) and an ICD loader to which an application may delegate for the purpose of loading backend implementations.  The above ~spack install~ brings in ~ocl-icd~.
+
+After a long and winding journey, I can not get past this:
+
+#+begin_example
+  $ cat opencl/pocl.icd 
+  /wcwc/opt/builtin/linux-debian12-x86_64/gcc-12.2.0/pocl-6.0-ulkbxdh376qwwpteqckzdawmwb4dhidp/lib/libpocl.so
+
+  $ OPENCL_VENDOR_PATH=(pwd)/opencl  poclcc -l
+  LIST OF DEVICES:
+  0:
+    Vendor:   AuthenticAMD
+      Name:   cpu-znver4-AMD Ryzen Threadripper 7970X 32-Cores
+   Version:   OpenCL 3.0 PoCL HSTR: cpu-x86_64-unknown-linux-gnu-znver4
+
+  $ jsonnet -A techs=af -A devices=opencl -A tests=arith spng/test/afvslt.jsonnet \
+    | AF_TRACE=all AF_PRINT_ERRORS=1 OPENCL_VENDOR_PATH=(pwd)/opencl \
+    AF_DISABLE_GRAPHICS=1 AF_SHOW_LOAD_PATH=1 \
+    AF_JIT_KERNEL_CACHE_DIRECTORY=(pwd)/arrayfire \
+    POCL_DEBUG=err,warn POCL_IGNORE_CL_STD=1 \
+    ./afvslt
+    ...
+
+    [jit][1729279276][2985820] [ /wcwc/stage/root/spack-stage-arrayfire-3.9.0-nuii44ogy5ggb6r7b5voq34hulzvsx7u/spack-src/src/backend/opencl/compile_module.cpp:235 ] {15986809140035948512 : Unable to open /nfs/data/1/bviren/afvslt/arrayfire/KER15986809140035948512_CL_65542_CPU-ZNVER4-AMD_RYZEN_THREADRIPPER_7970X_32-CORES_AF_39.bin for cpu-znver4-AMD Ryzen Threadripper 7970X 32-Cores}
+    [2024-10-18 19:21:16.411374110] PoCL: in fn process_options at line 275:
+     |     ERROR |  Invalid build option: -cl-std=CL3.0.0
+    OpenCL Error (-43): Invalid Build Options when calling clBuildProgram
+#+end_example
+

@@ -1,0 +1,96 @@
+#+title: Ray Grid Tiling On Torch
+
+* Overview
+
+SPNG provides a re-implementation of Wire-Cell's titular "ray grid tiling" that
+is based on PyTorch.  Besides executing on GPU, this version has some facility
+to process batched data.  For information on the algorithms see the [[https://www.phy.bnl.gov/~bviren/wire-cell/docs/raygrid.pdf][raygrid.pdf]]
+note.  Some of that information is repeated here to help reshape the algorithms.
+
+
+* Ray Grid
+
+The basic ray grid ~Coordinates~ class functions is essentially identically
+compared to the original vanilla C++ one.  The exception is the main methods are
+overloaded to provide batched versions.
+
+* Tiling
+
+The original ray grid tiling algorithms are resistant to batch operations.  In
+part this is due to many intermediate and final results being of the form of
+variable sized lists of things.  In this section we try to work out some
+approaches to allow batched operations at some levels.
+
+** Basic algorithm
+
+1. A ray grid *coordinates* is constructed.
+2. A 1D *measure* (eg, signals collected over one time slice and along one view) is accepted as an *activity* from each view.
+3. Each activity yields one or more *strips* representing contiguous elements above threshold.
+   - A strip is identified by the view index and a pair of ray indices that give a half-open bounds along the pitch direction.
+4. Blobs are constructed by an iterative per-view "multifurcation" of strips.
+
+The blob construction
+
+1. First two views are simply horizontal/vertical bounds and their strips form a single initial blob with a rectangle shape.
+2. For each view in remaining views and for each strip in the view:
+   - Copy the current (one view less) blob to a new blob
+   - Add the strip "on top" of the existing blob
+   - Check for any "old" strip crossing points inside new strip.
+   - Check for any new strip crossing points inside all of old strips.
+
+
+In other words, every possible combination of one strip from each view forms one
+blob.  The rest is corner bookkeeping.
+
+
+
+*** Strips
+
+Finding strips in an activity can be done with a "level crossing" trick.  In Python and in 1D it looks like:
+
+#+begin_src python
+  # Activity is 1D array of measures, minimum is the threshold
+  mask = activity > minimum
+  # Bookend False in order to catch case where first/last is above threshold
+  mask = torch.cat((torch.tensor([False]), mask, torch.tensor([False])))
+  # The "trick" to find indices of "level crossing" points. 
+  begs = ((mask[1:] == True) && (mask[:-1] == False)).nonzero().squeze()
+  ends = ((mask[:-1] == True) && (mask[1:] == False)).nonzero().squeze()
+  return torch.vstack((begs, ends))
+#+end_src
+
+The resulting ~begs/ends~ are 1D size ~N~ tensors giving the beginning / ending 1D
+index for a strip.  The stacked return is shape ~(2,N)~.
+
+The original ~activity~ tensor can be provided as a 2D image (channel vs time
+slice) and the ~begs/ends~ calculated along the transverse channel axis.  The
+subsequent calls to ~.nonzerio()~ will yield a ~(2,N)~ tensor giving row/col
+indices.  If the same stacking is applied, the return is ~(2 beg/end, 2
+chan/time, N strips)~.
+
+Repeating this for each view ~i~ of three gives tensors of sizes ~strips_i = (2,2,N_i)~.
+
+*** Blobs
+
+The three tensors ~strips_i~ from above would need to partitions into groups of
+trios with each trio having a common time index.  Each time index can be
+processed separately.
+
+In the context of one time slice, each strip of one view is applied
+independently from the other strips in the view.  During the application of one
+strip, a variable number of corners will be produced and I do not see how this
+algorithm can be couched in terms of broadcasting.
+
+** Parallel processing
+
+As the above describes, broadcasting or batched parallelism is not generally
+possible.  But the data cleaves to allow at least nested parallel loops: per
+time slice and per strip in a view.
+
+If this was Python, ~vmap()~ could be used to easily provide that type of
+parallelism but it is not available in C++ libtorch.  It seems best that can be
+done is to use CPU threads to launch individual libtorch kernels.  That sounds
+like a mess.
+
+
+

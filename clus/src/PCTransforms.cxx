@@ -48,6 +48,14 @@ public:
             const auto md = m_dv->metadata(wpid);
             m_time_global_offsets[wpid.apa()][wpid.face()] = md["time_offset"].asDouble();
             m_drift_speeds[wpid.apa()][wpid.face()] = md["drift_speed"].asDouble();
+            // Per-event trigger offset applied ALONGSIDE cluster_t0 in the x
+            // correction, for detectors that do NOT bake the readout-vs-trigger
+            // offset into x_raw at imaging time (BlobSampler time_offset=0, e.g.
+            // PDHD).  Distinct from "time_offset" above, which carries the value
+            // baked into x_raw (and is intentionally NOT re-applied here).  Absent
+            // key => 0 => production bit-identical.
+            m_trigger_offsets[wpid.apa()][wpid.face()] =
+                md.isMember("trigger_offset") ? md["trigger_offset"].asDouble() : 0.0;
             // Optional per-TPC transverse position offset (Y,Z); default zero.  The
             // x component (pos_offset[0]) is intentionally ignored -- the drift/x
             // correction stays with the t0/flash_x_offset term.  Presence of the
@@ -71,13 +79,21 @@ public:
      * x_raw = xorig + face->dirx * (time_read_out + time_global_offset) * abs_drift_speed;
      * x_corr = xorig + face->dirx * (time_read_out - clustser_t0) * abs_drift_speed;
      *x_corr - x_raw = face->dirx * (- clustser_t0 - time_global_offset) * abs_drift_speed;
+     *
+     * Detectors that bake time_global_offset into x_raw (BlobSampler time_offset != 0,
+     * e.g. SBND) carry the whole correction in cluster_t0, and trigger_offset = 0.
+     * Detectors that do NOT bake it (BlobSampler time_offset = 0, e.g. PDHD) supply the
+     * per-event readout-vs-trigger offset as "trigger_offset" in the DV metadata; it is
+     * applied here ALONGSIDE cluster_t0:
+     *   x_corr = x_raw - face->dirx * (cluster_t0 + trigger_offset) * abs_drift_speed;
      */
 
     // get x_corr from x_raw
     virtual Point forward(const Point &pos_raw, double cluster_t0, int face,
                           int apa) const override        {
         Point pos_corr(pos_raw);
-        pos_corr[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
+        pos_corr[0] -= m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) *
+            (cluster_t0 + m_trigger_offsets.at(apa).at(face)) *
             m_drift_speeds.at(apa).at(face);
         // Transverse (Y,Z) shift: a per-TPC constant, independent of cluster_t0.
         const auto& [dy, dz] = m_pos_offsets.at(apa).at(face);
@@ -89,7 +105,8 @@ public:
     virtual Point backward(const Point &pos_corr, double cluster_t0, int face,
                            int apa) const override        {
         Point pos_raw(pos_corr);
-        pos_raw[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
+        pos_raw[0] += m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) *
+            (cluster_t0 + m_trigger_offsets.at(apa).at(face)) *
             m_drift_speeds.at(apa).at(face);
         // Invert the transverse (Y,Z) shift symmetrically with forward().
         const auto& [dy, dz] = m_pos_offsets.at(apa).at(face);
@@ -126,7 +143,8 @@ public:
         std::vector<double> arr_y_corr(arr_y.size());
         std::vector<double> arr_z_corr(arr_z.size());
         for (size_t i = 0; i < arr_x.size(); ++i) {
-            arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
+            arr_x_corr[i] = arr_x[i] - m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) *
+                (cluster_t0 + m_trigger_offsets.at(apa).at(face)) *
                 m_drift_speeds.at(apa).at(face);
             arr_y_corr[i] = arr_y[i] + dy;
             arr_z_corr[i] = arr_z[i] + dz;
@@ -148,7 +166,8 @@ public:
         std::vector<double> arr_y_raw(arr_y.size());
         std::vector<double> arr_z_raw(arr_z.size());
         for (size_t i = 0; i < arr_x.size(); ++i) {
-            arr_x_raw[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) * (cluster_t0 ) *
+            arr_x_raw[i] = arr_x[i] + m_dv->face_dirx(WirePlaneId(kAllLayers, face, apa)) *
+                (cluster_t0 + m_trigger_offsets.at(apa).at(face)) *
                 m_drift_speeds.at(apa).at(face);
             arr_y_raw[i] = arr_y[i] - dy;
             arr_z_raw[i] = arr_z[i] - dz;
@@ -210,6 +229,9 @@ private:
 
     // m_time_global_offsets.at(apa).at(face) = time_global_offset
     std::map<int, std::map<int, double>> m_time_global_offsets;
+    // m_trigger_offsets.at(apa).at(face) = per-event trigger offset applied with
+    // cluster_t0 (un-baked detectors only; 0 => bit-identical).
+    std::map<int, std::map<int, double>> m_trigger_offsets;
     std::map<int, std::map<int, double>> m_drift_speeds;
     // m_pos_offsets.at(apa).at(face) = {dy, dz} transverse position offset (cm-internal).
     std::map<int, std::map<int, std::pair<double, double>>> m_pos_offsets;

@@ -194,15 +194,15 @@ bool PatternAlgorithms::examine_structure_2(Graph& graph, Facade::Cluster& clust
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
 
-            // Get the two segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            auto eit = edge_range.first;
-            SegmentPtr sg1 = graph[*eit].segment;
-            ++eit;
-            SegmentPtr sg2 = graph[*eit].segment;
-            
+            // Get the two segments connected to this vertex, in stable
+            // edge-index order: sg1/sg2 determine the direction (vtx1->vtx2)
+            // of the merged replacement segment.
+            auto sorted_edges_2 = sorted_out_edges(vd, graph);
+            SegmentPtr sg1 = graph[sorted_edges_2[0]].segment;
+            SegmentPtr sg2 = graph[sorted_edges_2[1]].segment;
+
             if (!sg1 || !sg2) continue;
-            
+
             // double length1 = segment_track_length(sg1);
             // double length2 = segment_track_length(sg2);
             
@@ -374,15 +374,15 @@ bool PatternAlgorithms::examine_structure_3(Graph& graph, Facade::Cluster& clust
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
 
-            // Get the two segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            auto eit = edge_range.first;
-            SegmentPtr sg1 = graph[*eit].segment;
-            ++eit;
-            SegmentPtr sg2 = graph[*eit].segment;
-            
+            // Get the two segments connected to this vertex, in stable
+            // edge-index order: sg1/sg2 determine the direction of the
+            // merged replacement segment.
+            auto sorted_edges_2 = sorted_out_edges(vd, graph);
+            SegmentPtr sg1 = graph[sorted_edges_2[0]].segment;
+            SegmentPtr sg2 = graph[sorted_edges_2[1]].segment;
+
             if (!sg1 || !sg2) continue;
-            
+
             // Get the other vertices (endpoints)
             VertexPtr vtx1 = find_other_vertex(graph, sg1, vtx);
             VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
@@ -1104,11 +1104,12 @@ void PatternAlgorithms::examine_segment(Graph& graph, Facade::Cluster& cluster, 
         if (!vtx->descriptor_valid()) continue;
         
         auto vd = vtx->get_descriptor();
-        auto edge_range = boost::out_edges(vd, graph);
-        
+
+        // Stable edge-index order: the dedup below keeps the FIRST segment of
+        // each endpoint pair, so which duplicate survives depends on order.
         std::vector<SegmentPtr> tmp_segments;
-        for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+        for (auto edesc : sorted_out_edges(vd, graph)) {
+            SegmentPtr sg = graph[edesc].segment;
             if (sg) tmp_segments.push_back(sg);
         }
         
@@ -1387,12 +1388,13 @@ bool PatternAlgorithms::examine_vertices_1(Graph&graph, Facade::Cluster&cluster,
         if (boost::degree(vd_cur, graph) != 2) continue;
 
         // Get the two connected segments and cache their neighbor vertices,
-        // avoiding redundant find_other_vertex calls later.
+        // avoiding redundant find_other_vertex calls later.  Stable
+        // edge-index order: the loop below merges at the FIRST qualifying
+        // segment.
         std::vector<std::pair<SegmentPtr, VertexPtr>> seg_vtx_pairs;
-        auto [ebegin, eend] = boost::out_edges(vd_cur, graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr seg = graph[*eit].segment;
-            if (seg) seg_vtx_pairs.emplace_back(seg, graph[boost::target(*eit, graph)].vertex);
+        for (auto edesc : sorted_out_edges(vd_cur, graph)) {
+            SegmentPtr seg = graph[edesc].segment;
+            if (seg) seg_vtx_pairs.emplace_back(seg, graph[boost::target(edesc, graph)].vertex);
         }
         
         if (seg_vtx_pairs.size() != 2) continue;
@@ -1533,13 +1535,14 @@ bool PatternAlgorithms::examine_vertices_2(Graph&graph, Facade::Cluster&cluster,
             // Remove the segment between v1 and v2
             remove_segment(graph, sg);
             
-            // Collect all segments connected to v2 (excluding the one we just removed)
+            // Collect all segments connected to v2 (excluding the one we just
+            // removed).  Stable edge-index order: each is replaced by a NEW
+            // segment below, assigning new graph indices in this order.
             std::vector<SegmentPtr> v2_segments;
             if (v2->descriptor_valid()) {
                 auto vd2 = v2->get_descriptor();
-                auto [ebegin2, eend2] = boost::out_edges(vd2, graph);
-                for (auto eit2 = ebegin2; eit2 != eend2; ++eit2) {
-                    SegmentPtr seg2 = graph[*eit2].segment;
+                for (auto edesc : sorted_out_edges(vd2, graph)) {
+                    SegmentPtr seg2 = graph[edesc].segment;
                     if (seg2) {
                         v2_segments.push_back(seg2);
                     }
@@ -1704,9 +1707,11 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
     // Snapshot all segments before iterating — the loop body calls remove_segment/add_segment
     // which would invalidate boost::edges iterators (even with listS storage the removed
     // edge's list node is freed, making the live iterator dangle on the next ++eit).
+    // Stable edge-index order: the first passing segment triggers a merge and
+    // restart, so iteration order is a topology decision.
     std::vector<SegmentPtr> all_segments;
-    for (auto [eit, eend] = boost::edges(graph); eit != eend; ++eit) {
-        SegmentPtr s = graph[*eit].segment;
+    for (const auto& ed : ordered_edges(graph)) {
+        SegmentPtr s = graph[ed].segment;
         if (s && s->cluster() == &cluster) all_segments.push_back(s);
     }
 
@@ -1758,11 +1763,12 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 // Get v2 position
                 Facade::geo_point_t vtx_new_point = v2->wcpt().point;
                 
-                // Collect segments connected to v1 (except sg)
+                // Collect segments connected to v1 (except sg).  Stable
+                // edge-index order: each is removed and re-added below,
+                // assigning NEW graph indices in this order.
                 std::vector<SegmentPtr> v1_segments;
-                auto [e1begin, e1end] = boost::out_edges(vd1, graph);
-                for (auto e1it = e1begin; e1it != e1end; ++e1it) {
-                    SegmentPtr sg1 = graph[*e1it].segment;
+                for (auto edesc : sorted_out_edges(vd1, graph)) {
+                    SegmentPtr sg1 = graph[edesc].segment;
                     if (sg1 && sg1 != sg) {
                         v1_segments.push_back(sg1);
                     }
@@ -1906,11 +1912,12 @@ bool PatternAlgorithms::examine_vertices_4(Graph&graph, Facade::Cluster&cluster,
                 // Get v1 position
                 Facade::geo_point_t vtx_new_point = v1->wcpt().point;
                 
-                // Collect segments connected to v2 (except sg)
+                // Collect segments connected to v2 (except sg).  Stable
+                // edge-index order: each is removed and re-added below,
+                // assigning NEW graph indices in this order.
                 std::vector<SegmentPtr> v2_segments;
-                auto [e2begin, e2end] = boost::out_edges(vd2, graph);
-                for (auto e2it = e2begin; e2it != e2end; ++e2it) {
-                    SegmentPtr sg1 = graph[*e2it].segment;
+                for (auto edesc : sorted_out_edges(vd2, graph)) {
+                    SegmentPtr sg1 = graph[edesc].segment;
                     if (sg1 && sg1 != sg) {
                         v2_segments.push_back(sg1);
                     }
@@ -2173,13 +2180,14 @@ void PatternAlgorithms::examine_partial_identical_segments(Graph& graph, Facade:
             
             // If significant overlap found (>5cm), split the vertex
             if (max_dis > 5.0 * units::cm) {
-                // Find closest existing vertex to max_point
+                // Find closest existing vertex to max_point.  Stable
+                // node-index order: min_vertex is a tie-broken argmin that
+                // becomes a merge target.
                 double min_dis = 1e9;
                 VertexPtr min_vertex = nullptr;
-                
-                auto [vbegin2, vend2] = boost::vertices(graph);
-                for (auto vit2 = vbegin2; vit2 != vend2; ++vit2) {
-                    VertexPtr vtx1 = graph[*vit2].vertex;
+
+                for (const auto& nd2 : ordered_nodes(graph)) {
+                    VertexPtr vtx1 = graph[nd2].vertex;
                     if (!vtx1 || vtx1->cluster() != &cluster) continue;
                     
                     Facade::geo_point_t vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
@@ -2657,15 +2665,15 @@ bool PatternAlgorithms::examine_structure_final_1(Graph& graph, VertexPtr main_v
             auto vd = vtx->get_descriptor();
             if (boost::degree(vd, graph) != 2) continue;
             
-            // Get the two segments connected to this vertex
-            auto edge_range = boost::out_edges(vd, graph);
-            auto eit = edge_range.first;
-            SegmentPtr sg1 = graph[*eit].segment;
-            ++eit;
-            SegmentPtr sg2 = graph[*eit].segment;
-            
+            // Get the two segments connected to this vertex, in stable
+            // edge-index order: sg2 is the duplicate that gets removed below,
+            // so the survivor must not depend on pointer order.
+            auto sorted_edges_2 = sorted_out_edges(vd, graph);
+            SegmentPtr sg1 = graph[sorted_edges_2[0]].segment;
+            SegmentPtr sg2 = graph[sorted_edges_2[1]].segment;
+
             if (!sg1 || !sg2) continue;
-            
+
             // Check if segments have identical endpoints (same start and end points)
             const auto& wcpts1 = sg1->wcpts();
             const auto& wcpts2 = sg2->wcpts();
@@ -2765,13 +2773,12 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
     auto vd = main_vertex->get_descriptor();
     if (boost::degree(vd, graph) != 2) return flag_update;
     
-    // Get the two segments connected to main_vertex
-    auto edge_range = boost::out_edges(vd, graph);
-    auto eit = edge_range.first;
-    SegmentPtr sg1 = graph[*eit].segment;
-    ++eit;
-    SegmentPtr sg2 = graph[*eit].segment;
-    
+    // Get the two segments connected to main_vertex, in stable edge-index
+    // order: sg1/sg2 roles feed the merge decision below.
+    auto sorted_edges_2 = sorted_out_edges(vd, graph);
+    SegmentPtr sg1 = graph[sorted_edges_2[0]].segment;
+    SegmentPtr sg2 = graph[sorted_edges_2[1]].segment;
+
     if (!sg1 || !sg2) return flag_update;
     
     // Get main vertex position
@@ -2873,9 +2880,9 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             std::vector<SegmentPtr> vtx_segments;
             if (vtx->descriptor_valid()) {
                 auto vtx_vd = vtx->get_descriptor();
-                auto [vtx_ebegin, vtx_eend] = boost::out_edges(vtx_vd, graph);
-                for (auto vtx_eit = vtx_ebegin; vtx_eit != vtx_eend; ++vtx_eit) {
-                    SegmentPtr seg = graph[*vtx_eit].segment;
+                // Stable edge-index order: re-adds below assign new indices.
+                for (auto edesc : sorted_out_edges(vtx_vd, graph)) {
+                    SegmentPtr seg = graph[edesc].segment;
                     if (seg && seg != sg1) {
                         vtx_segments.push_back(seg);
                     }
@@ -2971,9 +2978,9 @@ bool PatternAlgorithms::examine_structure_final_1p(Graph& graph, VertexPtr main_
             std::vector<SegmentPtr> vtx_segments;
             if (vtx->descriptor_valid()) {
                 auto vtx_vd = vtx->get_descriptor();
-                auto [vtx_ebegin, vtx_eend] = boost::out_edges(vtx_vd, graph);
-                for (auto vtx_eit = vtx_ebegin; vtx_eit != vtx_eend; ++vtx_eit) {
-                    SegmentPtr seg = graph[*vtx_eit].segment;
+                // Stable edge-index order: re-adds below assign new indices.
+                for (auto edesc : sorted_out_edges(vtx_vd, graph)) {
+                    SegmentPtr seg = graph[edesc].segment;
                     if (seg && seg != sg2) {
                         vtx_segments.push_back(seg);
                     }
@@ -3026,27 +3033,27 @@ bool PatternAlgorithms::examine_structure_final_2(Graph& graph, VertexPtr main_v
         bool flag_update = false;
         
         auto main_vd = main_vertex->get_descriptor();
-        
-        // Loop over all segments connected to main_vertex
-        auto [ebegin, eend] = boost::out_edges(main_vd, graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+
+        // Loop over all segments connected to main_vertex.  Stable edge-index
+        // order: the first neighbor within 2 cm wins (merge + restart).
+        for (auto edesc : sorted_out_edges(main_vd, graph)) {
+            SegmentPtr sg = graph[edesc].segment;
             if (!sg) continue;
-            
+
             // Find the other vertex of this segment
             VertexPtr vtx1 = find_other_vertex(graph, sg, main_vertex);
             if (!vtx1 || !vtx1->descriptor_valid()) continue;
-            
+
             // Skip if either vertex has only 1 connection
             auto vtx1_vd = vtx1->get_descriptor();
             if (boost::degree(vtx1_vd, graph) == 1 || boost::degree(main_vd, graph) == 1) continue;
-            
+
             // Check distance between vertices
             WireCell::Point main_vtx_point = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
             WireCell::Point vtx1_point = vtx1->fit().valid() ? vtx1->fit().point : vtx1->wcpt().point;
-            
+
             double dis = ray_length(Ray{main_vtx_point, vtx1_point});
-            
+
             if (dis < 2.0*units::cm) {
                 // Check if vtx1 can be merged into main_vertex
                 flag_update = true;
@@ -3213,17 +3220,17 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
         bool flag_update = false;
         
         auto main_vd = main_vertex->get_descriptor();
-        
-        // Loop over all segments connected to main_vertex
-        auto [ebegin, eend] = boost::out_edges(main_vd, graph);
-        for (auto eit = ebegin; eit != eend; ++eit) {
-            SegmentPtr sg = graph[*eit].segment;
+
+        // Loop over all segments connected to main_vertex.  Stable edge-index
+        // order: the first neighbor within 2.5 cm wins (merge + restart).
+        for (auto edesc : sorted_out_edges(main_vd, graph)) {
+            SegmentPtr sg = graph[edesc].segment;
             if (!sg) continue;
-            
+
             // Find the other vertex of this segment
             VertexPtr vtx1 = find_other_vertex(graph, sg, main_vertex);
             if (!vtx1 || !vtx1->descriptor_valid()) continue;
-            
+
             // Skip if vtx1 has only 1 connection
             auto vtx1_vd = vtx1->get_descriptor();
             if (boost::degree(vtx1_vd, graph) == 1) continue;
@@ -3329,10 +3336,10 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                         dis/units::cm);
                     
                     // Collect segments to update
+                    // Stable edge-index order: re-adds below assign new indices.
                     std::vector<SegmentPtr> segments_to_update;
-                    auto [main_ebegin2, main_eend2] = boost::out_edges(main_vd, graph);
-                    for (auto main_eit = main_ebegin2; main_eit != main_eend2; ++main_eit) {
-                        SegmentPtr sg1 = graph[*main_eit].segment;
+                    for (auto edesc : sorted_out_edges(main_vd, graph)) {
+                        SegmentPtr sg1 = graph[edesc].segment;
                         if (sg1 && sg1 != sg) {
                             segments_to_update.push_back(sg1);
                         }
@@ -3440,10 +3447,10 @@ bool PatternAlgorithms::examine_structure_final_3(Graph& graph, VertexPtr main_v
                     }
                     
                     // Reconnect segments from vtx1 to main_vertex (except sg)
+                    // Stable edge-index order: re-adds below assign new indices.
                     std::vector<SegmentPtr> vtx1_segments;
-                    auto [vtx1_ebegin2, vtx1_eend2] = boost::out_edges(vtx1_vd, graph);
-                    for (auto vtx1_eit = vtx1_ebegin2; vtx1_eit != vtx1_eend2; ++vtx1_eit) {
-                        SegmentPtr sg1 = graph[*vtx1_eit].segment;
+                    for (auto edesc : sorted_out_edges(vtx1_vd, graph)) {
+                        SegmentPtr sg1 = graph[edesc].segment;
                         if (sg1 && sg1 != sg) {
                             vtx1_segments.push_back(sg1);
                         }

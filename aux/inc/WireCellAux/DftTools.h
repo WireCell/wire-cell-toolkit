@@ -94,6 +94,13 @@ namespace WireCell::Aux::DftTools {
     real_vector_t inv_c2r(const IDFT::pointer& dft, const complex_vector_t& spec);
     real_array_t inv_c2r(const IDFT::pointer& dft, const complex_array_t& spec, int axis);
 
+    // True real-optimized 1D transforms via IDFT::fwd_r2c_1d /
+    // inv_c2r_1d.  Equal to fwd_r2c / inv_c2r above only up to
+    // round-off; about half the flops and transform memory for
+    // backends with native real transforms (FftwDFT).
+    complex_vector_t fwd_r2c_real(const IDFT::pointer& dft, const real_vector_t& wave);
+    real_vector_t inv_c2r_real(const IDFT::pointer& dft, const complex_vector_t& spec);
+
 
     /// Convolve in1 and in2 via DFT.  Returned vecgtor has size sum
     /// of sizes of in1 and in2 less one element in order to assure no

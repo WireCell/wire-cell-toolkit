@@ -1084,7 +1084,13 @@ void OmnibusSigProc::rebase_waveform(Eigen::Ref<Array::array_xxf> arr,const int&
                 const float p16 = WireCell::Waveform::percentile_binned(signal, 0.5 - 0.34);
                 const float p50 = WireCell::Waveform::percentile_binned(signal, 0.5);
                 const float p84 = WireCell::Waveform::percentile_binned(signal, 0.5 + 0.34);
-                const float sigma = sqrt((pow(p84 - p50, 2) + pow(p50 - p16, 2)) / 2.);
+                // sigma = the cleaner (smaller) half-spread.  One-sided signal
+                // inflates only its own side, so min() stays a noise-only scale
+                // and the mask stays tight under a long bright pulse; a
+                // symmetric RMS of both half-spreads would be inflated there
+                // and let the signal bias the anchor (an over-subtraction that
+                // drove prolonged collection tails negative before decon).
+                const float sigma = std::min(p84 - p50, p50 - p16);
                 const float cut = m_rebase_nsigma * sigma;
                 const int min_count = n_bins / 4;
 

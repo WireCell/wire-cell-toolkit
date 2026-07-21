@@ -26,6 +26,14 @@ according to their scope of use.
 
 - [[./test/]] :: follows [[file:../../test/README.org][WCT testing]] conventions and of course with an emphasis on [[file:../../test/docs/jsonnet.org][Jsonnet tests]].
 
+** Omni interface
+
+A trial common interface exists in as ~omni.jsonnet~ files.
+
+- ~cfg/pgrapher/omni.jsonnet~ :: Provide an "omni detector map" ~{ <name>: <omni> }~ lookup for individual "omni objects".
+- ~cfg/pgrapher/experiment/<name>/omni.jsonnet~ :: the omni object for an experiment or an array of omni object for variants.
+
+See top-level file [[file:./omni.jsonnet][omni.jsonnet]] for details.
 
 * Guidelines for developing specific configuration
 

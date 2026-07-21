@@ -51,6 +51,17 @@ see `qlmatching-code.md` §4.4 and [[project_ql_organize_doublecount_bug]].
 what keeps the pointer-keyed map iteration deterministic when one node processes
 both APAs (see [[project_ql_matching_pointer_nondeterminism]]).
 
+**Output is grouping-preserving.** After the per-APA fits, `operator()` calls
+`recompose_cluster_groups` (the inverse of `decompose_cluster_groups`) on each run
+before assembling the output tensors: it merges every group's associated
+sub-clusters back into their main via `Grouping::merge`, so the emitted cluster
+tree matches the stage-3 input — `QLMatching` only annotates T0/flash, it does not
+re-cluster. The `decompose` split exists only to anchor each bundle's geometry on
+its main; left in the output it leaked into the downstream all-TPC clustering and
+split already-merged clusters (PDHD stage 4 has no flash-T0 merge to re-absorb it).
+See [`pdhd/docs/qlmatching-chain.md`](../../pdhd/docs/qlmatching-chain.md)
+§group-aware-matching.
+
 ### Step 2 — `QLMatching` becomes a multi-APA fanin (default off)
 `QLMatching` is now an `ITensorSetFanin` (was `ITensorSetFilter`) with a
 configurable multiplicity = number of configured anodes.

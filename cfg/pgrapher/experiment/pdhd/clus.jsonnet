@@ -16,10 +16,25 @@ local clus = import "pgrapher/common/clus.jsonnet";
 //     activity maps behind the anode and the points stay consistent with the
 //     (offset-free) imaging frame.  Restore a real value once a T0
 //     measurement exists.
+//   trigger_offset: per-event readout-vs-trigger offset (the opflash metadata
+//     offset_us, ~250us) applied DOWNSTREAM rather than baked into x_raw -- with
+//     time_offset=0 here the raw imaging x stays offset-free, and T0Correction
+//     (x_t0cor scope) adds (cluster_t0 + trigger_offset) so the flash-matched
+//     charge lands on the trigger time base.  QLMatching folds the same value into
+//     its matching geometry.  Default 0 => x_t0cor unchanged (bit-identical).
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
-          time_offset=0 * wc.us)
+          time_offset=0 * wc.us, trigger_offset=0 * wc.us)
 
-local drift_speed = 1.6 * wc.mm / wc.us;
+// Calibrated from PDHD data.  1.565 = anode->cathode crossing-track x-span midpoint
+// [~1.55 over-merge, ~1.57 truncation]; 1.585 = first cathode-end pass on two evt-983
+// crossers.  n=4 evt-983 crossers then showed 1.585 over-shoots the cathode (3 of 4
+// ends +0.9..+2.9 cm past it); the four ends hold a fixed ~3.5 cm spread (irreducible
+// t0/velocity/SCE residual), so v only slides the centroid.  1.576 puts the most-
+// overshooting crosser just INSIDE the cathode (clus62 +0.84 cm), so the QLMatching
+// cathode_ext1 containment edge reverts to ~the C++ default (1.5 cm) and the undershoot
+// residual lands on the benign flag window (cathode_ext2 -2.0->-3.0).  MUST match
+// params.lar.drift_speed (QLMatching + img dump read that).  See pdhd/docs/clustering-algorithm.md.
+local drift_speed = 1.576 * wc.mm / wc.us;
 
 local initial_index = "0";
 local index = std.parseInt(initial_index);
@@ -63,6 +78,7 @@ local dvm = {
         tick: 0.5 * wc.us,  // 0.5 mm per tick
         tick_drift: self.drift_speed * self.tick,
         time_offset: time_offset,
+        trigger_offset: trigger_offset,
         nticks_live_slice: 4,
         FV_xmin: -3579.85 * wc.mm,
         FV_xmax: -25.4 * wc.mm,
@@ -464,7 +480,21 @@ local clus_per_group (
         cm.examine_x_boundary(),
         cm.neutrino(protect_iso_band=true),
         cm.isolated(),
-        cm.examine_bundles(),
+        // examine_bundles() DISABLED at the per-drift-group stage (2026-06-14).
+        // It rewrites the "isolated"/"perblob" array, splitting a cluster into a
+        // main spine (-1) + associated sub-clusters at connectivity gaps (e.g. where
+        // `separate` carved out a crossing cosmic).  QLMatching then reads that array
+        // and matches/flags on the MAIN sub-cluster only -- so a track whose anode end
+        // sits in an associated sub-cluster (e.g. run27305 evt150 cluster 386) is
+        // never flagged at_x_boundary / close_to_PMT even though the full track reaches
+        // the anode.  With this commented out, the perblob comes from `isolated` (no -1
+        // main), so QLMatching leaves the cluster whole (decompose_cluster_groups: a
+        // perblob with no -1 is a single component -> no split) and computes the
+        // boundary flags over the FULL track.  Cluster grouping is unchanged (at this
+        // stage examine_bundles only rewrites perblob, never cluster membership;
+        // use_flash_t0=false so its flash-time merge is skipped).  Re-enable later in
+        // the all-TPC stage if the main/associated structure is needed there.
+        // cm.examine_bundles(),
     ],
 
     local mabc = g.pnode({
@@ -535,6 +565,8 @@ local clus_all_tpc (
     runNo = 1,
     subRunNo = 1,
     eventNo = 1,
+    save_opflash = false,
+    premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
     ) = {
     local pcmerging = g.pnode({
         type: "PointTreeMerging",
@@ -565,14 +597,27 @@ local clus_all_tpc (
     local cm_pipeline = [
         cm_old.switch_scope(),
 
-        // Cathode-crossing connector (SBND-tuned parameters as placeholder;
-        // PDHD central cathode is at x=0, the C++ default cathode_x —
-        // dimensions to be confirmed).  use_flash_t0=false because PDHD has
-        // no flash matching (the flash-coincidence gate would veto every
-        // pair).
+        // Cathode-crossing connector.  PDHD central cathode is at x=0 (the C++
+        // default cathode_x).  QLMatching runs BEFORE this all-TPC stage (see the
+        // premerged=false note above), so every cluster carries its matched
+        // cluster_t0 + "flash" scalar here: use_flash_t0=true gates pairs on
+        // flash-time coincidence (flash_t0_window=1us, matching the ql_scan
+        // cross-side coincidence window) so only same-crossing halves can merge.
+        // tip_touch_cut=3cm: when the two cathode tips nearly touch, drop the
+        // cc_pca connection-alignment term in the both-long PCA branch (over a
+        // ~1cm gap that vector is sub-cm-jitter noise, ~perpendicular even for a
+        // genuine crosser) and accept on PCA collinearity alone -- recovers
+        // same-flash crossers like run29107 evt983 cl36<->cl89.
+        // tip_touch_angle_cut=12deg: in the same tip-touch branch, also accept when
+        // the LOCAL (charge-weighted Hough) arms are collinear within 12deg even if a
+        // curved half inflates the GLOBAL PCA above angle_cut (10deg) -- recovers
+        // run29107 evt991 cl26<->cl67 (global 15deg, Hough 10deg); the Hough still
+        // rejects oblique/perpendicular touchers (49/90deg).
         cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
                            min_length_short=2*wc.cm, short_dir_len=25*wc.cm,
-                           conn_short_cut=30.0, use_flash_t0=false),
+                           conn_short_cut=30.0, tip_touch_cut=3*wc.cm,
+                           tip_touch_angle_cut=12.0,
+                           use_flash_t0=true, flash_t0_window=1*wc.us),
         #cm.retile(cut_time_low=3*wc.us,
         #          cut_time_high=5*wc.us,
         #          anodes=anodes,
@@ -605,6 +650,33 @@ local clus_all_tpc (
             subRunNo: subRunNo,
             eventNo: eventNo,
             save_deadarea: true,
+            // Dump the optical "op" bee instance (measured flash PE + Q/L
+            // predicted PE per matched cluster) at the pre-pipeline point.
+            // Needs do_qlmatch (the QLMatching "opflash" root PC); no-op
+            // otherwise.  Default false => bit-identical.
+            save_opflash: save_opflash,
+            // Emit one "op" row per flash carrying ALL its matched cluster ids
+            // (summed predicted PE), so a flash matched to several clusters shows
+            // them together instead of one row per cluster (SBND parity).
+            bee_flash_per_flash: true,
+            // Pair the two per-side flashes of a cathode-crosser within this time
+            // window and stash a per-flash "op_flash_group" array on the root
+            // opflash PC.  PDHD's opaque cathode makes a crosser scintillate
+            // independently in each volume -> TWO coincident per-side flashes, each
+            // matched as its own cluster half; the Bee viewer shows the pair as one
+            // group (one physical event).  Grouping is MATCHED-ONLY and closest-pair:
+            // only flashes with a matched cluster are eligible, and within each
+            // window-coincident neighborhood just the single closest cross-side pair
+            // (one per side) is grouped (see store_flash_groups).  1 us matches the
+            // ql_scan hand-scan tool's cross-side window; the matched-only + closest-
+            // pair logic keeps the wide window from merging unrelated busy-event
+            // flashes.  0 = off (no column => bit-identical ungrouped display).
+            flash_group_window: 1 * wc.us,
+            // Greedy disjoint pairing: when two distinct close crossers fall in one
+            // window-coincident neighborhood, group BOTH closest cross-side pairs
+            // instead of just the single closest one.  Default false (one pair per
+            // neighborhood); true here so a second real crosser pair is not dropped.
+            flash_group_greedy: true,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PD anode face
             dead_apa_groups: apa_drift_groups,  // group dead area by drift side -> 2 dead instances
             anodes: [wc.tn(a) for a in anodes],
@@ -623,23 +695,32 @@ local clus_all_tpc (
                     detector: "protodunehd",         // Detector name
                     algorithm: "clustering",    // Algorithm identifier
                     pcname: "3d",           // Which scope to use
-                    coords: ["x", "y", "z"],    // Coordinates to use (uncorrected; x_t0cor needs flash-associated t0)
+                    // T0-corrected drift coords (x_t0cor = x_raw - dirx*(cluster_t0 +
+                    // trigger_offset)*drift_speed), materialised by switch_scope above from
+                    // the QLMatching cluster_t0.  SBND parity (sbnd clus.jsonnet clus_all_apa
+                    // uses common_corr_coords for its clustering-global set).  A matched
+                    // cluster is drawn at its flash drift position; an UNMATCHED cluster
+                    // (cluster_t0=-1e12) lands far outside the volume, fails the containment
+                    // filter (scope_filter=false) and is dropped here -- it still appears in
+                    // img-global (raw, below).
+                    coords: common_corr_coords,
                     individual: false            // Output individual APA/Face
                 },
             {
-                    // name "img" dumps the live grouping BEFORE the all-TPC
-                    // pipeline -> the per-drift-group clustering result (stage
-                    // 3), grouped by drift side: clustering-group02 /
-                    // clustering-group13.  The "clustering" set above (end
-                    // dump) gives clustering-global (full-detector
-                    // clustering).
+                    // The hard-coded "img" name is MABC's pre-pipeline hook: this
+                    // set is dumped from the live grouping BEFORE the all-TPC
+                    // clustering pipeline runs -- i.e. the raw imaged charge (the
+                    // per-APA matched clusters).  With no apa_groups it is dumped
+                    // whole -> img-global (cf. SBND clus.jsonnet).  The "clustering"
+                    // set above (post-pipeline) gives clustering-global.  (This hook
+                    // can host only one set; emitting img-global here replaces the
+                    // former per-drift-side stage-3 clustering-group02/13 dump.)
                     name: "img",
                     detector: "protodunehd",
-                    algorithm: "clustering",    // -> clustering-group02 / clustering-group13
+                    algorithm: "img",           // -> img-global (raw imaged charge)
                     pcname: "3d",
                     coords: ["x", "y", "z"],
                     individual: false,
-                    apa_groups: apa_drift_groups,
                 }
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -658,7 +739,10 @@ local clus_all_tpc (
     local end = if dump
     then g.pipeline([mabc, sink])
     else g.pipeline([mabc]),
-    ret :: g.intern(
+    // premerged: the upstream joint QLMatching node already emits ONE merged tree, so
+    // feed mabc directly (its single input is the all-TPC stage's input).  Else merge the
+    // ngroups per-side outputs through PointTreeMerging first (historical path).
+    ret :: if premerged then end else g.intern(
         innodes = [pcmerging],
         centernodes = [],
         outnodes = [end],
@@ -674,5 +758,8 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_apa(anode, dump=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
     per_group(anodes, group_name, face, dump=true) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
-    all_tpc(anodes, ngroups=2, dump=true) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged),
+    // Expose the DetectorVolumes node builder so the Q/L matching graph can
+    // reference the SAME per-group DV the clustering uses (deterministic by name).
+    detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
 }

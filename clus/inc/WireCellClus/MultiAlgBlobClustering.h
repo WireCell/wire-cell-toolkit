@@ -174,6 +174,13 @@ namespace WireCell::Clus {
         // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence
         // together.  Default 0 = off, output bit-identical; set for SBND all-APA.
         double m_flash_group_window{0.0};
+        // Flash-pair grouping policy when several matched flashes coincide within
+        // the window.  false (default) = ONE closest cross-side pair per
+        // coincidence neighborhood, the rest left solo.  true = GREEDY disjoint
+        // pairs: repeatedly take the next-closest available cross-side pair, so
+        // two distinct close crossers in one neighborhood both group.  Default
+        // false keeps the grouped output bit-identical to the one-pair policy.
+        bool m_flash_group_greedy{false};
         Bee::Flashes m_bee_flash;
         void fill_bee_flashes(const Facade::Grouping& grouping);
 
