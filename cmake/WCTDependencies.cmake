@@ -161,7 +161,20 @@ function(_wct_provide tok)
   set(WCT_EXTERNAL_FOUND "${WCT_EXTERNAL_FOUND}" CACHE INTERNAL "")
 endfunction()
 
+# Record a token as unavailable.  A token reaches here for one of two reasons:
+# it was never requested (an AUTO probe came up empty, or an opt-in was left off
+# => SKIP), which is fine and simply drops the optional dependency; or it was
+# explicitly requested (WITH_<tok>=on/yes/<path> => REQUIRE) but could not be
+# satisfied, which is a configuration error -- the user asked for something we
+# cannot provide, so fail loudly rather than silently continuing without it.
+# _wct_mode is set by _wct_intent(tok), which every optional handler calls
+# before this, and is readable here from the enclosing scope.
 function(_wct_missing tok)
+  if(_wct_mode STREQUAL "REQUIRE")
+    message(FATAL_ERROR
+      "${tok} was explicitly requested (WITH_${tok}=\"${WITH_${tok}}\") "
+      "but could not be found")
+  endif()
   set(WCT_HAVE_${tok} FALSE CACHE INTERNAL "WCT has ${tok}")
   list(APPEND WCT_EXTERNAL_MISSING ${tok})
   list(REMOVE_DUPLICATES WCT_EXTERNAL_MISSING)
@@ -323,9 +336,7 @@ function(_wct_opt_findlib tok header)
   if(_ok)
     _wct_provide(${tok} LINK "${_libs}" INCLUDE "${_inc}")
   else()
-    if(_wct_mode STREQUAL "REQUIRE")
-      message(FATAL_ERROR "${tok} requested but not found")
-    endif()
+    # _wct_missing() fails hard when _wct_mode is REQUIRE (see its definition).
     _wct_missing(${tok})
   endif()
 endfunction()

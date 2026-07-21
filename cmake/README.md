@@ -1,10 +1,14 @@
 # Building Wire-Cell Toolkit with CMake
 
-This directory holds a modern-CMake build for the Wire-Cell Toolkit that runs
-**in parallel to the waf (`./wcb`) build**.  It does not replace waf and makes
-no changes to `wscript`, `*/wscript_build` or `waft/*`.
+This directory holds support files for a modern-CMake build for the Wire-Cell
+Toolkit.
 
-The commands below assume you work from a directory that contains:
+The CMake build is an alternative to the waf build (`./wcb`).  The two are fully
+independent.  For now, the waf build is still "official" while the CMake build
+may become so in the future.
+
+This document describes how to exercise the CMake build.  It assumes you work
+from a directory that contains:
 
 ```
 .
@@ -13,13 +17,9 @@ The commands below assume you work from a directory that contains:
 └── local/     # install prefix of the external dependencies (Boost, ROOT, ...)
 ```
 
-`local/` is the prefix where WCT's dependencies are installed; it is passed to
-CMake as `CMAKE_PREFIX_PATH` so `find_package`/`pkg-config` locate them.  Keep
-the CMake `build/` directory distinct from any `toolkit/build/` used by waf.
+Adjust `CMAKE_PREFIX_PATH` if your dependencies are not provided at `local/`.
 
-> Throughout, `"$PWD/local"` is the dependency prefix.  Use an absolute path
-> (CMake resolves relative `CMAKE_PREFIX_PATH` against each project, not your
-> shell's CWD).
+
 
 ## 1. Configure
 
@@ -31,26 +31,43 @@ cmake -S toolkit -B build -DCMAKE_PREFIX_PATH="$PWD/local"
 
 ### Ninja
 
+Using `ninja` can be faster than `make`. 
+
 ```bash
 cmake -S toolkit -B build -G Ninja -DCMAKE_PREFIX_PATH="$PWD/local"
 ```
 
-The configure step prints the detected version/build-mode, the C++ standard,
-and which dependencies and packages were found, e.g.:
+You may need to add `--fresh` if you get complaint about CMake cache.
+
+### What to look for
+
+Pay attention to the configure step output as it tells you want parts of WCT
+will and will not be built.
 
 ```
--- Wire-Cell Toolkit 0.35.0-337-g0447d488 [triplet 0.35.0]
---   build mode      : release (strict warnings)
--- WCT dependencies found  : SPDLOG;BOOST;FFTW;EIGEN;...
--- WCT packages configured: util;iface;aux;gen;...;tbb;hio
+-- WCT dependencies found  : SPDLOG;BOOST;FFTW;EIGEN;DYNAMO;JSONCPP;JSONNET;ZLIB;BZIP2;PTHREAD;FFTWTHREADS;GLPK;TBB;HDF5;PROTOBUF;PYTHON
+-- WCT optional deps absent: ZMQ;CZMQ;ZYRE;ZIO;GRPC;TRITON;ROOTSYS;LIBTORCH;CUDA;KOKKOS;BACKTRACE
+-- Generated WireCellUtil/BuildConfig.h (version cmake-build-0.35.0-904-g6ad16499)
+-- WCT package 'zio' disabled (missing dependency: ZMQ;CZMQ;ZYRE;ZIO)
+-- WCT package 'triton' disabled (missing dependency: GRPC;TRITON)
+-- WCT package 'pytorch' disabled (missing dependency: LIBTORCH)
+-- WCT package 'root' disabled (missing dependency: ROOTSYS)
+-- WCT package 'cuda' disabled (missing dependency: CUDA)
+-- WCT packages configured: util;iface;aux;gen;sigproc;sig;img;pgraph;sio;quickhull;pyutil;clus;match;apps;test;cfg;docs;tbb;hio
+-- Wire-Cell Toolkit cmake-build-0.35.0-904-g6ad16499 [triplet 0.35.0]
+--   build mode      : development (relaxed warnings)
+--   C++ standard    : c++17
+--   build type      : RelWithDebInfo
+--   install prefix  : /usr/local
+--   libdir          : lib
+--   spdlog level    : trace (static=ON)
+--   tests           : OFF
 ```
 
 ## 2. Build
 
 ```bash
 cmake --build build -j            # generator-agnostic (Make or Ninja)
-# or, with the Ninja build tree:
-ninja -C build
 ```
 
 Build a single target (library, app, or test):
@@ -60,8 +77,11 @@ cmake --build build -j --target WireCellUtil
 cmake --build build -j --target wire-cell
 ```
 
-Shared libraries are collected under `build/lib/`; applications
-(`wire-cell`, `wcsonnet`, `wcwires`, ...) under their package build dirs.
+To list build targets:
+
+```bash
+cmake --build build -j --target help
+```
 
 ## 3. Common options
 
@@ -93,9 +113,19 @@ family of `WITH_*` cache options that mirror waf's
 | `WITH_<TOKEN>_LIB` | `--with-name-lib` | library dir(s) (comma list), overrides `<prefix>/lib` |
 | `WITH_<TOKEN>_LIBS` | `--with-name-libs` | exact library name(s) (comma list), overrides the built-in default |
 
-`WITH_<TOKEN>` alone behaves like waf: empty means auto (mandatory deps are
-required, ordinary optional deps are probed quietly); `no` disables; `yes`
-requires; a path is used as an install-prefix search hint and requires the dep.
+You only need to specify a `WITH_<TOKEN>` if:
+
+- auto-detection fails on a required dependency.
+- to force an optional dependency to be used.
+
+`WITH_<TOKEN>` can take these values:
+
+- empty or unstated means "auto" (mandatory deps are required, ordinary optional deps are
+probed quietly),
+- `no` disables, 
+- `yes`requires, 
+- a path is used as an install-prefix search hint and requires the dep.
+
 
 ### Discovering every `WITH_*` option
 
@@ -110,16 +140,9 @@ cmake -LH build | grep -B1 '^WITH_'
 `cmake -LAH build` shows all cache variables (including advanced ones); or use
 the interactive `ccmake build` / `cmake-gui build`.
 
-### Boost
-
-Boost is treated **uniformly**, not special-cased — there is no separate set of
-`--boost-*` flags as in waf.  Use `WITH_BOOST=/prefix` (or
-`WITH_BOOST_INCLUDE` / `WITH_BOOST_LIB`) to point at a non-standard Boost.
-Modern Boost ships `BoostConfig.cmake`, which is preferred automatically, so the
-multithreaded/ABI selection waf did with `--boost-mt` is handled by CMake.
-
 ### Fine-grained include/lib locations and exact library names
 
+In rare cases, you may need to explicitly locate include and/or lib directories.
 `WITH_<TOKEN>_INCLUDE` and `WITH_<TOKEN>_LIB` add explicit search dirs (fed to
 `find_package`, `find_library`/`find_path`, and pkg-config), and
 `WITH_<TOKEN>_LIBS` overrides the library name(s) to link.  For example, to link
@@ -139,16 +162,14 @@ cmake -S toolkit -B build \
 
 ### Opt-in dependencies
 
-`WITH_ROOTSYS`, `WITH_CUDA`, `WITH_LIBTORCH`, `WITH_KOKKOS` are *never*
-auto-detected (matching waf's `with_p()` gating); they are used only when their
-`WITH_*` is non-empty.  Their packages (`root`, `cuda`, `pytorch`, ...) are
-gated on the corresponding dependency being found.
+ROOT, CUDA, libtorch, Kokkos and other optional dependencies are not
+auto-detected.  To have WCT use them a non-empty `WITH_*` must be supplied.
 
 ```bash
-# Build with ROOT and CUDA enabled (deps live under local/):
+# Build with ROOT
 cmake -S toolkit -B build -G Ninja \
       -DCMAKE_PREFIX_PATH="$PWD/local" \
-      -DWITH_ROOTSYS=yes -DWITH_CUDA=yes
+      -DWITH_ROOTSYS=yes
 ```
 
 A package whose optional dependency is absent is skipped, and configure says so:
@@ -167,7 +188,7 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Tests carry **labels** that map to the waf test groups; select with `-L`:
+Tests carry **labels** and their tests can be selected with `-L`:
 
 ```bash
 ctest --test-dir build -L atomic       # the test_*/atomic* unit tests
@@ -178,18 +199,21 @@ ctest --test-dir build -R WireCellUtil # by name regex
 ctest --test-dir build -N              # list without running
 ```
 
-`check_*.cxx` programs are built but not run (waf's "check" group).  Run a
-compiled test under a wrapper (mirrors `--testcmd`):
+It is possible to run compiled tests under a wrapper.
 
 ```bash
 cmake -S toolkit -B build -DWCT_WITH_TESTS=ON \
       -DWCT_TEST_LAUNCHER="valgrind;--error-exitcode=1" ...
 ```
 
+The `check_*.cxx` programs are built but not run as tests, per set.  They
+typically require command line options, input/output files or interactivity.
+Run them by hand.
+
 ### Test data
 
 History/report and some atomic tests read a downloaded data repository.  Fetch
-it into `build/tests/` (mirrors waf's data-repo handling):
+it into `build/tests/`:
 
 ```bash
 cmake --build build --target test-data        # download + unpack
