@@ -112,8 +112,9 @@ treat `auto` values as validated-but-unconfirmed.
   exactly (names, shapes `(11276, 3427)` f4 / `(nflash, 313)` f8, tickinfo
   `[t, 500, 0]`, chanmask triplets — first bad channel 546 matches the
   existing data sample).
-- Determinism: two independent full extractions member-hash identical
-  (`hash_archive.py`; opflash rollups `554c6924…`/`307de3f6…`).
+- Determinism: two independent full 48-event extractions member-hash identical
+  (`hash_archive.py`): `frames-dnn.tar.bz2` rollup `46ff819f…` (240 members),
+  opflash rollups `554c6924…`/`307de3f6…`.
 - End-to-end: evt 256587 through unchanged `run_img_evt.sh` +
   `run_ql_evt.sh` (imaging 46 s, QL 32 s, `mabc-all-apa.zip` produced; QL log
   shows `frame_apply_at_caf offset=2048 ns` applied, 15+11 flashes matched).
