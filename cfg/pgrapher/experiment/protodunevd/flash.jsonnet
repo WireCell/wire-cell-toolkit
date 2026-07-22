@@ -209,8 +209,17 @@ local wc = import 'wirecell.jsonnet';
     // charge time base).  Measured per event from the rawwf trigoff tree by
     // run_light_evt.sh and stamped verbatim into the archive metadata for
     // run_clus_evt.sh / QLMatching trigger_offsets.
+    // tail_merge: absorb the split-off LAr slow-tail flash (pdvd doc 23 §7d:
+    // one physical flash cut at the fast/slow boundary by the 1 us binning;
+    // late member = wide cathode-XA tail hits on the seed's own lit PDs).
+    // C++ default false; keys omitted when off => byte-identical pre-fix
+    // config.  On a tail merge the surviving flash keeps the seed's
+    // (fast-peak) time.  Sub-knob C++ defaults: window 3.0 us, min hit
+    // width 1.0 us, PE-dominance fraction 0.7, PE-ratio cap 1.0.
     opflash_finder(name='', offset_us=0, min_fired_pds=2, min_total_pe=10.0,
-                   offset_bot_us=null, offset_top_us=null)::  g.pnode({
+                   offset_bot_us=null, offset_top_us=null,
+                   tail_merge=false, tail_window_us=3.0, tail_min_width_us=1.0,
+                   tail_pe_frac=0.7, tail_pe_ratio=1.0)::  g.pnode({
         type: 'OpFlashFinder',
         name: name,
         data: {
@@ -223,6 +232,11 @@ local wc = import 'wirecell.jsonnet';
             min_fired_pds: min_fired_pds,
             min_total_pe: min_total_pe,
             min_fired_pe: 1.0,
+            [if tail_merge then 'flash_tail_merge']: true,
+            [if tail_merge then 'tail_window_us']: tail_window_us,
+            [if tail_merge then 'tail_min_width_us']: tail_min_width_us,
+            [if tail_merge then 'tail_pe_frac']: tail_pe_frac,
+            [if tail_merge then 'tail_pe_ratio']: tail_pe_ratio,
         } + if offset_bot_us == null && offset_top_us == null then {} else {
             metadata_extra: {
                 offset_bot_us: offset_bot_us,

@@ -230,6 +230,12 @@ namespace {
         int    max_fired = 2;        // later flash fired-PD count cap
         double fired_pe  = 0.5;      // pes[od] >= fired_pe counts as "fired"
         bool   subset_merge = false; // bypass max_fired when lit_j subset of lit_i
+        // Slow-tail merge (independent of `enabled`; criteria OR-ed).
+        bool   tail_merge = false;         // absorb slow-tail flashes into their seed
+        double tail_window_ns = 3000.0;    // = m_tail_window_us * 1000
+        double tail_min_width_ns = 1000.0; // hit is "slow-tail" iff width >= this
+        double tail_pe_frac = 0.7;         // wide+seed-lit PE >= frac * pe_j
+        double tail_pe_ratio = 1.0;        // pe_j <= ratio * pe_i
         // Quality cut applied after construction/refinement (both 0 => no cut).
         int    cut_min_pds = 0;      // drop flash if nPD (>= cut_fired_pe) < this
         double cut_min_pe  = 0.0;    // drop flash if total_pe < this
@@ -250,7 +256,14 @@ namespace {
     // (Chebyshev<=1, same side) of a lit OpDet of i.  Each merge recomputes i
     // via construct_flash, so it cascades: a third flash is tested against the
     // already-grown i.  flashes and refined are kept parallel (same discipline
-    // as remove_late_light).  No-op when !rp.enabled => bit-identical default.
+    // as remove_late_light).
+    //
+    // Independently, the slow-tail merge (rp.tail_merge) absorbs a later flash
+    // whose PE is dominated by wide (>= tail_min_width) hits on OpDets the
+    // seed already lights -- one physical flash whose LAr slow-tail hits were
+    // split off by the OpHit splitter + accumulators (pdvd doc 23 §7d).  A
+    // tail-only merge keeps the seed's time/time_width (scintillation onset).
+    // No-op when !rp.enabled && !rp.tail_merge => bit-identical default.
     void refine_flashes(std::vector<FlashSummary>& flashes,
                         std::vector<std::vector<int>>& refined,
                         const std::vector<Hit>& hits, int nchan,
@@ -258,7 +271,7 @@ namespace {
                         const std::vector<double>& opdet_z,
                         const RefineParams& rp)
     {
-        if (!rp.enabled || flashes.size() < 2) return;
+        if ((!rp.enabled && !rp.tail_merge) || flashes.size() < 2) return;
 
         // Sort flashes (and their hit lists) by time -- the cascade and the
         // window break both need time order, and this must hold even when
@@ -294,39 +307,75 @@ namespace {
                             std::abs(col[oda] - col[odb])) <= 1;
         };
 
+        // With only one mode on, the window break is that mode's window; with
+        // both, the wider one (each gate still applies its own window below).
+        const double break_window = std::max(rp.enabled ? rp.window_ns : 0.0,
+                                             rp.tail_merge ? rp.tail_window_ns : 0.0);
+
         for (size_t i = 0; i < flashes.size(); ++i) {
             std::vector<int> fired_i = fired_pds(flashes[i]);
             size_t j = i + 1;
             while (j < flashes.size()) {
-                if (flashes[j].time - flashes[i].time > rp.window_ns) break;  // sorted => done
+                const double dt = flashes[j].time - flashes[i].time;
+                if (dt > break_window) break;  // sorted => done
 
                 const auto& fj = flashes[j];
-                std::vector<int> fired_j = fired_pds(fj);
 
-                // subset escape: j lights only PDs that i already lights, so it
-                // bypasses the few-PD cap (a tail of an extended bright parent).
-                bool subset = rp.subset_merge;
-                for (int odj : fired_j) {
-                    if (!subset) break;
-                    if (std::find(fired_i.begin(), fired_i.end(), odj) == fired_i.end())
-                        subset = false;
-                }
-                bool ok = (fj.total_pe <= rp.pe_ratio * flashes[i].total_pe)  // dim
-                       && ((int) fired_j.size() >= 1)                         // a real small flash
-                       && (((int) fired_j.size() <= rp.max_fired) || subset); // few PDs (or subset)
-                if (ok) {
-                    for (int odj : fired_j) {  // every lit j adjacent to some lit i
-                        bool near = false;
-                        for (int odi : fired_i)
-                            if (adjacent(odi, odj)) { near = true; break; }
-                        if (!near) { ok = false; break; }
+                bool ok = false;
+                if (rp.enabled && dt <= rp.window_ns) {
+                    std::vector<int> fired_j = fired_pds(fj);
+
+                    // subset escape: j lights only PDs that i already lights, so it
+                    // bypasses the few-PD cap (a tail of an extended bright parent).
+                    bool subset = rp.subset_merge;
+                    for (int odj : fired_j) {
+                        if (!subset) break;
+                        if (std::find(fired_i.begin(), fired_i.end(), odj) == fired_i.end())
+                            subset = false;
+                    }
+                    ok = (fj.total_pe <= rp.pe_ratio * flashes[i].total_pe)   // dim
+                      && ((int) fired_j.size() >= 1)                          // a real small flash
+                      && (((int) fired_j.size() <= rp.max_fired) || subset);  // few PDs (or subset)
+                    if (ok) {
+                        for (int odj : fired_j) {  // every lit j adjacent to some lit i
+                            bool near = false;
+                            for (int odi : fired_i)
+                                if (adjacent(odi, odj)) { near = true; break; }
+                            if (!near) { ok = false; break; }
+                        }
                     }
                 }
 
-                if (ok) {
+                // Slow-tail merge: j's PE dominated by wide hits on OpDets the
+                // seed already lights.  The adjacency grid is NOT consulted.
+                bool tail = false;
+                if (rp.tail_merge && !ok && dt <= rp.tail_window_ns
+                    && fj.total_pe > 0.0
+                    && fj.total_pe <= rp.tail_pe_ratio * flashes[i].total_pe) {
+                    double wide_lit_pe = 0.0;
+                    for (int hidx : refined[j]) {
+                        const auto& h = hits[hidx];
+                        if (h.channel < 0 || h.channel >= nchan) continue;
+                        if (h.width >= rp.tail_min_width_ns &&
+                            flashes[i].pes[h.channel] >= rp.fired_pe)
+                            wide_lit_pe += h.pe;
+                    }
+                    tail = wide_lit_pe >= rp.tail_pe_frac * fj.total_pe;
+                }
+
+                if (ok || tail) {
+                    // A tail merge keeps the seed's time: the flash t0 is the
+                    // scintillation onset (fast peak), not the PE-weighted mean
+                    // that absorbing a 1-2 us slow tail would drag late.
+                    const double seed_time = flashes[i].time;
+                    const double seed_time_width = flashes[i].time_width;
                     refined[i].insert(refined[i].end(),
                                       refined[j].begin(), refined[j].end());
                     flashes[i] = construct_flash(refined[i], hits, nchan, opdet_y, opdet_z);
+                    if (tail && !ok) {
+                        flashes[i].time = seed_time;
+                        flashes[i].time_width = seed_time_width;
+                    }
                     fired_i = fired_pds(flashes[i]);  // i grew: refresh
                     flashes.erase(flashes.begin() + j);
                     refined.erase(refined.begin() + j);
@@ -456,6 +505,11 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["refine_max_fired"] = m_refine_max_fired;
     cfg["refine_fired_pe"] = m_refine_fired_pe;
     cfg["refine_subset_merge"] = m_refine_subset_merge;
+    cfg["flash_tail_merge"] = m_flash_tail_merge;
+    cfg["tail_window_us"] = m_tail_window_us;
+    cfg["tail_min_width_us"] = m_tail_min_width_us;
+    cfg["tail_pe_frac"] = m_tail_pe_frac;
+    cfg["tail_pe_ratio"] = m_tail_pe_ratio;
     cfg["min_fired_pds"] = m_min_fired_pds;
     cfg["min_total_pe"] = m_min_total_pe;
     cfg["min_fired_pe"] = m_min_fired_pe;
@@ -480,6 +534,11 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_refine_max_fired = get(cfg, "refine_max_fired", m_refine_max_fired);
     m_refine_fired_pe = get(cfg, "refine_fired_pe", m_refine_fired_pe);
     m_refine_subset_merge = get(cfg, "refine_subset_merge", m_refine_subset_merge);
+    m_flash_tail_merge = get(cfg, "flash_tail_merge", m_flash_tail_merge);
+    m_tail_window_us = get(cfg, "tail_window_us", m_tail_window_us);
+    m_tail_min_width_us = get(cfg, "tail_min_width_us", m_tail_min_width_us);
+    m_tail_pe_frac = get(cfg, "tail_pe_frac", m_tail_pe_frac);
+    m_tail_pe_ratio = get(cfg, "tail_pe_ratio", m_tail_pe_ratio);
     m_min_fired_pds = get(cfg, "min_fired_pds", m_min_fired_pds);
     m_min_total_pe = get(cfg, "min_total_pe", m_min_total_pe);
     m_min_fired_pe = get(cfg, "min_fired_pe", m_min_fired_pe);
@@ -600,6 +659,11 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     rp.max_fired = m_refine_max_fired;
     rp.fired_pe = m_refine_fired_pe;
     rp.subset_merge = m_refine_subset_merge;
+    rp.tail_merge = m_flash_tail_merge;
+    rp.tail_window_ns = m_tail_window_us * 1000.0;  // us -> WCT ns
+    rp.tail_min_width_ns = m_tail_min_width_us * 1000.0;
+    rp.tail_pe_frac = m_tail_pe_frac;
+    rp.tail_pe_ratio = m_tail_pe_ratio;
     rp.cut_min_pds = m_min_fired_pds;
     rp.cut_min_pe = m_min_total_pe;
     rp.cut_fired_pe = m_min_fired_pe;
