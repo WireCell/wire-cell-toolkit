@@ -142,6 +142,30 @@ function(params) {
             // wrongly kill it). C++ default OFF (multiplier 1.0 => bit-identical); SBND-on.
             lasso_flag_weight: true,
             lasso_boundary_weight: 0.2,
+            // Beam-window flash preference (production operating point adopted
+            // 2026-07-21 after validation round 2; sbnd_xin/docs/
+            // 22_ql-beam-flash-preference.md). A flash inside the corrected BNB
+            // window -- C++ default (0.2, 2.2) us, beam_pref_tlow/thigh -- is
+            // preferred when it competes with a cosmic flash for a cluster:
+            // cull_inconsistent exemption + LASSO L1 down-weight + empty-rescue
+            // steal guard, but ONLY for bundles that could plausibly BE the beam
+            // match (ks <= max_ks AND pred >= min_pred_frac x flash PE; ungated,
+            // the beam flash sweeps up junk bundles and steals true matches).
+            // Validated: zero regression on the 20 hand-scan events, 48/48 sane
+            // beam budgets on the reco1 nueCC sample, ~1 pair/event churn.
+            // C++ defaults OFF/inert (false, 1.0, 1.0, 1e9, 0.0) = pre-adoption
+            // behavior; this block is the SBND-on adoption (NOT byte-identical
+            // to the pre-adoption output -- owner-approved operating point).
+            beam_pref: true,
+            // The window is the EXPERIMENT'S beam gate on corrected flash time
+            // (frame_apply_at_caf) -- set it here per experiment, do not rely
+            // on the C++ default (which happens to equal SBND's BNB window).
+            beam_pref_tlow: 0.2 * wc.us,
+            beam_pref_thigh: 2.2 * wc.us,
+            beam_pref_lasso_weight: 0.5,
+            beam_pref_rescue_scale: 0.2,
+            beam_pref_max_ks: 0.3,
+            beam_pref_min_pred_frac: 0.02,
             // §G per-PMT light-error model (Q/L PE-error study, match/docs): a constant
             // floor (PE) below the knee, fractional above -- larger fractional error at low
             // PE, ->frac at high PE. Applied to BOTH data and sim (conservative for sim, kept
