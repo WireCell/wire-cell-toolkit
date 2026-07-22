@@ -372,6 +372,31 @@ namespace WireCell::Match {
         // likely to survive the strength cutoff.
         bool   m_lasso_flag_weight{false};
         double m_lasso_boundary_weight{0.2};
+        // Beam-window flash preference (SBND reco1 neutrino-candidate steering; see
+        // sbnd_xin/docs case study on evts 246579/116962). When m_beam_pref is on, a
+        // bundle whose flash time lies inside (beam_pref_tlow, beam_pref_thigh):
+        //  - is EXEMPT from the cull_inconsistent "rival kept a high/xtpc-consistent
+        //    bundle" drop, so it reaches the LASSO and competes there (evt 246579:
+        //    the cull removed the beam-flash bundle pre-fit, so the fit never saw
+        //    the beam flash's otherwise-unexplained PE);
+        //  - has its per-column L1 weight multiplied by m_beam_pref_lasso_weight
+        //    (<1 => shrunk less, exactly like lasso_boundary_weight), tilting
+        //    marginal LASSO competitions toward the beam flash (evt 116962).
+        // The xtpc scenario-1 / joint-pin culls are NOT relaxed (geometric
+        // cathode-crossing evidence outranks the time prior). Default OFF
+        // (false / weight 1.0) => bit-identical.
+        bool   m_beam_pref{false};
+        double m_beam_pref_tlow{0.2 * units::us};
+        double m_beam_pref_thigh{2.2 * units::us};
+        double m_beam_pref_lasso_weight{1.0};
+        // Empty-flash rescue steal guard (third beam_pref mechanism): when a
+        // NON-beam empty flash tries to REASSIGN a cluster away from a
+        // beam-window flash, its light metric must beat the current match by
+        // this scale (best_m < current_m * scale), not just strictly. 1.0 =>
+        // the historical strict-better test (evt 246579: the -326.8 us cosmic
+        // re-stole the beam cluster at 0.093 vs 0.406 -- light-better, wrong
+        // physics; scale 0.2 blocks it).
+        double m_beam_pref_rescue_scale{1.0};
 
         // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
         // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
@@ -1206,6 +1231,20 @@ namespace WireCell::Match {
         // window-truncated bundle when m_lasso_flag_weight is on (prototype's flag-based
         // weight), else 1.0. Multiplies the pe-mismatch (+KS) base in both rounds.
         double lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const;
+
+        // Beam-window preference test (m_beam_pref; see the §C knob block above):
+        // true iff the knob is on and the flash time lies inside
+        // (m_beam_pref_tlow, m_beam_pref_thigh). Knob off => always false.
+        bool in_beam_pref_window(const Opflash* f) const
+        {
+            if (!m_beam_pref || !f) return false;
+            const double t = f->get_time();
+            return t > m_beam_pref_tlow && t < m_beam_pref_thigh;
+        }
+        bool in_beam_pref_window(const TimingTPCBundle::pointer& bundle) const
+        {
+            return in_beam_pref_window(bundle->get_flash());
+        }
 
         // Empty-flash light-quality rescue (m_empty_rescue; see §I). snapshot is the
         // full pre-strength-cutoff flash->candidate map; this mutates run.flash_bundles_map

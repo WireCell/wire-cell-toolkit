@@ -338,6 +338,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_pe_mismatch_floor = get(cfg, "pe_mismatch_floor", m_pe_mismatch_floor);
     m_lasso_flag_weight    = get(cfg, "lasso_flag_weight",    m_lasso_flag_weight);
     m_lasso_boundary_weight = get(cfg, "lasso_boundary_weight", m_lasso_boundary_weight);
+    m_beam_pref              = get(cfg, "beam_pref",              m_beam_pref);
+    m_beam_pref_tlow         = get(cfg, "beam_pref_tlow",         m_beam_pref_tlow);
+    m_beam_pref_thigh        = get(cfg, "beam_pref_thigh",        m_beam_pref_thigh);
+    m_beam_pref_lasso_weight = get(cfg, "beam_pref_lasso_weight", m_beam_pref_lasso_weight);
+    m_beam_pref_rescue_scale = get(cfg, "beam_pref_rescue_scale", m_beam_pref_rescue_scale);
 
     m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
@@ -784,6 +789,11 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["pe_mismatch_floor"] = m_pe_mismatch_floor;
     cfg["lasso_flag_weight"]    = m_lasso_flag_weight;
     cfg["lasso_boundary_weight"] = m_lasso_boundary_weight;
+    cfg["beam_pref"]              = m_beam_pref;
+    cfg["beam_pref_tlow"]         = m_beam_pref_tlow;
+    cfg["beam_pref_thigh"]        = m_beam_pref_thigh;
+    cfg["beam_pref_lasso_weight"] = m_beam_pref_lasso_weight;
+    cfg["beam_pref_rescue_scale"] = m_beam_pref_rescue_scale;
 
     cfg["pe_err_floor"]       = m_pe_err_floor;
     cfg["pe_err_frac"]        = m_pe_err_frac;
@@ -2146,6 +2156,17 @@ void QLMatching::cull_inconsistent(ApaRun& run)
         else if (has_keep) {
             for (auto& b : bundles)
                 if (!keep_flag(b)) {
+                    // Beam-window preference: a beam-window flash's bundle survives the
+                    // rival-consistent drop and competes in the LASSO instead (evt 246579:
+                    // the beam flash's PE is unexplained without this bundle, which the
+                    // cull cannot see but the fit can). m_beam_pref off => unchanged.
+                    if (in_beam_pref_window(b)) {
+                        log->debug("QLCULLINC apa{} cluster {} KEEP beam-window bundle flash {} "
+                                   "(beam_pref exempts it from the rival-consistent drop)",
+                                   (int)run.anode->ident(), cluster->ident(),
+                                   b->get_flash()->get_flash_id());
+                        continue;
+                    }
                     to_be_removed.push_back(b);
                     log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
                                "(cluster kept high/xtpc-consistent bundle)",
@@ -2165,11 +2186,15 @@ void QLMatching::cull_inconsistent(ApaRun& run)
 // down-weighted bundle is shrunk less and so more likely to survive the strength cutoff.
 double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const
 {
+    double factor = 1.0;
     if (m_lasso_flag_weight &&
         (bundle->get_flag_at_x_boundary() || bundle->get_flag_close_to_PMT()
          || bundle->get_flag_window_truncated()))
-        return m_lasso_boundary_weight;
-    return 1.0;
+        factor = m_lasso_boundary_weight;
+    // Beam-window preference: shrink a beam-window flash's columns less (composes
+    // with the boundary down-weight). beam_pref off or weight 1.0 => factor unchanged.
+    if (in_beam_pref_window(bundle)) factor *= m_beam_pref_lasso_weight;
+    return factor;
 }
 
 // [Stage 2] First LASSO round, with a per-flash background/light DOF column;
@@ -2955,7 +2980,15 @@ void QLMatching::rescue_empty_flashes(ApaRun& run, const FlashBundlesMap& snapsh
             // a strictly better light match (mF < mX). The guard never removes a better
             // match, so it cannot drop a correct pair on light-confident cases; the
             // tight m_rescue_metric_max bar restricts it to high-confidence rescues.
-            if (!(best_m < mit->second.second)) continue;
+            // Beam-window preference: a NON-beam flash stealing C from a BEAM-window
+            // flash must beat it by the scaled margin (mF < mX * rescue_scale) -- most
+            // beam-vs-cosmic pairs are light-degenerate and the raw metric alone
+            // resteals the beam cluster (evt 246579: 0.093 vs 0.406). beam_pref off or
+            // scale 1.0 => the historical strict-better test, byte-identical.
+            double steal_bar = mit->second.second;
+            if (!in_beam_pref_window(flash) && in_beam_pref_window(mit->second.first))
+                steal_bar *= m_beam_pref_rescue_scale;
+            if (!(best_m < steal_bar)) continue;
             auto* X = mit->second.first;
             auto& xv = run.flash_bundles_map[X];
             xv.erase(std::remove_if(xv.begin(), xv.end(),
