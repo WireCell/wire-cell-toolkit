@@ -8,7 +8,7 @@
 #   - installed WCT file lists (libraries, headers, apps, share, pkgconfig, cmake)
 #   - the generated WireCellUtil/BuildConfig.h  (normalized: version-independent)
 #   - wire-cell-toolkit.pc                       (Libs + Requires set)
-#   - WireCellToolkitConfig.cmake                (the WireCell:: target set)
+#   - the installed CMake package config          (the WireCell:: target set)
 #   - optionally, the test outcomes              (WCT_RUN_TESTS=1)
 #
 # Living under cmake/test/, this file is never processed by the CMake build
@@ -92,10 +92,11 @@ normbc()   { grep -E '^#define (HAVE_|SPDLOG_ACTIVE)' "$1" 2>/dev/null | grep -v
 pc_reqs()  { grep -E '^Requires:' "$1" 2>/dev/null | sed 's/Requires://' | tr ' ,' '\n\n' | grep . | sort; }
 pc_libs()  { grep -E '^Libs:'     "$1" 2>/dev/null | tr ' ' '\n' | grep -E '^-l' | sort; }
 # The set of WireCell:: imported targets *defined* by the installed CMake
-# package.  waf writes one monolithic WireCellToolkitConfig.cmake; the CMake
-# build splits definitions across Config + WireCellToolkitTargets*.cmake, so
-# scan the whole package dir for add_library(WireCell::...) definitions.
-cfg_tgts() { grep -rhoE 'add_library\(WireCell::[A-Za-z]+' "$1/lib/cmake/WireCellToolkit/" 2>/dev/null \
+# package.  waf writes one monolithic config under lib/cmake/WireCellToolkit/;
+# the CMake build splits definitions across Config + WireCellTargets*.cmake
+# under lib/cmake/WireCell/.  Scan whichever package dir exists (glob matches
+# both names) for add_library(WireCell::...) definitions.
+cfg_tgts() { grep -rhoE 'add_library\(WireCell::[A-Za-z]+' "$1"/lib/cmake/WireCell*/ 2>/dev/null \
              | sed 's/add_library(//' | sort -u; }
 
 diffcheck() { # name  fileA  fileB  hard|soft

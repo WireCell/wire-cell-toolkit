@@ -30,7 +30,10 @@ set_property(CACHE WCT_BUILD_MODE PROPERTY STRINGS "" "development" "release")
 
 include(WCTVersion)
 
-project(WireCellToolkit
+# Project (and thus the exported package) is named "WireCell" so consumers use
+# find_package(WireCell) -- the name already used by downstream siblings and the
+# WireCell:: target namespace.  (The distribution/tarball is "wire-cell-toolkit".)
+project(WireCell
         VERSION ${WCT_VERSION_TRIPLET}
         LANGUAGES CXX)
 
@@ -38,8 +41,9 @@ project(WireCellToolkit
 # User-facing options (scalar build settings; per-dependency WITH_<DEP>
 # options are defined by the dependency module in wct-ike.2).
 # ---------------------------------------------------------------------------
-set(WCT_CXX_STANDARD "17" CACHE STRING "C++ standard to compile against (mirrors --cxxstd)")
-set_property(CACHE WCT_CXX_STANDARD PROPERTY STRINGS "17" "20" "23")
+# C++ standard is controlled with the native CMAKE_CXX_STANDARD (e.g.
+# -DCMAKE_CXX_STANDARD=23); it defaults to 17 below when the user leaves it
+# unset.  (No bespoke WCT_CXX_STANDARD variable -- see the C++ standard section.)
 
 option(WCT_SPDLOG_STATIC
        "spdlog is compiled as a library (defines SPDLOG_COMPILED_LIB); mirrors --with-spdlog-static" ON)
@@ -63,7 +67,11 @@ set(WCT_INSTALL_CONFIG "" CACHE STRING
 # ---------------------------------------------------------------------------
 # C++ standard.
 # ---------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD ${WCT_CXX_STANDARD})
+# Honor a user-supplied CMAKE_CXX_STANDARD (e.g. -DCMAKE_CXX_STANDARD=23);
+# default to C++17 when unset.  Must run before any target is created.
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)          # -std=c++NN, not -std=gnu++NN (matches waf)
 
@@ -179,7 +187,8 @@ list(APPEND WCT_PACKAGES clus match apps test cfg docs)
 # Optional packages, each gated on the WCT_HAVE_<DEP> flags discovered by
 # WCTDependencies.  This mirrors the per-package removal table in waft/wcb.py:
 #   root->ROOTSYS, tbb->TBB+FFTWTHREADS, hio->HDF5, pytorch->LIBTORCH,
-#   zio->ZMQ+CZMQ+ZYRE+ZIO, triton->GRPC+PROTOBUF+TRITON, cuda->CUDA.
+#   spng->LIBTORCH, zio->ZMQ+CZMQ+ZYRE+ZIO, triton->GRPC+PROTOBUF+TRITON,
+#   cuda->CUDA.
 # (pyutil->PYTHON is handled above because clus depends on it.)
 set(WCT_OPTIONAL_PACKAGES
     "tbb=TBB,FFTWTHREADS"
@@ -187,6 +196,7 @@ set(WCT_OPTIONAL_PACKAGES
     "zio=ZMQ,CZMQ,ZYRE,ZIO"
     "triton=GRPC,PROTOBUF,TRITON"
     "pytorch=LIBTORCH"
+    "spng=LIBTORCH"
     "root=ROOTSYS"
     "cuda=CUDA")
 foreach(_entry IN LISTS WCT_OPTIONAL_PACKAGES)
@@ -228,7 +238,7 @@ endforeach()
 
 # ---------------------------------------------------------------------------
 # Install/export: pkg-config .pc, native install(EXPORT) target file, and the
-# WireCellToolkitConfig package config for downstream find_package (wct-ike.11).
+# WireCellConfig package config for downstream find_package (wct-ike.11).
 # ---------------------------------------------------------------------------
 include(WCTExport)
 wct_install_exports()

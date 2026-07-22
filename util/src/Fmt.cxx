@@ -48,19 +48,19 @@ namespace WireCell::Fmt {
         }
 
         if (params.isString()) {
-            return fmt::format(pattern, params.asString());
+            return fmt::format(fmt::runtime(pattern), params.asString());
         }
 
         if (params.isIntegral()) {
-            return fmt::format(pattern, params.asInt64());
+            return fmt::format(fmt::runtime(pattern), params.asInt64());
         }
 
         if (params.isDouble()) {
-            return fmt::format(pattern, params.asDouble());
+            return fmt::format(fmt::runtime(pattern), params.asDouble());
         }
 
         if (params.isBool()) {
-            return fmt::format(pattern, params.asBool());
+            return fmt::format(fmt::runtime(pattern), params.asBool());
         }
 
         if (params.isNull()) {

@@ -197,7 +197,7 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
             WirePlaneId wire_plane_id(iplane2layer[iplane], iface, m_ident);
             if (wire_plane_id.index() < 0) {
                 log->critical("Bad wire plane id: {}", wire_plane_id.ident());
-                THROW(ValueError() << errmsg{format("bad wire plane id: %d", wire_plane_id.ident())});
+                THROW(ValueError() << errmsg{String::format("bad wire plane id: %d", wire_plane_id.ident())});
             }
 
             // (wire,pitch) directions

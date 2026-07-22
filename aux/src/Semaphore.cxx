@@ -52,5 +52,5 @@ void Aux::Semaphore::release() const
 
 int Aux::Semaphore::get_count() const
 {
-    m_sem.get_count();
+    return m_sem.get_count();
 }

@@ -106,7 +106,7 @@ function(wct_package NAME)
       set_target_properties(${NAME} PROPERTIES
         EXPORT_NAME "${_exp}"
         INSTALL_RPATH "$ORIGIN;${CMAKE_INSTALL_FULL_LIBDIR}")
-      install(TARGETS ${NAME} EXPORT WireCellToolkitTargets
+      install(TARGETS ${NAME} EXPORT WireCellTargets
               LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
               ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
               RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}")
