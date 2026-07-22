@@ -343,6 +343,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_beam_pref_thigh        = get(cfg, "beam_pref_thigh",        m_beam_pref_thigh);
     m_beam_pref_lasso_weight = get(cfg, "beam_pref_lasso_weight", m_beam_pref_lasso_weight);
     m_beam_pref_rescue_scale = get(cfg, "beam_pref_rescue_scale", m_beam_pref_rescue_scale);
+    m_beam_pref_max_ks        = get(cfg, "beam_pref_max_ks",        m_beam_pref_max_ks);
+    m_beam_pref_min_pred_frac = get(cfg, "beam_pref_min_pred_frac", m_beam_pref_min_pred_frac);
 
     m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
@@ -794,6 +796,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["beam_pref_thigh"]        = m_beam_pref_thigh;
     cfg["beam_pref_lasso_weight"] = m_beam_pref_lasso_weight;
     cfg["beam_pref_rescue_scale"] = m_beam_pref_rescue_scale;
+    cfg["beam_pref_max_ks"]        = m_beam_pref_max_ks;
+    cfg["beam_pref_min_pred_frac"] = m_beam_pref_min_pred_frac;
 
     cfg["pe_err_floor"]       = m_pe_err_floor;
     cfg["pe_err_frac"]        = m_pe_err_frac;

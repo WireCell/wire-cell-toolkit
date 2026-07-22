@@ -397,6 +397,20 @@ namespace WireCell::Match {
         // re-stole the beam cluster at 0.093 vs 0.406 -- light-better, wrong
         // physics; scale 0.2 blocks it).
         double m_beam_pref_rescue_scale{1.0};
+        // Bundle-quality gate on the preference (validation round 2, doc 22):
+        // without it the down-weighted beam flash sweeps up junk bundles --
+        // tiny predictions (8-300 PE) with ks 0.4-0.8 become near-free LASSO
+        // columns that mop up its PE residual and occasionally steal a true
+        // match from another flash (MC evt 18 cluster 1 at ks 0.68; MC evt 41
+        // a pred-8-PE bundle on a 3431-PE flash). Only a bundle with
+        // ks_dis <= max_ks AND total_pred_light >= min_pred_frac * flash PE
+        // receives the preference (cull exemption, L1 down-weight, rescue
+        // guard); others are handled exactly as without the knob. Genuine
+        // beam matches in every validated case have ks <= 0.27 and pred
+        // fraction >= 0.17. Defaults (1e9 / 0) = ungated, bit-identical to
+        // the round-1 behavior; the SBND shim sets 0.3 / 0.02.
+        double m_beam_pref_max_ks{1e9};
+        double m_beam_pref_min_pred_frac{0.0};
 
         // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
         // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
@@ -1241,9 +1255,20 @@ namespace WireCell::Match {
             const double t = f->get_time();
             return t > m_beam_pref_tlow && t < m_beam_pref_thigh;
         }
+        // Bundle-level test adds the quality gate (m_beam_pref_max_ks /
+        // m_beam_pref_min_pred_frac): only a bundle that could plausibly BE the
+        // beam match is preferred; junk bundles of a beam-window flash keep the
+        // un-preferred behavior (see the §C knob block).
         bool in_beam_pref_window(const TimingTPCBundle::pointer& bundle) const
         {
-            return in_beam_pref_window(bundle->get_flash());
+            const auto* f = bundle->get_flash();
+            if (!in_beam_pref_window(f)) return false;
+            if (bundle->get_ks_dis() > m_beam_pref_max_ks) return false;
+            const double meas = f->get_total_PE();
+            if (meas > 0 && bundle->get_total_pred_light() < m_beam_pref_min_pred_frac * meas) {
+                return false;
+            }
+            return true;
         }
 
         // Empty-flash light-quality rescue (m_empty_rescue; see §I). snapshot is the
