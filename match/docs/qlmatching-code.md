@@ -6,7 +6,7 @@ larsoft→WCT porting history, JSON schema and build details see
 [`qlmatching-port.md`](qlmatching-port.md) and
 [`porting-summary.md`](porting-summary.md). For how this component is wired into
 a runnable pipeline and packaged for BEE, see the chain doc
-`wcp-porting-img/sbnd/sbnd_xin/docs/ql-chain.md`.
+`wcp-porting-img/sbnd/sbnd_xin/docs/8_ql-chain.md`.
 
 All line references are into `match/src/QLMatching.cxx`, `match/src/Util.cxx`,
 etc., as of the `apply-pointcloud` branch.
@@ -674,7 +674,7 @@ display). A bundle only counts as "matched" output if its predicted PE total is
 The per-APA `…-img/op-apa<tpc>.json` files are merged across APAs by
 `merge-apa.py` and unioned with the clustering zips by `bee-upload.sh` into
 `combined.zip`, whose upload returns the BEE URL. That packaging half lives in
-the chain doc (`sbnd_xin/docs/ql-chain.md`); here the contract is just the file
+the chain doc (`sbnd_xin/docs/8_ql-chain.md`); here the contract is just the file
 naming + fields above.
 
 ---

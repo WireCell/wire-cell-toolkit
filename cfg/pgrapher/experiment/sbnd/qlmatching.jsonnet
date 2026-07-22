@@ -24,7 +24,7 @@ function(params) {
     // --- SBND matching constants (matching-only) ---
     local nchan = 312,
     // Dead PMT channels excluded from matching.  67/92/170/218/248 added after the
-    // sbnd_xin saturation-PE study (sbnd_xin/docs/saturation-pe.md): they read 0 PE in
+    // sbnd_xin saturation-PE study (sbnd_xin/docs/13_saturation-pe.md): they read 0 PE in
     // 100% of flashes in BOTH data and MC but were previously unmasked, so they only got
     // dropped in bright MC flashes by the (now-disabled) mc_saturation_pe gate.  Masking
     // them here handles them consistently in both modes and at all flash brightnesses.
@@ -116,7 +116,7 @@ function(params) {
             z_cushion: 0.0*wc.cm,
             // §D pre-selection / bad-match gates.
             // mc_saturation_pe DISABLED (set above any real flash PE).  The sbnd_xin
-            // saturation-PE study (sbnd_xin/docs/saturation-pe.md) found no genuine PMT
+            // saturation-PE study (sbnd_xin/docs/13_saturation-pe.md) found no genuine PMT
             // saturation in MC: the zero-PE PMTs in bright flashes are dead channels
             // (now in ch_mask above), identical in MC and data, not simulated saturation.
             // The gate is MC-only, so it just introduced an MC/data asymmetry; retired.

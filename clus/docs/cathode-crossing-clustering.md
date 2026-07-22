@@ -50,7 +50,7 @@ examine_bundles (use_flash_t0)
   `common_corr_coords` = `{x_t0cor, y_cor, z_cor}` when `pos_offset_on` is true (i.e.
   `reality='data'`; the offset is a data-only calibration, OFF for MC — see
   `match/docs/cathode-offset-correction.md`): the rigid per-TPC transverse correction
-  (±(−0.11,+0.67) cm, from `sbnd_xin/docs/cathode-crossing-diagnostic.md`) is **already applied**
+  (±(−0.11,+0.67) cm, from `sbnd_xin/docs/14_cathode-crossing-diagnostic.md`) is **already applied**
   in this data frame. For MC the frame is the uncorrected `{x_t0cor, y, z}`.
 - The merge passes (`extend`/`regular`/`parallel_prolong`/`close`/`extend_loop`) each build a
   graph: for every pair of clusters **in the same flash-T0 group** (`assign_flash_t0_groups`,
@@ -76,7 +76,7 @@ examine_bundles (use_flash_t0)
 
 ## 2. The A/B evidence (run on the 5 hand-scan data crossers)
 
-Data hand-scan cathode-crossers (`sbnd_xin/docs/cathode-crossing-diagnostic.md`):
+Data hand-scan cathode-crossers (`sbnd_xin/docs/14_cathode-crossing-diagnostic.md`):
 evt **686, 1302, 1346, 1852, 2028**. Each was run through the SBND all-APA pipeline two ways:
 the **full** pipeline and a variant with the all-APA `examine_bundles` **removed** (in the
 truncated run `real_cluster_id == cluster_id`, so `cluster_id` *is* the geometric-pass
@@ -632,7 +632,7 @@ Not every PDVD crosser is a tip-touch case: evt298567's golden crossers meet at 
 - Truncated run = comment `cm.examine_bundles(use_flash_t0=true)` (`clus.jsonnet:302`); gate
   trace = temporary `std::cerr` in `clustering_regular.cxx` / `clustering_parallel_prolong.cxx`.
   Both reverted after measurement.
-- Offsets + hand-scan crosser list: `sbnd_xin/docs/cathode-crossing-diagnostic.md`.
+- Offsets + hand-scan crosser list: `sbnd_xin/docs/14_cathode-crossing-diagnostic.md`.
 - Code: `clustering_regular.cxx:248-287` (the 3 cm lenient path + strict paths),
   `clustering_examine_bundles.cxx:99-240`, `connect_graph_relaxed.cxx` (inter-TPC fully-bad
   branch), `MultiAlgBlobClustering.cxx:1463-1473` (Bee id semantics).

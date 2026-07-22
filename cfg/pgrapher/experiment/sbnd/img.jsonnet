@@ -219,7 +219,7 @@ local img = {
     //           triple + one InSliceDeghosting round + GlobalGeomClustering.
     //   true  → "uboone-solving" — matches uBooNE production: two
     //           ProjectionDeghosting passes, three ChargeSolving triples,
-    //           three InSliceDeghosting rounds. See sbnd_xin/docs/imaging.md
+    //           three InSliceDeghosting rounds. See sbnd_xin/docs/4_imaging.md
     //           "Comparison with the uBooNE imaging chain" for derivation.
     solving :: function(anode, aname, full_deghost=false) {
 
