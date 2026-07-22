@@ -1012,14 +1012,27 @@ void OmnibusSigProc::init_overall_response(IFrame::pointer frame)
 void OmnibusSigProc::restore_baseline(Array::array_xxf& arr)
 {
     int nempty=0;
+    int nnonfinite=0;
     for (int i = 0; i != arr.rows(); i++) {
         Waveform::realseq_t signal(arr.cols());
         int ncount = 0;
         for (int j = 0; j != arr.cols(); j++) {
-            if (arr(i, j) != 0) {
-                signal.at(ncount) = arr(i, j);
-                ncount++;
+            const float val = arr(i, j);
+            if (val == 0) {
+                continue;
             }
+            // Defense-in-depth: a NaN/Inf sample would make the median below
+            // NaN, the |x-baseline|<500 cut would then reject every sample and
+            // Waveform::median() would be called on an empty vector, throwing
+            // "empty waveform" (issue #491).  Drop non-finite samples and zero
+            // them in place so they poison neither the baseline nor downstream.
+            if (!std::isfinite(val)) {
+                ++nnonfinite;
+                arr(i, j) = 0;
+                continue;
+            }
+            signal.at(ncount) = val;
+            ncount++;
         }
         if (!ncount) {
             ++nempty;
@@ -1031,23 +1044,31 @@ void OmnibusSigProc::restore_baseline(Array::array_xxf& arr)
 
         //std::cout << "Baseline 1: " << baseline << std::endl;
 
-        Waveform::realseq_t temp_signal(arr.cols());
-        ncount = 0;
+        Waveform::realseq_t temp_signal(ncount);
+        int ncount2 = 0;
         for (size_t j = 0; j != signal.size(); j++) {
             if (fabs(signal.at(j) - baseline) < 500) {
-                temp_signal.at(ncount) = signal.at(j);
-                ncount++;
+                temp_signal.at(ncount2) = signal.at(j);
+                ncount2++;
             }
         }
-        temp_signal.resize(ncount);
+        temp_signal.resize(ncount2);
         //std::cout << "Restoring baseline 2: " << temp_signal.size() << std::endl;
 
-        baseline = WireCell::Waveform::median(temp_signal);
+        // Guard against an empty second-pass selection: keep the first-pass
+        // baseline rather than calling median() on an empty vector.
+        if (ncount2) {
+            baseline = WireCell::Waveform::median(temp_signal);
+        }
         //std::cout << "Baseline 2: " << baseline << std::endl;
 
         for (int j = 0; j != arr.cols(); j++) {
             if (arr(i, j) != 0) arr(i, j) -= baseline;
         }
+    }
+    if (nnonfinite) {
+        log->warn("restore_baseline: zeroed {} non-finite (NaN/Inf) samples out of size=({},{})",
+                  nnonfinite, arr.rows(), arr.cols());
     }
     if (nempty) {
         log->debug("{} empty rows out of size=({},{})",
@@ -1352,12 +1373,15 @@ void OmnibusSigProc::decon_2D_init(int plane)
         m_r_data[plane].swap(m_rawdecon_r_data[plane]);
         unpad_data(plane);
         m_r_data[plane].swap(m_rawdecon_r_data[plane]);
-        // Strip the FFT row-padding (m_pad_nwires) and trim time axis to
-        // m_nticks so save_data() reads the same (m_nwires × m_nticks) grid
-        // that production wiener/gauss live on.  Mirrors the .block() slice
-        // at the end of decon_2D_hits / decon_2D_tightROI.
+        // Strip the FFT row-padding and trim time axis to m_nticks so
+        // save_data() reads the same (m_nwires × m_nticks) grid that production
+        // wiener/gauss live on.  Mirrors the .block() slice at the end of
+        // decon_2D_hits / decon_2D_tightROI: derive the row offset from the
+        // actual row count (0 once unpad_data() removed the padding, else
+        // m_pad_nwires) so it stays in-bounds -- see issue #491.
+        const int rd_row_pad = (m_rawdecon_r_data[plane].rows() - m_nwires[plane]) / 2;
         m_rawdecon_r_data[plane] = m_rawdecon_r_data[plane].block(
-            m_pad_nwires[plane], 0, m_nwires[plane], m_nticks).eval();
+            rd_row_pad, 0, m_nwires[plane], m_nticks).eval();
     }
 
     m_c_data[plane] = fwd_r2c(m_dft, m_r_data[plane], 1);
@@ -1472,7 +1496,13 @@ void OmnibusSigProc::decon_2D_ROI_refine(int plane)
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
 
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     restore_baseline(m_r_data[plane]);
 }
 
@@ -1517,7 +1547,13 @@ void OmnibusSigProc::decon_2D_tightROI(int plane)
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
 
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     restore_baseline(m_r_data[plane]);
 }
 
@@ -1563,7 +1599,13 @@ void OmnibusSigProc::decon_2D_tighterROI(int plane)
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
 
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     restore_baseline(m_r_data[plane]);
 }
 
@@ -1655,7 +1697,13 @@ void OmnibusSigProc::decon_2D_looseROI(int plane)
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
 
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     restore_baseline(m_r_data[plane]);
 }
 
@@ -1704,7 +1752,13 @@ void OmnibusSigProc::decon_2D_looseROI_debug_mode(int plane)
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
 
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     restore_baseline(m_r_data[plane]);
 }
 
@@ -1768,7 +1822,13 @@ void OmnibusSigProc::decon_2D_hits(int plane)
 
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     if (plane == 2) {
         restore_baseline(m_r_data[plane]);
     }
@@ -1801,7 +1861,13 @@ void OmnibusSigProc::decon_2D_charge(int plane)
 
     // do the second round of inverse FFT on wire
     Array::array_xxf tm_r_data = inv_c2r(m_dft, c_data_afterfilter, 1);
-    m_r_data[plane] = tm_r_data.block(m_pad_nwires[plane], 0, m_nwires[plane], m_nticks);
+    // Derive the wire-axis padding offset from the actual row count.  When
+    // decon_2D_init()->unpad_data() has already removed the padding (ICARUS
+    // "twofaced" separate-planes layout, m_nwires rows) this is 0; otherwise it
+    // is m_pad_nwires.  A hard-coded m_pad_nwires overran the array and read
+    // adjacent/NaN memory that later crashed restore_baseline (issue #491).
+    const int roi_row_pad = (tm_r_data.rows() - m_nwires[plane]) / 2;
+    m_r_data[plane] = tm_r_data.block(roi_row_pad, 0, m_nwires[plane], m_nticks);
     if (plane == 2) {
         restore_baseline(m_r_data[plane]);
     }
