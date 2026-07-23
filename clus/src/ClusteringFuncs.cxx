@@ -79,7 +79,7 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,
     const std::string& aname, const std::string& pcname,
-    const std::string& orig_id_aname)
+    const std::string& orig_id_aname, bool flags_from_longest)
 {
     std::unordered_map<int, int> desc2id;
     std::map<int, std::set<int> > id2desc;
@@ -133,6 +133,21 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         int best_flash = -1;
         int best_gid = -1;
 
+        // Flag bookkeeping (flags_from_longest).  from() copies each member's
+        // flag values in turn, so the last member visited wins -- a matched main
+        // can lose flag_main_cluster to a tiny co-merged fragment.  Capture the
+        // representative member's flags by value here (the member is destroyed
+        // inside the loop) and re-apply them after the merge.  Representative =
+        // the flash donor when one exists, else the longest member overall, so
+        // flags and flash always describe the same member.
+        std::vector<std::pair<std::string, int>> flash_flags, longest_flags;
+        double best_any_len = -1;
+        auto snapshot_flags = [](const Cluster* c) {
+            std::vector<std::pair<std::string, int>> kv;
+            for (const auto& fname : c->flag_names()) kv.emplace_back(fname, c->get_flag(fname));
+            return kv;
+        };
+
         for (const auto& desc : descs) {
             const int idx = g[desc];
             if (idx < 0) {  // no need anymore ...
@@ -150,6 +165,14 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                     best_flash = live_flash;
                     best_gid = live->get_scalar<int>("matched_flash_gid", -1);
                     have_flash = true;
+                    if (flags_from_longest) flash_flags = snapshot_flags(live);
+                }
+            }
+            if (flags_from_longest) {
+                const double any_len = live->get_length();
+                if (any_len > best_any_len) {
+                    best_any_len = any_len;
+                    longest_flags = snapshot_flags(live);
                 }
             }
 
@@ -186,6 +209,17 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
             fresh_cluster.set_cluster_t0(best_t0);
             fresh_cluster.set_scalar<int>("flash", best_flash);
             fresh_cluster.set_scalar<int>("matched_flash_gid", best_gid);
+        }
+
+        // Same treatment for the flags: replace from()'s last-member-wins values
+        // with the representative member's, so e.g. flag_main_cluster follows the
+        // cluster the bundle was actually matched on instead of an arbitrary
+        // co-merged fragment.  Flag names carried by other members but not by the
+        // representative keep their union value (QLMatching materializes its flags
+        // on every cluster, so in practice the name sets are identical).
+        if (flags_from_longest) {
+            const auto& rep = have_flash ? flash_flags : longest_flags;
+            for (const auto& [fname, fval] : rep) fresh_cluster.set_flag(fname, fval);
         }
 
         // Normally, it would be weird/wrong to store an address of a reference.

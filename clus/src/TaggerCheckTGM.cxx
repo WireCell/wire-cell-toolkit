@@ -54,6 +54,17 @@ public:
         m_beam_window_high = get(config, "beam_window_high", m_beam_window_high);
         m_length_limit_frac = get(config, "length_limit_frac", m_length_limit_frac);
         m_enable_case_b = get(config, "enable_case_b", m_enable_case_b);
+        // require_in_scope (default false = historical behavior): also require
+        // the cluster to pass the default-scope filter set by switch_scope, i.e.
+        // to have at least one blob whose T0-corrected points land inside the
+        // active volume.  switch_scope SEPARATES the failing blobs into their own
+        // cluster which stays in the grouping and inherits flag_main_cluster, so
+        // without this the tagger also evaluates non-physical out-of-volume
+        // shards -- which sit outside the FV by construction and therefore
+        // satisfy the CASE-A through-going test almost automatically.  The Bee
+        // writer (filter:1) and clustering_examine_bundles already honor this
+        // same flag; the taggers were the only consumers ignoring it.
+        m_require_in_scope = get(config, "require_in_scope", m_require_in_scope);
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -73,6 +84,7 @@ public:
         cfg["beam_window_high"] = m_beam_window_high; // disables the beam protection
         cfg["length_limit_frac"] = m_length_limit_frac;
         cfg["enable_case_b"] = m_enable_case_b;
+        cfg["require_in_scope"] = m_require_in_scope;
         return cfg;
     }
 
@@ -82,8 +94,18 @@ public:
         auto& grouping = *groupings.at(0);
 
         std::vector<Cluster*> main_clusters;
+        int n_out_of_scope = 0;
         for (auto* cluster : grouping.children()) {
-            if (cluster->get_flag(Flags::main_cluster)) main_clusters.push_back(cluster);
+            if (!cluster->get_flag(Flags::main_cluster)) continue;
+            if (m_require_in_scope && !cluster->get_scope_filter(cluster->get_default_scope())) {
+                ++n_out_of_scope;
+                continue;
+            }
+            main_clusters.push_back(cluster);
+        }
+        if (n_out_of_scope) {
+            SPDLOG_LOGGER_INFO(t_log, "visit: TaggerCheckTGM: skipped {} out-of-scope main cluster(s)",
+                               n_out_of_scope);
         }
         if (main_clusters.empty()) return;
 
@@ -108,6 +130,7 @@ private:
     double m_beam_window_low{0};
     double m_beam_window_high{0};
     double m_length_limit_frac{0.45};
+    bool m_require_in_scope{false};
     bool m_enable_case_b{true};
     std::vector<double> m_fv_tolerance;
 

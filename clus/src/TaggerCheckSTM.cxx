@@ -52,6 +52,8 @@ public:
         NeedParticleData::configure(config);  
 
         m_grouping_name = get<std::string>(config, "grouping", "live");
+        // See the visit() comment: default false = historical behavior.
+        m_require_in_scope = get<bool>(config, "require_in_scope", m_require_in_scope);
 
         // Optional detector-specific shorted-wire-region guard for find_first_kink.
         // Provide as a 2-element array [w_min, w_max] (W-wire indices, exclusive).
@@ -85,6 +87,7 @@ public:
         // Detector-specific shorted-wire-region guard (disabled by default).
         // Set to [w_min, w_max] W-wire index range to enable. Example: [7135, 7264] for UBoone.
         cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
+        cfg["require_in_scope"] = m_require_in_scope;
 
         return cfg;
     }
@@ -109,12 +112,24 @@ public:
         std::vector<Cluster*> main_clusters;
         std::vector<Cluster*> associated_all;
 
+        int n_out_of_scope = 0;
         for (auto* cluster : grouping.children()) {
+            // See TaggerCheckTGM: switch_scope leaves out-of-volume shards in the
+            // grouping carrying an inherited flag_main_cluster.  require_in_scope
+            // (default false = historical) drops them.
+            const bool in_scope = !m_require_in_scope
+                || cluster->get_scope_filter(cluster->get_default_scope());
             if (cluster->get_flag(Flags::main_cluster)) {
+                if (!in_scope) { ++n_out_of_scope; continue; }
                 main_clusters.push_back(cluster);
             } else if (cluster->get_flag(Flags::associated_cluster)) {
+                if (!in_scope) continue;
                 associated_all.push_back(cluster);
             }
+        }
+        if (n_out_of_scope) {
+            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: skipped {} out-of-scope main cluster(s)",
+                               n_out_of_scope);
         }
 
         SPDLOG_LOGGER_TRACE(s_log, "visit: TaggerCheckSTM: Found {} main cluster(s); {} associated clusters.",
@@ -215,6 +230,7 @@ public:
 
 private:
     std::string m_grouping_name{"live"};
+    bool m_require_in_scope{false};
     std::string m_trackfitting_config_file;  // Path to TrackFitting config file
     // Shorted-wire-region guard for find_first_kink: W-wire index range [w_min, w_max).
     // -1/-1 means disabled (default, detector-agnostic).

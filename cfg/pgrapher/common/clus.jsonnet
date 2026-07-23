@@ -85,7 +85,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
-        tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="") :: {
+        // require_in_scope (default false): also require each candidate main to
+        // pass the default-scope filter set by switch_scope, i.e. to have blobs
+        // whose T0-corrected points land in the active volume.  switch_scope
+        // separates the out-of-volume blobs into their own cluster that keeps an
+        // inherited flag_main_cluster; without this the taggers evaluate those
+        // non-physical shards (which are outside the FV by construction, so they
+        // satisfy the TGM CASE-A test almost automatically).  Key emitted only
+        // when true so existing compiled configs stay byte-identical.
+        tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
+                         require_in_scope=false) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -94,6 +103,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
             } + dv_cfg + pcts_cfg
+              + (if require_in_scope then { require_in_scope: true } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
@@ -102,7 +112,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins (negative =
         // inset).  In-beam-window bundles are never tagged (conservative until
         // check_neutrino_candidate is ported).
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true) :: {
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -112,7 +122,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 beam_window_high: beam_window_high,
                 length_limit_frac: length_limit_frac,
                 enable_case_b: enable_case_b,
-            } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial }),
+            } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial })
+              + (if require_in_scope then { require_in_scope: true } else {}),
         },
 
         tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
@@ -536,14 +547,21 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + scope_cfg,
         },
 
-        examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
+        // flags_from_longest (default false): on the flash-time merge, take the
+        // merged cluster's flags from the same representative member that donates
+        // its flash instead of from an arbitrary (last-visited) member, so a
+        // matched main cannot lose flag_main_cluster to a co-merged fragment.
+        // Key emitted only when true so existing compiled configs stay
+        // byte-identical.  See merge_clusters() in clus/inc/.../ClusteringFuncs.h.
+        examine_bundles(name="", graph_name="relaxed", use_flash_t0=false, flash_t0_window=80*wc.ns,
+                        flags_from_longest=false) :: {
             type: "ClusteringExamineBundles",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
                 graph_name: graph_name,
                 use_flash_t0: use_flash_t0,
                 flash_t0_window: flash_t0_window,
-            },
+            } + (if flags_from_longest then { flags_from_longest: true } else {}),
             uses: [detector_volumes, pc_transforms],
         },
 

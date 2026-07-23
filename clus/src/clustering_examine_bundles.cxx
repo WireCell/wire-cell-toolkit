@@ -30,6 +30,7 @@ static void clustering_examine_bundles(
         const std::string& graph_name,
         const bool use_flash_t0,
         const double flash_t0_window,
+        const bool flags_from_longest,
         WireCell::Log::logptr_t log);
 
 class ClusteringExamineBundles : public IConfigurable, public Clus::IEnsembleVisitor, public Aux::Logger, private NeedDV, private NeedPCTS, private NeedScope {
@@ -49,12 +50,15 @@ public:
         graph_name_ = get<std::string>(config, "graph_name", graph_name_);
         use_flash_t0_ = get<bool>(config, "use_flash_t0", use_flash_t0_);
         flash_t0_window_ = get<double>(config, "flash_t0_window", flash_t0_window_);
+        // Default false = historical (arbitrary donor) flag behavior on the
+        // flash-time merge.  See merge_clusters() in ClusteringFuncs.h.
+        flags_from_longest_ = get<bool>(config, "flags_from_longest", flags_from_longest_);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         clustering_examine_bundles(live, m_dv, m_pcts, m_scope, use_ctpc_, graph_name_,
-                                   use_flash_t0_, flash_t0_window_, log);
+                                   use_flash_t0_, flash_t0_window_, flags_from_longest_, log);
     }
 
 private:
@@ -62,6 +66,7 @@ private:
     std::string graph_name_{"relaxed"};
     bool use_flash_t0_{false};
     double flash_t0_window_{80*units::ns};
+    bool flags_from_longest_{false};
 };
 
 
@@ -86,6 +91,7 @@ static void clustering_examine_bundles(
     const std::string& graph_name,
     const bool use_flash_t0,
     const double flash_t0_window,
+    const bool flags_from_longest,
     WireCell::Log::logptr_t log)
 {
     // std::cout << "Test Examine Bundles" << std::endl;
@@ -140,7 +146,7 @@ static void clustering_examine_bundles(
         // The Bee writer reads this so the merged group's far-apart members keep
         // their distinct original ids (colors).  Only here, under use_flash_t0
         // (all-APA), so per-APA / other-detector output is bit-identical.
-        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id");
+        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id", flags_from_longest);
     }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();

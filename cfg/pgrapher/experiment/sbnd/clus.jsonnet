@@ -329,7 +329,13 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     // cluster before the flash-bundle collapse).  SBND-on; off => list unchanged.
     + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, flash_t0_window=800*wc.ns)] else [])
     + [
-        cm.examine_bundles(use_flash_t0=true),
+        // flags_from_longest: the flash-time merge here collapses a bundle's
+        // clusters into one; without this the merged cluster inherits its flags
+        // from an arbitrary member, so a matched main that absorbs a tiny
+        // co-merged fragment loses flag_main_cluster to it (SBND evt284349:
+        // the 2173-pt beam track lost it to a 3-pt TPC1 speck, leaving the flag
+        // only on its own out-of-volume shard).  The taggers key on that flag.
+        cm.examine_bundles(use_flash_t0=true, flags_from_longest=true),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-all-apa.zip',
     local mabc = g.pnode({
@@ -481,17 +487,24 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         tagger_check_stm: cm.tagger_check_stm(
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
-            recombination_model=wc.tn(sbnd_box_recomb)),
+            recombination_model=wc.tn(sbnd_box_recomb),
+            require_in_scope=true),
         // Through-going-muon tagger (prototype check_tgm port).  Runs on every
         // matched main cluster; in-beam-window bundles are never tagged
         // (conservative until check_neutrino_candidate is ported).  Must run
         // after fiducialutils (dead-region / signal-processing checks) and
         // before tagger_check_stm (which skips TGM-flagged mains).
+        // require_in_scope: evaluate only clusters that pass switch_scope's
+        // active-volume filter.  Without it the tagger also sees the
+        // out-of-volume shards switch_scope splits off (which keep an inherited
+        // flag_main_cluster) -- on the SBND 10-event reco1 sample those were 43%
+        // of all evaluated mains and tagged TGM at 85% vs 44% for real clusters.
         tagger_check_tgm: cm.tagger_check_tgm(
             fiducial=wc.tn(sbnd_pr_fv),
             fv_tolerance=sbnd_pr_fv_margins,
             beam_window_low=beam_window[0],
-            beam_window_high=beam_window[1]),
+            beam_window_high=beam_window[1],
+            require_in_scope=true),
         // Neutrino pattern recognition on the beam-coincident bundle.  The
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the

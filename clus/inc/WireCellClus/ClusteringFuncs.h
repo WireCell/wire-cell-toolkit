@@ -118,11 +118,22 @@ namespace WireCell::Clus::Facade {
     // ident() of the sub-cluster each blob came from, so a downstream consumer
     // (e.g. the Bee writer) can recover the pre-merge cluster identity of every
     // blob.  This is independent of the aname/parent_id ("perblob") array above.
+    // flags_from_longest (default false = historical behavior): Cluster::from()
+    // is called once per member and flags_from() copies the donor's flag VALUES
+    // (including zeros), so the merged cluster's flags are those of whichever
+    // member happened to be visited last -- arbitrary.  A cluster that was the
+    // matched main of its bundle can therefore lose flag_main_cluster to a tiny
+    // co-merged fragment.  With this true, the flags are re-applied after the
+    // merge from the same representative member that donates the flash (the
+    // longest flash-bearing one; longest overall when no member has a flash),
+    // mirroring the cluster_t0/flash/matched_flash_gid fixup below so that the
+    // merged cluster's flags and flash describe one coherent donor.
     std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
                                          const std::string& pcname="perblob",
-                                         const std::string& orig_id_aname="");
+                                         const std::string& orig_id_aname="",
+                                         bool flags_from_longest=false);
 
     // Assign each cluster an integer "flash-time group" id.  Clusters whose
     // matched flash time (cluster_t0) differ by less than `window` share a group
