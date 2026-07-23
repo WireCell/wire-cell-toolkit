@@ -93,7 +93,7 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // null / false => keys omitted => byte-identical.
          xtpc_pin_min_strength=null,
          xtpc_sc1_light_gate=false, xtpc_sc1_ks_max=null, xtpc_sc1_c2n_max=null,
-         xtpc_cathode_ks_max=null,
+         xtpc_cathode_ks_max=null, xtpc_pin_confirms_rescue=false,
          postcull_unflagged=false, postcull_ks_max=null, postcull_c2n_max=null,
          // Rescue blind-spot fix (doc 23 phase 1a): early postcull pass before
          // the rescues.  C++ default false; key omitted when off => byte-identical.
@@ -697,6 +697,9 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // Cathode-rescue ks ceiling (C++ default 0 = off).
             [if xtpc_cathode_ks_max != null then 'xtpc_cathode_ks_max']:
                 xtpc_cathode_ks_max,
+            // Joint-pin counts as cathode-rescue confirmation (doc 27; C++
+            // default false. Key omitted when off => byte-identical).
+            [if xtpc_pin_confirms_rescue then 'xtpc_pin_confirms_rescue']: true,
             // Post-fit cull of unflagged low-quality selections (C++ default
             // false; ks/c2n ceilings default 0.30/20 in C++).
             [if postcull_unflagged then 'postcull_unflagged']: true,

@@ -179,6 +179,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_sc1_ks_max       = get(cfg, "xtpc_sc1_ks_max",       m_xtpc_sc1_ks_max);
     m_xtpc_sc1_c2n_max      = get(cfg, "xtpc_sc1_c2n_max",      m_xtpc_sc1_c2n_max);
     m_xtpc_cathode_ks_max   = get(cfg, "xtpc_cathode_ks_max",   m_xtpc_cathode_ks_max);
+    m_xtpc_pin_confirms_rescue = get(cfg, "xtpc_pin_confirms_rescue", m_xtpc_pin_confirms_rescue);
     m_postcull_unflagged    = get(cfg, "postcull_unflagged",    m_postcull_unflagged);
     m_postcull_ks_max       = get(cfg, "postcull_ks_max",       m_postcull_ks_max);
     m_postcull_c2n_max      = get(cfg, "postcull_c2n_max",      m_postcull_c2n_max);
@@ -706,6 +707,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
     cfg["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
     cfg["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
+    cfg["xtpc_pin_confirms_rescue"] = m_xtpc_pin_confirms_rescue;
     cfg["postcull_unflagged"]    = m_postcull_unflagged;
     cfg["postcull_ks_max"]       = m_postcull_ks_max;
     cfg["postcull_c2n_max"]      = m_postcull_c2n_max;
@@ -2083,6 +2085,17 @@ void QLMatching::purge_unconfirmed_cathode_rescue(ApaRun& run)
     for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
         for (const auto& b : run.flash_bundles_map.at(flash)) {
             if (!b->get_flag_xtpc_cathode_provisional()) continue;
+            // Joint-pin confirmation (doc 27, off by default): a greedy-pinned
+            // bundle is a direction-confirmed collinear crosser half -- keep it
+            // regardless of the sc1 light gate and the ks ceiling below.
+            if (m_xtpc_pin_confirms_rescue && b->get_flag_xtpc_pin()) {
+                b->set_contained(true);
+                log->debug("QLXTPC cathode-rescue KEEP apa{} cluster {} flash {} "
+                           "(joint-pin confirmed crosser half)",
+                           (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                           b->get_flash()->get_flash_id());
+                continue;
+            }
             // Optional doc-19 ks ceiling: a scenario-1-confirmed but light-dim
             // provisional bundle is purged too (0 = off, legacy).
             if (b->get_flag_xtpc_scenario1() &&

@@ -995,6 +995,18 @@ namespace WireCell::Match {
         // shows those survivors at 69% phantom (ks p50 0.435 vs agrees 0.20).
         // When > 0 a confirmed-but-dim bundle (ks > ceiling) is purged too.
         double m_xtpc_cathode_ks_max{0.0};
+        // Joint-pin counts as cross-volume confirmation in the cathode-rescue
+        // purge (pdvd doc 27): the greedy pin (:4287) binds a
+        // direction-confirmed collinear pair (d < dmax) to its best-light
+        // coincident flash -- topologically stronger evidence than the
+        // sc1_light_gate'd scenario-1 flag, whose per-half ks ceiling was
+        // tuned as a junk-steering filter on ALREADY-CONTAINED bundles and
+        // guillotines genuine truncated-pattern crosser halves (ks 0.4-0.6)
+        // once the offset-0 frame routes formerly-contained cathode touchers
+        // through the provisional rescue (039252 evt298581 cluster 182).  A
+        // pin-confirmed keep is exempt from the cathode ks ceiling above.
+        // Default false => purge behaviour byte-identical.
+        bool   m_xtpc_pin_confirms_rescue{false};
         // Post-fit cull of UNFLAGGED low-quality selections: a selected bundle
         // carrying no quality flag (not consistent / xtpc_consistent /
         // scenario1 / pin) survived on LASSO strength alone -- the largest
