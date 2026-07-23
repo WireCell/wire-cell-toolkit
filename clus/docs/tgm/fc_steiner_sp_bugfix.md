@@ -73,12 +73,13 @@ new_cluster.from(*orig_cluster);
 After the fix the steiner boundary of cluster 28 reads (−68.2, 103.1, 75.1) —
 the real x_min tip, inside the box — and the spurious direct-FV exit is gone.
 
-### Not fixed here (same latent pattern)
+### Same pattern fixed in the sibling retilers
 `clus/src/improvecluster_1.cxx` and `clus/src/retile_cluster.cxx`
-(`RetileCluster`) contain the identical "correct-before-`from()`" ordering.
-They are not exercised by the SBND steiner path (which uses
-`improve_cluster_2`), so they are left untouched pending their own validation;
-flagged here so the owner can decide.
+(`RetileCluster`) contained the identical "correct-before-`from()`" ordering
+and received the same `set_cluster_t0(...)`-first fix. They are not exercised
+by the SBND steiner path (which uses `improve_cluster_2`), so the SBND 10-event
+verdicts are unchanged by these two edits (FC=1 count stays 6); the fix
+protects any other pipeline that retiles a T0-corrected cluster through them.
 
 ---
 

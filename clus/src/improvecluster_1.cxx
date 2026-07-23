@@ -198,12 +198,15 @@ namespace WireCell::Clus {
         if (default_scope.hash()!=raw_scope.hash()){
             t0 = Clock::now();
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
-            // std::vector<int> filter_results = c
+            // add_corrected_points builds x_t0cor from get_cluster_t0(); a
+            // freshly-retiled cluster's T0 defaults to 0 until from() copies it
+            // below, so running the correction first produced an UNCORRECTED
+            // x_t0cor (raw drift-x, off by v_drift*T0).  Set the real T0 first.
+            // See clus/docs/tgm/fc_steiner_sp_bugfix.md (bug 1).
+            new_cluster.set_cluster_t0(orig_cluster->get_cluster_t0());
             new_cluster.add_corrected_points(m_pcts, correction_name);
-            // Set this as the default scope for viewing
-            new_cluster.from(*orig_cluster); // copy state from original cluster
+            new_cluster.from(*orig_cluster); // copy remaining state from original cluster
             SPDLOG_LOGGER_TRACE(log, "timing: add_corrected_points took {} ms", MS(Clock::now()-t0).count());
-            // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
 

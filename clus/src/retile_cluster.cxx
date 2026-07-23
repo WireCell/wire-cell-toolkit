@@ -688,13 +688,14 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
 
         if (default_scope.hash()!=raw_scope.hash()){
             auto correction_name = cluster->get_scope_transform(default_scope);
-            // std::vector<int> filter_results = c
+            // add_corrected_points builds x_t0cor from get_cluster_t0(); a
+            // freshly-retiled shadow cluster's T0 defaults to 0 until from()
+            // copies it below, so running the correction first produced an
+            // UNCORRECTED x_t0cor (raw drift-x, off by v_drift*T0).  Set the
+            // real T0 first.  See clus/docs/tgm/fc_steiner_sp_bugfix.md (bug 1).
+            shad_cluster.set_cluster_t0(cluster->get_cluster_t0());
             shad_cluster.add_corrected_points(m_pcts, correction_name);
-            // Get the new scope with corrected points
-            const auto correction_scope = shad_cluster.get_scope(correction_name);
-            // // Set this as the default scope for viewing
-            shad_cluster.from(*cluster); // copy state from original cluster
-            // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
+            shad_cluster.from(*cluster); // copy remaining state from original cluster
         }
 
     }
