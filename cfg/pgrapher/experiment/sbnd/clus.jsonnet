@@ -510,6 +510,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             beam_window_high=beam_window[1],
             require_in_scope=true,
             check_neutrino_candidate=tgm_neutrino_candidate),
+        // Fully-contained tagger.  Independent of TGM/STM: it evaluates every
+        // in-scope main cluster and only records a containment verdict (flag
+        // "FC"), so it neither vetoes nor is vetoed by them.  Placed LAST in
+        // the pipeline on purpose -- cluster_fc_check lazily populates
+        // PCA/hough/steiner-boundary caches, so running it after the other
+        // taggers leaves their inputs pristine rather than relying on those
+        // caches being order-independent.  Coverage is unaffected by position.
+        tagger_check_fc: cm.tagger_check_fc(require_in_scope=true),
         // Neutrino pattern recognition on the beam-coincident bundle.  The
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the

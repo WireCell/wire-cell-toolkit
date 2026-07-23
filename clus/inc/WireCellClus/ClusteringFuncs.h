@@ -76,6 +76,13 @@ namespace WireCell::Clus::Facade {
 
         inline const std::string TGM = "TGM";
 
+        /// Set by TaggerCheckFC when cluster_fc_check() finds the main cluster
+        /// fully contained inside the fiducial volume.  Tagger-computed sibling
+        /// of STM/TGM above -- NOT the same as the lowercase "fully_contained"
+        /// flag, which is an imported uBooNE verdict copied out of a
+        /// tagger_info point cloud by ClusteringTaggerFlagTransfer.
+        inline const std::string FC = "FC";
+
     }
 
     struct ClusterLess {

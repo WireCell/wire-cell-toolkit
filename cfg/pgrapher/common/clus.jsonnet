@@ -130,6 +130,23 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {}),
         },
 
+        // Fully-contained (FC) tagger.  Records Facade::cluster_fc_check's
+        // verdict as the cluster flag "FC" -- the tagger-computed sibling of
+        // "TGM"/"STM", i.e. the prototype's event_type bit 2 / match_isFC.
+        // Needs the steiner and fiducialutils stages ahead of it (without
+        // them cluster_fc_check returns is_fc=false for every cluster).
+        // require_in_scope (C++ default false; key omitted when off =>
+        // byte-identical): evaluate only clusters passing switch_scope's
+        // active-volume filter.
+        tagger_check_fc(name="", require_in_scope=false) :: {
+            type: "TaggerCheckFC",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+            } + dv_cfg + pcts_cfg
+              + (if require_in_scope then { require_in_scope: true } else {}),
+        },
+
         tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
