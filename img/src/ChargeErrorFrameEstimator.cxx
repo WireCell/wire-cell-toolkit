@@ -153,7 +153,7 @@ ITrace::vector ChargeErrorFrameEstimator::error_traces(const ITrace::vector& int
             /// TODO: what to do here?
           }
 	      std::generate(error_charge.begin() + roistart, error_charge.begin() + iq,
-			    [=, this]() mutable { return errs[roilen] * fudge_factor / sqrt(m_rebin); });
+			    [&]() mutable { return errs[roilen] * fudge_factor / sqrt(m_rebin); });
 	      inroi = false;
 	      continue;
             }else if (inroi && iq == nq - 1){
@@ -166,7 +166,7 @@ ITrace::vector ChargeErrorFrameEstimator::error_traces(const ITrace::vector& int
             /// TODO: what to do here?
           }
 	      std::generate(error_charge.begin() + roistart, error_charge.begin() + iq + 1,
-			    [=, this]() mutable { return errs[roilen] * fudge_factor / sqrt(m_rebin); });
+			    [&]() mutable { return errs[roilen] * fudge_factor / sqrt(m_rebin); });
 	      inroi = false;
 	      continue;
 	    }
