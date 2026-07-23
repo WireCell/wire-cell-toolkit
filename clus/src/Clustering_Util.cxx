@@ -72,7 +72,9 @@ void compute_wireplane_params(
 // Returns FCCheckResult with is_fc=false (conservative) when the cluster
 // has no steiner_pc or when FiducialUtils is unavailable.
 // ---------------------------------------------------------------------------
-FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
+FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv,
+                               IFiducial::pointer fiducial,
+                               const std::vector<double>& fv_tolerance)
 {
     FCCheckResult result;
 
@@ -103,6 +105,30 @@ FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
     const auto& pca = cluster.get_pca();
     geo_vector_t main_dir = pca.axis.at(0);
 
+    // Direct fiducial containment test.  Default (fiducial == nullptr) is the
+    // historical FiducialUtils path, bit-for-bit.  When a fiducial is supplied
+    // the test mirrors TaggerCheckTGM::inside_fv: a negative tolerance insets
+    // the boundary, i.e. the point shifted OUTWARD by |tol| must still be
+    // contained.  Same tolerance-vector convention as
+    // FiducialUtils::inside_fiducial_volume: [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi],
+    // or 3 (per-axis), or 1 (uniform).
+    auto inside_fv = [&](const geo_point_t& p) -> bool {
+        if (!fiducial) return fiducial_utils->inside_fiducial_volume(p);
+        if (fv_tolerance.empty()) return fiducial->contained(p);
+        double txl, txh, tyl, tyh, tzl, tzh;
+        const auto& tv = fv_tolerance;
+        if (tv.size() >= 6) { txl = tv[0]; txh = tv[1]; tyl = tv[2]; tyh = tv[3]; tzl = tv[4]; tzh = tv[5]; }
+        else if (tv.size() >= 3) { txl = txh = tv[0]; tyl = tyh = tv[1]; tzl = tzh = tv[2]; }
+        else { txl = txh = tyl = tyh = tzl = tzh = tv[0]; }
+        if (!fiducial->contained(Point(p.x() - txl, p.y(), p.z()))) return false;
+        if (!fiducial->contained(Point(p.x() + txh, p.y(), p.z()))) return false;
+        if (!fiducial->contained(Point(p.x(), p.y() - tyl, p.z()))) return false;
+        if (!fiducial->contained(Point(p.x(), p.y() + tyh, p.z()))) return false;
+        if (!fiducial->contained(Point(p.x(), p.y(), p.z() - tzl))) return false;
+        if (!fiducial->contained(Point(p.x(), p.y(), p.z() + tzh))) return false;
+        return true;
+    };
+
     // Per-point direction cache updated as we iterate
     geo_point_t drift_dir{}, U_dir{}, V_dir{}, W_dir{};
 
@@ -117,7 +143,7 @@ FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
             // Direct fiducial check for every point in the group
             for (size_t j = 0; j != pts_groups.at(i).size(); j++) {
                 geo_point_t p1 = pts_groups.at(i).at(j);
-                if (!fiducial_utils->inside_fiducial_volume(p1)) {
+                if (!inside_fv(p1)) {
                     result.exit_wcps.push_back(pts_groups.at(i).at(0));
                     flag_save = true;
                     break;
@@ -209,8 +235,8 @@ FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv)
         // If both endpoints appear to exit, use direct fiducial check to arbitrate
         if (result.exit_boundary_set.size() == 2) {
             result.exit_boundary_set.clear();
-            if (!fiducial_utils->inside_fiducial_volume(bp1)) result.exit_boundary_set.insert(0);
-            if (!fiducial_utils->inside_fiducial_volume(bp2)) result.exit_boundary_set.insert(1);
+            if (!inside_fv(bp1)) result.exit_boundary_set.insert(0);
+            if (!inside_fv(bp2)) result.exit_boundary_set.insert(1);
             if (result.exit_boundary_set.empty()) {
                 result.exit_boundary_set.insert(0);
                 result.exit_boundary_set.insert(1);

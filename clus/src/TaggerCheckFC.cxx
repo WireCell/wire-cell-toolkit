@@ -36,6 +36,17 @@
 /// Sets Flags::FC ("FC"), the tagger-computed sibling of Flags::TGM/Flags::STM.
 /// It is deliberately NOT the lowercase Flags::fully_contained, which is
 /// reserved for uBooNE verdicts imported through ClusteringTaggerFlagTransfer.
+///
+/// Fiducial volume.  By default (no "fiducial" key) containment is
+/// FiducialUtils' -- the union of per-(apa,face) sensitive volumes with no
+/// margin -- i.e. exactly what TaggerCheckSTM and TaggerCheckNeutrino see.
+/// That volume is NOT the one TaggerCheckTGM uses, which made FC and TGM
+/// mutually non-exclusive: TGM insets every wall by 2-3 cm via fv_tolerance
+/// while FiducialUtils insets none, so a track ending 1 cm inside a wall is an
+/// exiter for TGM and contained for FC; and FiducialUtils excludes the CPA slab
+/// (|x| < 0.45 cm) that TGM's single cross-cathode box spans.  Setting
+/// "fiducial" + "fv_tolerance" to the same values TaggerCheckTGM is given makes
+/// the two verdicts comparable.  See sbnd_xin/docs/27_fc-tgm-consistent-fv.md.
 
 #include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/ClusteringFuncs.h"
@@ -55,7 +66,7 @@ using namespace WireCell::Clus::Facade;
 static auto f_log = WireCell::Log::logger("clus.NeutrinoPattern");
 
 class TaggerCheckFC : public IConfigurable, public Clus::IEnsembleVisitor,
-                      private Clus::NeedDV {
+                      private Clus::NeedDV, private Clus::NeedFiducial {
 public:
     TaggerCheckFC() {}
     virtual ~TaggerCheckFC() {}
@@ -63,6 +74,22 @@ public:
     virtual void configure(const WireCell::Configuration& config) {
         NeedDV::configure(config);
         m_grouping_name = get<std::string>(config, "grouping", m_grouping_name);
+        // "fiducial" absent => keep cluster_fc_check's historical FiducialUtils
+        // containment.  NeedFiducial::configure is called ONLY when the key is
+        // present: it falls back to looking up the type-only name
+        // "DetectorVolumes", which is not an instantiated component in the SBND
+        // PR config (it is named dv-apa0-1) and would throw.
+        m_use_fiducial = !config["fiducial"].isNull();
+        if (m_use_fiducial) NeedFiducial::configure(config);
+        // fv_tolerance: boundary margins for the direct containment tests,
+        // FiducialUtils convention [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi], negative =
+        // inset.  Set together with "fiducial" to evaluate containment exactly
+        // the way TaggerCheckTGM does.
+        auto tol = config["fv_tolerance"];
+        if (!tol.isNull() && tol.isArray()) {
+            m_fv_tolerance.clear();
+            for (const auto& t : tol) m_fv_tolerance.push_back(t.asDouble());
+        }
         // require_in_scope (default false = same convention as the other
         // taggers): also require the cluster to pass the default-scope filter
         // set by switch_scope.  switch_scope SEPARATES out-of-volume blobs into
@@ -76,6 +103,11 @@ public:
         Configuration cfg;
         cfg["grouping"] = m_grouping_name;
         cfg["detector_volumes"] = "DetectorVolumes";
+        // Empty/absent => historical FiducialUtils containment (the union of
+        // per-face sensitive volumes, no margin).  Naming an IFiducial here
+        // redirects the direct containment tests to it.
+        cfg["fiducial"] = Json::Value();   // null = use FiducialUtils
+        cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
         return cfg;
     }
@@ -108,7 +140,10 @@ public:
                 // is_fc=false when the cluster has no steiner_pc or when the
                 // grouping carries no FiducialUtils (i.e. when the pipeline is
                 // missing the steiner / fiducialutils stages).
-                is_fc = Facade::cluster_fc_check(*main_cluster, m_dv).is_fc;
+                is_fc = Facade::cluster_fc_check(
+                    *main_cluster, m_dv,
+                    m_use_fiducial ? m_fiducial : nullptr,
+                    m_fv_tolerance).is_fc;
             }
             catch (const std::exception& err) {
                 SPDLOG_LOGGER_WARN(f_log, "visit: TaggerCheckFC: cluster {} check failed: {}",
@@ -123,4 +158,9 @@ public:
 private:
     std::string m_grouping_name{"live"};
     bool m_require_in_scope{false};
+    // Off by default: with no "fiducial" key the containment tests stay on
+    // FiducialUtils, i.e. identical to what TaggerCheckSTM/TaggerCheckNeutrino
+    // see.  SBND sets both keys so FC and TGM share one fiducial (doc 27).
+    bool m_use_fiducial{false};
+    std::vector<double> m_fv_tolerance;
 };

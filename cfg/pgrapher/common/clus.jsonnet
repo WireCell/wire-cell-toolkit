@@ -138,12 +138,19 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // require_in_scope (C++ default false; key omitted when off =>
         // byte-identical): evaluate only clusters passing switch_scope's
         // active-volume filter.
-        tagger_check_fc(name="", require_in_scope=false) :: {
+        // fiducial / fv_tolerance (both C++-default absent => keys omitted =>
+        // byte-identical): redirect the DIRECT containment tests from
+        // FiducialUtils to this IFiducial with these margins, so FC and TGM
+        // judge containment identically.  Pass the same values as
+        // tagger_check_tgm.  The dead-region / signal-processing checks keep
+        // using FiducialUtils either way, exactly as TaggerCheckTGM does.
+        tagger_check_fc(name="", fiducial="", fv_tolerance=[], require_in_scope=false) :: {
             type: "TaggerCheckFC",
             name: prefix + name,
             data: {
                 grouping: "live",
             } + dv_cfg + pcts_cfg
+              + (if fiducial == "" then {} else { fiducial: fiducial, fv_tolerance: fv_tolerance })
               + (if require_in_scope then { require_in_scope: true } else {}),
         },
 

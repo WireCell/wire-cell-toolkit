@@ -316,7 +316,21 @@ namespace WireCell::Clus::Facade {
     /// Used by:
     ///   - TaggerCheckNeutrino to fill tagger_info.match_isFC
     ///   - TaggerCheckSTM to drive STM / TGM classification
-    FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv);
+    ///   - TaggerCheckFC to set the "FC" cluster flag
+    ///
+    /// fiducial (optional, default nullptr): when null, the direct
+    /// inside/outside tests use the grouping's FiducialUtils
+    /// (DetectorVolumes = union of per-face sensitive volumes, no margin) --
+    /// the historical behavior, unchanged for every caller that omits it.
+    /// When given, those tests instead run against this IFiducial with
+    /// fv_tolerance applied (negative = inset), matching how TaggerCheckTGM
+    /// evaluates containment so the FC and TGM verdicts can be compared.
+    /// Only the DIRECT fiducial tests are redirected: the dead-region and
+    /// signal-processing checks keep using FiducialUtils' per-(apa,face)
+    /// logic, exactly as TaggerCheckTGM does.
+    FCCheckResult cluster_fc_check(Cluster& cluster, IDetectorVolumes::pointer dv,
+                                   IFiducial::pointer fiducial = nullptr,
+                                   const std::vector<double>& fv_tolerance = {});
 
 
 }  // namespace WireCell::Clus::Facade

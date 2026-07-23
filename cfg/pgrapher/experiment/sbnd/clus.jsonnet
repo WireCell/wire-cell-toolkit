@@ -517,7 +517,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // PCA/hough/steiner-boundary caches, so running it after the other
         // taggers leaves their inputs pristine rather than relying on those
         // caches being order-independent.  Coverage is unaffected by position.
-        tagger_check_fc: cm.tagger_check_fc(require_in_scope=true),
+        // fiducial/fv_tolerance are the SAME objects tagger_check_tgm gets, so
+        // "contained" means one thing across both verdicts.  Without them FC
+        // fell back to FiducialUtils (per-face sensitive volumes, no margin),
+        // which is both more permissive at every wall than TGM's inset box and
+        // holed at the CPA slab -- see docs/27_fc-tgm-consistent-fv.md.
+        tagger_check_fc: cm.tagger_check_fc(
+            fiducial=wc.tn(sbnd_pr_fv),
+            fv_tolerance=sbnd_pr_fv_margins,
+            require_in_scope=true),
         // Neutrino pattern recognition on the beam-coincident bundle.  The
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the
@@ -540,6 +548,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                          || std.member(pipeline_names, 'tagger_check_neutrino')
                          then [sbnd_box_recomb] + extra_uses else [])
                         + (if std.member(pipeline_names, 'tagger_check_tgm')
+                           || std.member(pipeline_names, 'tagger_check_fc')
                            then [sbnd_pr_fv] else []),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
     local mabc = g.pnode({
