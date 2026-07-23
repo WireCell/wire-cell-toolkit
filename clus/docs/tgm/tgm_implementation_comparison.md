@@ -109,9 +109,41 @@ choices, and on beam-coincident clusters they give opposite answers.
 
 A calls `Facade::compute_wireplane_params(cluster.grouping()->wpids(), m_dv, …)`
 and, for each endpoint, resolves the plane via `m_dv->contained_by(p)` to pick
-the U/V/W directions of that (apa, face). B hard-codes the uBooNE ±60° / vertical
-values. For SBND these coincide numerically; for a detector whose wire angles
-differ they would not.
+the U/V/W directions of that (apa, face). B hard-codes the uBooNE ±60° /
+vertical values.
+
+For SBND the two agree, but not quite trivially. Dumping
+`sbnd-wires-larsoft-v1.json.bz2` gives, in `(y, z)` unit components:
+
+| | anode 0 (TPC0) | anode 1 (TPC1) | prototype / B |
+|---|---|---|---|
+| U | (+0.5, +0.866) = +60° | (+0.5, −0.866) = **−60°** | (+0.5, +0.866) = +60° |
+| V | (+0.5, −0.866) = −60° | (+0.5, +0.866) = **+60°** | (+0.5, −0.866) = −60° |
+| W | (+1, 0) = 0° | (+1, 0) = 0° | (0, 1, 0) = 0° |
+
+TPC1's U and V are mirrored relative to TPC0, so B's hard-coded pair is
+literally wrong there — but harmlessly: the prolonged test is
+`(angle1_1 < 10 || angle2_1 < 10 || angle3_1 < 5)`, and U and V share the same
+10° threshold, so swapping them cannot change the result. The test is also
+invariant under a sign flip of a wire direction, since `dir_1.angle(wire_dir)`
+is unsigned and only `sin(angle)` is used. Net effect on SBND: none. On a
+detector with different or asymmetric wire angles, A would follow the geometry
+and B would not.
+
+Repro for the table:
+```bash
+python3 -c "
+import bz2,json,math
+d=json.load(bz2.open('\$WIRECELL_DATA/sbnd-wires-larsoft-v1.json.bz2'))
+st=d['Store']; pts=[p['Point'] for p in st['points']]; ws=[w['Wire'] for w in st['wires']]
+for f in st['faces']:
+    for pi in f['Face']['planes']:
+        p=st['planes'][pi]['Plane']; w=ws[p['wires'][len(p['wires'])//2]]
+        t=pts[w['tail']]; h=pts[w['head']]
+        dy=h['y']-t['y']; dz=h['z']-t['z']; n=math.hypot(dy,dz)
+        print(p['ident'], round(dy/n,4), round(dz/n,4), round(math.degrees(math.atan2(dz,dy)),2))
+"
+```
 
 A comment in A notes that the `|dir.x|` construction makes the drift-angle test
 sign-agnostic, so a single `(1,0,0)` drift axis serves both SBND drift
