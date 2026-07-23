@@ -443,7 +443,11 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // flag-aware L1 down-weight (a boundary/near-PD bundle's measured
             // light is an underestimate; don't let the LASSO shrink it away),
             lasso_flag_weight: true,
-            lasso_boundary_weight: 0.2,
+            // 0.2 = the doc-19 adopted literal; the null-default function arg
+            // sweeps it (doc 28) -- null compiles to exactly the old literal.
+            lasso_boundary_weight:
+                if lasso_boundary_weight == null then 0.2
+                else lasso_boundary_weight,
             // mask the KS shape metric on the same channels the chi2/LASSO drop,
             bundle_mask_ks: true,
             // Per-flash DAPHNE-rail channel masking (needs a light archive made
@@ -571,8 +575,9 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if delta_shape != null then 'delta_shape']: delta_shape,
             [if bkg_weight != null then 'bkg_weight']: bkg_weight,
             [if strength_cutoff != null then 'strength_cutoff']: strength_cutoff,
-            [if lasso_boundary_weight != null then 'lasso_boundary_weight']:
-                lasso_boundary_weight,
+            // lasso_boundary_weight is set via the production literal above
+            // (doc 28: a conditional key here would duplicate that field and
+            // crash the compile whenever the sweep arg is non-null).
             // Shared-flash-aware rescues (doc 19 phase 5).  C++ defaults
             // false/1e9/0; keys omitted when off => byte-identical.
             [if empty_rescue_shared then 'empty_rescue_shared']: true,
