@@ -1007,6 +1007,28 @@ namespace WireCell::Match {
         // pin-confirmed keep is exempt from the cathode ks ceiling above.
         // Default false => purge behaviour byte-identical.
         bool   m_xtpc_pin_confirms_rescue{false};
+        // Solo (single-volume) cathode rescue (pdvd doc 27): keep a
+        // provisional cathode-overshoot bundle WITHOUT cross-volume
+        // confirmation when its own light is good (ks <= solo_ks AND, if
+        // solo_c2n > 0, chi2/ndf <= solo_c2n).  Single-volume cathode
+        // touchers (stopping tracks) have no xtpc partner, so at the
+        // offset-0 frame they drop from candidacy entirely once past the
+        // ceiling; scan forensics separates them cleanly from junk by light
+        // quality (recovered ks 0.03-0.29 vs phantom c2n 48-377 / ks 0.41).
+        // solo_ks 0 (default) => branch off => purge byte-identical.
+        double m_cathode_rescue_solo_ks{0.0};
+        double m_cathode_rescue_solo_c2n{0.0};
+        // Scenario-1 eviction ks margin (pdvd doc 27): cull_inconsistent's
+        // sc1-priority branch evicts ALL non-sc1 rivals of a cluster -- at
+        // the offset-0 frame spurious sc1 pairings (junk partner within
+        // dmax at the cathode) hijack clusters whose scan-endorsed
+        // high-consistent match has clearly BETTER light (truth ks
+        // 0.03-0.09 evicted by sc1 rivals ks 0.12-0.24).  When >= 0, a
+        // high-consistent rival is spared the eviction if the cluster's
+        // best sc1 ks is worse than rival_ks + margin, and competes in the
+        // LASSO instead (the scenario-2 precedent).  Default -1 = evict
+        // unconditionally = byte-identical.
+        double m_sc1_evict_ks_margin{-1.0};
         // Post-fit cull of UNFLAGGED low-quality selections: a selected bundle
         // carrying no quality flag (not consistent / xtpc_consistent /
         // scenario1 / pin) survived on LASSO strength alone -- the largest

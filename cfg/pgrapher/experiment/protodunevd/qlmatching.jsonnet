@@ -94,6 +94,8 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          xtpc_pin_min_strength=null,
          xtpc_sc1_light_gate=false, xtpc_sc1_ks_max=null, xtpc_sc1_c2n_max=null,
          xtpc_cathode_ks_max=null, xtpc_pin_confirms_rescue=false,
+         cathode_rescue_solo_ks=null, cathode_rescue_solo_c2n=null,
+         sc1_evict_ks_margin=null,
          postcull_unflagged=false, postcull_ks_max=null, postcull_c2n_max=null,
          // Rescue blind-spot fix (doc 23 phase 1a): early postcull pass before
          // the rescues.  C++ default false; key omitted when off => byte-identical.
@@ -700,6 +702,16 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // Joint-pin counts as cathode-rescue confirmation (doc 27; C++
             // default false. Key omitted when off => byte-identical).
             [if xtpc_pin_confirms_rescue then 'xtpc_pin_confirms_rescue']: true,
+            // Solo (single-volume) light-quality cathode rescue (doc 27; C++
+            // defaults 0/0 = off. Keys omitted when null => byte-identical).
+            [if cathode_rescue_solo_ks != null then 'cathode_rescue_solo_ks']:
+                cathode_rescue_solo_ks,
+            [if cathode_rescue_solo_c2n != null then 'cathode_rescue_solo_c2n']:
+                cathode_rescue_solo_c2n,
+            // sc1-eviction ks margin (doc 27; C++ default -1 = evict
+            // unconditionally.  Key omitted when null => byte-identical).
+            [if sc1_evict_ks_margin != null then 'sc1_evict_ks_margin']:
+                sc1_evict_ks_margin,
             // Post-fit cull of unflagged low-quality selections (C++ default
             // false; ks/c2n ceilings default 0.30/20 in C++).
             [if postcull_unflagged then 'postcull_unflagged']: true,

@@ -180,6 +180,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_sc1_c2n_max      = get(cfg, "xtpc_sc1_c2n_max",      m_xtpc_sc1_c2n_max);
     m_xtpc_cathode_ks_max   = get(cfg, "xtpc_cathode_ks_max",   m_xtpc_cathode_ks_max);
     m_xtpc_pin_confirms_rescue = get(cfg, "xtpc_pin_confirms_rescue", m_xtpc_pin_confirms_rescue);
+    m_cathode_rescue_solo_ks   = get(cfg, "cathode_rescue_solo_ks",   m_cathode_rescue_solo_ks);
+    m_cathode_rescue_solo_c2n  = get(cfg, "cathode_rescue_solo_c2n",  m_cathode_rescue_solo_c2n);
+    m_sc1_evict_ks_margin      = get(cfg, "sc1_evict_ks_margin",      m_sc1_evict_ks_margin);
     m_postcull_unflagged    = get(cfg, "postcull_unflagged",    m_postcull_unflagged);
     m_postcull_ks_max       = get(cfg, "postcull_ks_max",       m_postcull_ks_max);
     m_postcull_c2n_max      = get(cfg, "postcull_c2n_max",      m_postcull_c2n_max);
@@ -708,6 +711,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
     cfg["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
     cfg["xtpc_pin_confirms_rescue"] = m_xtpc_pin_confirms_rescue;
+    cfg["cathode_rescue_solo_ks"]  = m_cathode_rescue_solo_ks;
+    cfg["cathode_rescue_solo_c2n"] = m_cathode_rescue_solo_c2n;
+    cfg["sc1_evict_ks_margin"]     = m_sc1_evict_ks_margin;
     cfg["postcull_unflagged"]    = m_postcull_unflagged;
     cfg["postcull_ks_max"]       = m_postcull_ks_max;
     cfg["postcull_c2n_max"]      = m_postcull_c2n_max;
@@ -2106,6 +2112,20 @@ void QLMatching::purge_unconfirmed_cathode_rescue(ApaRun& run)
                            (int)run.anode->ident(), b->get_main_cluster()->ident(),
                            b->get_flash()->get_flash_id());
             }
+            // Solo cathode rescue (doc 27, off by default): a single-volume
+            // cathode toucher has no partner to confirm with -- keep it on its
+            // own light quality instead.
+            else if (m_cathode_rescue_solo_ks > 0.0
+                     && b->get_ks_dis() <= m_cathode_rescue_solo_ks
+                     && (m_cathode_rescue_solo_c2n <= 0.0
+                         || b->get_chi2() <= m_cathode_rescue_solo_c2n
+                                             * std::max(b->get_ndf(), 1))) {
+                b->set_contained(true);
+                log->debug("QLXTPC cathode-rescue KEEP apa{} cluster {} flash {} "
+                           "(solo light-quality rescue ks={:.2f})",
+                           (int)run.anode->ident(), b->get_main_cluster()->ident(),
+                           b->get_flash()->get_flash_id(), b->get_ks_dis());
+            }
             else {
                 to_be_removed.push_back(b);
                 log->debug("QLXTPC cathode-rescue DROP apa{} cluster {} flash {} "
@@ -2161,8 +2181,25 @@ void QLMatching::cull_inconsistent(ApaRun& run)
                 }
         }
         else if (has_sc1) {
+            // Optional ks-margin spare (doc 27, off by default): a clearly
+            // better-light high-consistent rival survives the sc1 eviction and
+            // competes in the LASSO (scenario-2 precedent).
+            double best_sc1_ks = std::numeric_limits<double>::max();
+            if (m_sc1_evict_ks_margin >= 0.0)
+                for (auto& b : bundles)
+                    if (b->get_flag_xtpc_scenario1())
+                        best_sc1_ks = std::min(best_sc1_ks, b->get_ks_dis());
             for (auto& b : bundles)
                 if (!b->get_flag_xtpc_scenario1()) {
+                    if (m_sc1_evict_ks_margin >= 0.0 && b->get_consistent_flag()
+                        && best_sc1_ks > b->get_ks_dis() + m_sc1_evict_ks_margin) {
+                        log->debug("QLCULLINC apa{} cluster {} KEEP consistent bundle flash {} "
+                                   "(ks {:.2f} clearly beats best sc1 {:.2f}; LASSO arbitrates)",
+                                   (int)run.anode->ident(), cluster->ident(),
+                                   b->get_flash()->get_flash_id(),
+                                   b->get_ks_dis(), best_sc1_ks);
+                        continue;
+                    }
                     to_be_removed.push_back(b);
                     log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
                                "(cluster kept xtpc scenario-1 crosser)",
