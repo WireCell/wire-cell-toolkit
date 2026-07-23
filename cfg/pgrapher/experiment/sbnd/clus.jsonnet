@@ -436,7 +436,8 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // is off: the op display needs the per-cluster flashpred pcarray, which is
 // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
 local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
-              trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='', beam_window=[0, 0]) = {
+              trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='', beam_window=[0, 0],
+              tgm_neutrino_candidate=false) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -490,10 +491,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             recombination_model=wc.tn(sbnd_box_recomb),
             require_in_scope=true),
         // Through-going-muon tagger (prototype check_tgm port).  Runs on every
-        // matched main cluster; in-beam-window bundles are never tagged
-        // (conservative until check_neutrino_candidate is ported).  Must run
-        // after fiducialutils (dead-region / signal-processing checks) and
-        // before tagger_check_stm (which skips TGM-flagged mains).
+        // matched main cluster.  tgm_neutrino_candidate (C++ default false;
+        // key omitted when off => byte-identical): enable the ported
+        // check_neutrino_candidate veto so in-beam-window bundles may be
+        // tagged; when off in-beam bundles are never tagged (conservative v1
+        // behavior).  Must run after fiducialutils (dead-region /
+        // signal-processing checks) and before tagger_check_stm (which skips
+        // TGM-flagged mains).
         // require_in_scope: evaluate only clusters that pass switch_scope's
         // active-volume filter.  Without it the tagger also sees the
         // out-of-volume shards switch_scope splits off (which keep an inherited
@@ -504,7 +508,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             fv_tolerance=sbnd_pr_fv_margins,
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
-            require_in_scope=true),
+            require_in_scope=true,
+            check_neutrino_candidate=tgm_neutrino_candidate),
         // Neutrino pattern recognition on the beam-coincident bundle.  The
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the
@@ -665,13 +670,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
        trackfitting_config_file='', particle_dataset=null, extra_uses=[],
-       dl_weights='', beam_window=[0, 0])::
+       dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                 pipeline_names=pipeline_names, tensor_outname=tensor_outname,
                 trackfitting_config_file=trackfitting_config_file,
                 particle_dataset=particle_dataset, extra_uses=extra_uses,
-                dl_weights=dl_weights, beam_window=beam_window),
+                dl_weights=dl_weights, beam_window=beam_window,
+                tgm_neutrino_candidate=tgm_neutrino_candidate),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

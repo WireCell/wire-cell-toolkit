@@ -110,9 +110,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // names the IFiducial for the inside/outside-FV tests (e.g. a
         // BoxFiducial spanning ALL TPCs so cathode crossers are not exiters);
         // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins (negative =
-        // inset).  In-beam-window bundles are never tagged (conservative until
-        // check_neutrino_candidate is ported).
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false) :: {
+        // inset).  check_neutrino_candidate (C++ default false): enable the
+        // ported prototype Dijkstra path-topology neutrino veto so
+        // in-beam-window bundles may be tagged; when false (default, key
+        // omitted => byte-identical pre-port config) in-beam bundles are
+        // never tagged through the protected branches.
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -123,7 +126,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 length_limit_frac: length_limit_frac,
                 enable_case_b: enable_case_b,
             } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial })
-              + (if require_in_scope then { require_in_scope: true } else {}),
+              + (if require_in_scope then { require_in_scope: true } else {})
+              + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {}),
         },
 
         tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
