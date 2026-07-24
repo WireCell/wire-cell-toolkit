@@ -637,7 +637,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 auto it2 = it->second.find(face);
                 if (it2 != it->second.end()) {
                     for (const auto* cluster : grouping.children()) {
-                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter);
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
                     }
                 }
             }
@@ -657,7 +657,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 if (!match) continue;
                 auto it = apa_bpts.by_group.find(grp.name);
                 if (it != apa_bpts.by_group.end()) {
-                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter);
+                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
                 }
                 break;
             }
@@ -666,7 +666,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter);
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
         }
     }
 }
@@ -1503,12 +1503,33 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
 // Helper function to fill bee points from a single cluster
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
-    Bee::Points& bpts, const Cluster& cluster, 
-    const std::string& pcname, const std::vector<std::string>& coords, int filter)
+    Bee::Points& bpts, const Cluster& cluster,
+    const std::string& pcname, const std::vector<std::string>& coords, int filter,
+    double dQdx_scale, double dQdx_offset)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
 
     // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
+
+    if (pcname == "stm_fit"){
+        // STM fit-trajectory layer (TaggerCheckSTM save_stm_fit knob): the
+        // per-point fitted dQ is encoded into q with the same
+        // dQdx_scale/dQdx_offset convention as the PRGraph track_fit layer.
+        // Reachable only when a bee_points_sets entry names this PC, so
+        // existing configs are byte-identical.
+        auto& fit_pc = cluster.get_pc(pcname);
+        if (fit_pc.empty()) {
+            return;
+        }
+        const auto& fx = fit_pc.get(coords.at(0))->elements<double>();
+        const auto& fy = fit_pc.get(coords.at(1))->elements<double>();
+        const auto& fz = fit_pc.get(coords.at(2))->elements<double>();
+        const auto& fdQ = fit_pc.get("dQ")->elements<double>();
+        for (size_t i = 0; i < fx.size(); ++i) {
+            bpts.append(Point(fx[i], fy[i], fz[i]), fdQ[i]*dQdx_scale + dQdx_offset, clid, 0);
+        }
+        return;
+    }
 
     if (pcname == "steiner_pc"){
         // Export Steiner points ... 

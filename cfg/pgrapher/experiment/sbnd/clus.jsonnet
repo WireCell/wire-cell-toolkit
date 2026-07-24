@@ -448,7 +448,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_component_rescue=false, tgm_rescue_chord=false,
               tgm_main_pair=false, tgm_main_pair_mode='path',
               tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
-              tgm_fv_x_margin=2, tgm_fv_y_margin=2.5) = {
+              tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
+              save_stm_fit=false) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -523,7 +524,34 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
             recombination_model=wc.tn(sbnd_box_recomb),
-            require_in_scope=true),
+            require_in_scope=true,
+            // save_stm_fit (C++ default false; key omitted when off =>
+            // byte-identical): persist per-pass STM fits as cluster PCs +
+            // grouping slot "stm" for the Bee stm_fit layer and the
+            // stm_magnify ROOT dump below.  Runner flag: -stm-fit.
+            save_stm_fit=save_stm_fit),
+        // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
+        // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
+        // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
+        // with the two-TPC concatenated-per-plane channel convention.  Only
+        // active when named in pipeline_names (needs -stm-fit; the WireCellRoot
+        // plugin must be loaded by the job).
+        stm_magnify: {
+            type: 'SbndMagnifyTrackingVisitor',
+            name: 'pr',
+            data: {
+                grouping: 'live',
+                track_fitting_name: 'stm',
+                output_filename: (if output_dir == '' then '' else output_dir + '/') + 'tracking-stm.root',
+                runNo: runNo,
+                subRunNo: subRunNo,
+                eventNo: eventNo,
+                anodes: [wc.tn(a) for a in anodes],
+                detector_volumes: wc.tn(dv),
+                dQdx_scale: 0.1,
+                dQdx_offset: -1000.0,
+            },
+        },
         // Through-going-muon tagger (prototype check_tgm port).  Runs on every
         // matched main cluster.  tgm_neutrino_candidate (C++ default false;
         // key omitted when off => byte-identical): enable the ported
@@ -684,7 +712,24 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     individual: false,
                     use_graph_vertices: true,
                 },
-            ],
+            ]
+            // STM fit-trajectory layer, dumped after TaggerCheckSTM runs (doc
+            // sbnd_xin/docs/40).  q = dQ*0.1 - 1000, same convention as the
+            // PR track_fit layer.  Entry present only when save_stm_fit is on
+            // => compiled config byte-identical otherwise.  Name must avoid
+            // the substring '-track' (bee3 models.py filters such files).
+            + (if save_stm_fit then [{
+                name: 'stm_fit',
+                visitor: 'TaggerCheckSTM:pr',
+                grouping: 'live',
+                detector: 'sbnd',
+                algorithm: 'stm_fit',
+                pcname: 'stm_fit',
+                coords: ['x', 'y', 'z'],
+                individual: false,
+                dQdx_scale: 0.1,
+                dQdx_offset: -1000.0,
+            }] else []),
             // Particle-flow Bee output ("mc" jsTree JSON), emitted once after
             // TaggerCheckNeutrino runs; inert when the visitor is not in the pipeline.
             bee_pf: [
@@ -749,7 +794,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_component_extremes=false, tgm_component_rescue=false,
        tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
-       tgm_fv_x_margin=2, tgm_fv_y_margin=2.5)::
+       tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
+       save_stm_fit=false)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -768,6 +814,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_zmax_margin=tgm_fv_zmax_margin,
                 tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior,
                 tgm_fv_x_margin=tgm_fv_x_margin,
-                tgm_fv_y_margin=tgm_fv_y_margin),
+                tgm_fv_y_margin=tgm_fv_y_margin,
+                save_stm_fit=save_stm_fit),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

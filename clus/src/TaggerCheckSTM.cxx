@@ -14,6 +14,7 @@
 
 #include "WireCellIface/IScalarFunction.h"
 #include "WireCellUtil/KSTest.h"
+#include "WireCellUtil/PointCloudDataset.h"
 
 
 
@@ -64,8 +65,16 @@ public:
             m_shorted_y_w_max = syw[1].asInt();
         }
 
+        // save_stm_fit (default false = byte-identical legacy): persist the
+        // per-pass final track fits as cluster PCs (stm_fit/stm_pass/stm_eval)
+        // and hand an accumulator TrackFitting to the grouping slot "stm".
+        m_save_stm_fit = get<bool>(config, "save_stm_fit", m_save_stm_fit);
+        if (m_save_stm_fit) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: save_stm_fit ON");
+        }
+
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
-    
+
         if (!m_trackfitting_config_file.empty()) {
             SPDLOG_LOGGER_TRACE(s_log, "configure: TaggerCheckSTM: Loading TrackFitting config from: {}", m_trackfitting_config_file);
             load_trackfitting_config(m_trackfitting_config_file);
@@ -88,6 +97,7 @@ public:
         // Set to [w_min, w_max] W-wire index range to enable. Example: [7135, 7264] for UBoone.
         cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
+        cfg["save_stm_fit"] = m_save_stm_fit;
 
         return cfg;
     }
@@ -158,6 +168,8 @@ public:
                 }
             }
 
+            if (m_save_stm_fit) { m_pass_records.clear(); m_eval_records.clear(); }
+
             bool is_stm = check_stm_conditions(*main_cluster, associated_clusters);
 
             // TGM is set inside check_stm_conditions; set STM only when not TGM
@@ -169,6 +181,28 @@ public:
                 main_cluster->ident(),
                 main_cluster->get_flag(Flags::STM),
                 main_cluster->get_flag(Flags::TGM));
+
+            if (m_save_stm_fit) persist_stm_fit(*main_cluster);
+        }
+
+        // Hand the accumulated fits to downstream writers (Bee dump reads the
+        // cluster PCs; SbndMagnifyTrackingVisitor reads this named slot for
+        // the pred/meas 2D charge and the segments).
+        if (m_save_stm_fit) {
+            auto saved = std::make_shared<TrackFitting>();
+            saved->set_parameters(m_track_fitter.get_parameters());
+            // add_segment triggers BuildGeometry on first use -- give the
+            // holder the same DV/transform setup as the live fitter above.
+            saved->set_detector_volume(m_dv);
+            saved->set_pc_transforms(m_pcts);
+            for (auto& [cid, seg] : m_saved_segments) saved->add_segment(seg);
+            saved->merge_fitted_charge_2d(m_acc_fitted_charge);
+            grouping.set_track_fitting("stm", saved);
+            SPDLOG_LOGGER_INFO(s_log,
+                "visit: TaggerCheckSTM: save_stm_fit stored {} segment(s) in grouping slot 'stm'",
+                m_saved_segments.size());
+            m_saved_segments.clear();
+            m_acc_fitted_charge.clear();
         }
 
         // (dead-code stub removed — see git history for the tracking-infrastructure
@@ -237,6 +271,154 @@ private:
     int m_shorted_y_w_min{-1};
     int m_shorted_y_w_max{-1};
     mutable TrackFitting m_track_fitter;
+
+    // === save_stm_fit knob state (inert when off => byte-identical legacy) ===
+    //
+    // Pass status codes recorded per fitted pass:
+    //   0 accepted (STM), 1 TGM, 2 rejected long-leftover past kink
+    //   ("Mid Point A"), 3 rejected dQ/dx eval (KS tests), 4 rejected
+    //   extra-tracks veto, 5 rejected proton endpoint, 6 fitted but no
+    //   decision (fell through).
+    // Round-1 rough fits and passes aborted with <=3 fit points are NOT
+    // recorded (no round-2 segment exists).
+    bool m_save_stm_fit{false};
+    struct StmPassRecord {
+        std::shared_ptr<PR::Segment> segment;
+        int pass{0};        // 0 forward, 1 backward
+        int status{6};
+        int kink_num{-1};
+        double exit_L{0}, left_L{0}, exit_Q{0}, left_Q{0};
+    };
+    struct StmEvalRecord {
+        int pass{0};
+        double peak_range{0}, offset_length{0}, com_range{0};
+        int strong{0};
+        double ks1{0}, ks2{0}, ratio1{0}, ratio2{0}, res_length{0}, ave_res_dQ_dx{0};
+        int verdict{-1};
+    };
+    mutable std::vector<StmPassRecord> m_pass_records;   // current cluster
+    mutable std::vector<StmEvalRecord> m_eval_records;   // current cluster
+    mutable int m_cur_pass{0};
+    // Grouping-level accumulation across clusters for the "stm" hand-off.
+    mutable std::vector<std::pair<int, std::shared_ptr<PR::Segment>>> m_saved_segments;
+    mutable std::map<TrackFitting::APAFacePlane,
+                     std::map<TrackFitting::WireTime, TrackFitting::FittedCharge2D>> m_acc_fitted_charge;
+
+    // Called right after the round-2 (final) fit of a pass.
+    void begin_pass_record(std::shared_ptr<PR::Segment> segment, bool is_forward) const {
+        m_cur_pass = is_forward ? 0 : 1;
+        StmPassRecord rec;
+        rec.segment = segment;
+        rec.pass = m_cur_pass;
+        m_pass_records.push_back(std::move(rec));
+        // Snapshot this pass's pred/meas 2D charge before the next
+        // clear_segments() wipes it (last-writer-wins on overlap).
+        for (const auto& [afp, wt_map] : m_track_fitter.get_fitted_charge_2d()) {
+            auto& dst = m_acc_fitted_charge[afp];
+            for (const auto& [wt, fc] : wt_map) dst[wt] = fc;
+        }
+    }
+    void note_pass_kink(int kink_num, double exit_L, double left_L, double exit_Q, double left_Q) const {
+        if (m_pass_records.empty()) return;
+        auto& rec = m_pass_records.back();
+        rec.kink_num = kink_num;
+        rec.exit_L = exit_L; rec.left_L = left_L;
+        rec.exit_Q = exit_Q; rec.left_Q = left_Q;
+    }
+    void set_pass_status(int status) const {
+        if (m_pass_records.empty()) return;
+        m_pass_records.back().status = status;
+    }
+
+    // Persist the recorded passes/evals of one main cluster as node-local PCs
+    // (consumed same-job by the MABC Bee dump and SbndMagnifyTrackingVisitor;
+    // the PR job does not re-save the pctree tarball).
+    void persist_stm_fit(Cluster& cluster) const {
+        using WireCell::PointCloud::Array;
+        using WireCell::PointCloud::Dataset;
+
+        if (!m_pass_records.empty()) {
+            std::vector<double> x, y, z, dQ, dx, L, rr, pu, pv, pw, pt, chi2;
+            std::vector<int> apa, face, pass, status;
+            for (const auto& rec : m_pass_records) {
+                const auto& fits = rec.segment->fits();
+                const size_t n = fits.size();
+                std::vector<double> cumL(n, 0);
+                for (size_t i = 1; i < n; i++) {
+                    cumL[i] = cumL[i-1] + (fits[i].point - fits[i-1].point).magnitude();
+                }
+                const double Ltot = n ? cumL.back() : 0;
+                for (size_t i = 0; i < n; i++) {
+                    const auto& f = fits[i];
+                    x.push_back(f.point.x()); y.push_back(f.point.y()); z.push_back(f.point.z());
+                    dQ.push_back(f.dQ); dx.push_back(f.dx);
+                    L.push_back(cumL[i]);
+                    // Residual range from the candidate stopping end (= path end).
+                    rr.push_back(Ltot - cumL[i]);
+                    pu.push_back(f.pu); pv.push_back(f.pv); pw.push_back(f.pw); pt.push_back(f.pt);
+                    chi2.push_back(f.reduced_chi2);
+                    apa.push_back(f.paf.first); face.push_back(f.paf.second);
+                    pass.push_back(rec.pass); status.push_back(rec.status);
+                }
+                SPDLOG_LOGGER_INFO(s_log,
+                    "persist_stm_fit: cluster {} stmfit pass={} status={} kink={} exit_L={:.1f} left_L={:.1f} npts={}",
+                    cluster.get_cluster_id(), rec.pass, rec.status, rec.kink_num,
+                    rec.exit_L/units::cm, rec.left_L/units::cm, n);
+                m_saved_segments.emplace_back(cluster.get_cluster_id(), rec.segment);
+            }
+            std::map<std::string, Array> arrays;
+            arrays.emplace("x", Array(x)); arrays.emplace("y", Array(y)); arrays.emplace("z", Array(z));
+            arrays.emplace("dQ", Array(dQ)); arrays.emplace("dx", Array(dx));
+            arrays.emplace("L", Array(L)); arrays.emplace("rr", Array(rr));
+            arrays.emplace("pu", Array(pu)); arrays.emplace("pv", Array(pv));
+            arrays.emplace("pw", Array(pw)); arrays.emplace("pt", Array(pt));
+            arrays.emplace("reduced_chi2", Array(chi2));
+            arrays.emplace("apa", Array(apa)); arrays.emplace("face", Array(face));
+            arrays.emplace("pass", Array(pass)); arrays.emplace("status", Array(status));
+            cluster.local_pcs()["stm_fit"] = Dataset(arrays);
+
+            std::vector<int> p_pass, p_status, p_kink, p_npts;
+            std::vector<double> p_exit_L, p_left_L, p_exit_dqdx, p_left_dqdx;
+            for (const auto& rec : m_pass_records) {
+                p_pass.push_back(rec.pass); p_status.push_back(rec.status);
+                p_kink.push_back(rec.kink_num);
+                p_npts.push_back(static_cast<int>(rec.segment->fits().size()));
+                p_exit_L.push_back(rec.exit_L); p_left_L.push_back(rec.left_L);
+                p_exit_dqdx.push_back(rec.exit_Q/(rec.exit_L/units::cm + 1e-9));
+                p_left_dqdx.push_back(rec.left_Q/(rec.left_L/units::cm + 1e-9));
+            }
+            std::map<std::string, Array> parrays;
+            parrays.emplace("pass", Array(p_pass)); parrays.emplace("status", Array(p_status));
+            parrays.emplace("kink_num", Array(p_kink)); parrays.emplace("npoints", Array(p_npts));
+            parrays.emplace("exit_L", Array(p_exit_L)); parrays.emplace("left_L", Array(p_left_L));
+            parrays.emplace("exit_dqdx", Array(p_exit_dqdx)); parrays.emplace("left_dqdx", Array(p_left_dqdx));
+            cluster.local_pcs()["stm_pass"] = Dataset(parrays);
+        }
+
+        if (!m_eval_records.empty()) {
+            std::vector<int> e_pass, e_strong, e_verdict;
+            std::vector<double> e_peak, e_off, e_com, e_ks1, e_ks2, e_r1, e_r2, e_resl, e_resq;
+            for (const auto& er : m_eval_records) {
+                e_pass.push_back(er.pass); e_strong.push_back(er.strong); e_verdict.push_back(er.verdict);
+                e_peak.push_back(er.peak_range); e_off.push_back(er.offset_length); e_com.push_back(er.com_range);
+                e_ks1.push_back(er.ks1); e_ks2.push_back(er.ks2);
+                e_r1.push_back(er.ratio1); e_r2.push_back(er.ratio2);
+                e_resl.push_back(er.res_length); e_resq.push_back(er.ave_res_dQ_dx);
+            }
+            std::map<std::string, Array> earrays;
+            earrays.emplace("pass", Array(e_pass)); earrays.emplace("strong", Array(e_strong));
+            earrays.emplace("verdict", Array(e_verdict));
+            earrays.emplace("peak_range", Array(e_peak)); earrays.emplace("offset_length", Array(e_off));
+            earrays.emplace("com_range", Array(e_com));
+            earrays.emplace("ks1", Array(e_ks1)); earrays.emplace("ks2", Array(e_ks2));
+            earrays.emplace("ratio1", Array(e_r1)); earrays.emplace("ratio2", Array(e_r2));
+            earrays.emplace("res_length", Array(e_resl)); earrays.emplace("ave_res_dqdx", Array(e_resq));
+            cluster.local_pcs()["stm_eval"] = Dataset(earrays);
+        }
+
+        m_pass_records.clear();
+        m_eval_records.clear();
+    }
 
     void load_trackfitting_config(const std::string& config_file) {
         try {
@@ -1246,9 +1428,9 @@ private:
     }
 
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
-    bool eval_stm_core(const STMEvalArrays& arrs, int kink_num,
+    bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
-                       bool flag_strong_check = false) const {
+                       bool flag_strong_check) const {
         const auto& pts   = arrs.pts;
         const auto& L     = arrs.L;
         const auto& dQ_dx = arrs.dQ_dx;
@@ -1374,6 +1556,16 @@ private:
 
         SPDLOG_LOGGER_TRACE(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/50000.);
 
+        if (m_save_stm_fit) {
+            StmEvalRecord er;
+            er.pass = m_cur_pass;
+            er.peak_range = peak_range; er.offset_length = offset_length; er.com_range = com_range;
+            er.strong = flag_strong_check ? 1 : 0;
+            er.ks1 = ks1; er.ks2 = ks2; er.ratio1 = ratio1; er.ratio2 = ratio2;
+            er.res_length = res_length; er.ave_res_dQ_dx = ave_res_dQ_dx;
+            m_eval_records.push_back(er);
+        }
+
         if (ks1 - ks2 >= 0.0) return false;
         if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) return false;
@@ -1411,7 +1603,20 @@ private:
 
 
         return false;
-    } // end eval_stm_core
+    } // end eval_stm_core_impl
+
+    // Thin wrapper so the save_stm_fit dump can record each call's verdict
+    // (the record itself is pushed at the stats point inside the impl, which
+    // every code path reaches before returning).
+    bool eval_stm_core(const STMEvalArrays& arrs, int kink_num,
+                       double peak_range, double offset_length, double com_range,
+                       bool flag_strong_check = false) const {
+        const bool ok = eval_stm_core_impl(arrs, kink_num, peak_range, offset_length, com_range, flag_strong_check);
+        if (m_save_stm_fit && !m_eval_records.empty()) {
+            m_eval_records.back().verdict = ok ? 1 : 0;
+        }
+        return ok;
+    }
 
     // Public wrapper: builds arrays once and delegates to core.
     bool eval_stm(std::shared_ptr<PR::Segment> segment, int kink_num,
@@ -2015,6 +2220,8 @@ private:
             m_track_fitter.add_segment(adjusted_segment);
             m_track_fitter.do_single_tracking(adjusted_segment);
 
+            if (m_save_stm_fit) begin_pass_record(adjusted_segment, is_forward);
+
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Finish second round of fitting");
 
             std::vector<double> dQ, dx;
@@ -2041,6 +2248,8 @@ private:
             }
             for (size_t i = 0; i < first_loop_end; i++) { exit_L += dx[i]; exit_Q += dQ[i]; }
             for (size_t i = second_loop_start; i < dx_size; i++) { left_L += dx[i]; left_Q += dQ[i]; }
+
+            if (m_save_stm_fit) note_pass_kink(kink_num, exit_L, left_L, exit_Q, left_Q);
 
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Left: {} {} {} {}",
                 exit_L/units::cm, left_L/units::cm,
@@ -2071,6 +2280,7 @@ private:
                 if ((exit_L < 3*units::cm || left_L < 3*units::cm) || flag_TGM_anode) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                     cluster.set_flag(Flags::TGM);
+                    if (m_save_stm_fit) set_pass_status(1);
                     return true;
                 }
             } else if (is_forward &&
@@ -2084,6 +2294,7 @@ private:
                     if (exit_L < 3*units::cm || left_L < 3*units::cm) {
                         SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TGM: {} {}", pts.front(), pts.back());
                         cluster.set_flag(Flags::TGM);
+                        if (m_save_stm_fit) set_pass_status(1);
                         return true;
                     }
                 }
@@ -2091,6 +2302,7 @@ private:
 
             // STM evaluation
             if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)) {
+                if (m_save_stm_fit) set_pass_status(2);
                 if (!is_forward) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}",
                         mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
@@ -2175,10 +2387,15 @@ private:
                 search_other_tracks(cluster, fitted_segments);
                 if (check_other_tracks(cluster, fitted_segments)) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point Tracks");
+                    if (m_save_stm_fit) set_pass_status(4);
                     return false;
                 }
-                if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) return true;
+                if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) {
+                    if (m_save_stm_fit) set_pass_status(0);
+                    return true;
+                }
             }
+            if (m_save_stm_fit) set_pass_status(flag_pass ? 5 : 3);
             return std::nullopt;
         };
 

@@ -93,17 +93,22 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // non-physical shards (which are outside the FV by construction, so they
         // satisfy the TGM CASE-A test almost automatically).  Key emitted only
         // when true so existing compiled configs stay byte-identical.
+        // save_stm_fit (C++ default false; key omitted when off => byte-identical):
+        // persist the per-pass STM track fits as cluster PCs
+        // (stm_fit/stm_pass/stm_eval) and a grouping-level "stm" TrackFitting
+        // for downstream writers (Bee stm_fit layer, SbndMagnifyTrackingVisitor).
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
-                         require_in_scope=false) :: {
+                         require_in_scope=false, save_stm_fit=false) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
                 grouping: "live",           // Which grouping to process
-                trackfitting_config_file: trackfitting_config_file, 
+                trackfitting_config_file: trackfitting_config_file,
                 particle_dataset: particle_dataset,
                 recombination_model: recombination_model,
             } + dv_cfg + pcts_cfg
               + (if require_in_scope then { require_in_scope: true } else {})
+              + (if save_stm_fit then { save_stm_fit: true } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial

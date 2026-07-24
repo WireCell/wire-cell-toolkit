@@ -327,12 +327,25 @@ namespace WireCell::Clus::Facade {
         std::shared_ptr<WireCell::Clus::TrackFitting> get_track_fitting() const { return m_track_fitting; }
         void set_track_fitting(std::shared_ptr<WireCell::Clus::TrackFitting> tf) { m_track_fitting = tf; }
 
+        // Named TrackFitting slots so several taggers can each persist their own
+        // fitter without colliding with the unnamed slot the neutrino-PR chain
+        // uses (e.g. TaggerCheckSTM save_stm_fit stores under "stm" for
+        // SbndMagnifyTrackingVisitor).  Unknown name returns nullptr.
+        std::shared_ptr<WireCell::Clus::TrackFitting> get_track_fitting(const std::string& name) const {
+            auto it = m_named_track_fitting.find(name);
+            return it == m_named_track_fitting.end() ? nullptr : it->second;
+        }
+        void set_track_fitting(const std::string& name, std::shared_ptr<WireCell::Clus::TrackFitting> tf) {
+            m_named_track_fitting[name] = tf;
+        }
+
         // Convenience accessor for PRGraph (delegates to TrackFitting)
         std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const;
 
       private:
         FiducialUtilsPtr m_fiducialutils;
         std::shared_ptr<WireCell::Clus::TrackFitting> m_track_fitting;
+        std::map<std::string, std::shared_ptr<WireCell::Clus::TrackFitting>> m_named_track_fitting;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;

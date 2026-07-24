@@ -127,7 +127,7 @@ namespace WireCell::Clus {
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
-            int filter);
+            int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0);
         void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
 

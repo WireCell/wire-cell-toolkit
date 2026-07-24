@@ -1151,6 +1151,17 @@ void TrackFitting::assemble_fitted_charge_2d()
     }
 }
 
+void TrackFitting::merge_fitted_charge_2d(const std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>>& other)
+{
+    for (const auto& [afp, wt_map] : other) {
+        auto& dst = m_fitted_charge_2d[afp];
+        for (const auto& [wt, fc] : wt_map) {
+            // Last-writer-wins, matching assemble_fitted_charge_2d.
+            dst[wt] = fc;
+        }
+    }
+}
+
 // ============================================================================
 // Helper functions for organize_segments_path methods
 // ============================================================================
