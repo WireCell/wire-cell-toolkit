@@ -120,6 +120,18 @@ public:
         // separates the two cases with the same 30 cm-step rule the chord
         // guard uses.  Only consulted when component_extremes is on.
         m_component_rescue = get(config, "component_rescue", m_component_rescue);
+        // rescue_chord_check (default false = rescue-as-introduced behavior):
+        // a CASE-A/CASE-B pair with an end donated by a RESCUED component must
+        // ALSO pass the straight-chord support test (chord_has_charge), even
+        // in path mode.  Rescue's target -- a genuine track end fragmented
+        // behind small gaps -- lies ON the straight line to the track's other
+        // end, so it passes.  But path mode alone lets a rescued speck pair
+        // across TWO merged tracks: SBND evt288727 cluster 6, two touching
+        // cosmics (one enters downstream, one enters the bottom via a
+        // drift-parallel fragmented track), pair joined by an L-shaped detour
+        // with jumps < 30 cm while 88% of the straight chord is > 6 cm from
+        // any charge.  Only consulted when component_rescue is on.
+        m_rescue_chord_check = get(config, "rescue_chord_check", m_rescue_chord_check);
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -150,6 +162,7 @@ public:
         cfg["component_min_length"] = m_component_min_length;
         cfg["component_graph"] = m_component_graph;
         cfg["component_rescue"] = m_component_rescue;
+        cfg["rescue_chord_check"] = m_rescue_chord_check;
         return cfg;
     }
 
@@ -206,6 +219,7 @@ private:
     double m_component_min_length{10 * units::cm};
     std::string m_component_graph{"relaxed"};
     bool m_component_rescue{false};
+    bool m_rescue_chord_check{false};
     std::vector<double> m_fv_tolerance;
 
     // A through-going muon deposits charge ALONG its whole path.  The CASE-A
@@ -405,8 +419,14 @@ private:
         return (ex[0] - ex[1]).magnitude() >= m_component_min_length;
     }
 
-    std::vector<std::vector<geo_point_t>> component_extreme_wcps(const Cluster& cluster) const {
+    // rescued_out (optional): parallel to the returned groups, one flag per
+    // point, 1 = the point was donated by a rescue-pass component.  Consumed
+    // by the rescue_chord_check pair guard in check_tgm().
+    std::vector<std::vector<geo_point_t>> component_extreme_wcps(
+        const Cluster& cluster,
+        std::vector<std::vector<char>>* rescued_out = nullptr) const {
         std::vector<std::vector<geo_point_t>> out;
+        std::vector<std::vector<char>> res;
         const int npts = cluster.npoints();
         if (npts <= 0) return out;
         std::vector<int> b2c;
@@ -455,18 +475,24 @@ private:
             if (out.empty()) {
                 out.push_back({ex[0]});
                 out.push_back({ex[1]});
+                res.push_back({0});
+                res.push_back({0});
                 first = 2;
             }
             for (int i = first; i < 8; ++i) {
                 bool distinct = true;
-                for (auto& grp : out) {
-                    if ((ex[i] - grp[0]).magnitude() < min_separation) {
-                        grp.push_back(ex[i]);
+                for (size_t g = 0; g < out.size(); ++g) {
+                    if ((ex[i] - out[g][0]).magnitude() < min_separation) {
+                        out[g].push_back(ex[i]);
+                        res[g].push_back(0);
                         distinct = false;
                         break;
                     }
                 }
-                if (distinct) out.push_back({ex[i]});
+                if (distinct) {
+                    out.push_back({ex[i]});
+                    res.push_back({0});
+                }
             }
         }
         // Rescue pass (knob off => never taken): a sub-min-length component
@@ -493,14 +519,18 @@ private:
                 ++n_rescued;
                 for (int i = 0; i < 8; ++i) {
                     bool distinct = true;
-                    for (auto& grp : out) {
-                        if ((ex[i] - grp[0]).magnitude() < min_separation) {
-                            grp.push_back(ex[i]);
+                    for (size_t g = 0; g < out.size(); ++g) {
+                        if ((ex[i] - out[g][0]).magnitude() < min_separation) {
+                            out[g].push_back(ex[i]);
+                            res[g].push_back(1);
                             distinct = false;
                             break;
                         }
                     }
-                    if (distinct) out.push_back({ex[i]});
+                    if (distinct) {
+                        out.push_back({ex[i]});
+                        res.push_back({1});
+                    }
                 }
             }
             if (n_rescued) {
@@ -512,6 +542,7 @@ private:
         SPDLOG_LOGGER_DEBUG(t_log, "component_extreme_wcps: cluster {} {} component(s), {} above {:.1f} cm -> {} extreme group(s)",
                             cluster.ident(), comp_pts.size(), n_used,
                             m_component_min_length / units::cm, out.size());
+        if (rescued_out) *rescued_out = std::move(res);
         return out;
     }
 
@@ -542,9 +573,13 @@ private:
         // Component-aware extremes when the knob is on; fall back to the
         // global scan if it yields fewer than two groups (tiny cluster), so
         // coverage is never LOST relative to the knob-off path.
-        auto out_vec_wcps = m_component_extremes ? component_extreme_wcps(cluster)
+        std::vector<std::vector<char>> rescued_grps;
+        auto out_vec_wcps = m_component_extremes ? component_extreme_wcps(cluster, &rescued_grps)
                                                  : std::vector<std::vector<geo_point_t>>();
-        if (out_vec_wcps.size() < 2) out_vec_wcps = cluster.get_extreme_wcps();
+        if (out_vec_wcps.size() < 2) {
+            out_vec_wcps = cluster.get_extreme_wcps();
+            rescued_grps.clear();
+        }
         if (out_vec_wcps.size() < 2 || out_vec_wcps[0].empty() || out_vec_wcps[1].empty()) return false;
         for (const auto& grp : out_vec_wcps) {
             if (grp.empty()) return false;
@@ -620,6 +655,30 @@ private:
                                 m_chord_max_gap / units::cm);
             return true;
         };
+        // rescue_chord_check pair guard (knob off => never taken): a pair
+        // whose end point was donated by a RESCUED component must also pass
+        // the STRAIGHT-chord support test.  Path mode alone lets a rescued
+        // wall-touching speck pair with the other cosmic of a two-track
+        // merge through an L-shaped charge detour (evt288727 cluster 6);
+        // a genuine fragmented track end lies on its own pair's chord.
+        auto end_rescued = [&](size_t g, int idx) -> bool {
+            if (g >= rescued_grps.size()) return false;
+            const auto& v = rescued_grps[g];
+            if (idx < 0 || idx >= (int)v.size()) return false;
+            return v[idx] != 0;
+        };
+        auto rescued_pair_rejects = [&](const geo_point_t& a, const geo_point_t& b,
+                                        size_t gi, int ai, size_t gk, int bi,
+                                        const char* case_tag) {
+            if (!m_rescue_chord_check || rescued_grps.empty()) return false;
+            if (!end_rescued(gi, ai) && !end_rescued(gk, bi)) return false;
+            if (chord_has_charge(cluster, a, b)) return false;
+            SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: rescued end, straight chord {:.1f} cm has an unsupported run > {:.1f} cm",
+                                cluster.ident(), case_tag, gi, gk,
+                                (a - b).magnitude() / units::cm,
+                                m_chord_max_gap / units::cm);
+            return true;
+        };
 
         for (size_t i = 0; i != out_vec_wcps.size(); i++) {
             bool flag_p1_inside = true;
@@ -661,6 +720,7 @@ private:
                     // sub-track that is itself through-going still tags on its
                     // own charge-supported pair.
                     if (chord_guard_rejects(pe1, pe2, "CASE-A", i, k)) continue;
+                    if (rescued_pair_rejects(pe1, pe2, i, p1_index, k, p2_index, "CASE-A")) continue;
                     if (flag_check) {
                         if (in_beam_window) {
                             if (m_check_neutrino_candidate) {
@@ -723,6 +783,7 @@ private:
                     // Chord-charge guard, CASE B (knob off => never taken).
                     // Before the hough / dead-volume work so it also saves that cost.
                     if (chord_guard_rejects(p1, p2, "CASE-B", i, k)) continue;
+                    if (rescued_pair_rejects(p1, p2, i, 0, k, 0, "CASE-B")) continue;
 
                     bool skip_pair = false;
                     bool flag_p1_inside_p = flag_p1_inside;
