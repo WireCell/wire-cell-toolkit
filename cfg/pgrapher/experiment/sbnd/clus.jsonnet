@@ -438,7 +438,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
               trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='', beam_window=[0, 0],
               tgm_neutrino_candidate=false, tgm_chord_charge=false,
-              tgm_component_extremes=false) = {
+              tgm_chord_mode='chord', tgm_component_extremes=false) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -512,6 +512,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             require_in_scope=true,
             check_neutrino_candidate=tgm_neutrino_candidate,
             require_chord_charge=tgm_chord_charge,
+            // C++ default "chord". Key omitted then => byte-identical.
+            chord_charge_mode=tgm_chord_mode,
             component_extremes=tgm_component_extremes),
         // Fully-contained tagger.  Independent of TGM/STM: it evaluates every
         // in-scope main cluster and only records a containment verdict (flag
@@ -691,7 +693,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
        trackfitting_config_file='', particle_dataset=null, extra_uses=[],
        dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false,
-       tgm_chord_charge=false, tgm_component_extremes=false)::
+       tgm_chord_charge=false, tgm_chord_mode='chord',
+       tgm_component_extremes=false)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -701,6 +704,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 dl_weights=dl_weights, beam_window=beam_window,
                 tgm_neutrino_candidate=tgm_neutrino_candidate,
                 tgm_chord_charge=tgm_chord_charge,
+                tgm_chord_mode=tgm_chord_mode,
                 tgm_component_extremes=tgm_component_extremes),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

@@ -123,6 +123,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // flash-time merge in examine_bundles(use_flash_t0) putting a detached
         // fragment into the tagged Cluster: its chord to the real track passes
         // the FV-only test trivially.  C++ defaults 6 cm / 30 cm.
+        // chord_charge_mode (C++ default "chord"; key omitted then =>
+        // byte-identical): "chord" samples the STRAIGHT segment between the
+        // extremes (rejects genuinely curved tracks -- SBND evt285185
+        // cluster 16 bows 10 cm off its 480 cm chord and lost a real TGM);
+        // "path" instead requires a piecewise charge path through the
+        // cluster's own points with no jump longer than chord_max_gap
+        // (chord_support_radius unused in that mode).
         // component_extremes (C++ default false; key omitted when off): find
         // the 8 extreme points PER connected component and union them.  The
         // global scan gives each slot (max z, min x, ...) to whichever merge
@@ -131,7 +138,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // form its pair.  USE TOGETHER WITH require_chord_charge: the union
         // also creates cross-component pairs, and the chord test is what
         // rejects those.  C++ component_min_length default 10 cm.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, component_extremes=false, component_min_length=null) :: {
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -147,6 +154,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if require_chord_charge then { require_chord_charge: true } else {})
               + (if chord_support_radius == null then {} else { chord_support_radius: chord_support_radius })
               + (if chord_max_gap == null then {} else { chord_max_gap: chord_max_gap })
+              // Key only when the guard is ON and the mode is non-default, so
+              // a runner may pass the mode unconditionally without disturbing
+              // the knob-off compiled config.
+              + (if require_chord_charge && chord_charge_mode != "chord" then { chord_charge_mode: chord_charge_mode } else {})
               + (if component_extremes then { component_extremes: true } else {})
               + (if component_min_length == null then {} else { component_min_length: component_min_length }),
         },

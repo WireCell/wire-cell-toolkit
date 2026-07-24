@@ -35,6 +35,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <map>
+#include <numeric>
 
 class TaggerCheckTGM;
 WIRECELL_FACTORY(TaggerCheckTGM, TaggerCheckTGM,
@@ -83,6 +86,17 @@ public:
         m_require_chord_charge = get(config, "require_chord_charge", m_require_chord_charge);
         m_chord_support_radius = get(config, "chord_support_radius", m_chord_support_radius);
         m_chord_max_gap = get(config, "chord_max_gap", m_chord_max_gap);
+        // chord_charge_mode (default "chord" = the straight-chord sampling
+        // test, preserved for reproducibility of earlier runs): "path"
+        // replaces it with the piecewise charge-path test, robust to track
+        // curvature -- see path_components().  Only consulted when
+        // require_chord_charge is on.
+        m_chord_charge_mode = get<std::string>(config, "chord_charge_mode", m_chord_charge_mode);
+        if (m_chord_charge_mode != "chord" && m_chord_charge_mode != "path") {
+            SPDLOG_LOGGER_WARN(t_log, "TaggerCheckTGM: unknown chord_charge_mode '{}', using 'chord'",
+                               m_chord_charge_mode);
+            m_chord_charge_mode = "chord";
+        }
         // component_extremes (default false = historical behavior): find the
         // extreme points PER connected component and union them, instead of
         // taking 8 global extremes over a flash-merged cluster.  See
@@ -116,6 +130,7 @@ public:
         cfg["require_chord_charge"] = m_require_chord_charge;
         cfg["chord_support_radius"] = m_chord_support_radius;
         cfg["chord_max_gap"] = m_chord_max_gap;
+        cfg["chord_charge_mode"] = m_chord_charge_mode;
         cfg["component_extremes"] = m_component_extremes;
         cfg["component_min_length"] = m_component_min_length;
         cfg["component_graph"] = m_component_graph;
@@ -170,6 +185,7 @@ private:
     bool m_require_chord_charge{false};
     double m_chord_support_radius{6 * units::cm};
     double m_chord_max_gap{30 * units::cm};
+    std::string m_chord_charge_mode{"chord"};
     bool m_component_extremes{false};
     double m_component_min_length{10 * units::cm};
     std::string m_component_graph{"relaxed"};
@@ -214,6 +230,103 @@ private:
             if (run > m_chord_max_gap) return false;
         }
         return true;
+    }
+
+    // Piecewise-path variant of the chord guard (chord_charge_mode: "path").
+    //
+    // The straight-chord test above rejects a pair whenever the STRAIGHT
+    // segment between the extremes leaves the charge -- which a genuinely
+    // curved track does: SBND evt285185 cluster 16, a continuous 480 cm
+    // top->anode crosser (largest real point gap 3.1 cm), bows up to 10 cm
+    // away from its own end-to-end chord, giving a 126 cm "unsupported" run
+    // at the 6 cm support radius and losing a real TGM.  Path mode asks the
+    // intended question directly: can pe1 reach pe2 through the cluster's
+    // own points without a jump longer than m_chord_max_gap?  Robust to
+    // curvature by construction.  The flash-merge artefacts stay rejected --
+    // their grafted fragments sit >= 93 cm from the rest of the bundle's
+    // charge on the 10-event MCP2025C sample -- and a cathode crosser still
+    // passes: the ~3 cm CPA gap is far below the 30 cm linking distance.
+    // (This is NOT the pre-built "relaxed"-graph connectivity, whose ~1 cm
+    // linking stops at the cathode; the linking distance here is
+    // m_chord_max_gap.)  m_chord_support_radius is not used in this mode.
+    //
+    // Implementation: single-linkage components over a voxel downsample of
+    // the cluster points (cell = max_gap/6; the representative of a voxel is
+    // its lowest-index point), linking representatives closer than max_gap.
+    // Representatives of adjacent occupied voxels are at most 2 cell
+    // diagonals ~= 17 cm apart at the 30 cm default, well under the linking
+    // distance, so a contiguous track can never be split; a real gap breaks
+    // the path at an effective tolerance of max_gap -+ 2 cell diagonals
+    // ~= [13, 47] cm -- both edges far from the ~3 cm (genuine) and
+    // >= 93 cm (artefact) populations this knob separates.  Deterministic:
+    // point-index and voxel-index iteration only.
+    //
+    // comp[i] = component id of point i, -1 for excluded points.
+    std::vector<int> path_components(const Cluster& cluster) const {
+        const int npts = cluster.npoints();
+        std::vector<int> comp(npts, -1);
+        if (npts <= 0) return comp;
+        const double cell = m_chord_max_gap / 6.0;
+        std::map<std::array<long, 3>, int> vox;  // voxel key -> voxel index
+        std::vector<geo_point_t> rep;            // per voxel: first (lowest-index) point
+        std::vector<std::array<long, 3>> keys;   // per voxel: its key
+        std::vector<int> pt_vox(npts, -1);       // per point: voxel index
+        for (int i = 0; i < npts; ++i) {
+            if (cluster.is_point_excluded(i)) continue;
+            const geo_point_t p = cluster.point3d(i);
+            const std::array<long, 3> key{(long)std::floor(p.x() / cell),
+                                          (long)std::floor(p.y() / cell),
+                                          (long)std::floor(p.z() / cell)};
+            auto [it, fresh] = vox.try_emplace(key, (int)rep.size());
+            if (fresh) {
+                rep.push_back(p);
+                keys.push_back(key);
+            }
+            pt_vox[i] = it->second;
+        }
+        const int nvox = (int)rep.size();
+        if (!nvox) return comp;
+        std::vector<int> parent(nvox);
+        std::iota(parent.begin(), parent.end(), 0);
+        auto find = [&parent](int a) {
+            while (parent[a] != a) {
+                parent[a] = parent[parent[a]];
+                a = parent[a];
+            }
+            return a;
+        };
+        const long nspan = 6;  // = max_gap / cell by construction
+        const double gap2 = m_chord_max_gap * m_chord_max_gap;
+        for (int a = 0; a < nvox; ++a) {
+            for (int b = a + 1; b < nvox; ++b) {
+                if (std::abs(keys[a][0] - keys[b][0]) > nspan) continue;
+                if (std::abs(keys[a][1] - keys[b][1]) > nspan) continue;
+                if (std::abs(keys[a][2] - keys[b][2]) > nspan) continue;
+                const int ra = find(a), rb = find(b);
+                if (ra == rb) continue;
+                const geo_vector_t d = rep[a] - rep[b];
+                if (d.dot(d) > gap2) continue;
+                parent[std::max(ra, rb)] = std::min(ra, rb);
+            }
+        }
+        for (int i = 0; i < npts; ++i) {
+            if (pt_vox[i] >= 0) comp[i] = find(pt_vox[i]);
+        }
+        return comp;
+    }
+
+    // Are a and b (extreme points, i.e. actual cluster points) in the same
+    // charge-path component?  Fails OPEN -- the guard may only suppress.
+    bool path_connected(const Cluster& cluster, const std::vector<int>& comp,
+                        const geo_point_t& a, const geo_point_t& b) const {
+        if (comp.empty()) return true;
+        const auto ra = cluster.kd_knn(1, a);
+        const auto rb = cluster.kd_knn(1, b);
+        if (ra.empty() || rb.empty()) return true;
+        const int ca = comp[ra[0].first];
+        const int cb = comp[rb[0].first];
+        if (ca < 0 || cb < 0) return true;  // nearest point excluded: don't veto
+        return ca == cb;
     }
 
     // Component-aware extreme points (knob off => never called).
@@ -418,6 +531,32 @@ private:
 
         const geo_point_t dir_main = cluster.get_pca().axis.at(0);
 
+        // Chord-charge guard state + dispatch (knob off => never taken).  The
+        // path-mode components are computed once per cluster; the lambda
+        // keeps the two call sites terse and the chord-mode log line
+        // byte-identical to the pre-path-mode code.
+        const std::vector<int> path_comp =
+            (m_require_chord_charge && m_chord_charge_mode == "path")
+                ? path_components(cluster) : std::vector<int>();
+        auto chord_guard_rejects = [&](const geo_point_t& a, const geo_point_t& b,
+                                       const char* case_tag, size_t gi, size_t gk) {
+            if (!m_require_chord_charge) return false;
+            if (m_chord_charge_mode == "path") {
+                if (path_connected(cluster, path_comp, a, b)) return false;
+                SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: no {:.1f} cm-step charge path between the ends ({:.1f} cm chord)",
+                                    cluster.ident(), case_tag, gi, gk,
+                                    m_chord_max_gap / units::cm,
+                                    (a - b).magnitude() / units::cm);
+                return true;
+            }
+            if (chord_has_charge(cluster, a, b)) return false;
+            SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: chord {:.1f} cm has an unsupported run > {:.1f} cm",
+                                cluster.ident(), case_tag, gi, gk,
+                                (a - b).magnitude() / units::cm,
+                                m_chord_max_gap / units::cm);
+            return true;
+        };
+
         for (size_t i = 0; i != out_vec_wcps.size(); i++) {
             bool flag_p1_inside = true;
             int p1_index = -1;
@@ -457,12 +596,7 @@ private:
                     // a tag; the loop continues to the remaining pairs, so a
                     // sub-track that is itself through-going still tags on its
                     // own charge-supported pair.
-                    if (m_require_chord_charge && !chord_has_charge(cluster, pe1, pe2)) {
-                        SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} CASE-A pair ({},{}) rejected: chord {:.1f} cm has an unsupported run > {:.1f} cm",
-                                            cluster.ident(), i, k, (pe1 - pe2).magnitude() / units::cm,
-                                            m_chord_max_gap / units::cm);
-                        continue;
-                    }
+                    if (chord_guard_rejects(pe1, pe2, "CASE-A", i, k)) continue;
                     if (flag_check) {
                         if (in_beam_window) {
                             if (m_check_neutrino_candidate) {
@@ -524,12 +658,7 @@ private:
 
                     // Chord-charge guard, CASE B (knob off => never taken).
                     // Before the hough / dead-volume work so it also saves that cost.
-                    if (m_require_chord_charge && !chord_has_charge(cluster, p1, p2)) {
-                        SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} CASE-B pair ({},{}) rejected: chord {:.1f} cm has an unsupported run > {:.1f} cm",
-                                            cluster.ident(), i, k, (p1 - p2).magnitude() / units::cm,
-                                            m_chord_max_gap / units::cm);
-                        continue;
-                    }
+                    if (chord_guard_rejects(p1, p2, "CASE-B", i, k)) continue;
 
                     bool skip_pair = false;
                     bool flag_p1_inside_p = flag_p1_inside;
