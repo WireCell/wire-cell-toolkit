@@ -438,7 +438,8 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
               trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='', beam_window=[0, 0],
               tgm_neutrino_candidate=false, tgm_chord_charge=false,
-              tgm_chord_mode='chord', tgm_component_extremes=false) = {
+              tgm_chord_mode='chord', tgm_component_extremes=false,
+              tgm_component_rescue=false, tgm_fv_zmax_margin=3) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -469,7 +470,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             },
         },
     },
-    local sbnd_pr_fv_margins = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -3 * wc.cm, -3 * wc.cm],
+    // Margin vector convention (inside_fv / Clustering_Util fc_check): index 4
+    // is applied as contained(z - tv[4]), so with a NEGATIVE entry it insets
+    // the DOWNSTREAM (z ~ 500 cm) face; index 5 insets the upstream face.
+    // tgm_fv_zmax_margin (cm; default 3 = byte-identical legacy value)
+    // parametrizes only the downstream inset -- shared by tagger_check_tgm AND
+    // tagger_check_fc below, so "contained" keeps one meaning across both
+    // verdicts (docs/27_fc-tgm-consistent-fv.md).
+    local sbnd_pr_fv_margins = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -tgm_fv_zmax_margin * wc.cm, -3 * wc.cm],
     // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
     // PC (PointTreeBuilding), one per (APA, face 0).
     local improve2 = cm.improve_cluster_2(
@@ -514,7 +522,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             require_chord_charge=tgm_chord_charge,
             // C++ default "chord". Key omitted then => byte-identical.
             chord_charge_mode=tgm_chord_mode,
-            component_extremes=tgm_component_extremes),
+            component_extremes=tgm_component_extremes,
+            // C++ default false. Key omitted when off => byte-identical.
+            component_rescue=tgm_component_rescue),
         // Fully-contained tagger.  Independent of TGM/STM: it evaluates every
         // in-scope main cluster and only records a containment verdict (flag
         // "FC"), so it neither vetoes nor is vetoed by them.  Placed LAST in
@@ -694,7 +704,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        trackfitting_config_file='', particle_dataset=null, extra_uses=[],
        dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false,
        tgm_chord_charge=false, tgm_chord_mode='chord',
-       tgm_component_extremes=false)::
+       tgm_component_extremes=false, tgm_component_rescue=false,
+       tgm_fv_zmax_margin=3)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -705,6 +716,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_neutrino_candidate=tgm_neutrino_candidate,
                 tgm_chord_charge=tgm_chord_charge,
                 tgm_chord_mode=tgm_chord_mode,
-                tgm_component_extremes=tgm_component_extremes),
+                tgm_component_extremes=tgm_component_extremes,
+                tgm_component_rescue=tgm_component_rescue,
+                tgm_fv_zmax_margin=tgm_fv_zmax_margin),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

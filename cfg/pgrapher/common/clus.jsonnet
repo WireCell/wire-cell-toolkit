@@ -138,7 +138,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // form its pair.  USE TOGETHER WITH require_chord_charge: the union
         // also creates cross-component pairs, and the chord test is what
         // rejects those.  C++ component_min_length default 10 cm.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null) :: {
+        // component_rescue (C++ default false; key omitted when off): a
+        // component SHORTER than component_min_length still donates its
+        // extremes when it is path-connected (30 cm-step charge path, the
+        // path-mode chord rule) to a component that passed the length cut --
+        // a genuine track end that fragments into a sub-10 cm piece behind
+        // small gaps keeps its wall exit (SBND evt286681 cluster 7), while a
+        // detached merge-grafted speck stays dropped (path-disconnected).
+        // Only consulted when component_extremes is on.
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -159,7 +167,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // the knob-off compiled config.
               + (if require_chord_charge && chord_charge_mode != "chord" then { chord_charge_mode: chord_charge_mode } else {})
               + (if component_extremes then { component_extremes: true } else {})
-              + (if component_min_length == null then {} else { component_min_length: component_min_length }),
+              + (if component_min_length == null then {} else { component_min_length: component_min_length })
+              + (if component_rescue then { component_rescue: true } else {}),
         },
 
         // Fully-contained (FC) tagger.  Records Facade::cluster_fc_check's

@@ -38,6 +38,7 @@
 #include <cmath>
 #include <map>
 #include <numeric>
+#include <set>
 
 class TaggerCheckTGM;
 WIRECELL_FACTORY(TaggerCheckTGM, TaggerCheckTGM,
@@ -105,6 +106,20 @@ public:
         m_component_extremes = get(config, "component_extremes", m_component_extremes);
         m_component_min_length = get(config, "component_min_length", m_component_min_length);
         m_component_graph = get<std::string>(config, "component_graph", m_component_graph);
+        // component_rescue (default false = historical behavior): a component
+        // SHORTER than component_min_length still donates its extreme points
+        // when it is path-connected (same path_components() component, i.e.
+        // reachable through the cluster's own charge with no jump longer than
+        // chord_max_gap) to a component that passed the length cut.  The
+        // min-length cut exists so a detached merge-grafted speck cannot fake
+        // a TGM end (evt285185 cluster 20, 608 cm away); but a genuine track
+        // END that fragments into a sub-10 cm piece behind small gaps is
+        // dropped by the same cut and the track loses its pair (SBND
+        // evt286681 cluster 7: anode->top corner clipper whose last 2.5 cm
+        // before the top wall sits behind 4-6 cm gaps).  Path connectivity
+        // separates the two cases with the same 30 cm-step rule the chord
+        // guard uses.  Only consulted when component_extremes is on.
+        m_component_rescue = get(config, "component_rescue", m_component_rescue);
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -134,6 +149,7 @@ public:
         cfg["component_extremes"] = m_component_extremes;
         cfg["component_min_length"] = m_component_min_length;
         cfg["component_graph"] = m_component_graph;
+        cfg["component_rescue"] = m_component_rescue;
         return cfg;
     }
 
@@ -189,6 +205,7 @@ private:
     bool m_component_extremes{false};
     double m_component_min_length{10 * units::cm};
     std::string m_component_graph{"relaxed"};
+    bool m_component_rescue{false};
     std::vector<double> m_fv_tolerance;
 
     // A through-going muon deposits charge ALONG its whole path.  The CASE-A
@@ -423,10 +440,17 @@ private:
 
         const double min_separation = 5.0 * units::cm;
         int n_used = 0;
+        std::vector<const std::vector<size_t>*> kept;     // rescue anchors (knob on)
+        std::vector<const std::vector<size_t>*> skipped;  // rescue candidates (knob on)
         for (const auto* v : order) {
             std::array<geo_point_t, 8> ex;
-            if (!component_extremes(cluster, *v, ex)) continue;
+            if (!component_extremes(cluster, *v, ex)) {
+                // >= 2 points so a rescue re-scan can fill ex.
+                if (m_component_rescue && v->size() >= 2) skipped.push_back(v);
+                continue;
+            }
             ++n_used;
+            if (m_component_rescue) kept.push_back(v);
             int first = 0;
             if (out.empty()) {
                 out.push_back({ex[0]});
@@ -443,6 +467,46 @@ private:
                     }
                 }
                 if (distinct) out.push_back({ex[i]});
+            }
+        }
+        // Rescue pass (knob off => never taken): a sub-min-length component
+        // donates its extremes after all when it shares a path_components()
+        // component (30 cm-step charge path, same rule as the path-mode chord
+        // guard) with a component that passed the length cut.  This cannot
+        // re-admit the evt285185 speck: that fragment is path-DISCONNECTED
+        // from the track by construction (>= 93 cm from any other charge).
+        // All points of a "relaxed"-graph component (~1 cm linking) share one
+        // path component (30 cm linking), so any single point identifies it.
+        if (m_component_rescue && n_used > 0 && !skipped.empty()) {
+            const std::vector<int> pcomp = path_components(cluster);
+            std::set<int> anchors;
+            for (const auto* v : kept) {
+                const int pid = pcomp[(*v)[0]];
+                if (pid >= 0) anchors.insert(pid);
+            }
+            int n_rescued = 0;
+            for (const auto* v : skipped) {
+                const int pid = pcomp[(*v)[0]];
+                if (pid < 0 || !anchors.count(pid)) continue;
+                std::array<geo_point_t, 8> ex;
+                component_extremes(cluster, *v, ex);  // fills ex; length verdict ignored
+                ++n_rescued;
+                for (int i = 0; i < 8; ++i) {
+                    bool distinct = true;
+                    for (auto& grp : out) {
+                        if ((ex[i] - grp[0]).magnitude() < min_separation) {
+                            grp.push_back(ex[i]);
+                            distinct = false;
+                            break;
+                        }
+                    }
+                    if (distinct) out.push_back({ex[i]});
+                }
+            }
+            if (n_rescued) {
+                SPDLOG_LOGGER_DEBUG(t_log,
+                    "component_rescue: cluster {} rescued {} of {} short component(s) path-connected to a kept one",
+                    cluster.ident(), n_rescued, skipped.size());
             }
         }
         SPDLOG_LOGGER_DEBUG(t_log, "component_extreme_wcps: cluster {} {} component(s), {} above {:.1f} cm -> {} extreme group(s)",
