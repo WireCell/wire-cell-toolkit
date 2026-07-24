@@ -115,7 +115,23 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // in-beam-window bundles may be tagged; when false (default, key
         // omitted => byte-identical pre-port config) in-beam bundles are
         // never tagged through the protected branches.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false) :: {
+        // require_chord_charge (C++ default false; keys omitted when off =>
+        // byte-identical pre-fix config): before a pair of extreme points may
+        // tag, require the cluster to carry charge ALONG the chord between
+        // them -- no contiguous stretch longer than chord_max_gap without a
+        // cluster point within chord_support_radius.  Guards against the
+        // flash-time merge in examine_bundles(use_flash_t0) putting a detached
+        // fragment into the tagged Cluster: its chord to the real track passes
+        // the FV-only test trivially.  C++ defaults 6 cm / 30 cm.
+        // component_extremes (C++ default false; key omitted when off): find
+        // the 8 extreme points PER connected component and union them.  The
+        // global scan gives each slot (max z, min x, ...) to whichever merge
+        // component reaches furthest, hiding the other component's own
+        // wall-exit, so a genuine through-goer inside a merged bundle can never
+        // form its pair.  USE TOGETHER WITH require_chord_charge: the union
+        // also creates cross-component pairs, and the chord test is what
+        // rejects those.  C++ component_min_length default 10 cm.
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, component_extremes=false, component_min_length=null) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -127,7 +143,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 enable_case_b: enable_case_b,
             } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial })
               + (if require_in_scope then { require_in_scope: true } else {})
-              + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {}),
+              + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {})
+              + (if require_chord_charge then { require_chord_charge: true } else {})
+              + (if chord_support_radius == null then {} else { chord_support_radius: chord_support_radius })
+              + (if chord_max_gap == null then {} else { chord_max_gap: chord_max_gap })
+              + (if component_extremes then { component_extremes: true } else {})
+              + (if component_min_length == null then {} else { component_min_length: component_min_length }),
         },
 
         // Fully-contained (FC) tagger.  Records Facade::cluster_fc_check's

@@ -33,6 +33,9 @@
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/Units.h"
 
+#include <algorithm>
+#include <array>
+
 class TaggerCheckTGM;
 WIRECELL_FACTORY(TaggerCheckTGM, TaggerCheckTGM,
                  WireCell::IConfigurable, WireCell::Clus::IEnsembleVisitor)
@@ -74,6 +77,20 @@ public:
         // branches.  OFF keeps the conservative never-tag-in-beam behavior
         // byte-identical.
         m_check_neutrino_candidate = get(config, "check_neutrino_candidate", m_check_neutrino_candidate);
+        // require_chord_charge (default false = historical behavior): also
+        // require the cluster to carry charge ALONG the chord between the two
+        // extreme points before that pair may tag.  See chord_has_charge().
+        m_require_chord_charge = get(config, "require_chord_charge", m_require_chord_charge);
+        m_chord_support_radius = get(config, "chord_support_radius", m_chord_support_radius);
+        m_chord_max_gap = get(config, "chord_max_gap", m_chord_max_gap);
+        // component_extremes (default false = historical behavior): find the
+        // extreme points PER connected component and union them, instead of
+        // taking 8 global extremes over a flash-merged cluster.  See
+        // component_extreme_wcps().  Intended to be used together with
+        // require_chord_charge.
+        m_component_extremes = get(config, "component_extremes", m_component_extremes);
+        m_component_min_length = get(config, "component_min_length", m_component_min_length);
+        m_component_graph = get<std::string>(config, "component_graph", m_component_graph);
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -96,6 +113,12 @@ public:
         cfg["enable_case_b"] = m_enable_case_b;
         cfg["require_in_scope"] = m_require_in_scope;
         cfg["check_neutrino_candidate"] = m_check_neutrino_candidate;
+        cfg["require_chord_charge"] = m_require_chord_charge;
+        cfg["chord_support_radius"] = m_chord_support_radius;
+        cfg["chord_max_gap"] = m_chord_max_gap;
+        cfg["component_extremes"] = m_component_extremes;
+        cfg["component_min_length"] = m_component_min_length;
+        cfg["component_graph"] = m_component_graph;
         return cfg;
     }
 
@@ -144,7 +167,176 @@ private:
     bool m_require_in_scope{false};
     bool m_enable_case_b{true};
     bool m_check_neutrino_candidate{false};
+    bool m_require_chord_charge{false};
+    double m_chord_support_radius{6 * units::cm};
+    double m_chord_max_gap{30 * units::cm};
+    bool m_component_extremes{false};
+    double m_component_min_length{10 * units::cm};
+    std::string m_component_graph{"relaxed"};
     std::vector<double> m_fv_tolerance;
+
+    // A through-going muon deposits charge ALONG its whole path.  The CASE-A
+    // and CASE-B pair tests below only ask whether the straight line between
+    // the two extreme points crosses the fiducial volume -- never whether the
+    // cluster has any charge on it.  That was safe in the prototype, where
+    // check_tgm sees one connected PR3DCluster (bundle->get_main_cluster(),
+    // 2dtoy/src/ToyFiducial.cxx:905-928).  Here the flash-time merge in
+    // clustering_examine_bundles (use_flash_t0) collapses a whole flash group
+    // into ONE Cluster, so a detached fragment hundreds of cm away is inside
+    // the object under test and its chord to the real track passes the FV test
+    // trivially.  SBND evt 285185 cluster 20: a 14-point / 1.1 cm speck on the
+    // far top field cage, 608 cm chord, 96% of it empty, tagged TGM.
+    //
+    // Sample the chord ~every cm and reject the pair if any contiguous stretch
+    // longer than m_chord_max_gap is unsupported, where "supported" means a
+    // cluster point lies within m_chord_support_radius.  A cathode-crossing
+    // track stays supported -- the CPA gap is a few cm, below the radius --
+    // which a connectivity-based rule would NOT achieve: no connected
+    // component ever spans the SBND cathode (the relaxed graph stops at
+    // |x| ~ 1 cm), so "main component only" would drop every crosser.
+    // Measured on the 10-event MCP2025C reco1 sample, support radius 6 cm:
+    // genuine through-goers (incl. every cathode crosser) 0.0 cm longest
+    // unsupported run, merge artefacts 93-583 cm.  Clean for radii >= 4 cm.
+    bool chord_has_charge(const Cluster& cluster,
+                          const geo_point_t& a, const geo_point_t& b) const {
+        const double len = (b - a).magnitude();
+        if (len <= 0) return true;
+        const int nsamp = std::max(20, (int)(len / (1 * units::cm)));
+        const double step = len / nsamp;
+        const double r2 = m_chord_support_radius * m_chord_support_radius;
+        double run = 0;  // running unsupported length
+        for (int is = 0; is <= nsamp; ++is) {
+            const geo_point_t p = a + (b - a) * ((double)is / nsamp);
+            const auto res = cluster.kd_knn(1, p);
+            // kd_knn returns (index, SQUARED distance), cf. TaggerCheckSTM.cxx:1497.
+            if (!res.empty() && res[0].second <= r2) { run = 0; continue; }
+            run += step;
+            if (run > m_chord_max_gap) return false;
+        }
+        return true;
+    }
+
+    // Component-aware extreme points (knob off => never called).
+    //
+    // get_extreme_wcps() (Facade_Cluster.cxx:3042) scans the WHOLE cluster for
+    // 8 GLOBAL extremes.  On a flash-merged Cluster each slot (max z, min x,
+    // ...) is claimed by whichever merge component reaches furthest, so a
+    // second component's own wall-exit never becomes a candidate and the
+    // legitimate WITHIN-component through-going pair is never even tested:
+    //   SBND evt284657 cluster 25 -- comp 11 runs top wall (y=199.9) to
+    //   downstream wall (z=500.5), but comp 10 also reaches z=500.5 and took
+    //   the global max-z slot, leaving comp 11 with only its top end;
+    //   cluster 26 -- comp 20 runs top wall to the anode (x=-201.3), but comp
+    //   16 also reaches x=-201.3 and took the global min-x slot.
+    // Both are real through-going muons that lost their tag.
+    //
+    // Fix: run the same scan PER connected component and union the results.
+    // Components shorter than m_component_min_length contribute nothing (a
+    // few-point speck would otherwise donate two "ends" of its own).  Cross-
+    // component pairs are still formed -- they are exactly what the
+    // chord-charge test rejects -- so a cathode crosser, whose two halves ARE
+    // separate components here, keeps its tag: its chord across the ~3 cm CPA
+    // gap stays charge-supported.  Use the two knobs together.
+    //
+    // The scan and the 5 cm proximity grouping are duplicated from
+    // get_extreme_wcps() rather than shared (CLAUDE.md M10).
+    bool component_extremes(const Cluster& cluster, const std::vector<size_t>& idxs,
+                            std::array<geo_point_t, 8>& ex) const {
+        if (idxs.size() < 2) return false;
+        std::vector<geo_point_t> pts;
+        pts.reserve(idxs.size());
+        geo_point_t center(0, 0, 0);
+        for (size_t i : idxs) {
+            const geo_point_t p = cluster.point3d(i);
+            pts.push_back(p);
+            center = center + p;
+        }
+        center = center * (1.0 / (double)pts.size());
+        geo_vector_t main_axis = calc_pca_dir(center, pts);
+        if (main_axis.y() < 0) main_axis = main_axis * (-1);
+
+        double val[8];
+        for (int i = 0; i < 8; ++i) ex[i] = pts[0];
+        val[0] = val[1] = pts[0].dot(main_axis);
+        val[2] = val[3] = pts[0].y();
+        val[4] = val[5] = pts[0].z();
+        val[6] = val[7] = pts[0].x();
+        for (const auto& p : pts) {
+            const double mp = p.dot(main_axis);
+            if (mp > val[0]) { ex[0] = p; val[0] = mp; }
+            if (mp < val[1]) { ex[1] = p; val[1] = mp; }
+            if (p.y() > val[2]) { ex[2] = p; val[2] = p.y(); }
+            if (p.y() < val[3]) { ex[3] = p; val[3] = p.y(); }
+            if (p.z() > val[4]) { ex[4] = p; val[4] = p.z(); }
+            if (p.z() < val[5]) { ex[5] = p; val[5] = p.z(); }
+            if (p.x() > val[6]) { ex[6] = p; val[6] = p.x(); }
+            if (p.x() < val[7]) { ex[7] = p; val[7] = p.x(); }
+        }
+        return (ex[0] - ex[1]).magnitude() >= m_component_min_length;
+    }
+
+    std::vector<std::vector<geo_point_t>> component_extreme_wcps(const Cluster& cluster) const {
+        std::vector<std::vector<geo_point_t>> out;
+        const int npts = cluster.npoints();
+        if (npts <= 0) return out;
+        std::vector<int> b2c;
+        try {
+            b2c = cluster.connected_blobs(m_dv, m_pcts, m_component_graph);
+        }
+        catch (const std::exception& err) {
+            SPDLOG_LOGGER_WARN(t_log, "component_extreme_wcps: cluster {} connected_blobs failed: {}",
+                               cluster.ident(), err.what());
+            return out;
+        }
+        if (b2c.empty()) return out;
+
+        // std::map keyed by component id => deterministic iteration (no pointer keys).
+        std::map<int, std::vector<size_t>> comp_pts;
+        for (int i = 0; i < npts; ++i) {
+            if (cluster.is_point_excluded(i)) continue;
+            const int bind = cluster.kd3d().major_index(i);
+            if (bind < 0 || bind >= (int)b2c.size()) continue;
+            comp_pts[b2c[bind]].push_back((size_t)i);
+        }
+        // Largest component first so ITS main-axis pair seeds groups 0 and 1:
+        // CASE B special-cases (i==0 && k==1) as "the" main-axis pair.  Ties
+        // break on component id (stable_sort over the ordered map).
+        std::vector<const std::vector<size_t>*> order;
+        for (const auto& [cid, v] : comp_pts) order.push_back(&v);
+        std::stable_sort(order.begin(), order.end(),
+                         [](const std::vector<size_t>* a, const std::vector<size_t>* b) {
+                             return a->size() > b->size();
+                         });
+
+        const double min_separation = 5.0 * units::cm;
+        int n_used = 0;
+        for (const auto* v : order) {
+            std::array<geo_point_t, 8> ex;
+            if (!component_extremes(cluster, *v, ex)) continue;
+            ++n_used;
+            int first = 0;
+            if (out.empty()) {
+                out.push_back({ex[0]});
+                out.push_back({ex[1]});
+                first = 2;
+            }
+            for (int i = first; i < 8; ++i) {
+                bool distinct = true;
+                for (auto& grp : out) {
+                    if ((ex[i] - grp[0]).magnitude() < min_separation) {
+                        grp.push_back(ex[i]);
+                        distinct = false;
+                        break;
+                    }
+                }
+                if (distinct) out.push_back({ex[i]});
+            }
+        }
+        SPDLOG_LOGGER_DEBUG(t_log, "component_extreme_wcps: cluster {} {} component(s), {} above {:.1f} cm -> {} extreme group(s)",
+                            cluster.ident(), comp_pts.size(), n_used,
+                            m_component_min_length / units::cm, out.size());
+        return out;
+    }
 
     // FiducialUtils::inside_fiducial_volume logic against our own IFiducial.
     bool inside_fv(const Point& p) const {
@@ -170,7 +362,12 @@ private:
             return false;
         }
 
-        const auto out_vec_wcps = cluster.get_extreme_wcps();
+        // Component-aware extremes when the knob is on; fall back to the
+        // global scan if it yields fewer than two groups (tiny cluster), so
+        // coverage is never LOST relative to the knob-off path.
+        auto out_vec_wcps = m_component_extremes ? component_extreme_wcps(cluster)
+                                                 : std::vector<std::vector<geo_point_t>>();
+        if (out_vec_wcps.size() < 2) out_vec_wcps = cluster.get_extreme_wcps();
         if (out_vec_wcps.size() < 2 || out_vec_wcps[0].empty() || out_vec_wcps[1].empty()) return false;
         for (const auto& grp : out_vec_wcps) {
             if (grp.empty()) return false;
@@ -253,6 +450,19 @@ private:
                             pe2.x()/units::cm, pe2.y()/units::cm, pe2.z()/units::cm,
                             flag_check, (pe1-pe2).magnitude()/units::cm, length_limit/units::cm);
                     }
+                    // Chord-charge guard (knob off => never taken).  Placed
+                    // before every CASE-A tagging branch so it covers both the
+                    // flag_check path and the out_vec_wcps.size()==2 /
+                    // flag_check_again early exits below.  It can only SUPPRESS
+                    // a tag; the loop continues to the remaining pairs, so a
+                    // sub-track that is itself through-going still tags on its
+                    // own charge-supported pair.
+                    if (m_require_chord_charge && !chord_has_charge(cluster, pe1, pe2)) {
+                        SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} CASE-A pair ({},{}) rejected: chord {:.1f} cm has an unsupported run > {:.1f} cm",
+                                            cluster.ident(), i, k, (pe1 - pe2).magnitude() / units::cm,
+                                            m_chord_max_gap / units::cm);
+                        continue;
+                    }
                     if (flag_check) {
                         if (in_beam_window) {
                             if (m_check_neutrino_candidate) {
@@ -311,6 +521,15 @@ private:
                     const double perp_deg =
                         std::fabs((3.1415926/2. - dir_test.angle(dir_main)) / 3.1415926 * 180.);
                     if (!(perp_deg > 75 || (i == 0 && k == 1))) continue;
+
+                    // Chord-charge guard, CASE B (knob off => never taken).
+                    // Before the hough / dead-volume work so it also saves that cost.
+                    if (m_require_chord_charge && !chord_has_charge(cluster, p1, p2)) {
+                        SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} CASE-B pair ({},{}) rejected: chord {:.1f} cm has an unsupported run > {:.1f} cm",
+                                            cluster.ident(), i, k, (p1 - p2).magnitude() / units::cm,
+                                            m_chord_max_gap / units::cm);
+                        continue;
+                    }
 
                     bool skip_pair = false;
                     bool flag_p1_inside_p = flag_p1_inside;
