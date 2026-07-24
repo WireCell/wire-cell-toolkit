@@ -447,7 +447,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_chord_mode='chord', tgm_component_extremes=false,
               tgm_component_rescue=false, tgm_rescue_chord=false,
               tgm_main_pair=false, tgm_main_pair_mode='path',
-              tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0) = {
+              tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
+              tgm_fv_x_margin=2, tgm_fv_y_margin=2.5) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -485,7 +486,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
     // parametrizes only the downstream inset -- shared by tagger_check_tgm AND
     // tagger_check_fc below, so "contained" keeps one meaning across both
     // verdicts (docs/27_fc-tgm-consistent-fv.md).
-    local sbnd_pr_fv_margins = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -tgm_fv_zmax_margin * wc.cm, -3 * wc.cm],
+    // tgm_fv_x_margin / tgm_fv_y_margin (cm; defaults 2 / 2.5 = byte-identical
+    // legacy values) parametrize the drift-x and vertical-y insets, both faces
+    // symmetric.  Shared by tagger_check_tgm AND tagger_check_fc, same as the
+    // downstream-z knob, so "contained" keeps one meaning across both verdicts.
+    local sbnd_pr_fv_margins = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin * wc.cm, -3 * wc.cm],
     // tgm_fv_zmax_margin_interior (cm; default 0 = OFF, key omitted =>
     // byte-identical): when > 0, check_tgm's CASE-A interior-support tests
     // (chord midpoints + waypoint re-check) use THIS downstream-z inset
@@ -495,7 +500,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
     // (evt287517 cluster 16, evt289805 cluster 9) keeps its midpoint support
     // at the legacy 3 cm interior.  TGM only -- tagger_check_fc containment
     // and the ENDPOINT exit tests keep sbnd_pr_fv_margins unchanged.
-    local sbnd_pr_fv_margins_interior = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -3 * wc.cm],
+    // x/y track the endpoint vector above: the doc-35 endpoint-only widening
+    // applies to the downstream-z inset only.
+    local sbnd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -3 * wc.cm],
     // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
     // PC (PointTreeBuilding), one per (APA, face 0).
     local improve2 = cm.improve_cluster_2(
@@ -741,7 +748,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_chord_charge=false, tgm_chord_mode='chord',
        tgm_component_extremes=false, tgm_component_rescue=false,
        tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
-       tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0)::
+       tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
+       tgm_fv_x_margin=2, tgm_fv_y_margin=2.5)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -758,6 +766,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_main_pair=tgm_main_pair,
                 tgm_main_pair_mode=tgm_main_pair_mode,
                 tgm_fv_zmax_margin=tgm_fv_zmax_margin,
-                tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior),
+                tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior,
+                tgm_fv_x_margin=tgm_fv_x_margin,
+                tgm_fv_y_margin=tgm_fv_y_margin),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
