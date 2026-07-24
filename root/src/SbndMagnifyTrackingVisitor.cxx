@@ -32,6 +32,7 @@ void Root::SbndMagnifyTrackingVisitor::configure(const WireCell::Configuration& 
     m_eventNo = get<int>(cfg, "eventNo", 0);
     m_dQdx_scale = get<double>(cfg, "dQdx_scale", 0.1);
     m_dQdx_offset = get<double>(cfg, "dQdx_offset", -1000);
+    m_nticks = get<int>(cfg, "nticks", m_nticks);
 
     auto anode_tns = cfg["anodes"];
     for (auto anode_tn : anode_tns) {
@@ -55,6 +56,7 @@ WireCell::Configuration Root::SbndMagnifyTrackingVisitor::default_configuration(
     cfg["eventNo"] = 0;
     cfg["dQdx_scale"] = 0.1;
     cfg["dQdx_offset"] = -1000;
+    cfg["nticks"] = 3427;
     return cfg;
 }
 
@@ -154,8 +156,14 @@ void Root::SbndMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Clus
                 plane = pind;
                 for (const auto& [ch, time_range] : dead_chs) {
                     chid = cs.global(pind, apa, ch);
-                    start_time = time_range.first;
-                    end_time = time_range.second;
+                    // get_all_dead_chs converts an x range to ticks, so a dead
+                    // region with an unbounded x extent comes back as +-1e9.
+                    // The channel is dead for the whole readout either way, and
+                    // an unclamped range makes the Magnify projection pads
+                    // unreadable.
+                    start_time = std::max(0, std::min(m_nticks, time_range.first));
+                    end_time = std::max(0, std::min(m_nticks, time_range.second));
+                    if (end_time <= start_time) { start_time = 0; end_time = m_nticks; }
                     tree->Fill();
                 }
             }
@@ -336,7 +344,10 @@ void Root::SbndMagnifyTrackingVisitor::write_proj_data(TFile* output_tf, Clus::F
                 int cid = cl->get_cluster_id();
                 auto pit = cluster_passes.find(cid);
                 // Fall back to a single pass-0 block when the cluster carries
-                // no stm_pass PC (should not happen in the save_stm_fit chain).
+                // no stm_pass PC.  This DOES happen: a fitted cell can belong
+                // to an associated cluster that STM itself never fit, so
+                // T_proj_data can hold a block with no T_rec track (the GUI
+                // shows it only under "all clusters").
                 static const std::vector<int> pass0{0};
                 const auto& passes = (pit == cluster_passes.end()) ? pass0 : pit->second;
                 for (int pass : passes) {

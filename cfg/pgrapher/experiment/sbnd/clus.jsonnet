@@ -550,6 +550,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                 detector_volumes: wc.tn(dv),
                 dQdx_scale: 0.1,
                 dQdx_offset: -1000.0,
+                // Readout length in ticks; only used to clamp T_bad_ch time
+                // ranges (a dead region with unbounded x converts to +-1e9
+                // ticks and makes the Magnify projection pads unreadable).
+                // C++ default 3427 -- same value, stated here for the record.
+                nticks: 3427,
             },
         },
         // Through-going-muon tagger (prototype check_tgm port).  Runs on every

@@ -58,6 +58,9 @@ namespace WireCell {
             IDetectorVolumes::pointer m_dv;
             double m_dQdx_scale{0.1};
             double m_dQdx_offset{-1000};
+            // Readout length in ticks, used only to clamp dead-channel time
+            // ranges (an unbounded dead x extent converts to +-1e9 ticks).
+            int m_nticks{3427};
 
             // Concatenated-per-plane global channel scheme, derived from the
             // anodes at visit time: nch[p] = per-TPC channel count of plane p,

@@ -136,6 +136,10 @@ int main(int argc, char* argv[])
     // STM decision trees ride along so the Magnify file explains its own tracks.
     if (T_stm_pass != 0) T_stm_pass->CloneTree();
     if (T_stm_eval != 0) T_stm_eval->CloneTree();
+    // Trun carries run/subrun/event and the dQ/dx packing constants.  The GUI
+    // does not read it, but without it the converted file cannot say which
+    // event it is (the uBooNE app drops it too).
+    if (Trun != 0) Trun->CloneTree();
 
     std::vector<std::vector<double> >* vx = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* vy = new std::vector<std::vector<double> >;
@@ -223,6 +227,15 @@ int main(int argc, char* argv[])
     const bool has_chi2 = T_rec->GetBranch("reduced_chi2");
     if (has_chi2) T_rec->SetBranchAddress("reduced_chi2", &reduced_chi2);
 
+    // The GUI's dQ/dx panel indexes flag_vertex/sub_cluster_id unconditionally
+    // (Data.cc DrawDQDX), so dropping them makes the file unopenable.
+    Int_t flag_vertex = 0, sub_cluster_id = 0;
+    const bool has_vertex = T_rec->GetBranch("flag_vertex");
+    if (has_vertex) {
+        T_rec->SetBranchAddress("flag_vertex", &flag_vertex);
+        T_rec->SetBranchAddress("sub_cluster_id", &sub_cluster_id);
+    }
+
     // STM extras written by SbndMagnifyTrackingVisitor.
     Double_t rr = 0;
     Int_t stm_pass = 0, stm_status = -1;
@@ -275,6 +288,9 @@ int main(int argc, char* argv[])
     std::vector<std::vector<double> >* L = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* dtheta = new std::vector<std::vector<double> >;
 
+    std::vector<std::vector<int> >* Vflag_vertex = new std::vector<std::vector<int> >;
+    std::vector<std::vector<int> >* Vsub_cluster_id = new std::vector<std::vector<int> >;
+
     std::vector<std::vector<double> >* Vreduced_chi2 = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* Vrr = new std::vector<std::vector<double> >;
     std::vector<std::vector<int> >* Vpass = new std::vector<std::vector<int> >;
@@ -291,6 +307,10 @@ int main(int argc, char* argv[])
     t1->Branch("rec_v", &rec_pv);
     t1->Branch("rec_w", &rec_pw);
     t1->Branch("rec_t", &rec_pt);
+    if (has_vertex) {
+        t1->Branch("flag_vertex", &Vflag_vertex);
+        t1->Branch("sub_cluster_id", &Vsub_cluster_id);
+    }
     if (has_chi2)   t1->Branch("reduced_chi2", &Vreduced_chi2);
     if (has_rr)     t1->Branch("rec_rr", &Vrr);
     if (has_pass)   t1->Branch("stm_pass", &Vpass);
@@ -334,6 +354,10 @@ int main(int argc, char* argv[])
             dx->push_back(std::vector<double>());
             L->push_back(std::vector<double>());
 
+            if (has_vertex) {
+                Vflag_vertex->push_back(std::vector<int>());
+                Vsub_cluster_id->push_back(std::vector<int>());
+            }
             if (has_chi2)   Vreduced_chi2->push_back(std::vector<double>());
             if (has_rr)     Vrr->push_back(std::vector<double>());
             if (has_pass)   Vpass->push_back(std::vector<int>());
@@ -388,6 +412,10 @@ int main(int argc, char* argv[])
         dx->back().push_back(dx1);
         L->back().push_back(total_L->back());
 
+        if (has_vertex) {
+            Vflag_vertex->back().push_back(flag_vertex);
+            Vsub_cluster_id->back().push_back(sub_cluster_id);
+        }
         if (has_chi2)   Vreduced_chi2->back().push_back(reduced_chi2);
         if (has_rr)     Vrr->back().push_back(rr);
         if (has_pass)   Vpass->back().push_back(stm_pass);
