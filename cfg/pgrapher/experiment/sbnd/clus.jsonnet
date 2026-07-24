@@ -440,7 +440,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_neutrino_candidate=false, tgm_chord_charge=false,
               tgm_chord_mode='chord', tgm_component_extremes=false,
               tgm_component_rescue=false, tgm_rescue_chord=false,
-              tgm_fv_zmax_margin=3) = {
+              tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -479,6 +479,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
     // tagger_check_fc below, so "contained" keeps one meaning across both
     // verdicts (docs/27_fc-tgm-consistent-fv.md).
     local sbnd_pr_fv_margins = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -tgm_fv_zmax_margin * wc.cm, -3 * wc.cm],
+    // tgm_fv_zmax_margin_interior (cm; default 0 = OFF, key omitted =>
+    // byte-identical): when > 0, check_tgm's CASE-A interior-support tests
+    // (chord midpoints + waypoint re-check) use THIS downstream-z inset
+    // instead of tgm_fv_zmax_margin, i.e. the doc-32 widening becomes
+    // endpoint-only.  Rationale (doc 32 caveat, doc 35): a corner clipper
+    // running ALONG the downstream wall inside the widened 3->5 cm band
+    // (evt287517 cluster 16, evt289805 cluster 9) keeps its midpoint support
+    // at the legacy 3 cm interior.  TGM only -- tagger_check_fc containment
+    // and the ENDPOINT exit tests keep sbnd_pr_fv_margins unchanged.
+    local sbnd_pr_fv_margins_interior = [-2 * wc.cm, -2 * wc.cm, -2.5 * wc.cm, -2.5 * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -3 * wc.cm],
     // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
     // PC (PointTreeBuilding), one per (APA, face 0).
     local improve2 = cm.improve_cluster_2(
@@ -516,6 +526,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         tagger_check_tgm: cm.tagger_check_tgm(
             fiducial=wc.tn(sbnd_pr_fv),
             fv_tolerance=sbnd_pr_fv_margins,
+            // Key omitted when the knob is 0 (empty list) => byte-identical.
+            interior_fv_tolerance=(if tgm_fv_zmax_margin_interior > 0
+                                   then sbnd_pr_fv_margins_interior else []),
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
             require_in_scope=true,
@@ -710,7 +723,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false,
        tgm_chord_charge=false, tgm_chord_mode='chord',
        tgm_component_extremes=false, tgm_component_rescue=false,
-       tgm_rescue_chord=false, tgm_fv_zmax_margin=3)::
+       tgm_rescue_chord=false, tgm_fv_zmax_margin=3,
+       tgm_fv_zmax_margin_interior=0)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -724,6 +738,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_component_extremes=tgm_component_extremes,
                 tgm_component_rescue=tgm_component_rescue,
                 tgm_rescue_chord=tgm_rescue_chord,
-                tgm_fv_zmax_margin=tgm_fv_zmax_margin),
+                tgm_fv_zmax_margin=tgm_fv_zmax_margin,
+                tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

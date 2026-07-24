@@ -153,7 +153,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // alone lets a rescued speck pair across TWO merged cosmics through
         // an L-shaped charge detour (SBND evt288727 cluster 6).  Only
         // consulted when component_rescue is on.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false) :: {
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, interior_fv_tolerance=[]) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -176,7 +176,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if component_extremes then { component_extremes: true } else {})
               + (if component_min_length == null then {} else { component_min_length: component_min_length })
               + (if component_rescue then { component_rescue: true } else {})
-              + (if rescue_chord_check then { rescue_chord_check: true } else {}),
+              + (if rescue_chord_check then { rescue_chord_check: true } else {})
+              // C++ default empty (= use fv_tolerance). Key omitted when
+              // empty => byte-identical pre-knob config.  Separate tolerance
+              // for the CASE-A interior-support tests only (doc 32 caveat:
+              // endpoint-only widening of the downstream-z inset).
+              + (if std.length(interior_fv_tolerance) > 0 then { interior_fv_tolerance: interior_fv_tolerance } else {}),
         },
 
         // Fully-contained (FC) tagger.  Records Facade::cluster_fc_check's

@@ -137,6 +137,19 @@ public:
             m_fv_tolerance.clear();
             for (const auto& t : tol) m_fv_tolerance.push_back(t.asDouble());
         }
+        // interior_fv_tolerance (default empty = use fv_tolerance,
+        // byte-identical): separate tolerance vector for the CASE-A
+        // interior-support tests only (flag_check midpoints and
+        // flag_check_again waypoint chords).  The ENDPOINT outside/inside
+        // tests and CASE-B keep fv_tolerance, so "contained" keeps one
+        // meaning for exit qualification while a widened endpoint inset
+        // (doc 32 tgm_fv_zmax_margin) no longer starves a wall-hugging
+        // corner clipper of its midpoint support.  See inside_fv_interior().
+        auto itol = config["interior_fv_tolerance"];
+        if (!itol.isNull() && itol.isArray()) {
+            m_interior_fv_tolerance.clear();
+            for (const auto& t : itol) m_interior_fv_tolerance.push_back(t.asDouble());
+        }
     }
 
     virtual Configuration default_configuration() const {
@@ -148,6 +161,7 @@ public:
         // Boundary margins for the FV tests, FiducialUtils tolerance-vec
         // convention: [x_lo, x_hi, y_lo, y_hi, z_lo, z_hi], negative = inset.
         cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
+        cfg["interior_fv_tolerance"] = Json::Value(Json::arrayValue);
         cfg["beam_window_low"] = m_beam_window_low;   // window on cluster_t0; low >= high
         cfg["beam_window_high"] = m_beam_window_high; // disables the beam protection
         cfg["length_limit_frac"] = m_length_limit_frac;
@@ -221,6 +235,7 @@ private:
     bool m_component_rescue{false};
     bool m_rescue_chord_check{false};
     std::vector<double> m_fv_tolerance;
+    std::vector<double> m_interior_fv_tolerance;
 
     // A through-going muon deposits charge ALONG its whole path.  The CASE-A
     // and CASE-B pair tests below only ask whether the straight line between
@@ -547,10 +562,24 @@ private:
     }
 
     // FiducialUtils::inside_fiducial_volume logic against our own IFiducial.
-    bool inside_fv(const Point& p) const {
-        if (m_fv_tolerance.empty()) return m_fiducial->contained(p);
+    bool inside_fv(const Point& p) const { return inside_fv_tol(p, m_fv_tolerance); }
+    // Interior-support variant: the CASE-A "does the track pass through the
+    // detector interior" tests (flag_check chord midpoints and the
+    // flag_check_again waypoint chords) may use their OWN tolerance vector.
+    // A widened endpoint inset (tgm_fv_zmax_margin 3->5 cm, doc 32) also
+    // shrinks the interior these tests sample, so a genuine corner clipper
+    // RUNNING ALONG the downstream wall inside the widened band loses its
+    // midpoint support and the waypoint re-check vetoes the tag (SBND
+    // evt287517 cluster 16, evt289805 cluster 9: top->downstream-z corner
+    // clippers, whole chord in the z = 493-501 cm band).  Empty (default)
+    // => fall back to fv_tolerance, byte-identical legacy behavior.
+    bool inside_fv_interior(const Point& p) const {
+        return inside_fv_tol(p, m_interior_fv_tolerance.empty() ? m_fv_tolerance
+                                                                : m_interior_fv_tolerance);
+    }
+    bool inside_fv_tol(const Point& p, const std::vector<double>& tv) const {
+        if (tv.empty()) return m_fiducial->contained(p);
         double txl, txh, tyl, tyh, tzl, tzh;
-        const auto& tv = m_fv_tolerance;
         if (tv.size() >= 6) { txl = tv[0]; txh = tv[1]; tyl = tv[2]; tyh = tv[3]; tzl = tv[4]; tzh = tv[5]; }
         else if (tv.size() >= 3) { txl = txh = tv[0]; tyl = tyh = tv[1]; tzl = tzh = tv[2]; }
         else { txl = txh = tyl = tyh = tzl = tzh = tv[0]; }
@@ -703,7 +732,7 @@ private:
                     bool flag_check = false;
                     for (int kk = 0; kk != 3; kk++) {
                         const geo_point_t p3 = pe1 + (pe2 - pe1) * ((kk + 1) / 4.);
-                        flag_check = flag_check || inside_fv(p3);
+                        flag_check = flag_check || inside_fv_interior(p3);
                     }
                     if (std::getenv("WCT_TGM_DEBUG")) {
                         SPDLOG_LOGGER_INFO(t_log, "check_tgm dbg: cluster {} pair ({},{}) ngrp {} pe1 ({:.1f},{:.1f},{:.1f}) pe2 ({:.1f},{:.1f},{:.1f}) mid_inside {} len {:.1f}/{:.1f} cm",
@@ -744,13 +773,13 @@ private:
                             if (kkk == i || kkk == k) continue;
                             for (int kk = 0; kk != 4; kk++) {
                                 const geo_point_t p3 = pe1 + (out_vec_wcps[kkk][0] - pe1) * ((kk + 1) / 4.);
-                                flag_check_again = flag_check_again || inside_fv(p3);
+                                flag_check_again = flag_check_again || inside_fv_interior(p3);
                             }
                             for (int kk = 0; kk != 3; kk++) {
                                 // NB: mixed endpoints as in the prototype.
                                 const geo_point_t p3 = out_vec_wcps[kkk][0]
                                     + (pe2 - out_vec_wcps[i][0]) * ((kk + 1) / 4.);
-                                flag_check_again = flag_check_again || inside_fv(p3);
+                                flag_check_again = flag_check_again || inside_fv_interior(p3);
                             }
                         }
                         if (!flag_check_again) {
