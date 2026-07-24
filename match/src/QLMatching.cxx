@@ -458,6 +458,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_empty_rescue          = get(cfg, "empty_rescue",          m_empty_rescue);
     m_opflash_phys_gid      = get(cfg, "opflash_phys_gid",      m_opflash_phys_gid);
+    m_flag_matched_mains    = get(cfg, "flag_matched_mains",    m_flag_matched_mains);
     m_rescue_metric_max     = get(cfg, "rescue_metric_max",     m_rescue_metric_max);
     m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
     m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
@@ -859,6 +860,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["overpred_channels"]    = Json::arrayValue;
     cfg["empty_rescue"]          = m_empty_rescue;
     cfg["opflash_phys_gid"]      = m_opflash_phys_gid;
+    cfg["flag_matched_mains"]    = m_flag_matched_mains;
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
@@ -3387,9 +3389,19 @@ void QLMatching::rescue_empty_flashes_shared(std::vector<ApaRun>& runs)
 // matched_flash_gid (survives the all-APA merge), and the per-channel flashpred.
 void QLMatching::apply_matched_t0s(ApaRun& run)
 {
+    int n_newly_flagged = 0;
     for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
         for (auto bundle : run.flash_bundles_map[flash]) {
             auto* cluster = bundle->get_main_cluster();
+            // flag_matched_mains: decompose_cluster_groups flags only the mains it
+            // SPLIT, so a single-component matched main carries no main_cluster
+            // flag and the taggers never see it.  Stamp it here, where the bundle
+            // (and therefore the "is a matched main" fact) is known.  Knob off =>
+            // this is a no-op and the legacy flag set is untouched.
+            if (m_flag_matched_mains && !cluster->get_flag("main_cluster")) {
+                cluster->set_flag("main_cluster");
+                ++n_newly_flagged;
+            }
             const double t0 = flash->get_time() * units::ns;
             // gid side: legacy = this node's anode ident; m_opflash_phys_gid = the
             // flash's PHYSICAL side, so a cross-side (xTPC) match on the opposite
@@ -3429,6 +3441,10 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
                        bundle->get_flag_window_truncated(),
                        bundle->get_consistent_flag());
         }
+    }
+    if (m_flag_matched_mains) {
+        log->debug("flag_matched_mains: stamped main_cluster on {} matched main(s) "
+                   "that decompose_cluster_groups left unflagged", n_newly_flagged);
     }
 }
 

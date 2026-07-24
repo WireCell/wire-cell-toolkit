@@ -774,6 +774,19 @@ namespace WireCell::Match {
         // node configs, whose per-node flash lists are already one-per-side).
         bool   m_opflash_phys_gid{false};
 
+        // Stamp flag_main_cluster on EVERY matched bundle main, not only on the
+        // mains that decompose_cluster_groups actually SPLIT. That function sets
+        // the flag only when a cluster carries an "isolated"/"perblob" array with
+        // both a main (-1) and sub-components, i.e. only for multi-component
+        // groups; a compact single-component match keeps flag_main_cluster=0 and
+        // is therefore invisible to every downstream consumer that iterates
+        // main-flagged clusters (TaggerCheckTGM/STM/FC, the nusel bundle table).
+        // SBND evt286021: the 1.158 us beam-window flash is matched to a 141-point
+        // cluster at 437 PE predicted that no tagger ever evaluates, so the event
+        // reads "no-bundle". Default OFF => byte-identical (the flag set stays the
+        // split-mains-only legacy set).
+        bool   m_flag_matched_mains{false};
+
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
         // match/docs/sbnd-opdetsim-chain.md). Maps the true predicted PE p on each PMT into
