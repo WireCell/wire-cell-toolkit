@@ -142,11 +142,16 @@ static void clustering_examine_bundles(
                    n_matched_inscope, matched_groups.size());
 
         // Save, per blob, the original (pre-merge) cluster ident of each
-        // flash-group member into a "real_cluster_id" array in the "perblob" PC.
-        // The Bee writer reads this so the merged group's far-apart members keep
-        // their distinct original ids (colors).  Only here, under use_flash_t0
+        // flash-group member into a "real_cluster_id" array in the "perblob" PC,
+        // and a marker of the REPRESENTATIVE member (the flash/flags donor)
+        // into "real_cluster_main".
+        // The Bee writer reads the ids so the merged group's far-apart members
+        // keep their distinct original ids (colors); TaggerCheckTGM
+        // main_component_mode="real" reads the main flags so the TGM verdict can
+        // follow the pre-merge main cluster.  Only here, under use_flash_t0
         // (all-APA), so per-APA / other-detector output is bit-identical.
-        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id", flags_from_longest);
+        merge_clusters(g, live_grouping, "", "perblob", "real_cluster_id", flags_from_longest,
+                       "real_cluster_main");
     }
 
     std::vector<Cluster *> live_clusters = live_grouping.children();

@@ -77,6 +77,24 @@ static void clustering_switch_scope(
         // raises RuntimeError for unrecognised correction names.
         const std::vector<int> filter_results = cluster->add_corrected_points(pcts, correction_name);
 
+        // Carry the flash-merge per-blob provenance across the rebuild:
+        // separate() -> from() copies scalars/flags/scopes but NOT node-local
+        // PCs, so the "perblob" real_cluster_id / real_cluster_main arrays
+        // (persisted through the pctree tarball by the QL job's
+        // save_real_cluster_id) would die here -- and they are what the Bee
+        // writer's colors and TaggerCheckTGM main_component_mode="real" read.
+        // Row-partition them by the same filter that partitions the blobs.
+        // Absent arrays (legacy tarballs) => no-op.
+        std::vector<int> src_rcid, src_rcmain;
+        if (cluster->has_pcarray<int>("real_cluster_id", "perblob")) {
+            auto sp = cluster->get_pcarray<int>("real_cluster_id", "perblob");
+            src_rcid.assign(sp.begin(), sp.end());
+        }
+        if (cluster->has_pcarray<int>("real_cluster_main", "perblob")) {
+            auto sp = cluster->get_pcarray<int>("real_cluster_main", "perblob");
+            src_rcmain.assign(sp.begin(), sp.end());
+        }
+
         // Retrieve the correction scope registered by add_corrected_points().
         const auto correction_scope = cluster->get_scope(correction_name);
 
@@ -94,6 +112,25 @@ static void clustering_switch_scope(
         // scope_transform to each separated cluster. Only the scope_filter is new.
         for (auto& [id, new_cluster] : separated_clusters) {
             new_cluster->set_scope_filter(correction_scope, id == 1);
+            // Re-attach the provenance rows of the blobs that went to this
+            // part.  separate() keeps the blobs of each part in their source
+            // order, so filtering the source array by the same group id
+            // reproduces the parallel per-blob order.  Skip (fail open) on
+            // any size mismatch.
+            const int part_id = id;         // lambdas cannot capture a structured binding pre-C++20
+            Cluster* part = new_cluster;
+            auto carve = [&](const std::vector<int>& src, const char* aname) {
+                if (src.empty() || src.size() != filter_results.size()) return;
+                std::vector<int> sub;
+                sub.reserve(src.size());
+                for (size_t i = 0; i < src.size(); ++i) {
+                    if (filter_results[i] == part_id) sub.push_back(src[i]);
+                }
+                if (sub.size() != (size_t)part->nchildren()) return;
+                part->put_pcarray(sub, aname, "perblob");
+            };
+            carve(src_rcid, "real_cluster_id");
+            carve(src_rcmain, "real_cluster_main");
         }
     }
 }

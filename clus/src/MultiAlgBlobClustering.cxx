@@ -194,6 +194,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
+    m_save_real_cluster_id = get(cfg, "save_real_cluster_id", m_save_real_cluster_id);
     m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
 
     m_save_opflash = get(cfg, "save_opflash", m_save_opflash);
@@ -390,6 +391,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     // cfg["bee_dir"] = m_bee_dir;
     cfg["bee_zip"] = "mabc.zip";
     cfg["save_deadarea"] = m_save_deadarea;
+    cfg["save_real_cluster_id"] = m_save_real_cluster_id;
 
     // Add the new parameter to default configuration
     cfg["initial_index"] = m_initial_index;
@@ -2342,6 +2344,25 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         auto gs = ensemble.with_name(name);
         auto& grouping = *gs[0];
         normalize_cluster_flags(grouping, log, name, ident);
+        // Homogenize the "perblob" key set so the flash-merge provenance
+        // survives serialization (see m_save_real_cluster_id in the header).
+        // Done after normalize_cluster_flags so the fill-in "main_cluster"
+        // flag values are the final, normalized ones.
+        if (m_save_real_cluster_id) {
+            for (Cluster* cluster : grouping.children()) {
+                if (!cluster->has_pcarray<int>("isolated", "perblob")) continue;
+                const size_t nb = cluster->nchildren();
+                if (!cluster->has_pcarray<int>("real_cluster_id", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, cluster->ident()),
+                                         "real_cluster_id", "perblob");
+                }
+                // An unmerged cluster is its own representative: all 1.
+                if (!cluster->has_pcarray<int>("real_cluster_main", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, 1),
+                                         "real_cluster_main", "perblob");
+                }
+            }
+        }
         auto node = ensemble.remove_child(grouping);
         auto tens = as_tensors(*node, outpath(name, ident));
         outtens.insert(outtens.end(), tens.begin(), tens.end());

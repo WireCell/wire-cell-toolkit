@@ -285,7 +285,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // 'clustering_') to that file -- the persistent intermediate format consumed by
 // the downstream pattern-recognition job (see sbnd/docs/sbnd-pattern-recognition.md).
 // Default '' keeps the historical dump_mode no-op sink (byte-identical).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -363,6 +363,12 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             [if rse_from_ident then 'rse_from_ident']: true,
             save_deadarea: true,
             dead_area_version: 2,
+            // Homogenize the perblob PC key set at tensor-save time so the
+            // flash-merge per-blob provenance (real_cluster_id /
+            // real_cluster_main) survives into the saved pctree tarball --
+            // the serializer silently drops heterogeneous keys.  C++ default
+            // false.  Key omitted when off => byte-identical pre-fix tarball.
+            [if save_real_cluster_id then 'save_real_cluster_id']: true,
             // Dump the optical flash / charge-light "op" display into this same
             // mabc-all-apa.zip (reads the merged-root "opflash" PC + per-cluster
             // matched-flash association written by QLMatching). bee_detector
@@ -440,7 +446,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_neutrino_candidate=false, tgm_chord_charge=false,
               tgm_chord_mode='chord', tgm_component_extremes=false,
               tgm_component_rescue=false, tgm_rescue_chord=false,
-              tgm_main_pair=false,
+              tgm_main_pair=false, tgm_main_pair_mode='path',
               tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
@@ -545,10 +551,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // straight-chord test (evt288727 two-cosmic composite).
             rescue_chord_check=tgm_rescue_chord,
             // C++ default false. Key omitted when off => byte-identical.
-            // A pair may tag only when an end lies in the largest 30 cm
-            // path component -- the TGM verdict follows the main cluster,
-            // not a merged-in through-going fragment (evt289343 cluster 9).
-            main_component_pairs=tgm_main_pair),
+            // A pair may tag only when an end lies in the main cluster --
+            // the TGM verdict follows the main cluster, not a merged-in
+            // through-going fragment (evt289343 cluster 9).
+            main_component_pairs=tgm_main_pair,
+            // C++ default "path" (largest-path-component proxy). Key omitted
+            // then => byte-identical.  "real" = per-blob flash-merge
+            // provenance (needs a save_real_cluster_id pctree; falls back to
+            // the proxy on old tarballs).
+            main_component_mode=tgm_main_pair_mode),
         // Fully-contained tagger.  Independent of TGM/STM: it evaluates every
         // in-scope main cluster and only records a containment verdict (flag
         // "FC"), so it neither vetoes nor is vetoed by them.  Placed LAST in
@@ -718,19 +729,19 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
-    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='')::
+    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
-                     tensor_outname=tensor_outname),
+                     tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
        trackfitting_config_file='', particle_dataset=null, extra_uses=[],
        dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false,
        tgm_chord_charge=false, tgm_chord_mode='chord',
        tgm_component_extremes=false, tgm_component_rescue=false,
-       tgm_rescue_chord=false, tgm_main_pair=false, tgm_fv_zmax_margin=3,
-       tgm_fv_zmax_margin_interior=0)::
+       tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
+       tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -745,6 +756,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_component_rescue=tgm_component_rescue,
                 tgm_rescue_chord=tgm_rescue_chord,
                 tgm_main_pair=tgm_main_pair,
+                tgm_main_pair_mode=tgm_main_pair_mode,
                 tgm_fv_zmax_margin=tgm_fv_zmax_margin,
                 tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),

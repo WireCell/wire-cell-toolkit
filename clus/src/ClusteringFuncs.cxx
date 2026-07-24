@@ -79,7 +79,8 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     cluster_connectivity_graph_t& g,
     Grouping& grouping,
     const std::string& aname, const std::string& pcname,
-    const std::string& orig_id_aname, bool flags_from_longest)
+    const std::string& orig_id_aname, bool flags_from_longest,
+    const std::string& orig_main_aname)
 {
     std::unordered_map<int, int> desc2id;
     std::map<int, std::set<int> > id2desc;
@@ -104,6 +105,7 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
 
     const bool savecc = aname.size() > 0 && pcname.size() > 0;
     const bool save_origid = orig_id_aname.size() > 0 && pcname.size() > 0;
+    const bool save_origmain = orig_main_aname.size() > 0 && pcname.size() > 0;
 
     for (const auto& [id, descs] : id2desc) {
         if (descs.size() < 2) {
@@ -119,6 +121,13 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         // Per-blob original cluster ident (the pre-merge ident() of each
         // sub-cluster), parallel to cc but keyed by the member's own ident.
         std::vector<int> orig_id;
+        // Per-blob marker of the merged cluster's REPRESENTATIVE member (the
+        // flash/flags donor chosen below), so ITS points stay identifiable
+        // after the merge.  NB the "main_cluster" flag cannot serve here:
+        // with flag_matched_mains every bundle's main carries it, and a flash
+        // group can merge several bundles -- all mains of their own bundle.
+        // The representative is the one main the merged cluster reports.
+        std::vector<int> orig_main;
 
         // Flash bookkeeping: Cluster::from() copies the first-encountered
         // member's cluster_t0/flash/matched_flash_gid (arbitrary std::set order).
@@ -132,6 +141,9 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         double best_t0 = 0;
         int best_flash = -1;
         int best_gid = -1;
+        int best_flash_ident = -1;   // ident of the flash donor
+        int best_any_ident = -1;     // ident of the longest member overall
+        double best_any_len2 = -1;
 
         // Flag bookkeeping (flags_from_longest).  from() copies each member's
         // flag values in turn, so the last member visited wins -- a matched main
@@ -164,8 +176,16 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                     best_t0 = live->get_cluster_t0();
                     best_flash = live_flash;
                     best_gid = live->get_scalar<int>("matched_flash_gid", -1);
+                    best_flash_ident = live->ident();
                     have_flash = true;
                     if (flags_from_longest) flash_flags = snapshot_flags(live);
+                }
+            }
+            if (save_origmain) {
+                const double any_len2 = live->get_length();
+                if (any_len2 > best_any_len2) {
+                    best_any_len2 = any_len2;
+                    best_any_ident = live->ident();
                 }
             }
             if (flags_from_longest) {
@@ -200,6 +220,16 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         }
         if (save_origid) {
             fresh_cluster.put_pcarray(orig_id, orig_id_aname, pcname);
+        }
+        if (save_origmain && save_origid) {
+            // Representative = the same member whose flash/flags the merged
+            // cluster carries (flash donor when one exists, else the longest).
+            const int rep_ident = have_flash ? best_flash_ident : best_any_ident;
+            orig_main.resize(orig_id.size());
+            for (size_t i = 0; i < orig_id.size(); ++i) {
+                orig_main[i] = (orig_id[i] == rep_ident) ? 1 : 0;
+            }
+            fresh_cluster.put_pcarray(orig_main, orig_main_aname, pcname);
         }
 
         // Override from()'s arbitrary first-wins flash with the longest

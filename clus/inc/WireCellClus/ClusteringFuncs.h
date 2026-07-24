@@ -135,12 +135,20 @@ namespace WireCell::Clus::Facade {
     // longest flash-bearing one; longest overall when no member has a flash),
     // mirroring the cluster_t0/flash/matched_flash_gid fixup below so that the
     // merged cluster's flags and flash describe one coherent donor.
+    // orig_main_aname: when set (with orig_id_aname and pcname), additionally
+    // save a per-blob marker (1/0) of the merged cluster's REPRESENTATIVE
+    // member -- the flash/flags donor, i.e. the one main the merged cluster
+    // reports -- so its points stay identifiable inside the merged cluster
+    // (read back by TaggerCheckTGM main_component_mode="real").  The
+    // "main_cluster" flag cannot serve: a flash group can merge several
+    // bundles, each of whose mains carries it.
     std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",
                                          const std::string& pcname="perblob",
                                          const std::string& orig_id_aname="",
-                                         bool flags_from_longest=false);
+                                         bool flags_from_longest=false,
+                                         const std::string& orig_main_aname="");
 
     // Assign each cluster an integer "flash-time group" id.  Clusters whose
     // matched flash time (cluster_t0) differ by less than `window` share a group

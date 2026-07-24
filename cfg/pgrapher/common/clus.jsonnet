@@ -163,7 +163,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // (SBND evt289343 cluster 9: in-beam bundle tagged TGM by a 26 cm
         // corner-clipping cosmic fragment 450 cm from the main track).  The
         // TGM verdict follows the main cluster instead.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, interior_fv_tolerance=[]) :: {
+        // main_component_mode (C++ default "path"; key omitted then =>
+        // byte-identical): with main_component_pairs on, "path" identifies the
+        // main as the largest 30 cm path component (a proxy); "real" reads the
+        // per-blob "real_cluster_main" flash-merge provenance (exact, needs a
+        // pctree saved with save_real_cluster_id; falls back to the proxy when
+        // the array is absent).
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[]) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -188,6 +194,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if component_rescue then { component_rescue: true } else {})
               + (if rescue_chord_check then { rescue_chord_check: true } else {})
               + (if main_component_pairs then { main_component_pairs: true } else {})
+              // Key only when the guard is ON and the mode is non-default, so
+              // a runner may pass the mode unconditionally without disturbing
+              // the knob-off compiled config.
+              + (if main_component_pairs && main_component_mode != "path" then { main_component_mode: main_component_mode } else {})
               // C++ default empty (= use fv_tolerance). Key omitted when
               // empty => byte-identical pre-knob config.  Separate tolerance
               // for the CASE-A interior-support tests only (doc 32 caveat:

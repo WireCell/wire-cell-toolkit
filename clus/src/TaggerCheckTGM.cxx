@@ -148,6 +148,23 @@ public:
         // its proxy (per-point provenance of the pre-merge main cluster does
         // not survive the merge).
         m_main_component_pairs = get(config, "main_component_pairs", m_main_component_pairs);
+        // main_component_mode (default "path" = doc-36 behavior): how the
+        // "main" is identified when main_component_pairs is on.
+        //  "path": proxy -- the largest 30 cm path component.  Wrong when a
+        //          merged-in cosmic is larger than the bundle's main cluster.
+        //  "real": exact -- the per-blob "real_cluster_main" perblob array
+        //          written by the QL flash merge (marks the REPRESENTATIVE
+        //          member: the flash/flags donor, i.e. the one main the
+        //          merged cluster reports), persisted through the pctree
+        //          tarball when the QL job saves with save_real_cluster_id.
+        //          Falls back to the "path" proxy when the array is absent
+        //          (old tarballs, unmerged-only events).
+        m_main_component_mode = get<std::string>(config, "main_component_mode", m_main_component_mode);
+        if (m_main_component_mode != "path" && m_main_component_mode != "real") {
+            SPDLOG_LOGGER_WARN(t_log, "TaggerCheckTGM: unknown main_component_mode '{}', using 'path'",
+                               m_main_component_mode);
+            m_main_component_mode = "path";
+        }
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -194,6 +211,7 @@ public:
         cfg["component_rescue"] = m_component_rescue;
         cfg["rescue_chord_check"] = m_rescue_chord_check;
         cfg["main_component_pairs"] = m_main_component_pairs;
+        cfg["main_component_mode"] = m_main_component_mode;
         return cfg;
     }
 
@@ -252,6 +270,7 @@ private:
     bool m_component_rescue{false};
     bool m_rescue_chord_check{false};
     bool m_main_component_pairs{false};
+    std::string m_main_component_mode{"path"};
     std::vector<double> m_fv_tolerance;
     std::vector<double> m_interior_fv_tolerance;
 
@@ -747,16 +766,41 @@ private:
                 if (n > best_npts) { best_npts = n; main_comp = c; }
             }
         }
+        // Exact mode ("real"): per-blob provenance from the QL flash merge --
+        // the contributing member's "main_cluster" flag, persisted through the
+        // pctree tarball by save_real_cluster_id.  The array is parallel to
+        // the cluster's blob (children) order, which is also the scoped-view
+        // blob order that kd().major_index() indexes (same invariant the Bee
+        // writer relies on).  Absent array (old tarballs) => fall back to the
+        // largest-path-component proxy.
+        std::vector<int> real_main;
+        if (m_main_component_pairs && m_main_component_mode == "real"
+            && cluster.has_pcarray<int>("real_cluster_main", "perblob")) {
+            auto sp = cluster.get_pcarray<int>("real_cluster_main", "perblob");
+            real_main.assign(sp.begin(), sp.end());
+        }
+        // 1 = end is in the main cluster/component, 0 = definitely not,
+        // -1 = cannot tell (fails OPEN: only a definite 0/0 pair is vetoed).
+        auto end_in_main = [&](const geo_point_t& p) -> int {
+            const auto r = cluster.kd_knn(1, p);
+            if (r.empty()) return -1;
+            if (!real_main.empty()) {
+                const size_t bidx = cluster.kd().major_index(r[0].first);
+                if (bidx >= real_main.size()) return -1;
+                return real_main[bidx] != 0 ? 1 : 0;
+            }
+            if (main_comp < 0) return -1;
+            return path_comp[r[0].first] == main_comp ? 1 : 0;
+        };
         auto main_pair_rejects = [&](const geo_point_t& a, const geo_point_t& b,
                                      const char* case_tag, size_t gi, size_t gk) {
-            if (!m_main_component_pairs || main_comp < 0) return false;
-            const auto ra = cluster.kd_knn(1, a);
-            const auto rb = cluster.kd_knn(1, b);
-            if (ra.empty() || rb.empty()) return false;
-            if (path_comp[ra[0].first] == main_comp) return false;
-            if (path_comp[rb[0].first] == main_comp) return false;
-            SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: neither end in the main charge component ({:.1f} cm chord)",
+            if (!m_main_component_pairs) return false;
+            if (real_main.empty() && main_comp < 0) return false;
+            if (end_in_main(a) != 0 || end_in_main(b) != 0) return false;
+            SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: neither end in the {} ({:.1f} cm chord)",
                                 cluster.ident(), case_tag, gi, gk,
+                                real_main.empty() ? "main charge component"
+                                                  : "pre-merge main cluster",
                                 (a - b).magnitude() / units::cm);
             return true;
         };

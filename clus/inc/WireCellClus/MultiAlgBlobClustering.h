@@ -209,6 +209,19 @@ namespace WireCell::Clus {
         size_t write_obj(const WireCell::Bee::Object& obj);
 
         bool m_save_deadarea{false};
+        // save_real_cluster_id (default false = byte-identical legacy tarball):
+        // before serializing the point-cloud trees, give EVERY cluster that
+        // carries a "perblob" PC the "real_cluster_id" / "real_cluster_main"
+        // arrays (fill-in: own ident / own "main_cluster" flag).  The tensor
+        // serializer (TensorDM as_tensors) concatenates same-named local PCs
+        // across nodes and silently drops arrays whose key is absent from the
+        // first-seen node, so the flash-merge provenance written by
+        // examine_bundles (real_cluster_id on merged clusters only) never
+        // survived the tarball.  Homogenizing the key set at save time lets it
+        // through; the fill-in values reproduce exactly what a reader would
+        // assume for an unmerged cluster, so nothing downstream changes except
+        // that the arrays now exist after a load.
+        bool m_save_real_cluster_id{false};
         // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for
         //     single-TPC viewers like the original Bee).  2 = wire-cell-bee3 v2
         //     wrapper {"version":2,"tpc":<apa>,"polygons":[...]} that places the
