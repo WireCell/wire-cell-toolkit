@@ -842,6 +842,20 @@ namespace WireCell::Match {
         double m_lm_lograt_max{2.0};               // over-prediction ceiling (both regimes)
         double m_lm_small_ks_max{0.45};            // SMALL regime KS ceiling (prototype-tight)
         double m_lm_small_lograt_min{-0.55};       // SMALL lograt floor (prototype -0.55)
+        // Good-shape guard (both regimes; owner decision, doc 34 round 2): a
+        // bundle whose ONLY failure is the under-prediction floor is NOT a
+        // mismatch when the judged side's light PATTERN agrees -- activity
+        // close to a PMT (and the library's missing near-field / leakage
+        // response) suppresses the predicted STRENGTH but not the shape (SBND
+        // evt285999 t=524.8 us ks 0.20 lograt -0.92; evt286021 t=1485.5 us
+        // close_to_PMT ks 0.08 lograt -1.42).  Rescue requires every norm-
+        // failing judged side to have ks < lm_shape_ks_max AND lograt >=
+        // lm_shape_lograt_min; the true mismatch class keeps bad shape
+        // (evt286021 main 8: ks 0.482) or an absurd deficit (specks at
+        // lograt -2..-3.4).  Never applies to the totals-fallback (no judged
+        // side => no shape to trust) nor to over-prediction failures.
+        double m_lm_shape_ks_max{0.25};            // "pattern agrees" KS ceiling
+        double m_lm_shape_lograt_min{-1.8};        // deficit still explainable floor
 
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and

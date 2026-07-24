@@ -492,6 +492,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_lm_lograt_max      = get(cfg, "lm_lograt_max",      m_lm_lograt_max);
     m_lm_small_ks_max     = get(cfg, "lm_small_ks_max",     m_lm_small_ks_max);
     m_lm_small_lograt_min = get(cfg, "lm_small_lograt_min", m_lm_small_lograt_min);
+    m_lm_shape_ks_max     = get(cfg, "lm_shape_ks_max",     m_lm_shape_ks_max);
+    m_lm_shape_lograt_min = get(cfg, "lm_shape_lograt_min", m_lm_shape_lograt_min);
     m_rescue_metric_max     = get(cfg, "rescue_metric_max",     m_rescue_metric_max);
     m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
     m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
@@ -906,6 +908,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["lm_lograt_max"]       = m_lm_lograt_max;
     cfg["lm_small_ks_max"]     = m_lm_small_ks_max;
     cfg["lm_small_lograt_min"] = m_lm_small_lograt_min;
+    cfg["lm_shape_ks_max"]     = m_lm_shape_ks_max;
+    cfg["lm_shape_lograt_min"] = m_lm_shape_lograt_min;
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
@@ -3515,15 +3519,32 @@ QLMatching::LMResult QLMatching::check_light_mismatch(TimingTPCBundle* bundle) c
                                     : (relax ? m_lm_lograt_min_relax : m_lm_lograt_min);
 
     bool any_judged = false;
-    bool fail = false;
+    bool fail_shape = false;   // KS ceiling exceeded on a judged side
+    bool fail_norm = false;    // normalization out of bounds on a judged side
+    bool guardable = true;     // every norm-failing side qualifies for the good-shape guard
     for (int s = 0; s < 2; ++s) {
         if (r.pred[s] < m_lm_side_pred_min) continue;
         any_judged = true;
         const double lograt = std::log10(std::max(r.pred[s], 1e-6) /
                                          std::max(r.meas[s], 1e-6));
-        if (r.ks[s] >= 0 && r.ks[s] > ks_max) fail = true;
-        if (lograt < lograt_min || lograt > m_lm_lograt_max) fail = true;
+        if (r.ks[s] >= 0 && r.ks[s] > ks_max) fail_shape = true;
+        if (lograt < lograt_min || lograt > m_lm_lograt_max) {
+            fail_norm = true;
+            // Good-shape guard qualification (see the knob block): only an
+            // UNDER-prediction failure with an agreeing pattern and a still-
+            // explainable deficit; over-prediction is never rescued.
+            if (!(lograt < lograt_min && lograt <= m_lm_lograt_max &&
+                  r.ks[s] >= 0 && r.ks[s] < m_lm_shape_ks_max &&
+                  lograt >= m_lm_shape_lograt_min)) {
+                guardable = false;
+            }
+        }
     }
+    // Good-shape guard: a normalization-only failure whose every failing side
+    // shows an agreeing light pattern is near-PMT / leakage strength loss, not
+    // a wrong pairing (doc 34 round 2; SBND evt285999 t=524.8, evt286021
+    // t=1485.5).  A shape failure anywhere disables it.
+    bool fail = fail_shape || (fail_norm && !guardable);
     if (!any_judged) {
         // No side reaches lm_side_pred_min yet the bundle escaped the low-E
         // exemption (bright flash / long cluster): judge the totals -- this IS
@@ -3884,6 +3905,8 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
         lm["lograt_max"]       = m_lm_lograt_max;
         lm["small_ks_max"]     = m_lm_small_ks_max;
         lm["small_lograt_min"] = m_lm_small_lograt_min;
+        lm["shape_ks_max"]     = m_lm_shape_ks_max;
+        lm["shape_lograt_min"] = m_lm_shape_lograt_min;
         qp["lm"] = lm;
     }
     top["quality_params"] = qp;
