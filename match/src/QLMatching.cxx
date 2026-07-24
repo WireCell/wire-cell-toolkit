@@ -88,19 +88,38 @@ namespace {
         return nadded;
     }
 
+    // Per-anode 2D-measurement root PCs (ctpc_a<A>f<F>p<U|V|W>, dead_winds_*,
+    // dead_gap_*).  Uniquely named per (apa,face,plane), so carrying them across
+    // the merge is collision-free.  Dropping them was a bug: the blobs of every
+    // non-primary input arrive (take_children) WITHOUT the 2D charge and
+    // dead-channel data that describe them, so downstream consumers
+    // (Blob::estimate_total_charge, get_overlap_good_ch_charge,
+    // Grouping::is_wire_dead, FiducialUtils) silently read 0/empty for those
+    // APAs.  On SBND that voided the PR-tail steiner graph for every TPC1-only
+    // cluster and leaked a (0,0,0) boundary point into cluster_fc_check
+    // (evt285185 main 12, evt285999 main 18 — clus/docs/tgm/
+    // apa1_ctpc_missing-analysis.md).
+    bool is_per_anode_root_pc(const std::string& name)
+    {
+        return name.rfind("ctpc_a", 0) == 0
+            || name.rfind("dead_winds_a", 0) == 0
+            || name.rfind("dead_gap_a", 0) == 0;
+    }
+
     void merge_pct(Points::node_t* tgt, Points::node_t* src,
                    const std::set<std::string>& root_pcs_to_merge)
     {
         if (!src) return;
         // Merge selected root-node local PCs (concatenate across inputs). NOTE:
         // local_pcs() returns a reference, so bind by reference or the merge is a
-        // silent no-op. Only names in root_pcs_to_merge are merged; everything else
-        // (flash/light/flashlight, per-anode ctpc_a*, ...) is dropped from the
-        // source roots, exactly as the standalone PointTreeMerging did.
+        // silent no-op. Names in root_pcs_to_merge and the per-anode 2D PCs are
+        // merged; everything else (flash/light/flashlight, ...) is dropped from
+        // the source roots, exactly as the standalone PointTreeMerging did.
         auto& tgt_pc = tgt->value.local_pcs();
         for (const auto& src_pc : src->value.local_pcs()) {
             const auto& name = src_pc.first;
-            if (root_pcs_to_merge.find(name) == root_pcs_to_merge.end()) continue;
+            if (root_pcs_to_merge.find(name) == root_pcs_to_merge.end()
+                && !is_per_anode_root_pc(name)) continue;
             if (tgt_pc.find(name) == tgt_pc.end()) tgt_pc.emplace(name, src_pc.second);
             else tgt_pc[name].append(src_pc.second);
         }

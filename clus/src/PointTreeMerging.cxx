@@ -105,6 +105,24 @@ static size_t normalize_pctree_local_pcs(Points::node_t* root)
     return nadded;
 }
 
+// Per-anode 2D-measurement root PCs (ctpc_a<A>f<F>p<U|V|W>, dead_winds_*,
+// dead_gap_*).  Uniquely named per (apa,face,plane), so carrying them across
+// the merge is collision-free.  Dropping them was a bug: the blobs of every
+// non-primary input arrive (take_children) WITHOUT the 2D charge and
+// dead-channel data that describe them, so downstream consumers
+// (Blob::estimate_total_charge, get_overlap_good_ch_charge,
+// Grouping::is_wire_dead, FiducialUtils) silently read 0/empty for those
+// APAs.  On SBND that voided the PR-tail steiner graph for every TPC1-only
+// cluster and leaked a (0,0,0) boundary point into cluster_fc_check
+// (evt285185 main 12, evt285999 main 18 — clus/docs/tgm/
+// apa1_ctpc_missing-analysis.md).  Same fix as QLMatching::merge_pct.
+static bool is_per_anode_root_pc(const std::string& name)
+{
+    return name.rfind("ctpc_a", 0) == 0
+        || name.rfind("dead_winds_a", 0) == 0
+        || name.rfind("dead_gap_a", 0) == 0;
+}
+
 static void merge_pct(Points::node_t* tgt, Points::node_t* src,
                       const std::set<std::string>& root_pcs_to_merge)
 {
@@ -114,14 +132,15 @@ static void merge_pct(Points::node_t* tgt, Points::node_t* src,
 
     // Merge selected root-node local PCs (concatenate across inputs). NOTE the
     // reference: local_pcs() returns a reference, so this must bind by
-    // reference or the merge is silently a no-op. Only names explicitly opted
-    // in via root_pcs_to_merge are merged; everything else (per-anode ctpc_a*,
-    // dead_winds_a*, flash/light/flashlight, ...) keeps the historical behavior
-    // of being dropped from the source roots, so existing chains are unchanged.
+    // reference or the merge is silently a no-op. Names opted in via
+    // root_pcs_to_merge and the per-anode 2D PCs are merged; everything else
+    // (flash/light/flashlight, ...) keeps the historical behavior of being
+    // dropped from the source roots.
     auto& tgt_pc = tgt->value.local_pcs();
     for (const auto& src_pc : src->value.local_pcs()) {
         const auto& name = src_pc.first;
-        if (root_pcs_to_merge.find(name) == root_pcs_to_merge.end()) {
+        if (root_pcs_to_merge.find(name) == root_pcs_to_merge.end()
+            && !is_per_anode_root_pc(name)) {
             continue;
         }
         if (tgt_pc.find(name) == tgt_pc.end()) {

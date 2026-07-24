@@ -3642,9 +3642,16 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cos
 
     }
 
-    // Collect all points, avoiding duplicates
+    // Collect all points, avoiding duplicates.  Skip (apa,face) keys that
+    // never saw a qualifying point (no blob above the charge cut): their
+    // extreme points are still default-constructed (0,0,0), and letting the
+    // origin into the farthest-pair scan below fabricates a boundary point
+    // outside the detector (SBND evt285999 main 18: the origin beat both real
+    // track endpoints and, snapped to a steiner terminal, became an interior
+    // "exit" that failed cluster_fc_check).
     std::vector<geo_point_t> all_points;
     for (const auto& entry : boundary_points_map) {
+        if (!initialized_map[entry.first]) continue;
         all_points.push_back(entry.second.first);
         all_points.push_back(entry.second.second);
     }
