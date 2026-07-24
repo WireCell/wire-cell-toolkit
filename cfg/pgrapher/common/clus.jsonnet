@@ -153,7 +153,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // alone lets a rescued speck pair across TWO merged cosmics through
         // an L-shaped charge detour (SBND evt288727 cluster 6).  Only
         // consulted when component_rescue is on.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, interior_fv_tolerance=[]) :: {
+        // main_component_pairs (C++ default false; key omitted when off): a
+        // pair may tag only when at least one end lies in the cluster's MAIN
+        // charge component (the 30 cm-step path component with the most
+        // points; a cathode crosser is ONE such component).  On a
+        // flash-merged Cluster a merged-in fragment that is itself
+        // through-going otherwise tags the whole bundle on its own
+        // within-component pair -- which the chord guard deliberately allows
+        // (SBND evt289343 cluster 9: in-beam bundle tagged TGM by a 26 cm
+        // corner-clipping cosmic fragment 450 cm from the main track).  The
+        // TGM verdict follows the main cluster instead.
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, interior_fv_tolerance=[]) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -177,6 +187,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if component_min_length == null then {} else { component_min_length: component_min_length })
               + (if component_rescue then { component_rescue: true } else {})
               + (if rescue_chord_check then { rescue_chord_check: true } else {})
+              + (if main_component_pairs then { main_component_pairs: true } else {})
               // C++ default empty (= use fv_tolerance). Key omitted when
               // empty => byte-identical pre-knob config.  Separate tolerance
               // for the CASE-A interior-support tests only (doc 32 caveat:

@@ -132,6 +132,22 @@ public:
         // with jumps < 30 cm while 88% of the straight chord is > 6 cm from
         // any charge.  Only consulted when component_rescue is on.
         m_rescue_chord_check = get(config, "rescue_chord_check", m_rescue_chord_check);
+        // main_component_pairs (default false = historical behavior): a
+        // CASE-A/CASE-B pair may tag only when at least one end lies in the
+        // cluster's MAIN charge component -- the path_components() component
+        // (30 cm-step linkage, so a cathode crosser stays one component)
+        // holding the most points.  On a flash-merged Cluster a merged-in
+        // fragment that is itself through-going otherwise tags the whole
+        // bundle on its own within-component pair, which the chord guard by
+        // design does not reject: SBND evt289343 cluster 9 (in beam window),
+        // a 26 cm bottom->downstream corner-clipping cosmic fragment ~450 cm
+        // from the 52 cm main track tagged the bundle TGM, and the
+        // check_neutrino_candidate veto could not protect because it walks
+        // the path between the PAIR's own endpoints.  The TGM verdict should
+        // follow the bundle's main cluster; the largest path component is
+        // its proxy (per-point provenance of the pre-merge main cluster does
+        // not survive the merge).
+        m_main_component_pairs = get(config, "main_component_pairs", m_main_component_pairs);
         auto tol = config["fv_tolerance"];
         if (!tol.isNull() && tol.isArray()) {
             m_fv_tolerance.clear();
@@ -177,6 +193,7 @@ public:
         cfg["component_graph"] = m_component_graph;
         cfg["component_rescue"] = m_component_rescue;
         cfg["rescue_chord_check"] = m_rescue_chord_check;
+        cfg["main_component_pairs"] = m_main_component_pairs;
         return cfg;
     }
 
@@ -234,6 +251,7 @@ private:
     std::string m_component_graph{"relaxed"};
     bool m_component_rescue{false};
     bool m_rescue_chord_check{false};
+    bool m_main_component_pairs{false};
     std::vector<double> m_fv_tolerance;
     std::vector<double> m_interior_fv_tolerance;
 
@@ -664,7 +682,7 @@ private:
         // keeps the two call sites terse and the chord-mode log line
         // byte-identical to the pre-path-mode code.
         const std::vector<int> path_comp =
-            (m_require_chord_charge && m_chord_charge_mode == "path")
+            ((m_require_chord_charge && m_chord_charge_mode == "path") || m_main_component_pairs)
                 ? path_components(cluster) : std::vector<int>();
         auto chord_guard_rejects = [&](const geo_point_t& a, const geo_point_t& b,
                                        const char* case_tag, size_t gi, size_t gk) {
@@ -706,6 +724,40 @@ private:
                                 cluster.ident(), case_tag, gi, gk,
                                 (a - b).magnitude() / units::cm,
                                 m_chord_max_gap / units::cm);
+            return true;
+        };
+        // main_component_pairs guard (knob off => never taken): the MAIN
+        // charge component is the path_components() label holding the most
+        // points; ascending-id iteration with a strict > keeps the lowest id
+        // on a tie (deterministic).  A pair with NEITHER end in it is a
+        // fragment-only pair -- on a flash-merged cluster that is a merged-in
+        // cosmic tagging the bundle, not the main track (evt289343 cluster 9).
+        // A genuine main-track pair has both ends in it (a cathode crosser is
+        // ONE path component -- the 30 cm linkage bridges the CPA gap), and a
+        // main<->fragment cross pair keeps one end, so only the fragment's
+        // own pairs are vetoed.  Fails OPEN like path_connected().
+        int main_comp = -1;
+        if (m_main_component_pairs && !path_comp.empty()) {
+            std::map<int, int> comp_npts;
+            for (int c : path_comp) {
+                if (c >= 0) ++comp_npts[c];
+            }
+            int best_npts = 0;
+            for (const auto& [c, n] : comp_npts) {
+                if (n > best_npts) { best_npts = n; main_comp = c; }
+            }
+        }
+        auto main_pair_rejects = [&](const geo_point_t& a, const geo_point_t& b,
+                                     const char* case_tag, size_t gi, size_t gk) {
+            if (!m_main_component_pairs || main_comp < 0) return false;
+            const auto ra = cluster.kd_knn(1, a);
+            const auto rb = cluster.kd_knn(1, b);
+            if (ra.empty() || rb.empty()) return false;
+            if (path_comp[ra[0].first] == main_comp) return false;
+            if (path_comp[rb[0].first] == main_comp) return false;
+            SPDLOG_LOGGER_DEBUG(t_log, "check_tgm: cluster {} {} pair ({},{}) rejected: neither end in the main charge component ({:.1f} cm chord)",
+                                cluster.ident(), case_tag, gi, gk,
+                                (a - b).magnitude() / units::cm);
             return true;
         };
 
@@ -750,6 +802,7 @@ private:
                     // own charge-supported pair.
                     if (chord_guard_rejects(pe1, pe2, "CASE-A", i, k)) continue;
                     if (rescued_pair_rejects(pe1, pe2, i, p1_index, k, p2_index, "CASE-A")) continue;
+                    if (main_pair_rejects(pe1, pe2, "CASE-A", i, k)) continue;
                     if (flag_check) {
                         if (in_beam_window) {
                             if (m_check_neutrino_candidate) {
@@ -813,6 +866,7 @@ private:
                     // Before the hough / dead-volume work so it also saves that cost.
                     if (chord_guard_rejects(p1, p2, "CASE-B", i, k)) continue;
                     if (rescued_pair_rejects(p1, p2, i, 0, k, 0, "CASE-B")) continue;
+                    if (main_pair_rejects(p1, p2, "CASE-B", i, k)) continue;
 
                     bool skip_pair = false;
                     bool flag_p1_inside_p = flag_p1_inside;

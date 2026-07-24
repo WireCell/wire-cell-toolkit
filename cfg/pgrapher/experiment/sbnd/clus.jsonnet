@@ -440,6 +440,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_neutrino_candidate=false, tgm_chord_charge=false,
               tgm_chord_mode='chord', tgm_component_extremes=false,
               tgm_component_rescue=false, tgm_rescue_chord=false,
+              tgm_main_pair=false,
               tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
@@ -542,7 +543,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // C++ default false. Key omitted when off => byte-identical
             // doc-32 rescue behavior.  Rescued-end pairs must also pass the
             // straight-chord test (evt288727 two-cosmic composite).
-            rescue_chord_check=tgm_rescue_chord),
+            rescue_chord_check=tgm_rescue_chord,
+            // C++ default false. Key omitted when off => byte-identical.
+            // A pair may tag only when an end lies in the largest 30 cm
+            // path component -- the TGM verdict follows the main cluster,
+            // not a merged-in through-going fragment (evt289343 cluster 9).
+            main_component_pairs=tgm_main_pair),
         // Fully-contained tagger.  Independent of TGM/STM: it evaluates every
         // in-scope main cluster and only records a containment verdict (flag
         // "FC"), so it neither vetoes nor is vetoed by them.  Placed LAST in
@@ -723,7 +729,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false,
        tgm_chord_charge=false, tgm_chord_mode='chord',
        tgm_component_extremes=false, tgm_component_rescue=false,
-       tgm_rescue_chord=false, tgm_fv_zmax_margin=3,
+       tgm_rescue_chord=false, tgm_main_pair=false, tgm_fv_zmax_margin=3,
        tgm_fv_zmax_margin_interior=0)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
@@ -738,6 +744,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_component_extremes=tgm_component_extremes,
                 tgm_component_rescue=tgm_component_rescue,
                 tgm_rescue_chord=tgm_rescue_chord,
+                tgm_main_pair=tgm_main_pair,
                 tgm_fv_zmax_margin=tgm_fv_zmax_margin,
                 tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
