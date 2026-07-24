@@ -787,6 +787,62 @@ namespace WireCell::Match {
         // split-mains-only legacy set).
         bool   m_flag_matched_mains{false};
 
+        // ---- LM (light-mismatch) tagger (default OFF => byte-identical). ----
+        // prototype (ToyFiducial.cxx check_LM lines 598-660): once the matching is
+        // final, judge each matched bundle's predicted light against the measured
+        // flash by KS shape distance + total-PE normalization; a bundle whose
+        // matched flash its charge cannot explain is a light mismatch (LM) -- the
+        // canonical fake in-beam "nu-candidate" (SBND evt286021 main 8: 8.3 cm /
+        // 141 pt cluster matched to a 2566 PE beam-window flash).
+        //
+        // SBND adaptation (two drift volumes, PDs behind both anodes): the shape
+        // and normalization tests run PER DRIFT SIDE (OpDet x vs the cathode
+        // plane, same convention as flash_phys_side).  A side is judged only when
+        // its predicted PE reaches lm_side_pred_min: the photon library does not
+        // model the small cathode leakage light, so the far (low-prediction)
+        // side's measured PE must not be read as a mismatch.
+        //
+        // Verdict codes follow the prototype: 0 = pass, 1 = low energy
+        // (unjudgeable: prediction and cluster too small AND the flash itself is
+        // dim), 2 = light mismatch.  Unlike the prototype, a bright flash
+        // OVERRIDES the low-energy exemption (owner decision): a tiny-prediction
+        // cluster matched to a >= lm_flash_pe_bright flash is exactly the
+        // mismatch this tagger exists to catch, not "low energy".
+        //
+        // TWO cut regimes, tuned on the MCP2025C 20-event sample (doc 34).  The
+        // healthy long-track population under-predicts systematically (judged-
+        // side log10(pred/meas) median -0.16, 1st percentile -0.99, per-side KS
+        // up to 0.507 on hand-scanned-good crossers), so the LONG regime is
+        // loose: only egregious deficits tag.  The SMALL regime (cluster below
+        // the prototype low-E thresholds but flash bright) is where the fake
+        // in-beam nu-candidates live, and keeps prototype-tight cuts -- a
+        // sub-10 cm cluster physically cannot explain a kilo-PE flash unless
+        // its prediction says so.
+        //
+        // Stamped as cluster scalar "lm_flag" on main + associated clusters in
+        // apply_matched_t0s.  The stamped value is resolved PER FLASH: all of a
+        // flash's matched bundles later merge into one output cluster (MABC
+        // examine_bundles flash-T0 merge), so they all receive the verdict of
+        // the flash's largest-total-predicted-light bundle -- otherwise a
+        // grafted few-PE speck's verdict relabels a clean crosser (evt286021
+        // cluster 16) or demotes a genuine in-beam nu-candidate whose flash is
+        // dominated by a healthy track (evt287825 t=1.41 us, evt288639
+        // t=1.17 us).  Key absent when off => pctree byte-identical; dump_calib
+        // gets per-bundle "lm*" keys with each bundle's OWN verdict (absent
+        // when off).
+        bool   m_lm_tagger{false};
+        double m_lm_pred_pe_min{25.0};             // prototype: total_pred_pe < 25
+        double m_lm_length_min{10 * units::cm};    // prototype: cluster_length < 10 cm
+        double m_lm_flash_pe_bright{1000.0};       // low-E exemption only below this flash PE
+        double m_lm_side_pred_min{25.0};           // judge a side only above this predicted PE
+        double m_lm_ks_max{0.55};                  // LONG regime per-side KS ceiling
+        double m_lm_ks_max_relax{0.70};            // ... when close_to_PMT / at_x_boundary
+        double m_lm_lograt_min{-1.3};              // LONG log10(pred_s/meas_s) floor
+        double m_lm_lograt_min_relax{-1.6};        // ... relaxed
+        double m_lm_lograt_max{2.0};               // over-prediction ceiling (both regimes)
+        double m_lm_small_ks_max{0.45};            // SMALL regime KS ceiling (prototype-tight)
+        double m_lm_small_lograt_min{-0.55};       // SMALL lograt floor (prototype -0.55)
+
         // Per-PMT non-linearity correction applied to the predicted PE total (study-grade,
         // scintillation-profile-dependent; see sbnd_xin/pmt_nonlinearity_curve.py and
         // match/docs/sbnd-opdetsim-chain.md). Maps the true predicted PE p on each PMT into
@@ -1334,7 +1390,26 @@ namespace WireCell::Match {
         // flash_bundles_map.
         void rescue_empty_flashes_shared(std::vector<ApaRun>& runs);
         void apply_matched_t0s(ApaRun& run);         // write cluster t0 / flash / matched gid
+        // LM verdict stamping (m_lm_tagger only): one verdict per +-80 ns
+        // flash GROUP across all runs (the MABC flash-T0 merge unit), from the
+        // group's largest-total-predicted-light bundle. See the .cxx comment.
+        void apply_lm_verdicts(std::vector<ApaRun>& runs);
         void write_opflash_pc(ApaRun& run);          // merge-safe per-root "opflash" PC
+
+        // LM (light-mismatch) verdict for one bundle (m_lm_tagger; see the knob
+        // block above). Pure function of the bundle's flash / prediction /
+        // opdet_mask / flags and the main cluster's uvwt length; never touches
+        // the matching. verdict: 0 = pass, 1 = low energy, 2 = light mismatch;
+        // ks/pred/meas are the per-drift-side metrics (ks = -1 when a side has
+        // no judgeable shape).
+        struct LMResult {
+            int verdict{0};
+            double ks[2]{-1.0, -1.0};
+            double pred[2]{0.0, 0.0};
+            double meas[2]{0.0, 0.0};
+            double length{0.0};
+        };
+        LMResult check_light_mismatch(TimingTPCBundle* bundle) const;
 
         // Physical drift side (0 = low-x, 1 = high-x of the cathode) of a flash,
         // from where its measured light actually sits. When m_opflash_phys_gid is

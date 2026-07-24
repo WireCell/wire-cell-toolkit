@@ -478,6 +478,20 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_empty_rescue          = get(cfg, "empty_rescue",          m_empty_rescue);
     m_opflash_phys_gid      = get(cfg, "opflash_phys_gid",      m_opflash_phys_gid);
     m_flag_matched_mains    = get(cfg, "flag_matched_mains",    m_flag_matched_mains);
+
+    // LM (light-mismatch) tagger knobs; all inert unless lm_tagger is set.
+    m_lm_tagger          = get(cfg, "lm_tagger",          m_lm_tagger);
+    m_lm_pred_pe_min     = get(cfg, "lm_pred_pe_min",     m_lm_pred_pe_min);
+    m_lm_length_min      = get(cfg, "lm_length_min",      m_lm_length_min);
+    m_lm_flash_pe_bright = get(cfg, "lm_flash_pe_bright", m_lm_flash_pe_bright);
+    m_lm_side_pred_min   = get(cfg, "lm_side_pred_min",   m_lm_side_pred_min);
+    m_lm_ks_max          = get(cfg, "lm_ks_max",          m_lm_ks_max);
+    m_lm_ks_max_relax    = get(cfg, "lm_ks_max_relax",    m_lm_ks_max_relax);
+    m_lm_lograt_min      = get(cfg, "lm_lograt_min",      m_lm_lograt_min);
+    m_lm_lograt_min_relax = get(cfg, "lm_lograt_min_relax", m_lm_lograt_min_relax);
+    m_lm_lograt_max      = get(cfg, "lm_lograt_max",      m_lm_lograt_max);
+    m_lm_small_ks_max     = get(cfg, "lm_small_ks_max",     m_lm_small_ks_max);
+    m_lm_small_lograt_min = get(cfg, "lm_small_lograt_min", m_lm_small_lograt_min);
     m_rescue_metric_max     = get(cfg, "rescue_metric_max",     m_rescue_metric_max);
     m_rescue_exponent       = get(cfg, "rescue_exponent",       m_rescue_exponent);
     m_rescue_boundary_weight = get(cfg, "rescue_boundary_weight", m_rescue_boundary_weight);
@@ -880,6 +894,18 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["empty_rescue"]          = m_empty_rescue;
     cfg["opflash_phys_gid"]      = m_opflash_phys_gid;
     cfg["flag_matched_mains"]    = m_flag_matched_mains;
+    cfg["lm_tagger"]           = m_lm_tagger;
+    cfg["lm_pred_pe_min"]      = m_lm_pred_pe_min;
+    cfg["lm_length_min"]       = m_lm_length_min;
+    cfg["lm_flash_pe_bright"]  = m_lm_flash_pe_bright;
+    cfg["lm_side_pred_min"]    = m_lm_side_pred_min;
+    cfg["lm_ks_max"]           = m_lm_ks_max;
+    cfg["lm_ks_max_relax"]     = m_lm_ks_max_relax;
+    cfg["lm_lograt_min"]       = m_lm_lograt_min;
+    cfg["lm_lograt_min_relax"] = m_lm_lograt_min_relax;
+    cfg["lm_lograt_max"]       = m_lm_lograt_max;
+    cfg["lm_small_ks_max"]     = m_lm_small_ks_max;
+    cfg["lm_small_lograt_min"] = m_lm_small_lograt_min;
     cfg["rescue_metric_max"]     = m_rescue_metric_max;
     cfg["rescue_exponent"]       = m_rescue_exponent;
     cfg["rescue_boundary_weight"] = m_rescue_boundary_weight;
@@ -1032,6 +1058,10 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
         for (std::size_t k = 0; k < invec.size(); ++k) run_one_apa_fit(runs[k]);
     }
     const double t_fit = ms_since(t_fit0);
+
+    // LM tagger: resolve + stamp one verdict per cross-side flash group, now
+    // that every run's matching is final. No-op (and byte-identical) when off.
+    if (m_lm_tagger) apply_lm_verdicts(runs);
 
     // Hand-scan calibration / cathode diagnostic dumps read the per-APA runs while
     // the matching decomposition is still materialized (main + associated are
@@ -3406,6 +3436,190 @@ void QLMatching::rescue_empty_flashes_shared(std::vector<ApaRun>& runs)
 // Stamp the matched flash/t0 onto each cluster (and its associated sub-clusters):
 // cluster_t0, the "flash" row index (Cluster::get_flash()), a globally-unique
 // matched_flash_gid (survives the all-APA merge), and the per-channel flashpred.
+// LM (light-mismatch) verdict for one bundle -- m_lm_tagger only, read-only on
+// the matching. prototype (ToyFiducial.cxx check_LM lines 598-660), adapted for
+// SBND's two drift volumes: the KS shape distance and the pred/meas
+// normalization are evaluated PER DRIFT SIDE (OpDet x vs the cathode plane,
+// same convention as flash_phys_side), and a side is judged only when its
+// predicted PE reaches lm_side_pred_min -- the photon library does not model
+// the small cathode leakage light, so the far side's measured PE alone must
+// never be read as a mismatch. See the m_lm_tagger knob block in QLMatching.h.
+QLMatching::LMResult QLMatching::check_light_mismatch(TimingTPCBundle* bundle) const
+{
+    LMResult r;
+    Opflash* flash = bundle->get_flash();
+    auto* main_cluster = bundle->get_main_cluster();
+    if (!flash || !main_cluster) return r;
+
+    // uvwt-range length -- the same formula as the prototype's cluster_length
+    // (ToyFiducial.cxx lines 604-617); Facade::Cluster::get_length() is its port.
+    r.length = main_cluster->get_length();
+
+    const auto& pred = bundle->get_pred_flash();
+    const auto& mask = bundle->get_opdet_mask();
+    const int nchan = std::min<int>((int) pred.size(), m_nchan);
+
+    // Per-side channel lists in fixed channel-index order (the ordering
+    // convention of TimingTPCBundle::examine_bundle's KS CDF). Masked channels
+    // contribute to NEITHER distribution: a dead PMT / non-PMT opdet carries no
+    // prediction, and leaving its measured PE in would fake a shape mismatch.
+    std::vector<double> mm[2], pp[2];
+    for (int ch = 0; ch < nchan; ++ch) {
+        if (ch < (int) mask.size() && mask[ch] == 0) continue;
+        const int s = (ch < (int) m_opdets.size() &&
+                       m_opdets[ch].center.x() >= m_cathode_x) ? 1 : 0;
+        const double m = flash->get_PE(ch);
+        const double p = pred.at(ch);
+        mm[s].push_back(m);
+        pp[s].push_back(p);
+        r.meas[s] += m;
+        r.pred[s] += p;
+    }
+    for (int s = 0; s < 2; ++s) {
+        if (r.pred[s] <= 0 || r.meas[s] <= 0 || mm[s].empty()) continue;
+        double cm = 0, cp = 0, dmax = 0;
+        for (std::size_t i = 0; i < mm[s].size(); ++i) {
+            cm += mm[s][i] / r.meas[s];
+            cp += pp[s][i] / r.pred[s];
+            dmax = std::max(dmax, std::abs(cm - cp));
+        }
+        r.ks[s] = dmax;
+    }
+
+    const double total_pred = r.pred[0] + r.pred[1];
+    const double total_meas = r.meas[0] + r.meas[1];
+
+    // prototype (ToyFiducial.cxx:625-626): total_pred_pe < 25 || cluster_length
+    // < 10 cm => "low energy", never judged. Divergence (owner decision): a
+    // BRIGHT flash overrides the exemption -- a tiny-prediction cluster matched
+    // to a >= lm_flash_pe_bright flash is exactly the mismatch this tagger
+    // exists to catch (SBND evt286021 main 8), not "low energy".
+    const bool small = (total_pred < m_lm_pred_pe_min) || (r.length < m_lm_length_min);
+    if (small && total_meas < m_lm_flash_pe_bright) {
+        r.verdict = 1;
+        return r;
+    }
+
+    // Cut regime (see the knob block in QLMatching.h). SMALL + bright flash =
+    // the fake-nu-candidate class, judged prototype-tight (a sub-10 cm cluster
+    // cannot explain a kilo-PE flash; ToyFiducial.cxx:637-641 non-boundary
+    // branch: ks < 0.25, log10 ratio > -0.55). LONG = everything else, judged
+    // loose against SBND's systematic under-prediction (20-evt population:
+    // healthy judged sides reach ks 0.507 / lograt -1.11), with the prototype's
+    // boundary/anode relaxation (ToyFiducial.cxx:645-655) -- near the PMTs or
+    // at the drift boundary the prediction is least reliable.
+    const bool relax = bundle->get_flag_close_to_PMT() || bundle->get_flag_at_x_boundary();
+    const double ks_max = small ? m_lm_small_ks_max
+                                : (relax ? m_lm_ks_max_relax : m_lm_ks_max);
+    const double lograt_min = small ? m_lm_small_lograt_min
+                                    : (relax ? m_lm_lograt_min_relax : m_lm_lograt_min);
+
+    bool any_judged = false;
+    bool fail = false;
+    for (int s = 0; s < 2; ++s) {
+        if (r.pred[s] < m_lm_side_pred_min) continue;
+        any_judged = true;
+        const double lograt = std::log10(std::max(r.pred[s], 1e-6) /
+                                         std::max(r.meas[s], 1e-6));
+        if (r.ks[s] >= 0 && r.ks[s] > ks_max) fail = true;
+        if (lograt < lograt_min || lograt > m_lm_lograt_max) fail = true;
+    }
+    if (!any_judged) {
+        // No side reaches lm_side_pred_min yet the bundle escaped the low-E
+        // exemption (bright flash / long cluster): judge the totals -- this IS
+        // the tiny-prediction-vs-bright-flash class.
+        const double lograt = std::log10(std::max(total_pred, 1e-6) /
+                                         std::max(total_meas, 1e-6));
+        if (lograt < lograt_min || lograt > m_lm_lograt_max) fail = true;
+    }
+    r.verdict = fail ? 2 : 0;
+    return r;
+}
+
+// LM verdict resolution + stamping (m_lm_tagger only). Runs ONCE over all
+// runs, after every fit/rescue is final and before output assembly.
+//
+// Why not per bundle: downstream MABC examine_bundles (use_flash_t0) merges
+// EVERY cluster matched inside one +-80 ns flash group -- across BOTH drift
+// sides -- into one output cluster, so per-bundle lm_flag stamps collide on
+// the composite and an arbitrary writer wins. Observed on the 20-evt tuning
+// sample: a 14-PE-pred grafted speck relabeled evt286021's 22434-PE-pred
+// through-goer to lm=2; the genuine in-beam nu-candidates of evt287825
+// (t=1.41 us) and evt288639 (t=1.17 us), whose flashes are dominated by
+// healthy 119/118-cm bundles, were demoted by subdominant fragments; and
+// evt284349's 424-cm TGM read lm=1 from the OTHER side's dim coincident
+// flash (gid 9, 306 PE, 27 ns away -- same group, different run).
+//
+// Resolution: group the matched flashes of ALL runs by single-linkage in
+// trigger-folded time with m_flash_group_window (the same rule as
+// MultiAlgBlobClustering::store_flash_groups / dump_calib's coincidence
+// pass), then stamp every member bundle's clusters with the verdict of the
+// group's largest-total-predicted-light bundle (ties keep the first in the
+// deterministic (time, input, flash-index) order). NB a per-APA (non-joint)
+// node only sees its own side's flashes, so cross-side groups resolve per
+// side there -- SBND production runs the joint node.
+void QLMatching::apply_lm_verdicts(std::vector<ApaRun>& runs)
+{
+    struct Rec {
+        double t_us;
+        int input_idx;
+        int fidx;
+        ApaRun* run;
+        Opflash* flash;
+    };
+    std::vector<Rec> recs;
+    for (auto& run : runs) {
+        for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
+            const double t = (flash->get_time() + trigger_offset_for(run.input_idx)) / units::us;
+            recs.push_back({t, (int) run.input_idx,
+                            (int) run.global_flash_idx_map.at(flash), &run, flash});
+        }
+    }
+    std::sort(recs.begin(), recs.end(), [](const Rec& a, const Rec& b) {
+        if (a.t_us != b.t_us) return a.t_us < b.t_us;
+        if (a.input_idx != b.input_idx) return a.input_idx < b.input_idx;
+        return a.fidx < b.fidx;
+    });
+    const double win_us = m_flash_group_window / units::us;
+
+    std::size_t i = 0;
+    while (i < recs.size()) {
+        std::size_t j = i + 1;
+        while (j < recs.size() && recs[j].t_us - recs[j - 1].t_us <= win_us) ++j;
+        double best_pred = -1.0;
+        int best_verdict = -1;
+        for (std::size_t k = i; k < j; ++k) {
+            for (const auto& bundle : recs[k].run->flash_bundles_map[recs[k].flash]) {
+                const auto lmr = check_light_mismatch(bundle.get());
+                const double pred = lmr.pred[0] + lmr.pred[1];
+                if (pred > best_pred) {
+                    best_pred = pred;
+                    best_verdict = lmr.verdict;
+                }
+                log->debug("LM verdict: cluster {} gidx {} flash id {} t {:.3f} us "
+                           "ks0 {:.3f} ks1 {:.3f} pred0 {:.1f} pred1 {:.1f} "
+                           "meas0 {:.1f} meas1 {:.1f} len {:.1f} cm "
+                           "close_pmt {} x_bnd {} -> lm={}",
+                           bundle->get_main_cluster()->ident(),
+                           recs[k].run->global_cluster_idx_map[bundle->get_main_cluster()],
+                           recs[k].flash->get_flash_id(), recs[k].t_us,
+                           lmr.ks[0], lmr.ks[1], lmr.pred[0], lmr.pred[1],
+                           lmr.meas[0], lmr.meas[1], lmr.length / units::cm,
+                           bundle->get_flag_close_to_PMT(),
+                           bundle->get_flag_at_x_boundary(), lmr.verdict);
+            }
+        }
+        for (std::size_t k = i; k < j; ++k) {
+            for (const auto& bundle : recs[k].run->flash_bundles_map[recs[k].flash]) {
+                bundle->get_main_cluster()->set_scalar<int>("lm_flag", best_verdict);
+                for (auto* oc : bundle->get_other_clusters())
+                    oc->set_scalar<int>("lm_flag", best_verdict);
+            }
+        }
+        i = j;
+    }
+}
+
 void QLMatching::apply_matched_t0s(ApaRun& run)
 {
     int n_newly_flagged = 0;
@@ -3436,6 +3650,10 @@ void QLMatching::apply_matched_t0s(ApaRun& run)
             cluster->set_scalar<int>("flash", flash->get_flash_id());
             cluster->set_scalar<int>("matched_flash_gid", flash_gid);
             cluster->put_pcarray<double>(bundle->get_pred_flash(), "pe", "flashpred");
+            // (The LM "lm_flag" scalar is stamped by apply_lm_verdicts, a
+            // separate cross-run pass -- the resolution unit is the +-80 ns
+            // flash GROUP across BOTH drift sides, which this per-run loop
+            // cannot see.)
             // Propagate the group's matched flash/t0 to its associated sub-clusters.
             for (auto* oc : bundle->get_other_clusters()) {
                 oc->set_cluster_t0(t0);
@@ -3650,6 +3868,24 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["auto_mask_pe_bright"]    = m_auto_mask_pe_bright;
     qp["auto_mask_min_contrast"] = m_auto_mask_min_contrast;
     qp["auto_mask_min_flash"]    = m_auto_mask_min_flash;
+    // Active LM cuts (key emitted only when the knob is on => knob-off dumps
+    // stay byte-identical), so the tuning script reads the operating point
+    // from the dump instead of guessing.
+    if (m_lm_tagger) {
+        Json::Value lm;
+        lm["pred_pe_min"]      = m_lm_pred_pe_min;
+        lm["length_min_cm"]    = m_lm_length_min / cm;
+        lm["flash_pe_bright"]  = m_lm_flash_pe_bright;
+        lm["side_pred_min"]    = m_lm_side_pred_min;
+        lm["ks_max"]           = m_lm_ks_max;
+        lm["ks_max_relax"]     = m_lm_ks_max_relax;
+        lm["lograt_min"]       = m_lm_lograt_min;
+        lm["lograt_min_relax"] = m_lm_lograt_min_relax;
+        lm["lograt_max"]       = m_lm_lograt_max;
+        lm["small_ks_max"]     = m_lm_small_ks_max;
+        lm["small_lograt_min"] = m_lm_small_lograt_min;
+        qp["lm"] = lm;
+    }
     top["quality_params"] = qp;
 
     // OpDet table (all channels). apa side and active flag mirror compute_geometry:
@@ -3837,6 +4073,24 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             if (m_cluster_rescue_relaxed)
                 jb["cluster_rescue_relaxed"] = b->get_flag_cluster_rescue_relaxed();
             jb["auto_selected"]        = (bool)selected.count(b.get());
+            // LM tagger metrics for the hand scan / cut tuning (keys emitted
+            // only when the knob is on => knob-off dumps stay byte-identical).
+            // Computed for EVERY candidate bundle so the tuning sees the full
+            // universe, not only the auto-selected matches.
+            if (m_lm_tagger) {
+                const auto lmr = check_light_mismatch(b.get());
+                jb["lm"] = lmr.verdict;
+                Json::Value jks(Json::arrayValue), jlp(Json::arrayValue), jlm(Json::arrayValue);
+                for (int s = 0; s < 2; ++s) {
+                    jks.append(lmr.ks[s]);
+                    jlp.append(lmr.pred[s]);
+                    jlm.append(lmr.meas[s]);
+                }
+                jb["lm_ks"]   = jks;
+                jb["lm_pred"] = jlp;
+                jb["lm_meas"] = jlm;
+                jb["lm_length_cm"] = lmr.length / cm;
+            }
             Json::Value jpred(Json::arrayValue);
             for (double v : pred) jpred.append(v);
             jb["pred_pe"] = jpred;

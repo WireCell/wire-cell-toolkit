@@ -305,18 +305,29 @@ function(params) {
             auto_mask: true,
     },
 
+    // LM (light-mismatch) tagger overlay (see QLMatching.h m_lm_tagger).  After
+    // the matching is final, each matched bundle is judged by per-drift-side KS
+    // shape distance + pred/meas normalization; the verdict (0 = pass, 1 = low
+    // energy, 2 = light mismatch) is stamped as cluster scalar "lm_flag" and
+    // dumped per bundle into the calib JSON.  C++ default false; key omitted
+    // when off => byte-identical pre-LM config.  `lm_params` overrides the C++
+    // cut defaults (lm_ks_max, lm_lograt_min, ... -- see QLMatching.h), merged
+    // only when the tagger is on.
+    local lm_on(lm_params) = { lm_tagger: true } + lm_params,
+
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
     // `pmt_nl` (default true) bakes the per-PMT predicted-PE non-linearity overlay
     // (nl_on) into the node; pass pmt_nl=false to disable it. `extra` is an optional
     // data overlay merged last (default {} => no-op) for other per-call tweaks.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
               + match_data(dv, reality, semimodel_file, cathode_fiducial)
               + (if pmt_nl then nl_on else {})
+              + (if lm then lm_on(lm_params) else {})
               + extra,
     }, nin=1, nout=1),
 
@@ -327,7 +338,7 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -341,6 +352,7 @@ function(params) {
             calib_dump: calib_dump,
         } + match_data(dv, reality, semimodel_file, cathode_fiducial)
           + (if pmt_nl then nl_on else {})  // PMT non-linearity ON by default for SBND (pmt_nl=false disables)
+          + (if lm then lm_on(lm_params) else {})  // LM tagger, C++ default false; key omitted when off => byte-identical
           + extra,  // optional overlay (default {} => no-op) for other per-call tweaks
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be
