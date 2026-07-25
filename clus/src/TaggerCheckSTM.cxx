@@ -191,6 +191,17 @@ public:
                 main_cluster->get_flag(Flags::STM),
                 main_cluster->get_flag(Flags::TGM));
 
+            // Complete-by-construction companion to the "no STM fit:" lines
+            // inside check_stm_conditions: those name every PRE-fit exit, but a
+            // cluster can also exit AFTER the round-1 fit through a path that
+            // records no pass (so the dQ/dx dump has nothing for it even though
+            // the tagger did evaluate it).  Reporting it here needs no knowledge
+            // of which path was taken.  Log-only.
+            if (m_save_stm_fit && m_pass_records.empty()) {
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: evaluated but no pass recorded (exited after the round-1 fit)",
+                                    main_cluster->ident());
+            }
+
             if (m_save_stm_fit) persist_stm_fit(*main_cluster);
         }
 
@@ -2112,8 +2123,12 @@ private:
         SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: TaggerCheckSTM: Checking cluster with {} wire plane IDs.",
             cluster.grouping()->wpids().size());
 
-        // Early exit if no steiner graph points
+        // Early exit if no steiner graph points.
+        // The "no STM fit" DEBUG lines below name every pre-fit exit, so a
+        // hand scan can tell "the tagger rejected this" from "the tagger never
+        // looked at it".  Log-only: no verdict depends on them.
         if (!cluster.has_pc("steiner_pc") || cluster.get_pc("steiner_pc").size() == 0) {
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: no steiner_pc", cluster.ident());
             return false;
         }
 
@@ -2123,6 +2138,7 @@ private:
 
         if (fc_result.is_fc) {
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STMTagger: Mid Point: A");
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: fully contained (Mid Point A)", cluster.ident());
             return false;
         }
 
@@ -2134,6 +2150,7 @@ private:
         // fiducial_utils and drift_dir are needed by the TGM checks below.
         auto fiducial_utils = cluster.grouping()->get_fiducialutils();
         if (!fiducial_utils) {
+            SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: no fiducialutils (MakeFiducialUtils missing from the pipeline?)", cluster.ident());
             return false;
         }
 
@@ -2193,6 +2210,8 @@ private:
                 
                 if (angle_between > 120./180.*3.1415926 && dis1 > 20*units::cm && dis2 > 20*units::cm) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: B");
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: single exit point with a {:.0f} deg mid-track kink, arms {:.1f}/{:.1f} cm (Mid Point B)",
+                                        cluster.ident(), angle_between*180/3.1415926, dis1/units::cm, dis2/units::cm);
                     return false;
                 } else {
                     if (dis1 < dis2) {
@@ -2203,6 +2222,8 @@ private:
                 }
             } else {
                 SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point: C");
+                SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: {} candidate exit points, need exactly 1 (Mid Point C)",
+                                    cluster.ident(), candidate_exit_wcps.size());
                 return false;
             }
         }
@@ -2234,7 +2255,11 @@ private:
                 auto segment = create_segment_for_cluster(cluster, path_points);
                 m_track_fitter.add_segment(segment);
                 m_track_fitter.do_single_tracking(segment, false);
-                if (is_forward && segment->fits().size() <= 3) return false;
+                if (is_forward && segment->fits().size() <= 3) {
+                    SPDLOG_LOGGER_DEBUG(s_log, "check_stm_conditions: cluster {} no STM fit: round-1 forward fit gave only {} points (<=3)",
+                                        cluster.ident(), segment->fits().size());
+                    return false;
+                }
             }
 
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Finish first round of fitting");
