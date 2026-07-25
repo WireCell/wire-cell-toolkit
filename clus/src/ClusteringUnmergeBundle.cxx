@@ -69,10 +69,12 @@ using namespace WireCell::Clus::Facade;
  *    by their pre-merge real_cluster_id, which reproduces the pre-merge
  *    cluster partition exactly.
  *
- *  - mode "component" (fallback, PROXY): recompute connected components on
- *    the cluster's own graph and call the longest one the main.  Used
- *    automatically when the provenance arrays are absent (a tarball saved
- *    without save_real_cluster_id).
+ *  - mode "component" (PROXY, opt-in only): recompute connected components on
+ *    the cluster's own graph and call the longest one the main.  This is a
+ *    clustering decision, not bookkeeping -- the relaxed graph does not join
+ *    the two halves of a cathode crosser -- so mode "real" does NOT fall back
+ *    to it: a cluster without provenance (a tarball saved without
+ *    save_real_cluster_id) is left alone with a warning.
  *
  * MUST run before the steiner stage: separate() moves blob nodes into fresh
  * cluster nodes, and node-local point clouds (steiner_pc) are NOT carried
@@ -111,8 +113,8 @@ public:
         cfg["pc_transforms"] = "PCTransformSet";
         cfg["grouping"] = m_grouping_name;
         // "real" = per-blob flash-merge provenance (exact, needs a pctree
-        // saved with save_real_cluster_id); falls back to "component" when
-        // the arrays are absent.  "component" = longest connected component.
+        // saved with save_real_cluster_id); clusters without it are skipped,
+        // NOT proxied.  "component" = longest connected component (opt-in).
         cfg["mode"] = m_mode;
         cfg["pcarray_name"] = m_pcarray_name;
         cfg["graph_name"] = m_graph_name;
@@ -256,8 +258,23 @@ private:
         used_real = false;
         if (m_mode == "real") {
             const Prov p = groups_from_provenance(cluster, nb, groups);
-            if (p == Prov::no_split) return false;
-            used_real = (p == Prov::ok);
+            // No usable provenance => SKIP.  Deliberately not a fallback to
+            // the component proxy: undoing the flash merge is bookkeeping,
+            // but splitting on graph connectivity is a clustering decision
+            // (it breaks cathode crossers, whose two halves the relaxed graph
+            // does not join).  Reusing a pctree saved without
+            // save_real_cluster_id must therefore be a no-op, not a silent
+            // re-clustering.  Ask for the proxy explicitly with mode
+            // "component".
+            if (p != Prov::ok) {
+                if (p == Prov::unusable) {
+                    log->warn("cluster {}: no flash-merge provenance (save the pctree with "
+                              "save_real_cluster_id, or set mode=\"component\"); not split",
+                              cluster->ident());
+                }
+                return false;
+            }
+            used_real = true;
         }
         if (!used_real) {
             groups.clear();

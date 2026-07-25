@@ -95,10 +95,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         //
         // mode (C++ default "real"): "real" = per-blob real_cluster_main /
         // real_cluster_id flash-merge provenance (exact; needs a pctree saved
-        // with MultiAlgBlobClustering save_real_cluster_id, and falls back to
-        // the proxy per cluster when absent).  "component" = longest
-        // connected component (proxy).  require_in_scope (C++ default true):
-        // skip the out-of-volume shards switch_scope splits off.
+        // with MultiAlgBlobClustering save_real_cluster_id -- a cluster
+        // WITHOUT it is left alone with a warning, NOT proxied, because a
+        // connectivity split is a clustering decision and breaks cathode
+        // crossers).  "component" = longest connected component, opt-in only.
+        // require_in_scope (C++ default true): skip the out-of-volume shards
+        // switch_scope splits off.
         //
         // MUST be placed BEFORE the steiner stage: separate() does not carry
         // node-local point clouds, and the retained main would otherwise keep
