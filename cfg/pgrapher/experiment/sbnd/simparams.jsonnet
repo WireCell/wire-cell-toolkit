@@ -6,10 +6,14 @@ local wc = import 'wirecell.jsonnet';
 base {
   lar: super.lar {
     // be sure you really want to have this. default value: 8 ms
-    // Longitudinal diffusion constant
-    DL :  4.0 * wc.cm2/wc.s,
-    // Transverse diffusion constant
-    DT :  8.8 * wc.cm2/wc.s,
+    // Longitudinal diffusion constant.  SBND physical value (was 4.0, which
+    // matched sbndcode's wcsimsp_sbnd.fcl); kept equal to the value the PR
+    // track fit assumes (sbnd_xin/sbnd_track_fitting.json) so simulation and
+    // fit share one diffusion model.  NOT bit-identical: changes simulated
+    // waveforms.  See sbnd_xin/docs/47 section 6a.
+    DL :  6.5781 * wc.cm2/wc.s,
+    // Transverse diffusion constant.  SBND physical value (was 8.8).
+    DT :  13.1349 * wc.cm2/wc.s,
     // Electron lifetime
     lifetime : 35*wc.ms,
     // Electron drift speed, assumes 0.5 kV/cm and 88.4 K consistent with 1D sim

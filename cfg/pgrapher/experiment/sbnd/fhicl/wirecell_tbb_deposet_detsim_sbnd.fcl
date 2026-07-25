@@ -89,9 +89,9 @@ physics:
           }
           structs: {
             # Longitudinal diffusion constant [cm2/s]
-            DL: 4.0
+            DL: 6.5781
             # Transverse diffusion constant [cm2/s]
-            DT: 8.8
+            DT: 13.1349
             # Electron lifetime [ms]
             lifetime: 35.0
             # Electron drift speed, assumes a certain applied E-field [mm/us]
