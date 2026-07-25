@@ -490,7 +490,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_main_pair=false, tgm_main_pair_mode='path',
               tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
               tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
-              save_stm_fit=false, unmerge_bundle_mode='real',
+              save_stm_fit=false, unmerge_bundle_mode='real', unmerge_assoc_min_gap=3 * wc.cm,
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM (C++ default 50000 = MicroBooNE).  56000 is the
               // SBND value derived in sbnd_xin/docs/48; pass 50000 to isolate
@@ -610,9 +610,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // off only assoc_cluster_main == 0.  Doc 52 4a/4b.
         //
         // Not in pipeline_names => absent from the compiled config.
+        // min_gap: split off only companions that are genuinely DETACHED from
+        // the main.  Measured on the 30-event scan (doc 52 §10): without it, 41 %
+        // of the charge this visitor removed sat within 3 cm of the main --
+        // same-particle charge broken by SP / dead-channel gaps -- and 14
+        // through-going muons lost TGM because the chord-support walk only sees
+        // the cluster it is handed.  3 cm keeps those and still removes the
+        // 18-22 cm clumps doc 50 is about.
         unmerge_assoc: cm.unmerge_bundle(name='assoc', mode=unmerge_bundle_mode,
                                          id_aname='assoc_cluster_id',
-                                         main_aname='assoc_cluster_main'),
+                                         main_aname='assoc_cluster_main',
+                                         min_gap=unmerge_assoc_min_gap),
         // SBND has no beam_flash flag (QLMatching sets main/associated_cluster
         // instead) -- process every scope-passing cluster.
         steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false),
@@ -934,7 +942,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
-       save_stm_fit=false, unmerge_bundle_mode='real',
+       save_stm_fit=false, unmerge_bundle_mode='real', unmerge_assoc_min_gap=3 * wc.cm,
        mip_dqdx=56000, stm_consistent_fv=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
@@ -957,6 +965,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
                 unmerge_bundle_mode=unmerge_bundle_mode,
+                unmerge_assoc_min_gap=unmerge_assoc_min_gap,
                 mip_dqdx=mip_dqdx,
                 stm_consistent_fv=stm_consistent_fv),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),

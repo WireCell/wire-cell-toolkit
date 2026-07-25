@@ -1,6 +1,8 @@
 #include <WireCellClus/ClusteringFuncs.h>
 #include "WireCellUtil/Array.h"
 
+#include <unordered_map>
+
 
 #include <iostream>              // temp debug
 
@@ -168,8 +170,21 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         std::vector<int> orig_main;
 
         // Accumulators for the carried provenance pairs (see carry_pairs above).
+        //
+        // Keyed by BLOB POINTER, not by row position.  Positional copying is
+        // wrong and was measurably wrong: a member's blobs do NOT necessarily
+        // end up as a contiguous, order-preserving run of the merged cluster's
+        // children, so the k-th row of a member's array is not the k-th of its
+        // blobs afterwards.  The orig_id/orig_main arrays above cannot see this
+        // because their value is CONSTANT within a member -- any permutation of
+        // a member's rows is a no-op there -- which is why the flash pair looked
+        // healthy while the carried pair came out scrambled (doc 52 §11:
+        // evt284349 cluster 10 had the right group sizes, 4+5+4+311, attached to
+        // the wrong blobs, so the un-merge split the trunk's tip and kept the
+        // detached piece).  Blob facades survive take_children (only the nodes
+        // move), so the pointer is a stable key.
         struct CarryAcc {
-            std::vector<int> id, main;
+            std::vector<std::pair<Blob*, std::pair<int, int>>> rows;  // blob -> (id, main)
             int next_id{0};      // next fresh dense id to hand out
             bool any{false};     // did at least one member actually carry it?
         };
@@ -256,35 +271,39 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                 snap[ip].first.assign(sid.begin(), sid.end());
                 snap[ip].second.assign(smain.begin(), smain.end());
             }
+            // The member's children in the SAME order as its per-blob array
+            // rows (both are "children order" while the member is still intact).
+            std::vector<Blob*> member_kids;
+            if (!carried.empty()) member_kids = live->children();
             const size_t nb_before = fresh_cluster.nchildren();
 
             fresh_cluster.from(*live);
             fresh_cluster.take_children(*live, true);
 
-            // Append this member's rows, in the blob order take_children just
-            // produced (the same invariant the cc/orig_id resize() below rely on).
+            // Record this member's rows against the blobs they belong to.
             const size_t nb_added = (size_t) fresh_cluster.nchildren() - nb_before;
             for (size_t ip = 0; ip < carried.size(); ++ip) {
                 auto& acc = carried[ip];
                 const auto& sid = snap[ip].first;
-                if (sid.size() == nb_added && nb_added > 0) {
+                if (sid.size() == member_kids.size() && sid.size() == nb_added
+                    && nb_added > 0) {
                     // Rebase into a fresh dense range, ascending by original id
                     // => deterministic and collision-free across members.
                     std::map<int, int> remap;
                     for (int v : sid) remap.emplace(v, 0);
                     for (auto& [orig, fresh_id] : remap) { (void) orig; fresh_id = acc.next_id++; }
-                    for (size_t k = 0; k < nb_added; ++k) {
-                        acc.id.push_back(remap.at(sid[k]));
-                        acc.main.push_back(snap[ip].second[k]);
+                    for (size_t k = 0; k < sid.size(); ++k) {
+                        acc.rows.emplace_back(member_kids[k],
+                                              std::make_pair(remap.at(sid[k]),
+                                                             snap[ip].second[k]));
                     }
                     acc.any = true;
                 }
                 else {
                     // No usable array on this member: one fresh id, all main.
                     const int fresh_id = acc.next_id++;
-                    for (size_t k = 0; k < nb_added; ++k) {
-                        acc.id.push_back(fresh_id);
-                        acc.main.push_back(1);
+                    for (Blob* b : member_kids) {
+                        acc.rows.emplace_back(b, std::make_pair(fresh_id, 1));
                     }
                 }
             }
@@ -311,16 +330,33 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         if (save_origid) {
             fresh_cluster.put_pcarray(orig_id, orig_id_aname, pcname);
         }
-        // Re-attach the carried provenance pairs.  Only when some member really
-        // had them (else this is a no-op and output is unchanged) and only when
-        // the accumulated length matches the merged blob count.
-        for (size_t ip = 0; ip < carried.size(); ++ip) {
-            const auto& acc = carried[ip];
-            if (!acc.any) continue;
-            if (acc.id.size() != (size_t) fresh_cluster.nchildren()) continue;
-            if (acc.main.size() != acc.id.size()) continue;
-            fresh_cluster.put_pcarray(acc.id, carry_pairs[ip].first, pcname);
-            fresh_cluster.put_pcarray(acc.main, carry_pairs[ip].second, pcname);
+        // Re-attach the carried provenance pairs, placing every row at the
+        // position its own blob ended up in.  Only when some member really had
+        // the arrays (else this is a no-op and output is unchanged); fail open on
+        // any blob we cannot place or any row left unfilled.
+        if (!carried.empty()) {
+            const auto merged_kids = fresh_cluster.children();
+            std::unordered_map<const Blob*, size_t> where;
+            where.reserve(merged_kids.size());
+            for (size_t i = 0; i < merged_kids.size(); ++i) where[merged_kids[i]] = i;
+            for (size_t ip = 0; ip < carried.size(); ++ip) {
+                const auto& acc = carried[ip];
+                if (!acc.any) continue;
+                if (acc.rows.size() != merged_kids.size()) continue;
+                std::vector<int> ids(merged_kids.size(), -1), mains(merged_kids.size(), -1);
+                bool ok = true;
+                for (const auto& [blob, val] : acc.rows) {
+                    auto it = where.find(blob);
+                    if (it == where.end()) { ok = false; break; }
+                    ids[it->second] = val.first;
+                    mains[it->second] = val.second;
+                }
+                if (!ok) continue;
+                for (int v : mains) if (v < 0) { ok = false; break; }
+                if (!ok) continue;
+                fresh_cluster.put_pcarray(ids, carry_pairs[ip].first, pcname);
+                fresh_cluster.put_pcarray(mains, carry_pairs[ip].second, pcname);
+            }
         }
         if (save_origmain && save_origid) {
             // Representative = the same member whose flash/flags the merged

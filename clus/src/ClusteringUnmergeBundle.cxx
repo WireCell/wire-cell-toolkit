@@ -8,6 +8,9 @@
 #include "WireCellUtil/PointCloudDataset.h"
 #include "WireCellAux/Logger.h"
 
+#include <array>
+#include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <vector>
@@ -109,6 +112,13 @@ public:
         // -- which reproduces the prototype's main_cluster +
         // additional_clusters layout that check_stm expects
         // (wire-cell-prod-stm.cxx:816-828).
+        // min_gap (default 0 = off, byte-identical): fold a companion group
+        // back into the main when its closest approach to the retained main is
+        // <= this.  See fold_back_attached() for why -- clustering_isolated's
+        // "associated" label mixes same-particle SP fragments a few mm away with
+        // genuinely detached clumps 20 cm away, and only a distance test tells
+        // them apart.  Internal length units (jsonnet: 3*wc.cm).
+        m_min_gap = get<double>(config, "min_gap", m_min_gap);
         m_id_aname = get<std::string>(config, "id_aname", m_id_aname);
         m_main_aname = get<std::string>(config, "main_aname", m_main_aname);
         if (m_mode != "real" && m_mode != "component") {
@@ -129,6 +139,7 @@ public:
         cfg["pcarray_name"] = m_pcarray_name;
         cfg["graph_name"] = m_graph_name;
         cfg["require_in_scope"] = m_require_in_scope;
+        cfg["min_gap"] = m_min_gap;
         cfg["id_aname"] = m_id_aname;
         cfg["main_aname"] = m_main_aname;
         return cfg;
@@ -150,7 +161,7 @@ public:
         std::set<int> taken;
         for (const auto* c : clusters) taken.insert(c->ident());
 
-        size_t n_split = 0, n_parts = 0, n_real = 0, n_proxy = 0;
+        size_t n_split = 0, n_parts = 0, n_real = 0, n_proxy = 0, n_kept = 0;
         for (Cluster* cluster : clusters) {
             if (!cluster->get_flag(Flags::main_cluster)) continue;
             // switch_scope leaves out-of-volume shards carrying an inherited
@@ -161,20 +172,22 @@ public:
 
             const size_t before = grouping.nchildren();
             bool used_real = false;
-            if (process_cluster(grouping, cluster, taken, used_real)) {
+            if (process_cluster(grouping, cluster, taken, used_real, n_kept)) {
                 ++n_split;
                 n_parts += grouping.nchildren() - before;
                 if (used_real) ++n_real; else ++n_proxy;
             }
         }
         log->debug("unmerged {} main cluster(s) into {} associated cluster(s) "
-                   "({} exact/provenance, {} proxy/component)",
-                   n_split, n_parts, n_real, n_proxy);
+                   "({} exact/provenance, {} proxy/component; {} companion group(s) "
+                   "kept as still attached, min_gap {:.2f} cm)",
+                   n_split, n_parts, n_real, n_proxy, n_kept, m_min_gap / units::cm);
     }
 
 private:
     std::string m_grouping_name{"live"};
     std::string m_mode{"real"};
+    double m_min_gap{0.0};
     std::string m_id_aname{"real_cluster_id"};
     std::string m_main_aname{"real_cluster_main"};
     std::string m_pcarray_name{"perblob"};
@@ -234,6 +247,105 @@ private:
         return Prov::ok;
     }
 
+    /// Fold back companion groups that are not actually DETACHED from the
+    /// retained main.
+    ///
+    /// Why this is needed (doc 52 §10/§11).  `clustering_isolated` merges a
+    /// "small" cluster into the nearest big one within small_big_dis_cut = 80 cm
+    /// with NO gap test, so its "associated" label covers two populations that
+    /// must be treated differently:
+    ///   * fragments 0.3-3 cm from the trunk -- the SAME particle, split by
+    ///     signal-processing / dead-channel inefficiency, which the chain's
+    ///     gap-jumping passes exist to bridge.  Measured on the 30-event scan:
+    ///     18 % of the charge this visitor removed was within 1 cm of the main
+    ///     and 41 % within 3 cm.  Removing it silently broke TGM: the chord
+    ///     support walk (rescue_chord_check) only sees the cluster it is handed,
+    ///     so 14 through-going muons lost their endpoint pairs and fell through
+    ///     to the STM fit (evt284349 mains 8 and 10 among them).
+    ///   * genuinely detached clumps 18-22 cm out, which are what doc 50 set out
+    ///     to remove.
+    /// A distance test is the only thing that separates them, and the prototype
+    /// never needed one because it hands additional_clusters to check_stm /
+    /// check_tgm instead of deleting them.
+    ///
+    /// m_min_gap <= 0 disables this entirely => byte-identical to the pre-knob
+    /// visitor.
+    ///
+    /// Returns the number of groups folded back into the main.
+    size_t fold_back_attached(Cluster* cluster, size_t nb,
+                              std::vector<int>& groups) const {
+        if (m_min_gap <= 0) return 0;
+
+        int ngrp = 0;
+        for (int g : groups) if (g >= 0) ngrp = std::max(ngrp, g + 1);
+        if (ngrp < 1) return 0;
+
+        // Points of the retained main and of each candidate companion, in the
+        // scoped view (the same view kd().major_index() indexes).
+        const auto& pts = cluster->points();
+        if (pts.size() < 3) return 0;
+        const auto& kd = cluster->kd();
+        const size_t np = pts[0].size();
+
+        std::vector<std::array<double, 3>> main_pts;
+        std::vector<std::vector<std::array<double, 3>>> grp_pts(ngrp);
+        main_pts.reserve(np);
+        for (size_t ip = 0; ip < np; ++ip) {
+            const size_t bidx = kd.major_index(ip);
+            if (bidx >= nb) continue;
+            const std::array<double, 3> p{pts[0][ip], pts[1][ip], pts[2][ip]};
+            const int g = groups[bidx];
+            if (g < 0) main_pts.push_back(p);
+            else grp_pts[g].push_back(p);
+        }
+        if (main_pts.empty()) return 0;
+
+        const double cut2 = m_min_gap * m_min_gap;
+        std::vector<char> attached(ngrp, 0);
+        std::vector<double> best(ngrp, -1.0);
+        for (int g = 0; g < ngrp; ++g) {
+            if (grp_pts[g].empty()) continue;
+            double b2 = std::numeric_limits<double>::max();
+            for (const auto& q : grp_pts[g]) {
+                for (const auto& p : main_pts) {
+                    const double dx = p[0] - q[0], dy = p[1] - q[1], dz = p[2] - q[2];
+                    const double d2 = dx * dx + dy * dy + dz * dz;
+                    if (d2 < b2) b2 = d2;
+                    if (b2 <= cut2) break;       // "touching" is settled
+                }
+                if (b2 <= cut2) break;
+            }
+            best[g] = std::sqrt(b2);
+            if (b2 <= cut2) attached[g] = 1;
+        }
+
+        size_t nfold = 0;
+        for (int g = 0; g < ngrp; ++g) if (attached[g]) ++nfold;
+        if (nfold == 0) return 0;
+
+        // Fold the attached groups back into the main, then re-densify the
+        // surviving group ids so separate() still sees 0..K-1.
+        std::map<int, int> keep;
+        for (int g = 0; g < ngrp; ++g) {
+            if (!attached[g] && !grp_pts[g].empty()) keep[g] = (int) keep.size();
+        }
+        for (size_t i = 0; i < nb; ++i) {
+            const int g = groups[i];
+            if (g < 0) continue;
+            auto it = keep.find(g);
+            groups[i] = (it == keep.end()) ? -1 : it->second;
+        }
+        for (int g = 0; g < ngrp; ++g) {
+            if (attached[g]) {
+                SPDLOG_LOGGER_DEBUG(log, "cluster {}: companion group {} kept "
+                                    "(closest approach {:.2f} cm <= min_gap {:.2f} cm)",
+                                    cluster->ident(), g, best[g] / units::cm,
+                                    m_min_gap / units::cm);
+            }
+        }
+        return nfold;
+    }
+
     /// Proxy: connected components of the cluster's own graph, longest = main.
     bool groups_from_components(Cluster* cluster, size_t nb,
                                 std::vector<int>& groups) const {
@@ -264,7 +376,7 @@ private:
 
     /// Split one merged main.  Returns true if a split happened.
     bool process_cluster(Grouping& grouping, Cluster*& cluster,
-                         std::set<int>& taken, bool& used_real) const {
+                         std::set<int>& taken, bool& used_real, size_t& n_kept) const {
         const size_t nb = cluster->nchildren();
         if (nb < 2) return false;
 
@@ -294,6 +406,9 @@ private:
             groups.clear();
             if (!groups_from_components(cluster, nb, groups)) return false;
         }
+
+        // Keep companions that are still touching the main (doc 52 §11).
+        n_kept += fold_back_attached(cluster, nb, groups);
 
         int ngrp = 0;
         for (int g : groups) if (g >= 0) ngrp = std::max(ngrp, g + 1);
