@@ -268,6 +268,17 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
             // byte-identical (mirrors the bee_sink conditional above).
             [if rse_from_ident then 'rse_from_ident']: true,
             save_deadarea: bee_sink == null,
+            // The isolated grouping's provenance pair is written HERE, at per-APA
+            // scope, so it must be homogenized on THIS node's tensor output too:
+            // TensorDM concatenates same-named local PCs across cluster nodes and
+            // silently drops a key that is absent from the first-seen node (doc
+            // 38's gotcha).  clustering_isolated marks only the clusters it
+            // merged, so without this the arrays never reach the all-APA stage and
+            // the all-APA save-time fill-in makes every blob look like a main --
+            // measured: assoc_cluster_main all 1, the un-merge splits nothing.
+            // Same flag as ClusteringIsolated's save_assoc_id: the two are only
+            // ever wanted together.  C++ default false; key omitted when off.
+            [if save_assoc_id then 'save_assoc_cluster_id']: true,
             dead_area_version: 2,
             anodes: [wc.tn(anode)],
             face: face,

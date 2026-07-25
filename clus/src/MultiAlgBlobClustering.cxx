@@ -2371,6 +2371,45 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         // survives serialization (see m_save_real_cluster_id in the header).
         // Done after normalize_cluster_flags so the fill-in "main_cluster"
         // flag values are the final, normalized ones.
+        // The isolated grouping's pair (doc 52) must be homogenized FIRST, and it
+        // needs a wider gate than the flash pair's.  The invariant that
+        // Dataset::append enforces is "every cluster that has a 'perblob' PC has
+        // the SAME keys in it" -- it raises when an incoming per-blob dataset is
+        // missing a key the target already has
+        // (util/src/PointCloudDataset.cxx:261); a cluster with no "perblob" PC at
+        // all is simply absent and fine.  Gating on "isolated" the way the flash
+        // loop does is not sufficient here, because the assoc pair already exists
+        // when the all-APA switch_scope runs, so its carve puts it on the
+        // out-of-volume shards too -- and examine_bundles then skips those (not in
+        // scope), so they never receive "isolated".  Measured symptom: the whole
+        // per-APA -> all-APA handoff threw "missing keys in append: 3 missing:
+        // isolated real_cluster_id real_cluster_main".
+        // So: any cluster that has a "perblob" PC gets the full key set.  -1 in
+        // "isolated" is that array's documented "this blob is in the main
+        // sub-component" value, which is exactly what a cluster nothing merged is.
+        // Running before the flash loop lets that loop's "isolated" gate then
+        // cover these clusters too.
+        if (m_save_assoc_cluster_id) {
+            for (Cluster* cluster : grouping.children()) {
+                const auto& lpcs = cluster->value().local_pcs();
+                if (lpcs.find("perblob") == lpcs.end()) continue;
+                const size_t nb = cluster->nchildren();
+                if (!cluster->has_pcarray<int>("isolated", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, -1), "isolated", "perblob");
+                }
+                if (!cluster->has_pcarray<int>("assoc_cluster_id", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, cluster->ident()),
+                                         "assoc_cluster_id", "perblob");
+                }
+                // A cluster the isolated grouping never merged is a main, not an
+                // associated fragment: all 1.  This is the "absent provenance =>
+                // main" sentinel the un-merge needs to keep crossers whole.
+                if (!cluster->has_pcarray<int>("assoc_cluster_main", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, 1),
+                                         "assoc_cluster_main", "perblob");
+                }
+            }
+        }
         if (m_save_real_cluster_id) {
             for (Cluster* cluster : grouping.children()) {
                 if (!cluster->has_pcarray<int>("isolated", "perblob")) continue;
@@ -2383,27 +2422,6 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                 if (!cluster->has_pcarray<int>("real_cluster_main", "perblob")) {
                     cluster->put_pcarray(std::vector<int>(nb, 1),
                                          "real_cluster_main", "perblob");
-                }
-            }
-        }
-        // Same homogenization for the isolated grouping's pair (doc 52).  Kept
-        // as its own knob and its own loop so either provenance can be saved
-        // without the other, and so a build with only one knob on stays
-        // byte-identical for the other array.
-        if (m_save_assoc_cluster_id) {
-            for (Cluster* cluster : grouping.children()) {
-                if (!cluster->has_pcarray<int>("isolated", "perblob")) continue;
-                const size_t nb = cluster->nchildren();
-                if (!cluster->has_pcarray<int>("assoc_cluster_id", "perblob")) {
-                    cluster->put_pcarray(std::vector<int>(nb, cluster->ident()),
-                                         "assoc_cluster_id", "perblob");
-                }
-                // A cluster the isolated grouping never merged is a main, not an
-                // associated fragment: all 1.  This is the "absent provenance =>
-                // main" sentinel the un-merge needs to keep crossers whole.
-                if (!cluster->has_pcarray<int>("assoc_cluster_main", "perblob")) {
-                    cluster->put_pcarray(std::vector<int>(nb, 1),
-                                         "assoc_cluster_main", "perblob");
                 }
             }
         }
