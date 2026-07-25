@@ -174,17 +174,17 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_inpath        = get(cfg, "inpath", m_inpath);
     m_outpath       = get(cfg, "outpath", m_outpath);
-    // realign_perblob (default false => byte-identical): see
+    // realign_perblob (default TRUE, doc 52 §12.8): see
     // recompose_cluster_groups().  decompose+recompose permute each split
     // main's blob children while its node-local "perblob" arrays keep their
     // original row order, silently detaching every per-blob array from the
-    // blobs it describes (doc 52 §11: the assoc_cluster_* provenance came out
-    // scrambled; the always-written "isolated" array is equally misaligned but
-    // hidden because the all-APA examine_bundles rewrites it -- AFTER using
-    // the stale rows in its main-overlap vote).  With this on, recompose
+    // blobs it describes (doc 52 §11/§12: the assoc_cluster_* provenance came
+    // out scrambled; the always-written "isolated" array is equally misaligned
+    // but hidden because the all-APA examine_bundles rewrites it -- AFTER
+    // using the stale rows in its main-overlap vote).  With this on, recompose
     // reorders the perblob dataset rows to the new child order so row i again
-    // describes child i.  Off preserves the historical (misaligned) behavior
-    // bit-for-bit.
+    // describes child i.  Pass false only to reproduce the historical
+    // (misaligned) behavior bit-for-bit for A/B archaeology.
     m_realign_perblob = get(cfg, "realign_perblob", m_realign_perblob);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
@@ -1386,10 +1386,11 @@ void QLMatching::recompose_cluster_groups(ApaRun& run)
         // equally misaligned but hidden: the all-APA examine_bundles rewrites
         // it from a fresh connected-components pass -- after consuming the
         // stale rows in its main-overlap vote.)
-        // With realign_perblob on, reorder the whole perblob dataset by the
-        // SAME permutation the blobs underwent, restoring row i == child i for
-        // every key at once.  Off (default) => historical behavior, including
-        // the misalignment, bit-for-bit.
+        // With realign_perblob on (the default, doc 52 §12.8), reorder the
+        // whole perblob dataset by the SAME permutation the blobs underwent,
+        // restoring row i == child i for every key at once.  Off => historical
+        // behavior, including the misalignment, bit-for-bit (A/B archaeology
+        // only).
         if (!m_realign_perblob) continue;
         auto ccit = run.decompose_cc.find(main_cluster);
         if (ccit == run.decompose_cc.end()) continue;

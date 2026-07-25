@@ -321,19 +321,21 @@ function(params) {
     // `pmt_nl` (default true) bakes the per-PMT predicted-PE non-linearity overlay
     // (nl_on) into the node; pass pmt_nl=false to disable it. `extra` is an optional
     // data overlay merged last (default {} => no-op) for other per-call tweaks.
-    // realign_perblob (C++ default false; key omitted when off => byte-identical
-    // pre-fix config): make recompose_cluster_groups() reorder each split main's
-    // "perblob" dataset rows to the permuted post-merge blob order (doc 52 §11) --
+    // realign_perblob (C++ default TRUE since doc 52 §12.8; null here = inherit,
+    // key omitted): recompose_cluster_groups() reorders each split main's
+    // "perblob" dataset rows to the permuted post-merge blob order (doc 52 §12) --
     // required for any consumer of per-blob provenance (assoc_cluster_*) and it
     // also realigns "isolated" for the all-APA examine_bundles main-overlap vote.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, realign_perblob=false, extra={}):: g.pnode({
+    // Pass false ONLY to reproduce the pre-fix (misaligned) behavior for A/B
+    // archaeology.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, realign_perblob=null, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
               + match_data(dv, reality, semimodel_file, cathode_fiducial)
               + (if pmt_nl then nl_on else {})
               + (if lm then lm_on(lm_params) else {})
-              + { [if realign_perblob then 'realign_perblob']: true }
+              + { [if realign_perblob != null then 'realign_perblob']: realign_perblob }
               + extra,
     }, nin=1, nout=1),
 
@@ -344,7 +346,7 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, realign_perblob=false, extra={}):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, realign_perblob=null, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -359,9 +361,9 @@ function(params) {
         } + match_data(dv, reality, semimodel_file, cathode_fiducial)
           + (if pmt_nl then nl_on else {})  // PMT non-linearity ON by default for SBND (pmt_nl=false disables)
           + (if lm then lm_on(lm_params) else {})  // LM tagger, C++ default false; key omitted when off => byte-identical
-          // C++ default false.  Key omitted when off => byte-identical pre-fix
-          // config.  See matching() above / doc 52 §11.
-          + { [if realign_perblob then 'realign_perblob']: true }
+          // C++ default TRUE (doc 52 §12.8); null = inherit (key omitted).
+          // See matching() above.
+          + { [if realign_perblob != null then 'realign_perblob']: realign_perblob }
           + extra,  // optional overlay (default {} => no-op) for other per-call tweaks
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be

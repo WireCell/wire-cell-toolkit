@@ -958,11 +958,16 @@ namespace WireCell::Match {
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
         // Realign each recomposed main's node-local "perblob" dataset rows to
-        // the post-merge blob child order (doc 52 §11).  Default false =>
-        // recompose leaves the arrays in their pre-decompose row order, which
-        // no longer matches the permuted children -- the historical behavior,
-        // preserved bit-for-bit for the legacy path.
-        bool m_realign_perblob{false};
+        // the post-merge blob child order (doc 52 §12).  Default TRUE (owner
+        // decision 2026-07-25, doc 52 §12.8): leaving the arrays in their
+        // pre-decompose row order silently detaches every per-blob array from
+        // the blob it describes -- including the always-written "isolated" cc
+        // that the all-APA examine_bundles main-overlap vote consumes.  A
+        // detector whose chain never marks a main (-1) in "isolated" (PDHD,
+        // PDVD: examine_bundles disabled) never decomposes, so this is a
+        // structural no-op there.  Set false only to reproduce the historical
+        // (misaligned) behavior for A/B archaeology.
+        bool m_realign_perblob{true};
         float m_cluster_t0{-1e12};
 
         // Hand-scan calibration dump. When non-empty, after all per-APA runs
