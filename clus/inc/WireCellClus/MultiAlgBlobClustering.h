@@ -222,6 +222,14 @@ namespace WireCell::Clus {
         // assume for an unmerged cluster, so nothing downstream changes except
         // that the arrays now exist after a load.
         bool m_save_real_cluster_id{false};
+        // save_assoc_cluster_id (default false = byte-identical legacy tarball):
+        // the same homogenization for the isolated grouping's provenance pair
+        // "assoc_cluster_id" / "assoc_cluster_main" (doc 52 Stage 1/2), written
+        // by clustering_isolated's save_assoc_id and carried across merges by
+        // merge_clusters.  Fill-in for a cluster the grouping never touched: own
+        // ident, and main=1 -- an ungrouped cluster IS a main, which is the
+        // sentinel the un-merge relies on to keep cathode crossers whole.
+        bool m_save_assoc_cluster_id{false};
         // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for
         //     single-TPC viewers like the original Bee).  2 = wire-cell-bee3 v2
         //     wrapper {"version":2,"tpc":<apa>,"polygons":[...]} that places the

@@ -101,6 +101,16 @@ public:
         m_pcarray_name = get<std::string>(config, "pcarray_name", m_pcarray_name);
         m_graph_name = get<std::string>(config, "graph_name", m_graph_name);
         m_require_in_scope = get<bool>(config, "require_in_scope", m_require_in_scope);
+        // Which provenance pair to split on.  Defaults are the flash merge's
+        // (doc 38/45) so existing configs are unchanged; set both to
+        // "assoc_cluster_id"/"assoc_cluster_main" for a second instance that
+        // undoes the isolated GROUPING instead (doc 52 Stage 3).  The two are
+        // meant to run in order -- flash first (outer), isolated second (inner)
+        // -- which reproduces the prototype's main_cluster +
+        // additional_clusters layout that check_stm expects
+        // (wire-cell-prod-stm.cxx:816-828).
+        m_id_aname = get<std::string>(config, "id_aname", m_id_aname);
+        m_main_aname = get<std::string>(config, "main_aname", m_main_aname);
         if (m_mode != "real" && m_mode != "component") {
             raise<ValueError>("ClusteringUnmergeBundle: unknown mode \"%s\" (want \"real\" or \"component\")",
                               m_mode);
@@ -119,6 +129,8 @@ public:
         cfg["pcarray_name"] = m_pcarray_name;
         cfg["graph_name"] = m_graph_name;
         cfg["require_in_scope"] = m_require_in_scope;
+        cfg["id_aname"] = m_id_aname;
+        cfg["main_aname"] = m_main_aname;
         return cfg;
     }
 
@@ -163,6 +175,8 @@ public:
 private:
     std::string m_grouping_name{"live"};
     std::string m_mode{"real"};
+    std::string m_id_aname{"real_cluster_id"};
+    std::string m_main_aname{"real_cluster_main"};
     std::string m_pcarray_name{"perblob"};
     std::string m_graph_name{"relaxed"};
     bool m_require_in_scope{true};
@@ -179,10 +193,10 @@ private:
     /// member.
     Prov groups_from_provenance(const Cluster* cluster, size_t nb,
                                 std::vector<int>& groups) const {
-        if (!cluster->has_pcarray<int>("real_cluster_main", m_pcarray_name)) return Prov::unusable;
-        if (!cluster->has_pcarray<int>("real_cluster_id", m_pcarray_name)) return Prov::unusable;
-        auto rmain = cluster->get_pcarray<int>("real_cluster_main", m_pcarray_name);
-        auto rid = cluster->get_pcarray<int>("real_cluster_id", m_pcarray_name);
+        if (!cluster->has_pcarray<int>(m_main_aname, m_pcarray_name)) return Prov::unusable;
+        if (!cluster->has_pcarray<int>(m_id_aname, m_pcarray_name)) return Prov::unusable;
+        auto rmain = cluster->get_pcarray<int>(m_main_aname, m_pcarray_name);
+        auto rid = cluster->get_pcarray<int>(m_id_aname, m_pcarray_name);
         if (rmain.size() != nb || rid.size() != nb) {
             log->warn("cluster {}: provenance size {}/{} != {} blobs, using the proxy",
                       cluster->ident(), rmain.size(), rid.size(), nb);

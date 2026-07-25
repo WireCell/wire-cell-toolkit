@@ -107,6 +107,44 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
     const bool save_origid = orig_id_aname.size() > 0 && pcname.size() > 0;
     const bool save_origmain = orig_main_aname.size() > 0 && pcname.size() > 0;
 
+    // Provenance pairs CARRIED across this merge (doc 52 Stage 2, defect D4).
+    // A merge can WRITE provenance (orig_id_aname/orig_main_aname) and a split
+    // can CARVE it (clustering_switch_scope), but until now nothing could CARRY
+    // an existing per-blob array THROUGH a merge -- so any provenance array died
+    // at the next of the 12 merge_clusters() call sites.  Handled here, for the
+    // whole codebase at once, rather than per call site: cathode_connect and the
+    // generic all-APA passes merge with no provenance arguments at all, and
+    // future passes would silently reintroduce the same bug.
+    //
+    // Semantics, per doc 52 4b:
+    //  * the MAIN array is concatenated VERBATIM.  A "connection" merge (extend,
+    //    regular, parallel_prolong, close, connect, deghost, live_dead,
+    //    neutrino, cathode_connect) asserts that the charge is one particle; it
+    //    must not rewrite the members' roles.  Promoting every member to main
+    //    was considered and is WRONG: it would sweep up the associated fragments
+    //    already grouped onto either half, and the isolated un-merge could then
+    //    never split them off -- the original bug.  Carrying roles unchanged
+    //    keeps a cathode crosser whole (both halves are mains, retained by
+    //    ClusteringUnmergeBundle's union rule) while its delta rays still leave.
+    //  * the ID array is REBASED per member into a fresh dense range, in
+    //    ascending original-id order.  Ids are only unique within the scope that
+    //    wrote them: the per-APA (SBND) / per-drift-group (PDHD, PDVD) stages
+    //    renumber independently, so member A's group 7 and member B's group 7 are
+    //    different objects and must not be pooled into one split-off cluster.
+    //  * a member with NO array contributes one fresh id and main=1.  An
+    //    ungrouped cluster is a main, not an associated fragment; defaulting it
+    //    the other way would let the un-merge discard the far half of any
+    //    crosser that never went through clustering_isolated.
+    //
+    // Fail open, exactly as clustering_switch_scope's carve() does: any size
+    // disagreement drops the pair for that merged cluster rather than raising.
+    // When no member carries the arrays nothing is written, so a build with the
+    // writer knob off is byte-identical.
+    static const std::vector<std::pair<std::string, std::string>> carry_pairs = {
+        {"assoc_cluster_id", "assoc_cluster_main"},
+    };
+    const bool do_carry = pcname.size() > 0;
+
     for (const auto& [id, descs] : id2desc) {
         if (descs.size() < 2) {
             continue;
@@ -128,6 +166,14 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         // group can merge several bundles -- all mains of their own bundle.
         // The representative is the one main the merged cluster reports.
         std::vector<int> orig_main;
+
+        // Accumulators for the carried provenance pairs (see carry_pairs above).
+        struct CarryAcc {
+            std::vector<int> id, main;
+            int next_id{0};      // next fresh dense id to hand out
+            bool any{false};     // did at least one member actually carry it?
+        };
+        std::vector<CarryAcc> carried(do_carry ? carry_pairs.size() : 0);
 
         // Flash bookkeeping: Cluster::from() copies the first-encountered
         // member's cluster_t0/flash/matched_flash_gid (arbitrary std::set order).
@@ -196,8 +242,52 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
                 }
             }
 
+            // Snapshot the carried arrays while `live` is still alive -- it is
+            // destroyed at the bottom of this loop body.
+            std::vector<std::pair<std::vector<int>, std::vector<int>>> snap(carried.size());
+            for (size_t ip = 0; ip < carried.size(); ++ip) {
+                const auto& [id_aname, main_aname] = carry_pairs[ip];
+                if (!live->has_pcarray<int>(id_aname, pcname)) continue;
+                if (!live->has_pcarray<int>(main_aname, pcname)) continue;
+                auto sid = live->get_pcarray<int>(id_aname, pcname);
+                auto smain = live->get_pcarray<int>(main_aname, pcname);
+                if (sid.size() != smain.size()) continue;
+                if (sid.size() != (size_t) live->nchildren()) continue;
+                snap[ip].first.assign(sid.begin(), sid.end());
+                snap[ip].second.assign(smain.begin(), smain.end());
+            }
+            const size_t nb_before = fresh_cluster.nchildren();
+
             fresh_cluster.from(*live);
             fresh_cluster.take_children(*live, true);
+
+            // Append this member's rows, in the blob order take_children just
+            // produced (the same invariant the cc/orig_id resize() below rely on).
+            const size_t nb_added = (size_t) fresh_cluster.nchildren() - nb_before;
+            for (size_t ip = 0; ip < carried.size(); ++ip) {
+                auto& acc = carried[ip];
+                const auto& sid = snap[ip].first;
+                if (sid.size() == nb_added && nb_added > 0) {
+                    // Rebase into a fresh dense range, ascending by original id
+                    // => deterministic and collision-free across members.
+                    std::map<int, int> remap;
+                    for (int v : sid) remap.emplace(v, 0);
+                    for (auto& [orig, fresh_id] : remap) { (void) orig; fresh_id = acc.next_id++; }
+                    for (size_t k = 0; k < nb_added; ++k) {
+                        acc.id.push_back(remap.at(sid[k]));
+                        acc.main.push_back(snap[ip].second[k]);
+                    }
+                    acc.any = true;
+                }
+                else {
+                    // No usable array on this member: one fresh id, all main.
+                    const int fresh_id = acc.next_id++;
+                    for (size_t k = 0; k < nb_added; ++k) {
+                        acc.id.push_back(fresh_id);
+                        acc.main.push_back(1);
+                    }
+                }
+            }
 
             if (fresh_cluster.ident() < 0) {
                 fresh_cluster.set_ident(live->ident());
@@ -220,6 +310,17 @@ std::vector<Cluster*> WireCell::Clus::Facade::merge_clusters(
         }
         if (save_origid) {
             fresh_cluster.put_pcarray(orig_id, orig_id_aname, pcname);
+        }
+        // Re-attach the carried provenance pairs.  Only when some member really
+        // had them (else this is a no-op and output is unchanged) and only when
+        // the accumulated length matches the merged blob count.
+        for (size_t ip = 0; ip < carried.size(); ++ip) {
+            const auto& acc = carried[ip];
+            if (!acc.any) continue;
+            if (acc.id.size() != (size_t) fresh_cluster.nchildren()) continue;
+            if (acc.main.size() != acc.id.size()) continue;
+            fresh_cluster.put_pcarray(acc.id, carry_pairs[ip].first, pcname);
+            fresh_cluster.put_pcarray(acc.main, carry_pairs[ip].second, pcname);
         }
         if (save_origmain && save_origid) {
             // Representative = the same member whose flash/flags the merged

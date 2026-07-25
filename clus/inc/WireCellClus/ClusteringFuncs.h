@@ -142,6 +142,14 @@ namespace WireCell::Clus::Facade {
     // (read back by TaggerCheckTGM main_component_mode="real").  The
     // "main_cluster" flag cannot serve: a flash group can merge several
     // bundles, each of whose mains carries it.
+    // Independently of all of the above, a fixed registry of provenance PAIRS
+    // (currently just "assoc_cluster_id"/"assoc_cluster_main") is CARRIED across
+    // the merge whenever the members have them: the main array is concatenated
+    // verbatim and the id array is rebased per member into a fresh dense range,
+    // with a member lacking the arrays contributing one fresh id and main=1.
+    // See the long comment at the top of merge_clusters() for why each of those
+    // three choices is what it is; doc 52 4b has the full argument.  Absent
+    // arrays => no-op, so this costs nothing when the writer knob is off.
     std::vector<Cluster*> merge_clusters(cluster_connectivity_graph_t& g, //
                                          Grouping& grouping,
                                          const std::string& aname="",

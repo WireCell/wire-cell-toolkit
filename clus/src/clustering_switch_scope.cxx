@@ -85,14 +85,23 @@ static void clustering_switch_scope(
         // writer's colors and TaggerCheckTGM main_component_mode="real" read.
         // Row-partition them by the same filter that partitions the blobs.
         // Absent arrays (legacy tarballs) => no-op.
-        std::vector<int> src_rcid, src_rcmain;
-        if (cluster->has_pcarray<int>("real_cluster_id", "perblob")) {
-            auto sp = cluster->get_pcarray<int>("real_cluster_id", "perblob");
-            src_rcid.assign(sp.begin(), sp.end());
-        }
-        if (cluster->has_pcarray<int>("real_cluster_main", "perblob")) {
-            auto sp = cluster->get_pcarray<int>("real_cluster_main", "perblob");
-            src_rcmain.assign(sp.begin(), sp.end());
+        //
+        // The list is one place on purpose: doc 52 defect D3 was exactly this
+        // list being hardcoded to two names, so the isolated grouping's own
+        // provenance ("assoc_cluster_*", doc 52 Stage 1) silently failed to
+        // survive the rebuild.  Any future per-blob provenance array goes here
+        // and nowhere else.  Absent arrays => no-op, hence byte-identical when
+        // the writer knob is off.
+        static const char* const carry_anames[] = {
+            "real_cluster_id", "real_cluster_main",      // flash merge (doc 38)
+            "assoc_cluster_id", "assoc_cluster_main",    // isolated grouping (doc 52)
+        };
+        constexpr size_t n_carry = sizeof(carry_anames) / sizeof(carry_anames[0]);
+        std::vector<std::vector<int>> src_carry(n_carry);
+        for (size_t ic = 0; ic < n_carry; ++ic) {
+            if (!cluster->has_pcarray<int>(carry_anames[ic], "perblob")) continue;
+            auto sp = cluster->get_pcarray<int>(carry_anames[ic], "perblob");
+            src_carry[ic].assign(sp.begin(), sp.end());
         }
 
         // Retrieve the correction scope registered by add_corrected_points().
@@ -129,8 +138,9 @@ static void clustering_switch_scope(
                 if (sub.size() != (size_t)part->nchildren()) return;
                 part->put_pcarray(sub, aname, "perblob");
             };
-            carve(src_rcid, "real_cluster_id");
-            carve(src_rcmain, "real_cluster_main");
+            for (size_t ic = 0; ic < n_carry; ++ic) {
+                carve(src_carry[ic], carry_anames[ic]);
+            }
         }
     }
 }

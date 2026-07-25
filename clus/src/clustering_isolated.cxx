@@ -23,7 +23,8 @@ static void clustering_isolated(
     bool use_flash_t0 = false,
     double flash_t0_window = 80*units::ns,
     double length_cut = 20*units::cm,
-    int range_cut = 150
+    int range_cut = 150,
+    bool save_assoc_id = false
     );
 
 class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -41,12 +42,28 @@ public:
         // hardcoded values, so configs that omit these keys are unchanged.
         length_cut_ = get(config, "length_cut", 20*units::cm);
         range_cut_ = get(config, "range_cut", 150);
+        // Stage 1 of doc 52: also record the main + associated partition this
+        // pass creates into the DEDICATED, never-recycled per-blob pair
+        // "assoc_cluster_id" / "assoc_cluster_main" ("perblob"), so
+        // ClusteringUnmergeBundle can undo the grouping downstream and the STM
+        // / PR taggers see the main alone, as the prototype does
+        // (wire-cell-prod-stm.cxx:816-828 fits main_cluster only).
+        //
+        // The existing ("isolated","perblob") array cannot serve: it is the
+        // rolling connectivity partition that clustering_examine_bundles
+        // rewrites one pass later (defect D2) and that QLMatching's
+        // decompose_cluster_groups owns.  New names, so neither is disturbed.
+        //
+        // Default false => merge_clusters() is called exactly as before and no
+        // array is added, so the compiled config, the Bee dumps and the pctree
+        // tarball are all byte-identical.
+        save_assoc_id_ = get(config, "save_assoc_id", false);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_,
-                                   length_cut_, range_cut_);
+                                   length_cut_, range_cut_, save_assoc_id_);
     }
 
 private:
@@ -54,6 +71,7 @@ private:
     double flash_t0_window_{80*units::ns};
     double length_cut_{20*units::cm};
     int range_cut_{150};
+    bool save_assoc_id_{false};
 };
 
 
@@ -80,7 +98,8 @@ static void clustering_isolated(
     bool use_flash_t0,
     double flash_t0_window,
     double length_cut,
-    int range_cut
+    int range_cut,
+    bool save_assoc_id
 )
 {
     // Get all the wire plane IDs from the grouping
@@ -504,7 +523,25 @@ static void clustering_isolated(
                 add_edge(map_cluster_index[live], map_cluster_index[live2], g);
             }
         }
-        merge_clusters(g, live_grouping, "isolated");
+        if (save_assoc_id) {
+            // Doc 52 Stage 1.  merge_clusters() already implements exactly the
+            // semantics the prototype uses: "assoc_cluster_id" gets each blob's
+            // pre-merge cluster ident, and "assoc_cluster_main" marks the
+            // REPRESENTATIVE member's blobs (1) versus the rest (0).  Here the
+            // representative is the longest member -- no member carries a flash
+            // at this stage, so merge_clusters falls to best_any_ident
+            // (ClusteringFuncs.cxx:184-189) -- which is the same cluster this
+            // function itself picked as max_cluster above (:454-462), i.e. the
+            // prototype's max_cluster (ToyClustering_isolated.h:296-302).
+            // flags_from_longest stays FALSE: this pass must not change which
+            // member's flags the merged cluster reports.
+            merge_clusters(g, live_grouping, "isolated", "perblob",
+                           "assoc_cluster_id", /*flags_from_longest=*/false,
+                           "assoc_cluster_main");
+        }
+        else {
+            merge_clusters(g, live_grouping, "isolated");
+        }
     }
 
     // example separation ... 

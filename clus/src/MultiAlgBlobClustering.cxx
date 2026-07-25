@@ -195,6 +195,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
 
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
     m_save_real_cluster_id = get(cfg, "save_real_cluster_id", m_save_real_cluster_id);
+    m_save_assoc_cluster_id = get(cfg, "save_assoc_cluster_id", m_save_assoc_cluster_id);
     m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
 
     m_save_opflash = get(cfg, "save_opflash", m_save_opflash);
@@ -392,6 +393,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["bee_zip"] = "mabc.zip";
     cfg["save_deadarea"] = m_save_deadarea;
     cfg["save_real_cluster_id"] = m_save_real_cluster_id;
+    cfg["save_assoc_cluster_id"] = m_save_assoc_cluster_id;
 
     // Add the new parameter to default configuration
     cfg["initial_index"] = m_initial_index;
@@ -2381,6 +2383,27 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                 if (!cluster->has_pcarray<int>("real_cluster_main", "perblob")) {
                     cluster->put_pcarray(std::vector<int>(nb, 1),
                                          "real_cluster_main", "perblob");
+                }
+            }
+        }
+        // Same homogenization for the isolated grouping's pair (doc 52).  Kept
+        // as its own knob and its own loop so either provenance can be saved
+        // without the other, and so a build with only one knob on stays
+        // byte-identical for the other array.
+        if (m_save_assoc_cluster_id) {
+            for (Cluster* cluster : grouping.children()) {
+                if (!cluster->has_pcarray<int>("isolated", "perblob")) continue;
+                const size_t nb = cluster->nchildren();
+                if (!cluster->has_pcarray<int>("assoc_cluster_id", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, cluster->ident()),
+                                         "assoc_cluster_id", "perblob");
+                }
+                // A cluster the isolated grouping never merged is a main, not an
+                // associated fragment: all 1.  This is the "absent provenance =>
+                // main" sentinel the un-merge needs to keep crossers whole.
+                if (!cluster->has_pcarray<int>("assoc_cluster_main", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, 1),
+                                         "assoc_cluster_main", "perblob");
                 }
             }
         }

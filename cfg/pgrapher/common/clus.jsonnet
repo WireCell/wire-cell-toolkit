@@ -105,7 +105,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // MUST be placed BEFORE the steiner stage: separate() does not carry
         // node-local point clouds, and the retained main would otherwise keep
         // a steiner_pc built from the pre-split blob set.
-        unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true) :: {
+        // id_aname / main_aname (C++ defaults "real_cluster_id" /
+        // "real_cluster_main"; keys omitted when null => byte-identical pre-knob
+        // config): which per-blob provenance pair to split on.  Pass
+        // "assoc_cluster_id" / "assoc_cluster_main" for a SECOND instance that
+        // undoes the isolated GROUPING (doc 52 Stage 3) rather than the flash
+        // merge.  Run the flash one first (outer) and the isolated one second
+        // (inner): that order reproduces the prototype's main_cluster +
+        // additional_clusters layout, and both must precede the steiner stage.
+        unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true,
+                       id_aname=null, main_aname=null) :: {
             type: "ClusteringUnmergeBundle",
             name: prefix + name,
             data: dv_cfg + pcts_cfg + {
@@ -114,6 +123,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 pcarray_name: "perblob",
                 graph_name: graph_name,
                 require_in_scope: require_in_scope,
+                [if id_aname != null then 'id_aname']: id_aname,
+                [if main_aname != null then 'main_aname']: main_aname,
             },
             uses: [detector_volumes, pc_transforms],
         },
@@ -705,7 +716,18 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // thresholds. When null the key is omitted and ClusteringIsolated falls
         // back to its built-in defaults (20 cm / 150), so existing configs stay
         // byte-identical. Set to opt into a tighter/looser threshold.
-        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null) :: {
+        // save_assoc_id (C++ default false; key omitted when off => byte-identical
+        // pre-knob config): also record this pass's main + associated partition
+        // into the dedicated per-blob pair "assoc_cluster_id" /
+        // "assoc_cluster_main" ("perblob").  merge_clusters carries that pair
+        // across every later merge and clustering_switch_scope carves it through
+        // the scope rebuild, so ClusteringUnmergeBundle(id_aname=..., main_aname=...)
+        // can undo the grouping before the taggers run -- the prototype's
+        // main_cluster + additional_clusters layout.  Needs
+        // MultiAlgBlobClustering save_assoc_cluster_id=true to survive the pctree
+        // tarball.  Doc 52.
+        isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null,
+                 save_assoc_id=false) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
             data: {
@@ -713,6 +735,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 flash_t0_window: flash_t0_window,
                 [if length_cut != null then 'length_cut']: length_cut,
                 [if range_cut != null then 'range_cut']: range_cut,
+                [if save_assoc_id then 'save_assoc_id']: true,
             } + dv_cfg + scope_cfg,
         },
 

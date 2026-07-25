@@ -172,7 +172,7 @@ local bs_dead_face(apa, face) = {
 // standalone chain (pointed .. connect1).  The original cfg func_cfgs tail
 // (deghost -> examine_x_boundary -> isolated) is retained below as commented
 // lines so it can be re-enabled without re-deriving it.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -233,7 +233,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // "small" and absorbed into a nearby long cosmic track by the
         // angle-less 80 cm small->big merge.  See sbnd_xin/docs/
         // overclustering-evt11-gamma.md.  range_cut left at its 150 default.
-        cm.isolated(length_cut=15 * wc.cm),
+        // save_assoc_id: record the main + associated partition this pass creates
+        // into "assoc_cluster_id"/"assoc_cluster_main" so it can be undone before
+        // the taggers (doc 52).  C++ default false; key omitted when off =>
+        // byte-identical compiled config.
+        cm.isolated(length_cut=15 * wc.cm, save_assoc_id=save_assoc_id),
         cm.examine_bundles(),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
@@ -307,7 +311,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // 'clustering_') to that file -- the persistent intermediate format consumed by
 // the downstream pattern-recognition job (see sbnd/docs/sbnd-pattern-recognition.md).
 // Default '' keeps the historical dump_mode no-op sink (byte-identical).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -391,6 +395,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // the serializer silently drops heterogeneous keys.  C++ default
             // false.  Key omitted when off => byte-identical pre-fix tarball.
             [if save_real_cluster_id then 'save_real_cluster_id']: true,
+            // Same homogenization for the isolated grouping's provenance pair, so
+            // assoc_cluster_id/assoc_cluster_main survive into the PR job's
+            // pctree tarball.  C++ default false; key omitted when off.
+            [if save_assoc_cluster_id then 'save_assoc_cluster_id']: true,
             // Dump the optical flash / charge-light "op" display into this same
             // mabc-all-apa.zip (reads the merged-root "opflash" PC + per-cluster
             // matched-flash association written by QLMatching). bee_detector
@@ -572,6 +580,28 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // Not in pipeline_names => absent from the compiled config => no
         // behavior change.  Runner flag: -unmerge / -unmerge-comp.
         unmerge_bundle: cm.unmerge_bundle(mode=unmerge_bundle_mode),
+        // Second, INNER un-merge: undo the per-APA isolated GROUPING
+        // (clustering_isolated save_assoc_id), which merges a main cluster with
+        // the small clusters that are near it but NOT connected to it.  The
+        // prototype only groups these (Clustering_isolated returns
+        // main -> [(assoc, dis)] and leaves live_clusters untouched); the toolkit
+        // physically merges them, so the STM/PR endpoint finder walks into a
+        // detached clump across empty space (docs 50, 51).
+        //
+        // Order matters: this runs AFTER unmerge_bundle so the flash grouping is
+        // undone first (outer) and the isolated grouping second (inner) --
+        // together they reproduce the prototype's main_cluster +
+        // additional_clusters exactly.  Both must precede steiner.
+        //
+        // A cathode crosser survives both: its two halves are each the MAIN of
+        // their own per-APA isolated group (cm.isolated() is per-APA only), and
+        // the visitor retains the union of every main-marked member, splitting
+        // off only assoc_cluster_main == 0.  Doc 52 4a/4b.
+        //
+        // Not in pipeline_names => absent from the compiled config.
+        unmerge_assoc: cm.unmerge_bundle(name='assoc', mode=unmerge_bundle_mode,
+                                         id_aname='assoc_cluster_id',
+                                         main_aname='assoc_cluster_main'),
         // SBND has no beam_flash flag (QLMatching sets main/associated_cluster
         // instead) -- process every scope-passing cluster.
         steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false),
@@ -866,22 +896,23 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
-                      trace_bee=trace_bee),
+                      trace_bee=trace_bee, save_assoc_id=save_assoc_id),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
-    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false,
+    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
             trace_bee=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
+                     save_assoc_cluster_id=save_assoc_cluster_id,
                      trace_bee=trace_bee),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
