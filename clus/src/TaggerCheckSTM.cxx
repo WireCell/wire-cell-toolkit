@@ -73,6 +73,14 @@ public:
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: save_stm_fit ON");
         }
 
+        // mip_dqdx (electrons per cm; C++ default 50e3 = the MicroBooNE value,
+        // so an absent key is byte-identical to the pre-knob code).  See the
+        // m_mip_dqdx declaration for the two roles this one number drives.
+        m_mip_dqdx = get<double>(config, "mip_dqdx", m_mip_dqdx);
+        if (m_mip_dqdx != 50e3) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: mip_dqdx = {} e/cm (default 50000)", m_mip_dqdx);
+        }
+
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
 
         if (!m_trackfitting_config_file.empty()) {
@@ -98,6 +106,7 @@ public:
         cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
         cfg["save_stm_fit"] = m_save_stm_fit;
+        cfg["mip_dqdx"] = m_mip_dqdx;
 
         return cfg;
     }
@@ -270,6 +279,24 @@ private:
     // -1/-1 means disabled (default, detector-agnostic).
     int m_shorted_y_w_min{-1};
     int m_shorted_y_w_max{-1};
+
+    // MIP dQ/dx scale, in electrons per cm (NOT per internal length unit --
+    // every use site divides a dQ/dx that has already been multiplied by
+    // units::cm, or builds a reference vector compared against such values).
+    // Note this differs from PRSegmentFunctions.h, whose MIP_dQdx default
+    // arguments are written 50000/units::cm.
+    //
+    // Two distinct roles, both driven by this one number:
+    //   1. the flat "MIP-like, not stopping" REFERENCE curves that the fitted
+    //      dQ/dx is KS-compared against (detect_proton's const_ref and
+    //      eval_stm_core's ref_flat);
+    //   2. the DIVISOR that normalizes measured dQ/dx into MIP units for ~33
+    //      hard-coded cut thresholds (e.g. ave_res_dQ_dx/mip > 0.9).
+    // Raising it therefore both rescales the reference and tightens every one
+    // of those cuts on unchanged measured charge.  Default 50e3 is the
+    // MicroBooNE value the thresholds were tuned against, so leaving the knob
+    // unset is byte-identical to the pre-knob code.
+    double m_mip_dqdx{50e3};
     mutable TrackFitting m_track_fitter;
 
     // === save_stm_fit knob state (inert when off => byte-identical legacy) ===
@@ -1022,8 +1049,8 @@ private:
                         }
                     }
                     
-                    sum_fQ /= (sum_fx / units::cm + 1e-9) * 50e3;
-                    sum_bQ /= (sum_bx / units::cm + 1e-9) * 50e3;
+                    sum_fQ /= (sum_fx / units::cm + 1e-9) * m_mip_dqdx;
+                    sum_bQ /= (sum_bx / units::cm + 1e-9) * m_mip_dqdx;
                     
                     // Final selection criteria
                     if ((sum_fQ > 0.6 && sum_bQ > 0.6) || 
@@ -1031,7 +1058,7 @@ private:
                         v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
                         
                         if (i + 2 < dq_size) {
-                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3, pu.at(i), pv.at(i), pw.at(i));
+                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx, pu.at(i), pv.at(i), pw.at(i));
                             return max_numbers.at(i);
                         }
                     }
@@ -1123,14 +1150,14 @@ private:
                             sum_bx += dx.at(i+k+1);
                         }
                     }
-                    sum_fQ /= (sum_fx/units::cm+1e-9)*50e3;
-                    sum_bQ /= (sum_bx/units::cm+1e-9)*50e3;
+                    sum_fQ /= (sum_fx/units::cm+1e-9)*m_mip_dqdx;
+                    sum_bQ /= (sum_bx/units::cm+1e-9)*m_mip_dqdx;
                     //std::cout << sum_fQ << " " << sum_bQ << std::endl;
                     if (std::abs(sum_fQ-sum_bQ) < 0.07*(sum_fQ+sum_bQ) && (flag_bad_u||flag_bad_v||flag_bad_w)) continue;
                     
                     if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
                         if (i+2<dq_size){
-                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/50e3);
+                            SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx);
                             return max_numbers.at(i);
                         }
                     }
@@ -1204,7 +1231,7 @@ private:
 
             // Protection against Michel electron
             double seg_length = segment_track_length(fitted_segments[i], 1);
-            double seg_dQ_dx = segment_median_dQ_dx(fitted_segments[i]) * units::cm / 50000;
+            double seg_dQ_dx = segment_median_dQ_dx(fitted_segments[i]) * units::cm / m_mip_dqdx;
             
 
             // std::cout << i << " " << dis/units::cm << " " << seg_length/units::cm << " " << seg_dQ_dx << std::endl;
@@ -1351,7 +1378,7 @@ private:
             const size_t count = static_cast<size_t>(ncount);
             const size_t count_p = static_cast<size_t>(ncount_p);
             std::vector<double> muon_ref(count);
-            std::vector<double> const_ref(count, 50e3);
+            std::vector<double> const_ref(count, m_mip_dqdx);
             std::vector<double> muon_ref_p(count_p);
 
             for (size_t i = 0; i < count; i++) {
@@ -1372,26 +1399,26 @@ private:
             double ratio3 = std::accumulate(vec_yp.begin(), vec_yp.end(), 0.0) / 
                         (std::accumulate(muon_ref_p.begin(), muon_ref_p.end(), 0.0) + 1e-9);
 
-            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/50e3, dQ_dx.size() - max_bin);
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/m_mip_dqdx, dQ_dx.size() - max_bin);
 
-            if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/50e3 > 2.3 &&
+            if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/m_mip_dqdx > 2.3 &&
                 (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {
-                if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/50e3 > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1)
+                if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/m_mip_dqdx > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1)
                 return true;
-                if (dQ_dx.size()-max_bin <= 1 && ((dQ_dx[max_bin]/50e3 < 3.0 && ((ks1 < 0.06 && ks2 > 0.03) || (ks1 < 0.065 && ks2 > 0.04))) || (ks1 < 0.035 && dQ_dx[max_bin]/50e3 < 4.0)))
+                if (dQ_dx.size()-max_bin <= 1 && ((dQ_dx[max_bin]/m_mip_dqdx < 3.0 && ((ks1 < 0.06 && ks2 > 0.03) || (ks1 < 0.065 && ks2 > 0.04))) || (ks1 < 0.035 && dQ_dx[max_bin]/m_mip_dqdx < 4.0)))
                 return false;
                 if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.027)
                 return true;
             }
 
             // Check for proton with very high dQ_dx
-            double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / 50000.;
-            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/50e3, ks3, ratio3);
+            double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / m_mip_dqdx;
+            SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/m_mip_dqdx, ks3, ratio3);
                     
-            if (track_medium_dQ_dx < 1.0 && dQ_dx.at(max_bin)/50e3 > 3.5){
+            if (track_medium_dQ_dx < 1.0 && dQ_dx.at(max_bin)/m_mip_dqdx > 3.5){
                 if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) return true;
-                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx.at(max_bin)/50e3 > 4.3 && ks3 > 0.03)) return true;
-            }else if (track_medium_dQ_dx < 1 && dQ_dx.at(max_bin)/50e3 > 3.0){
+                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx.at(max_bin)/m_mip_dqdx > 4.3 && ks3 > 0.03)) return true;
+            }else if (track_medium_dQ_dx < 1 && dQ_dx.at(max_bin)/m_mip_dqdx > 3.0){
                 if (ks3 > 0.12 && ks1 > 0.03) return true;
             }
         }
@@ -1544,7 +1571,7 @@ private:
         for (size_t i = 0; i < count; i++) {
             test_data[i] = vec_y[i];
             ref_muon[i] = particle_data()->get_dEdx_function("muon")->scalar_function((vec_x[i] + offset_length) / units::cm);
-            ref_flat[i] = 50e3;
+            ref_flat[i] = m_mip_dqdx;
         }
 
         double ks1 = WireCell::kslike_compare(test_data, ref_muon);
@@ -1554,7 +1581,7 @@ private:
         double ratio2 = std::accumulate(ref_flat.begin(), ref_flat.end(), 0.0) / 
                         (std::accumulate(test_data.begin(), test_data.end(), 0.0) + 1e-9);
 
-        SPDLOG_LOGGER_TRACE(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/50000.);
+        SPDLOG_LOGGER_TRACE(s_log, "eval_stm: KS value: {} {} {} {} {} {} {} {} {}", flag_strong_check, ks1, ks2, ratio1, ratio2, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, res_dis1/(res_length1+1e-9), res_length/units::cm, ave_res_dQ_dx/m_mip_dqdx);
 
         if (m_save_stm_fit) {
             StmEvalRecord er;
@@ -1570,12 +1597,12 @@ private:
         if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) return false;
 
-        if (((res_length > 8*units::cm && ave_res_dQ_dx/50000. > 0.9 && res_length1 > 5*units::cm) ||
-            (res_length1 > 1.5*units::cm && ave_res_dQ_dx/50000. > 2.3)) && res_dis1/(res_length1+1e-9) > 0.99)
+        if (((res_length > 8*units::cm && ave_res_dQ_dx/m_mip_dqdx > 0.9 && res_length1 > 5*units::cm) ||
+            (res_length1 > 1.5*units::cm && ave_res_dQ_dx/m_mip_dqdx > 2.3)) && res_dis1/(res_length1+1e-9) > 0.99)
             return false;
 
         // If residual does not look like a michel electron
-        if ((res_length > 20 * units::cm && ave_res_dQ_dx/50000. > 1.2 && 
+        if ((res_length > 20 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.2 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) ||
             (res_length > 16 * units::cm && ave_res_dQ_dx > 72500) || 
             (res_length > 10 * units::cm && ave_res_dQ_dx > 72500 && 
@@ -1584,9 +1611,9 @@ private:
             (res_length > 6 * units::cm && ave_res_dQ_dx > 92500) ||
             (res_length > 6 * units::cm && ave_res_dQ_dx > 72500 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
-            (res_length > 4 * units::cm && ave_res_dQ_dx/50000. > 1.4 && 
+            (res_length > 4 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.4 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > 0.02) ||
-            (res_length > 2*units::cm && ave_res_dQ_dx/50000. > 4.5))
+            (res_length > 2*units::cm && ave_res_dQ_dx/m_mip_dqdx > 4.5))
             return false;
 
         if (!flag_strong_check) {
@@ -2017,7 +2044,7 @@ private:
             auto segment = fitted_segments[i];
             // Use helper functions from PRSegmentFunctions.h
             double track_length1 = segment_track_length(segment, 1) / units::cm;
-            double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / 50000.;
+            double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / m_mip_dqdx;
             double track_length_threshold = segment_track_length_threshold(segment, 75000./units::cm) / units::cm;
             
             
@@ -2253,8 +2280,8 @@ private:
 
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Left: {} {} {} {}",
                 exit_L/units::cm, left_L/units::cm,
-                (left_Q/(left_L/units::cm+1e-9))/50e3,
-                (exit_Q/(exit_L/units::cm+1e-9))/50e3);
+                (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx,
+                (exit_Q/(exit_L/units::cm+1e-9))/m_mip_dqdx);
 
             // TGM check
             if (!fiducial_utils->inside_fiducial_volume(pts.front()) &&
@@ -2301,16 +2328,16 @@ private:
             }
 
             // STM evaluation
-            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0)) {
+            if (left_L > 40*units::cm || (left_L > 7.5*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx > 2.0)) {
                 if (m_save_stm_fit) set_pass_status(2);
                 if (!is_forward) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid {} {} {}",
-                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
+                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx);
                     return false;
                 }
                 if (!flag_double_end) {
                     SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Mid Point A  Fid  {} {} {}",
-                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/50e3);
+                        mid_point, left_L, (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx);
                     return false;
                 }
                 // is_forward && flag_double_end: no decision — let backward pass run.
@@ -2318,13 +2345,13 @@ private:
             }
 
             bool flag_fix_end = (exit_L < 35*units::cm ||
-                                  ((left_Q/(left_L/units::cm+1e-9))/50e3 > 2.0 && left_L > 2*units::cm));
+                                  ((left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx > 2.0 && left_L > 2*units::cm));
 
             // Short-track reset; forward pass has an extra 5cm condition (prototype-faithful).
-            bool short_track = (left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.5) ||
-                               (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.7) ||
-                               (is_forward && left_L < 5*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.8) ||
-                               (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9))/50e3 < 1.9);
+            bool short_track = (left_L < 8*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.5) ||
+                               (left_L < 6*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.7) ||
+                               (is_forward && left_L < 5*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.8) ||
+                               (left_L < 3*units::cm && (left_Q/(left_L/units::cm+1e-9))/m_mip_dqdx < 1.9);
             if (short_track) {
                 left_L = 0;
                 kink_num = static_cast<int>(dQ.size());

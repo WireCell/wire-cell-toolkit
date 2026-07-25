@@ -449,7 +449,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_main_pair=false, tgm_main_pair_mode='path',
               tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
               tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
-              save_stm_fit=false, unmerge_bundle_mode='real') = {
+              save_stm_fit=false, unmerge_bundle_mode='real',
+              // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
+              // TaggerCheckSTM (C++ default 50000 = MicroBooNE).  56000 is the
+              // SBND value derived in sbnd_xin/docs/48; pass 50000 to isolate
+              // the reference-table change from the MIP-scale change in an A/B.
+              mip_dqdx=56000) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -544,7 +549,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // byte-identical): persist per-pass STM fits as cluster PCs +
             // grouping slot "stm" for the Bee stm_fit layer and the
             // stm_magnify ROOT dump below.  Runner flag: -stm-fit.
-            save_stm_fit=save_stm_fit),
+            save_stm_fit=save_stm_fit,
+            // mip_dqdx: SBND MIP dQ/dx scale in e/cm, replacing the inherited
+            // MicroBooNE 50000.  Anchored to the muon reference table the same
+            // way 50000 was anchored to MicroBooNE's: the uBooNE table plateau
+            // (rr = 59.5 cm) is 48879.4 e/cm and 50000/48879.4 = 1.02293; the
+            // SBND table regenerated at 0.5 kV/cm plateaus at 54657.7 e/cm and
+            // 56000/54657.7 = 1.02456, so the same 2.3-2.5% headroom is kept
+            // and 56000 is as round a number as 50000 was.
+            // NOT byte-identical -- see sbnd_xin/docs/48.
+            mip_dqdx=mip_dqdx),
         // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
         // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
         // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
@@ -815,7 +829,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
-       save_stm_fit=false, unmerge_bundle_mode='real')::
+       save_stm_fit=false, unmerge_bundle_mode='real',
+       mip_dqdx=56000)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -836,6 +851,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_x_margin=tgm_fv_x_margin,
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
-                unmerge_bundle_mode=unmerge_bundle_mode),
+                unmerge_bundle_mode=unmerge_bundle_mode,
+                mip_dqdx=mip_dqdx),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

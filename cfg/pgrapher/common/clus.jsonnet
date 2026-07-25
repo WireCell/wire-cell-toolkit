@@ -130,8 +130,19 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // persist the per-pass STM track fits as cluster PCs
         // (stm_fit/stm_pass/stm_eval) and a grouping-level "stm" TrackFitting
         // for downstream writers (Bee stm_fit layer, SbndMagnifyTrackingVisitor).
+        // mip_dqdx (C++ default 50e3 = the MicroBooNE value; null here => key
+        // omitted => byte-identical pre-knob config): the MIP dQ/dx scale in
+        // ELECTRONS PER CM (not per internal length unit -- unlike the
+        // MIP_dQdx default arguments in PRSegmentFunctions.h, which are
+        // written 50000/units::cm).  One number, two roles inside
+        // TaggerCheckSTM: it sets the flat "MIP-like, not stopping" reference
+        // curves the fitted dQ/dx is KS-compared against, AND it is the
+        // divisor that normalizes measured dQ/dx for ~33 hard-coded cut
+        // thresholds.  Raising it rescales the reference and tightens all of
+        // those cuts on unchanged measured charge, so it is a behavior change,
+        // not a recalibration of the reference alone.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
-                         require_in_scope=false, save_stm_fit=false) :: {
+                         require_in_scope=false, save_stm_fit=false, mip_dqdx=null) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -142,6 +153,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
               + (if require_in_scope then { require_in_scope: true } else {})
               + (if save_stm_fit then { save_stm_fit: true } else {})
+              + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
