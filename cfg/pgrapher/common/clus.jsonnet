@@ -113,17 +113,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // merge.  Run the flash one first (outer) and the isolated one second
         // (inner): that order reproduces the prototype's main_cluster +
         // additional_clusters layout, and both must precede the steiner stage.
-        // min_gap (C++ default 0 = off; key omitted when null => byte-identical):
-        // fold a companion group back into the retained main when its closest
-        // approach to that main is <= min_gap.  clustering_isolated merges
-        // "small" into the nearest big within 80 cm with NO gap test, so its
-        // "associated" label mixes same-particle fragments a few mm out (split by
-        // SP / dead-channel inefficiency) with the genuinely detached clumps
-        // 18-22 cm out.  Splitting the former strips real track charge and broke
-        // TGM's chord-support walk on 14 through-going muons (doc 52 section 10).
-        // Only meaningful together with id_aname/main_aname = the assoc pair.
         unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true,
-                       id_aname=null, main_aname=null, min_gap=null) :: {
+                       id_aname=null, main_aname=null) :: {
             type: "ClusteringUnmergeBundle",
             name: prefix + name,
             data: dv_cfg + pcts_cfg + {
@@ -134,7 +125,6 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 require_in_scope: require_in_scope,
                 [if id_aname != null then 'id_aname']: id_aname,
                 [if main_aname != null then 'main_aname']: main_aname,
-                [if min_gap != null then 'min_gap']: min_gap,
             },
             uses: [detector_volumes, pc_transforms],
         },

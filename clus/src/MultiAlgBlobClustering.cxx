@@ -2156,6 +2156,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
     grouping->enumerate_idents();
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
+    check_perblob_provenance(*grouping->node(), "load:" + path);
     return *grouping;
 }
 
@@ -2266,6 +2267,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
 
         for (auto* grouping : ensemble.children()) {
             grouping->enumerate_idents(m_clusters_id_order);
+        }
+        {
+            auto gs = ensemble.with_name("live");
+            if (gs.size()) check_perblob_provenance(*gs[0]->node(), "post:" + cmeth.name);
         }
 
         // Dump bee points right after specific visitor runs
@@ -2426,7 +2431,14 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             }
         }
         auto node = ensemble.remove_child(grouping);
+        check_perblob_provenance(*node, "save:" + outpath(name, ident));
         auto tens = as_tensors(*node, outpath(name, ident));
+        // Serialize -> deserialize self-test: if "save" is clean but "rtrip"
+        // is not, the corruption is inside the TensorDM round trip itself.
+        if (std::getenv("WCT_PROV_CHECK")) {
+            auto rt = Aux::TensorDM::as_pctree(tens, outpath(name, ident));
+            if (rt) check_perblob_provenance(*rt, "rtrip:" + outpath(name, ident));
+        }
         outtens.insert(outtens.end(), tens.begin(), tens.end());
         SPDLOG_LOGGER_DEBUG(log, "Produce {} tensors for grouping {}", tens.size(), name);
     }

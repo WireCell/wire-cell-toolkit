@@ -957,6 +957,12 @@ namespace WireCell::Match {
 
         std::string m_inpath{"pointtrees/%d"};
         std::string m_outpath{"pointtrees/%d"};
+        // Realign each recomposed main's node-local "perblob" dataset rows to
+        // the post-merge blob child order (doc 52 §11).  Default false =>
+        // recompose leaves the arrays in their pre-decompose row order, which
+        // no longer matches the permuted children -- the historical behavior,
+        // preserved bit-for-bit for the legacy path.
+        bool m_realign_perblob{false};
         float m_cluster_t0{-1e12};
 
         // Hand-scan calibration dump. When non-empty, after all per-APA runs
@@ -1248,6 +1254,11 @@ namespace WireCell::Match {
             // cluster-group decomposition
             std::vector<std::pair<WireCell::Clus::Facade::Cluster*,
                                   std::vector<WireCell::Clus::Facade::Cluster*>>> match_groups;
+            // The "isolated" cc array each split main was separated on, saved
+            // at decompose so recompose can realign the main's "perblob"
+            // dataset rows to the permuted child order (m_realign_perblob,
+            // doc 52 §11).  Filled only when that knob is on.
+            std::map<WireCell::Clus::Facade::Cluster*, std::vector<int>> decompose_cc;
             std::vector<WireCell::Clus::Facade::Cluster*> clusters;
             std::map<Opflash*, int> global_flash_idx_map;
             std::map<WireCell::Clus::Facade::Cluster*, int> global_cluster_idx_map;

@@ -1,4 +1,5 @@
 #include "WireCellClus/PointTreeMerging.h"
+#include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/ExecMon.h"
@@ -237,9 +238,14 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
         SPDLOG_LOGGER_DEBUG(log, "input[{}] ident={} path='{}' live children={}",
                             i, invec[i]->ident(), inpath_for(invec[i]),
                             src_live ? src_live->nchildren() : 0);
+        if (src_live) {
+            Clus::Facade::check_perblob_provenance(
+                *src_live, "ptm:in" + std::to_string(i));
+        }
         merge_pct(root_live.get(), src_live.get(), m_root_pcs_to_merge);
         merge_pct(root_dead.get(), src_dead.get(), m_root_pcs_to_merge);
     }
+    Clus::Facade::check_perblob_provenance(*root_live, "ptm:in0+merged");
 
 
     SPDLOG_LOGGER_DEBUG(log, "merged live PC tree with {} children", root_live->nchildren());
@@ -248,6 +254,7 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
     const auto ndead_added = normalize_pctree_local_pcs(root_dead.get());
     SPDLOG_LOGGER_DEBUG(log, "normalized merged PC trees with {} live and {} dead arrays added",
                         nlive_added, ndead_added);
+    Clus::Facade::check_perblob_provenance(*root_live, "ptm:normalized");
 
     // output
     std::string outpath = m_outpath;
@@ -255,6 +262,11 @@ bool Clus::PointTreeMerging::operator()(const input_vector& invec, output_pointe
         outpath = String::format(outpath, ident);
     }
     auto outtens = as_tensors(*root_live.get(), outpath + "/live");
+    // Serialize -> deserialize self-test (see prov_check.cxx).
+    if (std::getenv("WCT_PROV_CHECK")) {
+        auto rt = as_pctree(outtens, outpath + "/live");
+        if (rt) Clus::Facade::check_perblob_provenance(*rt, "ptm:rtrip");
+    }
     auto outtens_dead = as_tensors(*root_dead.get(), outpath + "/dead");
     outtens.insert(outtens.end(), outtens_dead.begin(), outtens_dead.end());
     for(const auto& ten : outtens) {

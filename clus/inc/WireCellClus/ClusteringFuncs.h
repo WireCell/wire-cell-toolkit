@@ -168,6 +168,18 @@ namespace WireCell::Clus::Facade {
     std::map<const Cluster*, int> assign_flash_t0_groups(
         const std::vector<Cluster*>& clusters, double window);
 
+    // Diagnostic-only (env WCT_PROV_CHECK=1, else a fast no-op returning 0):
+    // validate the per-blob provenance arrays of every cluster child of the
+    // given grouping NODE -- per-key row counts vs blob count, and spatial
+    // compactness of each assoc_cluster_main==0 group -- logging any violation
+    // under logger "clus.provchk" tagged with `tag`.  Returns the number of
+    // problems found.  Takes the raw node (not the facade) so it can run
+    // where facades are not set up (PointTreeMerging, serialization
+    // round-trips).  See clus/src/prov_check.cxx and doc 52 §11.
+    size_t check_perblob_provenance(
+        const WireCell::PointCloud::Tree::Points::node_t& groot,
+        const std::string& tag);
+
 
 
     /**
