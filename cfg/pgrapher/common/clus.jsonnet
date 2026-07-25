@@ -85,6 +85,37 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
+        // Restore the prototype "main cluster + associated clusters" data
+        // product on a post-Q/L tree: split every flag_main_cluster cluster
+        // that the flash-time merge (examine_bundles use_flash_t0) built back
+        // into its pre-merge main (retained, keeps the flags and the cluster
+        // scalars) and one flag_associated_cluster cluster per other member.
+        // Without it the STM tagger fits a bundle of detached cosmics as one
+        // track and check_other_clusters() has no companions left to count.
+        //
+        // mode (C++ default "real"): "real" = per-blob real_cluster_main /
+        // real_cluster_id flash-merge provenance (exact; needs a pctree saved
+        // with MultiAlgBlobClustering save_real_cluster_id, and falls back to
+        // the proxy per cluster when absent).  "component" = longest
+        // connected component (proxy).  require_in_scope (C++ default true):
+        // skip the out-of-volume shards switch_scope splits off.
+        //
+        // MUST be placed BEFORE the steiner stage: separate() does not carry
+        // node-local point clouds, and the retained main would otherwise keep
+        // a steiner_pc built from the pre-split blob set.
+        unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true) :: {
+            type: "ClusteringUnmergeBundle",
+            name: prefix + name,
+            data: dv_cfg + pcts_cfg + {
+                grouping: "live",
+                mode: mode,
+                pcarray_name: "perblob",
+                graph_name: graph_name,
+                require_in_scope: require_in_scope,
+            },
+            uses: [detector_volumes, pc_transforms],
+        },
+
         // require_in_scope (default false): also require each candidate main to
         // pass the default-scope filter set by switch_scope, i.e. to have blobs
         // whose T0-corrected points land in the active volume.  switch_scope

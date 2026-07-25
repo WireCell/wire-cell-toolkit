@@ -449,7 +449,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_main_pair=false, tgm_main_pair_mode='path',
               tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
               tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
-              save_stm_fit=false) = {
+              save_stm_fit=false, unmerge_bundle_mode='real') = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
@@ -516,6 +516,21 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
     // tagger (they silently no-op without it).
     local cm_by_name = {
         switch_scope: cm_old.switch_scope(),
+        // Restore the prototype main+associated data product before anything
+        // fits or walks a "main cluster".  The Q/L stage's flash-time merge
+        // (examine_bundles use_flash_t0) collapses every member of a matched
+        // bundle into ONE flag_main_cluster cluster; uBooNE hands the PR chain
+        // a single connected main plus a vector of companions
+        // (wire-cell-prod-stm.cxx: main_cluster + additional_clusters).  Until
+        // this split runs, TaggerCheckSTM fits a bundle of detached cosmics as
+        // one track, check_other_clusters() has no companions to count, and
+        // TaggerCheckNeutrino's matched_flash_gid companion list is empty.
+        // Placed between switch_scope and steiner ON PURPOSE: separate() does
+        // not carry node-local PCs, so the split must precede steiner_pc
+        // creation (the visitor erases a stale steiner_pc and warns if not).
+        // Not in pipeline_names => absent from the compiled config => no
+        // behavior change.  Runner flag: -unmerge / -unmerge-comp.
+        unmerge_bundle: cm.unmerge_bundle(mode=unmerge_bundle_mode),
         // SBND has no beam_flash flag (QLMatching sets main/associated_cluster
         // instead) -- process every scope-passing cluster.
         steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false),
@@ -800,7 +815,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
-       save_stm_fit=false)::
+       save_stm_fit=false, unmerge_bundle_mode='real')::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -820,6 +835,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior,
                 tgm_fv_x_margin=tgm_fv_x_margin,
                 tgm_fv_y_margin=tgm_fv_y_margin,
-                save_stm_fit=save_stm_fit),
+                save_stm_fit=save_stm_fit,
+                unmerge_bundle_mode=unmerge_bundle_mode),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
