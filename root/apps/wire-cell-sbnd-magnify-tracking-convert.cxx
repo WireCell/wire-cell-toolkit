@@ -16,6 +16,13 @@
 //      SbndMagnifyTrackingVisitor output keeps the per-pass provenance.
 //   3. Clones the STM decision trees T_stm_pass / T_stm_eval into the output
 //      when present, keeping the Magnify file self-contained.
+//   4. Publishes `true_dx` next to `true_dQ`: the length of TRUE track whose
+//      deposits were assigned to each fitted point.  The true dQ/dx is
+//      true_dQ/true_dx; dividing by rec_dx (what the uBooNE app and the
+//      prototype's wire-cell-track-com leave the consumer to do) reports the
+//      assignment cell's length fluctuation as a physics fluctuation -- see
+//      the block comment at the accumulation loop.  Purely additive:
+//      true_dQ is unchanged, and consumers that lack the branch still work.
 //
 // Input is the tracking ROOT file written by SbndMagnifyTrackingVisitor
 // (T_rec_charge / T_proj_data / T_bad_ch / Trun, plus T_stm_pass /
@@ -31,6 +38,7 @@
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/Units.h"
 
+#include <cmath>
 #include <iostream>
 #include <vector>
 #include <map>
@@ -147,10 +155,13 @@ int main(int argc, char* argv[])
     std::vector<std::vector<double> >* vQ = new std::vector<std::vector<double> >;
     std::vector<int>* vN = new std::vector<int>;
 
+    std::vector<std::vector<double> >* vQdx = new std::vector<std::vector<double> >;
+
     std::vector<double>* x = new std::vector<double>;
     std::vector<double>* y = new std::vector<double>;
     std::vector<double>* z = new std::vector<double>;
     std::vector<double>* Q = new std::vector<double>;
+    std::vector<double>* Qdx = new std::vector<double>;   // per-truth-point path length, cm
     Int_t N;
 
     if (file_type == 1) {  // MC: read the truth track and republish it as T_true
@@ -164,12 +175,41 @@ int main(int argc, char* argv[])
             T_true->SetBranchAddress("y", &y);
             T_true->SetBranchAddress("z", &z);
             T_true->SetBranchAddress("Q", &Q);
+            // Optional: the path length each truth point's Q was deposited
+            // over.  dump_truth_sed.C writes it (|endPos-startPos| of the G4
+            // step); the prototype's mcs-tracks.root does not, and for those
+            // it is reconstructed below from consecutive-point spacing --
+            // valid because MCSTrackSim emits one ordered chain at a fixed
+            // step size.
+            const bool has_truth_dx = T_true->GetBranch("dx") != 0;
+            if (has_truth_dx) T_true->SetBranchAddress("dx", &Qdx);
             T_true->GetEntry(0);
+
+            if (!has_truth_dx) {
+                // Midpoint rule on the chain: point i owns half of the gap to
+                // each neighbour, ends own their single gap.
+                const size_t nt = x->size();
+                Qdx->assign(nt, 0);
+                if (nt > 1) {
+                    std::vector<double> gap(nt - 1);
+                    for (size_t i = 0; i + 1 < nt; ++i)
+                        gap[i] = std::sqrt(std::pow(x->at(i + 1) - x->at(i), 2) +
+                                           std::pow(y->at(i + 1) - y->at(i), 2) +
+                                           std::pow(z->at(i + 1) - z->at(i), 2));
+                    Qdx->at(0) = gap.front();
+                    Qdx->at(nt - 1) = gap.back();
+                    for (size_t i = 1; i + 1 < nt; ++i) Qdx->at(i) = 0.5 * (gap[i - 1] + gap[i]);
+                }
+                std::cout << "truth tree has no dx branch: path lengths taken from"
+                          << " consecutive-point spacing" << std::endl;
+            }
+
             vN->push_back(N);
             vx->push_back(*x);
             vy->push_back(*y);
             vz->push_back(*z);
             vQ->push_back(*Q);
+            vQdx->push_back(*Qdx);
 
             // Identity unless -s/-c were given.  No uBooNE constants here.
             for (size_t i = 0; i != vx->at(0).size(); i++) {
@@ -181,6 +221,7 @@ int main(int argc, char* argv[])
             t2->Branch("y", &vy);
             t2->Branch("z", &vz);
             t2->Branch("Q", &vQ);
+            t2->Branch("dx", &vQdx);
             t2->Fill();
         }
         else {
@@ -273,6 +314,10 @@ int main(int argc, char* argv[])
     std::vector<std::vector<double> >* z2 = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* dQ_rec = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* dQ_tru = new std::vector<std::vector<double> >;
+    // Path length of TRUE track accumulated onto each fitted point -- the
+    // denominator of the true dQ/dx.  See the block comment at the truth
+    // accumulation loop below for why rec_dx is the wrong one.
+    std::vector<std::vector<double> >* dx_tru = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* dx = new std::vector<std::vector<double> >;
     std::vector<int>* cluster_id = new std::vector<int>;
     std::vector<std::vector<double> >* rec_pu = new std::vector<std::vector<double> >;
@@ -318,6 +363,7 @@ int main(int argc, char* argv[])
 
     if (file_type == 1) {
         t1->Branch("true_dQ", &dQ_tru);
+        t1->Branch("true_dx", &dx_tru);
         t1->Branch("true_x", &x2_pair);
         t1->Branch("true_y", &y2_pair);
         t1->Branch("true_z", &z2_pair);
@@ -337,6 +383,7 @@ int main(int argc, char* argv[])
             total_L->push_back(0);
 
             dQ_tru->push_back(std::vector<double>());
+            dx_tru->push_back(std::vector<double>());
             dis->push_back(std::vector<double>());
             x2_pair->push_back(std::vector<double>());
             y2_pair->push_back(std::vector<double>());
@@ -382,6 +429,7 @@ int main(int argc, char* argv[])
                                             p.z() / (0.01 * units::mm))] =
                 std::make_pair(x2->size() - 1, x2->back().size());
             dQ_tru->back().push_back(0);
+            dx_tru->back().push_back(0);
             dis->back().push_back(point_pair.first / units::cm);
 
             x2_pair->back().push_back(point_pair.second.x() / units::cm);
@@ -432,6 +480,23 @@ int main(int argc, char* argv[])
     if (file_type == 1 && !x->empty()) {
         // Accumulate truth charge onto the fitted point each truth point is
         // closest to, then per-track angular comparison.
+        // prototype (mcs/apps/wire-cell-track-com.cxx lines 261-267)
+        //
+        // true_dx accumulates the TRUE path length of the same deposits.  The
+        // true dQ/dx of a fitted point is true_dQ/true_dx, never true_dQ/rec_dx:
+        // this assignment is a 3-D Voronoi cell of the fitted path, and the
+        // length of TRUE track falling inside one such cell varies wildly
+        // (0.2 - 5.3 cm on the first block measured) while rec_dx is nearly
+        // constant (~0.62 cm).  Dividing by rec_dx therefore reports the cell's
+        // length fluctuation as a dQ/dx fluctuation -- it made the truth curve
+        // noisier than the fit it is supposed to validate (rms/median 0.55 vs
+        // 0.23) and turned the truth beyond the fit's end into a fake Bragg
+        // peak (396 ke/cm on a 50 ke/cm MIP).  Both numerator and denominator
+        // now come from the same deposits, so the quantity is the length-
+        // weighted mean of the truth's own local dQ/dx over the cell.
+        //
+        // true_dx == 0 means no truth point picked this fitted point: the true
+        // dQ/dx is undefined there and consumers must skip it, not plot a zero.
         for (size_t i = 0; i != x->size(); i++) {
             Point p(x->at(i) * units::cm, y->at(i) * units::cm, z->at(i) * units::cm);
             std::pair<double, Point> point_pair = get_closest_point(pcloud1, p);
@@ -441,8 +506,29 @@ int main(int argc, char* argv[])
             const int index = map_point_index[key].second;
             const int index1 = map_point_index[key].first;
             if (static_cast<size_t>(index1) < dQ_tru->size() &&
-                static_cast<size_t>(index) < dQ_tru->at(index1).size())
+                static_cast<size_t>(index) < dQ_tru->at(index1).size()) {
                 dQ_tru->at(index1).at(index) += Q->at(i);
+                if (i < Qdx->size()) dx_tru->at(index1).at(index) += Qdx->at(i);
+            }
+        }
+
+        {   // Report the split of the true path over the fitted points: a cell
+            // much longer than rec_dx averages structure away (a Bragg peak,
+            // for a stopping track), so the ratio is worth seeing per file.
+            double l_tru = 0, l_rec = 0;
+            size_t n_empty = 0, n_pts = 0;
+            for (size_t k = 0; k != dx_tru->size(); k++) {
+                for (size_t i = 0; i != dx_tru->at(k).size(); i++) {
+                    l_tru += dx_tru->at(k).at(i);
+                    l_rec += dx->at(k).at(i);
+                    ++n_pts;
+                    if (dx_tru->at(k).at(i) <= 0) ++n_empty;
+                }
+            }
+            std::cout << "truth path assigned: " << l_tru << " cm over " << n_pts
+                      << " fitted points (sum rec_dx " << l_rec << " cm); "
+                      << n_empty << " points got no truth (true dQ/dx undefined)"
+                      << std::endl;
         }
 
         for (size_t k = 0; k != x2->size(); k++) {
