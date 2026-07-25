@@ -24,6 +24,28 @@ local bee_dir = 'data';
 
 local common_coords = ['x', 'y', 'z'];
 
+// DIAGNOSTIC (default OFF): dump the Bee "clustering" layer once per pipeline
+// step, so the step that merged two pieces into one cluster can be named instead
+// of guessed.  MABC's bee_points_sets entries accept a "visitor" = the step's
+// type:name, and MultiAlgBlobClustering.cxx:2270 dumps that set right after that
+// step runs (AFTER the per-step enumerate_idents renumbering, so match pieces by
+// point coordinates, never by cluster id -- ids shift between layers).
+// Layer names are tr<NN>_<Type>; the index disambiguates a type used twice
+// (e.g. the two ClusteringRegular passes).
+// Off => bee_points_sets list unchanged => compiled config byte-identical.
+local trace_sets(pipeline, coords) = [
+    {
+        name: 'tr%02d_%s' % [i, std.split(wc.tn(pipeline[i]), ':')[0]],
+        detector: 'sbnd',
+        algorithm: 'clustering',
+        pcname: '3d',
+        coords: coords,
+        individual: false,
+        visitor: wc.tn(pipeline[i]),
+    }
+    for i in std.range(0, std.length(pipeline) - 1)
+];
+
 // Per-TPC transverse (Y,Z) position offset, materialized in the post-QLMatching
 // scope by T0Correction as y_cor/z_cor (see match/docs/cathode-offset-correction.md).
 // One flag drives BOTH the metadata injection (which the C++ keys on for the
@@ -150,7 +172,7 @@ local bs_dead_face(apa, face) = {
 // standalone chain (pointed .. connect1).  The original cfg func_cfgs tail
 // (deghost -> examine_x_boundary -> isolated) is retained below as commented
 // lines so it can be re-enabled without re-deriving it.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -258,7 +280,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
                 pcname: '3d',
                 coords: ['x', 'y', 'z'],
                 individual: true,
-            }],
+            }] + (if trace_bee then trace_sets(cm_pipeline, ['x', 'y', 'z']) else []),
             pipeline: wc.tns(cm_pipeline),
         },
     }, nin=1, nout=1, uses=[dv, anode, pcts] + cm_pipeline
@@ -285,7 +307,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // 'clustering_') to that file -- the persistent intermediate format consumed by
 // the downstream pattern-recognition job (see sbnd/docs/sbnd-pattern-recognition.md).
 // Default '' keeps the historical dump_mode no-op sink (byte-identical).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -407,7 +429,7 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
                     coords: common_corr_coords(pos_offset_on),
                     individual: false,
                 },
-            ],
+            ] + (if trace_bee then trace_sets(cm_pipeline, common_corr_coords(pos_offset_on)) else []),
             pipeline: wc.tns(cm_pipeline),
         },
     }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline
@@ -842,20 +864,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
-    per_apa(anode, dump=true, bee_sink=null)::
+    // trace_bee (default false): per-step Bee layers for merge attribution; see
+    // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
+                      bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
+                      trace_bee=trace_bee),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
-    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false)::
+    all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false,
+            trace_bee=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
-                     tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id),
+                     tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
+                     trace_bee=trace_bee),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
        trackfitting_config_file='', particle_dataset=null, extra_uses=[],
