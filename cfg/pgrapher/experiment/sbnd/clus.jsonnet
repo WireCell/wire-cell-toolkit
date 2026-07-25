@@ -454,11 +454,25 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // TaggerCheckSTM (C++ default 50000 = MicroBooNE).  56000 is the
               // SBND value derived in sbnd_xin/docs/48; pass 50000 to isolate
               // the reference-table change from the MIP-scale change in an A/B.
-              mip_dqdx=56000) = {
+              mip_dqdx=56000,
+              // stm_consistent_fv: TaggerCheckSTM's containment gate uses the
+              // same fiducial + margins as tagger_check_tgm / tagger_check_fc.
+              // Default TRUE = SBND production; pass false to restore the
+              // pre-doc-49 FiducialUtils fallback for an A/B.  Details at the
+              // tagger_check_stm call below.
+              stm_consistent_fv=true) = {
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
-    // DetectorVolumes implements IFiducial (box FV from its metadata) -- used by
-    // MakeFiducialUtils / the taggers' inside_fiducial_volume().
+    // DetectorVolumes implements IFiducial -- used by MakeFiducialUtils / the
+    // taggers' inside_fiducial_volume().  NOT the FV_* metadata below:
+    // DetectorVolumes::contained() is contained_by(p).valid(), i.e. the union of
+    // the per-face IAnodeFace::sensitive() boxes, which AnodePlane builds as
+    // x in [anode_x, cathode_x] and so run to the W plane with no margin
+    // (SBND |x| <= 201.45, |y| <= 199.965, z in [0, 501.0]; |x| < 0.45 is a hole).
+    // Any tagger given no explicit fiducial therefore tests a volume ~3 cm more
+    // permissive at every wall than sbnd_pr_fv + sbnd_pr_fv_margins below --
+    // TaggerCheckSTM and TaggerCheckNeutrino's match_isFC still do; see
+    // sbnd_xin/docs/49_stm-containment-fv-inconsistency.md.
     local cm_old = clus.clustering_methods(
         prefix='pr', detector_volumes=dv, pc_transforms=pcts, fiducial=dv, coords=common_coords),
     local cm = clus.clustering_methods(
@@ -558,7 +572,27 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // 56000/54657.7 = 1.02456, so the same 2.3-2.5% headroom is kept
             // and 56000 is as round a number as 50000 was.
             // NOT byte-identical -- see sbnd_xin/docs/48.
-            mip_dqdx=mip_dqdx),
+            mip_dqdx=mip_dqdx,
+            // stm_consistent_fv (default TRUE = SBND production): give the
+            // containment gate the SAME fiducial + margins tagger_check_tgm and
+            // tagger_check_fc get, so "contained" means one thing across all
+            // three verdicts.  Without it cluster_fc_check falls back to
+            // FiducialUtils -> the union of per-face SENSITIVE volumes, which
+            // exceeds this box at every wall even before the margins (SBND 0.40
+            // cm x / 0.65 y / 0.85 z) and is holed at the CPA slab: on a
+            // 30-event sample 96 of the 147 clusters the STM tagger skipped as
+            // "fully contained" were called exiters by tagger_check_fc, so no
+            // dQ/dx fit was ever attempted for them.  The prototype has no such
+            // split -- check_stm and check_tgm are members of ONE ToyFiducial
+            // and share its boundaries, inset once by boundary_dis_cut = 3 cm --
+            // so this restores parity rather than inventing a volume.
+            // NOT byte-identical.  Set false for the A/B (runner: -no-stm-fv).
+            // See sbnd_xin/docs/49_stm-containment-fv-inconsistency.md.
+            // Only the ENDPOINT tests exist in cluster_fc_check, so the
+            // interior_fv_tolerance vector tagger_check_tgm needs has no
+            // counterpart here.
+            fiducial=(if stm_consistent_fv then wc.tn(sbnd_pr_fv) else null),
+            fv_tolerance=(if stm_consistent_fv then sbnd_pr_fv_margins else [])),
         // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
         // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
         // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
@@ -668,6 +702,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                          then [sbnd_box_recomb] + extra_uses else [])
                         + (if std.member(pipeline_names, 'tagger_check_tgm')
                            || std.member(pipeline_names, 'tagger_check_fc')
+                           || (stm_consistent_fv
+                               && std.member(pipeline_names, 'tagger_check_stm'))
                            then [sbnd_pr_fv] else []),
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/') + 'mabc-pr.zip',
     local mabc = g.pnode({
@@ -830,7 +866,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
        save_stm_fit=false, unmerge_bundle_mode='real',
-       mip_dqdx=56000)::
+       mip_dqdx=56000, stm_consistent_fv=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -852,6 +888,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tgm_fv_y_margin=tgm_fv_y_margin,
                 save_stm_fit=save_stm_fit,
                 unmerge_bundle_mode=unmerge_bundle_mode,
-                mip_dqdx=mip_dqdx),
+                mip_dqdx=mip_dqdx,
+                stm_consistent_fv=stm_consistent_fv),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

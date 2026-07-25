@@ -38,7 +38,7 @@ struct edge_base_t {
  * for Short Track Muon (STM) characteristics and sets the STM flag when conditions are met.
  * This function works on clusters that have already been processed by clustering_recovering_bundle.
  */
-class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData {
+class TaggerCheckSTM : public IConfigurable, public Clus::IEnsembleVisitor, private Clus::NeedDV, private Clus::NeedPCTS, private Clus::NeedRecombModel, private Clus::NeedParticleData, private Clus::NeedFiducial {
 public:
     TaggerCheckSTM() {
         // Initialize with default preset
@@ -55,6 +55,55 @@ public:
         m_grouping_name = get<std::string>(config, "grouping", "live");
         // See the visit() comment: default false = historical behavior.
         m_require_in_scope = get<bool>(config, "require_in_scope", m_require_in_scope);
+
+        // Fiducial volume for the containment (cluster_fc_check) gate.
+        //
+        // "fiducial" absent => the historical fallback, FiducialUtils ->
+        // DetectorVolumes::contained() = the union of per-(apa,face)
+        // IAnodeFace::sensitive() boxes with NO margin.  That volume is NOT the
+        // one TaggerCheckTGM and TaggerCheckFC use, and the difference is not
+        // small: AnodePlane builds each sensitive box as x in [anode_x,
+        // cathode_x], so it runs to the wire plane and exceeds a metadata FV box
+        // at every wall before any margin is applied (SBND: 0.40 cm in x, 0.65
+        // in y, 0.85 in z), and it is holed at the CPA slab that TGM's single
+        // cross-cathode box spans.  A cluster ending in that shell is "fully
+        // contained" here -- so check_stm_conditions returns at Mid Point A and
+        // NO fit is ever attempted -- while being an exiter to TGM/FC.  On a
+        // 30-event SBND sample 96 of the 147 clusters skipped as contained were
+        // called exiters by TaggerCheckFC, all 96 through the box alone.
+        //
+        // The prototype has no such split: check_stm, check_tgm and
+        // check_fully_contained are all members of ONE WCP2dToy/WCPPID
+        // ToyFiducial object (prototype pid/src/ToyFiducial.cxx:405 check_stm,
+        // pid/src/Cosmic_tagger.h:1331 check_tgm, 2dtoy/src/ToyFiducial.cxx:816
+        // check_fully_contained) and all call the same
+        // inside_fiducial_volume(p, offset_x) with tolerance_vec = NULL, i.e.
+        // the identical boundary polygons -- inset once in the constructor by
+        // boundary_dis_cut = 3 cm (uboone_nusel_app/apps/
+        // prod-wire-cell-matching-nusel.cxx:351).  Setting "fiducial" +
+        // "fv_tolerance" to the values TaggerCheckTGM gets therefore RESTORES
+        // prototype parity rather than inventing a new volume.
+        //
+        // NeedFiducial::configure runs ONLY when the key is present: it
+        // otherwise falls back to the type-only name "DetectorVolumes", which is
+        // not an instantiated component in the SBND PR config (it is named
+        // dv-apa0-1) and would throw.  Same guard as TaggerCheckFC.cxx:82.
+        m_use_fiducial = !config["fiducial"].isNull();
+        if (m_use_fiducial) NeedFiducial::configure(config);
+        // fv_tolerance: [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi] margins, negative =
+        // inset (FiducialUtils::inside_fiducial_volume convention; 3 or 1
+        // element also accepted).  Only the ENDPOINT containment tests exist in
+        // cluster_fc_check, so TaggerCheckTGM's separate interior_fv_tolerance
+        // has no counterpart here and none is needed.
+        auto tol = config["fv_tolerance"];
+        if (!tol.isNull() && tol.isArray()) {
+            m_fv_tolerance.clear();
+            for (const auto& t : tol) m_fv_tolerance.push_back(t.asDouble());
+        }
+        if (m_use_fiducial) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: containment uses the configured fiducial with {} tolerance value(s)",
+                                m_fv_tolerance.size());
+        }
 
         // Optional detector-specific shorted-wire-region guard for find_first_kink.
         // Provide as a 2-element array [w_min, w_max] (W-wire indices, exclusive).
@@ -107,6 +156,12 @@ public:
         cfg["require_in_scope"] = m_require_in_scope;
         cfg["save_stm_fit"] = m_save_stm_fit;
         cfg["mip_dqdx"] = m_mip_dqdx;
+        // Null/empty => the historical FiducialUtils containment (union of
+        // per-face sensitive volumes, no margin).  Naming an IFiducial here
+        // redirects cluster_fc_check's direct containment tests to it; pass the
+        // same values TaggerCheckTGM gets to make the two verdicts agree.
+        cfg["fiducial"] = Json::Value();   // null = use FiducialUtils
+        cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
 
         return cfg;
     }
@@ -308,6 +363,14 @@ private:
     // MicroBooNE value the thresholds were tuned against, so leaving the knob
     // unset is byte-identical to the pre-knob code.
     double m_mip_dqdx{50e3};
+
+    // Containment fiducial volume for the cluster_fc_check gate.  Unset by
+    // default => the historical FiducialUtils / sensitive-volume-union fallback,
+    // i.e. an absent "fiducial" key is byte-identical to the pre-knob code.
+    // See configure() for why that fallback disagrees with TGM/FC.
+    bool m_use_fiducial{false};
+    std::vector<double> m_fv_tolerance;
+
     mutable TrackFitting m_track_fitter;
 
     // === save_stm_fit knob state (inert when off => byte-identical legacy) ===
@@ -2134,7 +2197,11 @@ private:
 
         // Perform two-round fully-contained boundary check using the shared function.
         // This also returns the exit endpoint data needed for subsequent STM analysis.
-        auto fc_result = Facade::cluster_fc_check(cluster, m_dv);
+        // m_use_fiducial ? the TGM/FC box : the historical FiducialUtils
+        // fallback.  Same call shape as TaggerCheckFC.cxx:145.
+        auto fc_result = Facade::cluster_fc_check(cluster, m_dv,
+                                                 m_use_fiducial ? m_fiducial : nullptr,
+                                                 m_fv_tolerance);
 
         if (fc_result.is_fc) {
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: STMTagger: Mid Point: A");

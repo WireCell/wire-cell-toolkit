@@ -141,8 +141,22 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // thresholds.  Raising it rescales the reference and tightens all of
         // those cuts on unchanged measured charge, so it is a behavior change,
         // not a recalibration of the reference alone.
+        // fiducial / fv_tolerance (both C++ default unset; keys omitted then =>
+        // byte-identical pre-fix config): the fiducial volume for the
+        // cluster_fc_check containment gate that decides whether an STM fit is
+        // attempted at all.  Unset means the historical fallback, FiducialUtils
+        // -> DetectorVolumes::contained() = the union of per-(apa,face)
+        // sensitive volumes with NO margin -- which is NOT the volume
+        // tagger_check_tgm / tagger_check_fc use, and is more permissive at
+        // every wall (see clus/src/TaggerCheckSTM.cxx configure()).  Pass the
+        // SAME IFiducial name and the SAME margin vector given to
+        // tagger_check_tgm so "contained" means one thing across all three
+        // verdicts; that also matches the prototype, where check_stm and
+        // check_tgm are members of one ToyFiducial and share its boundaries.
+        // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi], negative = inset.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
-                         require_in_scope=false, save_stm_fit=false, mip_dqdx=null) :: {
+                         require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
+                         fiducial=null, fv_tolerance=[]) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -154,6 +168,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if require_in_scope then { require_in_scope: true } else {})
               + (if save_stm_fit then { save_stm_fit: true } else {})
               + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
