@@ -23,6 +23,13 @@
 //      assignment cell's length fluctuation as a physics fluctuation -- see
 //      the block comment at the accumulation loop.  Purely additive:
 //      true_dQ is unchanged, and consumers that lack the branch still work.
+//   5. Publishes `true_dQ_sec`, the charge of the elected particle's SECONDARIES
+//      (delta rays) accumulated per fitted point, kept separate from true_dQ.
+//      dump_truth_sed.C tags each truth row with `sec` and gives secondaries
+//      dx = 0, so the denominator stays the parent's path length: the restricted
+//      true dQ/dx is true_dQ/true_dx and the total charge available near the
+//      trajectory is (true_dQ+true_dQ_sec)/true_dx.  They are NOT summed into
+//      one branch on purpose -- see the accumulation loop.
 //
 // Input is the tracking ROOT file written by SbndMagnifyTrackingVisitor
 // (T_rec_charge / T_proj_data / T_bad_ch / Trun, plus T_stm_pass /
@@ -156,12 +163,14 @@ int main(int argc, char* argv[])
     std::vector<int>* vN = new std::vector<int>;
 
     std::vector<std::vector<double> >* vQdx = new std::vector<std::vector<double> >;
+    std::vector<std::vector<int> >* vQsec = new std::vector<std::vector<int> >;
 
     std::vector<double>* x = new std::vector<double>;
     std::vector<double>* y = new std::vector<double>;
     std::vector<double>* z = new std::vector<double>;
     std::vector<double>* Q = new std::vector<double>;
     std::vector<double>* Qdx = new std::vector<double>;   // per-truth-point path length, cm
+    std::vector<int>* Qsec = new std::vector<int>;        // 1 = secondary of the elected particle
     Int_t N;
 
     if (file_type == 1) {  // MC: read the truth track and republish it as T_true
@@ -183,7 +192,12 @@ int main(int argc, char* argv[])
             // step size.
             const bool has_truth_dx = T_true->GetBranch("dx") != 0;
             if (has_truth_dx) T_true->SetBranchAddress("dx", &Qdx);
+            // Absent in pre-secondary truth files: every row is then primary,
+            // which is the legacy meaning of true_dQ.
+            const bool has_truth_sec = T_true->GetBranch("sec") != 0;
+            if (has_truth_sec) T_true->SetBranchAddress("sec", &Qsec);
             T_true->GetEntry(0);
+            if (!has_truth_sec) Qsec->assign(x->size(), 0);
 
             if (!has_truth_dx) {
                 // Midpoint rule on the chain: point i owns half of the gap to
@@ -210,6 +224,7 @@ int main(int argc, char* argv[])
             vz->push_back(*z);
             vQ->push_back(*Q);
             vQdx->push_back(*Qdx);
+            vQsec->push_back(*Qsec);
 
             // Identity unless -s/-c were given.  No uBooNE constants here.
             for (size_t i = 0; i != vx->at(0).size(); i++) {
@@ -222,6 +237,7 @@ int main(int argc, char* argv[])
             t2->Branch("z", &vz);
             t2->Branch("Q", &vQ);
             t2->Branch("dx", &vQdx);
+            t2->Branch("sec", &vQsec);
             t2->Fill();
         }
         else {
@@ -234,12 +250,33 @@ int main(int argc, char* argv[])
     NFKDVec::Tree<double> pcloud(3), pcloud1(3);
     PointVector ps;
 
+    // pcloud is the TRAJECTORY reference: com_dis, com_dtheta, true_x/y/z and
+    // stat_beg_dis/stat_end_dis all measure how far the fit is from the true
+    // PARTICLE.  Secondary rows are therefore excluded from it -- a delta ray
+    // sits a centimetre or two off the parent, so including it lets a fitted
+    // point that is 1.8 cm from the muon report 0.3 cm from a delta ray and
+    // understate the trajectory error.  (The charge accumulation below is the
+    // other direction -- every truth row finds its nearest FITTED point -- and
+    // does use all rows.)
+    size_t i_pri_first = x->size(), i_pri_last = 0;
     if (file_type == 1 && !x->empty()) {
         for (size_t i = 0; i != x->size(); i++) {
             x->at(i) = x->at(i) * x_scale + x_offset;
+            const bool is_sec = i < Qsec->size() && Qsec->at(i) != 0;
+            if (is_sec) continue;
+            if (i_pri_first > i) i_pri_first = i;
+            i_pri_last = i;
             ps.push_back(Point(x->at(i) * units::cm, y->at(i) * units::cm, z->at(i) * units::cm));
         }
+        if (ps.empty()) {   // truth with no primary row at all: fall back to everything
+            for (size_t i = 0; i != x->size(); i++)
+                ps.push_back(Point(x->at(i) * units::cm, y->at(i) * units::cm, z->at(i) * units::cm));
+            i_pri_first = 0;
+            i_pri_last = x->size() - 1;
+        }
         add_points(pcloud, ps);
+        std::cout << "pairing reference: " << ps.size() << " primary truth points of "
+                  << x->size() << " rows" << std::endl;
     }
     ps.clear();
 
@@ -318,6 +355,8 @@ int main(int argc, char* argv[])
     // denominator of the true dQ/dx.  See the block comment at the truth
     // accumulation loop below for why rec_dx is the wrong one.
     std::vector<std::vector<double> >* dx_tru = new std::vector<std::vector<double> >;
+    // Charge of the elected particle's secondaries (delta rays), same cells.
+    std::vector<std::vector<double> >* dQ_tru_sec = new std::vector<std::vector<double> >;
     std::vector<std::vector<double> >* dx = new std::vector<std::vector<double> >;
     std::vector<int>* cluster_id = new std::vector<int>;
     std::vector<std::vector<double> >* rec_pu = new std::vector<std::vector<double> >;
@@ -364,6 +403,7 @@ int main(int argc, char* argv[])
     if (file_type == 1) {
         t1->Branch("true_dQ", &dQ_tru);
         t1->Branch("true_dx", &dx_tru);
+        t1->Branch("true_dQ_sec", &dQ_tru_sec);
         t1->Branch("true_x", &x2_pair);
         t1->Branch("true_y", &y2_pair);
         t1->Branch("true_z", &z2_pair);
@@ -384,6 +424,7 @@ int main(int argc, char* argv[])
 
             dQ_tru->push_back(std::vector<double>());
             dx_tru->push_back(std::vector<double>());
+            dQ_tru_sec->push_back(std::vector<double>());
             dis->push_back(std::vector<double>());
             x2_pair->push_back(std::vector<double>());
             y2_pair->push_back(std::vector<double>());
@@ -430,6 +471,7 @@ int main(int argc, char* argv[])
                 std::make_pair(x2->size() - 1, x2->back().size());
             dQ_tru->back().push_back(0);
             dx_tru->back().push_back(0);
+            dQ_tru_sec->back().push_back(0);
             dis->back().push_back(point_pair.first / units::cm);
 
             x2_pair->back().push_back(point_pair.second.x() / units::cm);
@@ -440,8 +482,10 @@ int main(int argc, char* argv[])
                 max_dis->back() = point_pair.first / units::cm;
             total_dis2->back() += pow(point_pair.first / units::cm, 2);
 
-            const double dis1 = pow(x1 - x->front(), 2) + pow(y1 - y->front(), 2) + pow(z1 - z->front(), 2);
-            const double dis2 = pow(x1 - x->back(), 2) + pow(y1 - y->back(), 2) + pow(z1 - z->back(), 2);
+            const double dis1 = pow(x1 - x->at(i_pri_first), 2) + pow(y1 - y->at(i_pri_first), 2)
+                              + pow(z1 - z->at(i_pri_first), 2);
+            const double dis2 = pow(x1 - x->at(i_pri_last), 2) + pow(y1 - y->at(i_pri_last), 2)
+                              + pow(z1 - z->at(i_pri_last), 2);
             if (Npoints->back() == 1) {
                 beg_dis->push_back(sqrt(std::min(dis1, dis2)));
                 end_dis->push_back(0);
@@ -497,6 +541,16 @@ int main(int argc, char* argv[])
         //
         // true_dx == 0 means no truth point picked this fitted point: the true
         // dQ/dx is undefined there and consumers must skip it, not plot a zero.
+        //
+        // Secondary charge goes to true_dQ_sec, never added into true_dQ.  Both
+        // are real, but they answer different questions and merging them breaks
+        // both: the restricted true dQ/dx of the parent (true_dQ/true_dx) is a
+        // smooth MIP reference, whereas the delta-ray charge is concentrated on
+        // whichever single fitted point is nearest while the reco spreads the
+        // same charge over several wires and several points.  Summed, evt18
+        // block 150's truth goes from 49.4 ke/cm median with rms/median 0.087 to
+        // 51.2 with 0.681 and 373 ke/cm spikes, and the mean fitted/true falls
+        // from 1.036 to 0.852 -- one artifact traded for another.
         for (size_t i = 0; i != x->size(); i++) {
             Point p(x->at(i) * units::cm, y->at(i) * units::cm, z->at(i) * units::cm);
             std::pair<double, Point> point_pair = get_closest_point(pcloud1, p);
@@ -507,7 +561,9 @@ int main(int argc, char* argv[])
             const int index1 = map_point_index[key].first;
             if (static_cast<size_t>(index1) < dQ_tru->size() &&
                 static_cast<size_t>(index) < dQ_tru->at(index1).size()) {
-                dQ_tru->at(index1).at(index) += Q->at(i);
+                const bool is_sec = i < Qsec->size() && Qsec->at(i) != 0;
+                if (is_sec) dQ_tru_sec->at(index1).at(index) += Q->at(i);
+                else        dQ_tru->at(index1).at(index) += Q->at(i);
                 if (i < Qdx->size()) dx_tru->at(index1).at(index) += Qdx->at(i);
             }
         }
@@ -515,12 +571,14 @@ int main(int argc, char* argv[])
         {   // Report the split of the true path over the fitted points: a cell
             // much longer than rec_dx averages structure away (a Bragg peak,
             // for a stopping track), so the ratio is worth seeing per file.
-            double l_tru = 0, l_rec = 0;
+            double l_tru = 0, l_rec = 0, q_pri = 0, q_sec = 0;
             size_t n_empty = 0, n_pts = 0;
             for (size_t k = 0; k != dx_tru->size(); k++) {
                 for (size_t i = 0; i != dx_tru->at(k).size(); i++) {
                     l_tru += dx_tru->at(k).at(i);
                     l_rec += dx->at(k).at(i);
+                    q_pri += dQ_tru->at(k).at(i);
+                    q_sec += dQ_tru_sec->at(k).at(i);
                     ++n_pts;
                     if (dx_tru->at(k).at(i) <= 0) ++n_empty;
                 }
@@ -529,6 +587,13 @@ int main(int argc, char* argv[])
                       << " fitted points (sum rec_dx " << l_rec << " cm); "
                       << n_empty << " points got no truth (true dQ/dx undefined)"
                       << std::endl;
+            std::cout << "truth charge: " << q_pri << " e- primary + " << q_sec
+                      << " e- secondary (delta rays, "
+                      << (q_pri > 0 ? 100. * q_sec / q_pri : 0.)
+                      << "% of primary); mean true dQ/dx "
+                      << (l_tru > 0 ? q_pri / 1000. / l_tru : 0.) << " ke/cm restricted, "
+                      << (l_tru > 0 ? (q_pri + q_sec) / 1000. / l_tru : 0.)
+                      << " ke/cm with secondaries" << std::endl;
         }
 
         for (size_t k = 0; k != x2->size(); k++) {
