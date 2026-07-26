@@ -338,8 +338,16 @@ namespace WireCell::Clus::Facade {
             const int face, const int pind) const;
 
         // Get wire charge and uncertainty for specific wire/time
-        std::pair<double, double> get_wire_charge(int apa, int face, int plane, 
+        std::pair<double, double> get_wire_charge(int apa, int face, int plane,
                                                 int wire_index, int time_slice) const;
+
+        // Read-only view of the cached charge row for one (apa, face, plane,
+        // time_slice): wire_index -> (charge, uncertainty), or nullptr when
+        // the slice has no data.  The same data get_wire_charge() consults,
+        // exposed so per-blob wire loops can hoist the per-wire
+        // cache()/find(time_slice) chain (doc 54 round 2).
+        const std::unordered_map<int, std::pair<double, double>>*
+        wire_charge_row(int apa, int face, int plane, int time_slice) const;
         
         // Check if a wire is dead at a specific time
         bool is_wire_dead(int apa, int face, int plane, 

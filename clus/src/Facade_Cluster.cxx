@@ -3446,14 +3446,26 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_two_boundary_wcps(bool flag_cos
 
 
     
+    // Memoize the per-blob charge estimate: estimate_total_charge() is a pure
+    // function of the blob and the grouping's static CTPC data, but it walks
+    // every wire of the blob through hash lookups.  Recomputing it for every
+    // POINT of the blob dominated this function (doc 54 round 2).  Keyed
+    // lookups only -- the map is never iterated, so pointer keys are
+    // determinism-safe.
+    std::unordered_map<const Blob*, double> blob_total_charge;
+
     // Find extreme points
     for (int i = 0; i < npoints(); i++) {
          // Skip excluded points
          if (is_point_excluded(i)) continue;
-        
+
         // Get blob and check charge threshold
         const Blob* blob = blob_with_point(i);
-        if (blob->estimate_total_charge() < 1500) continue;
+        auto bc_it = blob_total_charge.find(blob);
+        if (bc_it == blob_total_charge.end()) {
+            bc_it = blob_total_charge.emplace(blob, blob->estimate_total_charge()).first;
+        }
+        if (bc_it->second < 1500) continue;
         auto wpid = blob->wpid();
         auto apa = wpid.apa();
         auto face = wpid.face();

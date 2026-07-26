@@ -1015,7 +1015,19 @@ std::pair<double, double> Grouping::get_wire_charge(int apa, int face, int plane
     return wire_it->second;
 }
 
-bool Grouping::is_wire_dead(int apa, int face, int plane, 
+const std::unordered_map<int, std::pair<double, double>>*
+Grouping::wire_charge_row(int apa, int face, int plane, int time_slice) const {
+    build_wire_cache(apa, face, plane);
+    auto& gc = this->cache();
+    const auto& cache = gc.wire_caches[apa][face];
+    auto time_it = cache.charge_data[plane].find(time_slice);
+    if (time_it == cache.charge_data[plane].end()) {
+        return nullptr;
+    }
+    return &time_it->second;
+}
+
+bool Grouping::is_wire_dead(int apa, int face, int plane,
                            int wire_index, int time_slice) const {
     // Ensure cache is built for this APA/face/plane
     build_wire_cache(apa, face, plane);
