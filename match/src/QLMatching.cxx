@@ -174,17 +174,14 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
 
     m_inpath        = get(cfg, "inpath", m_inpath);
     m_outpath       = get(cfg, "outpath", m_outpath);
-    // realign_perblob (default TRUE, doc 52 §12.8): see
-    // recompose_cluster_groups().  decompose+recompose permute each split
-    // main's blob children while its node-local "perblob" arrays keep their
-    // original row order, silently detaching every per-blob array from the
-    // blobs it describes (doc 52 §11/§12: the assoc_cluster_* provenance came
-    // out scrambled; the always-written "isolated" array is equally misaligned
-    // but hidden because the all-APA examine_bundles rewrites it -- AFTER
-    // using the stale rows in its main-overlap vote).  With this on, recompose
-    // reorders the perblob dataset rows to the new child order so row i again
-    // describes child i.  Pass false only to reproduce the historical
-    // (misaligned) behavior bit-for-bit for A/B archaeology.
+    // realign_perblob: VESTIGIAL since doc 52 §13 (option 2).  The row-order
+    // invariant is now enforced by the Grouping primitives themselves --
+    // separate() carves the "perblob" dataset across main+splits and merge()
+    // concatenates it back in adoption order -- producing byte-identical
+    // output to the inline realign this component used to do (doc 52 §12.4).
+    // The key is still accepted so existing configs keep compiling, but it no
+    // longer gates anything; in particular false can NO LONGER reproduce the
+    // historical misaligned behavior.
     m_realign_perblob = get(cfg, "realign_perblob", m_realign_perblob);
     m_cluster_t0    = get(cfg, "cluster_t0", m_cluster_t0);
     m_semimodel_file = get(cfg, "semimodel_file", m_semimodel_file);
@@ -1308,7 +1305,6 @@ void QLMatching::decompose_cluster_groups(ApaRun& run)
         // separate(): groups with id<0 stay in `cluster` (the main), each id>=0
         // becomes a new sibling cluster returned (ascending id -> deterministic).
         auto splits = grouping->separate(cluster, cc);
-        if (m_realign_perblob) run.decompose_cc[cluster] = cc;
         cluster->set_flag("main_cluster");
         std::vector<Cluster*> others;
         for (auto& [gid, nc] : splits) {
@@ -1371,60 +1367,21 @@ void QLMatching::recompose_cluster_groups(ApaRun& run)
         if (others.empty()) continue;
         // merge(): main adopts every associated cluster's blobs (take_children),
         // then the emptied associated facades are destroyed (keep=false default).
+        //
+        // The decompose+recompose round trip PERMUTES the main's blob children
+        // (kept cc<0 blobs first, split groups re-appended at the END in
+        // `others` order = ascending gid).  Doc 52 §11/§12 measured the
+        // consequence when the node-local "perblob" arrays kept their original
+        // row order: the assoc pair came out with the right group sizes on the
+        // wrong blobs, so the downstream un-merge cut the trunk's tip off a
+        // through-going muon and kept the detached clump.  Since doc 52 §13
+        // (option 2) the Grouping primitives enforce the row-order invariant
+        // themselves -- separate() carved the dataset across main+splits at
+        // decompose, and this merge() concatenates the parts' rows back in
+        // adoption order -- so the dataset stays parallel to the children with
+        // no realign step here.  The inline realign this replaced produced
+        // byte-identical output (kept rows first, then ascending gid).
         grouping->merge(others.begin(), others.end(), main_cluster);
-
-        // The decompose+recompose round trip PERMUTES the main's blob children:
-        // separate() keeps the cc<0 blobs (original relative order) and merge()
-        // appends each split's blobs at the END, in ascending-gid order -- while
-        // the main's node-local "perblob" arrays (the always-written "isolated"
-        // cc plus any provenance pair such as doc 52's assoc_cluster_*) keep
-        // their ORIGINAL row order.  Every per-blob array therefore silently
-        // stops describing the blob at its own row.  Doc 52 §11 measured the
-        // consequence: the assoc pair came out with the right group sizes on
-        // the wrong blobs, so the downstream un-merge cut the trunk's tip off
-        // a through-going muon and kept the detached clump.  ("isolated" is
-        // equally misaligned but hidden: the all-APA examine_bundles rewrites
-        // it from a fresh connected-components pass -- after consuming the
-        // stale rows in its main-overlap vote.)
-        // With realign_perblob on (the default, doc 52 §12.8), reorder the
-        // whole perblob dataset by the SAME permutation the blobs underwent,
-        // restoring row i == child i for every key at once.  Off => historical
-        // behavior, including the misalignment, bit-for-bit (A/B archaeology
-        // only).
-        if (!m_realign_perblob) continue;
-        auto ccit = run.decompose_cc.find(main_cluster);
-        if (ccit == run.decompose_cc.end()) continue;
-        const std::vector<int>& cc = ccit->second;
-        const size_t nb = cc.size();
-        auto& lpcs = main_cluster->value().local_pcs();
-        auto pbit = lpcs.find("perblob");
-        if (pbit == lpcs.end()) continue;
-        if (pbit->second.size_major() != nb
-            || (size_t) main_cluster->nchildren() != nb) {
-            log->warn("recompose: cluster {} perblob rows {} / blobs {} vs cc {} "
-                      "-- cannot realign, leaving as-is",
-                      main_cluster->ident(), pbit->second.size_major(),
-                      main_cluster->nchildren(), nb);
-            continue;
-        }
-        // New child order: [rows with cc<0, original order] then per gid
-        // ascending (splits was a std::map; `others` was built in its
-        // iteration order) [rows with cc==gid, original order].
-        std::vector<size_t> rows;
-        rows.reserve(nb);
-        for (size_t i = 0; i < nb; ++i) {
-            if (cc[i] < 0) rows.push_back(i);
-        }
-        std::set<int> gids;
-        for (int v : cc) {
-            if (v >= 0) gids.insert(v);
-        }
-        for (int gid : gids) {
-            for (size_t i = 0; i < nb; ++i) {
-                if (cc[i] == gid) rows.push_back(i);
-            }
-        }
-        pbit->second = pbit->second.subset(rows);
     }
     // run.clusters / global_cluster_idx_map / the bundles now hold dangling pointers
     // to the destroyed associated clusters; nothing reads them after this point

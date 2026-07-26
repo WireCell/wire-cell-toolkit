@@ -121,6 +121,13 @@ static void clustering_switch_scope(
         // scope_transform to each separated cluster. Only the scope_filter is new.
         for (auto& [id, new_cluster] : separated_clusters) {
             new_cluster->set_scope_filter(correction_scope, id == 1);
+            // Since doc 52 §13 (option 2) Grouping::separate() auto-carves the
+            // WHOLE "perblob" dataset onto each part -- including "isolated",
+            // which this visitor has always deliberately dropped (it is
+            // rewritten downstream by examine_bundles).  Erase the auto-carved
+            // dataset and re-attach exactly the carry list below, preserving
+            // this visitor's historical output byte-for-byte.
+            new_cluster->value().local_pcs().erase("perblob");
             // Re-attach the provenance rows of the blobs that went to this
             // part.  separate() keeps the blobs of each part in their source
             // order, so filtering the source array by the same group id

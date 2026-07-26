@@ -160,6 +160,43 @@ namespace WireCell::Clus::Facade {
                                          bool remove=false,
                                          bool notify_value=true);
 
+        /// Merge, enforcing the "perblob" row-order invariant.
+        ///
+        /// These overloads HIDE the NaryTree::FacadeParent merge() methods on
+        /// purpose (clus/docs/perblob_invariant.md): the base merge appends
+        /// each part's blob children at the END of the target's child list
+        /// but knows nothing of the cluster-level N-row "perblob" Dataset
+        /// whose row i must describe child i.  separate() above carves that
+        /// Dataset across the survivor and the splits; these merges
+        /// concatenate the parts' Datasets onto the target's in the SAME
+        /// order the children are adopted, so any separate/merge sequence
+        /// keeps row i == child i with no caller-side realign.  When the
+        /// Datasets cannot be concatenated truthfully (a stale row count, a
+        /// part carrying no Dataset while others do, mismatched key sets)
+        /// the target's Dataset is DROPPED with a warning -- a loud absence
+        /// instead of a silent misalignment.  Clusters carrying no "perblob"
+        /// Dataset pay one map lookup each and are otherwise untouched, and
+        /// the returned cc array is exactly the base merge's.
+        ///
+        /// The map version keeps the base behavior of using the map keys as
+        /// the returned cc group ids.  With keep=true the emptied part
+        /// shells survive; any "perblob" entry they still hold is erased
+        /// (their children are gone).
+        std::vector<int> merge(std::map<int, Cluster*>& splits,
+                               Cluster* target,
+                               bool keep=false, int existingID=-1);
+        std::vector<int> merge(std::vector<Cluster*>& parts,
+                               Cluster* target=nullptr,
+                               bool keep=false, int existingID=-1);
+        template<typename ChildIt>
+        std::vector<int> merge(ChildIt cbeg, ChildIt cend,
+                               Cluster* target=nullptr,
+                               bool keep=false, int existingID=-1)
+        {
+            std::vector<Cluster*> parts(cbeg, cend);
+            return merge(parts, target, keep, existingID);
+        }
+
 
         // TODO: remove this in the future
         // void set_params(const TPCParams& tp) { m_tp = tp; }

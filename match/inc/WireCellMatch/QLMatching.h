@@ -962,11 +962,12 @@ namespace WireCell::Match {
         // decision 2026-07-25, doc 52 §12.8): leaving the arrays in their
         // pre-decompose row order silently detaches every per-blob array from
         // the blob it describes -- including the always-written "isolated" cc
-        // that the all-APA examine_bundles main-overlap vote consumes.  A
-        // detector whose chain never marks a main (-1) in "isolated" (PDHD,
-        // PDVD: examine_bundles disabled) never decomposes, so this is a
-        // structural no-op there.  Set false only to reproduce the historical
-        // (misaligned) behavior for A/B archaeology.
+        // that the all-APA examine_bundles main-overlap vote consumes.
+        // VESTIGIAL since doc 52 §13 (option 2): the Grouping primitives now
+        // enforce the invariant themselves (separate() carves, merge()
+        // concatenates), byte-identically to the realign this used to gate.
+        // Kept only so existing configs keep compiling; false no longer
+        // reproduces the historical misaligned behavior.
         bool m_realign_perblob{true};
         float m_cluster_t0{-1e12};
 
@@ -1259,11 +1260,6 @@ namespace WireCell::Match {
             // cluster-group decomposition
             std::vector<std::pair<WireCell::Clus::Facade::Cluster*,
                                   std::vector<WireCell::Clus::Facade::Cluster*>>> match_groups;
-            // The "isolated" cc array each split main was separated on, saved
-            // at decompose so recompose can realign the main's "perblob"
-            // dataset rows to the permuted child order (m_realign_perblob,
-            // doc 52 §11).  Filled only when that knob is on.
-            std::map<WireCell::Clus::Facade::Cluster*, std::vector<int>> decompose_cc;
             std::vector<WireCell::Clus::Facade::Cluster*> clusters;
             std::map<Opflash*, int> global_flash_idx_map;
             std::map<WireCell::Clus::Facade::Cluster*, int> global_cluster_idx_map;

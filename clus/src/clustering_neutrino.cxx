@@ -446,16 +446,12 @@ static void clustering_neutrino(
                     // }
                     // merge back ...
                     // cluster1 = &(live_grouping.make_child());
-                    for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        cluster1->take_children(*sep_clusters.at(j), true);
-                        live_grouping.destroy_child(sep_clusters.at(j));
-                        assert(sep_clusters.at(j) == nullptr);
-                    }
-                    // The separate/take-back round trip regrouped the children
-                    // by component id while any node-local "perblob" Dataset
-                    // kept its original row order -- reorder it to match (doc
-                    // 52 §13; no-op unless the array exists at this stage).
-                    realign_perblob_after_regroup(*cluster1, b2id);
+                    // Grouping::merge == the old take_children/destroy_child
+                    // loop (ascending gid adoption, shells destroyed), plus it
+                    // carries any node-local "perblob" Dataset through the
+                    // round trip (doc 52 §13, option 2; the Dataset is absent
+                    // at this pipeline stage today, so this is a no-op).
+                    live_grouping.merge(sep_clusters, cluster1);
                     // std::cout  << "[neutrino] cluster1->npoints() " << cluster1->npoints() << " " << cluster1->point(0) << std::endl;
                 }
 
@@ -628,13 +624,8 @@ static void clustering_neutrino(
                     // }
                     // merge back ...
                     // cluster2 = &(live_grouping.make_child());
-                    for (size_t j = 0; j != sep_clusters.size(); j++) {
-                        cluster2->take_children(*sep_clusters.at(j), true);
-                        live_grouping.destroy_child(sep_clusters.at(j));
-                        assert(sep_clusters.at(j) == nullptr);
-                    }
-                    // Same realign as the cluster1 round trip above (doc 52 §13).
-                    realign_perblob_after_regroup(*cluster2, b2id);
+                    // Same merge-back as the cluster1 round trip above (doc 52 §13).
+                    live_grouping.merge(sep_clusters, cluster2);
                     // std::cout  << "[neutrino] cluster2->npoints() " << cluster2->npoints() << " " << cluster2->point(0) << std::endl;
                 }
 

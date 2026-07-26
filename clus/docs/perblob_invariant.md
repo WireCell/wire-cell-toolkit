@@ -38,30 +38,59 @@ QLMatching decompose/recompose corruption (wcp-porting-validation
 audit (§13 there) found the identical latent pattern in `RetileCluster::mutate`
 and twice in `clustering_neutrino`.
 
+## The primitives enforce the invariant (doc 52 §13, option 2)
+
+Since 2026-07-25 the Clus-level primitives maintain the invariant
+themselves:
+
+- **`Grouping::separate()`** snapshots the cluster's `"perblob"` Dataset and
+  **carves** it across the survivor (kept `cc<0` rows, original order; the
+  entry is erased when no rows remain) and every split (its own rows).  A
+  Dataset whose rows already disagree with the children is **dropped with a
+  warning** — a loud absence instead of a silent lie.
+- **`Grouping::merge()`** (new overloads that deliberately HIDE the
+  `NaryTree::FacadeParent` merges) **concatenates** the parts' Datasets onto
+  the target's in the same order the children are adopted.  When a truthful
+  concatenation is impossible (stale rows, a child-bearing part without a
+  Dataset while others carry one, mismatched key sets) the target's Dataset
+  is dropped with a warning.  The returned cc array is exactly the base
+  merge's.
+
+So any separate/merge sequence through the **Grouping** methods keeps
+row *i* == child *i* automatically.  Clusters without the Dataset (the whole
+pre-`isolated` clustering stage) pay one `local_pcs` map lookup per
+participant — measured zero wall/RSS drift on the SBND 30-event, PDHD/PDVD
+abtest, and uBooNE 35-event manifests.
+
 ## Rules for any code that mutates a cluster's child set
 
-1. **Prefer `merge_clusters()`** (`ClusteringFuncs.cxx`) for merging — it
-   carries the perblob provenance keyed by **blob pointer**, immune to
-   member-order effects (doc 52 Stage 2).
-2. **Separate-then-merge-back (or total take-back) round trip**: call
+1. **Prefer `merge_clusters()`** (`ClusteringFuncs.cxx`) for graph-driven
+   merging — it carries the perblob provenance keyed by **blob pointer**,
+   immune to member-order effects (doc 52 Stage 2), and REBASES the id
+   arrays across members (raw concatenation must not be used there: member
+   ids collide).
+2. **Split / merge-back through the Grouping methods** —
+   `Grouping::separate()` / `Grouping::merge()` — and the Dataset follows
+   the blobs automatically.  Do NOT re-subset the Dataset afterwards: it is
+   already aligned, and a second permutation would scramble it.  (This
+   superseded the inline realigns that briefly lived in QLMatching
+   recompose, `retile_cluster.cxx` and `clustering_neutrino.cxx`.)
+3. **Raw NaryTree primitives** (`node()->separate`, `take_children`,
+   `adopt_children`) bypass the enforcement.  If you must use them on a
+   perblob-carrying cluster, restore the invariant with
    `realign_perblob_after_regroup(cluster, cc)` (`ClusteringFuncs.h`,
-   implemented in `prov_check.cxx`) with the same `cc` you gave `separate()`.
-   It reorders the whole Dataset by the permutation the children underwent;
-   fail-open no-op when the array is absent.  Reference call sites:
-   `retile_cluster.cxx` (after `merge()`), `clustering_neutrino.cxx` (after
-   both take-back loops).  `QLMatching::recompose_cluster_groups()` does the
-   same inline.
-3. **Permanent split (pieces do not come back)**: carve — snapshot the Dataset
-   before `separate()`, then `lpcs["perblob"] = snapshot.subset(rows)` per
-   part with each part's own rows.  Reference: `clustering_switch_scope.cxx`
-   (carve lambda), `ClusteringUnmergeBundle.cxx`, `ClusteringRecoveringBundle.cxx`.
-4. **Absorbing blobs** (`take_children` into a cluster that keeps its arrays)
-   without one of the above is a bug: the target's arrays go stale-length,
-   the donor's die with it.
+   implemented in `prov_check.cxx`) for a length-preserving round trip, or
+   carve by hand (`clustering_switch_scope.cxx`'s carve lambda,
+   `ClusteringUnmergeBundle.cxx`).
+4. **Intentional drops stay explicit**: `clustering_switch_scope.cxx` erases
+   the auto-carved Dataset on each part and re-attaches only its carry list
+   (it has always deliberately dropped `isolated`); `ClusteringUnmergeBundle`
+   and `ClusteringRecoveringBundle` keep their own carves as defense in
+   depth (same values as the auto-carve).
 5. **Never** iterate/emit these arrays through a child-set mutation you did
-   not realign — and remember `put_pcarray()` on an existing key `assign()`s
-   with a new shape, bypassing `Dataset::add`'s major-size check, so a wrong
-   write is silent.
+   not account for — and remember `put_pcarray()` on an existing key
+   `assign()`s with a new shape, bypassing `Dataset::add`'s major-size
+   check, so a wrong write is silent.
 
 ## Regression tripwire
 
@@ -78,10 +107,10 @@ Classes: (a) silent length-preserving permutation; (b) stale-length arrays;
 
 | Site | Pattern | Class | Status |
 |---|---|---|---|
-| `match/src/QLMatching.cxx` decompose/recompose | separate + merge back | (a) | FIXED (doc 52 §12.4), realign default ON |
-| `clus/src/retile_cluster.cxx` `RetileCluster::mutate` | separate + merge back, fresh `isolated` only | (a) | FIXED (realign helper); reachable only via `cm.retile`, commented out in all configs |
-| `clus/src/clustering_neutrino.cxx` cluster1/cluster2 round trips | separate + total take-back | (a) | FIXED (realign helper); dormant anyway — runs before `isolated` writes perblob in every config |
-| `clus/src/ClusteringRecoveringBundle.cxx` | separate, pieces leave | (b)+(c) | FIXED (carve); component not instantiated by any config |
+| `match/src/QLMatching.cxx` decompose/recompose | separate + merge back | (a) | ENFORCED by the primitives (§13.3); the interim inline realign (doc 52 §12.4) removed, byte-identically |
+| `clus/src/retile_cluster.cxx` `RetileCluster::mutate` | separate + merge back, fresh `isolated` only | (a) | ENFORCED by the primitives; reachable only via `cm.retile`, commented out in all configs |
+| `clus/src/clustering_neutrino.cxx` cluster1/cluster2 round trips | separate + total take-back | (a) | ENFORCED — loops replaced by `Grouping::merge`; dormant anyway (runs before `isolated` writes perblob in every config) |
+| `clus/src/ClusteringRecoveringBundle.cxx` | separate, pieces leave | (b)+(c) | FIXED (carve) + primitive auto-carve. CORRECTION: it IS instantiated — qlport `uboone-mabc.jsonnet:1247` (uBooNE chain); the original "not instantiated" claim only grepped `cfg/pgrapher/experiment/`. uBooNE gate: doc 52 §13.3 |
 | `clus/src/clustering_switch_scope.cxx` | separate remove=true | safe | carves `assoc_*`/`real_*` per part (drops `isolated`, rewritten downstream) |
 | `clus/src/ClusteringUnmergeBundle.cxx` | separate remove=false | safe | subsets whole Dataset per part |
 | 12 graph-merge visitors via `merge_clusters()` | merge | safe | pointer-keyed carry (doc 52 Stage 2) |

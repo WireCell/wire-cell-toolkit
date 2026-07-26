@@ -701,17 +701,12 @@ Points::node_ptr RetileCluster::mutate(Points::node_type& node) const
     }
 
 
-    // Restore input cluster
+    // Restore input cluster.  The separate/merge round trip permutes the
+    // children (kept cc<0 blobs first, split groups re-appended at the end in
+    // ascending-gid order); the Grouping primitives carve and re-concatenate
+    // the node-local "perblob" Dataset through it (doc 52 §13, option 2), so
+    // assoc_cluster_* / real_cluster_* stay parallel to the children.
     auto cc2 = m_grouping->merge(splits,orig_cluster);
-
-    // The separate/merge round trip permuted the children (kept cc<0 blobs
-    // first, split groups re-appended at the end in ascending-gid order) while
-    // the node-local "perblob" Dataset kept its original row order.  Reorder
-    // the WHOLE Dataset by the same permutation so assoc_cluster_* /
-    // real_cluster_* stay parallel to the children -- same fix as
-    // QLMatching::recompose_cluster_groups() (doc 52 §12.4/§13).  The fresh
-    // "isolated" written below then overwrites its (also-reordered) rows.
-    realign_perblob_after_regroup(*orig_cluster, cc_vec);
 
     // Record how we had split it.
     orig_cluster->put_pcarray(cc2, "isolated", "perblob");
