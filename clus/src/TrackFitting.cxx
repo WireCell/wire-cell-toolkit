@@ -7106,6 +7106,52 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     }
     static const std::set<WireTimePair> empty_wt_set;
 
+    // Wire-indexed lookup, as in dQ_dx_multi_fit: for each (apa,face),
+    // wire -> rows carrying the 2D-measurement row index and its charge.
+    // The response-matrix fill below visits only wires near each trajectory
+    // point instead of re-walking every 2D measurement per point -- the
+    // full-map scan was O(n_3D_pos * n_2D) and dominated the STM tagger
+    // (42.6% of the PR job on SBND evt 287517, doc 54).
+    struct PlaneRow {
+        int row;
+        int wire;
+        int time;
+        double charge;
+        double charge_err;
+        int flag;
+    };
+    using WireRowMap = std::map<int, std::vector<PlaneRow>>;
+    std::map<ApaFaceKey, WireRowMap> wire_idx_U, wire_idx_V, wire_idx_W;
+    {
+        int n = 0;
+        for (const auto& [coord_key, result] : map_U_charge_2D) {
+            for (const auto& c : result.second) {
+                if (c.plane == kUlayer)
+                    wire_idx_U[{c.apa, c.face}][c.wire].push_back(
+                        {n, c.wire, c.time, result.first.charge, result.first.charge_err, result.first.flag});
+            }
+            ++n;
+        }
+        n = 0;
+        for (const auto& [coord_key, result] : map_V_charge_2D) {
+            for (const auto& c : result.second) {
+                if (c.plane == kVlayer)
+                    wire_idx_V[{c.apa, c.face}][c.wire].push_back(
+                        {n, c.wire, c.time, result.first.charge, result.first.charge_err, result.first.flag});
+            }
+            ++n;
+        }
+        n = 0;
+        for (const auto& [coord_key, result] : map_W_charge_2D) {
+            for (const auto& c : result.second) {
+                if (c.plane == kWlayer)
+                    wire_idx_W[{c.apa, c.face}][c.wire].push_back(
+                        {n, c.wire, c.time, result.first.charge, result.first.charge_err, result.first.flag});
+            }
+            ++n;
+        }
+    }
+
     // Build response matrices using geometry information
     for (int i = 0; i < n_3D_pos; i++) {
         WireCell::Point curr_rec_pos = fine_tracking_path.at(i).first;
@@ -7326,94 +7372,97 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         const auto& set_VT = precomp_VT.count(af_key) ? precomp_VT.at(af_key) : empty_wt_set;
         const auto& set_WT = precomp_WT.count(af_key) ? precomp_WT.at(af_key) : empty_wt_set;
 
-        int n_u = 0;
-        for (const auto& [coord_key, result] : map_U_charge_2D) {
-            const auto& measurement = result.first;
-            const auto& Coord2D_set = result.second;
+        // Wire-indexed response-matrix fill: for each plane visit only the
+        // wires inside the search window (wire_idx_* built once above), then
+        // re-apply the ORIGINAL window predicate verbatim on each candidate.
+        // The enumerated wire range is a superset of the predicate's, so the
+        // accepted rows -- hence RU/RV/RW and reg_flag_* -- are identical to
+        // the full-map scan this replaces.  Row visiting order can differ,
+        // which Eigen absorbs: SparseMatrix::insert keeps each column's
+        // storage row-sorted, so the assembled matrices are bit-identical.
+        {
+            auto uit = wire_idx_U.find(af_key);
+            if (uit != wire_idx_U.end()) {
+                const auto& wire_map = uit->second;
+                const double wc = centers_U.front();
+                const double sr = m_params.search_range;
+                auto it_lo = wire_map.lower_bound(static_cast<int>(std::floor(wc - sr)));
+                auto it_hi = wire_map.upper_bound(static_cast<int>(std::ceil(wc + sr)));
+                for (auto wit = it_lo; wit != it_hi; ++wit) {
+                    for (const auto& prow : wit->second) {
+                        int wire = prow.wire;
+                        int time = prow.time;
+                        if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
 
-            for (const auto& coord2d : Coord2D_set) {
-                // coord2d: TrackFitting::Coord2D
-                // Only process if plane matches U
-                if (coord2d.plane != kUlayer || coord2d.apa != apa || coord2d.face != face) continue;
-                int wire = coord2d.wire;
-                int time = coord2d.time;
+                            if (prow.flag == 0 && value > 0) reg_flag_u[i] = 1; // Dead channel
 
-                // if (wire !=938 || time != 7176) continue;
-
-                if (abs(wire - centers_U.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_U, sigmas_U, weights, 0, 4, cur_ntime_ticks);
-
-
-                    if (measurement.flag == 0 && value > 0) reg_flag_u[i] = 1; // Dead channel
-                    
-                    if (value > 0 && measurement.charge > 0 && measurement.flag != 0) {
-                        double charge = measurement.charge;
-                        double charge_err = measurement.charge_err;
-                        double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-                        RU.insert(n_u, i) = value / total_err;
-
-                        // std::cout << n_u << " " << i << " " << time << " " << wire << " " << i << " " << value / total_err << std::endl;
+                            if (value > 0 && prow.charge > 0 && prow.flag != 0) {
+                                double charge = prow.charge;
+                                double charge_err = prow.charge_err;
+                                double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
+                                RU.insert(prow.row, i) = value / total_err;
+                            }
+                        }
                     }
                 }
             }
-            n_u++;
         }
-        int n_v = 0;
-        for (const auto& [coord_key, result] : map_V_charge_2D) {
-            const auto& measurement = result.first;
-            const auto& Coord2D_set = result.second;
+        {
+            auto vit_af = wire_idx_V.find(af_key);
+            if (vit_af != wire_idx_V.end()) {
+                const auto& wire_map = vit_af->second;
+                const double wc = centers_V.front();
+                const double sr = m_params.search_range;
+                auto it_lo = wire_map.lower_bound(static_cast<int>(std::floor(wc - sr)));
+                auto it_hi = wire_map.upper_bound(static_cast<int>(std::ceil(wc + sr)));
+                for (auto wit = it_lo; wit != it_hi; ++wit) {
+                    for (const auto& prow : wit->second) {
+                        int wire = prow.wire;
+                        int time = prow.time;
+                        if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
 
-            for (const auto& coord2d : Coord2D_set) {
-                // coord2d: TrackFitting::Coord2D
-                // Only process if plane matches V
-                if (coord2d.plane != kVlayer || coord2d.apa != apa || coord2d.face != face) continue;
-                int wire = coord2d.wire;
-                int time = coord2d.time;
+                            if (prow.flag == 0 && value > 0) reg_flag_v[i] = 1; // Dead channel
 
-                if (abs(wire - centers_V.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_V, sigmas_V, weights, 0, 4, cur_ntime_ticks);
-
-                    if (measurement.flag == 0 && value > 0) reg_flag_v[i] = 1; // Dead channel
-
-                    if (value > 0 && measurement.charge > 0 && measurement.flag != 0) {
-                        double charge = measurement.charge;
-                        double charge_err = measurement.charge_err;
-                        double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
-                        RV.insert(n_v, i) = value / total_err;
+                            if (value > 0 && prow.charge > 0 && prow.flag != 0) {
+                                double charge = prow.charge;
+                                double charge_err = prow.charge_err;
+                                double total_err = sqrt(pow(charge_err, 2) + pow(charge * rel_uncer_ind, 2) + pow(add_uncer_ind, 2));
+                                RV.insert(prow.row, i) = value / total_err;
+                            }
+                        }
                     }
-
                 }
             }
-            n_v++;
         }
-        int n_w = 0;
-        for (const auto& [coord_key, result] : map_W_charge_2D) {
-            const auto& measurement = result.first;
-            const auto& Coord2D_set = result.second;
+        {
+            auto wit_af = wire_idx_W.find(af_key);
+            if (wit_af != wire_idx_W.end()) {
+                const auto& wire_map = wit_af->second;
+                const double wc = centers_W.front();
+                const double sr = m_params.search_range;
+                auto it_lo = wire_map.lower_bound(static_cast<int>(std::floor(wc - sr)));
+                auto it_hi = wire_map.upper_bound(static_cast<int>(std::ceil(wc + sr)));
+                for (auto wit = it_lo; wit != it_hi; ++wit) {
+                    for (const auto& prow : wit->second) {
+                        int wire = prow.wire;
+                        int time = prow.time;
+                        if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
+                            double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
 
-            for (const auto& coord2d : Coord2D_set) {
-                // coord2d: TrackFitting::Coord2D
-                // Only process if plane matches W
-                if (coord2d.plane != kWlayer || coord2d.apa != apa || coord2d.face != face) continue;
-                int wire = coord2d.wire;
-                int time = coord2d.time;
-                if (abs(wire - centers_W.front()) <= m_params.search_range && abs(time - centers_T.front()) <= m_params.search_range * cur_ntime_ticks) {
-                    double value = cal_gaus_integral_seg(time, wire, centers_T, sigmas_T, centers_W, sigmas_W, weights, 0, 4, cur_ntime_ticks);
+                            if (prow.flag == 0 && value > 0) reg_flag_w[i] = 1; // Dead channel
 
-                    if (measurement.flag == 0 && value > 0) reg_flag_w[i] = 1; // Dead channel
-
-                    if (value > 0 && measurement.charge > 0 && measurement.flag != 0) {
-                        double charge = measurement.charge;
-                        double charge_err = measurement.charge_err;
-                        double total_err = sqrt(charge_err*charge_err + (charge*rel_uncer_col)*(charge*rel_uncer_col) + add_uncer_col*add_uncer_col);
-                        RW.insert(n_w, i) = value / total_err;
-
-                        // std::cout << n_w << " " << i << " " << time << " " << wire << " " << i << " " << value / total_err << std::endl;
-                    
+                            if (value > 0 && prow.charge > 0 && prow.flag != 0) {
+                                double charge = prow.charge;
+                                double charge_err = prow.charge_err;
+                                double total_err = sqrt(charge_err*charge_err + (charge*rel_uncer_col)*(charge*rel_uncer_col) + add_uncer_col*add_uncer_col);
+                                RW.insert(prow.row, i) = value / total_err;
+                            }
+                        }
                     }
                 }
             }
-            n_w++;
         }
 
 
