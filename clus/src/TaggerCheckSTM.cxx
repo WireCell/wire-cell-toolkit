@@ -403,6 +403,17 @@ private:
     // of those cuts on unchanged measured charge.  Default 50e3 is the
     // MicroBooNE value the thresholds were tuned against, so leaving the knob
     // unset is byte-identical to the pre-knob code.
+    //
+    // As of doc 57 there are no absolute e/cm literals left in this file.  The
+    // seven sites that had them -- five distinct values: 1000 in
+    // adjust_rough_path, 72500 (x3) / 85000 / 92500 in the Michel-electron
+    // residual veto, 75000 in check_other_tracks -- are now written
+    // a * m_mip_dqdx, with a = the literal over MicroBooNE's 50000.  Every one
+    // was an exact multiple of it, so this is a change of convention, not a
+    // re-tuning: at the default 50e3 each product is bit-identical to the
+    // literal it replaced.  At SBND's 56000 the seven now follow the MIP scale
+    // like the ~33 ratio cuts already did.  Anything ADDED here must use the
+    // same form.
     double m_mip_dqdx{50e3};
 
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
@@ -745,8 +756,12 @@ private:
             
             // std::cout << i << " " << min_dQ_dx << " " << para_angles.at(i) << " " << refl_angles.at(i) <<" " << sum_angles << std::endl;
 
-            // First breakpoint condition: Low charge with significant angles
-            if (min_dQ_dx < 1000 && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
+            // First breakpoint condition: Low charge with significant angles.
+            // min_dQ_dx is dQ per INTERNAL length unit (dQ/dx with dx unscaled),
+            // so the threshold carries a units::cm that the MIP-normalised cuts
+            // elsewhere in this file do not.  Was a bare 1000, i.e. 10000 e/cm,
+            // i.e. 0.2 x MicroBooNE's 50000 MIP -- see the m_mip_dqdx comment.
+            if (min_dQ_dx < 0.2 * m_mip_dqdx / units::cm && para_angles.at(i) > 10 && refl_angles.at(i) > 25) {
                 SPDLOG_LOGGER_TRACE(s_log, "adjust_rough_path: Mid_Point_Break: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), min_dQ_dx, fine_tracking_path.at(i).first.x(), fine_tracking_path.at(i).first.y(), fine_tracking_path.at(i).first.z());
                 flag_crawl = true;
                 save_i = i;
@@ -1716,15 +1731,24 @@ private:
             (res_length1 > 1.5*units::cm && ave_res_dQ_dx/m_mip_dqdx > 2.3)) && res_dis1/(res_length1+1e-9) > 0.99)
             return false;
 
-        // If residual does not look like a michel electron
+        // If residual does not look like a michel electron.
+        //
+        // The five thresholds written 1.45/1.7/1.85 x m_mip_dqdx below were bare
+        // 72500 / 85000 / 92500 e/cm, i.e. absolute charge on MicroBooNE's scale
+        // where the MIP reference is 50000 e/cm.  Each is an EXACT multiple of
+        // it (72500/50000 = 1.45, 85000 = 1.7, 92500 = 1.85), which is what
+        // makes the rewrite unambiguous rather than an interpretation.  They sat
+        // in this same conditional as the /m_mip_dqdx ratios on the surrounding
+        // lines, so before this change half of one veto followed mip_dqdx to
+        // SBND's 56000 and half of it stayed on MicroBooNE's 50000.  See doc 57.
         if ((res_length > 20 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.2 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) ||
-            (res_length > 16 * units::cm && ave_res_dQ_dx > 72500) || 
-            (res_length > 10 * units::cm && ave_res_dQ_dx > 72500 && 
+            (res_length > 16 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx) || 
+            (res_length > 10 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
-            (res_length > 10 * units::cm && ave_res_dQ_dx > 85000) ||
-            (res_length > 6 * units::cm && ave_res_dQ_dx > 92500) ||
-            (res_length > 6 * units::cm && ave_res_dQ_dx > 72500 && 
+            (res_length > 10 * units::cm && ave_res_dQ_dx > 1.7 * m_mip_dqdx) ||
+            (res_length > 6 * units::cm && ave_res_dQ_dx > 1.85 * m_mip_dqdx) ||
+            (res_length > 6 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
             (res_length > 4 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.4 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > 0.02) ||
@@ -2160,7 +2184,9 @@ private:
             // Use helper functions from PRSegmentFunctions.h
             double track_length1 = segment_track_length(segment, 1) / units::cm;
             double track_medium_dQ_dx = segment_median_dQ_dx(segment) * units::cm / m_mip_dqdx;
-            double track_length_threshold = segment_track_length_threshold(segment, 75000./units::cm) / units::cm;
+            // 75000 e/cm was 1.5 x MicroBooNE's 50000 MIP; the argument is a
+            // dQ/dx per internal length unit, hence the /units::cm.
+            double track_length_threshold = segment_track_length_threshold(segment, 1.5 * m_mip_dqdx / units::cm) / units::cm;
             
             
 
@@ -2206,6 +2232,13 @@ private:
 
                 if (track_length1 < 5 && track_medium_dQ_dx < 2) continue;
                 else if (track_length1 < 25 && track_medium_dQ_dx < 1) continue;
+                // 85/50. and 110/50. are ALREADY in the a x MIP form this file
+                // now uses everywhere: track_medium_dQ_dx is measured/m_mip_dqdx,
+                // so these are 1.7 and 2.2 MIP.  Left as written fractions
+                // because the spelled-out 50 is the direct evidence that
+                // MicroBooNE's MIP reference -- not the 48879 e/cm table plateau
+                // -- is the scale the absolute literals here were written on.
+                // Doc 57 sec 5a.
                 else if (track_length1 < 10 && track_medium_dQ_dx < 85/50.) continue;
                 else if (track_length1 < 3.5 && track_medium_dQ_dx < 110/50.) continue;
                 else return true;
