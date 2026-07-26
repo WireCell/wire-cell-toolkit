@@ -123,6 +123,11 @@ namespace WireCell::Clus {
         std::map<std::string, ApaBeePoints> m_bee_points;
 
         // New helper function to fill bee points
+        // doc 53: re-stamp "real_cluster_id" into ONE globally unique ident
+        // epoch.  Called once per event after the clustering pipeline and
+        // BEFORE the Bee fills, so the Bee per-blob labels and the saved pctree
+        // carry the same ids.
+        void restamp_real_cluster_id(Facade::Grouping& grouping) const;
         void fill_bee_points(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster,
@@ -246,12 +251,16 @@ namespace WireCell::Clus {
         // becomes a valid event-wide key.  A cluster that was never merged is
         // rewritten to exactly the values it already had.
         //
-        // SCOPE: this runs in the tensor-save block, i.e. AFTER every
-        // fill_bee_points() call, so it rewrites the SAVED PCTREE only.  The Bee
-        // zip this same node writes still carries the legacy two-epoch labels
-        // (measured: 10/10 pctree tarballs change, 30/30 Bee zips byte-identical).
-        // Fixing the Bee labels too would mean moving the re-stamp ahead of the
-        // Bee fills -- deliberately not done here.
+        // SCOPE: restamp_real_cluster_id() runs once per event right after the
+        // clustering pipeline and BEFORE the Bee fills, so the Bee per-blob
+        // label and the saved pctree carry the SAME ids.  Per-visitor Bee dumps
+        // (trace_bee) are mid-pipeline snapshots and necessarily keep whatever
+        // ids existed at that step.
+        //
+        // NOT gated on save_real_cluster_id: examine_bundles writes the array in
+        // memory whether or not the tarball is saved, so the Bee labels are
+        // affected either way.  Detectors that never write it (PDHD, PDVD --
+        // their examine_bundles is disabled) see a structural no-op.
         //
         // Gated by save_real_cluster_id, so it is a STRUCTURAL no-op wherever
         // that is off -- i.e. every detector but SBND.  Set false only to

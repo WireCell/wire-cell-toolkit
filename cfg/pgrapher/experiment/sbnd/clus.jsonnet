@@ -416,9 +416,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // installed since, so 31% of values name two clusters -- fine for
             // the within-cluster consumers, wrong for anything that joins on it.
             // Group membership is unchanged either way, so the un-merge and TGM
-            // are verdict-neutral.  Applies to the SAVED PCTREE only: the
-            // re-stamp runs after every fill_bee_points(), so this node's Bee zip
-            // is byte-identical either way.
+            // are verdict-neutral.  Applies to BOTH the saved pctree and this
+            // node's Bee per-blob labels: the re-stamp runs right after the
+            // clustering pipeline, before the Bee fills.  Per-step trace_bee
+            // layers are mid-pipeline snapshots and keep their own ids.
             // TRISTATE: C++ default TRUE (doc 53, owner decision); null here =
             // inherit, key omitted.  Pass false ONLY to reproduce the two-epoch
             // values for A/B archaeology.  Gated by save_real_cluster_id, so it
