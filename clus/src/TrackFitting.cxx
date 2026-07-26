@@ -2060,7 +2060,13 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             );
             pts.push_back(extended_p1);
         }
-    } else {
+    } else if (!pts.empty()) {
+        // pts can still be empty here: a single-point ps_vec pushes nothing in
+        // the beginning block (dis1 == 0) and takes the `continue` branch in
+        // the middle loop (dis == 0), so pts.back() below would read before the
+        // allocation (doc 60 §4).  Output is unchanged either way -- whatever
+        // this branch pushes onto an empty pts leaves size 1, which the
+        // pts.size() <= 1 fallback overwrites with ps_vec regardless.
         WireCell::Point p1 = ps_vec.back();
         double dis1 = sqrt(pow(p1.x() - pts.back().x(), 2) + pow(p1.y() - pts.back().y(), 2) + pow(p1.z() - pts.back().z(), 2));
         if (dis1 >= 0.45*units::cm)
@@ -8492,6 +8498,23 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         //     // pts.push_back(WireCell::Point(212.117 * units::cm, -101.817 * units::cm, 212.831 * units::cm));
         //     // pts.push_back(WireCell::Point(211.977 * units::cm, -102.455 * units::cm, 212.891 * units::cm));
         // }    
+
+        // A degenerate candidate can be whittled down to a single point by the
+        // 2nd trajectory_fit (doc 60; SBND evt 278794, a 4.7 cm 5-point steiner
+        // stub from TaggerCheckSTM::search_other_tracks went 5 -> 3 -> 1).
+        // dQ_dx_fit and dQ_dx_fill then both bail out at their
+        // fine_tracking_path.size() <= 1 guard -- prototype
+        // (PR3DCluster_dQ_dx_fit.h lines 267, 369) does the same -- leaving
+        // dQ/dx/reduced_chi2 empty while pu..paf below would get one entry
+        // each, which trips the consistency check at the end of this function.
+        // The prototype carries the empty dQ and lets its caller drop the track
+        // (`if (dQ.size() > 1)`, PR3DCluster_pattern_recognition.h line 262);
+        // our caller already tests fits().size() > 1 (TaggerCheckSTM.cxx), so
+        // return with every output vector still cleared and let it filter.
+        // Mirrors the ptss.size() <= 1 guard after the 1st pass above.  Must
+        // sit inside the flag_2nd_tracking block: the projection loop is here,
+        // not after it.
+        if (pts.size() <= 1) return;
 
         // Generate 2D projections
         pu.clear();
