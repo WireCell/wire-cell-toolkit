@@ -125,6 +125,21 @@ namespace WireCell::Clus::Facade {
     // ident() of the sub-cluster each blob came from, so a downstream consumer
     // (e.g. the Bee writer) can recover the pre-merge cluster identity of every
     // blob.  This is independent of the aname/parent_id ("perblob") array above.
+    //
+    // SCOPE INVARIANT -- the recorded ids are meaningful only WITHIN one
+    // cluster.  Equal values in two DIFFERENT clusters name different objects
+    // and must never be joined on.  MultiAlgBlobClustering re-runs
+    // Grouping::enumerate_idents() after every visitor, so the ident() values
+    // captured here belong to the numbering epoch in force at THIS call, while
+    // the save-time fill-in for a cluster that was never merged writes the
+    // ident of the LATEST epoch.  Both epochs are dense 1..N and nothing in the
+    // array says which one a row belongs to, so the two overlap: measured 31%
+    // of distinct "real_cluster_id" values name two clusters on the SBND d52ron
+    // 30-event set (all of them recorded-vs-fill-in; recorded-vs-recorded
+    // cannot collide, since idents are unique at the instant of this call).
+    // See sbnd_xin/docs/53_unmerge-vs-cathode-crossers.md.  Set
+    // MultiAlgBlobClustering's "real_cluster_id_global" to re-stamp the array
+    // into one globally unique epoch at save time.
     // flags_from_longest (default false = historical behavior): Cluster::from()
     // is called once per member and flags_from() copies the donor's flag VALUES
     // (including zeros), so the merged cluster's flags are those of whichever

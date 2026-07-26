@@ -221,7 +221,42 @@ namespace WireCell::Clus {
         // through; the fill-in values reproduce exactly what a reader would
         // assume for an unmerged cluster, so nothing downstream changes except
         // that the arrays now exist after a load.
+        //
+        // SCOPE INVARIANT: "real_cluster_id" is meaningful only WITHIN one
+        // cluster -- see the merge_clusters() comment in ClusteringFuncs.h.
+        // The recorded values come from the ident numbering in force when
+        // examine_bundles ran; the fill-in below uses the CURRENT numbering
+        // (enumerate_idents re-runs after every visitor).  The two epochs
+        // overlap, so joining on this value across clusters is wrong.
         bool m_save_real_cluster_id{false};
+        // real_cluster_id_global (default TRUE since doc 53, owner decision):
+        // re-stamp "real_cluster_id" at save time into ONE globally unique
+        // epoch -- the representative rows (real_cluster_main != 0) take the
+        // cluster's own current ident, every other pre-merge group takes a
+        // fresh id above the largest ident in the grouping.  Without it the
+        // array mixes the ident numbering merge_clusters recorded with the one
+        // enumerate_idents has installed since, and 31% of values name two
+        // clusters (SBND d52ron 30-event set).
+        //
+        // Group membership is untouched, so consumers that only compare rows
+        // within a cluster (ClusteringUnmergeBundle, TaggerCheckTGM
+        // main_component_mode="real") are behaviourally unchanged -- measured:
+        // partition and real_cluster_main byte-equal over 179 clusters, nusel
+        // verdict tables row-for-row identical.  What changes is that the value
+        // becomes a valid event-wide key.  A cluster that was never merged is
+        // rewritten to exactly the values it already had.
+        //
+        // SCOPE: this runs in the tensor-save block, i.e. AFTER every
+        // fill_bee_points() call, so it rewrites the SAVED PCTREE only.  The Bee
+        // zip this same node writes still carries the legacy two-epoch labels
+        // (measured: 10/10 pctree tarballs change, 30/30 Bee zips byte-identical).
+        // Fixing the Bee labels too would mean moving the re-stamp ahead of the
+        // Bee fills -- deliberately not done here.
+        //
+        // Gated by save_real_cluster_id, so it is a STRUCTURAL no-op wherever
+        // that is off -- i.e. every detector but SBND.  Set false only to
+        // reproduce the two-epoch values for A/B archaeology.
+        bool m_real_cluster_id_global{true};
         // save_assoc_cluster_id (default false = byte-identical legacy tarball):
         // the same homogenization for the isolated grouping's provenance pair
         // "assoc_cluster_id" / "assoc_cluster_main" (doc 52 Stage 1/2), written

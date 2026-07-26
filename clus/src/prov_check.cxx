@@ -16,6 +16,13 @@
 //    cm), so its blob centers must be spatially compact.  A group whose
 //    max distance from its own centroid exceeds ~25 cm can only be rows
 //    attached to the wrong blobs.
+//  * cross-cluster reuse count for "real_cluster_id" (doc 53): that array is
+//    meaningful only WITHIN a cluster, because merge_clusters records the ident
+//    numbering of its own epoch while the save-time fill-in uses the current one
+//    and enumerate_idents re-runs after every visitor.  This is NOT reported as
+//    a problem -- with real_cluster_id_global off it is the expected state, and
+//    counting it is the whole point: it makes an invariant that used to be
+//    invisible show up in the log, and it drops to 0 when the knob is on.
 //
 // Enabled ONLY by env WCT_PROV_CHECK=1 -- production runs never pay for it and
 // never log from it.  Works on the raw pctree node so it can run both where
@@ -52,6 +59,9 @@ size_t WireCell::Clus::Facade::check_perblob_provenance(
     int worst_ic = -1, worst_gid = -2;
     std::array<double, 3> worst_ctr{0, 0, 0};
 
+    // real_cluster_id value -> the clusters that use it (see the header note).
+    std::map<int, std::set<int>> rid_owners;
+
     int ic = -1;
     for (const auto* cnode : groot.children()) {
         ++ic;
@@ -75,6 +85,14 @@ size_t WireCell::Clus::Facade::check_perblob_provenance(
             }
         }
         if (!len_ok) continue;
+
+        // Cross-cluster reuse of "real_cluster_id" (diagnostic, never a problem).
+        if (const auto rid = ds.get("real_cluster_id")) {
+            const auto vrid = rid->elements<int>();
+            if (vrid.size() == nb) {
+                for (size_t i = 0; i < nb; ++i) rid_owners[vrid[i]].insert(ic);
+            }
+        }
 
         const auto aid = ds.get("assoc_cluster_id");
         const auto amain = ds.get("assoc_cluster_main");
@@ -138,10 +156,19 @@ size_t WireCell::Clus::Facade::check_perblob_provenance(
         }
     }
 
+    size_t rid_reused = 0;
+    for (const auto& [val, owners] : rid_owners) {
+        if (owners.size() > 1) ++rid_reused;
+    }
+
     log->info("[provchk:{}] {} clusters ({} with perblob): {} problem(s); "
               "worst assoc-group rmax {:.1f} cm (cluster#{} grp {} at ({:.1f},{:.1f},{:.1f}) cm)",
               tag, nclus, nwith, nbad, worst / units::cm, worst_ic, worst_gid,
               worst_ctr[0] / units::cm, worst_ctr[1] / units::cm, worst_ctr[2] / units::cm);
+    log->info("[provchk:{}] real_cluster_id: {} distinct value(s), {} naming more than "
+              "one cluster (expected non-zero unless real_cluster_id_global is on; "
+              "the value is a WITHIN-cluster key -- never join on it across clusters)",
+              tag, rid_owners.size(), rid_reused);
     return nbad;
 }
 

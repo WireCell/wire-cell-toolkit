@@ -196,6 +196,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
     m_save_real_cluster_id = get(cfg, "save_real_cluster_id", m_save_real_cluster_id);
     m_save_assoc_cluster_id = get(cfg, "save_assoc_cluster_id", m_save_assoc_cluster_id);
+    m_real_cluster_id_global = get(cfg, "real_cluster_id_global", m_real_cluster_id_global);
     m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
 
     m_save_opflash = get(cfg, "save_opflash", m_save_opflash);
@@ -394,6 +395,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["save_deadarea"] = m_save_deadarea;
     cfg["save_real_cluster_id"] = m_save_real_cluster_id;
     cfg["save_assoc_cluster_id"] = m_save_assoc_cluster_id;
+    cfg["real_cluster_id_global"] = m_real_cluster_id_global;
 
     // Add the new parameter to default configuration
     cfg["initial_index"] = m_initial_index;
@@ -2428,6 +2430,64 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                     cluster->put_pcarray(std::vector<int>(nb, 1),
                                          "real_cluster_main", "perblob");
                 }
+            }
+            // real_cluster_id_global (doc 53): collapse the two ident numbering
+            // epochs this array mixes -- merge_clusters recorded the epoch in
+            // force when examine_bundles ran, the fill-in above uses the current
+            // one, enumerate_idents re-runs after every visitor, and both are
+            // dense 1..N -- into ONE event-wide epoch.  Must run AFTER the
+            // fill-in so every cluster has the pair.
+            //
+            // Representative rows (real_cluster_main != 0) take the cluster's
+            // own current ident; each other pre-merge group takes a fresh id
+            // above the largest ident in the grouping.  So:
+            //   - group MEMBERSHIP is untouched => every consumer that compares
+            //     rows within one cluster (ClusteringUnmergeBundle's split,
+            //     TaggerCheckTGM main_component_mode="real") is unchanged;
+            //   - a cluster nothing merged already reads own-ident/main=1, so it
+            //     is rewritten to exactly the same values;
+            //   - the value becomes a valid event-wide key, and the Bee writer's
+            //     per-blob label for a merged cluster's representative finally
+            //     equals that cluster's id, which it always assumed.
+            // Deterministic: clusters in children() (tree) order, ids handed out
+            // in ascending old-value order.  No pointer-keyed iteration.
+            if (m_real_cluster_id_global) {
+                int next = 0;
+                for (const Cluster* cluster : grouping.children()) {
+                    next = std::max(next, cluster->ident());
+                }
+                ++next;
+                size_t nstamped = 0;
+                for (Cluster* cluster : grouping.children()) {
+                    if (!cluster->has_pcarray<int>("real_cluster_id", "perblob")) continue;
+                    if (!cluster->has_pcarray<int>("real_cluster_main", "perblob")) continue;
+                    const size_t nb = cluster->nchildren();
+                    auto rid = cluster->get_pcarray<int>("real_cluster_id", "perblob");
+                    auto rmain = cluster->get_pcarray<int>("real_cluster_main", "perblob");
+                    // Fail open, as every other provenance carve does.
+                    if (rid.size() != nb || rmain.size() != nb) {
+                        log->warn("real_cluster_id_global: cluster {} has {}/{} rows for {} "
+                                  "blobs, not re-stamped", cluster->ident(),
+                                  rid.size(), rmain.size(), nb);
+                        continue;
+                    }
+                    std::map<int, int> remap;          // old id -> fresh id, ascending
+                    for (size_t i = 0; i < nb; ++i) {
+                        if (rmain[i] == 0) remap.emplace(rid[i], 0);
+                    }
+                    for (auto& [old_id, fresh] : remap) {
+                        (void) old_id;
+                        fresh = next++;
+                    }
+                    std::vector<int> out(nb);
+                    for (size_t i = 0; i < nb; ++i) {
+                        out[i] = rmain[i] != 0 ? cluster->ident() : remap.at(rid[i]);
+                    }
+                    cluster->put_pcarray(out, "real_cluster_id", "perblob");
+                    ++nstamped;
+                }
+                log->debug("real_cluster_id_global: re-stamped {} cluster(s) into one epoch, "
+                           "ids 1..{}", nstamped, next - 1);
             }
         }
         auto node = ensemble.remove_child(grouping);

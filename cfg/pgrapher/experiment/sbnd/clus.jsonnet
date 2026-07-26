@@ -322,7 +322,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // 'clustering_') to that file -- the persistent intermediate format consumed by
 // the downstream pattern-recognition job (see sbnd/docs/sbnd-pattern-recognition.md).
 // Default '' keeps the historical dump_mode no-op sink (byte-identical).
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false) = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -410,6 +410,20 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
             // assoc_cluster_id/assoc_cluster_main survive into the PR job's
             // pctree tarball.  C++ default false; key omitted when off.
             [if save_assoc_cluster_id then 'save_assoc_cluster_id']: true,
+            // Re-stamp real_cluster_id at save time into ONE globally unique
+            // ident epoch (doc 53).  Without it the array mixes the numbering
+            // examine_bundles recorded with the numbering enumerate_idents has
+            // installed since, so 31% of values name two clusters -- fine for
+            // the within-cluster consumers, wrong for anything that joins on it.
+            // Group membership is unchanged either way, so the un-merge and TGM
+            // are verdict-neutral.  Applies to the SAVED PCTREE only: the
+            // re-stamp runs after every fill_bee_points(), so this node's Bee zip
+            // is byte-identical either way.
+            // TRISTATE: C++ default TRUE (doc 53, owner decision); null here =
+            // inherit, key omitted.  Pass false ONLY to reproduce the two-epoch
+            // values for A/B archaeology.  Gated by save_real_cluster_id, so it
+            // is a structural no-op wherever that is off.
+            [if real_cluster_id_global != null then 'real_cluster_id_global']: real_cluster_id_global,
             // Dump the optical flash / charge-light "op" display into this same
             // mabc-all-apa.zip (reads the merged-root "opflash" PC + per-cluster
             // matched-flash association written by QLMatching). bee_detector
@@ -918,12 +932,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
-            trace_bee=false)::
+            trace_bee=false, real_cluster_id_global=null)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
                      save_assoc_cluster_id=save_assoc_cluster_id,
+                     real_cluster_id_global=real_cluster_id_global,
                      trace_bee=trace_bee),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
