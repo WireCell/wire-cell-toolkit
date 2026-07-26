@@ -413,7 +413,9 @@ private:
     // re-tuning: at the default 50e3 each product is bit-identical to the
     // literal it replaced.  At SBND's 56000 the seven now follow the MIP scale
     // like the ~33 ratio cuts already did.  Anything ADDED here must use the
-    // same form.
+    // same form: a * m_mip_dqdx, never an absolute e/cm literal.  That is the
+    // convention going forward (owner decision 2026-07-26, after the 30-event
+    // A/B in doc 57 sec 5a-bis came back bit-identical).
     double m_mip_dqdx{50e3};
 
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
