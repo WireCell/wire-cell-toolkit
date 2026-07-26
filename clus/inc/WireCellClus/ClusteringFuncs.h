@@ -180,6 +180,24 @@ namespace WireCell::Clus::Facade {
         const WireCell::PointCloud::Tree::Points::node_t& groot,
         const std::string& tag);
 
+    // Restore the "perblob" row-i == child-i invariant after a
+    // separate-then-merge-back (or total take-back) round trip.  The round
+    // trip permutes the blob children -- kept (cc<0) blobs stay in place,
+    // split-off groups are re-appended at the END in ascending group-id order
+    // (both FacadeParent::merge() and an ascending-key take_children loop do
+    // this) -- while the cluster's node-local per-blob Dataset keeps its
+    // original row order.  This applies the SAME permutation to the whole
+    // Dataset (all arrays at once, via Dataset::subset), exactly as
+    // QLMatching::recompose_cluster_groups() does (doc 52 §12.4).  `cc` is
+    // the per-blob group array that was given to separate(), in PRE-split
+    // children order.  Fail-open no-op (returns false) unless the Dataset
+    // exists and both its major size and the cluster's current child count
+    // equal cc.size() -- so at any pipeline stage where the array was never
+    // written this is byte-identical to not calling it.
+    bool realign_perblob_after_regroup(Cluster& cluster,
+                                       const std::vector<int>& cc,
+                                       const std::string& pcname = "perblob");
+
 
 
     /**

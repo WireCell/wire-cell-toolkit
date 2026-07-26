@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <vector>
 
 using namespace WireCell;
@@ -142,4 +143,38 @@ size_t WireCell::Clus::Facade::check_perblob_provenance(
               tag, nclus, nwith, nbad, worst / units::cm, worst_ic, worst_gid,
               worst_ctr[0] / units::cm, worst_ctr[1] / units::cm, worst_ctr[2] / units::cm);
     return nbad;
+}
+
+bool WireCell::Clus::Facade::realign_perblob_after_regroup(
+    Cluster& cluster, const std::vector<int>& cc, const std::string& pcname)
+{
+    const size_t nb = cc.size();
+    if (!nb) return false;
+
+    auto& lpcs = cluster.value().local_pcs();
+    auto it = lpcs.find(pcname);
+    if (it == lpcs.end()) return false;
+    if (it->second.size_major() != nb) return false;
+    if ((size_t) cluster.nchildren() != nb) return false;
+
+    // The post-round-trip children order: kept (cc<0) blobs first in original
+    // relative order, then each non-negative group id ascending, rows in
+    // original relative order within a group.
+    std::vector<size_t> rows;
+    rows.reserve(nb);
+    for (size_t i = 0; i < nb; ++i) {
+        if (cc[i] < 0) rows.push_back(i);
+    }
+    std::set<int> gids;
+    for (int v : cc) {
+        if (v >= 0) gids.insert(v);
+    }
+    for (int gid : gids) {
+        for (size_t i = 0; i < nb; ++i) {
+            if (cc[i] == gid) rows.push_back(i);
+        }
+    }
+
+    it->second = it->second.subset(rows);
+    return true;
 }
