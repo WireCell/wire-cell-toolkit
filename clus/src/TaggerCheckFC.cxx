@@ -97,6 +97,19 @@ public:
         // flag_main_cluster; those shards are non-physical and are excluded
         // from the label table, so evaluating them here only wastes time.
         m_require_in_scope = get(config, "require_in_scope", m_require_in_scope);
+        // beam_window_only + beam_window_low/high (all C++-default off =>
+        // byte-identical legacy behavior): evaluate only the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) lies in
+        // [low, high).  Same gate and same window as the steiner stage and
+        // TaggerCheckTGM/TaggerCheckSTM.  cluster_fc_check reads only the
+        // cluster handed to it, so gating removes verdicts without changing any.
+        m_beam_window_only = get(config, "beam_window_only", m_beam_window_only);
+        m_beam_window_low = get(config, "beam_window_low", m_beam_window_low);
+        m_beam_window_high = get(config, "beam_window_high", m_beam_window_high);
+        if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
+            SPDLOG_LOGGER_WARN(f_log, "configure: TaggerCheckFC: beam_window_only set but the window is empty ([{}, {}) us) -- gate disabled, every main evaluated",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us);
+        }
     }
 
     virtual Configuration default_configuration() const {
@@ -109,6 +122,11 @@ public:
         cfg["fiducial"] = Json::Value();   // null = use FiducialUtils
         cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
+        // Evaluate only mains whose cluster_t0 is in [low, high); false (or an
+        // empty window) = every main, i.e. legacy behavior.
+        cfg["beam_window_only"] = m_beam_window_only;
+        cfg["beam_window_low"] = m_beam_window_low;
+        cfg["beam_window_high"] = m_beam_window_high;
         return cfg;
     }
 
@@ -117,19 +135,34 @@ public:
         if (groupings.empty()) return;
         auto& grouping = *groupings.at(0);
 
+        const bool beam_gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
+
         std::vector<Cluster*> main_clusters;
         int n_out_of_scope = 0;
+        int n_out_of_window = 0;
         for (auto* cluster : grouping.children()) {
             if (!cluster->get_flag(Flags::main_cluster)) continue;
             if (m_require_in_scope && !cluster->get_scope_filter(cluster->get_default_scope())) {
                 ++n_out_of_scope;
                 continue;
             }
+            if (beam_gate) {
+                const double t0 = cluster->get_cluster_t0();
+                if (t0 < m_beam_window_low || t0 >= m_beam_window_high) {
+                    ++n_out_of_window;
+                    continue;
+                }
+            }
             main_clusters.push_back(cluster);
         }
         if (n_out_of_scope) {
             SPDLOG_LOGGER_INFO(f_log, "visit: TaggerCheckFC: skipped {} out-of-scope main cluster(s)",
                                n_out_of_scope);
+        }
+        if (beam_gate) {
+            SPDLOG_LOGGER_INFO(f_log, "visit: TaggerCheckFC: beam_window_only [{:.3f}, {:.3f}) us: {} main(s) evaluated, {} out of window",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us,
+                               main_clusters.size(), n_out_of_window);
         }
         if (main_clusters.empty()) return;
 
@@ -163,4 +196,8 @@ private:
     // see.  SBND sets both keys so FC and TGM share one fiducial (doc 27).
     bool m_use_fiducial{false};
     std::vector<double> m_fv_tolerance;
+    // Beam-window gate on cluster_t0 (see configure()).  Off by default.
+    bool m_beam_window_only{false};
+    double m_beam_window_low{0};
+    double m_beam_window_high{0};
 };

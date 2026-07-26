@@ -2,7 +2,9 @@
 #include "SteinerGrapher.h"
 
 #include "WireCellClus/Graphs.h"
+#include <algorithm>
 #include <chrono>
+#include <unordered_set>
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellClus/ClusteringFuncs.h"
@@ -36,6 +38,14 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
 
     m_perf = get(cfg, "perf", m_perf);
     m_require_beam_flash = get(cfg, "require_beam_flash", m_require_beam_flash);
+    m_beam_window_only = get(cfg, "beam_window_only", m_beam_window_only);
+    m_beam_window_low = get(cfg, "beam_window_low", m_beam_window_low);
+    m_beam_window_high = get(cfg, "beam_window_high", m_beam_window_high);
+    if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
+        log->warn("configure: beam_window_only set but the window is empty "
+                  "([{}, {}) us) -- gate disabled, every cluster processed",
+                  m_beam_window_low/units::us, m_beam_window_high/units::us);
+    }
     m_grapher_config.dv = m_dv;
     m_grapher_config.pcts = m_pcts;
     m_grapher_config.perf = m_perf; // propagate perf flag into Grapher instances
@@ -59,6 +69,14 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // (post-QL-matching detectors without that flag) processes every
     // scope-passing cluster, mains recognized by their main_cluster flag.
     cfg["require_beam_flash"] = m_require_beam_flash;
+    // If true, process only the beam-coincident bundle: clusters whose
+    // matched flash time (cluster_t0) is in [beam_window_low,
+    // beam_window_high) plus the companions sharing their matched_flash_gid.
+    // Default false = every cluster, i.e. legacy behavior; the window is also
+    // ignored when low >= high.
+    cfg["beam_window_only"] = m_beam_window_only;
+    cfg["beam_window_low"] = m_beam_window_low;
+    cfg["beam_window_high"] = m_beam_window_high;
 
     return cfg;
 }
@@ -95,6 +113,48 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
         else {
             filtered_clusters.push_back(cluster);
+        }
+    }
+
+    // Beam-window gate: keep only the beam-coincident bundle(s) -- the main
+    // clusters whose matched flash time (cluster_t0) lies in [low, high) plus
+    // the companions sharing their matched_flash_gid (the same pairing rule
+    // TaggerCheckSTM uses).  The downstream taggers carry the same gate, so
+    // the clusters dropped here are exactly the ones no tagger evaluates.
+    // The surviving vector is a subsequence of the ungated one, so the
+    // processing order of the kept clusters is unchanged; the gid set is keyed
+    // by int, never by pointer.
+    if (m_beam_window_only && m_beam_window_low < m_beam_window_high) {
+        auto in_window = [this](const Cluster* c) {
+            const double t0 = c->get_cluster_t0();
+            return t0 >= m_beam_window_low && t0 < m_beam_window_high;
+        };
+        std::unordered_set<int> beam_gids;
+        size_t n_main_in = 0;
+        for (auto* cluster : filtered_clusters) {
+            if (!cluster->get_flag(Flags::main_cluster)) continue;
+            if (!in_window(cluster)) continue;
+            ++n_main_in;
+            const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+            if (gid >= 0) beam_gids.insert(gid);
+        }
+        std::vector<Cluster*> beam_clusters;
+        for (auto* cluster : filtered_clusters) {
+            const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+            const bool companion = !cluster->get_flag(Flags::main_cluster)
+                && gid >= 0 && beam_gids.count(gid) > 0;
+            if (in_window(cluster) || companion) beam_clusters.push_back(cluster);
+        }
+        SPDLOG_LOGGER_INFO(log, "CreateSteinerGraph: beam_window_only [{:.3f}, {:.3f}) us: kept {} of {} cluster(s) ({} in-window main(s), {} flash group(s))",
+                           m_beam_window_low/units::us, m_beam_window_high/units::us,
+                           beam_clusters.size(), filtered_clusters.size(), n_main_in, beam_gids.size());
+        filtered_clusters.swap(beam_clusters);
+        // In require_beam_flash mode the single main is tracked separately; it
+        // must not survive the swap if the gate dropped it.
+        if (main_cluster
+            && std::find(filtered_clusters.begin(), filtered_clusters.end(), main_cluster)
+               == filtered_clusters.end()) {
+            main_cluster = nullptr;
         }
     }
 

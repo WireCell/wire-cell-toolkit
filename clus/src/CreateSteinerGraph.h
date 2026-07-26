@@ -38,6 +38,18 @@ namespace WireCell::Clus::Steiner {
         // beam_flash flag: set false to process every scope-passing cluster,
         // with each flagged main cluster getting the main treatment.
         bool m_require_beam_flash{true};
+        // Beam-window gate on the matched flash time (cluster_t0), the same
+        // [low, high) test TaggerCheckNeutrino/TaggerCheckTGM use.  When
+        // m_beam_window_only is false (default) or the window is empty
+        // (low >= high) every cluster selected by the rule above is processed,
+        // i.e. legacy behavior.  When on, only the beam-coincident bundle is
+        // retiled/graphed: its in-window main clusters plus the companions
+        // sharing their matched_flash_gid.  The downstream taggers
+        // (TGM/STM/FC) carry the same gate, so the clusters that lose their
+        // steiner graph are exactly the ones no tagger evaluates.
+        bool m_beam_window_only{false};
+        double m_beam_window_low{0};
+        double m_beam_window_high{0};
 
         Grapher::Config m_grapher_config;
 

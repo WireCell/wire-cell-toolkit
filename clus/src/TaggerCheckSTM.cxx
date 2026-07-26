@@ -130,6 +130,22 @@ public:
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: mip_dqdx = {} e/cm (default 50000)", m_mip_dqdx);
         }
 
+        // beam_window_only + beam_window_low/high (all C++-default off =>
+        // byte-identical legacy behavior): evaluate only the beam-coincident
+        // bundle, i.e. the main clusters whose matched flash time (cluster_t0)
+        // lies in [low, high) -- the same gate TaggerCheckTGM/TaggerCheckFC and
+        // the steiner stage carry, and the same window TaggerCheckNeutrino uses
+        // to pick its bundle.  Only the loop population changes: a surviving
+        // main's verdict is computed from itself and its own matched_flash_gid
+        // companions, so gating cannot perturb it.
+        m_beam_window_only = get<bool>(config, "beam_window_only", m_beam_window_only);
+        m_beam_window_low = get<double>(config, "beam_window_low", m_beam_window_low);
+        m_beam_window_high = get<double>(config, "beam_window_high", m_beam_window_high);
+        if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
+            SPDLOG_LOGGER_WARN(s_log, "configure: TaggerCheckSTM: beam_window_only set but the window is empty ([{}, {}) us) -- gate disabled, every main evaluated",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us);
+        }
+
         m_trackfitting_config_file = get<std::string>(config, "trackfitting_config_file", "");
 
         if (!m_trackfitting_config_file.empty()) {
@@ -154,6 +170,11 @@ public:
         // Set to [w_min, w_max] W-wire index range to enable. Example: [7135, 7264] for UBoone.
         cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
+        // Evaluate only mains whose cluster_t0 is in [low, high); false (or an
+        // empty window) = every main, i.e. legacy behavior.
+        cfg["beam_window_only"] = m_beam_window_only;
+        cfg["beam_window_low"] = m_beam_window_low;
+        cfg["beam_window_high"] = m_beam_window_high;
         cfg["save_stm_fit"] = m_save_stm_fit;
         cfg["mip_dqdx"] = m_mip_dqdx;
         // Null/empty => the historical FiducialUtils containment (union of
@@ -187,6 +208,8 @@ public:
         std::vector<Cluster*> associated_all;
 
         int n_out_of_scope = 0;
+        int n_out_of_window = 0;
+        const bool beam_gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
         for (auto* cluster : grouping.children()) {
             // See TaggerCheckTGM: switch_scope leaves out-of-volume shards in the
             // grouping carrying an inherited flag_main_cluster.  require_in_scope
@@ -195,15 +218,29 @@ public:
                 || cluster->get_scope_filter(cluster->get_default_scope());
             if (cluster->get_flag(Flags::main_cluster)) {
                 if (!in_scope) { ++n_out_of_scope; continue; }
+                if (beam_gate) {
+                    const double t0 = cluster->get_cluster_t0();
+                    if (t0 < m_beam_window_low || t0 >= m_beam_window_high) {
+                        ++n_out_of_window;
+                        continue;
+                    }
+                }
                 main_clusters.push_back(cluster);
             } else if (cluster->get_flag(Flags::associated_cluster)) {
                 if (!in_scope) continue;
+                // Not gated: the per-main loop below already keeps only the
+                // companions carrying the surviving main's matched_flash_gid.
                 associated_all.push_back(cluster);
             }
         }
         if (n_out_of_scope) {
             SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: skipped {} out-of-scope main cluster(s)",
                                n_out_of_scope);
+        }
+        if (beam_gate) {
+            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: beam_window_only [{:.3f}, {:.3f}) us: {} main(s) evaluated, {} out of window",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us,
+                               main_clusters.size(), n_out_of_window);
         }
 
         SPDLOG_LOGGER_TRACE(s_log, "visit: TaggerCheckSTM: Found {} main cluster(s); {} associated clusters.",
@@ -340,6 +377,10 @@ public:
 private:
     std::string m_grouping_name{"live"};
     bool m_require_in_scope{false};
+    // Beam-window gate on cluster_t0 (see configure()).  Off by default.
+    bool m_beam_window_only{false};
+    double m_beam_window_low{0};
+    double m_beam_window_high{0};
     std::string m_trackfitting_config_file;  // Path to TrackFitting config file
     // Shorted-wire-region guard for find_first_kink: W-wire index range [w_min, w_max).
     // -1/-1 means disabled (default, detector-agnostic).

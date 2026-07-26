@@ -63,6 +63,19 @@ public:
         m_grouping_name = get<std::string>(config, "grouping", m_grouping_name);
         m_beam_window_low = get(config, "beam_window_low", m_beam_window_low);
         m_beam_window_high = get(config, "beam_window_high", m_beam_window_high);
+        // beam_window_only (default false = evaluate every main cluster):
+        // restrict the tagger to the beam-coincident bundle, i.e. to mains
+        // whose matched flash time (cluster_t0) lies in the SAME
+        // [beam_window_low, beam_window_high) window the in-beam protection
+        // below already uses.  Off, or with an empty window (low >= high), the
+        // cluster selection is byte-identical to the pre-knob one.  Verdicts on
+        // the surviving mains are untouched: this only removes clusters from
+        // the loop, and each main's check_tgm() reads no other cluster.
+        m_beam_window_only = get(config, "beam_window_only", m_beam_window_only);
+        if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
+            SPDLOG_LOGGER_WARN(t_log, "configure: TaggerCheckTGM: beam_window_only set but the window is empty ([{}, {}) us) -- gate disabled, every main evaluated",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us);
+        }
         m_length_limit_frac = get(config, "length_limit_frac", m_length_limit_frac);
         m_enable_case_b = get(config, "enable_case_b", m_enable_case_b);
         // require_in_scope (default false = historical behavior): also require
@@ -197,6 +210,7 @@ public:
         cfg["interior_fv_tolerance"] = Json::Value(Json::arrayValue);
         cfg["beam_window_low"] = m_beam_window_low;   // window on cluster_t0; low >= high
         cfg["beam_window_high"] = m_beam_window_high; // disables the beam protection
+        cfg["beam_window_only"] = m_beam_window_only; // evaluate only in-window mains
         cfg["length_limit_frac"] = m_length_limit_frac;
         cfg["enable_case_b"] = m_enable_case_b;
         cfg["require_in_scope"] = m_require_in_scope;
@@ -220,19 +234,34 @@ public:
         if (groupings.empty()) return;
         auto& grouping = *groupings.at(0);
 
+        const bool beam_gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
+
         std::vector<Cluster*> main_clusters;
         int n_out_of_scope = 0;
+        int n_out_of_window = 0;
         for (auto* cluster : grouping.children()) {
             if (!cluster->get_flag(Flags::main_cluster)) continue;
             if (m_require_in_scope && !cluster->get_scope_filter(cluster->get_default_scope())) {
                 ++n_out_of_scope;
                 continue;
             }
+            if (beam_gate) {
+                const double t0 = cluster->get_cluster_t0();
+                if (t0 < m_beam_window_low || t0 >= m_beam_window_high) {
+                    ++n_out_of_window;
+                    continue;
+                }
+            }
             main_clusters.push_back(cluster);
         }
         if (n_out_of_scope) {
             SPDLOG_LOGGER_INFO(t_log, "visit: TaggerCheckTGM: skipped {} out-of-scope main cluster(s)",
                                n_out_of_scope);
+        }
+        if (beam_gate) {
+            SPDLOG_LOGGER_INFO(t_log, "visit: TaggerCheckTGM: beam_window_only [{:.3f}, {:.3f}) us: {} main(s) evaluated, {} out of window",
+                               m_beam_window_low/units::us, m_beam_window_high/units::us,
+                               main_clusters.size(), n_out_of_window);
         }
         if (main_clusters.empty()) return;
 
@@ -256,6 +285,7 @@ private:
     std::string m_grouping_name{"live"};
     double m_beam_window_low{0};
     double m_beam_window_high{0};
+    bool m_beam_window_only{false};
     double m_length_limit_frac{0.45};
     bool m_require_in_scope{false};
     bool m_enable_case_b{true};

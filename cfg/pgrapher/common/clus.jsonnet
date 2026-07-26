@@ -165,9 +165,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // verdicts; that also matches the prototype, where check_stm and
         // check_tgm are members of one ToyFiducial and share its boundaries.
         // fv_tolerance = [x_lo,x_hi,y_lo,y_hi,z_lo,z_hi], negative = inset.
+        // beam_window_only (C++ default false; keys omitted when off =>
+        // byte-identical pre-knob config): evaluate ONLY the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) is in
+        // [beam_window_low, beam_window_high).  Same gate as the steiner stage
+        // and tagger_check_{tgm,fc}; a surviving main's verdict is unchanged.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
                          require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
-                         fiducial=null, fv_tolerance=[]) :: {
+                         fiducial=null, fv_tolerance=[],
+                         beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -181,6 +187,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
               + (if fiducial != null then { fiducial: fiducial } else {})
               + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              + (if beam_window_only then {
+                     beam_window_only: true,
+                     beam_window_low: beam_window_low,
+                     beam_window_high: beam_window_high,
+                 } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
@@ -246,7 +257,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // per-blob "real_cluster_main" flash-merge provenance (exact, needs a
         // pctree saved with save_real_cluster_id; falls back to the proxy when
         // the array is absent).
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[]) :: {
+        // beam_window_only (C++ default false; key omitted when off =>
+        // byte-identical pre-knob config): evaluate ONLY the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) is in the
+        // SAME [beam_window_low, beam_window_high) window the in-beam
+        // protection already uses.  Same gate as the steiner stage and
+        // tagger_check_{stm,fc}; verdicts on surviving mains are unchanged.
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, beam_window_only=false, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[]) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -257,6 +274,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 length_limit_frac: length_limit_frac,
                 enable_case_b: enable_case_b,
             } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial })
+              + (if beam_window_only then { beam_window_only: true } else {})
               + (if require_in_scope then { require_in_scope: true } else {})
               + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {})
               + (if require_chord_charge then { require_chord_charge: true } else {})
@@ -296,14 +314,25 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // judge containment identically.  Pass the same values as
         // tagger_check_tgm.  The dead-region / signal-processing checks keep
         // using FiducialUtils either way, exactly as TaggerCheckTGM does.
-        tagger_check_fc(name="", fiducial="", fv_tolerance=[], require_in_scope=false) :: {
+        // beam_window_only (C++ default false; keys omitted when off =>
+        // byte-identical pre-knob config): evaluate ONLY the beam-coincident
+        // bundle, i.e. mains whose matched flash time (cluster_t0) is in
+        // [beam_window_low, beam_window_high).  Same gate as the steiner stage
+        // and tagger_check_{tgm,stm}.
+        tagger_check_fc(name="", fiducial="", fv_tolerance=[], require_in_scope=false,
+                        beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
             type: "TaggerCheckFC",
             name: prefix + name,
             data: {
                 grouping: "live",
             } + dv_cfg + pcts_cfg
               + (if fiducial == "" then {} else { fiducial: fiducial, fv_tolerance: fv_tolerance })
-              + (if require_in_scope then { require_in_scope: true } else {}),
+              + (if require_in_scope then { require_in_scope: true } else {})
+              + (if beam_window_only then {
+                     beam_window_only: true,
+                     beam_window_low: beam_window_low,
+                     beam_window_high: beam_window_high,
+                 } else {}),
         },
 
         tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0) :: {
@@ -886,7 +915,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Run steiner-related on clusters in grouping, saving graph to them of the given name.
         // require_beam_flash=true (uBooNE): only beam_flash-flagged clusters; false
         // (post-QL-matching detectors without that flag): every scope-passing cluster.
-        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true) :: {
+        // beam_window_only (C++ default false; keys omitted when off =>
+        // byte-identical pre-knob config): build steiner graphs ONLY for the
+        // beam-coincident bundle -- the main clusters whose matched flash time
+        // (cluster_t0) is in [beam_window_low, beam_window_high) plus the
+        // companions sharing their matched_flash_gid.  Pass the same window the
+        // taggers get: with tagger_check_{tgm,stm,fc} gated the same way, the
+        // clusters that lose their graph are exactly the ones no tagger reads.
+        steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
+                beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -895,7 +932,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 retiler: wc.tn(retiler),
                 perf: perf,
                 require_beam_flash: require_beam_flash,
-            } + dv_cfg + pcts_cfg,
+            } + dv_cfg + pcts_cfg
+              + (if beam_window_only then {
+                     beam_window_only: true,
+                     beam_window_low: beam_window_low,
+                     beam_window_high: beam_window_high,
+                 } else {}),
             uses: [detector_volumes, pc_transforms, retiler]
         },
 

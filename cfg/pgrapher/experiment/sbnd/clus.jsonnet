@@ -516,7 +516,23 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // Default TRUE = SBND production; pass false to restore the
               // pre-doc-49 FiducialUtils fallback for an A/B.  Details at the
               // tagger_check_stm call below.
-              stm_consistent_fv=true) = {
+              stm_consistent_fv=true,
+              // beam_window_only: run the PR tail (steiner + TGM + STM + FC)
+              // ONLY on the beam-coincident bundle -- the main clusters whose
+              // matched flash time (cluster_t0) falls in beam_window, plus (for
+              // steiner) the companions sharing their matched_flash_gid.
+              // DEFAULT TRUE = SBND production as of doc 56: the taggers are
+              // validated cosmic/containment verdicts for the beam bundle, and
+              // the out-of-time bundles they used to be run on are cosmics by
+              // construction (~11 bundles/event, 1 in window).  Pass false to
+              // restore the evaluate-every-bundle behavior (C++ knobs default
+              // off, keys omitted => compiled config byte-identical to the
+              // pre-doc-56 one).  Inert if beam_window is empty.
+              beam_window_only=true) = {
+    // Only gate when the caller actually supplied a window; beam_window=[0,0]
+    // (the arg default, i.e. "no beam window") must not silently drop every
+    // cluster's tagger evaluation.
+    local beam_gate = beam_window_only && beam_window[1] > beam_window[0],
     local dv = detector_volumes(anodes, '', pos_offset_on),
     local pcts = pctransforms(dv),
     // DetectorVolumes implements IFiducial -- used by MakeFiducialUtils / the
@@ -629,8 +645,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                                          id_aname='assoc_cluster_id',
                                          main_aname='assoc_cluster_main'),
         // SBND has no beam_flash flag (QLMatching sets main/associated_cluster
-        // instead) -- process every scope-passing cluster.
-        steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false),
+        // instead) -- process every scope-passing cluster, narrowed to the
+        // beam-coincident bundle when beam_window_only is on (the default; see
+        // the clus_pr argument).  Keys omitted when off => byte-identical.
+        steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false,
+                            beam_window_only=beam_gate,
+                            beam_window_low=beam_window[0],
+                            beam_window_high=beam_window[1]),
         fiducialutils: cm.fiducialutils(),
         tagger_check_stm: cm.tagger_check_stm(
             trackfitting_config_file=trackfitting_config_file,
@@ -670,7 +691,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // interior_fv_tolerance vector tagger_check_tgm needs has no
             // counterpart here.
             fiducial=(if stm_consistent_fv then wc.tn(sbnd_pr_fv) else null),
-            fv_tolerance=(if stm_consistent_fv then sbnd_pr_fv_margins else [])),
+            fv_tolerance=(if stm_consistent_fv then sbnd_pr_fv_margins else []),
+            // Beam-window gate on the main-cluster loop; see the clus_pr
+            // beam_window_only argument.  Keys omitted when off =>
+            // byte-identical.
+            beam_window_only=beam_gate,
+            beam_window_low=beam_window[0],
+            beam_window_high=beam_window[1]),
         // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
         // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
         // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
@@ -719,6 +746,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                                    then sbnd_pr_fv_margins_interior else []),
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
+            // Beam-window gate on the main-cluster loop -- the SAME window the
+            // in-beam protection above uses; see the clus_pr beam_window_only
+            // argument.  Key omitted when off => byte-identical.
+            beam_window_only=beam_gate,
             require_in_scope=true,
             check_neutrino_candidate=tgm_neutrino_candidate,
             require_chord_charge=tgm_chord_charge,
@@ -756,7 +787,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         tagger_check_fc: cm.tagger_check_fc(
             fiducial=wc.tn(sbnd_pr_fv),
             fv_tolerance=sbnd_pr_fv_margins,
-            require_in_scope=true),
+            require_in_scope=true,
+            // Beam-window gate on the main-cluster loop; see the clus_pr
+            // beam_window_only argument.  Keys omitted when off =>
+            // byte-identical.
+            beam_window_only=beam_gate,
+            beam_window_low=beam_window[0],
+            beam_window_high=beam_window[1]),
         // Neutrino pattern recognition on the beam-coincident bundle.  The
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the
@@ -951,7 +988,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
        save_stm_fit=false, unmerge_bundle_mode='real',
-       mip_dqdx=56000, stm_consistent_fv=true)::
+       mip_dqdx=56000, stm_consistent_fv=true, beam_window_only=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -974,6 +1011,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 save_stm_fit=save_stm_fit,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 mip_dqdx=mip_dqdx,
-                stm_consistent_fv=stm_consistent_fv),
+                stm_consistent_fv=stm_consistent_fv,
+                beam_window_only=beam_window_only),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
