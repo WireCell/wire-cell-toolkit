@@ -517,6 +517,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // pre-doc-49 FiducialUtils fallback for an A/B.  Details at the
               // tagger_check_stm call below.
               stm_consistent_fv=true,
+              // stm_accept_guards: the doc-63 round-1 STM acceptance guards
+              // (charge-desert one-objectness veto, spike-not-ramp nu-vertex
+              // veto, eval ratio2 normalization cap).  C++ default false;
+              // key omitted when off => byte-identical pre-knob config.
+              // Runner flag: run_nusel_evt.sh -stm-guards.
+              stm_accept_guards=false,
               // beam_window_only: run the PR tail (steiner + TGM + STM + FC)
               // ONLY on the beam-coincident bundle -- the main clusters whose
               // matched flash time (cluster_t0) falls in beam_window, plus (for
@@ -672,6 +678,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // and 56000 is as round a number as 50000 was.
             // NOT byte-identical -- see sbnd_xin/docs/48.
             mip_dqdx=mip_dqdx,
+            // accept_guards (C++ default false; key omitted when off =>
+            // byte-identical): doc-63 round-1 acceptance guards.
+            accept_guards=stm_accept_guards,
             // stm_consistent_fv (default TRUE = SBND production): give the
             // containment gate the SAME fiducial + margins tagger_check_tgm and
             // tagger_check_fc get, so "contained" means one thing across all
@@ -988,7 +997,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
        save_stm_fit=false, unmerge_bundle_mode='real',
-       mip_dqdx=56000, stm_consistent_fv=true, beam_window_only=true)::
+       mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=false,
+       beam_window_only=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1012,6 +1022,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 mip_dqdx=mip_dqdx,
                 stm_consistent_fv=stm_consistent_fv,
+                stm_accept_guards=stm_accept_guards,
                 beam_window_only=beam_window_only),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

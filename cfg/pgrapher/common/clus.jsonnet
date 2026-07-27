@@ -170,10 +170,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // bundle, i.e. mains whose matched flash time (cluster_t0) is in
         // [beam_window_low, beam_window_high).  Same gate as the steiner stage
         // and tagger_check_{tgm,fc}; a surviving main's verdict is unchanged.
+        // accept_guards (C++ default false; key omitted when off =>
+        // byte-identical pre-knob config): the doc-63 round-1 pass-level
+        // acceptance guards (charge-desert one-objectness, spike-not-ramp
+        // vertex veto, eval ratio2 normalization cap).  Guard thresholds keep
+        // their C++ defaults (measured on the doc-62 owner baseline); only
+        // the master switch is threaded here.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
                          require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
                          fiducial=null, fv_tolerance=[],
-                         beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
+                         beam_window_only=false, beam_window_low=0, beam_window_high=0,
+                         accept_guards=false) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -192,6 +199,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                      beam_window_low: beam_window_low,
                      beam_window_high: beam_window_high,
                  } else {})
+              + (if accept_guards then { accept_guards: true } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial

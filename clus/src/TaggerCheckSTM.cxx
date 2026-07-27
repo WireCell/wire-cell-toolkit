@@ -130,6 +130,36 @@ public:
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: mip_dqdx = {} e/cm (default 50000)", m_mip_dqdx);
         }
 
+        // accept_guards (C++ default false => byte-identical legacy): the
+        // doc-63 round-1 pass-level acceptance guards, designed against the
+        // owner-adjudicated 72-bundle baseline of sbnd_xin/docs/62 (every
+        // threshold measured there; see docs/63 sec 1 for the separations and
+        // margins).  Three guards, all rejecting an acceptance the legacy
+        // eval would have granted -- they can only turn STM into not-STM:
+        //   1. charge desert: the fitted muon segment bridges >= 3 cm of
+        //      essentially chargeless path (dQ/dx < 0.02 MIP) -- the fit ran
+        //      across detached objects (one-objectness, doc 61 sec 5e);
+        //   2. spike-not-ramp: the "Bragg" is a spike (peak within 1.5 cm of
+        //      the stop > 3.2x the 2-6 cm base) with a cold 1.5-4 cm shoulder
+        //      (< 1.8 MIP) -- a nu-vertex signature, not a stopping muon,
+        //      whose ramp elevates the shoulder;
+        //   3. ratio2 cap (inside eval_stm_core): the first acceptance branch
+        //      checks only that flat-MIP is a worse SHAPE than the muon
+        //      hypothesis, never that the measured charge is muon-NORMALIZED;
+        //      ratio2 > 2.0 means the accepted window sums more than 2x
+        //      below MIP -- a ghost, not an under-collected muon.
+        m_accept_guards = get<bool>(config, "accept_guards", m_accept_guards);
+        m_guard_desert_cm = get<double>(config, "guard_desert_cm", m_guard_desert_cm);
+        m_guard_desert_frac = get<double>(config, "guard_desert_frac", m_guard_desert_frac);
+        m_guard_spike_ratio = get<double>(config, "guard_spike_ratio", m_guard_spike_ratio);
+        m_guard_spike_shoulder = get<double>(config, "guard_spike_shoulder", m_guard_spike_shoulder);
+        m_guard_ratio2_max = get<double>(config, "guard_ratio2_max", m_guard_ratio2_max);
+        if (m_accept_guards) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: accept_guards ON (desert>={}cm@<{}MIP, spike>{}@shoulder<{}MIP, ratio2>{})",
+                                m_guard_desert_cm, m_guard_desert_frac,
+                                m_guard_spike_ratio, m_guard_spike_shoulder, m_guard_ratio2_max);
+        }
+
         // beam_window_only + beam_window_low/high (all C++-default off =>
         // byte-identical legacy behavior): evaluate only the beam-coincident
         // bundle, i.e. the main clusters whose matched flash time (cluster_t0)
@@ -177,6 +207,13 @@ public:
         cfg["beam_window_high"] = m_beam_window_high;
         cfg["save_stm_fit"] = m_save_stm_fit;
         cfg["mip_dqdx"] = m_mip_dqdx;
+        // doc-63 round-1 acceptance guards; false = byte-identical legacy.
+        cfg["accept_guards"] = m_accept_guards;
+        cfg["guard_desert_cm"] = m_guard_desert_cm;
+        cfg["guard_desert_frac"] = m_guard_desert_frac;
+        cfg["guard_spike_ratio"] = m_guard_spike_ratio;
+        cfg["guard_spike_shoulder"] = m_guard_spike_shoulder;
+        cfg["guard_ratio2_max"] = m_guard_ratio2_max;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -418,6 +455,17 @@ private:
     // A/B in doc 57 sec 5a-bis came back bit-identical).
     double m_mip_dqdx{50e3};
 
+    // doc-63 round-1 acceptance guards (see configure()).  All inert unless
+    // m_accept_guards; every threshold was measured on the doc-62 owner
+    // baseline (sbnd_xin/docs/63 sec 1).  Scale convention: fractions of
+    // m_mip_dqdx, never absolute e/cm.
+    bool m_accept_guards{false};
+    double m_guard_desert_cm{3.0};      // min bridged-desert length to veto
+    double m_guard_desert_frac{0.02};   // "no charge" = dQ/dx below this x MIP
+    double m_guard_spike_ratio{3.2};    // peak(<1.5cm) / median(2-6cm)
+    double m_guard_spike_shoulder{1.8}; // median(1.5-4cm) in MIP units
+    double m_guard_ratio2_max{2.0};     // eval acceptance normalization cap
+
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
     // default => the historical FiducialUtils / sensitive-volume-union fallback,
     // i.e. an absent "fiducial" key is byte-identical to the pre-knob code.
@@ -433,7 +481,9 @@ private:
     //   0 accepted (STM), 1 TGM, 2 rejected long-leftover past kink
     //   ("Mid Point A"), 3 rejected dQ/dx eval (KS tests), 4 rejected
     //   extra-tracks veto, 5 rejected proton endpoint, 6 fitted but no
-    //   decision (fell through).
+    //   decision (fell through), 7 rejected by the doc-63 accept_guards
+    //   (desert/spike; a ratio2-cap rejection shows as 3 -- it fires inside
+    //   the eval).
     // Round-1 rough fits and passes aborted with <=3 fit points are NOT
     // recorded (no round-2 segment exists).
     bool m_save_stm_fit{false};
@@ -1586,6 +1636,74 @@ private:
         return arrs;
     }
 
+    // doc-63 round-1 pass-level acceptance guards (see configure()).  Called
+    // only when m_accept_guards and the eval chain accepted; a true return
+    // vetoes the acceptance for this pass.  Both guards are functions of the
+    // final fit and the kink alone, so unlike the ratio2 cap they do not
+    // depend on which eval call accepted.  kink semantics match
+    // eval_stm_core_impl: out-of-range kink means the stop is the path end.
+    bool accept_guards_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+
+        // Guard 1 -- charge desert: longest contiguous stretch of the muon
+        // segment [0, kink] with essentially no charge under the fit.  A fit
+        // that bridges detached objects crosses such a desert (doc-62
+        // baseline: 23.4 and 6.7 cm on the two bridge cases, 0.0 cm on every
+        // other accepted bundle).
+        const double desert_thresh = m_guard_desert_frac * m_mip_dqdx;
+        double max_desert = 0;
+        for (int i = 0; i <= k;) {
+            if (dQ_dx[i] < desert_thresh) {
+                int j = i;
+                while (j + 1 <= k && dQ_dx[j + 1] < desert_thresh) ++j;
+                const double len = L[std::min(j + 1, k)] - L[i];
+                if (len > max_desert) max_desert = len;
+                i = j + 1;
+            }
+            else ++i;
+        }
+        if (max_desert >= m_guard_desert_cm * units::cm) {
+            SPDLOG_LOGGER_INFO(s_log, "accept_guards: cluster {} rejected: fit bridges a {:.1f} cm charge desert (one-objectness)",
+                               cluster_ident, max_desert / units::cm);
+            return true;
+        }
+
+        // Guard 2 -- spike-not-ramp: a genuine Bragg is a RAMP (muon table:
+        // ~1.7 MIP at rr=3cm rising to ~3 at 0.5cm, so the 1.5-4 cm shoulder
+        // before the stop is elevated); a nu-vertex is a SPIKE on a MIP-flat
+        // approach.  Veto when the peak within 1.5 cm of the stop towers over
+        // the 2-6 cm base AND the shoulder is cold.
+        const double L_stop = L[k];
+        double peak = -1;
+        std::vector<double> shoulder, base;
+        for (int i = 0; i <= k; ++i) {
+            const double d = L_stop - L[i];
+            if (d < 1.5 * units::cm) peak = std::max(peak, dQ_dx[i]);
+            if (d >= 1.5 * units::cm && d < 4 * units::cm) shoulder.push_back(dQ_dx[i]);
+            if (d >= 2 * units::cm && d < 6 * units::cm) base.push_back(dQ_dx[i]);
+        }
+        auto median = [](std::vector<double>& v) {
+            std::sort(v.begin(), v.end());
+            const size_t m = v.size() / 2;
+            return v.size() % 2 ? v[m] : 0.5 * (v[m - 1] + v[m]);
+        };
+        if (peak > 0 && base.size() >= 2 && !shoulder.empty()) {
+            const double base_med = median(base);
+            const double shoulder_med = median(shoulder);
+            if (peak / (base_med + 1e-9) > m_guard_spike_ratio &&
+                shoulder_med < m_guard_spike_shoulder * m_mip_dqdx) {
+                SPDLOG_LOGGER_INFO(s_log, "accept_guards: cluster {} rejected: end spike {:.1f}x base with cold shoulder {:.2f} MIP (vertex, not Bragg)",
+                                   cluster_ident, peak / (base_med + 1e-9), shoulder_med / m_mip_dqdx);
+                return true;
+            }
+        }
+        return false;
+    }
+
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
     bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
@@ -1725,8 +1843,19 @@ private:
             m_eval_records.push_back(er);
         }
 
+        // doc-63 round-1 ratio2 cap (inert unless accept_guards): the branch-1
+        // acceptance below tests only that flat-MIP is a worse SHAPE than the
+        // muon hypothesis, never that the measured charge is muon-normalized.
+        // ratio2 > 2.0 means the accepted window sums more than 2x BELOW MIP
+        // -- no under-collected muon loses half its charge; a ghost/shower
+        // mess does (doc-62 baseline: the false accept 285443 sits at 3.96;
+        // the highest CORRECT accepting call is 1.48, evt 283463, a sub-MIP
+        // track the owner accepts, which a first-try 1.1 cap wrongly killed
+        // -- docs/63 round-1 record).
+        if (m_accept_guards && ratio2 > m_guard_ratio2_max) return false;
+
         if (ks1 - ks2 >= 0.0) return false;
-        if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 && 
+        if (sqrt(pow(ks2/0.06, 2) + pow((ratio2-1)/0.06, 2)) < 1.4 &&
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.02) return false;
 
         if (((res_length > 8*units::cm && ave_res_dQ_dx/m_mip_dqdx > 0.9 && res_length1 > 5*units::cm) ||
@@ -2575,6 +2704,16 @@ private:
                 flag_pass = flag_fix_end
                     ? eval_stm_core(eval_arrs, kink_num, 5*units::cm, 0., 35*units::cm, true)
                     : eval_stm_core(eval_arrs, kink_num, 40*units::cm, 0., 35*units::cm, true);
+            }
+
+            // doc-63 round-1 pass-level guards: desert + spike (see
+            // accept_guards_reject).  After the eval chain so the eval
+            // records are complete either way; before the other-track /
+            // proton stages whose outcome they would preempt.
+            if (m_accept_guards && flag_pass &&
+                accept_guards_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
             }
 
             if (flag_pass) {
