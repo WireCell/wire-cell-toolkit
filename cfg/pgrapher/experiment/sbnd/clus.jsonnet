@@ -498,13 +498,34 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // is off: the op display needs the per-cluster flashpred pcarray, which is
 // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
 local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
-              trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='', beam_window=[0, 0],
-              tgm_neutrino_candidate=false, tgm_chord_charge=false,
-              tgm_chord_mode='chord', tgm_component_extremes=false,
-              tgm_component_rescue=false, tgm_rescue_chord=false,
-              tgm_main_pair=false, tgm_main_pair_mode='path',
-              tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
-              tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
+              trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='',
+              // beam_window: internal-unit [low, high] on the matched flash time
+              // (cluster_t0).  DEFAULT = the SBND BNB gate after the
+              // frame_apply_at_caf correction, which is what production passes
+              // (run_nusel_evt.sh BEAM_WINDOW="0.2,2.2").  [0,0] disables it and
+              // makes beam_window_only inert.
+              beam_window=[0.2 * wc.us, 2.2 * wc.us],
+              // --- TGM/FC knobs.  Every default below is the SBND PRODUCTION
+              // operating point (run_full1k_nusel.sh's flag set: -chord -rescue
+              // -rescue-chord -fvz 5 -fvzi 3 -main-pair-real -fvx 2.5 -fvy 3,
+              // plus NUCAND/CHORD_MODE defaults), adopted as the module defaults
+              // 2026-07-27 (owner; sbnd_xin/docs/64_cfg-sync.md).  They used to
+              // sit at the pre-adoption values here and were reached only via
+              // runner flags, so cfg/ advertised a configuration nobody ran.
+              // Each C++ knob still defaults off/legacy, so other detectors are
+              // unaffected; pass the old value here for a pre-adoption A/B:
+              //   tgm_neutrino_candidate false, tgm_chord_charge false,
+              //   tgm_chord_mode 'chord', tgm_component_extremes false,
+              //   tgm_component_rescue false, tgm_rescue_chord false,
+              //   tgm_main_pair false, tgm_main_pair_mode 'path',
+              //   tgm_fv_zmax_margin 3, tgm_fv_zmax_margin_interior 0,
+              //   tgm_fv_x_margin 2, tgm_fv_y_margin 2.5. ---
+              tgm_neutrino_candidate=true, tgm_chord_charge=true,
+              tgm_chord_mode='path', tgm_component_extremes=true,
+              tgm_component_rescue=true, tgm_rescue_chord=true,
+              tgm_main_pair=true, tgm_main_pair_mode='real',
+              tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
+              tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM (C++ default 50000 = MicroBooNE).  56000 is the
@@ -1036,14 +1057,18 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      real_cluster_id_global=real_cluster_id_global,
                      trace_bee=trace_bee),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
+    // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
+    // production operating point (see the comment block on clus_pr's arg list for
+    // the pre-adoption values to pass for an A/B).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
        trackfitting_config_file='', particle_dataset=null, extra_uses=[],
-       dl_weights='', beam_window=[0, 0], tgm_neutrino_candidate=false,
-       tgm_chord_charge=false, tgm_chord_mode='chord',
-       tgm_component_extremes=false, tgm_component_rescue=false,
-       tgm_rescue_chord=false, tgm_main_pair=false, tgm_main_pair_mode='path',
-       tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
-       tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
+       dl_weights='', beam_window=[0.2 * wc.us, 2.2 * wc.us],
+       tgm_neutrino_candidate=true,
+       tgm_chord_charge=true, tgm_chord_mode='path',
+       tgm_component_extremes=true, tgm_component_rescue=true,
+       tgm_rescue_chord=true, tgm_main_pair=true, tgm_main_pair_mode='real',
+       tgm_fv_zmax_margin=5, tgm_fv_zmax_margin_interior=3,
+       tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
        save_stm_fit=false, unmerge_bundle_mode='real',
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
        stm_proton_muon_guard=true, stm_cathode_guard=true,

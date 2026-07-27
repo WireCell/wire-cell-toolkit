@@ -315,6 +315,32 @@ function(params) {
     // only when the tagger is on.
     local lm_on(lm_params) = { lm_tagger: true } + lm_params,
 
+    // --- Overlays promoted from the sbnd_xin qlmatching.jsonnet wrapper
+    // (2026-07-27, sbnd_xin/docs/64_cfg-sync.md).  These were the last pieces of
+    // SBND matching configuration living outside the toolkit. ---
+
+    // cathode_diag: output path ('' => off, production) for the cathode-crossing
+    // TPC0/TPC1 offset diagnostic -- QLMatching logs the three-vector
+    // decomposition per cross-TPC cathode-crossing pair.  Key omitted when off
+    // => byte-identical production config.
+    local diag_on(cathode_diag) = (if cathode_diag != '' then { cathode_diag: cathode_diag } else {}),
+
+    // flag_matched_mains: stamp flag_main_cluster on EVERY matched bundle main.
+    // Without it only the mains that decompose_cluster_groups actually SPLIT
+    // carry the flag, so a compact single-component match stays invisible to
+    // TaggerCheckTGM/STM/FC and to the nusel bundle table (SBND evt286021: the
+    // 1.158 us beam flash matched a 141-point cluster that no tagger ever
+    // evaluated).  C++ default false; SBND production has passed main_flag=true
+    // since doc 56, so it defaults TRUE here -- the PR taggers depend on it.
+    local mainflag_on(main_flag) = (if main_flag then { flag_matched_mains: true } else {}),
+
+    // Tri-state override helper: null => inherit whatever match_data set (key
+    // omitted, compiled config unchanged); a value => emit that key.  Used for
+    // the knobs match_data already fixes at the SBND production operating point
+    // (auto_mask, beam_pref and its two scales) so a scan can move them without
+    // editing this file, which is what the sbnd_xin wrapper existed for.
+    local override(key, val) = { [if val != null then key]: val },
+
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
@@ -328,7 +354,12 @@ function(params) {
     // also realigns "isolated" for the all-APA examine_bundles main-overlap vote.
     // Pass false ONLY to reproduce the pre-fix (misaligned) behavior for A/B
     // archaeology.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, realign_perblob=null, extra={}):: g.pnode({
+    // lm (LM light-mismatch tagger) defaults TRUE: SBND production runs with
+    // -lm (run_full1k_nusel.sh).  cathode_diag / main_flag / auto_mask /
+    // beam_pref* are the overlays promoted from the sbnd_xin wrapper -- see the
+    // helpers above for their semantics.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=true, lm_params={}, realign_perblob=null,
+             cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
@@ -336,6 +367,12 @@ function(params) {
               + (if pmt_nl then nl_on else {})
               + (if lm then lm_on(lm_params) else {})
               + { [if realign_perblob != null then 'realign_perblob']: realign_perblob }
+              + diag_on(cathode_diag)
+              + mainflag_on(main_flag)
+              + override('auto_mask', auto_mask)
+              + override('beam_pref', beam_pref)
+              + override('beam_pref_lasso_weight', beam_pref_weight)
+              + override('beam_pref_rescue_scale', beam_pref_rescue)
               + extra,
     }, nin=1, nout=1),
 
@@ -346,7 +383,8 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=false, lm_params={}, realign_perblob=null, extra={}):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=true, lm_params={}, realign_perblob=null,
+                   cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -364,6 +402,12 @@ function(params) {
           // C++ default TRUE (doc 52 §12.8); null = inherit (key omitted).
           // See matching() above.
           + { [if realign_perblob != null then 'realign_perblob']: realign_perblob }
+          + diag_on(cathode_diag)
+          + mainflag_on(main_flag)
+          + override('auto_mask', auto_mask)
+          + override('beam_pref', beam_pref)
+          + override('beam_pref_lasso_weight', beam_pref_weight)
+          + override('beam_pref_rescue_scale', beam_pref_rescue)
           + extra,  // optional overlay (default {} => no-op) for other per-call tweaks
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be

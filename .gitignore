@@ -64,6 +64,7 @@ ltximg
 !cfg/pgrapher/experiment/pdhd/pdhd-spe-templates.json
 !cfg/pgrapher/experiment/pdhd/pdhd-spe-templates-v1.json
 !cfg/pgrapher/experiment/pdhd/pdhd-noise-templates.json
+!cfg/pgrapher/experiment/sbnd/sbnd_track_fitting.json
 .snakemake
 *.old
 *.junk
