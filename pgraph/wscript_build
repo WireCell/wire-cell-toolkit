@@ -1,4 +1,4 @@
-bld.smplpkg('WireCellPgraph', use='WireCellAux LIBTORCH')
+bld.smplpkg('WireCellPgraph', use='WireCellAux')
 #            test_use='JSONCPP JSONNET BOOST')
 
 
