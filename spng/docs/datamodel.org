@@ -1,0 +1,392 @@
+#+title: SPNG Data Model
+
+A driving strategy of SPNG is that an ~ITorchTensorSet~ is the only data type transferred between SPNG data flow graph nodes.  As the name implies, it holds a set of tensors.  It also holds "metadata" in the form of a dynamic, structured object that follows the JSON data model.  Individual tensors are held in the set via an ~ITorchTensor~ which also holds a (possibly empty) "metadata" component.
+
+These tensor-oriented data types defines minimal structure with generic and simple primitives (tensors and metadata objects).  However, the information that SPNG must process has substantial structure (eg, that if ~IFrame~) and thus a /data model/ is needed to define the conventions used to express structure in the relatively "flat" tensor-oriented data types.
+
+This document defines the *SPNG Data Model*.  It is defined to be similar to the [[file:../../aux/docs/tensor-data-model.org][WCT Tensor Data Model]] but deviates in order to encourage the data forms to be immediately used in SPNG algorithms with minimal data transformation.  The model is intended to be sufficient for nearly perfect bidirectional conversion to and from the WCT data types with more explicit structure (~IFrame~, etc).
+
+The SPNG Data Model, like WCT's, is factored into "low level" (or "base") and a "high level" models.  The low-level model defines a small set of metadata parameters that are expected to exist.  The high-level model defines a convention that depends on the value of the low-level parameters, particularly the ~datatype~ parameter.
+
+* Low level data model
+
+**  ~ITorchTensorSet~ 
+
+
+An ~ITorchTensorSet~ is considered a generic "bag" of ~ITorchTensor~ instances.  As such, the set does not itself have any interpretation or requirements.  Implementations should be cautious about placing metadata in the set.  The set is not expected to exist in all data flow nodes and subgraphs.  Downstream nodes that require metadata from upstream ~ITorchTensorSet~ instances must explicitly take the instance as input.  Individual ~ITorchTensor~ instances *must not* be tasked with forwarding set-level metadata. 
+
+**  ~ITorchTensor~ 
+
+The tensor and metadata parts of an ~ITorchTensor~ are subject to the data model.
+
+*** metadata
+
+Every ~ITorchTensor~ metadata SHALL have these attributes:
+
+- ~datatype~ :: a string naming the SPNG Data Model element this ~ITorchTensor~ represents.
+- ~datapath~ :: a string *unique* to the ~ITorchTensorSet~.  This may be expressed as a ~/file/system/type/path~.
+
+An ~ITorchTensor~ metadata MAY have these attributes, depending on datatype.
+
+- ~parent~ :: a string naming the ~datapath~ of another ~ITorchTensor~ that represents a container holding the ~ITorchTensor~.  If empty or omitted, the ~ITorchTensor~ is not considered to have a parent (but may be a parent).  A parent MUST precede all children in the ~ITorchTensor~.
+- ~batches~ :: An integer giving the size of the batch dimension of the tensor part.  If omitted or provided with negative value then the tensor should be interpreted as not batched unless the consumer may infer batching based on the =datatype=.  If a tensor is batched, first / most major dimension spans the batch.  
+- ~derived_from~ :: An optional string or array of string holding the ~datapath~ strings of all ~ITorchTensor~ instances that directly provided information in the forming a novel output ~ITorchTensor~ instance.  See section [[Provenance]] below.
+
+
+
+
+* High level data model
+
+The high level SPNG data model specifies how other data types are represented in the low level SPNG data model.
+
+Various parameters take different forms depending on if the set of tensors are considered "batched" or not.  The type of such parameter are:
+
+- scalar if the array is not batched ("unbatched").
+- scalar if batched but with a common value across all batches ("batched but common").
+- array if value differs across the batches ("batched, changing").
+
+** ~IFrame~
+
+The ~IFrame~ type and its constituent set of ~ITrace~ represent waveforms sampled over time from a set of electronics channels.  An ~IFrame~ is decomposed into a number of ~ITorchTensor~ instances, each with a ~datatype~ as defined in the following subsections.
+
+*** The "frame" tensor
+
+An ~ITorchTensor~ with ~datatype~ of "frame" represents the non-constituent parts of an ~IFrame~.  In addition to the required low-level metadata attributes, a frame provides:
+
+- ~ident~ :: required, integer (unbatched) or array of integer (batched) of the ~IFrame::ident()~ value.
+- ~time~ :: required, float (unbatched) or array of float (batched) of the ~IFrame::time()~ value.
+- ~period~ :: required, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.
+
+No tensor part is provided by a "frame" tensor.
+
+#+begin_note
+~IFrame~ provides zero or more "frame tags".  These are (currently) not supported in the SPNG data model.  Trace tags are supported, as described below.
+#+end_note
+
+*** The "traces" tensor
+
+A "traces" tensor represents a tagged ~ITrace~ collection.  Unlike ~ITrace~, the "traces" tensor is always dense.  Like ~ITrace~ is it subject to positioning with respect to the parent frame reference time with a ~tbin~ attribute.
+
+The metadata attributes are:
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~time~ :: required, float giving an absolute reference time for the time domain samples.
+- ~period~ :: required, float (unbatched, batched but common) or array of float (batched, changing) of the ~IFrame::period()~ (aka "tick") value.  This replicates the ~period~ value in the parent.
+- ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor represents.
+- ~tbin~ :: integer (unbatched) or array of integer (batched) of the number of sample periods from the frame reference time to the first (element 0) column / tick.  If omitted, a default value of zero may be assumed.
+
+The tensor part is 2D (unbatched) or 3D (batched) floating point tensor providing waveform samples.  The minor element (columns) runs over ticks so that each row corresponds to one electronics channel.  The 2D dimensions must span the maximum size over all batches though the tick ranges and channels may be batch specific.
+
+A consumer of a traces tensor may define a requirement in terms of grouping and ordering of channel / rows.  Typically, ordering by "WCT wire attachment number" is needed.  If a producer and consumer convention do not match, an converter node is required.
+
+#+begin_note
+The rastering process of combining sparse ~ITrace~ into a dense array must content with the fact that a given channel and tick pixel may be covered by multiple traces in the tagged set.  Generally, it is proper to combine the overlap by "adding" value.  In some special cases cases, a frame represents a binary (0/1) value and combination may be context specific (choice of Boolean OR vs AND combination).
+#+end_note
+
+*** The "chids" tensor
+
+The "chids" tensor represents the association of channel ID numbers to the rows of a traces tensor.  The metadata includes:
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor associates.
+
+
+The tensor part is 1D (unbatched, batched but common values) or 2D (batched, differing values) integer value providing the channel ID numbers.  The size of the minor shape is equal to the number of rows in the corresponding "traces" tensor.
+
+*** The "summaries" tensor
+
+The "summaries" tensor represents the tagged trace summary vectors in ~IFrame~.  It provides a per-trace (here, per-channel) floating point scalar value.  
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~tag~ :: string (unbatched or batched but common) or array of string (batched, differing) of tag traces this tensor represents.
+
+The tensor part is shaped same as "chids": 1D (unbatched, batched but common values) or 2D (batched, differing values) integer value providing the channel ID numbers.  The size of the minor shape is equal to the number of rows in the corresponding "traces" tensor.
+
+#+begin_note
+Converting from ~IFrame~ to SPNG data model requires a combining operation to be applied to the per-trace summary value in ~IFrame~ into a per-channel.  This operation is dependent on the meaning of the summary value.  Summation, length-weighted average or quadrature are some possible operations.
+#+end_note
+
+*** The "chmasks" tensor
+
+The ~IFrame~ holds a set of "channel mask maps" (CMMs) that associates a label to a set of individual trace samples at potentially very fine grain.  This is used to label pixels as "bad" or "noisy", etc.  In ~IFrame~ the CMMs are represented by highly structured maps, pairs, lists.  Here, we flatten.  The metadata provides:
+
+- ~parent~ :: low-level data model attribute names the ~datapath~ of the frame ~ITorchTensor~
+- ~label~ :: the label for one set of channel masks
+
+The tensor part is always 2D and has 4 columns giving tick ranges for a batch index and a channel ID in that batch index: (index, chid, beg, end).  The dtype is ~torch::kLong~.
+
+
+* Conventions
+
+On top of the high-level data model, additional conventions must be understood.
+
+** Separation of tensor sets
+
+TDM allows for tensors sets or individual ("bare") tensor instances to be passed
+between DFP processing nodes.  For example, a set with tensors representing a
+"frame" and its parts can be input to a node which outputs a single ~ITorchTensor~
+with a "traces" datatype.  See ~TorchSetUnpacker~ for one implementation.  This
+single "bare" ~ITorchTensor~ can be consumed by a tensor filter, etc.  See section
+[[Combining of tensors into sets]] for the inverse operation.
+
+
+** Datapaths
+
+The role of a ~datapath~ metadata parameter is to uniquely identify a tensor in
+some data flow programming context (ie, some DFP sub-graph).  It is analogous to
+a "variable name" in more traditional programming paradigms.
+
+Ultimately the end-user (DFP programmer) must decide what idioms to apply in
+setting ~datapath~ just as they do when naming variables in traditional
+programming.  It is the job of the DFP node implementations to support a common
+set of idioms.
+
+One major choice determines how to assign ~datapath~ to output ~ITorchTensor~
+instances that are derived from input ~ITorchTensor~ instances.  The choice can be
+one of two possibilities:
+
+- imperative :: the output ~datapath~ may be the same as the input ~datapath~.  In
+  traditional programming this is equivalent to re-setting a variable.
+
+- functional :: the output ~datapath~ is wholly unique among all others.  In
+  traditional programming this is equivalent to a strict functional programming
+  style.
+
+The imperative idiom is simplest to implement.  A node simply forwards the input
+~datapath~ to the output tensor instance.  However, if ever the input and output
+tensors are brought together in a context, their ~datapath~ values will conflict.
+Furthermore, if a tensor is derived from more than one input tensor, a decision
+is needed for which of the inputs ~datapath~ is taken by the output.
+
+The functional idiom avoids the problems with the imperative idiom but requires
+some additional construction.  However, this can be accommodated in a relatively
+simple manner with the following recipe:
+
+- Define a set of metadata parameters that provide parts of the ~datapath~ string.
+- Identify a subset that are expected to be give unique values by a DFP node.
+- Supply a *datapath format* string to which the parameters are applied to
+  generate a datapath.
+- Forward all other metadata and any new metadata produced by the DFP node.
+
+For example, the ~FrameToTdm~ node converts an ~IFrame~ to TDM tensor set and has
+(frame) "ident", "tag", "rule" and "group" parameters available.  We may
+commandeer "tag" to indicate the nature of the tensor content.  A follow-on
+"decon" node may provide a unique value for "tag" to indicate the nature of the
+deconvolution.  For example, the main distinguishing feature between different
+"kinds" of SP decon is the time filter used, "gauss" vs "wiener".
+
+The production of the unique ~datapath~, given the format string, is then
+straight-forward:
+
+#+begin_src cpp
+  auto datapath = Fmt::format(datapath_format, tensor->metadata());
+#+end_src
+
+In general, the datapath format string must be provided directly to the node
+that applies it.  It SHOULD NOT be itself provided as a tensor metadata
+parameter.  This is because the format string must reflect the complexity of the
+DFP graph itself.  
+
+** Tags
+
+The ~IFrame~ data model defines a ~tag~ metadata attribute.  Initially it identifies
+a set of "tagged traces" in the frame for consideration.  This set is then
+partitioned according to two axes: rules that define groups.  The ~tag~ may be
+kept as the data flows through processing nodes or it may be changed.  If
+changed, the user should think of ~tag~ as labeling the kind of content of the
+tensor.  For example, data produced by a deconvolution with the "gauss" filter
+might be given the tag "gauss".  Equivalently, this change of tag may be used to
+label a "data tier".  A change in "tag" value can lead to a change in ~datapath~
+for nodes that apply a ~datapath_format~ string.
+
+** Provenance 
+
+The use of DFP and ~datapath~ to identify data in the graph enables a data
+provenance pattern.  An output tensor metadata may simply be given the ~datapath~
+of the input tensor(s) from which the output was derived.  When this idiom is
+followed, the ~derived_from~ metadata parameter should be identified to hold this
+provenance information.
+
+** Combining of tensors into sets
+
+The results of parallel pipelines each processing an individual "bare" tensor
+may be reunited back into a tensor set.  For example, a ~TorchPacker~ acts as a
+fan in of individual tensors to construct a tensor set.  The order in the set
+reflects the input port ordering.
+
+The repacked set and the original set holding the frame can likewise be combined
+with a ~SPNGFaninNode~, again with the final order reflecting the input ports.
+This particular fanin enacts a union which can lead to tensors with redundant
+~datapath~ values, be they otherwise identical or not.
+
+The ~TdmToFrame~ component can take such a tensor set and attempt to reconstruct
+from it an ~IFrame~.  To do that, it requires a mechanism to correlate tensors of
+different ~datatype~.  For example, typically an SPNG DFP graph will process only
+the "traces" tensors.  These can be given wholly different ~datapath~ as they go
+through the graph.  For ~TdmToFrame~ to reconstruct the frame, it must associate a
+"chids" tensor to each "traces" tensor.  The mechanism of forwarding the
+original frame tensor set provides the data but another association mechanism is
+required.
+
+This mechanism uses the metadata that is forwarded through the DFP nodes.
+
+
+
+* SPNG support
+
+SPNG provides modular and extensible support in the form of data flow graph node
+classes.  Instances of these classes may be to provide general purpose
+operations and the classes may be used as inheritance bases for developing
+extended behavior.
+
+** Datapath and provenance management
+
+Utility code is provided to produce imperative or functional management of ~datapath~.
+
+#+begin_src cpp
+  Configurable md;
+  md["tag"] = m_output_tag;
+  // derive from one
+  Configurable from = in_tensor->metadata();
+  // Or derive from many
+  std::vector<Configuration> from = {in_tensors[0]->metadata(),
+                                     in_tensors[1]->metadata()};
+
+  // Form new metadata, with scalar or vector "from".
+  md = TDM::derive_metadata(md, from, m_datapath_format);
+#+end_src
+
+This requires a node to define two configurable parameters
+
+- ~tag~ :: the kind of tensor content produced (eg "gauss" or "wiener" for decon).  
+- ~datapath_format~ :: a string how to format md attributes to a datapath string, or empty.
+
+
+Note, for long SPNG pipelines of fast GPU nodes, the overhead of datapath
+management may become the bottleneck.  If so, this bookkeeping should be made
+optional.
+
+
+** FunctionNode
+
+An instance of the ~FunctionNode~ class provides standardized and configurable
+tensor selection and (datapath) renaming operations.  Its internal operations
+are illustrated as a mini flow graph:
+
+#+ATTR_ORG: :width 50%
+[[file:tdm-mini-dfg-func.png]]
+
+Each box represents a method call with default implementations.  All actual C++
+methods are named with a ~_tensors~ suffix.
+
+- index :: from an ~ITorchTensorSet~, form a ~TensorIndex~ from the input tensor
+  set.  A ~TensorIndex~ provides a flat representation matching the tensor set as
+  well as a tree representation formed with from any ~parent~ tensor metadata
+  attributes.  It also provides tensor lookup by ~datapath~.
+
+- select :: apply standardized and configurable selection rules.  A rule may
+  include one or both of an "accept" or "reject" regular expression pattern
+  matched against a tensor's ~datapath~.  The rules are applied to parent tensors
+  and their children will follow.
+
+- transform :: apply a transformation on the selected tensor index.  The
+  ~FunctionNode~ implements this as a no-op.
+
+- combine :: apply a combination of input and transformed tensor indices.  The
+  ~FunctionNode~ implements a configurable choice from a set of possible
+  combination algorithms.
+
+- rename :: apply standardized and configurable renaming rules.  A rule consists
+  of a regular expression pattern and a format to apply if the pattern matches a
+  tensor's ~datapath~.  Renaming a parent will also rename the corresponding
+  ~parent~ metadata attribute of any children.
+
+- pack :: place the tensor in an index in their flat order into a ~ITorchTensorSet~.
+
+A subclass may override any of these methods in order to provide novel behavior.
+The most useful override is the *transform*.  A subclass may augment existing
+functionality of other methods by overriding and also calling them.
+
+*** Configuring FunctionNode
+
+tbd: comprehensive configuration guide.
+
+*** Comments / caveats
+
+The ~FunctionNode~, as described above, effectively implements a mini DFP graph
+passing a tensor index instead of a tensor set.  This monolithic subgraph could
+be separated into individual "selection", "transform", and "rename" function
+nodes.  The "combine" operation here is different than we will see in the fanin
+below.  It is a set-operation (keep input, keep transformed, union of both
+preferring either input or transformed).  In resembles "selection" but to
+implement as that in one has to contend with how to allow duplicate datapaths in
+a set or index.  For now we keep this monolith.
+
+** TorchFunctionNode
+
+The ~TorchFunctionNode~ inherits from ~FunctionNode~ so that a subclass may
+implement the ~transform~ method in a code context governed by a ~TorchContext~.
+This will provide semaphore governance and provide the subclass with a ~device()~
+method that returns a user-configurable device to assume.  An subclass ~transform~
+method is also assured that the tensors it consumes are on the configured
+device.
+
+
+*** Configuring TorchFunctionNode
+
+tbd: comprehensive configuration guide.
+
+** Fan nodes
+
+General purpose fan-out and fan-in node classes are provided.  These operate
+only on the ~ITorchTensorSet~ and ~ITorchTensor~ level and do not make a ~TorchIndex~.
+
+The internal structure of the ~FanoutNode~ is as:
+
+#+ATTR_ORG: :width 50%
+[[file:tdm-mini-dfg-fout.png]]
+
+The *separate* method will simply pass the input ~ITorchTensorSet~ pointer to all
+output ports.  No modification is made to the set.
+
+
+The internal structure of the ~FaninNode~ is as:
+
+#+ATTR_ORG: :width 50%
+[[file:tdm-mini-dfg-fin.png]]
+
+The *combine* method will simply form a new *ITorchTensorSet* that is the union of
+the input sets.  This implicitly assumes all ~datapath~ are unique.  If the
+upstream subgraph fails to assure this uniqueness the resulting tensor set will
+be badly formed but will contain all tensors.  Likewise the tensor set metadata
+is combined as a simple union.  In this case, if the input tensor sets have
+common keywords, only one will be retained in the output tensor set metadata.
+Again, the expectation is upstream ~FunctionNode~ instances will be applied to
+assure unique input to a fan in.
+
+And, in general, while it is possible to use either fan as a base class and
+implement either the *separate* or *combine* methods, this is not recommended.
+Instead, it is expected that a ~FunctionNode~ or derived will be applied to the
+pre and/or post fanned tensor sets.
+
+* More information
+
+- [[https://www.phy.bnl.gov/~bviren/talks/wire-cell/topics/spng/tdm.pdf][Presentation by bv to SPNG group on the TDM]]
+
+* 
+
+#+begin_example
+<frame>  /frames/0/frame (0) <float> @cpu  
+<traces> /frames/0/tags/null/rules/0/groups/0/traces (400, 6000) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/0/chids (400) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/null/rules/0/groups/1/traces (448, 6000) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/1/chids (448) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/null/rules/0/groups/2/traces (0, 0) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/2/chids (0) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/null/rules/0/groups/3/traces (478, 6000) <float> @cpu <-- /frames/0/frame 
+<chids>  /frames/0/tags/null/rules/0/groups/3/chids (478) <int> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/0/traces (399, 400) <float> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/1/traces (447, 448) <float> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/2/traces (1, 0, 0) <float> @cpu <-- /frames/0/frame 
+<traces> /frames/0/tags/gauss/groups/3/traces (1, 478) <float> @cpu <-- /frames/0/frame 
+#+end_example

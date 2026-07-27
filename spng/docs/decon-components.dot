@@ -1,0 +1,148 @@
+digraph deconflow {
+    rankdir=LR
+    subgraph cluster_kern {
+
+        label="DeconKernel"
+        // interval
+        node[shape=box]
+        fr[label="2D field\nresponse\n(21,200)"]
+        frp[label="2D field\nresponse\n(padded)"]
+
+        er[label="1D elec\nresponse\n(t=200)"]
+        erp[label="1D elec\nresponse\n(padded)"]
+
+        fc[label="1D channel\nfilter\n(c=21)"]
+        fcp[label="1D channel\nfilter\n(padded)"]
+        ft[label="1D time\nfilter\n(t=100)"]
+        ftp[label="1D time\nfilter\n(padded)"]
+
+        kernel_align[style=invis]
+        {rank=same; fr; er; fc; ft}
+
+        node[shape=ellipse]
+
+
+        // Fourier
+        node[shape=circle]
+        R[color=blue]
+        ER
+        FR
+        Fc
+        Ft
+        F[label="F", color=blue]
+        FdivR[label="F/R"]
+        fdivr[shape=box,label="kernel\n(small)"]
+
+
+        // operations
+        node[shape=diamond]
+        pad_fr[label="pad"]
+        pad_er[label="pad"]
+        pad_fc[label="pad"]
+        pad_ft[label="pad"]
+
+        fft_fr[label="2D \nDFT"]
+        fft_er[label="1D \nDFT"]
+        fft_fc[label="1D \nDFT"]
+        fft_ft[label="1D \nDFT"]
+        cross[label="outer\nproduct"]
+        fft_shape[label="FFT min\nshape"]
+        frer_mult[label="multiply\n(Fourier)"]
+        
+
+        subgraph cluster_cache {
+            label="mutex-controlled cache\nkeyed on measure shape"
+
+            pad_k[label="pad"]
+            fft_shape2[label="FFT min\nshape"]
+            best_shape[label="FFT best\nshape"]
+            shape_k[label="kernel shape\n(m+r+f-2)", shape=ellipse]
+            fft_k[label="2D \nDFT"]
+            Kquery[shape=circle, label="Kernel\n(padded)"]
+        }
+    }
+
+    subgraph cluster_conv {
+        label="KernelConvolve"
+        labelloc=bottom
+        // interval
+        node[shape=box]
+        m[label="m = 2D measure\n(800,6000)",color=red]
+        mp[label="2D measure\n(padded)"]
+
+        sasis[label="signal\ndecon'ed"]
+        sfull[label="signal\nshifted"]
+        s[label="signal\ncropped"]
+
+        // Fourier
+        node[shape=circle]
+        M[color=red]
+        S
+        K
+
+        conv_align[style=invis]
+        {rank=same; K; conv_align}
+
+        // operations
+        node[shape=diamond]
+        pad_m[label="pad"]
+        fft_m[label="2D \nDFT"]
+        infft[label="2D inv\nDFT"]
+        decon[label="multiply\n(Fourier)"]
+        shift
+        crop
+    }
+
+    kernel_align -> conv_align [style=invis,weight=100]
+    
+
+
+    m->pad_m
+    pad_m->mp->fft_m->M->decon
+
+
+    fr->fft_shape
+    er->fft_shape
+    fc->fft_shape
+    ft->fft_shape
+
+    // fft_shape->best_shape
+    // bestshape->pad_fr
+    // bestshape->pad_er
+    // bestshape->pad_fc
+    // bestshape->pad_ft
+
+
+    fft_shape->pad_fr
+    fft_shape->pad_er
+    fft_shape->pad_fc
+    fft_shape->pad_ft
+
+    fr->pad_fr->frp->fft_fr->FR->frer_mult
+    er->pad_er->erp->fft_er->ER->frer_mult
+
+    fc->pad_fc->fcp->fft_fc->Fc
+    ft->pad_ft->ftp->fft_ft->Ft
+
+    frer_mult->R
+    Fc->cross
+    Ft->cross
+    cross->F
+    R->FdivR
+    F->FdivR
+
+    FdivR->fdivr
+
+
+    fdivr->fft_shape2->best_shape->shape_k->pad_k
+    fdivr->pad_k
+    pad_k->fft_k->Kquery
+    Kquery->K
+    K->decon
+    m->fft_shape2
+    //K->pad_m
+    pad_m->K[dir=back]
+
+    decon->S->infft->sasis->shift->sfull->crop->s;
+
+}

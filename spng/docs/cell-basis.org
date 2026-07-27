@@ -1,0 +1,224 @@
+#+title: Cell Basis
+
+* Cell basis basics
+
+Conceptually, a "cell" is a neighborhood around where a wire from each plane
+crosses.
+
+In reality, most wire crossing patterns to not allow for a single crossing point
+to be shared by three wires.  More rigorously we define a "cell" as the
+minimally distance trio of pair-wise wire crossing points.  The distance is
+minimal in the sense that one may walk between any two crossing points along the
+mutual wire and not cross any wire that is not in the cell.
+
+Now, imagine ordering all possible "cells" from one anode face to produce a
+list.  We further imaging that while this order is arbitrary, we define an
+algorithm that reproduces the order for a given anode face.
+
+The order of that list defines a *cell basis* of size =Ncell=.  
+
+We will define two objects defined on the cell basis:
+
+- cell basis vector :: A 1D vector of size =Ncell= or =(Ncell,1)= that gives a
+  scalar value for each cell.  For example, one may define a *cell basis vector*
+  to express the amount of ionized charge in each cell.
+
+- cell basis tensor :: A 2D vector of shape =(Ncell,3)= gives a scalar value for
+  each wire or each wire's channel contributing associated with each cell.  The
+  last dimension of size 3 spans the wire planes in the face for the cell basis.
+
+A cell basis is thus defined for each anode face.  For anodes with wrapped or
+jumpered wires we define two cell bases, one for each face.  In order to express
+channel level information in a cell basis tensor we must form an ordered list of
+channels on both faces for each view in order to map wire indices (a per face
+set) to channel indices (a per view, two-face) set.
+
+
+* Intro
+
+SPNG [[https://github.com/WireCell/spng/issues/9][issue #9]] resulted in =CrossViews= and =CrossViewsExtract= to produce MP2/MP3
+images for input to DNNROI.  As fast as it is, it is one of the slower nodes
+when the graph runs on the GPU.  An alternative approach may be faster still.
+This document is meant to provide an outline for its implementation using the
+concept of a "cell basis".
+
+* Bases
+
+We define three vector bases giving different representations of tomographic
+information in a single time slice:
+
+- wire :: The *wire basis* is defined for one wire plane of one anode face.
+  Vectors in this basis are of size =Nwires=.  Order of the elements follow the
+  WCT-canonical order of increasing pitch.
+
+- channel :: The *channel basis* spans all (one or two) anode faces.  Vectors in
+  this basis are size =Nchans=.  Order of elements follow the WCT-canonical order
+  of "wire-attachement number" (WAN).  This counts channels in a wire-basis
+  order using their "segment zero" wires on each face and concatenates the two
+  faces across no more than one "edge" between faces (eg, across CRU jumpers or
+  across one of the two wrapped edges of APAs).  So far, LArSoft's convention on
+  channel ID assignment for DUNE happens to allow the *channel basis* to span a
+  contiguous range of channel ID values.  In general, LArSoft convention can not
+  be assured but the WAN number ordering is universal up to a choice of origin
+  plane.
+
+- cell :: The *cell basis* are defined for one anode face and spans a list of
+  "index trios".  Each element on this 3-tuple is an index in a corresponding
+  *wire basis*.  Together, the trio identify three wires with three pair-wise wire
+  crossings that are mutually close.  We call a trio a "cell" as it represents a
+  region in the 2D transverse plane near their mutual center.  The order of
+  cells is arbitrary and determined by construction.
+
+The bases are not individually equivalent.  Two wire bases map to one channel
+basis for a common wire plane.  Three wire bases each for a distinct wire plane
+and a common face map to one cell basis.  One cell basis maps through three wire
+basis to a channel basis.  Wire and channel bases are defined by simple ordering
+while the cell basis must be constructed using geometric wire-crossing
+information.
+
+* Cell basis construction
+
+A reference algorithm for *cell basis* construction is given.  It is described as
+progressing from U to V to W views.  This order of progression is an arbitrary
+choice and a different choice may be more optimal in some way depending on the
+wire crossing pattern.
+
+1. Form tensor =wire_endpoints= of shape =(NwireU, 2, 3)= holding the two 3D U-wire
+   endpoints.  Keep wires in pitch order.
+
+2. Find the "footprint" of each U-wire in the V-view wire indices as a pair of
+   low-side and high-side V-wire indices.
+
+3. Expand each U-wire V-footprint into an explicit range of V-wire indices to make ~Vindex~.
+
+4. Expand each U-wire index by repeating it as many V-wire indices in its footprint to make ~Uindex~.
+
+5. Plug the =Uindex= and =Vindex= tensors into Ray Grid Coordinates to get a
+   corresponding =Windex= tensor.
+
+6. Stack =Uindex=, =Vindex= and =Windex= to form =(N,3)= *cell basis tensor*.
+
+Note, steps 2, 3 and 4 represent a ragged-array problem.  See resulting
+=cell_basis()= implementation for a vectorized solution.
+
+* Using a cell basis tensor
+
+The cell basis tensor, as constructed above, holds wire indices relevant to each
+wire plane in each tensor column.  Each row represents one "cell".  It is
+straight-forward to construct other values on the cell basis given the initial
+wire-index cell basis tensor.
+
+** Channel-index cell basis tensor
+
+Given three tensors spanning the wires of each plane that hold channel index
+numbers, one can get the channel indices for each cell as
+
+#+begin_src c++
+  std::vector<torch::Tensor> wire_to_channel_indices = ...;
+  auto cell_channels = CellBasis::index(cell_wires, wire_to_channel_indices);
+#+end_src
+
+Where each tensor in the vector spans the number of wires in the corresponding
+plane.  In general, multiple wires correspond to the same channel.  Depending on
+the detector design, this should still leave channel-cell trios unique in the
+basis.  
+
+The =Aux::WireTools= and ~SPNG::CellBasis~ namespaces provide functions to construct the mapping.
+
+#+begin_src c++
+  // Define order of inter-face and intra-face channels.  Also defines the plane.
+  const std::vector<int>& wpid_nums = {wipd0.ident(), wpid1.ident()};
+
+  // Get channels in WAN order governed by wpid_nums
+  IChannel::vector channels = WireTools::wan_ordered_channels(anode, wpid_nums);
+
+  // Get the wires for one face.  This is in WIP order.
+  IWire::vector wires_face0 = anode->faces()[0]->wires();
+
+  // Get channels in wire order.  Note, this may have duplicate channels eg in the
+  // case of wrapped APA wires.
+  IChannel::vector wc_face0 = wire_channels(wires_face0, channels);
+
+  // Get a indexing map to convert to channels.
+  torch::Tensor wc_map = wire_channel_index(wires_face0, wc_face0);
+
+  // etc for face 1
+  // etc for other planes
+
+#+end_src
+
+The =wc_map= can then be passed to =CellBasis::index()= to convert an wire index
+cell basis tensor to a channel index one.
+
+Likewise, you can produce a cell basis tensor holding non-index values such as
+measured charge in channel by using a vector of tensors mapping channel index to
+channel charge content.
+
+Applying a threshold to the values of that charge cell basis tensor gives
+channel level ROIs and then applying Boolean operators you can construct MP2/MP3
+values.  For example, MP3 on the channel basis is formed by a logical AND across
+the three columns.  This results in a Boolean =(Ncell,1)= tensor.  This single
+tensor can be interpreted as providing each of the U, V and W columns in order
+to map MP3 values back to U, V and W channels.  You can then use the original
+channel index cell basis tensor to index a column of a 2D frame array, setting
+ROI values.
+
+But, first, given the many-wire to one-channel mapping, each column may have
+channels represented more than once.  And, because channels span both faces
+while wires span only one, some channels will not be represented.
+
+To handle this redundancy and omission a boolean operation must be defined to
+resolve the redundancy (eg Boolean OR) and a default value (eg False) must be
+defined to set on unrepresented channels.  A "scatter" operation with logical
+reduction using an "add trick" can then be applied.
+
+#+begin_src c++
+// Assuming:
+// torch::Tensor index; // 1D, kLong, values in [0, N-1]
+// torch::Tensor data;  // 1D, kBool, same size as index
+// int64_t N;           // The target range size (total number of channels)
+
+// 1. Initialize result tensor with zeros (false)
+// We use kInt8 or kInt32 for the reduction, as kBool doesn't support sum reduction
+auto result_int = torch::zeros({N}, torch::kInt32);
+
+// 2. Convert Boolean data to integers for summation
+// true -> 1, false -> 0
+auto data_int = data.to(torch::kInt32);
+
+// 3. Scatter Addition
+// For every i, result_int[index[i]] += data_int[i]
+// accumulate=true is key: it ensures duplicate indices are summed
+result_int.index_put_({index}, data_int, /*accumulate=*/true);
+
+// 4. Convert back to Boolean
+// Any value > 0 was effectively (true OR true OR ...)
+auto result = result_int > 0;
+#+end_src
+
+The equivalent for Boolean AND:
+
+#+begin_src cpp
+
+// 1. Count total occurrences of each index
+auto total_counts = torch::zeros({N}, torch::kInt32);
+auto ones = torch::ones_like(index, torch::kInt32);
+total_counts.index_put_({index}, ones, /*accumulate=*/true);
+
+// 2. Count 'true' occurrences for each index
+auto true_counts = torch::zeros({N}, torch::kInt32);
+true_counts.index_put_({index}, data.to(torch::kInt32), /*accumulate=*/true);
+
+// 3. Boolean AND condition: 
+// The index must have appeared at least once, and all appearances were 'true'
+auto result = (true_counts == total_counts) & (total_counts > 0);
+#+end_src
+
+After producing a final result in the full channel basis, this would be repeated
+for cells on the other face and the two results combined (eg, another Boolean
+OR).
+
+Likewise, an MP2 cell basis tensor can be formed for, say, U, by the Boolean
+operation (NOT U) AND V AND W applied to the columns of the thresholded charge
+cell tensor.  As MP2 targets one plane, then the resulting 1 column tensor is
+interpreted only as providing U plane channel ROI information.

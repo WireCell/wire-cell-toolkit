@@ -381,7 +381,7 @@ Store WireCell::WireSchema::load(const char* filename, Correction correction)
     static std::map<cache_key_t, StoreDBPtr> cache;
 
     // turn into absolute real path
-    std::string realpath = WireCell::Persist::resolve(filename);
+    std::string realpath = WireCell::Persist::resolve(filename, "wires");
 
     // Make mutable shared pointer to shart with.
     StoreDBPtr cached;
@@ -705,6 +705,8 @@ std::vector<int> Store::channels(const Plane& plane) const
 //// Validation ////
 
 using spdlog::error;
+using spdlog::debug;
+using spdlog::trace;
 using fmt::format;
 struct ValidationContext {
 
@@ -783,12 +785,16 @@ void WireCell::WireSchema::validate(const Store& store, double repsilon, bool fa
             const std::string actx = dctx + format("anodeID={}: ", anode.ident);
             v(actx);
 
+            trace("anode: ident={} index={}", anode.ident, ianode);
+
             v.positive(anode.faces.size(), "face count");
             for (int iface : anode.faces) {
                 const auto& face = v.element(store.faces(), iface, "faces array access");
                 v.nonneg(face.ident, "face ident");
                 const std::string fctx = actx + format("faceID={}: ", face.ident);
                 v(fctx);
+
+                trace("face: ident={} index={}", face.ident, iface);
 
                 v.positive(face.planes.size(), "plane count");
                 std::set<int> face_plane_idents;
@@ -797,6 +803,8 @@ void WireCell::WireSchema::validate(const Store& store, double repsilon, bool fa
                     v.nonneg(plane.ident, "plane ident");
                     const std::string pctx = fctx + format("planeID={}: ", plane.ident);
                     v(pctx);
+
+                    trace("plane: ident={} index={}", plane.ident, iplane);
 
                     face_plane_idents.insert(plane.ident);
 
@@ -810,11 +818,17 @@ void WireCell::WireSchema::validate(const Store& store, double repsilon, bool fa
                     v.positive(plane.wires.size(), "wire count");
                     Wire wlast;
                     bool seen=false;
+                    int iwire_in_plane=-1;
                     for (int iwire : plane.wires) {
+                        ++iwire_in_plane;
+
                         const auto& wire = v.element(store.wires(), iwire, "wires array access");
                         v.nonneg(wire.ident, "wire ident");
                         const std::string wctx = pctx + format("wireID={}: ", wire.ident);
                         v(wctx);
+
+
+                        trace("wire: ident={} index={} segment={}, chid={}", wire.ident, iwire_in_plane, wire.segment, wire.channel);
 
                         // Check wire direction convention
                         Ray wray(wire.tail, wire.head);

@@ -1,0 +1,249 @@
+#+title: Notes on use of Torch.
+
+This collects some notes on the use of the C++ API to PyTorch.
+
+* meta :noexport:
+
+
+#+begin_src sh :results output drawer
+scp torch.html hierocles.phy.bnl.gov:public_html/wire-cell/docs/spng/torch.html
+#+end_src
+
+#+RESULTS:
+:results:
+torch.html                                      0%    0     0.0KB/s   --:-- ETAtorch.html                                    100%   26KB  11.4MB/s   00:00    
+:end:
+
+
+* Names
+
+Rather confusingly:
+
+- PyTorch names the project at https://pytorch.org
+- This package [[https://stackoverflow.com/a/52708294][derives from Torch7]] 
+- ~torch~ names the Python API / package.
+- LibTorch names the C++ API, provided alone or with the ~torch~ Python package.
+- ~py-torch~ is the Spack package name for the Python ~torch~ package
+- ~pytorch~ is the name of the WCT subpackage that houses LibTorch-based DNN inference and FFT.
+- ~LIBTORCH~ is the WCT ~wcb~ environment label for building against a PyTorch installation.
+- ~--with--libtorch-*~ are WCT ~wcb~ command line args (which may point into the Python ~torch~ install area).
+
+WCT [[https://github.com/WireCell/wire-cell-toolkit/issues/343][Issue 343]] calls attention to this naming confusion and suggests using the name "torch" everywhere.  Here, we assume "torch" generically and state Python or C++ where it is not obvious.
+
+* Install and build problems
+
+** Include directories
+
+Using a few code distributions:
+
+- ~pip install torch~
+- ~libtorch-cxx11-abi-shared-with-deps-2.4.1+cu124.zip~
+- Spack build of ~py-torch-2.4.0~
+
+One would think an include location (~-I~) of this directory is needed:
+
+#+begin_example
+$TORCH_PREFIX/include
+#+end_example
+
+That fails to find the main entry header ~torch/torch.h~.  That and other important headers are in an unexpected, deeper directory:
+
+#+begin_example
+$TORCH_PREFIX/include/torch/csrc/api/include/torch/torch.h
+#+end_example
+
+Using *this* as a ~-I~ also fails as the first directory includes required headers included like ~#include <torch/HEADER.h>~.  To make matters more confused, some headers, like ~torch/script.h~, include paths like
+
+#+begin_example
+#include <torch/csrc/api/include/torch/types.h>
+#+end_example
+
+Given both directories as ~-I~ locations allows all headers to be found by the compiler.  Apparently this is an [[https://discuss.pytorch.org/t/where-to-find-torch-torch-h/59908][intentional wart]] that is buffed smooth if using Torch's CMake support.  For waf-heads, the weirdness is exposed.  Assuming ~TORCH_PREFIX~ points to the installation base directory then this will let WCT build against it.:
+
+#+begin_example
+waf  configure [...] \
+  --with-libtorch=$TORCH_PREFIX \
+  --with-libtorch-include=$TORCH_PREFIX/include,$TORCH_PREFIX/include/torch/csrc/api/include
+#+end_example
+
+
+**  Warning about arguments to variadic macro
+
+You may see many warnings from inside torch code like:
+
+#+begin_example
+warning: ISO C++11 requires at least one argument for the "..." in a variadic macro
+#+end_example
+
+As far as I can tell these can only be disabled by removing ~-pedantic~.
+
+
+* Data context
+
+At low level one must utilize a ~torch::Device~.  WCT ~pytorch~ defines a ~TorchContext~ which couples this device with a semaphore for cooperatively limiting resource usage of the device.  The device object is otherwise just an identifier which can be produced from a name (string).  A tensor "knows" its device and can be moved to another device.
+
+
+* Tensor memory semantics
+
+- A ~torch::Tensor~ is [[https://discuss.pytorch.org/t/tensor-move-semantics-in-c-frontend/77901/10][like a shared pointer]] which has some important implications:
+
+  - Pass-by-value is fine for ~torch::Tensor~.  There is little benefit to pass by reference and never hold a tensor by bare pointer.
+
+  - Somewhat surprisingly, ~const torch::Tensor~ does *not* make the underlying tensor data ~const~.  The names of methods that "mutate" the tensor end in underscore and yet are ~const~ (eg ~torch::Tensor::zero_() const~).  See [[https://github.com/zdevito/ATen/issues/27#issuecomment-330717839][this comment]] for explanation.  The only way to assure the underlying data is treated as "const" is self restraint.
+
+- ~torch::Tensor::detach()~ disconnects the tensor from autograd
+
+- ~torch::Tensor::clone()~ makes a new tensor holding a copy of of the tensor.  See also ~torch::clone()~.
+
+
+
+* Documentation
+
+Torch is most popularly used via its Python bindings.  The C++ API is similar but the lack of popularity can make learning how to do things via internet search difficult.  The C++ documentation is fairly good.  These entry pages should be given a linear read through.  Here are some with brief topic summaries:
+
+- [[https://pytorch.org/cppdocs/][overview]] :: understand the major parts of the API, focus on "ATen" (~at~ namespace) and "Frontend" (~torch~ namespace).  Both have ~Tensor~, the ~at::Tensor~ lacks autograd API provided by ~torch::Tensor~.
+
+- [[https://pytorch.org/cppdocs/frontend.html][frontend]] :: The C++ "frontend" mimics the Python API 
+
+- [[https://pytorch.org/cppdocs/notes/tensor_basics.html][tensor basics]] :: Same tensor type for CPU or CUDA tensor and may have type double, float, int.  Code for accessesing individual tensor elements differ for CPU vs CUDA.  Use ~from_blob()~ to attach tensor to existing array data.  Scalar vs zero-dimensional TEnsor.
+
+- [[https://pytorch.org/cppdocs/api/namespace_at.html#namespace-at][=at::= namespace]] :: Low level "tensor" type and functions.
+
+- ~torch::NoGradGuard~ :: this thread-local object turns off autograd.  It should be asserted at high level and sparingly.
+
+
+* Examples
+
+- tensor shape :: use ~tensor::sizes()~
+- indexing :: see https://pytorch.org/cppdocs/notes/tensor_indexing.html must pass ~{...}~ of indices, even if 1D, this yields yet another tensor.
+- accessing :: https://pytorch.org/cppdocs/notes/tensor_basics.html to get tensor elements as C++ POD 
+
+  See also [[file:../test/]].
+
+
+* Performance testing
+
+** Micro benchmarks
+
+A number of micro benchmarks are devised which mock the operations in SP
+
+- [X] 2D *convolution*
+  - Consider two equivalent algorithms: one-step and two-step DFT round-trip
+    - one-step uses a 2D kernel: $DFT_{ij}^{-1}(DFT_{ij}(A) DFT_{ij}(B))$
+    - two-step uses 2 1D kernels: $DFT_{ij}^{-1}(DFT_{j}(DFT_{i}(b1) DFT_{i}(B))DFT_{j}(b2))$
+  - When the 2D kernel is the outer product of the two 1D kernels the results are identical.
+  - Given precomputed kernels, convolution and filtered deconvolution are identical operations.
+
+- [ ] *quantile* (percentile/median) is the next leading usage in OSP after DFT.  Specifically the exact percentile version (not the faster binned version) is used to calculate the median of a waveform in ~restore_baseline()~.  At almost similar cost, the 50 +/- 34% values are also calculated in ~ROI_formation::cal_RMS~.  Perhaps these all could be replaced with binned versions which would make this benchmark moot.  But, take it as given.  ~Waveform::percentile()~ boils down to calling ~std::nth_element()~.
+
+- [ ] *hermitian mirror* see [[file:hermitian-mirror.org]].  Maybe we don't bother?
+
+
+** Performance
+
+#+begin_example
+$ ./build/spng/wcdoctest-spng -tc="spng torch convo small*"
+$ OMP_NUM_THREADS=1  ./build/spng/wcdoctest-spng -tc="spng torch convo perf*"
+$ OMP_NUM_THREADS=32 ./build/spng/wcdoctest-spng -tc="spng torch convo perf*"
+#+end_example
+
+These tests:
+- Does a 1-shot 2D FFT convolution and the same convo as two 1D, per-dimension FFT convolutions.
+- The "convo small" uses a small array and prints various results.
+- The "convo perf" uses array shape 1024 x 8192 and not printing and runs it many times.
+- 1000 calls to the alg on GPU, 100 on CPU. A single call to ~torch::rand()~ used for all calls.
+- Use env. var. to limit number of CPU threads, confirm CPU and GPU utilization with ~top~ and ~nvidia-smi~
+
+  Results:
+
+|    | threads | device | time   | ncalls |   CPU |  GPU | CPU mem | GPU mem |
+|----+---------+--------+--------+--------+-------+------+---------+---------|
+|  1 |      32 | GPU    | 9.5 s  |   1000 |  100% | 100% |     0.5 |     1.9 |
+|  2 |       1 | GPU    | 9.5 s  |   1000 |  100% | 100% |     0.5 |     1.9 |
+|  3 |      32 | CPU    | 9.5 s  |    100 | 3200% |   0% | 0.5-1.4 |       0 |
+|  4 |      16 | CPU    | 11.5 s |    100 | 1600% |   0% |         |         |
+|  5 |       8 | CPU    | 16.9 s |    100 |  800% |   0% |         |         |
+|  6 |       4 | CPU    | 28.7 s |    100 |  400% |   0% |         |         |
+|  7 |       2 | CPU    | 53.1 s |    100 |  200% |   0% |         |         |
+|  8 |       1 | CPU    | 122.4  |    100 |  100% |   0% |         |         |
+|  9 |       1 | CPU    | 12.3s  |     10 |  100% |   0% | 0.7-1.6 |       0 |
+| 10 |      32 | GPU    | 12.1   |   1000 |       |      |         |         |
+
+Notes:
+10. [@10] Turn on checks for small imaginary parts and differences between the two convo methods.
+
+Observations:
+
+- Running on GPU needs only, and all of, one CPU core.
+
+- GPU is two orders of magnitude faster than one core and (almost exactly!) one order faster to full 32 core CPU.
+
+- A lot of CPU memory fluctuation when running on CPU.
+
+- No CPU mem fluctuation when running on GPU.
+
+- GPU mem is higher than CPU mem (when running on CPU) but this may represent a high water mark.
+
+- CPU gives less than linear scaling with number of cores.
+
+- Setting ~OMP_NUM_THREADS=64~ gives no changes.  I guess OMP does not use hyper-threading?
+
+** One-step vs two-step convo
+
+Isolating these two equivalent algorithms: one-step:
+
+$DFT_{ij}^{-1}(DFT_{ij}(A) DFT_{ij}(B))$
+
+And two-step:
+
+$DFT_{ij}^{-1}(DFT_{j}(DFT_{i}(b1) DFT_{i}(B))DFT_{j}(b2))$
+
+This is also using array size 1024x8192.
+
+| step | device   | time   | ncalls |
+|------+----------+--------+--------|
+|    1 | GPU      | 3.81 s |   1000 |
+|    2 | GPU      | 4.25 s |   1000 |
+|    1 | CPU (32) | 2.56 s |    100 |
+|    2 | CPU (32) | 4.40 s |    100 |
+|    1 | CPU (16) | 2.98 s |    100 |
+|    2 | CPU (16) | 5.73 s |    100 |
+
+
+** Quantile and median
+
+|          | device  | time s | ncalls |
+|----------+---------+--------+--------|
+| quantile | GPU     |   4.02 |   1000 |
+| median   | GPU     |  0.146 |   1000 |
+|----------+---------+--------+--------|
+| quantile | CPU(32) |   2.17 |    100 |
+| median   | CPU(32) |  0.271 |    100 |
+| quantile | CPU(16) |   3.53 |    100 |
+| median   | CPU(16) |  0.531 |    100 |
+| quantile | CPU(1)  |   46.8 |    100 |
+| median   | CPU(1)  |   7.74 |    100 |
+
+The speed difference between quantile and median is attributed to different algorithms.  The quantile can be arbitrary (not just 50%) and requires a sort, perhaps O(n log n).  The median lends to [[https://rcoh.me/posts/linear-time-median-finding/][O(n) algorithms]].  However, many quantile of a given signal can be calculated at the same cost as one.
+
+* Exchanging tensors between WCT data flow graph nodes
+
+WCT ~IData~ and ~INode~ interface classes must be developed to allow transfer of tensors across the DFP graph edges.  Before designing these interfaces a number of problematic decisions are needed due to the facts:
+
+1. Tensors are type free (at C++ level) or in other words they are dynamically typed.
+2. An unknown and likely large variety in the number and meaning of tensors must be supported at the input/output of the relevant ~INode~.
+3. It is (apparently) impossible for C++ to assert const correctness of tensor data.
+4. We explicitly want to avoid copying tensor data.
+
+The first two could be covered by reflecting the variety in the ~IData~ and ~INode~ mid-hierarchy interfaces.  This would convert type-free ~torch::Tensor~ into C++ types.  But, it would require defining new ~IData~ and ~INode~ for every variant.
+
+A better (lazier) approach is perhaps to mimic the ~ITensor/ITensorSet~ replacing the method returning a ~std::byte*~ data representation and the associated retyping methods in ~ITensor~ with a single ~torch::Tensor tensor()~ method. These new ~IData~ interface classes must inherently depend on ~torch/torch.h~ and so they can not live in ~iface/~ but must be in ~spng/~ or better ~pytorch/~.
+
+A small proliferation in ~INode~ types is still required at the input and output of the subgraph that deals in tensors.  Eg, an ~IFrameTorchTensor~ and an ~ITorchTensorFrame~ converter on input/output is needed.
+
+The need for and inability to enforce const-ness at the C++ level requires that WCT rely on *contract*.  That is, developers simply must not write code that modifies any tensor taken from an ~IData~.
+
+
+
+
+

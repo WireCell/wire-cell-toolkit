@@ -34,6 +34,10 @@ namespace WireCell {
 
         /// The ID of the plane of wire zero.  This is just sugar.
         virtual WirePlaneId planeid() const;
+
+        /// Provide a global order number for this channel.
+        virtual size_t global_order() const;
+
     };
 }  // namespace WireCell
 

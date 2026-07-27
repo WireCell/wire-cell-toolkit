@@ -11,13 +11,23 @@ bats_load_library wct-bats.sh
 
     local cfgdir=$(srcdir cfg)
 
-    local found=$( grep -r wiener_threshold_tag $cfgdir )
+    # Assure the deprecated parameter is not used in any active configuration.
+    # We must ignore commented-out occurrences, so strip Jsonnet comments
+    # (// and # line comments plus single-line /* */ block comments) from each
+    # file before matching.  Otherwise a mention in a comment yields a false
+    # positive.
+    local found=""
+    local f
+    for f in $(find "$cfgdir" -name '*.jsonnet' -print); do
+        local hit
+        hit=$(sed -E 's://.*$::; s:#.*$::; s:/\*[^*]*\*/::g' "$f" \
+                  | grep -nw 'wiener_threshold_tag' || true)
+        if [[ -n "$hit" ]]; then
+            found+="$f: $hit"$'\n'
+        fi
+    done
     echo -e "found with wiener_threshold_tag:\n$found"
     [[ -z "$found" ]]
-    
-}
 
-@test "no threshold tags in cfg - this fails until wclsFrameSaver issue resolved" {
-    skip "pending wclsFrameSaver fix"
 }
 

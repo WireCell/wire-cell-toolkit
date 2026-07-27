@@ -1,0 +1,165 @@
+digraph idealistic {
+
+    subgraph cluster_legend {
+        label="legend"
+        idata[label="IData"]
+        node[shape=box]
+        inode[label="INode"]
+    }
+
+    // data
+    quietadc[label="ADC IFrame, one APA"]
+    subgraph cluster_adcaf {
+        label="per 'channel-plane' ADC array"
+        adcu_af[label="ADC array"]
+        adcv_af[label="ADC array"]
+        adcw_af[label="ADC array"]
+    }
+    subgraph cluster_spu {
+        label="per 'channel-plane' sp array"
+        spu_af[label="sp array"]
+        spv_af[label="sp array"]
+        spw_af[label="sp array"]
+    }
+    sigframe[label="signal IFrame, one APA"]
+
+    // nodes
+    node[shape=box]
+    nf[label="NF"]
+    frame2af[label="to arrays"]
+    spu[label="SP"]
+    spv[label="SP"]
+    spw[label="SP"]
+    af2frame[label="to frame"]
+    dnnroi
+    
+    nf->quietadc->frame2af
+    frame2af->adcu_af->spu->spu_af
+    frame2af->adcv_af->spv->spv_af
+    frame2af->adcw_af->spw->spw_af
+    
+    spu_af->af2frame
+    spv_af->af2frame
+    spw_af->af2frame
+    af2frame->sigframe
+
+
+
+    subgraph cluster_response {
+        label="Prepare responses"
+        node[shape=ellipse]
+        fr_src[label="FR source"]
+        fr_plane[label="plane num"]
+        fr_raw[label="FR\npath vs step\n(126,1000), T=100ns\n(2D real, static)"]
+        fr_cooked[label="FR spec\nchan vs freq\n(21,250), T=500ns\n(2D complex, static)"]
+
+        er_src[label="ER source"]
+        er_wave[label="ER wave\n500ns, N_fr\n(1D real, static)"]
+        er_spec[label="ER spec\n(250,), T=500ns\n(1D complex, static)"]
+
+        dr_spec[label="DR\nchannel vs freq\n(21,250), T=500ns\n(2D complex, static)"]
+
+        pcr_src[label="PCR source"]
+        pcr_waves[label="PCR\n(N_ch=800,N_tick=6000), T=500ns\n(2D real, static)"]
+
+
+        node[shape=box]
+        fr_prep[label="FR prepare\nWire-region avg\n1D FFT in time\nN=4 rebin in freq"]
+
+        fr_load        
+        er_load[label="load(N_fr, T)"]
+        pcr_load
+
+        fr_plane->fr_load
+        fr_src->fr_load->fr_raw->fr_prep->fr_cooked
+        er_src->er_load->er_wave->er_fft->er_spec
+
+        fr_cooked->dr_mult
+        er_spec->dr_mult
+        dr_mult->dr_spec
+
+        fr_plane->pcr_load
+        pcr_src->pcr_load->pcr_waves->pcr_fft->pcr_specs
+
+    }
+
+    subgraph cluster_sp {
+        label="Example SP subgraph"
+
+
+        subgraph cluster_inarrays {
+            label="Input Arrays"
+            node[shape=ellipse]
+            dc_dr[label="Nominal DR\nrel. chan vs freq\n(small)"]
+            dc_per[label="Per-chan resp\nabs. chan vs freq\n(sparse)"]
+            dc_adc[label="ADC plane"]
+            dc_gaussf[label="Gauss filter\n(1D wave)"]
+            dc_wienerf[label="Wiener filter\n(1D wave)"]
+        }
+
+        node[shape=ellipse]
+
+        dc_adc_spec[label="2D ADC spectra"]
+        dc_gaussf_spec[label="Gauss filter"]
+        dc_wienerf_spec[label="Wiener filter"]
+
+        dc_gauss_spec[label="Gauss spectra"]
+        dc_wiener_spec[label="Wiener spectra"]
+        dc_gauss[label="Gauss decon"]
+        dc_wiener[label="Wiener decon"]
+        dc_roi[label="ROIs"]
+        dc_signal[label="signal"]
+        
+        node[shape=box]
+        dc_gauss_fft[label="1D FFT"]
+        dc_wiener_fft[label="1D FFT"]
+        dc_gauss_decon[label="M*F/R"]
+        dc_wiener_decon[label="M*F/R"]
+        dc_adc_fft_time[label="FFT time"]
+        dc_fftg[label="2D invFFT"]
+        dc_fftw[label="2D invFFT"]
+        dc_signal_roi[label="ROI finding"]
+        dc_apply_roi[label="apply ROI"]
+
+        {rank=same dc_adc_fft_time dc_gauss_fft dc_wiener_fft}
+
+        dc_adc->dc_adc_fft_time->dc_adc_spec
+
+        dc_gaussf->dc_gauss_fft->dc_gaussf_spec
+        dc_wienerf->dc_wiener_fft->dc_wienerf_spec
+
+        dc_dr->dc_gauss_decon
+        dc_adc_spec->dc_gauss_decon
+        dc_gaussf_spec->dc_gauss_decon
+
+        dc_gauss_decon->dc_gauss_spec
+
+        dc_dr->dc_wiener_decon
+        dc_adc_spec->dc_wiener_decon
+        dc_wienerf_spec->dc_wiener_decon
+
+        dc_wiener_decon->dc_wiener_spec
+
+        dc_gauss_spec->dc_fftg->dc_gauss
+        dc_wiener_spec->dc_fftw->dc_wiener
+
+        subgraph cluster_dnnroi {
+            label="Incomplete DNNROI subgraph";
+            node[shape=ellipse]
+            sigdnn
+            node[shape=box]
+            DNNROI
+
+            edge[constraint=false]
+            dc_gauss->DNNROI
+            dc_wiener->DNNROI
+            DNNROI->sigdnn
+        }            
+
+
+        dc_wiener->dc_signal_roi->dc_roi->dc_apply_roi
+        dc_gauss->dc_apply_roi->dc_signal
+    }
+
+
+}

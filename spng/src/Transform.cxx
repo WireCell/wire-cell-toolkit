@@ -1,0 +1,192 @@
+#include "WireCellSpng/Transform.h"
+#include "WireCellSpng/SimpleTorchTensor.h"
+#include "WireCellSpng/Util.h"
+
+
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(SPNGTransform,
+                 WireCell::SPNG::Transform,
+                 WireCell::ITorchTensorFilter,
+                 WireCell::IConfigurable,
+                 WireCell::INamed)
+
+using namespace WireCell::HanaJsonCPP;                         
+
+namespace WireCell::SPNG {
+
+
+    Transform::Transform()
+        : TensorFilter("Transform", "spng")
+    {
+    }
+
+    ITorchTensor::pointer Transform::filter_tensor(const ITorchTensor::pointer& in)
+    {
+        torch::Tensor tensor = in->tensor();
+        for (auto op : m_ops) {
+            tensor = op(tensor);
+        }
+        log->debug("filtered: {} ops making {} total={}",
+                   m_ops.size(), to_string(tensor), torch::sum(tensor).item<double>());
+        return std::make_shared<SimpleTorchTensor>(tensor, in->metadata());
+    }
+
+    void Transform::configure(const WireCell::Configuration& jconfig)
+    {
+        log->debug("Transform config: {}", jconfig);
+        this->TensorFilter::configure(jconfig);
+        from_json(m_config, jconfig);
+
+        if (m_config.operations.empty()) {
+            log->warn("null transform configured");
+            return;
+        }
+
+        m_ops.clear();
+        for (const auto& opcfg: m_config.operations) {
+
+            std::vector<int64_t> dims(opcfg.dims.begin(), opcfg.dims.end());
+            const float scalar = opcfg.scalar;
+        
+            log->debug("Applying transform operation \"{}\" with scalar={} and ndims={}",
+                       opcfg.operation, scalar, dims.size());
+
+            if (opcfg.operation == "permute") {
+                // dims size must match tensor shape size, leave it to torch to check
+                if (dims.size() < 2) {
+                    raise<ValueError>("nonsensical to permute less than two dimensions");
+                }
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor.permute(dims);
+                });
+                continue;
+            }
+            if (opcfg.operation == "transpose") {
+                if (dims.size() != 2) {
+                    raise<ValueError>("wrong size sims for transpose");
+                }
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    return torch::transpose(tensor, dims[0], dims[1]);
+                });
+                
+                continue;
+            }
+            if (opcfg.operation == "scale") {
+                if (! scalar) {
+                    raise<ValueError>("cowardly assuming you do not want to multiply by zero");
+                }
+                m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
+                    return torch::mul(tensor, scalar);
+                });
+                continue;
+            }
+            if (opcfg.operation == "offset") {
+                m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor.add(scalar);
+                });
+                continue;
+            }
+            if (opcfg.operation == "normalize") {
+                m_ops.push_back([](const torch::Tensor& tensor) -> torch::Tensor {
+                    torch::Tensor vmin = tensor.min();
+                    torch::Tensor vmax = tensor.max();
+
+                    // Special case that all values are same
+                    if (vmax.item<float>() == vmin.item<float>()) {
+                        return torch::full_like(tensor, 0.5); 
+                    }
+
+                    return (tensor - vmin) / (vmax - vmin);
+                });
+                continue;
+            }
+            if (opcfg.operation == "medsub") {
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    torch::Tensor medians = std::get<0>(torch::median(tensor, dims[0], true));
+                    return tensor.sub(medians);
+                });
+                continue;
+            }
+            if (opcfg.operation == "lowmedsub") {
+                m_ops.push_back([dims, scalar](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto temp = tensor.clone();
+                    auto mask = temp.gt(scalar);
+                    temp.masked_fill_(mask, std::numeric_limits<float>::quiet_NaN());
+                    temp = std::get<0>(torch::nanmedian(temp, dims[0], /*keepdim=*/true));
+                    return tensor.sub(temp);
+                });
+                continue;
+            }
+            if (opcfg.operation == "treshold") {//TODO -- fix typo
+                m_ops.push_back([scalar](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor > scalar;
+                });
+                continue;
+            }
+            if (opcfg.operation == "slice") {
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    if (dims.size() != 3) {
+                        raise<ValueError>("slice transform requires 3 values in dims config, got %d",
+                                          dims.size());
+                    }
+                    return tensor.slice(dims[0], dims[1], dims[2]);
+                });
+                continue;
+            }
+            if (opcfg.operation == "squeeze" ){
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto ten = tensor;
+                    for (const auto dim : dims) {
+                        ten = ten.squeeze(dim);
+                    }
+                    return ten;
+                });
+                continue;
+            }
+            if (opcfg.operation == "unsqueeze" ){
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto ten = tensor;
+                    for (const auto dim : dims) {
+                        ten = ten.unsqueeze(dim);
+                    }
+                    return ten;
+                });
+                continue;
+            }
+            if (opcfg.operation == "view" ){
+                m_ops.push_back([dims](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor.view(dims);
+                });
+                continue;
+            }
+            if (opcfg.operation == "noop") {
+                m_ops.push_back([](const torch::Tensor& tensor) -> torch::Tensor {
+                    return tensor;
+                });
+                continue;
+            }
+            if (opcfg.operation == "to") {
+                auto dtype = opcfg.dtype;
+                m_ops.push_back([dtype](const torch::Tensor& tensor) -> torch::Tensor {
+                    auto output_tensor = tensor;
+                    return output_tensor.to(resolve_dtype(dtype));
+                });
+                continue;
+            }
+
+            raise<ValueError>("unknown operation: %s", opcfg.operation);
+        }
+
+    }
+
+    WireCell::Configuration Transform::default_configuration() const
+    {
+        auto cfg = this->TensorFilter::default_configuration();
+        auto cfg2 = to_json(m_config);
+        update(cfg, cfg2);
+        return cfg;
+    }
+
+}
+

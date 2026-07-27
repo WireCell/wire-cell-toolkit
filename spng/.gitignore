@@ -1,0 +1,8 @@
+.vscode
+.lock*
+.waf*
+*~
+build
+*.tar
+*.npz
+*.pt

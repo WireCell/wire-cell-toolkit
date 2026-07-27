@@ -1,0 +1,2 @@
+bld.smplpkg('WireCellSpng', use='WireCellAux SPDLOG LIBTORCH')
+

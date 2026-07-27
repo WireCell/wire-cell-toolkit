@@ -44,6 +44,10 @@ namespace WireCell {
             bool ok = (*this)(in, outv);
             if (!ok) return false;
             const size_t mult = output_types().size();  // don't use FanoutMultiplicity
+            if (outv.size() != mult) {
+                return false;
+            }
+
             anyv.resize(mult);
             for (size_t ind = 0; ind < mult; ++ind) {
                 anyv[ind] = outv[ind];

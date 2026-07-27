@@ -25,6 +25,9 @@ namespace WireCell {
             ~Context() { sem->release(); }
         };
 
+        /// Useful only for debugging.
+        virtual int get_count() const { return -1; }
+
     };
 }  // namespace WireCell
 

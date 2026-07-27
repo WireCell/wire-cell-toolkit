@@ -62,14 +62,18 @@ namespace WireCellTbb {
 
         // Start/stop the stop watch.
         void start() {
-            m_clock = std::chrono::high_resolution_clock::now();
+            m_wall = std::chrono::high_resolution_clock::now();
+            m_core = std::clock();
+
         }
         void stop() {
-            duration_t delta = std::chrono::high_resolution_clock::now() - m_clock;
+            duration_t delta = std::chrono::high_resolution_clock::now() - m_wall;
             m_runtime += delta;
             if (delta > m_maxrt) {
                 m_maxrt = delta;
             }
+
+            m_coretime = m_coretime + ((double) (std::clock() - m_core)) / CLOCKS_PER_SEC;
             ++m_calls;
         }
 
@@ -79,6 +83,9 @@ namespace WireCellTbb {
         // Total runtime for all executions.
         duration_t runtime() const {
             return m_runtime;
+        };
+        double coretime() const {
+            return m_coretime;
         };
         // Maximum runtime for any execution.
         duration_t max_runtime() const {
@@ -94,7 +101,12 @@ namespace WireCellTbb {
         duration_t m_runtime {0}, m_maxrt{0};
         using clock_t = std::chrono::high_resolution_clock;
         using time_point_t = clock_t::time_point;
-        time_point_t m_clock;
+        time_point_t m_wall;
+
+        // also keep std::clock which counts core-seconds
+        std::clock_t m_core;
+        double m_coretime{0};
+
 
         size_t m_calls{0};
     };

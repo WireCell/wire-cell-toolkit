@@ -289,14 +289,44 @@
     Ray :: {tail:self.Point,head:self.Point},
     Track :: { time:0.0, charge:-1, ray:self.Ray },
 
-    // WirePlaneID is a packed integer.  WARNING, layer is NOT what
-    // most people call "plane number".  It is a bit field.  For
-    // 3-plane detectors the outer most wire plane layer is 1, then 2
-    // and collection is 4 (not 3).  layer=0 is undefined.
+    // A wire-plane ID is a packed integer.  WARNING, layer is NOT what most
+    // people call "plane number".  It is a bit field.  For 3-plane detectors
+    // the outer most wire plane layer is 1, middle is layer 2 and the
+    // collection plane is 4 (not 3).  layer=0 is undefined.  What you normally
+    // think of as a zero-counted "plane number" is the "index" and that
+    // information is held in which layer bit holds value 1.  A WPID may have
+    // multiple layers set to 1, depending on how it is used.
     Ulayer:1<<0,
     Vlayer:1<<1,
     Wlayer:1<<2,
     WirePlaneId(layer, face=0, apa=0) :: (layer&7) | (face << 3) | (apa << 4),
+
+    wpid_index_to_layer(layer):: 1<<layer,
+
+    // Return INDEX of all layers that are identified in the layer bitmap.
+    wpid_layer_to_indices(layer) ::
+        [bit for bit in [0,1,2] if (layer & (1<<bit)) != 0],
+
+    // Return the layer's index.  The layer is bit-field with exactly 1 high bit.
+    wpid_layer_to_index(layer) ::
+        local indices = $.wpid_layer_to_indices(layer);
+        local is_one = std.assertEqual(std.length(indices), 1);
+        indices[0],
+
+
+    // Unpack a WirePlaneId into its constituents
+    unpack_wpid(wpid) :: {
+        local layer_mask = 7,
+        local face_shift = 3,
+        local apa_shift = 4,
+        apa: wpid >> apa_shift,
+        face: (wpid&(1 << face_shift))>>face_shift,
+        layer: wpid&layer_mask,
+        index: $.wpid_layer_to_index(self.layer),
+        letter: "uvw"[self.index],
+        name: "a" + std.toString(self.apa) + "f" + std.toString(self.face) + self.letter,
+    },
+
 
     // Base class for a configurable.
     Component :: {
@@ -306,6 +336,26 @@
     },
     /// example usage: 
     TrackDepos :: self.Component + { type: "TrackDepos" },
+
+    /// Return count up to but not including end.  This is simply a convenient
+    /// alias for a half-open range because std.range()'s gives an inclusive
+    /// count.
+    iota(end) :: std.range(0, end-1),
+
+    /// Return sequence of objects {index:i, value:sequence[i]} over sequence.
+    enumerate(sequence) :: [
+        { index: i, value: sequence[i] }
+        for i in std.range(0, std.length(sequence) - 1)
+    ],
+
+    /// Return sequence of pairs [i,sequence[i]] over sequence.
+    enumerate_pair(sequence) :: [
+        [i, sequence[i]]
+        for i in std.range(0, std.length(sequence) - 1)
+    ],
+
+    index_of(arr, val)::
+        [x.index for x in $.enumerate(arr) if x.value == val][0],
 
     /// Return canonical "type:name" or just "type" if no name from a
     /// configuration object.  Use this instead of bare names to
@@ -330,10 +380,18 @@
     tns(objs) :: [$.tn(obj) for obj in objs],
 
 
-    // Return a new list where only the first occurrence of any object is kept.
-    unique_helper(l, x):: if std.count(l,x) == 0 then l + [x] else l,
-    unique_list(l):: std.foldl($.unique_helper, l, []),
-
+    /// Return a new list where only the first occurrence of any object is kept.
+    ///
+    /// This function is a hot spot!  It is O(N log N) due to the implicit sort
+    /// on elements in set() and the explicit sort on index to restore original
+    /// order.  The toString() may also be somewhat expensive.  A hash based
+    /// storage object would allow removing the sorts and achieve O(N) but
+    /// currently Jsonnet lacks a hash function.
+    unique_list(seq)::
+        local indexed = std.mapWithIndex(function (ind, obj) {ind:ind, obj:obj}, seq);
+        local ulist = std.set(indexed, function (ent) std.toString(ent.obj));
+        local ordered = std.sort(ulist, function(ent) ent.ind);
+        [ent.obj for ent in ordered],
 
     // Return an array.  If l is array, return it.  If string, split it, if object return field names
     listify(l, d=',') ::
@@ -345,9 +403,46 @@
         else
             l,
 
-    // Round a floating point to nearest integer.  It's a bit weird to
-    // go through a format/parse.  Maybe there's a better way?
+    // Return an int from possibly a string
+    intify(number)::
+        if std.type(number) == "string"
+        then std.parseInt(number)
+        else std.ceil(number),
+
+    // Return a number from possibly a string
+    numberify(number)::
+        if std.type(number) == "string"
+        then std.parseJson(number)
+        else number,
+
+    // Try hard to return a list of integer values given various types of stuff.
+    intlistify(stuff)::
+        if std.type(stuff) == "array"
+        then [self.intify(x) for x in stuff]
+        else if std.type(stuff) == "number"
+        then [stuff]
+        else if std.length(stuff) == 0 // assume stuff is string
+        then []
+        else [self.intify(x) for x in self.listify(stuff) if std.length(x) > 0],
+
+    // Return an object that has no more keys than in the given keys.  If obj
+    // does not have the key it is omitted.
+    object_with(obj, keys):: {[k]:obj[k] for k in keys if std.objectHas(obj, k)},
+
+    // Flatten a list of lists of items to a list of items.
+    flatten(lol):: [item for sublist in lol for item in sublist],
+
+    // Flatten a list of lists of .... of lists of items to a list of items.
+    deep_flatten(lolol):: std.flatMap(function(x)
+            if std.type(x) == 'array' then $.deep_flatten(x) else [x], lolol),
+
+    // Round a floating point to nearest integer.  It's a bit weird to go
+    // through a format/parse.  Maybe there's a better way?  Note, std.round()
+    // comes in 0.21.
     roundToInt(x):: std.parseInt("%d" % (x+0.5)),
+
+    // 0.20.0 gets this native as std.sum().
+    sum(arr):: std.foldl(function(a, b) a+b, arr, 0),
 
     // Like the shell command of the same name.  
     basename(name, ext="",  delim="/") ::
@@ -427,6 +522,10 @@
     // This is std.get from 0.18.0
     get(o, f, default=null, inc_hidden=true)::
         if std.objectHasEx(o, f, inc_hidden) then o[f] else default,
+
+    // Filter input through trace and return it.
+    debug(obj, msg="debug")::
+        std.trace(msg + std.toString(obj), obj),
 
 }
 

@@ -22,6 +22,8 @@ namespace WireCell {
            private:
             double m_max_freq;
             double m_tau;
+            bool m_use_negative_freqs{true};
+
         };
     }  // namespace SigProc
 }  // namespace WireCell

@@ -23,6 +23,7 @@ namespace WireCell::Aux {
         // ISemaphore
         virtual void acquire() const;
         virtual void release() const;
+        virtual int get_count() const;
 
       private:
 

@@ -121,6 +121,20 @@ Test and application programs are allowed to have additional dependencies declar
   bld.smplpkg('MyPackage', use='YourPackage YourOtherPackage', test_use='ROOTSYS')
 #+END_SRC
 
+** Dependency trees
+
+There are three dependency trees collectively defined by three types of "use" arguments accepted by the ~bld.smplkpg()~.
+
+- ~use~ :: dependencies for the package's shared library
+- ~app_use~ :: dependencies for the package's applications (main programs)
+- ~test_use~ :: dependencies for the package's tests
+
+The ~app_use~ and ~test_use~ each implicitly gain the ~use~ dependencies as well as the dependency on the shared library of the package itself.
+
+The *order* of the "use" lists reflect into the order of compiler "-I" flags and linker "-L" flags in their respective command lines.
+
+The "use" lists are transitive.  For example, most packages need to depend on ~WireCellAux~ and perhaps a small list of new externals.  The ~WireCellAux~ will expand to dependency on ~WireCellIface~ which depends on ~WireCellUtil~ and the bulk of external packages.
+
 ** Tests
 
 The ~waft~ tools provides substantial support for running various types

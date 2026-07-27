@@ -35,6 +35,7 @@ namespace WireCell {
 
            protected:
             virtual void set_channels(const std::vector<int>& channels);
+            void parse_channels(const Json::Value& jchannels);
 
            private:
             std::vector<std::string> m_tags;
@@ -42,6 +43,7 @@ namespace WireCell {
             int m_count{0};
             tagrules::Context m_ft;
             bool m_use_rules{false};
+            bool m_select_all_channels{false};
         };
     }  // namespace SigProc
 }  // namespace WireCell

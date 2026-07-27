@@ -1,0 +1,34 @@
+#include "WireCellSpng/ContextBase.h"
+#include "WireCellUtil/Logging.h"
+
+#include <iostream> // debug
+
+namespace WireCell::SPNG {
+
+    WireCell::Configuration ContextBase::default_configuration() const
+    {
+        Configuration cfg;
+        cfg["device"] = "cpu";
+        // "semaphore" is not specified by default
+        return cfg;
+    }
+
+    void ContextBase::configure(const WireCell::Configuration& cfg)
+    {
+        // spdlog::debug("ContextBase: configured with: {}", cfg);
+        auto devname = get<std::string>(cfg, "device", "cpu");
+        auto semname = get<std::string>(cfg, "semaphore", "");
+        // spdlog::debug("ContextBase: device:{} semaphore:{}", devname, semname);
+        m_ctx.connect(devname, semname);
+    }
+    
+    torch::Tensor ContextBase::to(torch::Tensor ten) const
+    {
+        if (device() == ten.device()) {
+            return ten;
+        }
+        return ten.to(device());
+    }
+
+
+}

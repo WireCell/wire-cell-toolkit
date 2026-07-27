@@ -6,24 +6,68 @@ Emacs eglot (and others) can talk to ~clangd~ to enrich the editing experience.
 
 Most likely your editor handles this.
 
-* Configuring *clangd*
+* Configuring *clangd* as an LSP
 
-By default, just running ~clangd~ will lead to it reporting many spurious errors.  To reduce these, it must know how to compile the code.  This can be difficult to provide manually.   An easier way exists using the ~bear~ tool:
-
-#+begin_example
-  $ bear -- ./wcb 
-#+end_example
-
-If the resulting ~compile_commands.json~ file looks incomplete, you may need to preface that command with:
+To tell =clangd= various compiler flags run:
 
 #+begin_example
-  $ ./wcb clean
+$ ./wcb compile_flags
 #+end_example
 
-Note, ~bear~ makes an intemediate file ~compile_commands.events.json~ while running and writes ~compile_commands.json~
-on finishing.
+This makes a =compile_flags.txt= file in top level.  Do not commit this as it is
+very specific to the local environment.  To remake it, remove the manually and
+rerun.
 
-* Issues
+WCT uses =.h= extensions for header files which =clangd= assume are C source unless
+you have a =.clangd= file in the to of the source tree with these lines.
+
+#+begin_example
+If:
+  PathMatch: ".*\\.h"
+CompileFlags:
+  Add: [ -xc++-header ]
+#+end_example
+
+To directly test a file:
+
+#+begin_example
+$ clangd --check=spng/inc/WireCellSpng/Torch.h --log=verbose
+...
+I[11:01:58.249] Loaded compilation database from /nfs/data/1/bviren/newsp/toolkit/compile_flags.txt
+...
+I[11:02:02.227] All checks completed, 0 errors
+#+end_example
+
+* Emacs with eglot and clangd
+
+Besides making =clangd= happy with WCT, no special setup is needed.  Here is one
+example config for eglot.
+
+#+begin_src elisp
+(use-package eglot
+  :init
+  (add-hook 'c-mode-hook 'eglot-ensure)
+  (add-hook 'c++-mode-hook 'eglot-ensure)
+
+  :hook ((python-mode . eglot-ensure)
+         (c-mode . eglot-ensure)
+         (c++-mode . eglot-ensure)
+         )
+
+  :config
+  (setq eglot-code-action-indications '(mode-line))
+  (add-to-list 'eglot-server-programs '((c++-mode c-mode) . ("clangd")))
+  (add-to-list 'eglot-server-programs
+               `(python-mode
+                 . ,(eglot-alternatives '(("ruff" "server")
+                                          "jedi-language-server"
+                                          "pylsp")))))
+#+end_src
+
+When running Emacs locally to develop on a remote computer, use Tramp to access
+your source files and eglot should Just Work™.
+
+* Issues with clang as compiler
 
 ** ~backtrace.h~ not found
 

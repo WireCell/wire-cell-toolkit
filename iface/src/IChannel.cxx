@@ -13,3 +13,13 @@ WirePlaneId IChannel::planeid() const
     }
     return w.front()->planeid();
 }
+
+size_t IChannel::global_order() const
+{
+    const size_t wpid = planeid().ident();
+    //auto wire0 = wires()[0];
+
+    const size_t wan = index();
+    return ((size_t)wpid << 32) & (0xFFFFFFFF & wan);
+    
+}

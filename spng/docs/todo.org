@@ -1,0 +1,66 @@
+#+title: Work needing done
+
+This an incomplete and ever changing set of todo items for SPNG.
+
+* [0/0] Array library 
+
+- [0/5] Evaluate ArrayFire to compare to LibTorch (jc)
+  - [ ] Implement equivalent to [[file:../test/doctest_torch_exercise.cxx]] 
+  - [ ] Understand the AF memory model (shared pointer like?  whole object? - I think latter)
+  - [ ] Understand how to hand off AF array to an ~IData~, ideally with no copy.
+  - [ ] Does AF allow for const correctness (I think yes).
+  - [ ] Develop a story for supporting DNNROI inference in AF-based SPNG (does AF directly support torch script?  Is there a way to convert TS file to something AF loads?  Would we require DNNROI training to dump model in something besides TS? Does [[https://onnx.ai/][Onnx]] have a role?)
+
+* [3/3] Convolution kernel (bv)
+
+The "filtered decon" is really a convolution with a single "kernel" array.
+
+  - [X] Filtered deconvolution kernel design
+  - [X] A test with basic torch operations and performance related to decon
+  - [X] Factor this into functional library code
+    - ~Torch::convo_spec()~ and others in ~Util.h~.
+
+* [1/5] Data converters (bv/jc)
+
+This assumes LibTorch choice and progress can be made on the list independent of AF vs LT choice as the code should easily be refactored to support ArrayFire.
+
+  - [X] IFrame to tensor
+    - Like ~Aux::FrameTools::raster~ 
+
+  - [ ] Eigen and ~std::vector~
+    - perhaps to trivial to make explicit given ~torch::from_blob()~
+
+  - [ ] ~Response::Schema~
+
+    - ~Array::array_xxf as_array(const Schema::PlaneResponse& pr);~
+
+  - [ ] Sample and convert ER, RC
+
+  - [ ] File loaders to support small scale unit tests that consume realistic content.
+
+* [0/2] Mid-level code gluing kernel to WCT ~INode~
+
+  These are functions that would be called in an ~INode~'s ~configure()~ and ~operator()~ methods
+
+  - [ ] Assemble the filter and response ingredients that are passed to the overall convolution "kernel" builder.
+  - [ ] A face-padding/unpadding function to avoid wrap-around/bleed-over artifacts on non-cyclic wire planes.
+  - [ ] Function to apply shifts to kernel arrays.
+    - eg, "wire filter" is typically given with a peak at the center of the array.
+
+* [0/3] Code organization (bv)
+  - [ ] Rename ~pytorch/~ to ~torch/~ and related ([[https://github.com/WireCell/wire-cell-toolkit/issues/343][Issue 343]], hyu is on board).
+  - [ ] Branch WCT to include ~spng/~ as sub-package.
+  - [ ] Reconcile what utility code should live in ~spng/~ or ~pytorch/~
+
+* [0/3] DFP graph level
+  - [ ] New ~IData~ to hold a ~torch::Tensor~. (likely very similar to an ~ITensor~)
+  - [ ] A few new ~INode~'s to accept/produce this new ~IData~.
+  - [ ] A job config to use ideal line track depos, sim + SPNG
+
+* [0/3] Testing 
+  - [ ] Instrument ~OmnibusSigProc~ with timing (using TimeKeeper, perhaps) so measure performance at fine grain.
+  - [ ] Develop workflow to extract OSP's data array before and after decon, input before to SPNG, compare the two decons.
+  - [ ] Develop SPNG and OBS on the same input, compares the two outputs, does timing checks, validity checks, makes plots, writes a paper....
+
+
+

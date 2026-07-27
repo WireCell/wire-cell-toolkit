@@ -43,14 +43,16 @@
 #pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 // We need FMT version but it is found in core.h in different locations
 // depending on if fmtlib is external to or bundled with spdlog.
 #if defined(SPDLOG_FMT_EXTERNAL)
 #include <fmt/core.h>
+#include <fmt/args.h>
+
 #else
-#include <spdlog/fmt/bundled/core.h>
+#error WCT requires SPDLOG to be compiled against external fmtlib
 #endif
 
 // Newer fmtlib no longer implicitly uses the ostream insertion operator<<.  So

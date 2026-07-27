@@ -1,0 +1,80 @@
+#+title: Discrete Fourier Transforms in SPNG
+
+* Overview
+
+Unlike in mainline WCT, SPNG does not make use of the ~IDFT~ interface as that is
+not preserving of ~torch::Tensor~.
+
+* DFT sizes
+
+** Correctness
+
+DFT is mostly used in SPNG as to perform large-kernel convolution via
+Fourier-space multiplication (division for deconvolution).  This is much faster
+than directly convolving in interval space.
+
+For this to be correct, each corresponding dimension of the target array of size
+N and kernel array of size M must be padded in interval space to size at least
+N+M-1.  Failure to do this will produce cyclic aliasing.  Padding may be larger
+than N+M-1
+
+** Speed
+
+The speed of a DFT function depends on many aspects:
+
+- Speed can vary by almost an order of magnitude for small changes in array
+  size.
+
+- The "fastest" size near an original is often, but not always, one that has
+  small prime factors.
+
+- Parallelism in GPU and if enabled for CPU can complicate choice of "fastest"
+  size.
+
+- Looking up "fastest" size from a table of measured timings is supported.
+
+- These all depend differently depending on the DFT function (~fft(), ~rfft()~, ~irfft2()~, etc)
+
+** Measuring 
+
+This program generates a lookup table:
+
+#+begin_example
+$ ./build/spng/check_dft_measure -h
+#+end_example
+
+It can be used to generate a lot of testing data but.
+To generate a "standard" table file for your hardware, simply run:
+
+#+begin_example
+$ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  ./build/spng/check_dft_measure torch_dft_measured.json
+#+end_example
+
+And place this file in your ~$WIRECELL_PATH~.  The default file name is defined in ~WireCellSpng/DFT.h~.  The environment variables assure that libtorch uses as single CPU core.  This takes about 45 seconds on the wcgpu machines.   Note, by default, this only tests sizes that have small-prime factors.  Arbitrary and full ranges can also be tested but these take longer.  10k sizes takes about an hour on wcgpu.
+
+This same checker can be used to make a CSV file that can be plotted with provided Python program.
+#+begin_example
+$ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+  ./build/spng/check_dft_measure benchmark-st.csv
+
+$ ./spng/test/check_dft_measure.py benchmark-st.csv benchmark-st.pdf
+
+$ ./build/spng/check_dft_measure benchmark-mt.csv  
+$ ./spng/test/check_dft_measure.py benchmark-mt.csv benchmark-mt.pdf
+#+end_example
+
+
+
+#+begin_src c++
+inline const std::string faster_dft_size_default_measurement_file = "torch_dft_measured.json";
+#+end_src
+
+That API defines ways to select a "faster" size for a given size from this
+default file or an alternative and provides a heuristic to select one based on
+checking for all prime factors being small.
+
+
+
+
+See the presentation https://www.phy.bnl.gov/~bviren/talks/wire-cell/topics/spng/dft/dft.pdf for more info.
