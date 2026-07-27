@@ -160,6 +160,23 @@ public:
                                 m_guard_spike_ratio, m_guard_spike_shoulder, m_guard_ratio2_max);
         }
 
+        // proton_muon_guard (C++ default false => byte-identical legacy): the
+        // doc-63 round-2 muon-consistency guard on detect_proton's end-proton
+        // branches.  The doc-62 baseline's one missed STM (evt 62613 main 17)
+        // was killed by the dQ_dx[max_bin] > 4.3 MIP && ks3 > 0.03 clause by
+        // margins of 0.0007 and 0.003 while its end region matched the muon
+        // hypothesis almost perfectly (ks1 = 0.030, ratio3 = 1.06); the owner-
+        // confirmed proton rejections have ks1 = 0.063 / ratio3 = 1.22
+        // (319809) or fired through the delta-ray path (288859), which this
+        // guard does not touch.  See sbnd_xin/docs/63 sec 1.4.
+        m_proton_muon_guard = get<bool>(config, "proton_muon_guard", m_proton_muon_guard);
+        m_guard_proton_ks1 = get<double>(config, "guard_proton_ks1", m_guard_proton_ks1);
+        m_guard_proton_ratio3 = get<double>(config, "guard_proton_ratio3", m_guard_proton_ratio3);
+        if (m_proton_muon_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: proton_muon_guard ON (ks1<{}, ratio3<{})",
+                                m_guard_proton_ks1, m_guard_proton_ratio3);
+        }
+
         // beam_window_only + beam_window_low/high (all C++-default off =>
         // byte-identical legacy behavior): evaluate only the beam-coincident
         // bundle, i.e. the main clusters whose matched flash time (cluster_t0)
@@ -214,6 +231,10 @@ public:
         cfg["guard_spike_ratio"] = m_guard_spike_ratio;
         cfg["guard_spike_shoulder"] = m_guard_spike_shoulder;
         cfg["guard_ratio2_max"] = m_guard_ratio2_max;
+        // doc-63 round-2 muon-consistency guard; false = byte-identical legacy.
+        cfg["proton_muon_guard"] = m_proton_muon_guard;
+        cfg["guard_proton_ks1"] = m_guard_proton_ks1;
+        cfg["guard_proton_ratio3"] = m_guard_proton_ratio3;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -465,6 +486,11 @@ private:
     double m_guard_spike_ratio{3.2};    // peak(<1.5cm) / median(2-6cm)
     double m_guard_spike_shoulder{1.8}; // median(1.5-4cm) in MIP units
     double m_guard_ratio2_max{2.0};     // eval acceptance normalization cap
+
+    // doc-63 round-2 muon-consistency guard on detect_proton (see configure()).
+    bool m_proton_muon_guard{false};
+    double m_guard_proton_ks1{0.045};   // end matches muon shape below this
+    double m_guard_proton_ratio3{1.1};  // ... and muon normalization below this
 
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
     // default => the historical FiducialUtils / sensitive-volume-union fallback,
@@ -1582,6 +1608,20 @@ private:
                         (std::accumulate(muon_ref_p.begin(), muon_ref_p.end(), 0.0) + 1e-9);
 
             SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection: {} {} {} {} {} {} {} {} {} ", ks1, ks2, ratio1, ratio2, ks3, ratio3, ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3, dQ_dx[max_bin]/m_mip_dqdx, dQ_dx.size() - max_bin);
+
+            // doc-63 round-2 (inert unless proton_muon_guard): when the end
+            // region matches the muon hypothesis in both shape and
+            // normalization, do not let the high-dQ/dx branches below call it
+            // a proton -- a proton Bragg is far steeper and higher than the
+            // muon curve, so a good muon match and a proton are exclusive.
+            // Guards every end-proton KS branch below (a real proton fails
+            // ratio3 < 1.1 regardless of branch); the Michel/delta-ray checks
+            // above are untouched.
+            if (m_proton_muon_guard && ks1 < m_guard_proton_ks1 && ratio3 < m_guard_proton_ratio3) {
+                SPDLOG_LOGGER_DEBUG(s_log, "detect_proton: proton_muon_guard: end matches the muon hypothesis (ks1={:.3f}, ratio3={:.3f}); not a proton",
+                                    ks1, ratio3);
+                return false;
+            }
 
             if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/m_mip_dqdx > 2.3 &&
                 (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {

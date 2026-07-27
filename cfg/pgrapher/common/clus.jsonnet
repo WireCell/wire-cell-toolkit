@@ -176,11 +176,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // vertex veto, eval ratio2 normalization cap).  Guard thresholds keep
         // their C++ defaults (measured on the doc-62 owner baseline); only
         // the master switch is threaded here.
+        // proton_muon_guard (C++ default false; key omitted when off =>
+        // byte-identical): the doc-63 round-2 muon-consistency guard on
+        // detect_proton's end-proton branches -- an end region matching the
+        // muon hypothesis in shape and normalization is not called a proton.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
                          require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
                          fiducial=null, fv_tolerance=[],
                          beam_window_only=false, beam_window_low=0, beam_window_high=0,
-                         accept_guards=false) :: {
+                         accept_guards=false, proton_muon_guard=false) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -200,6 +204,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                      beam_window_high: beam_window_high,
                  } else {})
               + (if accept_guards then { accept_guards: true } else {})
+              + (if proton_muon_guard then { proton_muon_guard: true } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial
