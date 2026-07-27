@@ -179,6 +179,29 @@ public:
                                 m_guard_cathode_cm, m_guard_cathode_peak);
         }
 
+        // second_track_guard (C++ default false => byte-identical legacy):
+        // the doc-63 round-4b/4c vetoes on a second MIP TRACK the accepted
+        // fit tolerates.  Full-d59k survey (docs/63 sec 1.7):
+        //   4b -- a leftover past the kink that is LONG and STRAIGHT is a
+        //   second track (V topology, 353223:15: 28.6 cm, straightness
+        //   0.972), not a Michel/overshoot (correct STMs: left_L <= 22.3 cm,
+        //   and <= 21.1 cm among straight ones);
+        //   4c -- a search_other_tracks segment that is LONG at MIP dQ/dx is
+        //   a second track regardless of straightness (349241:15: 20.4 cm at
+        //   1.00 MIP escaped the len<25 && medQ<1 Michel clause; the longest
+        //   MIP-like segment on any correct STM is 12.4 cm).
+        m_second_track_guard = get<bool>(config, "second_track_guard", m_second_track_guard);
+        m_guard_left_track_cm = get<double>(config, "guard_left_track_cm", m_guard_left_track_cm);
+        m_guard_left_track_straight = get<double>(config, "guard_left_track_straight", m_guard_left_track_straight);
+        m_guard_seg_track_cm = get<double>(config, "guard_seg_track_cm", m_guard_seg_track_cm);
+        m_guard_seg_mip_lo = get<double>(config, "guard_seg_mip_lo", m_guard_seg_mip_lo);
+        m_guard_seg_mip_hi = get<double>(config, "guard_seg_mip_hi", m_guard_seg_mip_hi);
+        if (m_second_track_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: second_track_guard ON (leftover>{}cm@straight>{}, seg>{}cm@{}-{}MIP)",
+                                m_guard_left_track_cm, m_guard_left_track_straight,
+                                m_guard_seg_track_cm, m_guard_seg_mip_lo, m_guard_seg_mip_hi);
+        }
+
         // proton_muon_guard (C++ default false => byte-identical legacy): the
         // doc-63 round-2 muon-consistency guard on detect_proton's end-proton
         // branches.  The doc-62 baseline's one missed STM (evt 62613 main 17)
@@ -275,6 +298,13 @@ public:
         cfg["guard_cathode_peak"] = m_guard_cathode_peak;
         // doc-63 round-4a dist_to_anode face fix; false = byte-identical legacy.
         cfg["anode_dist_fix"] = m_anode_dist_fix;
+        // doc-63 round-4b/4c second-track vetoes; false = byte-identical legacy.
+        cfg["second_track_guard"] = m_second_track_guard;
+        cfg["guard_left_track_cm"] = m_guard_left_track_cm;
+        cfg["guard_left_track_straight"] = m_guard_left_track_straight;
+        cfg["guard_seg_track_cm"] = m_guard_seg_track_cm;
+        cfg["guard_seg_mip_lo"] = m_guard_seg_mip_lo;
+        cfg["guard_seg_mip_hi"] = m_guard_seg_mip_hi;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -539,6 +569,14 @@ private:
     // doc-63 round-4a dist_to_anode face fix (see configure()).
     bool m_anode_dist_fix{false};
 
+    // doc-63 round-4b/4c second-track vetoes (see configure()).
+    bool m_second_track_guard{false};
+    double m_guard_left_track_cm{25.0};       // leftover past kink longer than this ...
+    double m_guard_left_track_straight{0.9};  // ... and straighter than this => 2nd track
+    double m_guard_seg_track_cm{15.0};        // other-track segment longer than this ...
+    double m_guard_seg_mip_lo{0.4};           // ... with MIP-like median dQ/dx in
+    double m_guard_seg_mip_hi{1.5};           // (lo, hi) => 2nd track
+
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
     double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
@@ -559,9 +597,10 @@ private:
     //   0 accepted (STM), 1 TGM, 2 rejected long-leftover past kink
     //   ("Mid Point A"), 3 rejected dQ/dx eval (KS tests), 4 rejected
     //   extra-tracks veto, 5 rejected proton endpoint, 6 fitted but no
-    //   decision (fell through), 7 rejected by the doc-63 accept_guards or
-    //   cathode_guard (desert/spike/cathode; a ratio2-cap rejection shows as
-    //   3 -- it fires inside the eval).
+    //   decision (fell through), 7 rejected by the doc-63 accept_guards,
+    //   cathode_guard or second_track_guard's leftover veto (desert/spike/
+    //   cathode/leftover-track; a ratio2-cap rejection shows as 3 -- it
+    //   fires inside the eval -- and a round-4c segment veto as 4).
     // Round-1 rough fits and passes aborted with <=3 fit points are NOT
     // recorded (no round-2 segment exists).
     bool m_save_stm_fit{false};
@@ -1860,6 +1899,32 @@ private:
         return false;
     }
 
+    // doc-63 round-4b: a leftover past the kink that is LONG and STRAIGHT is
+    // a second track (V topology), not the Michel/overshoot debris a genuine
+    // stopping muon leaves.  Same calling convention as accept_guards_reject;
+    // gated on m_second_track_guard.
+    bool second_track_leftover_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const int n = static_cast<int>(L.size());
+        if (kink_num < 0 || kink_num >= n - 2) return false;  // need >=3 leftover points
+        const double left_L = L.back() - L[kink_num];
+        if (left_L < m_guard_left_track_cm * units::cm) return false;
+        double path = 0;
+        for (int i = kink_num + 1; i < n; ++i) {
+            path += std::sqrt((pts[i] - pts[i - 1]).dot(pts[i] - pts[i - 1]));
+        }
+        if (path <= 0) return false;
+        const auto chord_v = pts[n - 1] - pts[static_cast<size_t>(kink_num)];
+        const double straight = std::sqrt(chord_v.dot(chord_v)) / path;
+        if (straight > m_guard_left_track_straight) {
+            SPDLOG_LOGGER_INFO(s_log, "second_track_guard: cluster {} rejected: {:.1f} cm leftover past the kink with straightness {:.3f} (a second track, not a Michel)",
+                               cluster_ident, left_L / units::cm, straight);
+            return true;
+        }
+        return false;
+    }
+
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
     bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
@@ -2510,6 +2575,20 @@ private:
             double angle_deg = dir1.angle(drift_dir_abs) * 180. / 3.1415926;
             if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly perpendicular to drift
 
+            // doc-63 round-4c (gated): a LONG segment at MIP dQ/dx is a
+            // second track regardless of straightness -- 349241:15's 20.4 cm
+            // 1.00-MIP segment escaped the len<25 && medQ<1 Michel clause
+            // below, while the longest MIP-like segment on any correct STM
+            // in the full d59k population is 12.4 cm.  Placed after the
+            // perpendicular skip to inherit its isochronous-noise
+            // protection.
+            if (m_second_track_guard && track_length1 > m_guard_seg_track_cm &&
+                track_medium_dQ_dx > m_guard_seg_mip_lo && track_medium_dQ_dx < m_guard_seg_mip_hi) {
+                SPDLOG_LOGGER_INFO(s_log, "second_track_guard: cluster {} rejected: other-track segment {:.1f} cm at {:.2f} MIP (a second track)",
+                                   cluster.ident(), track_length1, track_medium_dQ_dx);
+                return true;
+            }
+
             // Complex condition from prototype
             if (((track_length1 > 5 && track_medium_dQ_dx > 0.7) &&
                 ((track_medium_dQ_dx - 0.7)/0.1 > (19 - track_length1)/7.) &&
@@ -2892,6 +2971,15 @@ private:
             // placement rationale as accept_guards above).
             if (m_cathode_guard && flag_pass &&
                 cathode_guard_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-4b: long straight leftover = second track (own
+            // knob; same placement rationale).  The short-track reset cannot
+            // have fired for a leftover this long (it requires left_L < 8
+            // cm), so kink_num here is the real kink.
+            if (m_second_track_guard && flag_pass &&
+                second_track_leftover_reject(eval_arrs, kink_num, cluster.ident())) {
                 if (m_save_stm_fit) set_pass_status(7);
                 return std::nullopt;
             }
