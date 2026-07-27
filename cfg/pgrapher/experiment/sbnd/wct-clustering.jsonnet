@@ -17,7 +17,7 @@
 //     --tla-str  output_dir=work/evt2 \
 //     --tla-code run=0 --tla-code subrun=0 --tla-code event=2 \
 //     --tla-str  reality=sim \
-//     --tla-code DL=6.5781 --tla-code DT=13.1349 \
+//     --tla-code DL=4.0 --tla-code DT=8.8 \
 //     --tla-code lifetime=35 --tla-code driftSpeed=1.563 \
 //     -c wct-clustering.jsonnet
 
@@ -33,8 +33,11 @@ function(
     subrun        = 0,
     event         = 0,
     reality       = 'sim',
-    DL            = 6.5781,
-    DT            = 13.1349,
+    // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
+    // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
+    // These feed simparams.lar -> the sim Drifter; no reco component reads them.
+    DL            = 4.0,
+    DT            = 8.8,
     lifetime      = 35.0,
     driftSpeed    = 1.563,
 )

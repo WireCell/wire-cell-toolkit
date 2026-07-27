@@ -49,8 +49,14 @@ function(
     event          = 0,
     reality        = 'sim',
     // Same LAr TLAs as the Q/L job so the anode/params objects are identical.
-    DL             = 6.5781,
-    DT             = 13.1349,
+    // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
+    // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
+    // Inert here in the same sense as lifetime below -- compiling this job at
+    // either pair gives byte-identical JSON, zero 'DL' keys.  The diffusion the
+    // PR/STM track fit actually uses lives in sbnd_track_fitting.json, which is
+    // read at RUNTIME and is NOT inert.
+    DL             = 4.0,
+    DT             = 8.8,
     // lifetime: electron lifetime in ms.  35 = the SBND simparams.jsonnet value,
     // so this chain and the simulation now state the same number (owner,
     // 2026-07-27).  It was 6.0, an inherited placeholder from the first standalone

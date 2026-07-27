@@ -26,7 +26,7 @@
 //     --tla-code run=0 --tla-code subrun=0 --tla-code event=2 \
 //     --tla-str  reality=sim \
 //     --tla-str  semimodel_file=semi-analytical-sbnd.json \
-//     --tla-code DL=6.5781 --tla-code DT=13.1349 \
+//     --tla-code DL=4.0 --tla-code DT=8.8 \
 //     --tla-code lifetime=35 --tla-code driftSpeed=1.563 \
 //     -c wct-clus-matching-perevt.jsonnet
 
@@ -43,8 +43,12 @@ function(
     event          = 0,
     reality        = 'sim',
     semimodel_file = 'semi-analytical-sbnd.json',
-    DL             = 6.5781,
-    DT             = 13.1349,
+    // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
+    // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
+    // Inert here in the same sense as lifetime below -- compiling this job at
+    // either pair gives byte-identical JSON, zero 'DL' keys.
+    DL             = 4.0,
+    DT             = 8.8,
     // lifetime: electron lifetime in ms.  35 = the SBND simparams.jsonnet value,
     // so this chain and the simulation now state the same number (owner,
     // 2026-07-27).  It was 6.0, an inherited placeholder from the first standalone
