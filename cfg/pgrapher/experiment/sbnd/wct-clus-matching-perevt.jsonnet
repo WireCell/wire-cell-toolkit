@@ -27,7 +27,7 @@
 //     --tla-str  reality=sim \
 //     --tla-str  semimodel_file=semi-analytical-sbnd.json \
 //     --tla-code DL=6.5781 --tla-code DT=13.1349 \
-//     --tla-code lifetime=6 --tla-code driftSpeed=1.563 \
+//     --tla-code lifetime=35 --tla-code driftSpeed=1.563 \
 //     -c wct-clus-matching-perevt.jsonnet
 
 local g = import 'pgraph.jsonnet';
@@ -45,16 +45,20 @@ function(
     semimodel_file = 'semi-analytical-sbnd.json',
     DL             = 6.5781,
     DT             = 13.1349,
-    // lifetime: electron lifetime in ms.  INERT in this chain -- it only feeds
-    // the sim Drifter's attenuation, and no reco component reads it (grep the
-    // compiled config: zero 'lifetime' keys).  NO lifetime / charge-attenuation
-    // correction is applied anywhere in imaging, clustering, Q/L matching or PR.
-    // The 6.0 is an inherited placeholder from the first standalone Q/L test
-    // (wcp-porting-img 655bd6a: "DL=6.2 DT=9.8 lifetime=6 driftSpeed=1.565"); the
-    // DL/DT of that same triple were later corrected to the SBND physical values
-    // (9f498089), lifetime never was because nothing consumes it.  SBND
-    // simparams.jsonnet says 35 ms.  See sbnd_xin/docs/64_cfg-sync.md sec 4.
-    lifetime       = 6.0,
+    // lifetime: electron lifetime in ms.  35 = the SBND simparams.jsonnet value,
+    // so this chain and the simulation now state the same number (owner,
+    // 2026-07-27).  It was 6.0, an inherited placeholder from the first standalone
+    // Q/L test (wcp-porting-img 655bd6a: "DL=6.2 DT=9.8 lifetime=6
+    // driftSpeed=1.565") whose DL/DT half was corrected to the SBND physical
+    // values in 9f498089 while lifetime was not.
+    // The change is provably inert: this knob only feeds the sim Drifter's
+    // attenuation and NO reco component reads it -- compiling this job with
+    // lifetime=6 and lifetime=35 gives byte-identical JSON (zero 'lifetime' keys).
+    // NO electron-lifetime / charge-attenuation correction is applied anywhere in
+    // imaging, clustering, Q/L matching or PR; adding one would be a real change
+    // needing a measured data lifetime and a dQ/dx revisit, not this knob.
+    // See sbnd_xin/docs/64_cfg-sync.md sec 4.
+    lifetime       = 35.0,
     driftSpeed     = 1.563,
     // Joint multi-APA matching toggle. false (default) = historical per-APA path
     // (one QLMatching per APA -> PointTreeMerging -> all-APA MABC). true = one
