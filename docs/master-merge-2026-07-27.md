@@ -22,27 +22,33 @@ cd /nfs/data/1/xqian/toolkit-dev/toolkit
 git merge-tree --write-tree --name-only apply-pointcloud origin/master
 #   -> tree ddc6975e..., CONFLICT (content): .gitignore   (that is the whole list)
 
+# the gate scripts live in wcp-porting-img (commit f2b3217):
+AB=../wcp-porting-img/abtest
+
 # 1. config gate -- compile every live job against both cfg/ trees
 #    (pre-merge this used a cfg/ tree extracted from the merge-tree result:
-#     git archive ddc6975e cfg | tar -x -C /home/xqian/tmp/mergecfg/)
-/home/xqian/tmp/compile_all_cfg.sh /home/xqian/tmp/cfgbase          # before
-/home/xqian/tmp/compile_all_cfg.sh /home/xqian/tmp/cfgpost          # after
-/home/xqian/tmp/cmp_cfg.sh /home/xqian/tmp/cfgbase /home/xqian/tmp/cfgpost
+#     git archive ddc6975e cfg | tar -x -C /home/xqian/tmp/mergecfg/
+#     then CFGROOT=/home/xqian/tmp/mergecfg/cfg $AB/compile_all_cfg.sh ...)
+$AB/compile_all_cfg.sh /home/xqian/tmp/cfgbase          # before
+$AB/compile_all_cfg.sh /home/xqian/tmp/cfgpost          # after
+$AB/cmp_cfg.sh /home/xqian/tmp/cfgbase /home/xqian/tmp/cfgpost
 
-# 2. build + unit tests
+# 2. build + unit tests.  NB --notests only skips *running* tests
+#    (waft/wcb_unit_test.py:184); the doctest binaries, including master's new
+#    all-package `wcdoctest`, are still BUILT by wcbuild, so they are fresh.
 ./wcb build --notests -p && ./wcb install --notests -p
 for p in clus match flash img sigproc aux util iface pgraph gen; do
     ./build/$p/wcdoctest-$p; done
 
 # 3. reco arms (pre-merge first -- baselines expire on rebuild)
-/home/xqian/tmp/mergegate_run.sh pre        # PDHD+PDVD NF+SP -> img -> clus
-/home/xqian/tmp/simgate_run.sh pre          # PDHD+PDVD gen/ simulation
-/home/xqian/tmp/sbndgate_run.sh pre 1 2     # SBND img -> clus -> Q/L
+$AB/mergegate_run.sh pre        # PDHD+PDVD NF+SP -> img -> clus
+$AB/simgate_run.sh pre          # PDHD+PDVD gen/ simulation
+$AB/sbndgate_run.sh pre 1 2     # SBND img -> clus -> Q/L
 (cd ../wcp-porting-img/sbnd/sbnd_xin && ./run_perf54_nusel.sh pre m66)
 (cd ../wcp-porting-img/qlport/scripts && ./sweep_5384.sh m66pre 4)
 # ... merge, rebuild, then the same with 'post' / m66post, and compare:
-/home/xqian/tmp/mergegate_cmp.sh pre post
-/home/xqian/tmp/fixedinput_gate.sh          # img+clus with SP input held fixed
+$AB/mergegate_cmp.sh pre post
+$AB/fixedinput_gate.sh          # img+clus with SP input held fixed
 (cd ../wcp-porting-img/sbnd/sbnd_xin && python3 p54_ab_report.py \
      --base-tag m66pre --opt-tag m66post)
 (cd ../wcp-porting-img/qlport/scripts && ./ab_check.sh m66post m66pre)
@@ -79,8 +85,17 @@ exactly one file inside our packages — `clus/src/SimpleClusGeomHelper.cxx`
 | 4 | SBND PR / taggers | 30 events | **PASS** — 121/121 identical (mabc-pr.zip, pctree, TSV, tracking-stm.root) |
 | 5 | SBND img → clus → Q/L | 2 events | **PASS** — 26/26 identical |
 | 6 | PDHD+PDVD img + clus | 6 events, SP input held fixed | **PASS** — 178/178 identical |
-| 7 | PDHD+PDVD NF+SP | 6 events, 32 archives | **inconclusive** — 29/32; the 3 differences are pre-existing nondeterminism (§ below) |
+| 7 | PDHD+PDVD NF+SP | 6 events, 32 archives | first run **29/32** — the 3 differences are pre-existing nondeterminism (§ below); a later full run (`landed`) came out **32/32** |
 | 8 | uBooNE | 35 events | Bee zips **35/35 identical**; tagger logs differ, pre-existing nondeterminism (§ below) |
+| 9 | full chain, landed binary | 6 events, NF+SP → img → clus | **PASS** — 32/32 + 64/64 + 114/114 identical to the pre-merge arm |
+
+Gate 9 was run last, with the shipped (post-revert) binary, to leave `work/`
+coherent (see "State left on disk"). It reproduced the pre-merge output exactly
+at *every* stage including NF+SP. That is a stronger end-to-end result than
+gate 7, but note what it does and does not show: NF+SP is demonstrably
+nondeterministic (§ below), so a 32/32 NF+SP result is one favourable draw, not
+proof of determinism. The load-bearing evidence for imaging and clustering
+remains gate 6, where the SP input is held fixed by construction.
 
 Gate 6 is the one that matters for imaging and clustering. Because NF+SP is
 nondeterministic (gate 7), a naive pre-vs-post comparison of img/clus mixes two
@@ -133,6 +148,12 @@ dependency costs ~300 MB per process and ~9% wall while changing no output. The
 same ~+300 MB was visible on every PDHD/PDVD NF+SP, imaging and clustering
 stage, which matters at the 6-way batch parallelism this box uses. Reverted;
 re-add if NVTX profiling is ever wanted.
+
+**Identity chain for the shipped binary.** Gate 4 above compares `m66pre` with
+`m66post`, but the binary that ships is `m66nolt` (with the revert). The chain
+is `m66pre ≡ m66post` (121/121) and `m66post ≡ m66nolt` (121/121), therefore
+`m66pre ≡ m66nolt`. Gates 3, 5 and 6 were additionally re-run against the final
+reverted binary and reproduced exactly: 8/8, 26/26, 178/178.
 
 ## Pre-existing problems found while validating — NOT caused by the merge
 
@@ -196,6 +217,29 @@ time; worth knowing whenever master adds a symbol to an existing library.
   three `wct-sim-check.jsonnet` files still *compile*: their `io.` uses are
   commented out, and jsonnet imports are lazy, so the missing import is never
   resolved.
+
+## State left on disk
+
+- `<det>/work/<run>_<evt>/` for the six `abtest/events.txt` events was
+  regenerated end-to-end (NF+SP → imaging → clustering) with the **landed**
+  binary as arm `landed`, so the tree is self-consistent: verified 6/6 events'
+  SP frames match the `landed` snapshot by content hash. This matters because
+  the validation itself wrote several different SP vintages there — including,
+  at one point, frames restored from the *pre-merge* arm by
+  `fixedinput_gate.sh` — and NF+SP is nondeterministic, so "just re-run it"
+  does not restore a known state (M11).
+- Snapshots of every arm are under `/home/xqian/tmp/mergegate/`
+  (`pre`, `post`, `post2`, `landed`, `sim-*`, `sbnd-*`, `fixedinput*`), and the
+  pre-merge binaries under `/home/xqian/tmp/premerge-bin/` (`COMMIT.txt` =
+  `d1bf5782`). These are scratch and will not survive a cleanup; the durable
+  record is this doc plus the `m66*` tags
+  (`sbnd_xin/work-*-m66{pre,post,nolt}`, `qlport/scripts/sweep/m66*`).
+- **`abtest/snap/premerge-20260727/` is not a usable snapshot.** It contains
+  only failure logs from an aborted first attempt (imaging skipped because the
+  work dirs had no SP frames yet) and was superseded by
+  `/home/xqian/tmp/mergegate/`. Do not feed it to `ab_compare.sh`. It was left
+  in place rather than deleted because `abtest/snap/` is the protected record
+  tree (M13) — the owner should remove it.
 
 ## Deliberately not done
 
