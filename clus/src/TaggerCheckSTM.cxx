@@ -489,7 +489,11 @@ private:
 
     // doc-63 round-2 muon-consistency guard on detect_proton (see configure()).
     bool m_proton_muon_guard{false};
-    double m_guard_proton_ks1{0.045};   // end matches muon shape below this
+    // 0.040, not the 0.045 first tried: the full-population review found
+    // 405740:14 reversing its proton veto at ks1 = 0.044 while the AI-scan
+    // record shows no Bragg trend and no established boundary entry; 0.040
+    // keeps it rejected and still recovers the doc-62 miss (ks1 = 0.030).
+    double m_guard_proton_ks1{0.040};   // end matches muon shape below this
     double m_guard_proton_ratio3{1.1};  // ... and muon normalization below this
 
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
@@ -1694,6 +1698,16 @@ private:
         // that bridges detached objects crosses such a desert (doc-62
         // baseline: 23.4 and 6.7 cm on the two bridge cases, 0.0 cm on every
         // other accepted bundle).
+        //
+        // Cathode-join exemption (docs/63 full-population review): a genuine
+        // cathode CROSSER also dips to ~zero for several cm where the two
+        // half-tracks join at the CPA (evt 290844: an 8.3 cm instrumental
+        // desert on a textbook STM).  A below-threshold run whose endpoints
+        // sit in DIFFERENT TPC volumes (or leave the known volumes) is that
+        // join, not topology -- exempt it, but only up to 4x the veto length
+        // (a detached-object bridge that merely happens to straddle the CPA
+        // stays vetoed).  Both baseline bridge cases are single-TPC.
+        const auto& gpts = arrs.pts;
         const double desert_thresh = m_guard_desert_frac * m_mip_dqdx;
         double max_desert = 0;
         for (int i = 0; i <= k;) {
@@ -1701,7 +1715,14 @@ private:
                 int j = i;
                 while (j + 1 <= k && dQ_dx[j + 1] < desert_thresh) ++j;
                 const double len = L[std::min(j + 1, k)] - L[i];
-                if (len > max_desert) max_desert = len;
+                bool crosses = false;
+                if (len < 4 * m_guard_desert_cm * units::cm) {
+                    const WirePlaneId wa = m_dv->contained_by(gpts[static_cast<size_t>(i)]);
+                    const WirePlaneId wb = m_dv->contained_by(gpts[static_cast<size_t>(std::min(j, k))]);
+                    crosses = (wa.apa() < 0 || wb.apa() < 0 ||
+                               wa.apa() != wb.apa() || wa.face() != wb.face());
+                }
+                if (!crosses && len > max_desert) max_desert = len;
                 i = j + 1;
             }
             else ++i;
