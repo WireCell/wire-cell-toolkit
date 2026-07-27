@@ -7,6 +7,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Persist.h"  // resolve() the TrackFitting config via WIRECELL_PATH
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/TrackFitting.h"  
 #include "WireCellClus/TrackFittingPresets.h"
@@ -787,10 +788,18 @@ private:
 
     void load_trackfitting_config(const std::string& config_file) {
         try {
+            // Resolve through WIRECELL_PATH so the parameter file can be named
+            // relatively (e.g. 'pgrapher/experiment/sbnd/sbnd_track_fitting.json')
+            // instead of as an absolute path.  Persist::resolve() returns an
+            // absolute path unchanged and "" when a relative name is not found,
+            // so callers that already pass an absolute path are unaffected and
+            // the not-found diagnostic below still names what was asked for.
+            const std::string resolved = Persist::resolve(config_file);
             // Load JSON file
-            std::ifstream file(config_file);
+            std::ifstream file(resolved.empty() ? config_file : resolved);
             if (!file.is_open()) {
-                std::cerr << "TaggerCheckSTM: Cannot open config file: " << config_file << std::endl;
+                std::cerr << "TaggerCheckSTM: Cannot open config file: " << config_file
+                          << " (not found on WIRECELL_PATH either)" << std::endl;
                 return;
             }
             

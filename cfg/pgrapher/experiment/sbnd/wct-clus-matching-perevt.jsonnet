@@ -45,6 +45,15 @@ function(
     semimodel_file = 'semi-analytical-sbnd.json',
     DL             = 6.5781,
     DT             = 13.1349,
+    // lifetime: electron lifetime in ms.  INERT in this chain -- it only feeds
+    // the sim Drifter's attenuation, and no reco component reads it (grep the
+    // compiled config: zero 'lifetime' keys).  NO lifetime / charge-attenuation
+    // correction is applied anywhere in imaging, clustering, Q/L matching or PR.
+    // The 6.0 is an inherited placeholder from the first standalone Q/L test
+    // (wcp-porting-img 655bd6a: "DL=6.2 DT=9.8 lifetime=6 driftSpeed=1.565"); the
+    // DL/DT of that same triple were later corrected to the SBND physical values
+    // (9f498089), lifetime never was because nothing consumes it.  SBND
+    // simparams.jsonnet says 35 ms.  See sbnd_xin/docs/64_cfg-sync.md sec 4.
     lifetime       = 6.0,
     driftSpeed     = 1.563,
     // Joint multi-APA matching toggle. false (default) = historical per-APA path

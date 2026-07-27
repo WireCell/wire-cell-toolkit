@@ -9,13 +9,11 @@
 // knob affects physics; pure diagnostic outputs (save_stm_fit, save_tensors,
 // dl_weights) stay off.  Production additionally passes -stm-fit.
 //
-// CAVEAT trackfitting_config: default '' makes TaggerCheckSTM fall back to its
-// uBooNE-derived built-in TrackFitting parameters.  The SBND values ship beside
-// this file as pgrapher/experiment/sbnd/sbnd_track_fitting.json, but
-// TaggerCheckSTM loads that path with a plain std::ifstream (see
-// clus/src/TaggerCheckSTM.cxx load_trackfitting_config), NOT through
-// WIRECELL_PATH -- so the caller must pass an ABSOLUTE path, as run_nusel_evt.sh
-// does.  Making it WIRECELL_PATH-resolvable is a tracked follow-up (doc 64).
+// trackfitting_config defaults to the canonical in-tree SBND parameter file
+// pgrapher/experiment/sbnd/sbnd_track_fitting.json, which TaggerCheckSTM resolves
+// through WIRECELL_PATH (Persist::resolve; an absolute path is passed through
+// unchanged, so the runners' absolute paths keep working).  Passing '' selects the
+// C++ preset defaults, which are uBooNE-hard-coded and never right for SBND.
 //
 // Per-event SBND pattern-recognition (PR) job — standalone, self-contained.
 //
@@ -53,6 +51,15 @@ function(
     // Same LAr TLAs as the Q/L job so the anode/params objects are identical.
     DL             = 6.5781,
     DT             = 13.1349,
+    // lifetime: electron lifetime in ms.  INERT in this chain -- it only feeds
+    // the sim Drifter's attenuation, and no reco component reads it (grep the
+    // compiled config: zero 'lifetime' keys).  NO lifetime / charge-attenuation
+    // correction is applied anywhere in imaging, clustering, Q/L matching or PR.
+    // The 6.0 is an inherited placeholder from the first standalone Q/L test
+    // (wcp-porting-img 655bd6a: "DL=6.2 DT=9.8 lifetime=6 driftSpeed=1.565"); the
+    // DL/DT of that same triple were later corrected to the SBND physical values
+    // (9f498089), lifetime never was because nothing consumes it.  SBND
+    // simparams.jsonnet says 35 ms.  See sbnd_xin/docs/64_cfg-sync.md sec 4.
     lifetime       = 6.0,
     driftSpeed     = 1.563,
     // PR visitors to run, by name (see clus_pr's cm_by_name in
@@ -67,10 +74,13 @@ function(
     pipeline_names = ['switch_scope', 'unmerge_bundle', 'unmerge_assoc', 'steiner',
                       'fiducialutils', 'tagger_check_tgm', 'tagger_check_stm',
                       'tagger_check_fc'],
-    // TrackFitting parameter JSON (absolute path; plain ifstream, not
-    // WIRECELL_PATH-resolved).  Required when tagger_check_stm is in the
-    // pipeline -- the C++ preset defaults are uBooNE-hard-coded.
-    trackfitting_config = '',
+    // TrackFitting parameter JSON, required whenever tagger_check_stm is in the
+    // pipeline: the C++ preset defaults are uBooNE-hard-coded, never right for
+    // SBND.  DEFAULT = the canonical in-tree file; TaggerCheckSTM resolves it
+    // through WIRECELL_PATH (Persist::resolve), and an absolute path is passed
+    // through unchanged, so the runners' absolute paths keep working.  '' selects
+    // the uBooNE presets.
+    trackfitting_config = 'pgrapher/experiment/sbnd/sbnd_track_fitting.json',
     // MIP dQ/dx scale in e/cm handed to TaggerCheckSTM.  56000 = the SBND value
     // (docs/48), matching the *DeDx tables now regenerated at 0.5 kV/cm.  Pass
     // 50000 (the MicroBooNE value, and the C++ default) to isolate the

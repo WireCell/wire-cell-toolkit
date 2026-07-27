@@ -560,10 +560,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 void TaggerCheckNeutrino::load_trackfitting_config(const std::string& config_file)
 {
     try {
+        // Resolve through WIRECELL_PATH so the parameter file can be named
+        // relatively (e.g. 'pgrapher/experiment/sbnd/sbnd_track_fitting.json').
+        // Persist::resolve() returns an absolute path unchanged, so callers that
+        // already pass one are unaffected.
+        const std::string resolved = Persist::resolve(config_file);
         // Load JSON file
-        std::ifstream file(config_file);
+        std::ifstream file(resolved.empty() ? config_file : resolved);
         if (!file.is_open()) {
-            std::cerr << "TaggerCheckNeutrino: Cannot open config file: " << config_file << std::endl;
+            std::cerr << "TaggerCheckNeutrino: Cannot open config file: " << config_file
+                      << " (not found on WIRECELL_PATH either)" << std::endl;
             return;
         }
         

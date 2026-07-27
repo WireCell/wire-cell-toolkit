@@ -498,7 +498,14 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
 // is off: the op display needs the per-cluster flashpred pcarray, which is
 // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
 local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident=false, pos_offset_on=true, pipeline_names=[], tensor_outname='',
-              trackfitting_config_file='', particle_dataset=null, extra_uses=[], dl_weights='',
+              // trackfitting_config_file: the SBND TrackFitting parameter JSON.
+              // DEFAULT = the canonical in-tree file, resolved through
+              // WIRECELL_PATH by TaggerCheckSTM/TaggerCheckNeutrino
+              // (Persist::resolve; an absolute path is passed through unchanged).
+              // '' selects the C++ preset defaults, which are uBooNE-hard-coded --
+              // never right for SBND, which is why this no longer defaults to ''.
+              trackfitting_config_file='pgrapher/experiment/sbnd/sbnd_track_fitting.json',
+              particle_dataset=null, extra_uses=[], dl_weights='',
               // beam_window: internal-unit [low, high] on the matched flash time
               // (cluster_t0).  DEFAULT = the SBND BNB gate after the
               // frame_apply_at_caf correction, which is what production passes
@@ -1061,7 +1068,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     // production operating point (see the comment block on clus_pr's arg list for
     // the pre-adoption values to pass for an A/B).
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
-       trackfitting_config_file='', particle_dataset=null, extra_uses=[],
+       trackfitting_config_file='pgrapher/experiment/sbnd/sbnd_track_fitting.json',
+       particle_dataset=null, extra_uses=[],
        dl_weights='', beam_window=[0.2 * wc.us, 2.2 * wc.us],
        tgm_neutrino_candidate=true,
        tgm_chord_charge=true, tgm_chord_mode='path',
