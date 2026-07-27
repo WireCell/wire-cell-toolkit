@@ -527,6 +527,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // guard on detect_proton (C++ default false; key omitted when
               // off => byte-identical).  Runner flag: -stm-proton-guard.
               stm_proton_muon_guard=false,
+              // stm_cathode_guard: the doc-63 round-3 cathode-truncation veto
+              // (C++ default false; key omitted when off => byte-identical).
+              // Runner flag: -stm-cathode-guard.
+              stm_cathode_guard=false,
               // beam_window_only: run the PR tail (steiner + TGM + STM + FC)
               // ONLY on the beam-coincident bundle -- the main clusters whose
               // matched flash time (cluster_t0) falls in beam_window, plus (for
@@ -688,6 +692,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // proton_muon_guard (C++ default false; key omitted when off =>
             // byte-identical): doc-63 round-2 muon-consistency guard.
             proton_muon_guard=stm_proton_muon_guard,
+            // cathode_guard (C++ default false; key omitted when off =>
+            // byte-identical): doc-63 round-3 cathode-truncation veto.
+            cathode_guard=stm_cathode_guard,
             // stm_consistent_fv (default TRUE = SBND production): give the
             // containment gate the SAME fiducial + margins tagger_check_tgm and
             // tagger_check_fc get, so "contained" means one thing across all
@@ -1005,7 +1012,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
        save_stm_fit=false, unmerge_bundle_mode='real',
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=false,
-       stm_proton_muon_guard=false, beam_window_only=true)::
+       stm_proton_muon_guard=false, stm_cathode_guard=false,
+       beam_window_only=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1031,6 +1039,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_consistent_fv=stm_consistent_fv,
                 stm_accept_guards=stm_accept_guards,
                 stm_proton_muon_guard=stm_proton_muon_guard,
+                stm_cathode_guard=stm_cathode_guard,
                 beam_window_only=beam_window_only),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

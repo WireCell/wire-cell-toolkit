@@ -184,7 +184,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                          require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
                          fiducial=null, fv_tolerance=[],
                          beam_window_only=false, beam_window_low=0, beam_window_high=0,
-                         accept_guards=false, proton_muon_guard=false) :: {
+                         accept_guards=false, proton_muon_guard=false,
+                         cathode_guard=false) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -205,6 +206,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {})
               + (if accept_guards then { accept_guards: true } else {})
               + (if proton_muon_guard then { proton_muon_guard: true } else {})
+              + (if cathode_guard then { cathode_guard: true } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial

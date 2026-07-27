@@ -160,6 +160,25 @@ public:
                                 m_guard_spike_ratio, m_guard_spike_shoulder, m_guard_ratio2_max);
         }
 
+        // cathode_guard (C++ default false => byte-identical legacy): the
+        // doc-63 round-3 cathode-truncation veto.  A track whose fitted stop
+        // sits within guard_cathode_cm of the CATHODE plane with no Bragg
+        // rise (end peak < guard_cathode_peak x MIP) did not stop -- its
+        // charge continues into the other TPC uncollected in this cluster
+        // (SBND CPA at x ~ 0).  Full-population survey (all 153 d59k STM
+        // tags): the two owner-rejected flat tracks 72586 (|x| = 2.8, peak
+        // 1.95) and 392200 (1.1, 1.08) are exactly this; the near-cathode
+        // GENUINE stops carry real Braggs (289343: 6.3 cm, 5.74 MIP; 281148:
+        // 2.2 cm, 3.31 MIP) and pass one or both conditions.  docs/63 sec 4
+        // round 3.
+        m_cathode_guard = get<bool>(config, "cathode_guard", m_cathode_guard);
+        m_guard_cathode_cm = get<double>(config, "guard_cathode_cm", m_guard_cathode_cm);
+        m_guard_cathode_peak = get<double>(config, "guard_cathode_peak", m_guard_cathode_peak);
+        if (m_cathode_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: cathode_guard ON (stop<{}cm of cathode with end peak<{}MIP)",
+                                m_guard_cathode_cm, m_guard_cathode_peak);
+        }
+
         // proton_muon_guard (C++ default false => byte-identical legacy): the
         // doc-63 round-2 muon-consistency guard on detect_proton's end-proton
         // branches.  The doc-62 baseline's one missed STM (evt 62613 main 17)
@@ -235,6 +254,10 @@ public:
         cfg["proton_muon_guard"] = m_proton_muon_guard;
         cfg["guard_proton_ks1"] = m_guard_proton_ks1;
         cfg["guard_proton_ratio3"] = m_guard_proton_ratio3;
+        // doc-63 round-3 cathode-truncation veto; false = byte-identical legacy.
+        cfg["cathode_guard"] = m_cathode_guard;
+        cfg["guard_cathode_cm"] = m_guard_cathode_cm;
+        cfg["guard_cathode_peak"] = m_guard_cathode_peak;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -496,6 +519,11 @@ private:
     double m_guard_proton_ks1{0.040};   // end matches muon shape below this
     double m_guard_proton_ratio3{1.1};  // ... and muon normalization below this
 
+    // doc-63 round-3 cathode-truncation veto (see configure()).
+    bool m_cathode_guard{false};
+    double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
+    double m_guard_cathode_peak{2.5};   // ... with end peak below this x MIP
+
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
     // default => the historical FiducialUtils / sensitive-volume-union fallback,
     // i.e. an absent "fiducial" key is byte-identical to the pre-knob code.
@@ -511,9 +539,9 @@ private:
     //   0 accepted (STM), 1 TGM, 2 rejected long-leftover past kink
     //   ("Mid Point A"), 3 rejected dQ/dx eval (KS tests), 4 rejected
     //   extra-tracks veto, 5 rejected proton endpoint, 6 fitted but no
-    //   decision (fell through), 7 rejected by the doc-63 accept_guards
-    //   (desert/spike; a ratio2-cap rejection shows as 3 -- it fires inside
-    //   the eval).
+    //   decision (fell through), 7 rejected by the doc-63 accept_guards or
+    //   cathode_guard (desert/spike/cathode; a ratio2-cap rejection shows as
+    //   3 -- it fires inside the eval).
     // Round-1 rough fits and passes aborted with <=3 fit points are NOT
     // recorded (no round-2 segment exists).
     bool m_save_stm_fit{false};
@@ -1765,6 +1793,53 @@ private:
         return false;
     }
 
+    // doc-63 round-3 cathode-truncation veto (see configure()).  Same calling
+    // convention as accept_guards_reject; gated on m_cathode_guard.
+    bool cathode_guard_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+
+        // Distance from the stop point to the cathode plane of its own TPC.
+        // face_dirx is the face-normal sign (IAnodeFace::dirx), pointing from
+        // the anode INTO the drift volume, i.e. toward the cathode; the
+        // sensitive-volume BoundingBox is component-wise normalized
+        // (first=min, second=max), so fdx>0 puts the cathode at max x
+        // (verified on SBND apa0: fdx=+1, bb.x=[-201.45,-0.45]cm, cathode at
+        // -0.45).  A point outside all known volumes cannot be judged -- no
+        // veto.
+        const auto& stop = pts[static_cast<size_t>(k)];
+        WirePlaneId wpid = m_dv->contained_by(stop);
+        if (wpid.apa() < 0 || wpid.face() < 0) return false;
+        WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
+        const int fdx = m_dv->face_dirx(wpid_u);
+        WireCell::BoundingBox bb = m_dv->inner_bounds(wpid_u);
+        const double cathode_x = (fdx > 0) ? bb.bounds().second.x() : bb.bounds().first.x();
+        const double dist = std::abs(stop.x() - cathode_x);
+        SPDLOG_LOGGER_DEBUG(s_log, "cathode_guard: cluster {} stop x={:.2f}cm apa={} face={} fdx={} bb.x=[{:.2f},{:.2f}]cm cathode_x={:.2f}cm dist={:.2f}cm",
+                            cluster_ident, stop.x() / units::cm, wpid.apa(), wpid.face(), fdx,
+                            bb.bounds().first.x() / units::cm, bb.bounds().second.x() / units::cm,
+                            cathode_x / units::cm, dist / units::cm);
+        if (dist >= m_guard_cathode_cm * units::cm) return false;
+
+        // A genuine near-cathode stop still shows its Bragg rise.
+        const double L_stop = L[k];
+        double peak = -1;
+        for (int i = 0; i <= k; ++i) {
+            const double d = L_stop - L[i];
+            if (d >= 0 && d < 5 * units::cm) peak = std::max(peak, dQ_dx[i]);
+        }
+        if (peak > 0 && peak < m_guard_cathode_peak * m_mip_dqdx) {
+            SPDLOG_LOGGER_INFO(s_log, "cathode_guard: cluster {} rejected: stop {:.1f} cm from the cathode with end peak {:.2f} MIP (drift-boundary truncation, not a stop)",
+                               cluster_ident, dist / units::cm, peak / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
     bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
@@ -2397,7 +2472,14 @@ private:
             // Calculate geometric length using helper function (maps to get_track_length(2))
             double straightness_ratio = dir1.magnitude() / segment_track_length(segment);
 
-            // std::cout << track_length1 << " " << track_medium_dQ_dx << " " << track_length_threshold << " " << dir1 << " " << straightness_ratio << std::endl;
+            // Log-only (doc 63 round-3 diagnosis): what search_other_tracks
+            // found and the quantities every veto below cuts on.  No verdict
+            // depends on this line.
+            SPDLOG_LOGGER_DEBUG(s_log, "check_other_tracks: cluster {} seg {}/{}: len={:.1f}cm medQ={:.2f}MIP lenThr={:.1f}cm straight={:.3f} front=({:.1f},{:.1f},{:.1f})cm",
+                                cluster.ident(), i, fitted_segments.size() - 1,
+                                track_length1, track_medium_dQ_dx, track_length_threshold,
+                                straightness_ratio,
+                                front_pt.x()/units::cm, front_pt.y()/units::cm, front_pt.z()/units::cm);
 
             // Main logic from prototype
             if (track_length1 > 5 && track_medium_dQ_dx > 0.4) {
@@ -2773,6 +2855,13 @@ private:
             // proton stages whose outcome they would preempt.
             if (m_accept_guards && flag_pass &&
                 accept_guards_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-3: cathode-truncation veto (own knob; same
+            // placement rationale as accept_guards above).
+            if (m_cathode_guard && flag_pass &&
+                cathode_guard_reject(eval_arrs, kink_num, cluster.ident())) {
                 if (m_save_stm_fit) set_pass_status(7);
                 return std::nullopt;
             }
