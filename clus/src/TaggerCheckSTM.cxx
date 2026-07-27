@@ -196,6 +196,21 @@ public:
                                 m_guard_proton_ks1, m_guard_proton_ratio3);
         }
 
+        // anode_dist_fix (C++ default false => byte-identical legacy): fix
+        // the inverted face selection in check_stm_conditions' dist_to_anode
+        // helper.  IAnodeFace::dirx points from the anode INTO the drift
+        // volume, so the anode sits at min x when fdx > 0 -- the legacy
+        // helper picks the OPPOSITE face and on SBND returns the distance to
+        // the CATHODE, so the prototype's anode-clipped-TGM catch
+        // (ToyFiducial.cxx:762 "at Anode", x < 2 cm with the uBooNE anode at
+        // x = 0) fires at the wrong drift boundary.  For contained points
+        // |x - anode_x| equals the prototype's signed quantity, so the fixed
+        // helper is a faithful translation.  docs/63 sec 4 round 4a.
+        m_anode_dist_fix = get<bool>(config, "anode_dist_fix", m_anode_dist_fix);
+        if (m_anode_dist_fix) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: anode_dist_fix ON (dist_to_anode uses the true anode face)");
+        }
+
         // beam_window_only + beam_window_low/high (all C++-default off =>
         // byte-identical legacy behavior): evaluate only the beam-coincident
         // bundle, i.e. the main clusters whose matched flash time (cluster_t0)
@@ -258,6 +273,8 @@ public:
         cfg["cathode_guard"] = m_cathode_guard;
         cfg["guard_cathode_cm"] = m_guard_cathode_cm;
         cfg["guard_cathode_peak"] = m_guard_cathode_peak;
+        // doc-63 round-4a dist_to_anode face fix; false = byte-identical legacy.
+        cfg["anode_dist_fix"] = m_anode_dist_fix;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -518,6 +535,9 @@ private:
     // keeps it rejected and still recovers the doc-62 miss (ks1 = 0.030).
     double m_guard_proton_ks1{0.040};   // end matches muon shape below this
     double m_guard_proton_ratio3{1.1};  // ... and muon normalization below this
+
+    // doc-63 round-4a dist_to_anode face fix (see configure()).
+    bool m_anode_dist_fix{false};
 
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
@@ -2489,7 +2509,7 @@ private:
             
             double angle_deg = dir1.angle(drift_dir_abs) * 180. / 3.1415926;
             if (fabs(angle_deg - 90.0) < 7.5) continue;  // Skip tracks nearly perpendicular to drift
-            
+
             // Complex condition from prototype
             if (((track_length1 > 5 && track_medium_dQ_dx > 0.7) &&
                 ((track_medium_dQ_dx - 0.7)/0.1 > (19 - track_length1)/7.) &&
@@ -2582,9 +2602,17 @@ private:
         }
 
         // Per-face distance-to-anode helper: replaces hardcoded x < threshold comparisons.
-        // face_dirx < 0  → drift in +x → anode is at xmin of inner_bounds.
-        // face_dirx > 0  → drift in -x → anode is at xmax of inner_bounds.
         // Falls back to |x| if the point is outside all known volumes (preserves UBoone behaviour).
+        //
+        // face_dirx (IAnodeFace::dirx) points from the anode INTO the drift
+        // volume, and the sensitive-volume BoundingBox is component-wise
+        // normalized (first=min), so the anode sits at MIN x when fdx > 0
+        // (verified on SBND apa0: fdx=+1, anode at bb min x=-201.45 cm).
+        // The legacy selection below is inverted -- on SBND it returns the
+        // distance to the CATHODE -- but it shipped inside validated
+        // productions, so the corrected form is the anode_dist_fix knob
+        // (docs/63 round 4a) and the inverted form stays the byte-identical
+        // default.
         auto dist_to_anode = [this](const WireCell::Point& pt) -> double {
             WirePlaneId wpid = m_dv->contained_by(pt);
             if (wpid.apa() < 0 || wpid.face() < 0) {
@@ -2593,7 +2621,9 @@ private:
             WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
             int fdx = m_dv->face_dirx(wpid_u);
             WireCell::BoundingBox bb = m_dv->inner_bounds(wpid_u);
-            double anode_x = (fdx < 0) ? bb.bounds().first.x() : bb.bounds().second.x();
+            const double anode_x = m_anode_dist_fix
+                ? ((fdx > 0) ? bb.bounds().first.x() : bb.bounds().second.x())
+                : ((fdx < 0) ? bb.bounds().first.x() : bb.bounds().second.x());
             return std::abs(pt.x() - anode_x);
         };
 
