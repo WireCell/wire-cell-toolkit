@@ -547,6 +547,14 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // off => byte-identical.  DEFAULT TRUE = SBND production as of
               // doc 63 (owner 2026-07-26, after validation).
               stm_second_track_guard=true,
+              // stm_deficit_guard / stm_vertex_kink_guard: the doc-63
+              // round-5 stop-region vetoes (charge-deficient end with no
+              // Bragg = truncation; sharp end turn into a hot prong =
+              // vertex).  C++ defaults false; keys omitted when off =>
+              // byte-identical.  DEFAULT TRUE = SBND production as of doc 63
+              // (owner 2026-07-26, after validation).
+              stm_deficit_guard=true,
+              stm_vertex_kink_guard=true,
               // beam_window_only: run the PR tail (steiner + TGM + STM + FC)
               // ONLY on the beam-coincident bundle -- the main clusters whose
               // matched flash time (cluster_t0) falls in beam_window, plus (for
@@ -717,6 +725,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // second_track_guard (C++ default false; key omitted when off =>
             // byte-identical): doc-63 round-4b/4c second-track vetoes.
             second_track_guard=stm_second_track_guard,
+            // deficit_guard / vertex_kink_guard (C++ defaults false; keys
+            // omitted when off => byte-identical): doc-63 round-5 vetoes.
+            deficit_guard=stm_deficit_guard,
+            vertex_kink_guard=stm_vertex_kink_guard,
             // stm_consistent_fv (default TRUE = SBND production): give the
             // containment gate the SAME fiducial + margins tagger_check_tgm and
             // tagger_check_fc get, so "contained" means one thing across all
@@ -1036,6 +1048,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
        stm_proton_muon_guard=true, stm_cathode_guard=true,
        stm_anode_dist_fix=true, stm_second_track_guard=true,
+       stm_deficit_guard=true, stm_vertex_kink_guard=true,
        beam_window_only=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
@@ -1065,6 +1078,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_cathode_guard=stm_cathode_guard,
                 stm_anode_dist_fix=stm_anode_dist_fix,
                 stm_second_track_guard=stm_second_track_guard,
+                stm_deficit_guard=stm_deficit_guard,
+                stm_vertex_kink_guard=stm_vertex_kink_guard,
                 beam_window_only=beam_window_only),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

@@ -219,6 +219,33 @@ public:
                                 m_guard_proton_ks1, m_guard_proton_ratio3);
         }
 
+        // deficit_guard + vertex_kink_guard (C++ defaults false =>
+        // byte-identical legacy): the doc-63 round-5 vetoes on the STOP
+        // REGION itself.  Full-d59k survey (docs/63 sec 1.8):
+        //   5a -- an end whose last-5cm median dQ/dx is below ~0.6 MIP with
+        //   no charge bump at all in the last 15 cm (max < 2.0 MIP) is a
+        //   reconstruction truncation (321371:18: 0.43 MIP median, 1.30 max;
+        //   correct STMs bottom out at 0.72, and the truncated/overshoot
+        //   Bragg cases 353487:3 and 283485:15 are kept by their bumps);
+        //   5b -- a sharp (>45 deg) turn within 12 cm of the stop into a
+        //   >2.2 MIP prong is a nu vertex plus proton, not a Bragg rise
+        //   (402330:1: 53.5 deg into 3.67 MIP; sharpest correct turn with a
+        //   hot prong is 34.8 deg).
+        m_deficit_guard = get<bool>(config, "deficit_guard", m_deficit_guard);
+        m_guard_deficit_med = get<double>(config, "guard_deficit_med", m_guard_deficit_med);
+        m_guard_deficit_bragg = get<double>(config, "guard_deficit_bragg", m_guard_deficit_bragg);
+        if (m_deficit_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: deficit_guard ON (end5 med<{} MIP && last15 max<{} MIP)",
+                                m_guard_deficit_med, m_guard_deficit_bragg);
+        }
+        m_vertex_kink_guard = get<bool>(config, "vertex_kink_guard", m_vertex_kink_guard);
+        m_guard_vertex_turn = get<double>(config, "guard_vertex_turn", m_guard_vertex_turn);
+        m_guard_vertex_mip = get<double>(config, "guard_vertex_mip", m_guard_vertex_mip);
+        if (m_vertex_kink_guard) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: vertex_kink_guard ON (turn>{} deg && post>{} MIP)",
+                                m_guard_vertex_turn, m_guard_vertex_mip);
+        }
+
         // anode_dist_fix (C++ default false => byte-identical legacy): fix
         // the inverted face selection in check_stm_conditions' dist_to_anode
         // helper.  IAnodeFace::dirx points from the anode INTO the drift
@@ -305,6 +332,13 @@ public:
         cfg["guard_seg_track_cm"] = m_guard_seg_track_cm;
         cfg["guard_seg_mip_lo"] = m_guard_seg_mip_lo;
         cfg["guard_seg_mip_hi"] = m_guard_seg_mip_hi;
+        // doc-63 round-5 stop-region vetoes; false = byte-identical legacy.
+        cfg["deficit_guard"] = m_deficit_guard;
+        cfg["guard_deficit_med"] = m_guard_deficit_med;
+        cfg["guard_deficit_bragg"] = m_guard_deficit_bragg;
+        cfg["vertex_kink_guard"] = m_vertex_kink_guard;
+        cfg["guard_vertex_turn"] = m_guard_vertex_turn;
+        cfg["guard_vertex_mip"] = m_guard_vertex_mip;
         // Null/empty => the historical FiducialUtils containment (union of
         // per-face sensitive volumes, no margin).  Naming an IFiducial here
         // redirects cluster_fc_check's direct containment tests to it; pass the
@@ -577,6 +611,14 @@ private:
     double m_guard_seg_mip_lo{0.4};           // ... with MIP-like median dQ/dx in
     double m_guard_seg_mip_hi{1.5};           // (lo, hi) => 2nd track
 
+    // doc-63 round-5 stop-region vetoes (see configure()).
+    bool m_deficit_guard{false};
+    double m_guard_deficit_med{0.60};    // end-5cm median below this (MIP) ...
+    double m_guard_deficit_bragg{2.0};   // ... with last-15cm max below this => truncation
+    bool m_vertex_kink_guard{false};
+    double m_guard_vertex_turn{45.0};    // sharpest end-region turn above this (deg) ...
+    double m_guard_vertex_mip{2.2};      // ... into a post-turn median above this (MIP) => vertex
+
     // doc-63 round-3 cathode-truncation veto (see configure()).
     bool m_cathode_guard{false};
     double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
@@ -598,9 +640,10 @@ private:
     //   ("Mid Point A"), 3 rejected dQ/dx eval (KS tests), 4 rejected
     //   extra-tracks veto, 5 rejected proton endpoint, 6 fitted but no
     //   decision (fell through), 7 rejected by the doc-63 accept_guards,
-    //   cathode_guard or second_track_guard's leftover veto (desert/spike/
-    //   cathode/leftover-track; a ratio2-cap rejection shows as 3 -- it
-    //   fires inside the eval -- and a round-4c segment veto as 4).
+    //   cathode_guard, second_track_guard's leftover veto, deficit_guard or
+    //   vertex_kink_guard (desert/spike/cathode/leftover-track/deficit-end/
+    //   vertex-kink; a ratio2-cap rejection shows as 3 -- it fires inside
+    //   the eval -- and a round-4c segment veto as 4).
     // Round-1 rough fits and passes aborted with <=3 fit points are NOT
     // recorded (no round-2 segment exists).
     bool m_save_stm_fit{false};
@@ -1925,6 +1968,112 @@ private:
         return false;
     }
 
+    // doc-63 round-5a stop-deficit veto: the fitted stop region carries
+    // neither MIP-level charge (end-5cm median below ~0.6 MIP -- no stopping
+    // particle deposits HALF a MIP at its stop) nor ANY charge bump in the
+    // last 15 cm (max below 2.0 MIP), so the visible end is a reconstruction
+    // truncation, not a stopping point.  Full-d59k survey (docs/63 sec 1.8):
+    // correct STMs bottom out at end-5cm median 0.72 MIP; the vetoed end
+    // 321371:18 sits at 0.43 with a last-15cm max of only 1.30 (its charge
+    // decays into NEGATIVE noise).  The 2.0 MIP bump threshold deliberately
+    // keeps every truncated-but-plausible Bragg: 353487:3 (bump 2.19 then a
+    // 3 cm dead tail -- the doc-61 scan reads it as a genuine STM) and
+    // 283485:15 (smooth Bragg to 2.5, endpoint overshoot) both survive.
+    // The kink argument must be the RECORDED kink, not the post-short-track-
+    // reset one (see the call site).  Same calling convention as
+    // accept_guards_reject; gated on m_deficit_guard.
+    bool deficit_guard_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 3) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const double L_stop = L[k];
+        std::vector<double> end5;
+        double max15 = -1;
+        for (int i = 0; i <= k; ++i) {
+            const double d = L_stop - L[i];
+            if (d >= 0 && d < 5 * units::cm) end5.push_back(dQ_dx[i]);
+            if (d >= 0 && d < 15 * units::cm) max15 = std::max(max15, dQ_dx[i]);
+        }
+        if (end5.size() < 2) return false;
+        std::sort(end5.begin(), end5.end());
+        const size_t m = end5.size() / 2;
+        const double end5_med = end5.size() % 2 ? end5[m] : 0.5 * (end5[m - 1] + end5[m]);
+        if (end5_med < m_guard_deficit_med * m_mip_dqdx &&
+            max15 < m_guard_deficit_bragg * m_mip_dqdx) {
+            SPDLOG_LOGGER_INFO(s_log, "deficit_guard: cluster {} rejected: end-5cm median {:.2f} MIP with last-15cm max {:.2f} MIP (charge-deficient end, truncation not a stop)",
+                               cluster_ident, end5_med / m_mip_dqdx, max15 / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
+    // doc-63 round-5b vertex-kink veto: a genuine Bragg rise is SMOOTH -- no
+    // direction break at its onset -- while a nu vertex fitted through reads
+    // as MIP leg -> sharp turn -> short HIGH-dQ/dx prong (a proton) that the
+    // eval mistakes for the Bragg.  Veto when the sharpest 2.5 cm-window turn
+    // in [stop-12, stop-2] cm exceeds the angle cut AND the median dQ/dx from
+    // that turn to the stop is hot.  Full-d59k survey (docs/63 sec 1.8):
+    // vetoed 402330:1 turns 53.5 deg into a 3.67 MIP prong; the sharpest
+    // correct-STM turn WITH a hot prong is 34.8 deg (389544:13), the hottest
+    // prong behind a >45 deg turn on a correct STM is 0.72 MIP (283463:14),
+    // and the borderline genuine short stopper 406752:7 (post-turn 2.01 MIP)
+    // stays below the 2.2 MIP cut.  Same calling convention as
+    // accept_guards_reject; gated on m_vertex_kink_guard.
+    bool vertex_kink_reject(const STMEvalArrays& arrs, int kink_num, int cluster_ident) const {
+        const auto& pts = arrs.pts;
+        const auto& L = arrs.L;
+        const auto& dQ_dx = arrs.dQ_dx;
+        const int n = static_cast<int>(L.size());
+        if (n < 8) return false;
+        const int k = (kink_num >= 0 && kink_num < n) ? kink_num : n - 1;
+        const double L_stop = L[k];
+        if (L_stop < 20 * units::cm) return false;  // need a MIP body before the window
+
+        // direction of the path chord over L in [lo, hi]; false if degenerate
+        auto wdir = [&](double lo, double hi, WireCell::Point& out) -> bool {
+            int a = -1, b = -1;
+            for (int i = 0; i <= k; ++i) {
+                if (L[i] >= lo && L[i] <= hi) {
+                    if (a < 0) a = i;
+                    b = i;
+                }
+            }
+            if (a < 0 || b <= a) return false;
+            out = pts[static_cast<size_t>(b)] - pts[static_cast<size_t>(a)];
+            const double mag = std::sqrt(out.dot(out));
+            if (mag <= 0) return false;
+            out = out * (1.0 / mag);
+            return true;
+        };
+
+        double best_ang = 0, best_t = -1;
+        const double t_lo = std::max(2.5 * units::cm, L_stop - 12 * units::cm);
+        for (double t = t_lo; t <= L_stop - 2 * units::cm; t += 0.5 * units::cm) {
+            WireCell::Point d1, d2;
+            if (!wdir(t - 2.5 * units::cm, t, d1) || !wdir(t, t + 2.5 * units::cm, d2)) continue;
+            const double c = std::max(-1.0, std::min(1.0, d1.dot(d2)));
+            const double ang = std::acos(c) * 180.0 / 3.1415926;
+            if (ang > best_ang) { best_ang = ang; best_t = t; }
+        }
+        if (best_t < 0 || best_ang < m_guard_vertex_turn) return false;
+        std::vector<double> post;
+        for (int i = 0; i <= k; ++i) {
+            if (L[i] >= best_t) post.push_back(dQ_dx[i]);
+        }
+        if (post.size() < 2) return false;
+        std::sort(post.begin(), post.end());
+        const size_t m = post.size() / 2;
+        const double post_med = post.size() % 2 ? post[m] : 0.5 * (post[m - 1] + post[m]);
+        if (post_med > m_guard_vertex_mip * m_mip_dqdx) {
+            SPDLOG_LOGGER_INFO(s_log, "vertex_kink_guard: cluster {} rejected: {:.1f} deg turn {:.1f} cm before the stop into a {:.2f} MIP prong (vertex, not Bragg)",
+                               cluster_ident, best_ang, (L_stop - best_t) / units::cm, post_med / m_mip_dqdx);
+            return true;
+        }
+        return false;
+    }
+
     // Core STM evaluation using pre-built arrays (called once per (peak_range, offset, com_range) combo).
     bool eval_stm_core_impl(const STMEvalArrays& arrs, int kink_num,
                        double peak_range, double offset_length, double com_range,
@@ -2826,6 +2975,14 @@ private:
             for (size_t i = second_loop_start; i < dx_size; i++) { left_L += dx[i]; left_Q += dQ[i]; }
 
             if (m_save_stm_fit) note_pass_kink(kink_num, exit_L, left_L, exit_Q, left_Q);
+            // The doc-63 round-5 guards evaluate the stop at THIS kink -- the
+            // one the pass record stores and the one their full-d59k
+            // calibration (docs/63 sec 1.8) measured -- NOT the post-reset
+            // value: the short-track reset below moves kink_num to the path
+            // end, which drags a genuine STM's low-charge Michel/overshoot
+            // tail into the end-5cm window (62303:12: recorded-kink median
+            // 0.99 MIP vs path-end 0.53, a false deficit veto).
+            const int kink_recorded = kink_num;
 
             SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Left: {} {} {} {}",
                 exit_L/units::cm, left_L/units::cm,
@@ -2980,6 +3137,21 @@ private:
             // cm), so kink_num here is the real kink.
             if (m_second_track_guard && flag_pass &&
                 second_track_leftover_reject(eval_arrs, kink_num, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-5a: charge-deficient end with no Bragg =
+            // reconstruction truncation (own knob; same placement rationale;
+            // kink_recorded, not the post-reset kink_num -- see its comment).
+            if (m_deficit_guard && flag_pass &&
+                deficit_guard_reject(eval_arrs, kink_recorded, cluster.ident())) {
+                if (m_save_stm_fit) set_pass_status(7);
+                return std::nullopt;
+            }
+            // doc-63 round-5b: sharp end-region turn into a hot prong =
+            // vertex, not Bragg (own knob; same placement rationale and kink).
+            if (m_vertex_kink_guard && flag_pass &&
+                vertex_kink_reject(eval_arrs, kink_recorded, cluster.ident())) {
                 if (m_save_stm_fit) set_pass_status(7);
                 return std::nullopt;
             }
