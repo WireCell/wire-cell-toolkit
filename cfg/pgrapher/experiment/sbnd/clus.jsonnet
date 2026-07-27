@@ -519,18 +519,21 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               stm_consistent_fv=true,
               // stm_accept_guards: the doc-63 round-1 STM acceptance guards
               // (charge-desert one-objectness veto, spike-not-ramp nu-vertex
-              // veto, eval ratio2 normalization cap).  C++ default false;
-              // key omitted when off => byte-identical pre-knob config.
-              // Runner flag: run_nusel_evt.sh -stm-guards.
-              stm_accept_guards=false,
+              // veto, eval ratio2 normalization cap).  C++ default false.
+              // DEFAULT TRUE = SBND production as of doc 63 (owner
+              // 2026-07-26); pass false for a pre-campaign A/B (key then
+              // omitted => byte-identical pre-knob config).
+              stm_accept_guards=true,
               // stm_proton_muon_guard: the doc-63 round-2 muon-consistency
               // guard on detect_proton (C++ default false; key omitted when
-              // off => byte-identical).  Runner flag: -stm-proton-guard.
-              stm_proton_muon_guard=false,
+              // off => byte-identical).  DEFAULT TRUE = SBND production as
+              // of doc 63 (owner 2026-07-26).
+              stm_proton_muon_guard=true,
               // stm_cathode_guard: the doc-63 round-3 cathode-truncation veto
               // (C++ default false; key omitted when off => byte-identical).
-              // Runner flag: -stm-cathode-guard.
-              stm_cathode_guard=false,
+              // DEFAULT TRUE = SBND production as of doc 63 (owner
+              // 2026-07-26).
+              stm_cathode_guard=true,
               // beam_window_only: run the PR tail (steiner + TGM + STM + FC)
               // ONLY on the beam-coincident bundle -- the main clusters whose
               // matched flash time (cluster_t0) falls in beam_window, plus (for
@@ -1011,8 +1014,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        tgm_fv_zmax_margin=3, tgm_fv_zmax_margin_interior=0,
        tgm_fv_x_margin=2, tgm_fv_y_margin=2.5,
        save_stm_fit=false, unmerge_bundle_mode='real',
-       mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=false,
-       stm_proton_muon_guard=false, stm_cathode_guard=false,
+       mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
+       stm_proton_muon_guard=true, stm_cathode_guard=true,
        beam_window_only=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
