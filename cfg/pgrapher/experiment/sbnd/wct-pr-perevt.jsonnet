@@ -143,6 +143,17 @@ function(
     // -stm-vertex-guard / SBND_STM_VERTEX_GUARD=1.
     stm_deficit_guard = true,
     stm_vertex_kink_guard = true,
+    // doc-66 sec 12 diffusion-margin cut package: Michel-veto res_length
+    // floor 6 -> 6.5 cm, detect_proton track_medium gate 1.0 -> 1.05,
+    // block-B ks2 entry 0.05 -> 0.055, C1 peak clause 4.3 -> 4.1.  Restores
+    // the four vetoes the 4.0/8.8 diffusion revert lost by hairline margins
+    // (owner-adjudicated; full-1000-event sweep found zero collateral).  C++
+    // defaults are the prototype constants; false omits the keys =>
+    // byte-identical pre-package config.  The four values themselves are
+    // module defaults in clus.jsonnet (pr(...) args stm_michel_res_cm etc.).
+    // DEFAULT TRUE = SBND production as of doc 66 (owner 2026-07-27).
+    // Runner flag: -no-stm-d66cuts / SBND_STM_D66CUTS=0.
+    stm_d66_cuts = true,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -315,7 +326,8 @@ function(
                              stm_anode_dist_fix=stm_anode_dist_fix,
                              stm_second_track_guard=stm_second_track_guard,
                              stm_deficit_guard=stm_deficit_guard,
-                             stm_vertex_kink_guard=stm_vertex_kink_guard);
+                             stm_vertex_kink_guard=stm_vertex_kink_guard,
+                             stm_d66_cuts=stm_d66_cuts);
 
     local graph = g.intern(
         innodes=[source],

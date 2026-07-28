@@ -220,6 +220,25 @@ public:
                                 m_guard_proton_ks1, m_guard_proton_ratio3);
         }
 
+        // doc-66 sec 12 diffusion-margin cut package (C++ defaults = the
+        // prototype's original constants => absent keys are byte-identical
+        // legacy).  The 4.0/8.8 diffusion revert moved four discriminants
+        // across these fixed thresholds by hairline margins on four SBND
+        // bundles the owner's hand scan adjudicated (sbnd_xin/docs/66 sec
+        // 12.1); the SBND production values 6.5 cm / 1.05 / 0.055 / 4.1 were
+        // chosen from a full-sample margin sweep with zero measured
+        // collateral (sec 12.2).
+        m_michel_res_len_cut = get<double>(config, "michel_res_length_cut", m_michel_res_len_cut);
+        m_proton_tm_max = get<double>(config, "proton_tm_max", m_proton_tm_max);
+        m_proton_b_ks2_max = get<double>(config, "proton_b_ks2_max", m_proton_b_ks2_max);
+        m_proton_c_peak_max = get<double>(config, "proton_c_peak_max", m_proton_c_peak_max);
+        if (m_michel_res_len_cut != 6.0 * units::cm || m_proton_tm_max != 1.0 ||
+            m_proton_b_ks2_max != 0.05 || m_proton_c_peak_max != 4.3) {
+            SPDLOG_LOGGER_DEBUG(s_log,
+                "configure: TaggerCheckSTM: doc-66 cut package (michel_res>{:.1f}cm, tm<{}, b_ks2<{}, c_peak>{})",
+                m_michel_res_len_cut / units::cm, m_proton_tm_max, m_proton_b_ks2_max, m_proton_c_peak_max);
+        }
+
         // deficit_guard + vertex_kink_guard (C++ defaults false =>
         // byte-identical legacy): the doc-63 round-5 vetoes on the STOP
         // REGION itself.  Full-d59k survey (docs/63 sec 1.8):
@@ -320,6 +339,11 @@ public:
         cfg["proton_muon_guard"] = m_proton_muon_guard;
         cfg["guard_proton_ks1"] = m_guard_proton_ks1;
         cfg["guard_proton_ratio3"] = m_guard_proton_ratio3;
+        // doc-66 sec 12 cut package; prototype constants = byte-identical legacy.
+        cfg["michel_res_length_cut"] = m_michel_res_len_cut;
+        cfg["proton_tm_max"] = m_proton_tm_max;
+        cfg["proton_b_ks2_max"] = m_proton_b_ks2_max;
+        cfg["proton_c_peak_max"] = m_proton_c_peak_max;
         // doc-63 round-3 cathode-truncation veto; false = byte-identical legacy.
         cfg["cathode_guard"] = m_cathode_guard;
         cfg["guard_cathode_cm"] = m_guard_cathode_cm;
@@ -624,6 +648,15 @@ private:
     bool m_cathode_guard{false};
     double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
     double m_guard_cathode_peak{2.5};   // ... with end peak below this x MIP
+
+    // doc-66 sec 12 diffusion-margin cut package (see configure()).  All four
+    // defaults are the prototype's original constants => absent keys are
+    // byte-identical legacy behavior.  SBND production overrides
+    // 6.5 cm / 1.05 / 0.055 / 4.1 (sbnd_xin/docs/66 sec 12.2).
+    double m_michel_res_len_cut{6.0 * units::cm};  // eval Michel veto res_length floor
+    double m_proton_tm_max{1.0};        // detect_proton block-C track_medium gate
+    double m_proton_b_ks2_max{0.05};    // detect_proton block-B entry ks2 ceiling
+    double m_proton_c_peak_max{4.3};    // detect_proton C1 dQ_dx[max_bin]/MIP clause
 
     // Containment fiducial volume for the cluster_fc_check gate.  Unset by
     // default => the historical FiducialUtils / sensitive-volume-union fallback,
@@ -1766,8 +1799,12 @@ private:
                 return false;
             }
 
+            // prototype ks2 < 0.05; m_proton_b_ks2_max widens the entry so a
+            // deep-Bragg end whose flat-MIP KS drifts a hair above 0.05 under
+            // 4.0/8.8 diffusion still reaches the comb veto below (doc 66
+            // sec 12.1, 390864:16 at ks2 = 0.0507).
             if (ks1-ks2 + (fabs(ratio1-1)-fabs(ratio2-1))/1.5*0.3 > 0.02 && dQ_dx[max_bin]/m_mip_dqdx > 2.3 &&
-                (dQ_dx.size() - max_bin <= 3 || (ks2 < 0.05 && dQ_dx.size() - max_bin <= 12))) {
+                (dQ_dx.size() - max_bin <= 3 || (ks2 < m_proton_b_ks2_max && dQ_dx.size() - max_bin <= 12))) {
                 if (dQ_dx.size()-max_bin <= 1 && dQ_dx[max_bin]/m_mip_dqdx > 2.5 && ks2 < 0.035 && fabs(ratio2-1) < 0.1)
                 return true;
                 if (dQ_dx.size()-max_bin <= 1 && ((dQ_dx[max_bin]/m_mip_dqdx < 3.0 && ((ks1 < 0.06 && ks2 > 0.03) || (ks1 < 0.065 && ks2 > 0.04))) || (ks1 < 0.035 && dQ_dx[max_bin]/m_mip_dqdx < 4.0)))
@@ -1780,10 +1817,15 @@ private:
             double track_medium_dQ_dx = segment_median_dQ_dx(fitted_segments[0]) * units::cm / m_mip_dqdx;
             SPDLOG_LOGGER_TRACE(s_log, "detect_proton: End proton detection1: {} {} {} {}", track_medium_dQ_dx, dQ_dx[max_bin]/m_mip_dqdx, ks3, ratio3);
                     
-            if (track_medium_dQ_dx < 1.0 && dQ_dx.at(max_bin)/m_mip_dqdx > 3.5){
+            // prototype track_medium < 1.0 and peak > 4.3; m_proton_tm_max /
+            // m_proton_c_peak_max restore this block for ends whose track
+            // median dQ/dx rises just past MIP under 4.0/8.8 diffusion (doc
+            // 66 sec 12.1: 317543:15 at tm = 1.010, 319809:20 at tm = 1.021
+            // with peak 4.16; nearest non-target STM sits above tm = 1.10).
+            if (track_medium_dQ_dx < m_proton_tm_max && dQ_dx.at(max_bin)/m_mip_dqdx > 3.5){
                 if ((ks3 > 0.06 && ratio3 > 1.1 && ks1 > 0.045) || (ks3 > 0.1 && ks2 < 0.19) || (ratio3 > 1.3)) return true;
-                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx.at(max_bin)/m_mip_dqdx > 4.3 && ks3 > 0.03)) return true;
-            }else if (track_medium_dQ_dx < 1 && dQ_dx.at(max_bin)/m_mip_dqdx > 3.0){
+                if ((ks2 < 0.045 && ks3 > 0.03) || (dQ_dx.at(max_bin)/m_mip_dqdx > m_proton_c_peak_max && ks3 > 0.03)) return true;
+            }else if (track_medium_dQ_dx < m_proton_tm_max && dQ_dx.at(max_bin)/m_mip_dqdx > 3.0){
                 if (ks3 > 0.12 && ks1 > 0.03) return true;
             }
         }
@@ -2257,8 +2299,13 @@ private:
             (res_length > 10 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
             (res_length > 10 * units::cm && ave_res_dQ_dx > 1.7 * m_mip_dqdx) ||
-            (res_length > 6 * units::cm && ave_res_dQ_dx > 1.85 * m_mip_dqdx) ||
-            (res_length > 6 * units::cm && ave_res_dQ_dx > 1.45 * m_mip_dqdx && 
+            // prototype 6 cm floor on both clauses; m_michel_res_len_cut lets
+            // a hairline-past-6cm residual through when the fit under 4.0/8.8
+            // diffusion leaves one on a deeply-accepting stop (doc 66 sec
+            // 12.1, 281632:8 at res_length = 6.10 cm; the only bundle in
+            // (6, 7] cm over the 1000-event sample).
+            (res_length > m_michel_res_len_cut && ave_res_dQ_dx > 1.85 * m_mip_dqdx) ||
+            (res_length > m_michel_res_len_cut && ave_res_dQ_dx > 1.45 * m_mip_dqdx &&
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > -0.05) ||
             (res_length > 4 * units::cm && ave_res_dQ_dx/m_mip_dqdx > 1.4 && 
             ks1 - ks2 + (fabs(ratio1-1) - fabs(ratio2-1))/1.5*0.3 > 0.02) ||

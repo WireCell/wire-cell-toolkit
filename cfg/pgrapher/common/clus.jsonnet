@@ -187,7 +187,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                          accept_guards=false, proton_muon_guard=false,
                          cathode_guard=false, anode_dist_fix=false,
                          second_track_guard=false, deficit_guard=false,
-                         vertex_kink_guard=false) :: {
+                         vertex_kink_guard=false,
+                         michel_res_length_cut=null, proton_tm_max=null,
+                         proton_b_ks2_max=null, proton_c_peak_max=null) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -219,6 +221,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // pre-knob config (doc-63 round 5 stop-region vetoes).
               + (if deficit_guard then { deficit_guard: true } else {})
               + (if vertex_kink_guard then { vertex_kink_guard: true } else {})
+              // doc-66 sec 12 diffusion-margin cut package.  C++ defaults are
+              // the prototype constants (6 cm / 1.0 / 0.05 / 4.3); null here
+              // omits the key => byte-identical legacy config.
+              + (if michel_res_length_cut != null then { michel_res_length_cut: michel_res_length_cut } else {})
+              + (if proton_tm_max != null then { proton_tm_max: proton_tm_max } else {})
+              + (if proton_b_ks2_max != null then { proton_b_ks2_max: proton_b_ks2_max } else {})
+              + (if proton_c_peak_max != null then { proton_c_peak_max: proton_c_peak_max } else {})
         },
 
         // Through-going-muon tagger (port of prototype check_tgm).  fiducial

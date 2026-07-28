@@ -583,6 +583,22 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // (owner 2026-07-26, after validation).
               stm_deficit_guard=true,
               stm_vertex_kink_guard=true,
+              // stm_d66_cuts: the doc-66 sec 12 diffusion-margin cut package
+              // (Michel-veto res_length floor 6 -> 6.5 cm, detect_proton
+              // track_medium gate 1.0 -> 1.05, block-B ks2 entry 0.05 ->
+              // 0.055, C1 peak clause 4.3 -> 4.1).  The 4.0/8.8 diffusion
+              // revert moved four owner-adjudicated bundles across the
+              // prototype constants by hairline margins; these values were
+              // chosen from a full-1000-event margin sweep with zero measured
+              // collateral (sbnd_xin/docs/66 sec 12.2).  C++ defaults are the
+              // prototype constants; false omits the keys => byte-identical
+              // pre-package config.  DEFAULT TRUE = SBND production as of doc
+              // 66 (owner 2026-07-27).
+              stm_d66_cuts=true,
+              stm_michel_res_cm=6.5,
+              stm_proton_tm_max=1.05,
+              stm_proton_b_ks2_max=0.055,
+              stm_proton_c_peak_max=4.1,
               // beam_window_only: run the PR tail (steiner + TGM + STM + FC)
               // ONLY on the beam-coincident bundle -- the main clusters whose
               // matched flash time (cluster_t0) falls in beam_window, plus (for
@@ -757,6 +773,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             // omitted when off => byte-identical): doc-63 round-5 vetoes.
             deficit_guard=stm_deficit_guard,
             vertex_kink_guard=stm_vertex_kink_guard,
+            // doc-66 sec 12 cut package (C++ defaults = prototype constants;
+            // keys omitted when stm_d66_cuts=false => byte-identical).
+            michel_res_length_cut=(if stm_d66_cuts then stm_michel_res_cm * wc.cm else null),
+            proton_tm_max=(if stm_d66_cuts then stm_proton_tm_max else null),
+            proton_b_ks2_max=(if stm_d66_cuts then stm_proton_b_ks2_max else null),
+            proton_c_peak_max=(if stm_d66_cuts then stm_proton_c_peak_max else null),
             // stm_consistent_fv (default TRUE = SBND production): give the
             // containment gate the SAME fiducial + margins tagger_check_tgm and
             // tagger_check_fc get, so "contained" means one thing across all
@@ -1082,6 +1104,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stm_proton_muon_guard=true, stm_cathode_guard=true,
        stm_anode_dist_fix=true, stm_second_track_guard=true,
        stm_deficit_guard=true, stm_vertex_kink_guard=true,
+       stm_d66_cuts=true, stm_michel_res_cm=6.5, stm_proton_tm_max=1.05,
+       stm_proton_b_ks2_max=0.055, stm_proton_c_peak_max=4.1,
        beam_window_only=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
@@ -1113,6 +1137,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_second_track_guard=stm_second_track_guard,
                 stm_deficit_guard=stm_deficit_guard,
                 stm_vertex_kink_guard=stm_vertex_kink_guard,
+                stm_d66_cuts=stm_d66_cuts,
+                stm_michel_res_cm=stm_michel_res_cm,
+                stm_proton_tm_max=stm_proton_tm_max,
+                stm_proton_b_ks2_max=stm_proton_b_ks2_max,
+                stm_proton_c_peak_max=stm_proton_c_peak_max,
                 beam_window_only=beam_window_only),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
