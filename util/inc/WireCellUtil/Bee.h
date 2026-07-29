@@ -85,8 +85,11 @@ namespace WireCell::Bee {
     /// points across many live Points objects.
     class Points : public Object {
 
-        std::vector<double> m_x, m_y, m_z, m_q;
-        std::vector<int> m_clid, m_real_clid;
+        std::vector<double> m_x, m_y, m_z, m_q, m_e;
+        std::vector<int> m_clid, m_real_clid, m_nu_idx;
+        // Set once the extended append() (with per-point e / nu_idx) is used;
+        // asJson() then also emits the "e" and "nu_idx" arrays.
+        bool m_has_extra{false};
 
     public:
 
@@ -122,6 +125,12 @@ namespace WireCell::Bee {
 
         /// Add a WCT point.  Note, p is expected to be in usual WCT system-of-units.
         void append(const Point& p, double q=0, int clid=0, int real_clid=0);
+
+        /// Add a WCT point that also carries a per-point energy (e) and a
+        /// neutrino-interaction index (nu_idx).  Using this overload makes
+        /// asJson() emit "e" and "nu_idx" arrays alongside the standard fields.
+        /// Do not mix with the basic append() within one Points object.
+        void append(const Point& p, double q, int clid, int real_clid, double e, int nu_idx);
 
         /// Simply append obj's x,y,z,q,cluster_id arrays to this.
         void append(const Points& obj);
