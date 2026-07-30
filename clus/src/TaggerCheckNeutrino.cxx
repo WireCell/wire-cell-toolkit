@@ -83,6 +83,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_dl_vtx_score_scale      = get(config, "dl_vtx_score_scale",      m_dl_vtx_score_scale);
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
+    m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -117,6 +118,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["clus_geom_helper"] = ""; // empty = no SCE vertex correction
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
+    cfg["nu_skip_cosmic"] = m_nu_skip_cosmic;     // beam-gate only: skip in-window mains with flag_TGM/flag_STM/lm_flag>0
+
 
     return cfg;
 }
@@ -173,6 +176,22 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             const double t0 = cluster->get_cluster_t0();
             if (t0 < m_beam_window_low || t0 >= m_beam_window_high) continue;
             n_in_beam_clusters++;
+            if (m_nu_skip_cosmic) {
+                // Honor upstream cosmic verdicts (TaggerCheckTGM/TaggerCheckSTM
+                // flags, Q/L LM tagger lm_flag: 1=low-energy, 2=light-mismatch;
+                // absent scalar = not evaluated, never skips).  Mirrors the
+                // STM-skips-TGM idiom (TaggerCheckSTM).  Per-main, so a
+                // cosmic-tagged longest bundle does not veto a clean runner-up.
+                const bool tgm = cluster->get_flag(Flags::TGM);
+                const bool stm = cluster->get_flag(Flags::STM);
+                const int lm = cluster->get_scalar<int>("lm_flag", -1);
+                if (tgm || stm || lm > 0) {
+                    SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window cluster {} (t0 {:.3f} us, L {:.1f} cm) cosmic-tagged (TGM={} STM={} lm_flag={}); skipping (nu_skip_cosmic)",
+                                       cluster->get_cluster_id(), t0/units::us, cluster->get_length()/units::cm,
+                                       tgm, stm, lm);
+                    continue;
+                }
+            }
             if (!main_cluster) {
                 main_cluster = cluster;
             }

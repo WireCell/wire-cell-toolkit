@@ -46,6 +46,8 @@ public:
         double m_dl_vtx_score_scale{1000.0};      // scale factor applied to the raw DL score term in the composite re-rank score
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
+        bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged
+                                       // cosmic upstream: flag_TGM, flag_STM, or lm_flag > 0.
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);
