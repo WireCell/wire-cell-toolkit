@@ -140,7 +140,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["proton_dir_vote"]      = m_proton_dir_vote;      // false = legacy muon-vs-flat-only direction
     cfg["proton_dir_score_max"] = m_proton_dir_score_max;
     cfg["proton_dir_asym_min"]  = m_proton_dir_asym_min;
-    // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber
+    // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber.
+    // Assign the array first: append() alone would accumulate rather than overwrite if
+    // this ever ran against a reused Configuration, and a 6-element array would be
+    // rejected by get_dir3() -- a key that looks set but silently is not.
+    cfg["ssm_target_dir"]   = Json::arrayValue;
+    cfg["ssm_absorber_dir"] = Json::arrayValue;
     for (double c : m_ssm_target_dir)   cfg["ssm_target_dir"].append(c);
     for (double c : m_ssm_absorber_dir) cfg["ssm_absorber_dir"].append(c);
     cfg["dl_weights"] = "";       // empty = DL vertex disabled
