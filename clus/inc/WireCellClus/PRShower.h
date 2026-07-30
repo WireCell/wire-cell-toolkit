@@ -186,10 +186,10 @@ namespace WireCell::Clus::PR {
         double get_total_length(Facade::Cluster* cluster);
         double get_total_track_length();
 
-        std::vector<double> get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit = 20);
+        std::vector<double> get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit = 20, double mip_dqdx_median = 43000/units::cm);
 
         // calculate the kinematics
-        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
+        void update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx = 50000/units::cm);
         void calculate_kinematics(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
         void calculate_kinematics_long_muon(IndexedSegmentSet& segments_in_muons, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model);
 

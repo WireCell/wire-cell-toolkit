@@ -477,7 +477,7 @@ static ParticleBlock fill_particle_block_at_vtx(
         double sg_len    = segment_track_length(sg) / units::cm;
         double sg_dlen   = segment_track_direct_length(sg) / units::cm;
         int    sg_pdg    = std::abs(sg->has_particle_info() ? sg->particle_info()->pdg() : 0);
-        double sg_med    = segment_median_dQ_dx(sg) / (43e3/units::cm);
+        double sg_med    = segment_median_dQ_dx(sg) / self.m_mip_dqdx_median;
         double sg_mdev   = segment_track_max_deviation(sg) / units::cm;
         double sg_ke_cal = segment_cal_kine_dQdx(sg, recomb_model);
         double sg_ke_rng = cal_kine_range(sg_len, sg_pdg ? sg_pdg : 13, particle_data);
@@ -611,7 +611,7 @@ bool PatternAlgorithms::ssm_tagger(
                   (sg_direct_length > 0.9*sg_length && sg_length <= 44 && sg_length >= 1 && is_elec)))
                 continue;
             if (sg_length < 1) continue;
-            if (segment_median_dQ_dx(sg) / (43e3/units::cm) < 0.95) continue;
+            if (segment_median_dQ_dx(sg) / m_mip_dqdx_median < 0.95) continue;
 
             Nsm++;
 
@@ -620,9 +620,9 @@ bool PatternAlgorithms::ssm_tagger(
             int nfits = (int)fits.size();
             std::vector<double> vec_d_dqdx;
             if (nfits > 1) {
-                double last = fits[0].dQ / (fits[0].dx/units::cm) / (43e3/units::cm);
+                double last = fits[0].dQ / (fits[0].dx/units::cm) / m_mip_dqdx_median;
                 for (int i = 1; i < nfits; ++i) {
-                    double cur = fits[i].dQ / (fits[i].dx/units::cm) / (43e3/units::cm);
+                    double cur = fits[i].dQ / (fits[i].dx/units::cm) / m_mip_dqdx_median;
                     vec_d_dqdx.push_back(cur - last);
                     last = cur;
                 }
@@ -915,10 +915,10 @@ bool PatternAlgorithms::ssm_tagger(
 
     std::vector<double> vec_dqdx, vec_d_dqdx, vec_abs_d_dqdx;
     if (nfits_ssm > 0) {
-        double last = fits_ssm[0].dQ / (fits_ssm[0].dx/units::cm) / (43e3/units::cm);
+        double last = fits_ssm[0].dQ / (fits_ssm[0].dx/units::cm) / m_mip_dqdx_median;
         vec_dqdx.push_back(last);
         for (int i = 1; i < nfits_ssm; ++i) {
-            double cur = fits_ssm[i].dQ / (fits_ssm[i].dx/units::cm) / (43e3/units::cm);
+            double cur = fits_ssm[i].dQ / (fits_ssm[i].dx/units::cm) / m_mip_dqdx_median;
             vec_dqdx.push_back(cur);
             vec_d_dqdx.push_back(cur - last);
             vec_abs_d_dqdx.push_back(std::abs(cur - last));
@@ -1028,12 +1028,12 @@ bool PatternAlgorithms::ssm_tagger(
     }
 
     double dQ_dx_cut   = 0.8866 + 0.9533 * std::pow(18.0/length, 0.4234);
-    double medium_dq_dx = segment_median_dQ_dx(ssm_sg) / (43e3/units::cm);
+    double medium_dq_dx = segment_median_dQ_dx(ssm_sg) / m_mip_dqdx_median;
     double medium_dq_dx_bp = medium_dq_dx;
     if (dir == 1 && vtx_activity && break_point >= 0)
-        medium_dq_dx_bp = segment_median_dQ_dx(ssm_sg, break_point, nfits_ssm) / (43e3/units::cm);
+        medium_dq_dx_bp = segment_median_dQ_dx(ssm_sg, break_point, nfits_ssm) / m_mip_dqdx_median;
     else if (vtx_activity && break_point >= 0)
-        medium_dq_dx_bp = segment_median_dQ_dx(ssm_sg, 0, break_point) / (43e3/units::cm);
+        medium_dq_dx_bp = segment_median_dQ_dx(ssm_sg, 0, break_point) / m_mip_dqdx_median;
 
     // degenerate break_point: reset medium_dq_dx_bp to full-segment median
     if ((break_point == nd && dir == 1 && vtx_activity) ||
@@ -1186,7 +1186,7 @@ bool PatternAlgorithms::ssm_tagger(
         double sg_len  = segment_track_length(sg) / units::cm;
         int    sg_pdg  = std::abs(sg->has_particle_info() ? sg->particle_info()->pdg() : 0);
         double sg_dlen = segment_track_direct_length(sg) / units::cm;
-        double sg_med  = segment_median_dQ_dx(sg) / (43e3/units::cm);
+        double sg_med  = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
         double sg_mdev = segment_track_max_deviation(sg) / units::cm;
         double sg_ke_cal = segment_cal_kine_dQdx(sg, recomb_model);
         double sg_ke_rng = cal_kine_range(sg_len, sg_pdg ? sg_pdg : 13, particle_data);

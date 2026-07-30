@@ -548,7 +548,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               tgm_fv_x_margin=2.5, tgm_fv_y_margin=3,
               save_stm_fit=false, unmerge_bundle_mode='real',
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
-              // TaggerCheckSTM (C++ default 50000 = MicroBooNE).  56000 is the
+              // TaggerCheckSTM AND (since docs pr/7-pr/8) to
+              // tagger_check_neutrino as the PR chain's flat-template/cal_4mom
+              // amplitude (C++ default 50000 = MicroBooNE).  56000 is the
               // SBND value derived in sbnd_xin/docs/48; pass 50000 to isolate
               // the reference-table change from the MIP-scale change in an A/B.
               mip_dqdx=56000,
@@ -642,7 +644,23 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // config).  DEFAULT TRUE for SBND (owner 2026-07-30); zero
               // production impact while tagger_check_neutrino is not in
               // pipeline_names.
-              dir_weak_use_score=true) = {
+              dir_weak_use_score=true,
+              // mip_dqdx_median: the PR chain's median-dQ/dx threshold scale in
+              // e/cm (C++ default 43000 = uBooNE; every x1.2/1.3/1.4/1.75...
+              // ratio cut is quoted against it -- docs pr/7 sec 5, pr/8).  The
+              // 50k-role flat-template amplitude reuses the existing mip_dqdx
+              // arg above (56000).  48000 keeps the uBooNE 43/50 internal ratio
+              // (owner 2026-07-30, placeholder pending an SBND median-MIP
+              // measurement).  null falls back to the uBooNE default.
+              mip_dqdx_median=48000,
+              // Proton-template direction vote (doc pr/8): when the muon-vs-flat
+              // direction gate abstains both ways, a proton-consistent, clearly
+              // asymmetric template fit toward a free end declares the direction
+              // (guards G1-G4).  C++ default false (key omitted => byte-identical
+              // uBooNE config).  DEFAULT TRUE for SBND (owner 2026-07-30);
+              // score/asym thresholds stay at the C++ defaults 0.25/1.3 pending
+              // the pr/8 sec 6 calibration.
+              proton_dir_vote=true) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -957,7 +975,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
             nu_skip_cosmic=nu_skip_cosmic,
-            dir_weak_use_score=dir_weak_use_score),
+            dir_weak_use_score=dir_weak_use_score,
+            mip_dqdx=mip_dqdx,
+            mip_dqdx_median=mip_dqdx_median,
+            proton_dir_vote=proton_dir_vote),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
         // geometry-free TaggerInfo consumers).  The weights are the
         // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -1254,7 +1275,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stm_proton_b_ks2_max=0.055, stm_proton_c_peak_max=4.1,
        beam_window_only=true, nu_skip_cosmic=true,
        // prototype-faithful is_dir_weak() reads -- see the clus_pr arg comment.
-       dir_weak_use_score=true)::
+       dir_weak_use_score=true,
+       // PR-chain median-dQ/dx scale + proton direction vote -- see the
+       // clus_pr arg comments (docs pr/7 sec 5, pr/8).
+       mip_dqdx_median=48000, proton_dir_vote=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1292,6 +1316,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_proton_c_peak_max=stm_proton_c_peak_max,
                 beam_window_only=beam_window_only,
                 nu_skip_cosmic=nu_skip_cosmic,
-                dir_weak_use_score=dir_weak_use_score),
+                dir_weak_use_score=dir_weak_use_score,
+                mip_dqdx_median=mip_dqdx_median,
+                proton_dir_vote=proton_dir_vote),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

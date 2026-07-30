@@ -46,7 +46,7 @@ bool PatternAlgorithms::examine_structure_1(Graph& graph, Facade::Cluster& clust
         
         // Get segment properties
         double length = segment_track_length(sg);
-        double medium_dQ_dx = segment_median_dQ_dx(sg) / (43e3/units::cm);
+        double medium_dQ_dx = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
         
         // Check if segment is short enough and has reasonable dQ/dx
         if (length < 5*units::cm || (length < 8*units::cm && medium_dQ_dx > 1.5)) {

@@ -50,13 +50,13 @@ void PatternAlgorithms::separate_track_shower(Graph&graph, Facade::Cluster& clus
 
         // First check if segment is a shower topology
         auto t0 = Clock::now();
-        segment_is_shower_topology(seg);
+        segment_is_shower_topology(seg, false, m_mip_dqdx_median);
         t_topology += MS(Clock::now() - t0);
 
         // If not shower topology, check if it's a shower trajectory
         if (!seg->flags_any(SegmentFlags::kShowerTopology)) {
             t0 = Clock::now();
-            segment_is_shower_trajectory(seg);
+            segment_is_shower_trajectory(seg, 10*units::cm, m_mip_dqdx);
             t_trajectory += MS(Clock::now() - t0);
         }
     }
@@ -116,14 +116,14 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
         auto t0 = Clock::now();
         if (seg->flags_any(SegmentFlags::kShowerTrajectory)) {
             // Trajectory shower
-            segment_determine_shower_direction_trajectory(seg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
+            segment_determine_shower_direction_trajectory(seg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, flag_print, track_pid_options());
             t_shower_traj += MS(Clock::now() - t0);
         } else if (seg->flags_any(SegmentFlags::kShowerTopology)) {
             // Topology shower: determine direction, then set electron particle info
-            segment_determine_shower_direction(seg, particle_data, recomb_model);
+            segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median);
             {
                 const int pdg_code = 11; // electron
-                auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, 43000/units::cm);
+                auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
                 auto pinfo = std::make_shared<Aux::ParticleInfo>(
                     pdg_code,
                     particle_data->get_particle_mass(pdg_code),
@@ -136,7 +136,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_shower_topo += MS(Clock::now() - t0);
         } else {
             // Track
-            segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
+            segment_determine_dir_track(seg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, flag_print, track_pid_options());
             t_track += MS(Clock::now() - t0);
         }
 
@@ -299,7 +299,7 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment_nue(
         VertexPtr vtx2 = find_other_vertex(graph, sg2, vtx);
 
         double length = segment_track_length(sg2);
-        double ratio  = segment_median_dQ_dx(sg2) / (43e3 / units::cm);
+        double ratio  = segment_median_dQ_dx(sg2) / m_mip_dqdx_median;
 
         WireCell::Vector dir2 = segment_cal_dir_3vector(sg2, vtx_pt, 15 * units::cm);
         double angle = (M_PI - dir1.angle(dir2)) / M_PI * 180.0;
@@ -659,7 +659,7 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
                     // Recalculate 4-momentum if particle info exists
                     if (sg->has_particle_info()) {
                         int pdg_code = sg->particle_info()->pdg();
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         
                         // Update particle info with new 4-momentum
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
@@ -765,7 +765,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     
                     // Set as electron (PDG 11)
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
 
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(
                         pdg_code,
@@ -790,7 +790,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                                       (sg1->has_particle_info() && std::abs(sg1->particle_info()->pdg()) == 11);
                     if (!is_shower1) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -804,7 +804,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     // Recalculate 4-momentum for showers that already have particle info with valid energy.
                     if (is_shower1 && sg1->has_particle_info() && sg1->particle_info()->energy() > 0) {
                         int pdg_code = sg1->particle_info()->pdg();
-                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -935,7 +935,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                      nshowers[0] > 0 && nshowers[1] > 0 && length < 5*units::cm)) {
 
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(
                         pdg_code,
                         particle_data->get_particle_mass(pdg_code),
@@ -960,9 +960,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     double dQ_dx_rms = segment_rms_dQ_dx(sg);
                     
-                    if ((dQ_dx_rms > 1.0 * (43e3/units::cm) && min_angle < 40) ||
-                        (dQ_dx_rms > 0.75 * (43e3/units::cm) && min_angle < 30) ||
-                        (dQ_dx_rms > 0.4 * (43e3/units::cm) && min_angle < 15)) {
+                    if ((dQ_dx_rms > 1.0 * m_mip_dqdx_median && min_angle < 40) ||
+                        (dQ_dx_rms > 0.75 * m_mip_dqdx_median && min_angle < 30) ||
+                        (dQ_dx_rms > 0.4 * m_mip_dqdx_median && min_angle < 15)) {
                         
                         const auto& wcpts = sg->wcpts();
                         auto front_pt = wcpts.front().point;
@@ -977,7 +977,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1002,9 +1002,9 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     double dQ_dx_rms = segment_rms_dQ_dx(sg);
                     
-                    if ((dQ_dx_rms > 1.0 * (43e3/units::cm) && min_angle < 40) ||
-                        (dQ_dx_rms > 0.75 * (43e3/units::cm) && min_angle < 30) ||
-                        (dQ_dx_rms > 0.4 * (43e3/units::cm) && min_angle < 15)) {
+                    if ((dQ_dx_rms > 1.0 * m_mip_dqdx_median && min_angle < 40) ||
+                        (dQ_dx_rms > 0.75 * m_mip_dqdx_median && min_angle < 30) ||
+                        (dQ_dx_rms > 0.4 * m_mip_dqdx_median && min_angle < 15)) {
                         
                         const auto& wcpts = sg->wcpts();
                         auto front_pt = wcpts.front().point;
@@ -1019,7 +1019,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                             sg->dirsign(1);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1045,7 +1045,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                    (nprotons[1] + nshowers[1] == 0 && nshowers[0] >= 2)))) {
                         
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1108,7 +1108,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                                                       (num_s2 >= 4 && length_s2 > 20*units::cm)))) {
                             
                             int pdg_code = 11;
-                            auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                            auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                             auto pinfo = std::make_shared<Aux::ParticleInfo>(
                                 pdg_code,
                                 particle_data->get_particle_mass(pdg_code),
@@ -1123,7 +1123,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 // Case G: Muon with specific vertex connectivity
                 else if (std::abs(pdg) == 13 && (sg->dirsign() == 0 || seg_dir_weak(sg)) &&
                          ((nmuons[0]+nprotons[0]+nshowers[0] == 1) || (nmuons[1]+nprotons[1]+nshowers[1] == 1)) &&
-                         (nshowers[0] + nshowers[1] > 0 || segment_median_dQ_dx(sg) < 1.3*43e3/units::cm)) {
+                         (nshowers[0] + nshowers[1] > 0 || segment_median_dQ_dx(sg) < 1.3*m_mip_dqdx_median)) {
                     
                     bool flag_change = false;
                     
@@ -1161,7 +1161,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1204,7 +1204,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                         sg->dir_weak(true);
 
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1218,7 +1218,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                 // Case H: No particle type, short length, high dQ/dx, has showers
                 else if (pdg == 0 && length < 12*units::cm && 
                          (nshowers[0] + nshowers[1] > 0) && 
-                         segment_median_dQ_dx(sg)/(43e3/units::cm) > 1.2) {
+                         segment_median_dQ_dx(sg)/m_mip_dqdx_median > 1.2) {
                     
                     bool flag_change = false;
                     
@@ -1283,7 +1283,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     
                     if (flag_change) {
                         int pdg_code = 11;
-                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             pdg_code,
                             particle_data->get_particle_mass(pdg_code),
@@ -1371,7 +1371,7 @@ void PatternAlgorithms::improve_maps_multiple_tracks_in(Graph& graph, Facade::Cl
                     SegmentPtr sg1 = *it1;
                     
                     int pdg_code = 11;
-                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(sg1, pdg_code, particle_data, recomb_model, m_mip_dqdx);
 
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(
                         pdg_code,

@@ -410,7 +410,7 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
     // Step 9: Process remaining segments in order of quality (one-pass architecture)
     std::vector<SegmentPtr> new_segments;    // high dQdx or long curvy segments → break
     std::vector<SegmentPtr> new_segments_1;  // lower quality → break with 2cm cut
-    const double mip_dQdx = 43e3 / units::cm;
+    const double mip_dQdx = m_mip_dqdx_median;
 
     while (!remaining_segments.empty()) {
         // Find the best segment (most non-faked points, then longest)

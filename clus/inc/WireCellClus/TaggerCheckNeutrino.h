@@ -41,6 +41,17 @@ public:
         // thresholds included).  C++ default false = legacy raw-flag reads,
         // byte-identical.  See PatternAlgorithms::m_dir_weak_use_score.
         bool m_dir_weak_use_score{false};
+        // MIP dQ/dx scales in e/cm (uBooNE legacy defaults => absent keys are
+        // byte-identical).  Two roles: mip_dqdx = flat-template amplitude
+        // (legacy 50e3); mip_dqdx_median = median-ratio threshold scale
+        // (legacy 43e3).  See PatternAlgorithms::m_mip_dqdx{,_median}.
+        double m_mip_dqdx{50000.0};
+        double m_mip_dqdx_median{43000.0};
+        // Proton-template direction vote (doc sbnd_xin/docs/pr/8; default
+        // false = legacy abstention).  Thresholds pending pr/8 calibration.
+        bool   m_proton_dir_vote{false};
+        double m_proton_dir_score_max{0.25};
+        double m_proton_dir_asym_min{1.3};
         std::string m_dl_weights;              // path to SCN vertex .pth weights file (empty = DL disabled)
         double m_dl_vtx_cut{25.0};             // max distance (mm) from DL prediction to accept candidate vertex (default 2.5 cm)
         double m_dQdx_scale{0.1};              // scale factor applied to dQ before passing to SCN network

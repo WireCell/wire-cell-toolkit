@@ -120,7 +120,7 @@ void PatternAlgorithms::set_default_shower_particle_info(Graph& graph, Facade::C
             !sg->flags_any(SegmentFlags::kShowerTopology)) continue;
         if (sg->has_particle_info()) continue;  // already set, leave it
 
-        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, 43000/units::cm);
+        auto four_momentum = segment_cal_4mom(sg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);
         auto pinfo = std::make_shared<Aux::ParticleInfo>(
             pdg_code,
             particle_data->get_particle_mass(pdg_code),
@@ -911,7 +911,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
               ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
             
             auto t_op = BS_Clock::now();
-            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
+            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median);
             t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
             auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
 
@@ -973,7 +973,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
                     test_start_p = kink_geo;
                     t_op = BS_Clock::now();
-                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit");
+                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median);
                     t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
                     auto& [kink_point2, dir1_2, dir2_2, flag_continue2] = kink_tuple;
                     Facade::geo_vector_t dir1_geo2(dir1_2.x(), dir1_2.y(), dir1_2.z());
@@ -2059,7 +2059,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                                         (seg->has_particle_info() && seg->particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
                         int dirsign = seg->dirsign();
                         bool is_dir_weak = seg_dir_weak(seg);
-                        double median_dqdx = segment_median_dQ_dx(seg) / (43e3 / units::cm);
+                        double median_dqdx = segment_median_dQ_dx(seg) / m_mip_dqdx_median;
                         
                         // Keep if: not shower AND has direction AND (strong direction OR high dQ/dx)
                         if (!is_shower && dirsign != 0 && (!is_dir_weak || median_dqdx > 2.0)) {

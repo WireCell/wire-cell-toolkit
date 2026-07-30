@@ -68,6 +68,11 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_trackfitting_config_file = get(config, "trackfitting_config_file", m_trackfitting_config_file);
     m_perf = get(config, "perf", m_perf);
     m_dir_weak_use_score = get(config, "dir_weak_use_score", m_dir_weak_use_score);
+    m_mip_dqdx            = get(config, "mip_dqdx",             m_mip_dqdx);             // e/cm
+    m_mip_dqdx_median     = get(config, "mip_dqdx_median",      m_mip_dqdx_median);      // e/cm
+    m_proton_dir_vote      = get(config, "proton_dir_vote",      m_proton_dir_vote);
+    m_proton_dir_score_max = get(config, "proton_dir_score_max", m_proton_dir_score_max);
+    m_proton_dir_asym_min  = get(config, "proton_dir_asym_min",  m_proton_dir_asym_min);
     auto dl_weights_raw = get(config, "dl_weights", m_dl_weights);
     if (!dl_weights_raw.empty()) {
         m_dl_weights = Persist::resolve(dl_weights_raw);
@@ -109,6 +114,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["trackfitting_config_file"] = "";
     cfg["perf"] = m_perf;
     cfg["dir_weak_use_score"] = m_dir_weak_use_score;  // false = legacy raw dir_weak flag reads
+    cfg["mip_dqdx"]            = m_mip_dqdx;             // e/cm; 50000 = uBooNE legacy flat-template scale
+    cfg["mip_dqdx_median"]     = m_mip_dqdx_median;      // e/cm; 43000 = uBooNE legacy median-threshold scale
+    cfg["proton_dir_vote"]      = m_proton_dir_vote;      // false = legacy muon-vs-flat-only direction
+    cfg["proton_dir_score_max"] = m_proton_dir_score_max;
+    cfg["proton_dir_asym_min"]  = m_proton_dir_asym_min;
     cfg["dl_weights"] = "";       // empty = DL vertex disabled
     cfg["dl_vtx_cut"] = 25.0;    // mm (= 2.5 cm)
     cfg["dQdx_scale"]  = 0.1;    // dQ scale factor for SCN network input
@@ -277,6 +287,11 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
     pattern_algos.m_perf = m_perf;
     pattern_algos.m_dir_weak_use_score = m_dir_weak_use_score;
+    pattern_algos.m_mip_dqdx        = m_mip_dqdx / units::cm;         // e/cm -> internal
+    pattern_algos.m_mip_dqdx_median = m_mip_dqdx_median / units::cm;  // e/cm -> internal
+    pattern_algos.m_proton_dir_vote      = m_proton_dir_vote;
+    pattern_algos.m_proton_dir_score_max = m_proton_dir_score_max;
+    pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
     m_track_fitter->set_perf(m_perf);
 
     int acc_segment_id = 0;

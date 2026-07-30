@@ -656,7 +656,7 @@ namespace WireCell::Clus::PR {
         return total_length;
     }
 
-    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model){
+    void Shower::update_particle_type(const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double mip_dqdx){
         double track_length = 0;
         double shower_length = 0;
         
@@ -695,7 +695,7 @@ namespace WireCell::Clus::PR {
         // If shower_length dominates, update start_segment to electron
         if (shower_length > track_length && m_start_segment) {
             // Calculate 4-momentum for electron (PDG = 11)
-            auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model);
+            auto four_momentum = segment_cal_4mom(m_start_segment, 11, particle_data, recomb_model, mip_dqdx);
             
             // Create ParticleInfo for electron
             auto pinfo = std::make_shared<Aux::ParticleInfo>(
@@ -710,9 +710,9 @@ namespace WireCell::Clus::PR {
         }
     }
 
-    std::vector<double> Shower::get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit /*=20*/){
+    std::vector<double> Shower::get_stem_dQ_dx(VertexPtr vertex, SegmentPtr segment, int limit /*=20*/, double mip_dqdx_median /*=43000/units::cm*/){
         std::vector<double> vec_dQ_dx;
-        const double MIP_dQdx = 43e3 / units::cm;
+        const double MIP_dQdx = mip_dqdx_median;
         
         if (!vertex || !segment) {
             return vec_dQ_dx;

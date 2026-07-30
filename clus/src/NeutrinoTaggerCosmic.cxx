@@ -560,7 +560,7 @@ bool PatternAlgorithms::cosmic_tagger(
             bool   is_shower   = seg_is_shower(sg);
 
             bool muon_like = (pdg == 13) ||
-                             (!is_shower && med_dqdx < dqdx_cut * 1.05 * 43e3 / units::cm && pdg != 211);
+                             (!is_shower && med_dqdx < dqdx_cut * 1.05 * m_mip_dqdx_median && pdg != 211);
 
             if (muon_like) {
                 if (segments_in_long_muon.count(sg)) {
@@ -593,7 +593,7 @@ bool PatternAlgorithms::cosmic_tagger(
             if (length > 2.5 * units::cm ||
                 (length > 0.9 * units::cm && sg->has_particle_info() && sg->particle_info()->pdg() == 2212) ||
                 !seg_dir_weak(sg)) {
-                if (length < 15 * units::cm && segment_median_dQ_dx(sg) / (43e3 / units::cm) < 0.75 && seg_dir_weak(sg))
+                if (length < 15 * units::cm && segment_median_dQ_dx(sg) / m_mip_dqdx_median < 0.75 && seg_dir_weak(sg))
                     return;
                 valid_tracks++;
             }
@@ -652,8 +652,8 @@ bool PatternAlgorithms::cosmic_tagger(
             ti.cosmict_2_flag_inside      = flag_inside;
             ti.cosmict_2_angle_beam       = static_cast<float>(dir.angle(dir_beam) / M_PI * 180.0);
             ti.cosmict_2_flag_dir_weak    = seg_dir_weak(muon);
-            ti.cosmict_2_dQ_dx_end        = static_cast<float>(dQ_dx_end / (43e3 / units::cm));
-            ti.cosmict_2_dQ_dx_front      = static_cast<float>(dQ_dx_front / (43e3 / units::cm));
+            ti.cosmict_2_dQ_dx_end        = static_cast<float>(dQ_dx_end / m_mip_dqdx_median);
+            ti.cosmict_2_dQ_dx_front      = static_cast<float>(dQ_dx_front / m_mip_dqdx_median);
             ti.cosmict_2_theta            = static_cast<float>(vec_theta(dir) / M_PI * 180.0);
             ti.cosmict_2_phi              = static_cast<float>(vec_phi(dir) / M_PI * 180.0);
             ti.cosmict_2_valid_tracks     = valid_tracks;
@@ -661,7 +661,7 @@ bool PatternAlgorithms::cosmic_tagger(
             int pdg = muon->has_particle_info() ? muon->particle_info()->pdg() : 0;
             if (pdg == 13 && n_muon_tracks <= 2 && total_shower_length < 40 * units::cm &&
                 (((!flag_inside) && dir.angle(dir_beam) / M_PI * 180.0 > 40) ||
-                 (flag_inside && ((seg_dir_weak(muon) && !(dQ_dx_end > 1.4 * 43e3 / units::cm && dQ_dx_end > 1.2 * dQ_dx_front)) ||
+                 (flag_inside && ((seg_dir_weak(muon) && !(dQ_dx_end > 1.4 * m_mip_dqdx_median && dQ_dx_end > 1.2 * dQ_dx_front)) ||
                                   dir.angle(dir_beam) / M_PI * 180.0 > 60))) &&
                 (vec_theta(dir) / M_PI * 180.0 >= 100.0 || std::fabs(std::fabs(vec_phi(dir) / M_PI * 180.0) - 90) <= 50) &&
                 valid_tracks == 0)
@@ -706,15 +706,15 @@ bool PatternAlgorithms::cosmic_tagger(
             ti.cosmict_3_flag_inside   = flag_inside;
             ti.cosmict_3_angle_beam    = static_cast<float>(dir.angle(dir_beam) / M_PI * 180.0);
             ti.cosmict_3_flag_dir_weak = last_sg ? seg_dir_weak(last_sg) : false;
-            ti.cosmict_3_dQ_dx_front   = static_cast<float>(dQ_dx_front / (43e3 / units::cm));
-            ti.cosmict_3_dQ_dx_end     = static_cast<float>(dQ_dx_end   / (43e3 / units::cm));
+            ti.cosmict_3_dQ_dx_front   = static_cast<float>(dQ_dx_front / m_mip_dqdx_median);
+            ti.cosmict_3_dQ_dx_end     = static_cast<float>(dQ_dx_end   / m_mip_dqdx_median);
             ti.cosmict_3_theta         = static_cast<float>(vec_theta(dir) / M_PI * 180.0);
             ti.cosmict_3_phi           = static_cast<float>(vec_phi(dir)   / M_PI * 180.0);
             ti.cosmict_3_valid_tracks  = valid_tracks;
 
             bool dir_weak_end = last_sg && seg_dir_weak(last_sg);
             if ((((!flag_inside) && dir.angle(dir_beam) / M_PI * 180.0 > 40) ||
-                 (flag_inside && ((dir_weak_end && !(dQ_dx_end > 1.4 * 43e3 / units::cm && dQ_dx_end > 1.2 * dQ_dx_front)) ||
+                 (flag_inside && ((dir_weak_end && !(dQ_dx_end > 1.4 * m_mip_dqdx_median && dQ_dx_end > 1.2 * dQ_dx_front)) ||
                                   dir.angle(dir_beam) / M_PI * 180.0 > 60))) &&
                 (vec_theta(dir) / M_PI * 180.0 >= 100.0 || std::fabs(std::fabs(vec_phi(dir) / M_PI * 180.0) - 90) <= 50) &&
                 valid_tracks == 0)
@@ -833,7 +833,7 @@ bool PatternAlgorithms::cosmic_tagger(
             if (length > 2.5 * units::cm ||
                 (length > 0.9 * units::cm && sg->has_particle_info() && sg->particle_info()->pdg() == 2212) ||
                 !seg_dir_weak(sg)) {
-                if (length < 15 * units::cm && segment_median_dQ_dx(sg) / (43e3 / units::cm) < 0.75 && seg_dir_weak(sg))
+                if (length < 15 * units::cm && segment_median_dQ_dx(sg) / m_mip_dqdx_median < 0.75 && seg_dir_weak(sg))
                     return;
                 valid_tracks++;
             }
@@ -857,7 +857,7 @@ bool PatternAlgorithms::cosmic_tagger(
             if (length2nd > 2.5 * units::cm ||
                 (length2nd > 0.9 * units::cm && muon_2nd->has_particle_info() && muon_2nd->particle_info()->pdg() == 2212) ||
                 !seg_dir_weak(muon_2nd)) {
-                if (!(length2nd < 15 * units::cm && segment_median_dQ_dx(muon_2nd) / (43e3 / units::cm) < 0.75 && seg_dir_weak(muon_2nd)))
+                if (!(length2nd < 15 * units::cm && segment_median_dQ_dx(muon_2nd) / m_mip_dqdx_median < 0.75 && seg_dir_weak(muon_2nd)))
                     valid_tracks++;
             }
 
@@ -990,14 +990,14 @@ bool PatternAlgorithms::cosmic_tagger(
             ti.cosmict_7_flag_inside     = flag_inside;
             ti.cosmict_7_angle_beam      = static_cast<float>(dir.angle(dir_beam) / M_PI * 180.0);
             ti.cosmict_7_flag_dir_weak   = flag_weak_dir;
-            ti.cosmict_7_dQ_dx_end       = static_cast<float>(dQ_dx_end   / (43e3 / units::cm));
-            ti.cosmict_7_dQ_dx_front     = static_cast<float>(dQ_dx_front / (43e3 / units::cm));
+            ti.cosmict_7_dQ_dx_end       = static_cast<float>(dQ_dx_end   / m_mip_dqdx_median);
+            ti.cosmict_7_dQ_dx_front     = static_cast<float>(dQ_dx_front / m_mip_dqdx_median);
             ti.cosmict_7_theta           = static_cast<float>(vec_theta(dir) / M_PI * 180.0);
             ti.cosmict_7_phi             = static_cast<float>(vec_phi(dir)   / M_PI * 180.0);
 
             if (flag_sec && n_muon_tracks <= 2 && total_shower_length < 40 * units::cm) {
                 if ((((!flag_inside) && dir.angle(dir_beam) / M_PI * 180.0 > 40) ||
-                     (flag_inside && ((flag_weak_dir && !(dQ_dx_end > 1.4 * 43e3 / units::cm && dQ_dx_end > 1.2 * dQ_dx_front)) ||
+                     (flag_inside && ((flag_weak_dir && !(dQ_dx_end > 1.4 * m_mip_dqdx_median && dQ_dx_end > 1.2 * dQ_dx_front)) ||
                                       dir.angle(dir_beam) / M_PI * 180.0 > 60))) &&
                     (vec_theta(dir) / M_PI * 180.0 >= 100.0 || std::fabs(std::fabs(vec_phi(dir) / M_PI * 180.0) - 90) <= 50))
                     flag_cosmic_7 = true;

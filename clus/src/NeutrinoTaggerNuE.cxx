@@ -400,7 +400,7 @@ static bool compare_muon_energy(NuEContext& ctx, ShowerPtr shower,
                 double length       = segment_track_length(sg1);
                 double medium_dQ_dx = segment_median_dQ_dx(sg1);
                 double dQ_dx_cut    = 0.8866 + 0.9533 * std::pow(18*units::cm / length, 0.4234);
-                if (medium_dQ_dx < dQ_dx_cut * 43e3 / units::cm) {
+                if (medium_dQ_dx < dQ_dx_cut * ctx.self.m_mip_dqdx_median) {
                     double tmp_energy = muon_range_fn->scalar_function(length / units::cm) * units::MeV;
                     if (tmp_energy > E_muon) E_muon = tmp_energy;
                 }
@@ -709,7 +709,7 @@ static bool single_shower(NuEContext& ctx, ShowerPtr shower,
                      : shower->get_kine_charge();
 
     // Normalized stem dQ/dx (first ≤3 fit points near the vertex)
-    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20);
+    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20, ctx.self.m_mip_dqdx_median);
     double max_dQ_dx = 0;
     for (size_t i = 0; i < vec_dQ_dx.size(); ++i) {
         if (vec_dQ_dx[i] > max_dQ_dx) max_dQ_dx = vec_dQ_dx[i];
@@ -745,7 +745,7 @@ static bool single_shower(NuEContext& ctx, ShowerPtr shower,
             SegmentPtr sg1 = ctx.graph[*eit].segment;
             if (!sg1 || sg1 == sg) continue;
 
-            double medium_dQ_dx = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+            double medium_dQ_dx = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
             double length       = segment_track_length(sg1);
 
             // 7022_110_5542: count non-shower-flagged segments with sufficient length/dQ_dx
@@ -1263,7 +1263,7 @@ static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
                         180.0 - dir1.angle(dir_shower) / M_PI * 180.0,
                         180.0 - dir1.angle(dir2_sg)   / M_PI * 180.0);
 
-                    double norm_dQ_dx = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+                    double norm_dQ_dx = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
                     double length     = segment_track_length(sg1);
                     bool   is_weak    = ctx.self.seg_dir_weak(sg1);
 
@@ -1716,7 +1716,7 @@ static bool mip_quality(NuEContext& ctx,
         for (ShowerPtr shower1 : connected_showers) {
             if (shower1 == shower) continue;
             SegmentPtr sg1  = shower1->start_segment();
-            double norm_dQ  = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+            double norm_dQ  = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
             double length1  = segment_track_length(sg1);
             double dQ_cut   = 0.8866 + 0.9533 * std::pow(18*units::cm / length1, 0.4234);
             if (norm_dQ > dQ_cut) { flag_split = false; flag_proton = true; }
@@ -1792,7 +1792,7 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
     int conn_type  = shower->get_start_vertex_and_type().second;
 
     // Stem dQ/dx (normalized, first ≤3 fit points)
-    auto vec_dQ_dx = shower->get_stem_dQ_dx(vtx, sg, 20);
+    auto vec_dQ_dx = shower->get_stem_dQ_dx(vtx, sg, 20, ctx.self.m_mip_dqdx_median);
     double max_dQ_dx = 0;
     for (size_t i = 0; i < vec_dQ_dx.size(); ++i) {
         if (vec_dQ_dx[i] > max_dQ_dx) max_dQ_dx = vec_dQ_dx[i];
@@ -1834,7 +1834,7 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
             } else {
                 flag_all_showers = false;
             }
-            double norm_dQ = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+            double norm_dQ = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
             bool   is_proton = sg1->has_particle_info() && sg1->particle_info()->pdg() == 2212;
             if ((!ctx.self.seg_dir_weak(sg1) || is_proton || segment_track_length(sg1) > 20*units::cm) &&
                 !seg_is_shower(sg1))
@@ -1926,10 +1926,10 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
                      ray_length(Ray{vtx_point, min_fits.back().point}));
                 if (min_front_near)
                     medium_dQ_dx = segment_median_dQ_dx(min_sg, 0, ncount)
-                                   / (43e3 / units::cm);
+                                   / ctx.self.m_mip_dqdx_median;
                 else
                     medium_dQ_dx = segment_median_dQ_dx(min_sg, n_min-1-ncount, n_min-1)
-                                   / (43e3 / units::cm);
+                                   / ctx.self.m_mip_dqdx_median;
             }
 
             if (min_ang2 < 15 && medium_dQ_dx > 0.95 && ncount > 5  && Eshower < 1500*units::MeV)
@@ -2316,11 +2316,11 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
     Point vertex_point = vertex_at_front ? sg_fits.front().point : sg_fits.back().point;
     int n_fits = (int)sg_fits.size();
     double medium_dQ_dx = vertex_at_front
-        ? segment_median_dQ_dx(sg, 0, 6)            / (43e3 / units::cm)
-        : segment_median_dQ_dx(sg, n_fits-1-6, n_fits-1) / (43e3 / units::cm);
+        ? segment_median_dQ_dx(sg, 0, 6)            / ctx.self.m_mip_dqdx_median
+        : segment_median_dQ_dx(sg, n_fits-1-6, n_fits-1) / ctx.self.m_mip_dqdx_median;
 
     // Stem dQ/dx (normalized, first ≤3 fit points)
-    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20);
+    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20, ctx.self.m_mip_dqdx_median);
     double max_dQ_dx = 0;
     for (size_t i = 0; i < vec_dQ_dx.size(); ++i) {
         if (vec_dQ_dx[i] > max_dQ_dx) max_dQ_dx = vec_dQ_dx[i];
@@ -2623,8 +2623,8 @@ static bool single_shower_pio_tagger(NuEContext& ctx, ShowerPtr shower,
             (ray_length(Ray{vtx_fit_pt(max_vtx), max_fits.front().point}) <=
              ray_length(Ray{vtx_fit_pt(max_vtx), max_fits.back().point}));
         double medium_dQ_dx = max_front_near
-            ? segment_median_dQ_dx(max_sg, 0,       std::min(6, n_max-1)) / (43e3/units::cm)
-            : segment_median_dQ_dx(max_sg, std::max(0, n_max-7), n_max-1) / (43e3/units::cm);
+            ? segment_median_dQ_dx(max_sg, 0,       std::min(6, n_max-1)) / ctx.self.m_mip_dqdx_median
+            : segment_median_dQ_dx(max_sg, std::max(0, n_max-7), n_max-1) / ctx.self.m_mip_dqdx_median;
 
         // dQ/dx at shower start: max of first 3 per-fit-point normalized values
         double start_dQ_dx = 0;
@@ -2637,7 +2637,7 @@ static bool single_shower_pio_tagger(NuEContext& ctx, ShowerPtr shower,
         auto accumulate_start = [&](auto begin_it, auto end_it) {
             for (auto it = begin_it; it != end_it; ++it) {
                 if (ncount > 2) break;
-                double dqdx = it->dQ / (it->dx + 1e-9) / (43e3 / units::cm);
+                double dqdx = it->dQ / (it->dx + 1e-9) / ctx.self.m_mip_dqdx_median;
                 if (dqdx > start_dQ_dx) start_dQ_dx = dqdx;
                 ++ncount;
             }
@@ -3138,7 +3138,7 @@ static bool bad_reconstruction_2(NuEContext& ctx,
     int n_ele = 0, n_other = 0;
     for (SegmentPtr sg1 : shower_segs) {
         if (sg1->cluster() != sg->cluster()) continue;
-        double med   = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+        double med   = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
         double ratio = segment_track_direct_length(sg1) / segment_track_length(sg1);
         if (sg1->flags_any(SegmentFlags::kShowerTopology) ||
             (sg1->flags_any(SegmentFlags::kShowerTrajectory) && med < 1.3) ||
@@ -3322,7 +3322,7 @@ static bool bad_reconstruction_2(NuEContext& ctx,
         if (sg1->cluster() != vertex->cluster()) continue;
         int n = (int)sg1->fits().size();
         for (int i = 0; i < n - 5; ++i) {
-            double med = segment_median_dQ_dx(sg1, i, i+5) / (43e3/units::cm);
+            double med = segment_median_dQ_dx(sg1, i, i+5) / ctx.self.m_mip_dqdx_median;
             if (med > max_dQ_dx) max_dQ_dx = med;
         }
     }
@@ -3447,7 +3447,7 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
         double tmp_length = segment_track_length(sg1);
         double dQ_dx_cut  = 0.8866 + 0.9533 * std::pow(18*units::cm/tmp_length, 0.4234);
         if (std::isinf(dQ_dx_cut) || std::isnan(dQ_dx_cut)) dQ_dx_cut = 10;
-        double med = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+        double med = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
 
         // 7055_677_33891
         if (tmp_length > 12*units::cm &&
@@ -3677,7 +3677,7 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
             double angle2 = std::min(
                 std::fabs(M_PI/2.0 - dir1_stem.angle(drift_dir)) / M_PI * 180.0,
                 std::fabs(M_PI/2.0 - dir2.angle(drift_dir)) / M_PI * 180.0);
-            double med    = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+            double med    = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
 
             // end_dQ_dx: dQ/dx at the vtx1 end of sg1
             const auto& f1 = sg1->fits();
@@ -3686,8 +3686,8 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
                  ray_length(Ray{vtx_fit_pt(vtx1), f1.back().point}));
             int nf1 = (int)f1.size();
             double end_dQ_dx = vtx1_at_front
-                ? segment_median_dQ_dx(sg1, 0, std::min(6, nf1-1)) / (43e3/units::cm)
-                : segment_median_dQ_dx(sg1, std::max(0, nf1-7), nf1-1) / (43e3/units::cm);
+                ? segment_median_dQ_dx(sg1, 0, std::min(6, nf1-1)) / ctx.self.m_mip_dqdx_median
+                : segment_median_dQ_dx(sg1, std::max(0, nf1-7), nf1-1) / ctx.self.m_mip_dqdx_median;
 
             bool flag_bad4 = false;
             double dir2_mag = dir2.magnitude();
@@ -3838,7 +3838,7 @@ static int mip_identification(NuEContext& ctx,
     if      (Eshower  < 300*units::MeV) dQ_dx_cut = 1.3;
 
     // Per-fit-point normalized dQ/dx along the stem (up to 20 points)
-    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20);
+    auto vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20, ctx.self.m_mip_dqdx_median);
     // Ensure at least 2 elements for early accesses
     while (vec_dQ_dx.size() < 2) vec_dQ_dx.push_back(0.0);
 

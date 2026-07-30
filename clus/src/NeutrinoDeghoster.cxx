@@ -418,7 +418,7 @@ void PatternAlgorithms::deghost_segments(Graph& graph, ClusterVertexMap map_clus
             
             // Check if this is a terminal segment with low dQ/dx
             int num_unique[3] = {0, 0, 0};
-            if ((start_n == 1 || end_n == 1) && medium_dQ_dx < 1.1 * 43e3 / units::cm && length > 3.6 * units::cm) {
+            if ((start_n == 1 || end_n == 1) && medium_dQ_dx < 1.1 * m_mip_dqdx_median && length > 3.6 * units::cm) {
                 int num_dead[3] = {0, 0, 0};
                 int num_total_points = 0;
                 

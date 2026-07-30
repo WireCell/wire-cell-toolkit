@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -397,7 +397,20 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on: direction-weakness reads use segment_is_dir_weak() (score thresholds),
               // the faithful port of prototype ProtoSegment::is_dir_weak() -- see sbnd_xin/docs/pr/6.
-              + (if dir_weak_use_score then { dir_weak_use_score: true } else {}),
+              + (if dir_weak_use_score then { dir_weak_use_score: true } else {})
+              // MIP dQ/dx scales in e/cm.  C++ defaults 50000 (flat-template role) /
+              // 43000 (median-threshold role) = the uBooNE legacy values; keys omitted
+              // when null => byte-identical pre-knob config.  SBND: 56000 / 48000
+              // (owner 2026-07-30; docs pr/7 sec 5 + pr/8).
+              + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
+              + (if mip_dqdx_median != null then { mip_dqdx_median: mip_dqdx_median } else {})
+              // Proton-template direction vote (doc pr/8).  C++ default false = legacy
+              // muon-vs-flat-only direction; keys omitted when off => byte-identical.
+              // Threshold keys emitted only when explicitly set (C++ defaults 0.25 / 1.3
+              // are initial values pending the pr/8 sec 6 calibration).
+              + (if proton_dir_vote then { proton_dir_vote: true } else {})
+              + (if proton_dir_score_max != null then { proton_dir_score_max: proton_dir_score_max } else {})
+              + (if proton_dir_asym_min != null then { proton_dir_asym_min: proton_dir_asym_min } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.

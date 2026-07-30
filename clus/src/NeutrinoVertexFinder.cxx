@@ -497,7 +497,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     clustering_points_segments({tmp_sg}, dv, "associate_points", 0.5*units::cm, 3.0);
     
     // Determine shower direction
-    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points");
+    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median);
     
     double tmp_sg_length = segment_track_length(tmp_sg);
     int tmp_sg_dir = tmp_sg->dirsign();
@@ -999,7 +999,7 @@ std::pair<SegmentPtr, VertexPtr> PatternAlgorithms::find_cont_muon_segment(Graph
         double angle = (M_PI - std::acos(cos_angle)) / M_PI * 180.0;
         
         // Calculate dQ/dx ratio
-        double ratio = segment_median_dQ_dx(sg2) / (43e3 / units::cm);
+        double ratio = segment_median_dQ_dx(sg2) / m_mip_dqdx_median;
         
         // For longer segments, also check angle at 50cm
         double angle1 = angle;
@@ -1221,11 +1221,11 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     
                     // Determine particle type
                     if (flag_shower_in && current_sg->dirsign() == 0 && !is_shower) {
-                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                         current_sg->particle_info(pinfo);
                     } else if (flag_shower_in && length < 2.0*units::cm && !is_shower) {
-                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                         current_sg->particle_info(pinfo);
                     } else if (flag_shower_in) {
@@ -1233,7 +1233,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                         // no-particle-info means pdg defaults to 0, which also qualifies.
                         int cur_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
                         if (std::abs(cur_pdg) == 13 || cur_pdg == 0) {
-                            auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                            auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                             auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                             current_sg->particle_info(pinfo);
                         }
@@ -1287,7 +1287,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             }
                             
                             if (flag_change) {
-                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                                 auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                                 current_sg->particle_info(pinfo);
                             }
@@ -1302,7 +1302,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                                 double direct_length = segment_track_direct_length(current_sg);
                                 if (direct_length >= 34*units::cm ||
                                     (direct_length < 34*units::cm && direct_length > 0.93 * length)) {
-                                    auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                    auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model, m_mip_dqdx);
                                     auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
                                     current_sg->particle_info(pinfo);
                                 }
@@ -1312,7 +1312,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                             auto pair_result1 = calculate_num_daughter_showers(graph, prev_vtx, current_sg, false);
                             if (pair_result1.second > 3*length && pair_result1.second - length > 12*units::cm) {
                                 current_sg->unset_flags(SegmentFlags::kShowerTrajectory);
-                                auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model, m_mip_dqdx);
                                 auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
                                 current_sg->particle_info(pinfo);
                             }
@@ -1324,20 +1324,20 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                         int current_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
                         if (current_pdg == 0 && !is_shower) {
                             if (flag_only_showers) {
-                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model);
+                                auto four_momentum = segment_cal_4mom(current_sg, 11, particle_data, recomb_model, m_mip_dqdx);
                                 auto pinfo = std::make_shared<Aux::ParticleInfo>(11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11), four_momentum);
                                 current_sg->particle_info(pinfo);
                             } else {
-                                double dqdx_ratio = segment_median_dQ_dx(current_sg) / (43e3 / units::cm);
+                                double dqdx_ratio = segment_median_dQ_dx(current_sg) / m_mip_dqdx_median;
                                 s_log->trace("examine_direction: cluster {} segment_graph_index={} dqdx_ratio={:.3f} length={:.2f}cm nfits={}",
                                     cluster.ident(), current_sg->get_graph_index(), dqdx_ratio, length/units::cm, current_sg->fits().size());
                                 // std::cout << "examine_direction: A segment graph index " << current_sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " length=" << length/units::cm << "cm nfits=" << current_sg->fits().size() << std::endl;
                                 if (dqdx_ratio > 1.4) {
-                                    auto four_momentum = segment_cal_4mom(current_sg, 2212, particle_data, recomb_model);
+                                    auto four_momentum = segment_cal_4mom(current_sg, 2212, particle_data, recomb_model, m_mip_dqdx);
                                     auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
                                     current_sg->particle_info(pinfo);
                                 } else {
-                                    auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model);
+                                    auto four_momentum = segment_cal_4mom(current_sg, 13, particle_data, recomb_model, m_mip_dqdx);
                                     auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
                                     current_sg->particle_info(pinfo);
                                 }
@@ -1359,16 +1359,16 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 int current_pdg = current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0;
                 if (current_pdg == 2212 && flag_shower_in && num_daughter_showers == 0) {
                     for (auto in_shower : in_showers) {
-                        double dqdx_ratio = segment_median_dQ_dx(in_shower) / (43e3 / units::cm);
+                        double dqdx_ratio = segment_median_dQ_dx(in_shower) / m_mip_dqdx_median;
 
                         // std::cout << "examine_direction: B segment graph index " << current_sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " length=" << length/units::cm << "cm nfits=" << current_sg->fits().size() << std::endl;
 
                         if (dqdx_ratio > 1.3) {
-                            auto four_momentum = segment_cal_4mom(in_shower, 2212, particle_data, recomb_model);
+                            auto four_momentum = segment_cal_4mom(in_shower, 2212, particle_data, recomb_model, m_mip_dqdx);
                             auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
                             in_shower->particle_info(pinfo);
                         } else {
-                            auto four_momentum = segment_cal_4mom(in_shower, 211, particle_data, recomb_model);
+                            auto four_momentum = segment_cal_4mom(in_shower, 211, particle_data, recomb_model, m_mip_dqdx);
                             auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
                             in_shower->particle_info(pinfo);
                         }
@@ -1417,7 +1417,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             SegmentPtr sg = graph[*e_it].segment;
             if (!sg) continue;
             
-            double dqdx_ratio = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            double dqdx_ratio = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
             if (dqdx_ratio > 1.3) continue;
             
             VertexPtr vtx = find_other_vertex(graph, sg, vertex);
@@ -1446,7 +1446,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 s_log->trace("examine_direction: cluster {} found long muon chain: total_length={:.2f}cm max_length={:.2f}cm nsegs={}",
                     cluster.ident(), total_length/units::cm, max_length/units::cm, acc_segments.size());
                 for (auto acc_seg : acc_segments) {
-                    auto four_momentum = segment_cal_4mom(acc_seg, 13, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(acc_seg, 13, particle_data, recomb_model, m_mip_dqdx);
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(13, particle_data->get_particle_mass(13), particle_data->pdg_to_name(13), four_momentum);
                     acc_seg->particle_info(pinfo);
                     acc_seg->unset_flags(SegmentFlags::kShowerTrajectory);
@@ -1513,16 +1513,16 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                 }
                 
                 if (n_proton > 0) {
-                    double dqdx_ratio = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+                    double dqdx_ratio = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
 
                     // std::cout << "examine_direction: C segment graph index " << sg->get_graph_index() << " dqdx_ratio=" << dqdx_ratio << " nfits=" << sg->fits().size() << std::endl;
 
                     if (dqdx_ratio > 1.3) {
-                        auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(2212, particle_data->get_particle_mass(2212), particle_data->pdg_to_name(2212), four_momentum);
                         sg->particle_info(pinfo);
                     } else {
-                        auto four_momentum = segment_cal_4mom(sg, 211, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, 211, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
                         sg->particle_info(pinfo);
                     }
@@ -1536,7 +1536,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         // Convert non-muon candidates to pions
         for (auto pion_sg : pion_sgs) {
             if (pion_sg == muon_sg) continue;
-            auto four_momentum = segment_cal_4mom(pion_sg, 211, particle_data, recomb_model);
+            auto four_momentum = segment_cal_4mom(pion_sg, 211, particle_data, recomb_model, m_mip_dqdx);
             auto pinfo = std::make_shared<Aux::ParticleInfo>(211, particle_data->get_particle_mass(211), particle_data->pdg_to_name(211), four_momentum);
             pion_sg->particle_info(pinfo);
         }
@@ -1556,7 +1556,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
             if (!seg_dir_weak(sg)) {
                 // Strong direction - calculate 4-momentum
                 int pdg = sg->particle_info()->pdg();
-                auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model, m_mip_dqdx);
                 auto pinfo = std::make_shared<Aux::ParticleInfo>(pdg, particle_data->get_particle_mass(pdg), particle_data->pdg_to_name(pdg), four_momentum);
                 sg->particle_info(pinfo);
             } else {
@@ -1666,7 +1666,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                     // A stopped proton cannot produce a Michel electron; if Michel topology is
                     // present at the endpoint, this track is more likely a misidentified muon.
                     if (flag_Michel_triggered && pdg == 2212) pdg = 13;
-                    auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model, m_mip_dqdx);
                     auto pinfo = std::make_shared<Aux::ParticleInfo>(pdg, particle_data->get_particle_mass(pdg), particle_data->pdg_to_name(pdg), four_momentum);
                     sg->particle_info(pinfo);
                 }
@@ -2221,7 +2221,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
             if (!sg1 || sg1->cluster() != &cluster) continue;
             
             if (!sg1->particle_info()) {
-                segment_is_shower_topology(sg1);
+                segment_is_shower_topology(sg1, false, m_mip_dqdx_median);
                 
                 VertexPtr start_v = nullptr, end_v = nullptr;
                 auto source_v = boost::source(*it, graph);
@@ -2242,11 +2242,11 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     int start_n = boost::out_degree(source_v, graph);
                     int end_n = boost::out_degree(target_v, graph);
                     
-                    if (segment_is_shower_trajectory(sg1)) {
+                    if (segment_is_shower_trajectory(sg1, 10*units::cm, m_mip_dqdx)) {
                         // Trajectory shower
-                        segment_determine_shower_direction_trajectory(sg1, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        segment_determine_shower_direction_trajectory(sg1, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                     } else {
-                        segment_determine_dir_track(sg1, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        segment_determine_dir_track(sg1, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                     }
                 }
             }
@@ -2261,7 +2261,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     SegmentPtr sg = graph[*it].segment;
                     if (!sg || sg->cluster() != &cluster) continue;
                     
-                    if (!sg->particle_info()) segment_is_shower_topology(sg);
+                    if (!sg->particle_info()) segment_is_shower_topology(sg, false, m_mip_dqdx_median);
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;
                     auto source_v = boost::source(*it, graph);
@@ -2285,7 +2285,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                         // Track
                         int start_n = boost::out_degree(source_v, graph);
                         int end_n = boost::out_degree(target_v, graph);
-                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, flag_print);
+                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, flag_print, track_pid_options());
                     }
                 }
             }
@@ -2305,8 +2305,8 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                 std::pair<int, double> pair_result = calculate_num_daughter_showers(graph, main_vertex, sg, false);
                 
                 double medium_dQdx = segment_median_dQ_dx(sg);
-                if ((pair_result.first <= 2 || (medium_dQdx/(43e3/units::cm) > 1.6 && pair_result.first <= 3)) && segment_is_shower_trajectory(sg)) {
-                    if (!segment_is_shower_trajectory(sg, 1.0*units::cm, 43000/units::cm)) {
+                if ((pair_result.first <= 2 || (medium_dQdx/m_mip_dqdx_median > 1.6 && pair_result.first <= 3)) && segment_is_shower_trajectory(sg, 10*units::cm, m_mip_dqdx)) {
+                    if (!segment_is_shower_trajectory(sg, 1.0*units::cm, m_mip_dqdx_median)) {
                         VertexPtr start_v = nullptr, end_v = nullptr;
                         auto source_v = boost::source(*it, graph);
                         auto target_v = boost::target(*it, graph);
@@ -2325,13 +2325,13 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                         if (start_v && end_v) {
                             int start_n = boost::out_degree(source_v, graph);
                             int end_n = boost::out_degree(target_v, graph);
-                            segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                            segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                         }
                     }
                 }
                 
                 // Examine topology case
-                if (pair_result.first == 1 && segment_is_shower_topology(sg, false)) {
+                if (pair_result.first == 1 && segment_is_shower_topology(sg, false, m_mip_dqdx_median)) {
                     int dir_save = sg->dirsign();
                     
                     VertexPtr start_v = nullptr, end_v = nullptr;
@@ -2353,7 +2353,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                         sg->unset_flags(SegmentFlags::kShowerTopology);
                         int start_n = boost::out_degree(source_v, graph);
                         int end_n = boost::out_degree(target_v, graph);
-                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                         
                         if ((sg->particle_info() && sg->particle_info()->pdg() == 2212 && sg->particle_score() < 0.09) ||
                             (sg->particle_info() && sg->particle_info()->pdg() == 13 && sg->particle_score() < 0.06)) {
@@ -2390,9 +2390,9 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                     if (start_v && end_v) {
                         int start_n = boost::out_degree(source_v, graph);
                         int end_n = boost::out_degree(target_v, graph);
-                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
+                        segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, m_mip_dqdx_median, false, track_pid_options());
                         
-                        if ((!sg->particle_info() || seg_dir_weak(sg)) && medium_dQdx/(43e3/units::cm) < 1.3) {
+                        if ((!sg->particle_info() || seg_dir_weak(sg)) && medium_dQdx/m_mip_dqdx_median < 1.3) {
                             if (!sg->particle_info()) {
                                 sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
                             }
@@ -3337,7 +3337,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                         if (!sg) continue;
                         double length = segment_track_length(sg);
                         double medium_dqdx = segment_median_dQ_dx(sg);
-                        double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * 43e3 / units::cm;
+                        double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * m_mip_dqdx_median;
                         auto [v1, v2] = find_vertices(graph, sg);
                         bool flag_start = (v1 == min_vertex);
                         if (length > 15 * units::cm && !seg_dir_weak(sg) && !flag_start && medium_dqdx > dQ_dx_cut) {
@@ -3606,9 +3606,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     if (!sg) continue;
                     auto pair_results = calculate_num_daughter_showers(graph, main_vertex, sg, false);
                     double length = segment_track_length(sg);
-                    double median_dqdx = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+                    double median_dqdx = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
                     if (pair_results.first == 1 && length < 1.5 * units::cm && median_dqdx > 1.6) {
-                        auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model, m_mip_dqdx);
                         auto pinfo = std::make_shared<Aux::ParticleInfo>(
                             2212, particle_data->get_particle_mass(2212),
                             particle_data->pdg_to_name(2212), four_momentum);
@@ -3749,11 +3749,11 @@ VertexPtr PatternAlgorithms::determine_overall_main_vertex(Graph& graph, Cluster
 
             auto pair_results = calculate_num_daughter_showers(graph, main_vertex, sg, false);
             double length = segment_track_length(sg);
-            double median_dqdx = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            double median_dqdx = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
 
             // Short segment with only 1 daughter and high dQ/dx -> likely proton
             if (pair_results.first == 1 && length < 1.5 * units::cm && median_dqdx > 1.6) {
-                auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model);
+                auto four_momentum = segment_cal_4mom(sg, 2212, particle_data, recomb_model, m_mip_dqdx);
                 auto pinfo = std::make_shared<Aux::ParticleInfo>(
                     2212, particle_data->get_particle_mass(2212),
                     particle_data->pdg_to_name(2212), four_momentum);

@@ -4,6 +4,7 @@
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellClus/IClusGeomHelper.h"
+#include "WireCellClus/PRSegmentFunctions.h"
 
 namespace WireCell::Clus::PR {
 
@@ -50,6 +51,37 @@ namespace WireCell::Clus::PR {
         // never seg->dir_weak() directly (flag propagation in break_segment is
         // the one intentional raw read, and it lives in PRSegmentFunctions.cxx).
         bool seg_dir_weak(SegmentPtr seg) const;
+
+        // MIP dQ/dx scales, INTERNAL units (charge per WCT length unit).
+        // Two distinct uBooNE-legacy roles, previously hard-coded everywhere
+        // (see wcp-porting-img sbnd_xin/docs/pr/7 sec. 5 and pr/8):
+        //  - m_mip_dqdx        (legacy 50e3 e/cm): the flat-template amplitude in
+        //    the do_track_comp KS comparison and the segment_cal_4mom /
+        //    segment_is_shower_trajectory scale.
+        //  - m_mip_dqdx_median (legacy 43e3 e/cm): the scale every median-dQ/dx
+        //    ratio threshold (x1.2/1.3/1.4/1.75...) and BDT normalization is
+        //    quoted against.
+        // Defaults = the uBooNE numbers => absent config keys are byte-identical.
+        // SBND production sets 56000 / 48000 e/cm (owner 2026-07-30; 48000 is a
+        // placeholder scaled by the uBooNE 43/50 ratio, pending an SBND MIP
+        // median measurement).
+        double m_mip_dqdx{50000/units::cm};
+        double m_mip_dqdx_median{43000/units::cm};
+
+        // Proton-template direction vote (doc pr/8; default false = legacy).
+        // Thresholds are initial values pending the pr/8 sec. 6 calibration.
+        bool   m_proton_dir_vote{false};
+        double m_proton_dir_score_max{0.25};
+        double m_proton_dir_asym_min{1.3};
+        // Bundle the do_track_pid-related knobs for the free segment functions.
+        TrackPidOptions track_pid_options() const {
+            TrackPidOptions o;
+            o.mip_dqdx = m_mip_dqdx;
+            o.proton_dir_vote = m_proton_dir_vote;
+            o.proton_dir_score_max = m_proton_dir_score_max;
+            o.proton_dir_asym_min = m_proton_dir_asym_min;
+            return o;
+        }
 
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics

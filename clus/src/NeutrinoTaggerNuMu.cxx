@@ -202,7 +202,7 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
 
             if (std::abs(pdg) == 13 &&
                 length > dis_cut &&
-                medium_dQ_dx < dQ_dx_cut * 43e3/units::cm &&
+                medium_dQ_dx < dQ_dx_cut * m_mip_dqdx_median &&
                 (length > 40*units::cm || (length <= 40*units::cm && direct_length > 0.925 * length)) &&
                 !(n_daughter_tracks > 1 || n_daughter_all - n_daughter_tracks > 2)) {
                 flag_numu_cc_1 = true;
@@ -216,7 +216,7 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
             ti.numu_cc_1_particle_type.push_back(static_cast<float>(pdg));
             ti.numu_cc_1_length.push_back(static_cast<float>(length / units::cm));
             ti.numu_cc_1_direct_length.push_back(static_cast<float>(direct_length / units::cm));
-            ti.numu_cc_1_medium_dQ_dx.push_back(static_cast<float>(medium_dQ_dx / (43e3/units::cm)));
+            ti.numu_cc_1_medium_dQ_dx.push_back(static_cast<float>(medium_dQ_dx / m_mip_dqdx_median));
             ti.numu_cc_1_dQ_dx_cut.push_back(static_cast<float>(dQ_dx_cut));
             ti.numu_cc_1_n_daughter_tracks.push_back(static_cast<float>(n_daughter_tracks));
             ti.numu_cc_1_n_daughter_all.push_back(static_cast<float>(n_daughter_all));
@@ -302,8 +302,8 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
         // Prototype condition: (shower && !topo) || !shower || length > 50cm
         // = !is_shower_topo || length > 50cm (since !shower implies !topo in this context)
         if (!is_shower_topo || length > 50*units::cm) {
-            if (medium_dQ_dx < dQ_dx_cut * 1.05 * 43e3/units::cm &&
-                medium_dQ_dx > 0.75 * 43e3/units::cm &&
+            if (medium_dQ_dx < dQ_dx_cut * 1.05 * m_mip_dqdx_median &&
+                medium_dQ_dx > 0.75 * m_mip_dqdx_median &&
                 (direct_length > 0.925 * length || length > 50*units::cm)) {
 
                 if (length > max_length) {

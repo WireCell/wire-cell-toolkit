@@ -146,14 +146,14 @@ void PatternAlgorithms::shower_clustering_with_nv_in_main_cluster(Graph& graph, 
         //  - update_particle_type() handles multi-segment showers via majority vote
         //  - explicit PDG=0 guard catches single-segment showers skipped by update_particle_type()
         //    (long-muon start segments retain PDG=13 and are handled by the post-pass below)
-        shower->update_particle_type(particle_data, recomb_model);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
         // PDG=0 guard: defensive fixup for shower-flagged start segments that
         // arrived without any ParticleInfo set.  Independent of
         // update_particle_type and still needed.
         auto start_seg = shower->start_segment();
         if (start_seg && start_seg->has_particle_info() && start_seg->particle_info() &&
             start_seg->particle_info()->pdg() == 0) {
-            auto four_momentum = segment_cal_4mom(start_seg, 11, particle_data, recomb_model);
+            auto four_momentum = segment_cal_4mom(start_seg, 11, particle_data, recomb_model, m_mip_dqdx);
             start_seg->particle_info(std::make_shared<Aux::ParticleInfo>(
                 11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11),
                 four_momentum));
@@ -284,7 +284,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
 
             // Get segment properties
             double medium_dQ_dx = segment_median_dQ_dx(sg);
-            double medium_dQ_dx_1 = medium_dQ_dx / (43e3 / units::cm);
+            double medium_dQ_dx_1 = medium_dQ_dx / m_mip_dqdx_median;
 
             // Get particle type if available
             int particle_type = 0;
@@ -319,7 +319,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
                 if (!sg1) continue;
 
                 double length = segment_track_length(sg1);
-                double medium_dQ_dx_norm = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+                double medium_dQ_dx_norm = segment_median_dQ_dx(sg1) / m_mip_dqdx_median;
 
                 n_tracks++;
                 total_length += length;
@@ -526,7 +526,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
             double seg_length = segment_track_length(seg);
             
             if (is_shower_topology || shower->get_num_segments() > 2 || 
-                (medium_dQ_dx > 43e3 / units::cm * 1.5 && seg_length > 0)) {
+                (medium_dQ_dx > m_mip_dqdx_median * 1.5 && seg_length > 0)) {
                 if (seg_length > 10 * units::cm) {
                     WireCell::Vector dir_shower = segment_cal_dir_3vector(seg, start_point, 15 * units::cm);
                     map_shower_dir[shower] = dir_shower;
@@ -1031,7 +1031,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                 pdg = start_seg->particle_info()->pdg();
             }
             if (pdg == 0 || std::abs(pdg) == 13) {
-                auto four_momentum = segment_cal_4mom(start_seg, 11, particle_data, recomb_model);
+                auto four_momentum = segment_cal_4mom(start_seg, 11, particle_data, recomb_model, m_mip_dqdx);
                 
                 // Create ParticleInfo for electron
                 auto pinfo = std::make_shared<Aux::ParticleInfo>(
@@ -1104,7 +1104,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
         }
 
         // Update particle type
-        shower->update_particle_type(particle_data, recomb_model);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
 
         bool tmp_flag = (shower->start_vertex() == main_vertex);
         SPDLOG_LOGGER_TRACE(s_log, "shower_clustering_with_nv_from_vertices: Separated shower: {} {} {} {} {}",
@@ -1245,7 +1245,7 @@ void PatternAlgorithms::examine_merge_showers(IndexedShowerSet& showers, VertexP
         for (auto& shower2 : to_merge) {
             shower1->add_shower(*shower2);
         }
-        shower1->update_particle_type(particle_data, recomb_model);
+        shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
         shower1->calculate_kinematics(particle_data, recomb_model);
         double kine_charge = cal_kine_charge(shower1, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv);
         shower1->set_kine_charge(kine_charge);
@@ -1429,7 +1429,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                 if (particle_type_sp1 == 0 ||
                     (std::abs(particle_type_sp1) == 13 &&
                      segment_track_length(sg) < 40 * units::cm && seg_dir_weak(sg))) {
-                    auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model);
+                    auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model, m_mip_dqdx);
                     sg->particle_info(std::make_shared<Aux::ParticleInfo>(
                         11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11),
                         four_momentum));
@@ -1437,7 +1437,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
 
             // Update particle type
-            shower->update_particle_type(particle_data, recomb_model);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
 
             // Check with other showers and merge if needed
             std::vector<ShowerPtr> showers_to_be_removed;
@@ -1463,7 +1463,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
 
             // Post-merge majority-vote and kinematics (prototype lines 1555-1556)
-            shower->update_particle_type(particle_data, recomb_model);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
             shower->calculate_kinematics(particle_data, recomb_model);
 
             showers.insert(shower);
@@ -1571,7 +1571,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             
             if (particle_type == 0 || 
                 (std::abs(particle_type) == 13 && segment_track_length(sg) < 40 * units::cm && seg_dir_weak(sg))) {
-                auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model);
+                auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model, m_mip_dqdx);
                 
                 // Create ParticleInfo for electron
                 auto pinfo = std::make_shared<Aux::ParticleInfo>(
@@ -1589,7 +1589,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             shower->complete_structure_with_start_segment(used_segments);
             // Majority-vote correction for multi-segment showers whose start segment
             // has an unexpected PDG not covered by the explicit force-to-11 above.
-            shower->update_particle_type(particle_data, recomb_model);
+            shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
             showers.insert(shower);
         }
     }
@@ -1664,7 +1664,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 }
                 
                 double medium_dQ_dx = segment_median_dQ_dx(sg);
-                if (particle_type == 2212 && medium_dQ_dx / (43e3 / units::cm) > 1.6) continue;
+                if (particle_type == 2212 && medium_dQ_dx / m_mip_dqdx_median > 1.6) continue;
                 if (particle_type == 11) continue;
                 
                 // Form a new shower
@@ -1801,7 +1801,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 if (!sg1) continue;
                 
                 double length = segment_track_length(sg1);
-                double medium_dQ_dx = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+                double medium_dQ_dx = segment_median_dQ_dx(sg1) / m_mip_dqdx_median;
                 
                 if (!seg_dir_weak(sg1)) {
                     // Find end vertex
@@ -1893,7 +1893,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                         particle_data->get_particle_mass(11));
                 }
                 shower1->start_segment()->set_flags(SegmentFlags::kAvoidMuonCheck);
-                shower1->update_particle_type(particle_data, recomb_model);
+                shower1->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
 
                 // Merge associated showers
                 for (auto shower : associated_showers) {
@@ -2340,7 +2340,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         }
 
         if (sg->has_particle_info() && sg->particle_info()) sg->particle_info()->set_pdg(11);
-        shower->update_particle_type(particle_data, recomb_model);
+        shower->update_particle_type(particle_data, recomb_model, m_mip_dqdx);
         shower->calculate_kinematics(particle_data, recomb_model);
         shower->set_kine_charge(cal_kine_charge(shower, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires, track_fitter, dv));
         shower->set_flag_kinematics(true);
@@ -2740,7 +2740,7 @@ void PatternAlgorithms::id_pi0_with_vertex(int acc_segment_id, IndexedShowerSet&
                     // Recalculate 4-momentum under pion hypothesis, mirroring prototype:
                     // if (sg->get_particle_4mom(3)>0) sg->cal_4mom();
                     if (sg->particle_info()->kinetic_energy() > 0) {
-                        auto four_momentum = segment_cal_4mom(sg, 211, particle_data, recomb_model);
+                        auto four_momentum = segment_cal_4mom(sg, 211, particle_data, recomb_model, m_mip_dqdx);
                         sg->particle_info()->set_four_momentum(four_momentum);
                     }
                 }

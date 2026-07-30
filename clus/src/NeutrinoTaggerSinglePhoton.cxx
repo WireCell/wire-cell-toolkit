@@ -675,7 +675,7 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
     int n_ele = 0, n_other = 0;
     for (SegmentPtr sg1 : shower_segs) {
         if (sg1->cluster() != sg->cluster()) continue;
-        double med   = segment_median_dQ_dx(sg1) / (43e3/units::cm);
+        double med   = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
         double ratio = segment_track_direct_length(sg1) / segment_track_length(sg1);
         if (sg1->flags_any(SegmentFlags::kShowerTopology) ||
             (sg1->flags_any(SegmentFlags::kShowerTrajectory) && med < 1.3) ||
@@ -865,7 +865,7 @@ static bool bad_reconstruction_2_sp(SpContext& ctx,
         if (sg1->cluster() != vertex->cluster()) continue;
         int n = (int)sg1->fits().size();
         for (int i = 0; i < n - 5; ++i) {
-            double med = segment_median_dQ_dx(sg1, i, i+5) / (43e3/units::cm);
+            double med = segment_median_dQ_dx(sg1, i, i+5) / ctx.self.m_mip_dqdx_median;
             if (med > max_dQ_dx) max_dQ_dx = med;
         }
     }
@@ -1146,7 +1146,7 @@ static int mip_identification_sp(SpContext& ctx,
     else if (Eshower <  550*units::MeV) dQ_dx_cut = 1.3;
     if      (Eshower <  300*units::MeV) dQ_dx_cut = 1.3;
 
-    std::vector<double> vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20);
+    std::vector<double> vec_dQ_dx = shower->get_stem_dQ_dx(vertex, sg, 20, ctx.self.m_mip_dqdx_median);
 
     std::vector<int> vec_threshold(vec_dQ_dx.size(), 0);
     for (size_t i = 0; i < vec_dQ_dx.size(); ++i)
@@ -1497,11 +1497,11 @@ static int mip_identification_sp(SpContext& ctx,
         mean_dqdx /= (float)dqdx7.size();
 
         const float alpha = 1.0f, beta = 0.255f;
-        float median_dedx = (std::exp(median_dqdx * 43e3 * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
+        float median_dedx = (std::exp(median_dqdx * (ctx.self.m_mip_dqdx_median*units::cm) * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
                             / (beta / 1.38f / 0.273f);
         if (median_dedx < 0) median_dedx = 0;
         if (median_dedx > 50) median_dedx = 50;
-        float mean_dedx   = (std::exp(mean_dqdx   * 43e3 * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
+        float mean_dedx   = (std::exp(mean_dqdx   * (ctx.self.m_mip_dqdx_median*units::cm) * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
                             / (beta / 1.38f / 0.273f);
         if (mean_dedx < 0) mean_dedx = 0;
         if (mean_dedx > 50) mean_dedx = 50;
@@ -1588,7 +1588,7 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
     auto [vtx, conn_type] = shower->get_start_vertex_and_type();
     SegmentPtr sg = shower->start_segment();
 
-    auto vec_dQ_dx = shower->get_stem_dQ_dx(vtx, sg, 20);
+    auto vec_dQ_dx = shower->get_stem_dQ_dx(vtx, sg, 20, ctx.self.m_mip_dqdx_median);
     double max_dQ_dx = 0;
     for (size_t i = 0; i < vec_dQ_dx.size(); ++i) {
         if (vec_dQ_dx[i] > max_dQ_dx) max_dQ_dx = vec_dQ_dx[i];
@@ -1634,7 +1634,7 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
             } else {
                 flag_all_showers = false;
             }
-            double norm_dQ = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
+            double norm_dQ = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
             bool is_proton = sg1->has_particle_info() && sg1->particle_info()->pdg() == 2212;
             if ((!ctx.self.seg_dir_weak(sg1) || is_proton || segment_track_length(sg1) > 20*units::cm) &&
                 !seg_is_shower(sg1))
@@ -1722,9 +1722,9 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
                     (ray_length(Ray{vtx_point, min_fits.front().point}) <=
                      ray_length(Ray{vtx_point, min_fits.back().point}));
                 if (min_front_near)
-                    medium_dQ_dx = segment_median_dQ_dx(min_sg, 0, ncount) / (43e3/units::cm);
+                    medium_dQ_dx = segment_median_dQ_dx(min_sg, 0, ncount) / ctx.self.m_mip_dqdx_median;
                 else
-                    medium_dQ_dx = segment_median_dQ_dx(min_sg, n_min-1-ncount, n_min-1) / (43e3/units::cm);
+                    medium_dQ_dx = segment_median_dQ_dx(min_sg, n_min-1-ncount, n_min-1) / ctx.self.m_mip_dqdx_median;
             }
 
             if (min_ang2 < 15 && medium_dQ_dx > 0.95 && ncount > 5  && Eshower < 1500*units::MeV)
@@ -2247,7 +2247,7 @@ bool PatternAlgorithms::singlephoton_tagger(
         // ------ proton bookkeeping ----------------------------------------
         if (std::abs(pdg) == 2212) {
             double length    = segment_track_length(sg);
-            double med_dqdx  = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            double med_dqdx  = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
             double energy    = length / units::cm * med_dqdx;
             if (energy > 0) {
                 num_protons++;
@@ -2272,7 +2272,7 @@ bool PatternAlgorithms::singlephoton_tagger(
         // ------ muon/pion bookkeeping -------------------------------------
         if (std::abs(pdg) == 13 || std::abs(pdg) == 211) {
             double length   = segment_track_length(sg);
-            double med_dqdx = segment_median_dQ_dx(sg) / (43e3 / units::cm);
+            double med_dqdx = segment_median_dQ_dx(sg) / m_mip_dqdx_median;
             double energy   = length / units::cm * med_dqdx;
             if (energy > 0) {
                 num_mip_tracks++;

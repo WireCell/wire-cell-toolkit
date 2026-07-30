@@ -86,11 +86,33 @@ namespace WireCell::Clus::PR {
     double segment_get_closest_2d_distance(SegmentPtr seg, const WireCell::Point& point, int apa, int face, int plane, const std::string& cloud_name = "fit");
 
 
-    // PID related 
+    // PID related
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
     std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
+
+    // Options for segment_do_track_pid / segment_determine_dir_track.
+    // Defaults reproduce legacy behavior byte-for-byte (uBooNE values, vote off).
+    // - mip_dqdx: the flat-template MIP amplitude handed to do_track_comp
+    //   (uBooNE legacy 50e3 e/cm; distinct from the 43e3 median-threshold
+    //   scale carried by the functions' MIP_dQdx parameter).
+    // - proton_dir_vote: doc sbnd_xin/docs/pr/8 improvement (beyond prototype):
+    //   when the muon-vs-flat direction gate abstains in both orientations,
+    //   let the proton template declare the direction, guarded by
+    //   score/asymmetry/free-end conditions.  Initial thresholds are
+    //   placeholders pending the pr/8 sec. 6 calibration.
+    // - start_n/end_n: vertex connectivity, filled by
+    //   segment_determine_dir_track (guard G4: stop end must be free).
+    struct TrackPidOptions {
+        double mip_dqdx{50000/units::cm};
+        bool   proton_dir_vote{false};
+        double proton_dir_score_max{0.25};
+        double proton_dir_asym_min{1.3};
+        int    start_n{1};
+        int    end_n{1};
+    };
+
     // success, flag_dir, pdg_code, particle_score
-    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range=35*units::cm, double offset_length = 0*units::cm, bool flag_force = false,  double MIP_dQdx = 50000/units::cm);
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range=35*units::cm, double offset_length = 0*units::cm, bool flag_force = false,  const TrackPidOptions& pid_opts = {});
 
     // direction calculation ...
     /// Returns true if the segment's direction is weakly determined.
@@ -101,7 +123,7 @@ namespace WireCell::Clus::PR {
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, WireCell::Point& p, double dis_cut);
     WireCell::Vector segment_cal_dir_3vector(SegmentPtr seg, int direction, int num_points, int start);
-    void segment_determine_dir_track(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false);
+    void segment_determine_dir_track(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false, const TrackPidOptions& pid_opts = {});
 
     // kinemiatics calculations ...
     double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model);
@@ -114,7 +136,7 @@ namespace WireCell::Clus::PR {
     void clustering_points_segments(std::vector<SegmentPtr> segments, const IDetectorVolumes::pointer& dv, const std::string& cloud_name = "associate_points", double search_range = 1.2*units::cm, double scaling_2d = 0.7);
 
     bool segment_is_shower_trajectory(SegmentPtr seg, double step_size = 10*units::cm, double mip_dQ_dx = 50000 / units::cm);
-    void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false);
+    void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx = 43000/units::cm, bool flag_print = false, const TrackPidOptions& pid_opts = {});
     
     bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name = "associate_points", double MIP_dQdx = 43000/units::cm, double rms_cut= 0.4*units::cm);
     bool segment_is_shower_topology(SegmentPtr seg, bool tmp_val=false, double MIP_dQ_dx = 43000/units::cm);

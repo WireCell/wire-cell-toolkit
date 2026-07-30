@@ -1389,7 +1389,8 @@ namespace WireCell::Clus::PR {
     }
 
     // success, flag_dir, particle_type, particle_score
-    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range , double offset_length, bool flag_force, double MIP_dQdx){
+    std::tuple<bool, int, int, double> segment_do_track_pid(SegmentPtr segment, std::vector<double>& L , std::vector<double>& dQ_dx, const Clus::ParticleDataSet::pointer& particle_data, double compare_range , double offset_length, bool flag_force, const TrackPidOptions& pid_opts){
+        const double MIP_dQdx = pid_opts.mip_dqdx;
         
         if (L.size() != dQ_dx.size() || L.empty() || !segment) {
             return std::make_tuple(false, 0, 0, 0.0);
@@ -1488,6 +1489,35 @@ namespace WireCell::Clus::PR {
             return std::make_tuple(true, flag_dir, particle_type, particle_score);
         }
         
+        // Improvement beyond the prototype (doc sbnd_xin/docs/pr/8): proton-template
+        // direction vote.  Entered ONLY where the legacy logic abstains (both
+        // orientations failed the muon-vs-flat gate, no flag_force), so every
+        // decision the prototype path makes is untouched.  A guarded extension of
+        // the flag_force mechanism above: proton-only, because the Bragg rise is
+        // the one real directional dQ/dx signature (an abstaining flat muon's
+        // fwd/bwd scores differ only by noise).  Guards:
+        //   G1 good absolute proton fit — the score mixes shape and magnitude
+        //      (sqrt(ks^2+(ratio-1)^2)), so MIP-like or shower profiles score >~1;
+        //   G2 proton must win that orientation's existing mu/p/e competition;
+        //   G3 significant fwd/bwd score asymmetry (a real direction claim);
+        //   G4 the stop end must be topologically free — physical sanity, and it
+        //      guarantees the result survives the caller's persistence condition.
+        if (pid_opts.proton_dir_vote) {
+            const double sp_f = result_forward.at(2);
+            const double sp_b = result_backward.at(2);
+            const bool fwd_wins = sp_f <= sp_b;
+            const double sp_best  = fwd_wins ? sp_f : sp_b;
+            const double sp_other = fwd_wins ? sp_b : sp_f;
+            const int    win_type = fwd_wins ? forward_particle_type : backward_particle_type;
+            const bool   free_end = fwd_wins ? (pid_opts.end_n == 1) : (pid_opts.start_n == 1);
+            if (win_type == 2212
+                && sp_best < pid_opts.proton_dir_score_max
+                && sp_other > pid_opts.proton_dir_asym_min * sp_best
+                && free_end) {
+                return std::make_tuple(true, fwd_wins ? 1 : -1, 2212, sp_best);
+            }
+        }
+
         // Failure path: neither forward nor backward PID succeeded (and flag_force==false).
         // Do NOT write to segment->dirsign() here — this function has no segment side-effects;
         // callers (segment_determine_dir_track) set dirsign from the returned flag_dir.
@@ -1528,10 +1558,16 @@ namespace WireCell::Clus::PR {
         return results;
     }
 
-    void segment_determine_dir_track(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print) {
+    void segment_determine_dir_track(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print, const TrackPidOptions& pid_opts) {
         if (!segment || !particle_data) {
             return;
         }
+
+        // Per-segment copy: the vote's free-end guard (G4) needs the vertex
+        // connectivity of THIS segment.
+        TrackPidOptions opts = pid_opts;
+        opts.start_n = start_n;
+        opts.end_n = end_n;
         
         // Reset direction flag
         segment->dirsign(0);
@@ -1580,7 +1616,7 @@ namespace WireCell::Clus::PR {
             
             if (start_n == 1 && end_n == 1 && npoints >= 15) {
                 // Can use the dQ/dx to do PID and direction
-                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 1*units::cm, true);
+                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 1*units::cm, true, opts);
                 tmp_flag_pid = std::get<0>(result);
                 if (tmp_flag_pid) {
                     segment->dirsign(std::get<1>(result));
@@ -1589,7 +1625,7 @@ namespace WireCell::Clus::PR {
                 }
                 
                 if (!tmp_flag_pid) {
-                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 1*units::cm, true);
+                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 1*units::cm, true, opts);
                     tmp_flag_pid = std::get<0>(result);
                     if (tmp_flag_pid) {
                         segment->dirsign(std::get<1>(result));
@@ -1599,7 +1635,7 @@ namespace WireCell::Clus::PR {
                 }
             } else {
                 // Can use the dQ/dx to do PID and direction
-                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 0*units::cm, false);
+                auto result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 35*units::cm, 0*units::cm, false, opts);
                 tmp_flag_pid = std::get<0>(result);
                 if (tmp_flag_pid) {
                     segment->dirsign(std::get<1>(result));
@@ -1608,7 +1644,7 @@ namespace WireCell::Clus::PR {
                 }
                 
                 if (!tmp_flag_pid) {
-                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 0*units::cm, false);
+                    result = segment_do_track_pid(segment, L, dQ_dx, particle_data, 15*units::cm, 0*units::cm, false, opts);
                     tmp_flag_pid = std::get<0>(result);
                     if (tmp_flag_pid) {
                         segment->dirsign(std::get<1>(result));
@@ -1708,7 +1744,7 @@ namespace WireCell::Clus::PR {
         }
     }
 
-     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print){
+     void segment_determine_shower_direction_trajectory(SegmentPtr segment, int start_n, int end_n, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, double MIP_dQdx, bool flag_print, const TrackPidOptions& pid_opts){
         segment->dirsign(0);
         double length = segment_track_length(segment, 0);
 
@@ -1726,7 +1762,7 @@ namespace WireCell::Clus::PR {
             segment->dirsign(1);
         } else {
             // Try track PID first
-            segment_determine_dir_track(segment, start_n, end_n, particle_data, recomb_model, MIP_dQdx, false);
+            segment_determine_dir_track(segment, start_n, end_n, particle_data, recomb_model, MIP_dQdx, false, pid_opts);
             
             // Check if particle info was set and if it's not an electron
             if (segment->has_particle_info() && segment->particle_info()->pdg() != 11) {
