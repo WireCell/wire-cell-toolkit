@@ -3391,7 +3391,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                         if (!sg) continue;
                         double length = segment_track_length(sg);
                         double medium_dqdx = segment_median_dQ_dx(sg);
-                        double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * m_mip_dqdx_median;
+                        double dQ_dx_cut = muon_dqdx_cut(length) * m_mip_dqdx_median;
                         auto [v1, v2] = find_vertices(graph, sg);
                         bool flag_start = (v1 == min_vertex);
                         if (length > 15 * units::cm && !seg_dir_weak(sg) && !flag_start && medium_dqdx > dQ_dx_cut) {

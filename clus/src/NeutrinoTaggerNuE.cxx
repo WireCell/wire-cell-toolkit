@@ -399,7 +399,7 @@ static bool compare_muon_energy(NuEContext& ctx, ShowerPtr shower,
             if (pdg == 13 || pdg == 2212) {
                 double length       = segment_track_length(sg1);
                 double medium_dQ_dx = segment_median_dQ_dx(sg1);
-                double dQ_dx_cut    = 0.8866 + 0.9533 * std::pow(18*units::cm / length, 0.4234);
+                double dQ_dx_cut    = ctx.self.muon_dqdx_cut(length);
                 if (medium_dQ_dx < dQ_dx_cut * ctx.self.m_mip_dqdx_median) {
                     double tmp_energy = muon_range_fn->scalar_function(length / units::cm) * units::MeV;
                     if (tmp_energy > E_muon) E_muon = tmp_energy;
@@ -756,7 +756,7 @@ static bool single_shower(NuEContext& ctx, ShowerPtr shower,
                 ++num_valid_tracks;
                 if (length > max_length) max_length = length;
             } else {
-                double dQ_dx_cut = 0.8866 + 0.9533 * std::pow(18*units::cm / length, 0.4234);
+                double dQ_dx_cut = ctx.self.muon_dqdx_cut(length);
                 if (medium_dQ_dx > dQ_dx_cut) {
                     ++num_valid_tracks;
                     if (length > max_length) max_length = length;
@@ -1718,7 +1718,7 @@ static bool mip_quality(NuEContext& ctx,
             SegmentPtr sg1  = shower1->start_segment();
             double norm_dQ  = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
             double length1  = segment_track_length(sg1);
-            double dQ_cut   = 0.8866 + 0.9533 * std::pow(18*units::cm / length1, 0.4234);
+            double dQ_cut   = ctx.self.muon_dqdx_cut(length1);
             if (norm_dQ > dQ_cut) { flag_split = false; flag_proton = true; }
             if (tmp_pi0_showers.count(shower1)) flag_inside_pi0 = true;
 
@@ -3445,7 +3445,7 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
         }
 
         double tmp_length = segment_track_length(sg1);
-        double dQ_dx_cut  = 0.8866 + 0.9533 * std::pow(18*units::cm/tmp_length, 0.4234);
+        double dQ_dx_cut  = ctx.self.muon_dqdx_cut(tmp_length);
         if (std::isinf(dQ_dx_cut) || std::isnan(dQ_dx_cut)) dQ_dx_cut = 10;
         double med = segment_median_dQ_dx(sg1) / ctx.self.m_mip_dqdx_median;
 

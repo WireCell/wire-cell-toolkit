@@ -93,6 +93,19 @@ public:
         std::vector<double> m_kine_plane_weights{0.25, 0.25, 1.0};  // {U,V,W}
         double m_kine_plane_asym_switch{0.04};
         double m_kine_w_value{23.6};  // eV per electron-ion pair
+        // Muon median-dQ/dx-vs-length envelope {c0, c1, pivot_cm, power}:
+        // cut = c0 + c1*pow(pivot/L, power), a multiple of mip_dqdx_median,
+        // used at nine tagger sites (docs/pr/2 sec. 2e(iv)).  Defaults = the
+        // prototype's empirical uBooNE stopping-muon refit => absent key is
+        // byte-identical.  See PatternAlgorithms::m_muon_dqdx_curve.
+        std::vector<double> m_muon_dqdx_curve{0.8866, 0.9533, 18.0, 0.4234};
+        // Single-photon stem dE/dx conversion (docs/pr/2 sec. 2e(i) third
+        // correctness item).  Default false = the inline uBooNE-field inverse
+        // Modified-Box, byte-identical; true routes shw_sp_vec_*_dedx through
+        // the configured recombination model.  The mean-dedx threshold
+        // (MeV/cm) is coupled to that choice; default = the legacy 2.3.
+        bool   m_sp_dedx_use_recomb_model{false};
+        double m_sp_mean_dedx_cut{2.3};
         std::string m_dl_weights;              // path to SCN vertex .pth weights file (empty = DL disabled)
         double m_dl_vtx_cut{25.0};             // max distance (mm) from DL prediction to accept candidate vertex (default 2.5 cm)
         double m_dQdx_scale{0.1};              // scale factor applied to dQ before passing to SCN network

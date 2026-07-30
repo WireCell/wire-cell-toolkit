@@ -7,6 +7,7 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 
 #include <array>
+#include <cmath>
 
 namespace WireCell::Clus::PR {
 
@@ -206,6 +207,50 @@ namespace WireCell::Clus::PR {
         // Defaults = the uBooNE literals they replaced => byte-identical when the
         // config keys are absent.  See KineChargeOptions above.
         KineChargeOptions m_kine_charge{};
+
+        // Muon median-dQ/dx-vs-length envelope {c0, c1, pivot, power}:
+        //     dQ_dx_cut = c0 + c1 * pow(pivot / L, power)
+        // a dimensionless multiple of m_mip_dqdx_median.  The default is the
+        // prototype's empirical uBooNE stopping-muon refit (of the commented-out
+        // 0.85 + 0.95*sqrt(25cm/L) family): short tracks are Bragg-dominated so
+        // their MEDIAN dQ/dx sits well above MIP (2.5x at 5 cm), relaxing toward
+        // the 0.8866 plateau asymptote.  Appears at NINE sites (numu x2,
+        // vertex-finder, nue x4, ssm, cosmic), all as literals before this knob
+        // (doc pr/2 sec 2e(iv) undercounted 3).  pivot is INTERNAL units.
+        // Defaults = the uBooNE literals => absent config keys are
+        // byte-identical.
+        std::array<double, 4> m_muon_dqdx_curve{{0.8866, 0.9533, 18 * units::cm, 0.4234}};
+
+        // The envelope, length in INTERNAL units.  Inline and shaped exactly
+        // like the literal expression it replaced (c0 + c1*pow(180.0/L, c3)),
+        // so the defaults are bit-identical.
+        double muon_dqdx_cut(double length) const {
+            return m_muon_dqdx_curve[0] +
+                   m_muon_dqdx_curve[1] * std::pow(m_muon_dqdx_curve[2] / length, m_muon_dqdx_curve[3]);
+        }
+        // Same envelope for a length already in cm (the ssm_tagger convention,
+        // whose sg_length values are divided by units::cm at the source).
+        // pivot/units::cm = 18.0 exactly, so this too is bit-identical.
+        double muon_dqdx_cut_cm(double length_cm) const {
+            return m_muon_dqdx_curve[0] +
+                   m_muon_dqdx_curve[1] * std::pow((m_muon_dqdx_curve[2] / units::cm) / length_cm, m_muon_dqdx_curve[3]);
+        }
+
+        // Single-photon stem dE/dx conversion (NeutrinoTaggerSinglePhoton.cxx).
+        // Default false = the inline float inverse Modified-Box frozen at
+        // uBooNE's field (A=1.0, B=0.255, rho=1.38, E=0.273 kV/cm), kept for
+        // byte-identity.  When true, shw_sp_vec_{median,mean}_dedx go through
+        // m_recomb_model->dE() instead -- the same configured model the rest of
+        // the chain uses (docs/pr/2 sec 2e(i) third correctness item).
+        bool m_sp_dedx_use_recomb_model{false};
+        // The hard mip_quality cut on shw_sp_vec_mean_dedx (MeV/cm).  Stored as
+        // float so the default compares bit-identically to the legacy 2.3f
+        // literal.  uBooNE-tuned against the inline (0.273 kV/cm) dE/dx scale;
+        // coupled to the knob above -- retune when switching models.
+        float m_sp_mean_dedx_cut{2.3f};
+        // The configured recombination model, set by TaggerCheckNeutrino::visit()
+        // alongside the kine transfer.  Null when the component has none.
+        IRecombinationModel::pointer m_recomb_model{};
 
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics

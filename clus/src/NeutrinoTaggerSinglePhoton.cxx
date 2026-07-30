@@ -1496,13 +1496,29 @@ static int mip_identification_sp(SpContext& ctx,
         for (float d : dqdx7) mean_dqdx += d;
         mean_dqdx /= (float)dqdx7.size();
 
-        const float alpha = 1.0f, beta = 0.255f;
-        float median_dedx = (std::exp(median_dqdx * (ctx.self.m_mip_dqdx_median*units::cm) * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
-                            / (beta / 1.38f / 0.273f);
+        float median_dedx = 0, mean_dedx = 0;
+        if (ctx.self.m_sp_dedx_use_recomb_model && ctx.self.m_recomb_model) {
+            // Route the stem dE/dx through the CONFIGURED recombination model
+            // (docs/pr/2 sec 2e(i) third correctness item).  The vec entries
+            // are MIP-normalized; un-normalize to e/cm and evaluate over 1 cm.
+            const double dx = 1 * units::cm;
+            const double mip = ctx.self.m_mip_dqdx_median * units::cm;  // e/cm
+            median_dedx = ctx.self.m_recomb_model->dE(median_dqdx * mip, dx) / units::MeV;
+            mean_dedx   = ctx.self.m_recomb_model->dE(mean_dqdx   * mip, dx) / units::MeV;
+        }
+        else {
+            // Legacy byte-identical path: inline float inverse Modified-Box
+            // frozen at the uBooNE field (A=1.0, B=0.255, rho=1.38, 0.273 kV/cm),
+            // bypassing the configured model (prototype
+            // NeutrinoID_singlephoton_tagger.h lines 2500-2519).
+            const float alpha = 1.0f, beta = 0.255f;
+            median_dedx = (std::exp(median_dqdx * (ctx.self.m_mip_dqdx_median*units::cm) * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
+                          / (beta / 1.38f / 0.273f);
+            mean_dedx   = (std::exp(mean_dqdx   * (ctx.self.m_mip_dqdx_median*units::cm) * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
+                          / (beta / 1.38f / 0.273f);
+        }
         if (median_dedx < 0) median_dedx = 0;
         if (median_dedx > 50) median_dedx = 50;
-        float mean_dedx   = (std::exp(mean_dqdx   * (ctx.self.m_mip_dqdx_median*units::cm) * 23.6e-6 * beta / 1.38f / 0.273f) - alpha)
-                            / (beta / 1.38f / 0.273f);
         if (mean_dedx < 0) mean_dedx = 0;
         if (mean_dedx > 50) mean_dedx = 50;
 
@@ -2501,8 +2517,11 @@ bool PatternAlgorithms::singlephoton_tagger(
 
     if (flag_hol) flag_sp = false;
 
-    // Final threshold cuts
-    if (ti.shw_sp_vec_mean_dedx < 2.3f)                             flag_sp = false;
+    // Final threshold cuts.  The mean-dedx threshold is tuned against the
+    // legacy (uBooNE-field) dE/dx scale -- retune it together with
+    // sp_dedx_use_recomb_model (float member: default compares bit-identically
+    // to the legacy 2.3f literal).
+    if (ti.shw_sp_vec_mean_dedx < ctx.self.m_sp_mean_dedx_cut)      flag_sp = false;
     if (num_protons + num_mip_tracks > 0. && max_shw_dis < 2.)      flag_sp = false;
 
     (void)flag_lol;  // filled in TaggerInfo but not a direct cut in this port

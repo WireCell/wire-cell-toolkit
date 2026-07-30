@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -488,7 +488,27 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if kine_proton_recom_factor != null then { kine_proton_recom_factor: kine_proton_recom_factor } else {})
               + (if kine_plane_weights != null then { kine_plane_weights: kine_plane_weights } else {})
               + (if kine_plane_asym_switch != null then { kine_plane_asym_switch: kine_plane_asym_switch } else {})
-              + (if kine_w_value != null then { kine_w_value: kine_w_value } else {}),
+              + (if kine_w_value != null then { kine_w_value: kine_w_value } else {})
+              // Muon median-dQ/dx-vs-length envelope [c0, c1, pivot_cm, power]:
+              // cut = c0 + c1*(pivot/L)^power, a multiple of mip_dqdx_median,
+              // used at NINE tagger sites (numu x2, vertex-finder, nue x4, ssm,
+              // cosmic -- docs/pr/2 sec 2e(iv)).  C++ default
+              // [0.8866, 0.9533, 18, 0.4234] = the prototype's empirical uBooNE
+              // stopping-muon refit; key omitted when null => byte-identical
+              // pre-knob config.  pivot and power must be > 0 (C++ rejects with
+              // a warning).
+              + (if muon_dqdx_curve != null then { muon_dqdx_curve: muon_dqdx_curve } else {})
+              // Single-photon stem dE/dx conversion (docs/pr/2 sec 2e(i) third
+              // correctness item).  C++ default false = the inline float inverse
+              // Modified-Box frozen at uBooNE's 0.273 kV/cm; key omitted when off
+              // => byte-identical.  When on: shw_sp_vec_{median,mean}_dedx go
+              // through the component's configured recombination_model instead.
+              + (if sp_dedx_use_recomb_model then { sp_dedx_use_recomb_model: true } else {})
+              // The hard shw_sp_vec_mean_dedx cut in MeV/cm.  C++ default 2.3 =
+              // the legacy literal (compared as float => bit-identical); key
+              // omitted when null.  Tuned against the INLINE (uBooNE-field)
+              // dE/dx scale -- retune together with the knob above.
+              + (if sp_mean_dedx_cut != null then { sp_mean_dedx_cut: sp_mean_dedx_cut } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.

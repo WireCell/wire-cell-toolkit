@@ -555,7 +555,7 @@ bool PatternAlgorithms::cosmic_tagger(
         segs_at_vtx(main_vertex, [&](SegmentPtr sg) {
             double length      = segment_track_length(sg);
             double med_dqdx    = segment_median_dQ_dx(sg);
-            double dqdx_cut    = 0.8866 + 0.9533 * std::pow(18 * units::cm / length, 0.4234);
+            double dqdx_cut    = muon_dqdx_cut(length);
             int    pdg         = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
             bool   is_shower   = seg_is_shower(sg);
 

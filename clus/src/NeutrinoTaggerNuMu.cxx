@@ -195,7 +195,7 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
             double length        = segment_track_length(sg);
             double direct_length = segment_track_direct_length(sg);
             double medium_dQ_dx  = segment_median_dQ_dx(sg);
-            double dQ_dx_cut     = 0.8866 + 0.9533 * std::pow(18*units::cm / length, 0.4234);
+            double dQ_dx_cut     = muon_dqdx_cut(length);
             int    pdg           = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
 
             auto [n_daughter_tracks, n_daughter_all] = count_daughters(graph, sg, main_vertex);
@@ -293,7 +293,7 @@ std::pair<bool, double> PatternAlgorithms::numu_tagger(
 
         double direct_length = segment_track_direct_length(sg);
         double medium_dQ_dx  = segment_median_dQ_dx(sg);
-        double dQ_dx_cut     = 0.8866 + 0.9533 * std::pow(18*units::cm / length, 0.4234);
+        double dQ_dx_cut     = muon_dqdx_cut(length);
 
         if (sg->flags_any(SegmentFlags::kAvoidMuonCheck)) continue;
 

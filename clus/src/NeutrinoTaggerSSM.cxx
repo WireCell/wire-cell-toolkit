@@ -1031,7 +1031,7 @@ bool PatternAlgorithms::ssm_tagger(
         score_e_fwd_bp  = score_e_fwd;
     }
 
-    double dQ_dx_cut   = 0.8866 + 0.9533 * std::pow(18.0/length, 0.4234);
+    double dQ_dx_cut   = muon_dqdx_cut_cm(length);
     double medium_dq_dx = segment_median_dQ_dx(ssm_sg) / m_mip_dqdx_median;
     double medium_dq_dx_bp = medium_dq_dx;
     if (dir == 1 && vtx_activity && break_point >= 0)

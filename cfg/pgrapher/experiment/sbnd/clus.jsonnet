@@ -752,7 +752,28 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               kine_proton_recom_factor=null,
               kine_plane_weights=null,
               kine_plane_asym_switch=null,
-              kine_w_value=null) = {
+              kine_w_value=null,
+              // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
+              // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
+              // multiple of mip_dqdx_median.  null = the C++ defaults = the
+              // prototype's empirical uBooNE stopping-muon refit
+              // [0.8866, 0.9533, 18, 0.4234], byte-identical (docs/pr/10).
+              muon_dqdx_curve=null,
+              // use_power_recomb: hand the taggers (STM + neutrino PR) the
+              // free-power Modified-Box recombination fitted to SBND stopping
+              // tracks (docs/55 sec 7g canonical, PowerBoxRecombination
+              // defaults) instead of the plain sbnd_box_recomb above.  false =
+              // byte-identical legacy config; flipping it changes every
+              // model-driven dQ/dx -> dE/dx conversion (docs/pr/10).
+              use_power_recomb=false,
+              // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
+              // through the configured recombination model instead of the
+              // inline uBooNE-field (0.273 kV/cm) inverse Box; C++ default
+              // false, key omitted => byte-identical.  sp_mean_dedx_cut
+              // (MeV/cm): the hard mean-dedx cut coupled to that choice; null
+              // = the legacy 2.3 (docs/pr/2 sec 2e(i), docs/pr/10).
+              sp_dedx_use_recomb_model=false,
+              sp_mean_dedx_cut=null) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -779,6 +800,19 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         name: 'sbnd_box_recomb',
         data: { A: 1.0, B: 0.255, Efield: 0.5, rho: 1.38, Wi: 23.6e-6 },
     },
+    // Free-power Modified Box fitted to SBND stopping-track dQ/dx vs residual
+    // range (docs/55 sec 7g; canonical parameters in stm_ref_dqdx.json:
+    // R = ln(A+u)/u, u = k*(dEdx/2.1)^p, times normalization C).  The data
+    // block restates the C++ defaults so the operating point is visible here;
+    // selected via use_power_recomb (docs/pr/10).
+    local sbnd_power_recomb = {
+        type: 'PowerBoxRecombination',
+        name: 'sbnd_power_recomb',
+        data: { A: 0.93, k: 0.282371, p: 1.362179, C: 0.855175, pivot: 2.1, Wi: 23.6e-6, dedx_max: 77.0 },
+    },
+    // The recombination model the taggers actually receive.  With
+    // use_power_recomb=false this compiles to exactly the pre-knob config.
+    local sbnd_recomb = if use_power_recomb then sbnd_power_recomb else sbnd_box_recomb,
     // TGM fiducial: ONE box spanning BOTH TPCs (the overall FV bounds of
     // dvm above), so a cathode-crossing track is not an "exiter" at x=0.
     // The default fiducial=dv cannot serve here: DetectorVolumes::contained()
@@ -880,7 +914,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         tagger_check_stm: cm.tagger_check_stm(
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
-            recombination_model=wc.tn(sbnd_box_recomb),
+            recombination_model=wc.tn(sbnd_recomb),
             require_in_scope=true,
             // save_stm_fit (C++ default false; key omitted when off =>
             // byte-identical): persist per-pass STM fits as cluster PCs +
@@ -1052,7 +1086,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         tagger_check_neutrino: cm.tagger_check_neutrino(
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
-            recombination_model=wc.tn(sbnd_box_recomb),
+            recombination_model=wc.tn(sbnd_recomb),
             perf=true,
             dl_weights=dl_weights,
             // The DL re-rank sub-knobs, pinned here rather than inherited: they
@@ -1087,7 +1121,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             kine_proton_recom_factor=kine_proton_recom_factor,
             kine_plane_weights=kine_plane_weights,
             kine_plane_asym_switch=kine_plane_asym_switch,
-            kine_w_value=kine_w_value),
+            kine_w_value=kine_w_value,
+            muon_dqdx_curve=muon_dqdx_curve,
+            sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
+            sp_mean_dedx_cut=sp_mean_dedx_cut),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
         // geometry-free TaggerInfo consumers).  The weights are the
         // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -1170,7 +1207,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
     // extra_uses) when a tagger is in the pipeline.
     local tagger_uses = (if std.member(pipeline_names, 'tagger_check_stm')
                          || std.member(pipeline_names, 'tagger_check_neutrino')
-                         then [sbnd_box_recomb] + extra_uses else [])
+                         then [sbnd_recomb] + extra_uses else [])
                         + (if std.member(pipeline_names, 'tagger_check_tgm')
                            || std.member(pipeline_names, 'tagger_check_fc')
                            || (stm_consistent_fv
@@ -1412,7 +1449,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        kine_fudge_factor=null, kine_recom_factor=null,
        kine_shower_fudge_factor=null, kine_shower_recom_factor=null,
        kine_proton_recom_factor=null, kine_plane_weights=null,
-       kine_plane_asym_switch=null, kine_w_value=null)::
+       kine_plane_asym_switch=null, kine_w_value=null,
+       // Muon dQ/dx-vs-length envelope + recombination-model selection +
+       // single-photon dE/dx routing (docs/pr/10) -- see the clus_pr arg
+       // comments.  All defaults = byte-identical legacy config.
+       muon_dqdx_curve=null,
+       use_power_recomb=false,
+       sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1469,6 +1512,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kine_proton_recom_factor=kine_proton_recom_factor,
                 kine_plane_weights=kine_plane_weights,
                 kine_plane_asym_switch=kine_plane_asym_switch,
-                kine_w_value=kine_w_value),
+                kine_w_value=kine_w_value,
+                muon_dqdx_curve=muon_dqdx_curve,
+                use_power_recomb=use_power_recomb,
+                sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
+                sp_mean_dedx_cut=sp_mean_dedx_cut),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

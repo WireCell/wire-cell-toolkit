@@ -132,6 +132,27 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
             }
         }
     }
+    // Muon median-dQ/dx-vs-length envelope {c0, c1, pivot_cm, power}
+    // (docs/pr/2 sec. 2e(iv)).  A non-positive pivot or power would make the
+    // envelope constant or inverted for every length; reject and keep default.
+    if (config.isMember("muon_dqdx_curve")) {
+        const auto& jv = config["muon_dqdx_curve"];
+        if (!jv.isArray() || jv.size() != 4u) {
+            SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: muon_dqdx_curve must be a 4-element array; keeping default");
+        }
+        else {
+            std::vector<double> v{jv[0].asDouble(), jv[1].asDouble(), jv[2].asDouble(), jv[3].asDouble()};
+            if (v[2] <= 0 || v[3] <= 0) {
+                SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: muon_dqdx_curve pivot and power must be > 0; keeping default");
+            }
+            else {
+                m_muon_dqdx_curve = v;
+            }
+        }
+    }
+    // Single-photon stem dE/dx conversion (docs/pr/2 sec. 2e(i)).
+    m_sp_dedx_use_recomb_model = get(config, "sp_dedx_use_recomb_model", m_sp_dedx_use_recomb_model);
+    m_sp_mean_dedx_cut         = get(config, "sp_mean_dedx_cut",         m_sp_mean_dedx_cut);
     auto dl_weights_raw = get(config, "dl_weights", m_dl_weights);
     if (!dl_weights_raw.empty()) {
         m_dl_weights = Persist::resolve(dl_weights_raw);
@@ -204,6 +225,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     for (double w : m_kine_plane_weights) cfg["kine_plane_weights"].append(w);
     cfg["kine_plane_asym_switch"]   = m_kine_plane_asym_switch;    // (med,max) asymmetry above which the max plane is dropped
     cfg["kine_w_value"]             = m_kine_w_value;              // eV per electron-ion pair
+    cfg["muon_dqdx_curve"] = Json::arrayValue;                     // {c0, c1, pivot_cm, power} of the muon
+    for (double c : m_muon_dqdx_curve) cfg["muon_dqdx_curve"].append(c);  // median-dQ/dx-vs-length envelope
+    cfg["sp_dedx_use_recomb_model"] = m_sp_dedx_use_recomb_model;  // false = inline uBooNE-field inverse Box
+    cfg["sp_mean_dedx_cut"]         = m_sp_mean_dedx_cut;          // MeV/cm; coupled to the knob above
     cfg["dl_weights"] = "";       // empty = DL vertex disabled
     cfg["dl_vtx_cut"] = 25.0;    // mm (= 2.5 cm)
     cfg["dQdx_scale"]  = 0.1;    // dQ scale factor for SCN network input
@@ -398,6 +423,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_kine_charge.plane_weights       = {m_kine_plane_weights[0], m_kine_plane_weights[1], m_kine_plane_weights[2]};
     pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
     pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
+    // Muon dQ/dx-vs-length envelope: c0/c1/power dimensionless, pivot cm -> internal.
+    pattern_algos.m_muon_dqdx_curve = {m_muon_dqdx_curve[0], m_muon_dqdx_curve[1],
+                                       m_muon_dqdx_curve[2] * units::cm, m_muon_dqdx_curve[3]};
+    // Single-photon stem dE/dx conversion; the cut narrows to float so the
+    // default compares bit-identically to the legacy 2.3f literal.
+    pattern_algos.m_sp_dedx_use_recomb_model = m_sp_dedx_use_recomb_model;
+    pattern_algos.m_sp_mean_dedx_cut         = static_cast<float>(m_sp_mean_dedx_cut);
+    pattern_algos.m_recomb_model             = m_recomb_model;
     m_track_fitter->set_perf(m_perf);
 
     int acc_segment_id = 0;

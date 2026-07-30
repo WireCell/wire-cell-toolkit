@@ -210,6 +210,28 @@ function(
     kine_plane_weights       = null,
     kine_plane_asym_switch   = null,
     kine_w_value             = null,
+    // Muon median-dQ/dx-vs-length envelope [c0, c1, pivot_cm, power]:
+    //   dQ_dx_cut = c0 + c1*(pivot/L)^power   (a multiple of mip_dqdx_median)
+    // used by nine tagger cuts (numu x2, vertex-finder, nue x4, ssm, cosmic).
+    // null = the C++ defaults = the prototype's empirical uBooNE stopping-muon
+    // refit [0.8866, 0.9533, 18, 0.4234], byte-identical (docs/pr/10, which
+    // also records the SBND table-derived fit).  Sensitivity check:
+    // --tla-code 'muon_dqdx_curve=[0.8866,0.9533,18,0.4234]' compiles the
+    // defaults explicitly and must not change any verdict.
+    muon_dqdx_curve          = null,
+    // Recombination-model selection for BOTH taggers (STM + neutrino PR):
+    // false = sbnd_box_recomb (A=1.0, B=0.255 at 0.5 kV/cm), byte-identical;
+    // true = sbnd_power_recomb, the free-power Modified Box fitted to SBND
+    // stopping tracks (docs/55 sec 7g canonical; docs/pr/10).  Changes every
+    // model-driven dQ/dx -> dE/dx conversion (kinematics, PID energies).
+    use_power_recomb         = false,
+    // Single-photon stem dE/dx: false = the inline uBooNE-field (0.273 kV/cm)
+    // inverse Box, byte-identical; true = route shw_sp_vec_{median,mean}_dedx
+    // through the configured recombination model above.  sp_mean_dedx_cut
+    // (MeV/cm) is the hard mean-dedx cut coupled to that choice; null = the
+    // legacy 2.3 (docs/pr/2 sec 2e(i) third correctness item; docs/pr/10).
+    sp_dedx_use_recomb_model = false,
+    sp_mean_dedx_cut         = null,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -410,7 +432,11 @@ function(
                              kine_proton_recom_factor=kine_proton_recom_factor,
                              kine_plane_weights=kine_plane_weights,
                              kine_plane_asym_switch=kine_plane_asym_switch,
-                             kine_w_value=kine_w_value);
+                             kine_w_value=kine_w_value,
+                             muon_dqdx_curve=muon_dqdx_curve,
+                             use_power_recomb=use_power_recomb,
+                             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
+                             sp_mean_dedx_cut=sp_mean_dedx_cut);
 
     local graph = g.intern(
         innodes=[source],
