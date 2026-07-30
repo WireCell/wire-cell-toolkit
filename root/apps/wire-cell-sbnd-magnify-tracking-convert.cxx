@@ -414,6 +414,27 @@ int main(int argc, char* argv[])
     double prev_x1{0}, prev_y1{0}, prev_z1{0};
     int prev_cluster_id = -1;
 
+    // rec_L ("Distance from start" in the GUI) restarts at every SUB-cluster, not
+    // only at every block.  The PR writer gives every vertex and every segment of a
+    // cluster the same ndf (SbndPrMagnifyTrackingVisitor: reco_ndf =
+    // cluster->get_cluster_id()), so without this the whole PR graph of a cluster is
+    // one running sum that also accumulates the hop from the end of one segment to
+    // the start of the next.  On SBND evt 172230 cluster 5 that is:
+    //
+    //   sub  -1  n= 25  len=1033.71 cm   <- the 25 vertices, pairwise hops
+    //   sub 5001..5056  25 real segments, 2.4 - 25.6 cm each, 231.5 cm total
+    //   inter-segment hops 522.0 cm      block total rec_L 1787.29 cm
+    //
+    // i.e. 1787 cm of "distance from start" on a detector whose diagonal is ~540 cm,
+    // with every real segment pushed past 1033 cm by the vertex run alone.
+    //
+    // No-op for STM dumps: SbndMagnifyTrackingVisitor writes
+    // ndf == sub_cluster_id == cid*10+pass, so the sub-cluster changes exactly when
+    // ndf does and the block has already restarted.  (Verified by re-converting
+    // work-stmcamp-dbg6/nusel_evt349241/tracking-stm.root: rec_L unchanged.)
+    int prev_sub_cluster_id = 0;
+    bool new_subcluster = false;
+
     std::map<std::tuple<int, int, int>, std::pair<int, int> > map_point_index;
 
     for (int i = 0; i != T_rec->GetEntries(); i++) {
@@ -453,12 +474,30 @@ int main(int argc, char* argv[])
 
             max_dis->push_back(0);
             total_dis2->push_back(0);
+            new_subcluster = true;
+        }
+        else if (has_vertex && sub_cluster_id != prev_sub_cluster_id) {
+            total_L->back() = 0;      // new PR segment: distance restarts
+            new_subcluster = true;
         }
         Npoints->back()++;
 
-        if (Npoints->back() != 1) {
+        // PR vertices (flag_vertex, sub_cluster_id -1) are point objects, not a
+        // trajectory: the writer emits all of a cluster's vertices before its
+        // segments and the hops between them are not a distance along anything.
+        // They all sit at 0.  (No-op for STM dumps, which have no vertex points.)
+        if (has_vertex && flag_vertex) {
+            total_L->back() = 0;
+            new_subcluster = true;
+        }
+
+        // Neither the first point of a block nor the first point of a sub-cluster
+        // has a predecessor on the same trajectory: adding the hop to it is what
+        // inflated the axis (see the block comment above).
+        if (!new_subcluster) {
             total_L->back() += sqrt(pow(x1 - prev_x1, 2) + pow(y1 - prev_y1, 2) + pow(z1 - prev_z1, 2));
         }
+        new_subcluster = false;
 
         Point p(x1 * units::cm, y1 * units::cm, z1 * units::cm);
         ps.push_back(p);
@@ -517,6 +556,7 @@ int main(int argc, char* argv[])
         prev_y1 = y1;
         prev_z1 = z1;
         prev_cluster_id = std::round(ndf);
+        prev_sub_cluster_id = sub_cluster_id;
     }
 
     add_points(pcloud1, ps);

@@ -314,3 +314,31 @@ predicate is `segment_is_dir_weak()` (`PRSegmentFunctions.cxx`).  Raw reads
 remain ONLY in: that predicate's fall-through, `break_segment()` flag
 propagation, and trace prints.  Full history: wcp-porting-validation
 `sbnd_xin/docs/pr/6_is-dir-weak-port-divergence.md`.
+
+## `pu/pv/pw/pt` published to Magnify-tracking: WCP writes DISPLAY coords, WCT writes INDEX coords
+
+INTENTIONAL divergence — do not "restore" the missing `+ 0.5`.
+
+WCP's `PR3DCluster::do_tracking()` publishes the projection of each fitted point
+with a half added on every axis
+(`prototype_base/pid/src/PR3DCluster_trajectory_fit.h:468-471`,
+`pu.push_back(offset_u + 0.5 + ...)`, likewise `pv + 2400`, `pw + 4800`, `pt`).
+That half is not geometry: it compensates the Magnify-tracking GUI, whose
+projection histograms are `TH2F(n, 0, n)` filled with `SetBinContent(index+1,
+...)`, so index *i* is painted centred on *i + 0.5*.  WCP therefore stores a
+DISPLAY coordinate, not a wire index — `pu` there is half a wire off the wire it
+names.
+
+The toolkit writers (`UbooneMagnifyTrackingVisitor`, `SbndMagnifyTrackingVisitor`,
+`SbndPrMagnifyTrackingVisitor`) publish `fit.pu` unshifted, i.e. an INDEX
+coordinate in the same frame as `T_proj_data.channel`, consistent with
+`Facade::point2wind` (`wind = round((y-center)/pitch - 0.5)`) and with
+TrackFitting's own 2-D fit target.  Integer = wire centre, and `T_rec_charge.pu`
+is directly comparable to `T_proj_data.channel`; same for `pt` and
+`time_slice`.
+
+The half bin lives in the VIEWER instead: `Magnify-tracking-SBND` bins its
+projection pads with edges `lo-0.5 … hi-0.5` on both axes, so a bin is centred on
+its index.  A port that "fixes" the writer to match WCP re-breaks that viewer by
+exactly half a channel and half a slice.  Measurement and full history:
+wcp-porting-validation `sbnd_xin/docs/pr/7_magnify-tracking-projection-alignment.md`.
