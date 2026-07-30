@@ -57,6 +57,12 @@ public:
         // sample excluded at the hypothesized stopping end (ill-defined
         // endpoints dilute or inflate the tip dQ/dx).  Runs before the vote.
         bool   m_endpoint_trim_retry{false};
+        // Minimum wcpt-path length (cm) for a segment to count as a leg in the
+        // fit_vertex position fit (doc sbnd_xin/docs/pr/9 sec. 11 F3c; default
+        // 0 = legacy include-all, byte-identical).  Stops vertex-activity
+        // stubs from dragging the vertex: >=3 surviving legs => fit on the
+        // survivors; <=2 => skip the fit (two-leg position already fit).
+        double m_fit_vertex_min_seg_length{0};
         // SSM beam-line reference directions in the detector frame, {x,y,z}.
         // Defaults = the prototype's uBooNE BNB-target / NuMI-absorber vectors
         // (absent keys => byte-identical).  SBND has no value for either yet

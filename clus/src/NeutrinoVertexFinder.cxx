@@ -1885,8 +1885,61 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
     
     // std::cout << "MyFCN: " << sg_set.size() << " segments to be fitted for vertex " << vertex->fit_index() << std::endl;
 
-    // Add all segments to the fitting
-    for (auto it = sg_set.begin(); it != sg_set.end(); it++) {
+    // Add all segments to the fitting.  With m_fit_vertex_min_seg_length set
+    // (doc sbnd_xin/docs/pr/9 sec. 11 F3c; 0 = legacy include-all), segments
+    // shorter than the cut are excluded from the position fit so that
+    // vertex-activity stubs cannot drag the vertex -- unless fewer than 2
+    // segments survive, in which case the full set is kept.
+    std::vector<SegmentPtr> fit_segments(sg_set.begin(), sg_set.end());
+    if (m_fit_vertex_min_seg_length > 0) {
+        // Measure in WCPT space: the fit cloud of a freshly created
+        // vertex-activity stub can spread well past its 0.6 cm wcpt path
+        // (evt 172230: fit span > 1 cm before any refit), so fit-based
+        // lengths cannot identify the stub.  The wcpt path is the segment's
+        // graph-topology extent.
+        auto wcpt_path_length = [](SegmentPtr sg) {
+            const auto& wcpts = sg->wcpts();
+            double len = 0;
+            for (size_t i = 0; i + 1 < wcpts.size(); ++i) {
+                len += (wcpts[i+1].point - wcpts[i].point).magnitude();
+            }
+            return len;
+        };
+        std::vector<SegmentPtr> long_segments;
+        for (auto sg : fit_segments) {
+            const double wlen = wcpt_path_length(sg);
+            if (sg_set.size() > 2) {
+                s_log->trace("fit_vertex: cluster {} candidate segment wcpt_len={:.2f} cm fit_len={:.2f} cm (cut {:.2f} cm)",
+                    cluster.ident(), wlen/units::cm,
+                    segment_track_direct_length(sg)/units::cm,
+                    m_fit_vertex_min_seg_length/units::cm);
+            }
+            if (wlen >= m_fit_vertex_min_seg_length) {
+                long_segments.push_back(sg);
+            }
+        }
+        if (long_segments.size() < fit_segments.size()) {
+            if (long_segments.size() <= 2) {
+                // All extra legs are below the cut: this is effectively a
+                // two-leg (or fewer) vertex whose position the plain two-leg
+                // fit already determined.  Refitting on the re-tracked fit
+                // clouds reproduces the stub-induced drag even with the stub
+                // excluded from the MyFCN accumulation (evt 172230: identical
+                // 2.4 cm displacement -- the stub corrupts the fit through
+                // do_multi_tracking charge competition, not through its own
+                // PCA term), so skip the fit outright.
+                s_log->trace("fit_vertex: cluster {} skipping vertex fit: only {} segment(s) >= {:.2f} cm (of {})",
+                    cluster.ident(), long_segments.size(),
+                    m_fit_vertex_min_seg_length/units::cm, fit_segments.size());
+                return false;
+            }
+            s_log->trace("fit_vertex: cluster {} excluding {} short segment(s) (< {:.2f} cm) from the vertex fit",
+                cluster.ident(), fit_segments.size() - long_segments.size(),
+                m_fit_vertex_min_seg_length/units::cm);
+            fit_segments = long_segments;
+        }
+    }
+    for (auto it = fit_segments.begin(); it != fit_segments.end(); it++) {
         fcn.AddSegment(*it);
     }
     

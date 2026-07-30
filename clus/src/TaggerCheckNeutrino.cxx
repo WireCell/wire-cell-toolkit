@@ -74,6 +74,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_proton_dir_score_max = get(config, "proton_dir_score_max", m_proton_dir_score_max);
     m_proton_dir_asym_min  = get(config, "proton_dir_asym_min",  m_proton_dir_asym_min);
     m_endpoint_trim_retry  = get(config, "endpoint_trim_retry",  m_endpoint_trim_retry);
+    m_fit_vertex_min_seg_length = get(config, "fit_vertex_min_seg_length", m_fit_vertex_min_seg_length);  // cm
     // SSM beam-line reference directions, {x,y,z} in the detector frame.
     // Anything malformed keeps the default and warns rather than falling
     // through to (0,0,0): a zero reference makes every safe_acos(dot) return
@@ -142,6 +143,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["proton_dir_score_max"] = m_proton_dir_score_max;
     cfg["proton_dir_asym_min"]  = m_proton_dir_asym_min;
     cfg["endpoint_trim_retry"]  = m_endpoint_trim_retry;  // false = legacy (no endpoint-trim retry on abstention)
+    cfg["fit_vertex_min_seg_length"] = m_fit_vertex_min_seg_length;  // cm; 0 = legacy (all segments enter the vertex fit)
     // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber.
     // Assign the array first: append() alone would accumulate rather than overwrite if
     // this ever ran against a reused Configuration, and a 6-element array would be
@@ -324,6 +326,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_proton_dir_score_max = m_proton_dir_score_max;
     pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
     pattern_algos.m_endpoint_trim_retry  = m_endpoint_trim_retry;
+    pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
     // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
     pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
     pattern_algos.m_ssm_absorber_dir = WireCell::Vector(m_ssm_absorber_dir[0], m_ssm_absorber_dir[1], m_ssm_absorber_dir[2]);

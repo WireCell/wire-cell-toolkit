@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, ssm_target_dir=null, ssm_absorber_dir=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, ssm_target_dir=null, ssm_absorber_dir=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -417,6 +417,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // excluded at each orientation's hypothesized stopping end (runs
               // before the proton_dir_vote fallback).
               + (if endpoint_trim_retry then { endpoint_trim_retry: true } else {})
+              // fit_vertex short-segment exclusion (doc pr/9 sec 11 F3c), value in cm.
+              // C++ default 0 = all segments enter the vertex position fit; key omitted
+              // when null => byte-identical.  When set: segments with wcpt-path length
+              // below the cut do not count as vertex-fit legs -- >=3 surviving legs
+              // fit on the survivors, <=2 skip the fit (the two-leg position was
+              // already fit; refitting on stub-contaminated re-tracked clouds
+              // reproduces the drag).  SBND: 1.0 cm (owner 2026-07-30, deliberate
+              // prototype divergence).
+              + (if fit_vertex_min_seg_length != null then { fit_vertex_min_seg_length: fit_vertex_min_seg_length } else {})
               // SSM beam-line reference directions [x,y,z] in the detector frame,
               // feeding the 8 ssm_*_angle_{target,absorber} BDT features.  C++
               // defaults = the prototype's uBooNE BNB-target (0.46,0.05,0.885) and

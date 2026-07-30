@@ -76,6 +76,19 @@ namespace WireCell::Clus::PR {
         // Endpoint-trim retry (doc sbnd_xin/docs/pr/9 sec. 6 F1).  C++ default
         // false => legacy abstention path, byte-identical.
         bool   m_endpoint_trim_retry{false};
+        // Minimum WCPT-path length for a segment to count as a leg in the
+        // fit_vertex position fit (doc sbnd_xin/docs/pr/9 sec. 11 F3c, owner
+        // 2026-07-30, deliberate prototype divergence): very short vertex-
+        // activity stubs otherwise drag the fitted vertex (evt 172230: a
+        // 0.62 cm drift-blur stub moved the true vertex 2.4 cm).  Measured in
+        // wcpt space (a fresh stub's FIT cloud spreads past 1 cm).  If >=3
+        // legs survive, the fit runs on the survivors; if the exclusion
+        // leaves <=2, the vertex fit is skipped (an effectively two-leg
+        // vertex was already fit by the plain two-leg pass, and refitting on
+        // stub-contaminated re-tracked clouds reproduces the drag).  Excluded
+        // segments stay in the graph and the particle flow.
+        // C++ default 0 => no filtering, legacy byte-identical.
+        double m_fit_vertex_min_seg_length{0};
         // Bundle the do_track_pid-related knobs for the free segment functions.
         TrackPidOptions track_pid_options() const {
             TrackPidOptions o;
