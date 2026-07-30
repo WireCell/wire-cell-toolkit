@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -393,7 +393,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on (beam gate only): skip in-window mains with flag_TGM/flag_STM/lm_flag>0.
-              + (if nu_skip_cosmic then { nu_skip_cosmic: true } else {}),
+              + (if nu_skip_cosmic then { nu_skip_cosmic: true } else {})
+              // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
+              // When on: direction-weakness reads use segment_is_dir_weak() (score thresholds),
+              // the faithful port of prototype ProtoSegment::is_dir_weak() -- see sbnd_xin/docs/pr/6.
+              + (if dir_weak_use_score then { dir_weak_use_score: true } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.

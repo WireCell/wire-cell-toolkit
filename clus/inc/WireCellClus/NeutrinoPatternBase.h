@@ -37,6 +37,20 @@ namespace WireCell::Clus::PR {
         public:
         bool m_perf{false};  // if true, print per-step timing to stdout
 
+        // Direction-weakness read fidelity switch (default false = legacy port
+        // behavior, byte-identical).  The prototype's ONLY public accessor is the
+        // score-thresholded ProtoSegment::is_dir_weak() (the raw member is
+        // private); the port read the raw flag at every one of the ~83 sites
+        // instead.  When true, all reads route through segment_is_dir_weak()
+        // (PRSegmentFunctions.cxx), restoring the prototype semantics: a mu/p
+        // segment whose particle_score is poor (or still the sentinel 100) is
+        // treated as weak.  See wcp-porting-img sbnd_xin/docs/pr/6.
+        bool m_dir_weak_use_score{false};
+        // All PatternAlgorithms code must read direction weakness through this,
+        // never seg->dir_weak() directly (flag propagation in break_segment is
+        // the one intentional raw read, and it lives in PRSegmentFunctions.cxx).
+        bool seg_dir_weak(SegmentPtr seg) const;
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.

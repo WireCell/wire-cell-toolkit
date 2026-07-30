@@ -632,7 +632,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // byte-identical uBooNE config).  DEFAULT TRUE for SBND (owner
               // 2026-07-30, sbnd_xin/docs/pr/3); zero production impact while
               // tagger_check_neutrino is not in pipeline_names.
-              nu_skip_cosmic=true) = {
+              nu_skip_cosmic=true,
+              // dir_weak_use_score: route the PR chain's direction-weakness
+              // reads through segment_is_dir_weak() -- the faithful port of the
+              // prototype's ONLY public accessor ProtoSegment::is_dir_weak()
+              // (score>0.07/0.13 thresholds; sentinel score 100 = weak).  The
+              // original port read the raw flag at all ~83 sites (docs/pr/6).
+              // C++ default false (key omitted => byte-identical uBooNE
+              // config).  DEFAULT TRUE for SBND (owner 2026-07-30); zero
+              // production impact while tagger_check_neutrino is not in
+              // pipeline_names.
+              dir_weak_use_score=true) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -946,7 +956,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             dl_vtx_score_scale=1000.0,
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
-            nu_skip_cosmic=nu_skip_cosmic),
+            nu_skip_cosmic=nu_skip_cosmic,
+            dir_weak_use_score=dir_weak_use_score),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
         // geometry-free TaggerInfo consumers).  The weights are the
         // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -1241,7 +1252,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stm_deficit_guard=true, stm_vertex_kink_guard=true,
        stm_d66_cuts=true, stm_michel_res_cm=6.5, stm_proton_tm_max=1.05,
        stm_proton_b_ks2_max=0.055, stm_proton_c_peak_max=4.1,
-       beam_window_only=true, nu_skip_cosmic=true)::
+       beam_window_only=true, nu_skip_cosmic=true,
+       // prototype-faithful is_dir_weak() reads -- see the clus_pr arg comment.
+       dir_weak_use_score=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1278,6 +1291,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_proton_b_ks2_max=stm_proton_b_ks2_max,
                 stm_proton_c_peak_max=stm_proton_c_peak_max,
                 beam_window_only=beam_window_only,
-                nu_skip_cosmic=nu_skip_cosmic),
+                nu_skip_cosmic=nu_skip_cosmic,
+                dir_weak_use_score=dir_weak_use_score),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

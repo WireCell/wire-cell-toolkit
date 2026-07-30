@@ -339,7 +339,7 @@ void PatternAlgorithms::shower_clustering_connecting_to_main_vertex(Graph& graph
 
                 // flag_good_track: only evaluate while still false (early skip once set)
                 if (!flag_good_track &&
-                    !sg1->dir_weak() &&
+                    !seg_dir_weak(sg1) &&
                     (length > 3.6 * units::cm || (length > 2.4 * units::cm && medium_dQ_dx_norm > 2.5))) {
 
                     VertexPtr v1 = graph[boost::source(seg_edesc, graph)].vertex;
@@ -775,7 +775,7 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
             }
             
             if (is_shower || particle_type == 0 || 
-                ((std::abs(particle_type) == 13 || std::abs(particle_type) == 211) && seg->dir_weak())) {
+                ((std::abs(particle_type) == 13 || std::abs(particle_type) == 211) && seg_dir_weak(seg))) {
                 double length = segment_track_length(seg);
                 acc_length += length;
                 
@@ -1428,7 +1428,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
                     particle_type_sp1 = sg->particle_info()->pdg();
                 if (particle_type_sp1 == 0 ||
                     (std::abs(particle_type_sp1) == 13 &&
-                     segment_track_length(sg) < 40 * units::cm && sg->dir_weak())) {
+                     segment_track_length(sg) < 40 * units::cm && seg_dir_weak(sg))) {
                     auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model);
                     sg->particle_info(std::make_shared<Aux::ParticleInfo>(
                         11, particle_data->get_particle_mass(11), particle_data->pdg_to_name(11),
@@ -1570,7 +1570,7 @@ void PatternAlgorithms::shower_clustering_in_other_clusters(Graph& graph, Vertex
             }
             
             if (particle_type == 0 || 
-                (std::abs(particle_type) == 13 && segment_track_length(sg) < 40 * units::cm && sg->dir_weak())) {
+                (std::abs(particle_type) == 13 && segment_track_length(sg) < 40 * units::cm && seg_dir_weak(sg))) {
                 auto four_momentum = segment_cal_4mom(sg, 11, particle_data, recomb_model);
                 
                 // Create ParticleInfo for electron
@@ -1656,7 +1656,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
         if (it_mv != map_vertex_segments.end()) {
             for (auto sg : it_mv->second) {
                 // Skip strong direction segments or certain particle types
-                if (!sg->dir_weak()) continue;
+                if (!seg_dir_weak(sg)) continue;
                 
                 int particle_type = 0;
                 if (sg->has_particle_info() && sg->particle_info()) {
@@ -1803,7 +1803,7 @@ void PatternAlgorithms::examine_shower_1(Graph& graph, VertexPtr main_vertex, In
                 double length = segment_track_length(sg1);
                 double medium_dQ_dx = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
                 
-                if (!sg1->dir_weak()) {
+                if (!seg_dir_weak(sg1)) {
                     // Find end vertex
                     auto seg_edesc = sg1->get_descriptor();
                     auto source_vdesc = boost::source(seg_edesc, graph);
@@ -2116,7 +2116,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
                 if (!sg1 || sg1->cluster() != sh->start_segment()->cluster()) continue;
                 double len = segment_track_length(sg1);
                 ttl += len;
-                if (!sg1->dir_weak()) ttrk += len;
+                if (!seg_dir_weak(sg1)) ttrk += len;
             }
             bool comp_ok = !(ttrk > 3 * units::cm && ttrk > 0.25 * ttl);
             result.push_back({sh, ct, sv, E, dir_i, dir_fm, ang_drift, ang_fm_i, comp_ok});
@@ -2145,7 +2145,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
             }
 
             double sg_length = segment_track_length(sg);
-            if ((sg_length > 45 * units::cm && !sg->dir_weak()) || sg_length > 55 * units::cm) continue;
+            if ((sg_length > 45 * units::cm && !seg_dir_weak(sg)) || sg_length > 55 * units::cm) continue;
 
             auto seg_edesc = sg->get_descriptor();
             VertexPtr v1   = graph[boost::source(seg_edesc, graph)].vertex;
@@ -2197,7 +2197,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
                     };
 
                     if (c.conn_type == 2) {
-                        if ((!sg->dir_weak() && sg_length > 3 * units::cm) || flag_tmp_connected) {
+                        if ((!seg_dir_weak(sg) && sg_length > 3 * units::cm) || flag_tmp_connected) {
                             if (get_closest_dis() < 8 * units::cm && c.Eshower > 75 * units::MeV && tmp_angle < 6) {
                                 // Allow this condition
                             } else {
@@ -2209,13 +2209,13 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
 
                     if ((c.Eshower > 800 * units::MeV && tmp_angle < 30) ||
                         (c.Eshower > 150 * units::MeV && tmp_angle < 10) ||
-                        (c.Eshower > 150 * units::MeV && tmp_angle < 18 && c.conn_type == 1 && sg->dir_weak()) ||
+                        (c.Eshower > 150 * units::MeV && tmp_angle < 18 && c.conn_type == 1 && seg_dir_weak(sg)) ||
                         (c.Eshower > 100 * units::MeV && tmp_angle < 10 && sg_length < 25 * units::cm) ||
                         (c.Eshower > 250 * units::MeV && tmp_angle < 15) ||
                         (c.Eshower > 360 * units::MeV && tmp_angle < 25) ||
                         (c.Eshower > 100 * units::MeV && c.Eshower <= 150 * units::MeV && tmp_angle < 15 &&
                          sg_length < 25 * units::cm && flag_checked) ||
-                        (c.Eshower > 60 * units::MeV && c.conn_type == 2 && sg->dir_weak() &&
+                        (c.Eshower > 60 * units::MeV && c.conn_type == 2 && seg_dir_weak(sg) &&
                          ((tmp_angle < 15   && get_closest_dis() < 18 * units::cm) ||
                           (tmp_angle < 17.5 && get_closest_dis() <  6 * units::cm)) &&
                          sg_length < 15 * units::cm) ||
@@ -2229,7 +2229,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
 
             if (map_merge_seg_shower.count(sg)) continue;
             if (flag_checked) continue;
-            if (!sg->dir_weak() && sg_length > 6 * units::cm && daughter_length < 40 * units::cm) continue;
+            if (!seg_dir_weak(sg) && sg_length > 6 * units::cm && daughter_length < 40 * units::cm) continue;
 
             // ---- Case II: showers at main_vertex (indirect connections only) ----
             {
@@ -2316,7 +2316,7 @@ void PatternAlgorithms::examine_showers(Graph& graph, VertexPtr main_vertex, Ind
         IndexedSegmentSet tmp_used_segments;
         shower->complete_structure_with_start_segment(tmp_used_segments);
         if (pair_conn_type != 1) {
-            if (segment_track_length(sg) > 44 * units::cm || sg->dir_weak())
+            if (segment_track_length(sg) > 44 * units::cm || seg_dir_weak(sg))
                 sg->set_flags(SegmentFlags::kAvoidMuonCheck);
         } else {
             if (shower->get_num_main_segments() >= 3)
@@ -2837,7 +2837,7 @@ void PatternAlgorithms::id_pi0_without_vertex(int acc_segment_id, IndexedShowerS
         for (auto sg : main_vertex_segs) {
             if (map_segment_in_shower.find(sg) == map_segment_in_shower.end()) {
                 double sg_length = segment_track_length(sg);
-                if (sg_length < 1.2 * units::cm && (sg->dirsign() == 0 || sg->dir_weak())) {
+                if (sg_length < 1.2 * units::cm && (sg->dirsign() == 0 || seg_dir_weak(sg))) {
                     flag_return = false;
                 }
             } else {
@@ -3139,7 +3139,7 @@ void PatternAlgorithms::shower_clustering_with_nv(int acc_segment_id, IndexedSho
                     "shower_clustering_with_nv entry: seg id={} nfits={} nwcpts={} dirsign={} dir_weak={}"
                     " shower_topo={} shower_traj={} pdg={}",
                     seg->id(), seg->fits().size(), seg->wcpts().size(),
-                    seg->dirsign(), seg->dir_weak() ? 1 : 0,
+                    seg->dirsign(), seg_dir_weak(seg) ? 1 : 0,
                     seg->flags_any(SegmentFlags::kShowerTopology) ? 1 : 0,
                     seg->flags_any(SegmentFlags::kShowerTrajectory) ? 1 : 0,
                     seg->has_particle_info() ? seg->particle_info()->pdg() : 0);

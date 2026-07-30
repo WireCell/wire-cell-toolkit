@@ -36,6 +36,11 @@ public:
         std::string m_grouping_name{"live"};
         std::string m_trackfitting_config_file;  // Path to TrackFitting config file
         bool m_perf{false};  // if true, print per-step timing to stdout
+        // Route direction-weakness reads through segment_is_dir_weak() (the
+        // faithful port of prototype ProtoSegment::is_dir_weak(), score
+        // thresholds included).  C++ default false = legacy raw-flag reads,
+        // byte-identical.  See PatternAlgorithms::m_dir_weak_use_score.
+        bool m_dir_weak_use_score{false};
         std::string m_dl_weights;              // path to SCN vertex .pth weights file (empty = DL disabled)
         double m_dl_vtx_cut{25.0};             // max distance (mm) from DL prediction to accept candidate vertex (default 2.5 cm)
         double m_dQdx_scale{0.1};              // scale factor applied to dQ before passing to SCN network

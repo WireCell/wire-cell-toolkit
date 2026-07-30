@@ -1274,7 +1274,7 @@ static int mip_identification_sp(SpContext& ctx,
         for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
             SegmentPtr sg1 = ctx.graph[*eit].segment;
             if (!sg1 || sg1 == sg) continue;
-            if (!sg1->dir_weak() || segment_track_length(sg1) > 10*units::cm) ++n_good_tracks;
+            if (!ctx.self.seg_dir_weak(sg1) || segment_track_length(sg1) > 10*units::cm) ++n_good_tracks;
         }
     }
     if (Eshower < 600*units::MeV) {
@@ -1620,7 +1620,7 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
             bool is_pdg11 = sg1->has_particle_info() && sg1->particle_info()->pdg() == 11;
             bool is_weak_muon = sg1->has_particle_info() &&
                                 sg1->particle_info()->pdg() == 13 &&
-                                sg1->dir_weak() &&
+                                ctx.self.seg_dir_weak(sg1) &&
                                 segment_track_length(sg1) < 6*units::cm;
             if (is_pdg11 || is_weak_muon) {
                 Point dp = vtx_point;
@@ -1636,7 +1636,7 @@ static bool high_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerI
             }
             double norm_dQ = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
             bool is_proton = sg1->has_particle_info() && sg1->particle_info()->pdg() == 2212;
-            if ((!sg1->dir_weak() || is_proton || segment_track_length(sg1) > 20*units::cm) &&
+            if ((!ctx.self.seg_dir_weak(sg1) || is_proton || segment_track_length(sg1) > 20*units::cm) &&
                 !seg_is_shower(sg1))
                 ++n_valid_tracks;
             else if (norm_dQ > 2.0 && segment_track_length(sg1) > 1.8*units::cm)
@@ -1805,7 +1805,7 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
             double tmp_angle = dir2.angle(dir1_stem) / M_PI * 180.0;
             if (tmp_angle < min_angle_vtx) min_angle_vtx = tmp_angle;
             bool is_proton = sg1->has_particle_info() && sg1->particle_info()->pdg() == 2212;
-            if ((!sg1->dir_weak() || is_proton || segment_track_length(sg1) > 20*units::cm) &&
+            if ((!ctx.self.seg_dir_weak(sg1) || is_proton || segment_track_length(sg1) > 20*units::cm) &&
                 !seg_is_shower(sg1))
                 ++n_valid_tracks;
         }
@@ -1890,7 +1890,7 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
                 n_vtx_segs_global > 1 && Eshower < 300*units::MeV && main_len < 20*units::cm)
                 flag_ov2 = true;
             // 7020_249_12479
-            if (sg1->dir_weak() && len1 < 8*units::cm && ang2 < 30 &&
+            if (ctx.self.seg_dir_weak(sg1) && len1 < 8*units::cm && ang2 < 30 &&
                 n_vtx_segs_global == 2 && Eshower < 400*units::MeV)
                 flag_ov2 = true;
 
@@ -1902,7 +1902,7 @@ static bool low_energy_overlapping_sp(SpContext& ctx, ShowerPtr shower, TaggerIn
             ti.shw_sp_lol_2_v_vtx_n_segs.push_back(n_vtx_segs_global);
             ti.shw_sp_lol_2_v_energy.push_back(Eshower / units::MeV);
             ti.shw_sp_lol_2_v_shower_main_length.push_back(main_len / units::cm);
-            ti.shw_sp_lol_2_v_flag_dir_weak.push_back(sg1->dir_weak());
+            ti.shw_sp_lol_2_v_flag_dir_weak.push_back(ctx.self.seg_dir_weak(sg1));
 
             if (flag_ov2) flag_overlap_2_save = true;
         }
@@ -2315,7 +2315,7 @@ bool PatternAlgorithms::singlephoton_tagger(
                 if (!sg1 || sg1 == sg) continue;
                 double len1 = segment_track_length(sg1);
                 if (!seg_is_shower(sg1) &&
-                    (len1 > 8*units::cm || (!sg1->dir_weak() && len1 > 5*units::cm)))
+                    (len1 > 8*units::cm || (!seg_dir_weak(sg1) && len1 > 5*units::cm)))
                     ++first_pass_valid_tracks;
             }
         }
@@ -2428,7 +2428,7 @@ bool PatternAlgorithms::singlephoton_tagger(
         if (!sg1 || sg1 == sg) continue;
         double len1 = segment_track_length(sg1);
         if (!seg_is_shower(sg1) &&
-            (len1 > 8*units::cm || (!sg1->dir_weak() && len1 > 5*units::cm)))
+            (len1 > 8*units::cm || (!seg_dir_weak(sg1) && len1 > 5*units::cm)))
             ++num_valid_tracks;
     }
 

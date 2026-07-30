@@ -67,6 +67,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
     m_trackfitting_config_file = get(config, "trackfitting_config_file", m_trackfitting_config_file);
     m_perf = get(config, "perf", m_perf);
+    m_dir_weak_use_score = get(config, "dir_weak_use_score", m_dir_weak_use_score);
     auto dl_weights_raw = get(config, "dl_weights", m_dl_weights);
     if (!dl_weights_raw.empty()) {
         m_dl_weights = Persist::resolve(dl_weights_raw);
@@ -107,6 +108,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
 
     cfg["trackfitting_config_file"] = "";
     cfg["perf"] = m_perf;
+    cfg["dir_weak_use_score"] = m_dir_weak_use_score;  // false = legacy raw dir_weak flag reads
     cfg["dl_weights"] = "";       // empty = DL vertex disabled
     cfg["dl_vtx_cut"] = 25.0;    // mm (= 2.5 cm)
     cfg["dQdx_scale"]  = 0.1;    // dQ scale factor for SCN network input
@@ -274,6 +276,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
     WireCell::Clus::PR::PatternAlgorithms pattern_algos;
     pattern_algos.m_perf = m_perf;
+    pattern_algos.m_dir_weak_use_score = m_dir_weak_use_score;
     m_track_fitter->set_perf(m_perf);
 
     int acc_segment_id = 0;

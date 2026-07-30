@@ -50,6 +50,11 @@ std::vector<SegmentPtr> PatternAlgorithms::find_cluster_segments(Graph& graph, c
     return result;
 }
 
+bool PatternAlgorithms::seg_dir_weak(SegmentPtr seg) const
+{
+    return m_dir_weak_use_score ? segment_is_dir_weak(seg) : seg->dir_weak();
+}
+
 bool PatternAlgorithms::clean_up_graph(Graph& graph, const Facade::Cluster& cluster)
 {
     bool modified = false;
@@ -1864,7 +1869,7 @@ void PatternAlgorithms::print_segs_info(Graph& graph, Facade::Cluster& cluster, 
         int particle_type = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
         double particle_mass = sg->has_particle_info() ? sg->particle_info()->mass() / units::MeV : 0;
         double kinetic_energy = sg->has_particle_info() ? (sg->particle_info()->energy() - sg->particle_info()->mass()) / units::MeV : 0;
-        bool is_dir_weak = sg->dir_weak();
+        bool is_dir_weak = seg_dir_weak(sg);
         
         // Determine segment type and print
         if (sg->flags_any(SegmentFlags::kShowerTopology)) {
@@ -2053,7 +2058,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                                         seg->flags_any(SegmentFlags::kShowerTopology) ||
                                         (seg->has_particle_info() && seg->particle_info() && std::abs(seg->particle_info()->pdg()) == 11);
                         int dirsign = seg->dirsign();
-                        bool is_dir_weak = seg->dir_weak();
+                        bool is_dir_weak = seg_dir_weak(seg);
                         double median_dqdx = segment_median_dQ_dx(seg) / (43e3 / units::cm);
                         
                         // Keep if: not shower AND has direction AND (strong direction OR high dQ/dx)

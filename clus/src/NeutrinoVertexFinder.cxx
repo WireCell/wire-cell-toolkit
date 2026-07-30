@@ -310,7 +310,7 @@ std::tuple<bool, int, int> PatternAlgorithms::examine_main_vertex_candidate(Grap
         
         // Check if segment is pointing IN to the vertex (strong direction)
         int dir_sign = sg->dirsign();
-        bool is_dir_weak = sg->dir_weak();
+        bool is_dir_weak = seg_dir_weak(sg);
         
         if (flag_start && dir_sign == -1 && !is_dir_weak) {
             flag_in = true;
@@ -612,7 +612,7 @@ float PatternAlgorithms::calc_conflict_maps(Graph& graph, VertexPtr vertex){
         if (dir_sign != 0 && ((is_shower && sg_length > 5*units::cm) || !is_shower)) {
             // Check if direction conflicts with topology
             if ((flag_start && dir_sign == -1) || (!flag_start && dir_sign == 1)) {
-                if (!sg->dir_weak()) {
+                if (!seg_dir_weak(sg)) {
                     num_conflicts += 1.0;
                 } else {
                     num_conflicts += 0.5;
@@ -803,7 +803,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
             if (!is_proton) continue;
             
             int dir_sign = sg->dirsign();
-            bool is_weak = sg->dir_weak();
+            bool is_weak = seg_dir_weak(sg);
             
             if ((is_weak || dir_sign == 0)) {
                 VertexPtr other_vertex = find_other_vertex(graph, sg, vtx);
@@ -829,7 +829,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
                                           ray_length(Ray{wcps.back().point, other_vertex->wcpt().point}));
                         
                         int other_dir = other_sg->dirsign();
-                        bool other_weak = other_sg->dir_weak();
+                        bool other_weak = seg_dir_weak(other_sg);
                         bool is_other_proton = other_sg->has_particle_info() && 
                                               std::abs(other_sg->particle_info()->pdg()) == 2212;
                         
@@ -899,7 +899,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
             }
             
             int dir_sign = sg->dirsign();
-            bool is_weak = sg->dir_weak();
+            bool is_weak = seg_dir_weak(sg);
             bool is_proton = sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 2212;
             
             if (is_proton && dir_sign != 0 && !is_weak) {
@@ -1196,10 +1196,10 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
 
             s_log->trace("examine_direction: cluster {} processing seg: length={:.2f}cm is_shower={} flag_shower_in={} cur_dirsign={} dir_weak={}",
                 cluster.ident(), length/units::cm, is_shower, flag_shower_in,
-                current_sg->dirsign(), current_sg->dir_weak());
+                current_sg->dirsign(), seg_dir_weak(current_sg));
 
             // Determine segment direction
-            if (current_sg->dirsign() == 0 || current_sg->dir_weak() || is_shower || flag_final) {
+            if (current_sg->dirsign() == 0 || seg_dir_weak(current_sg) || is_shower || flag_final) {
                 const auto& wcps = current_sg->wcpts();
                 s_log->trace("examine_direction: processing seg nfits={} nwcpts={} dirsign_before={}"
                     " is_shower={} shower_topo={} shower_traj={}",
@@ -1351,7 +1351,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
                         current_sg->has_particle_info() ? current_sg->particle_info()->pdg() : 0,
                         length/units::cm);
                 }
-            } else if (current_sg->dirsign() != 0 && !current_sg->dir_weak()) {
+            } else if (current_sg->dirsign() != 0 && !seg_dir_weak(current_sg)) {
                 // Strong direction already set
                 auto pair_result = calculate_num_daughter_showers(graph, prev_vtx, current_sg);
                 int num_daughter_showers = pair_result.first;
@@ -1553,7 +1553,7 @@ bool PatternAlgorithms::examine_direction(Graph& graph, VertexPtr vertex, Vertex
         if (has_4mom && sg->particle_info()->mass() > 0 && 
             !sg->flags_any(SegmentFlags::kShowerTopology)) {
             
-            if (!sg->dir_weak()) {
+            if (!seg_dir_weak(sg)) {
                 // Strong direction - calculate 4-momentum
                 int pdg = sg->particle_info()->pdg();
                 auto four_momentum = segment_cal_4mom(sg, pdg, particle_data, recomb_model);
@@ -2392,7 +2392,7 @@ void PatternAlgorithms::improve_vertex(Graph& graph, Facade::Cluster& cluster, V
                         int end_n = boost::out_degree(target_v, graph);
                         segment_determine_dir_track(sg, start_n, end_n, particle_data, recomb_model, 43000/units::cm, false);
                         
-                        if ((!sg->particle_info() || sg->dir_weak()) && medium_dQdx/(43e3/units::cm) < 1.3) {
+                        if ((!sg->particle_info() || seg_dir_weak(sg)) && medium_dQdx/(43e3/units::cm) < 1.3) {
                             if (!sg->particle_info()) {
                                 sg->particle_info() = std::make_shared<Aux::ParticleInfo>();
                             }
@@ -2659,7 +2659,7 @@ void PatternAlgorithms::change_daughter_type(Graph& graph, VertexPtr vertex, Seg
         
         // Skip if shower trajectory or has strong direction
         if (sg1->flags_any(SegmentFlags::kShowerTrajectory)) continue;
-        if (!sg1->dir_weak() && sg1->dirsign() != 0) continue;
+        if (!seg_dir_weak(sg1) && sg1->dirsign() != 0) continue;
         
         // Check shower topology case: long segments with no direction.
         // Matches prototype: if large-shower-topology → try 170°, then fall through to 165° check.
@@ -2832,7 +2832,7 @@ void PatternAlgorithms::examine_main_vertices_local(Graph& graph, std::vector<Ve
                         }
                     } else {
                         // Check track significance
-                        if (!sg1->dir_weak() && length > 6*units::cm) {
+                        if (!seg_dir_weak(sg1) && length > 6*units::cm) {
                             flag_skip = false;
                             break;
                         }
@@ -2969,7 +2969,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
                 // Bonus for clear protons or tracks with direction
                 int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
                 int dirsign = sg->dirsign();
-                bool is_dir_weak = sg->dir_weak();
+                bool is_dir_weak = seg_dir_weak(sg);
                 
                 if (pdg == 2212 && dirsign != 0 && !is_dir_weak) {
                     map_vertex_num[vtx] += 1.0 / 4.0;  // clear proton
@@ -3340,7 +3340,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                         double dQ_dx_cut = (0.8866 + 0.9533 * std::pow(18.0 * units::cm / length, 0.4234)) * 43e3 / units::cm;
                         auto [v1, v2] = find_vertices(graph, sg);
                         bool flag_start = (v1 == min_vertex);
-                        if (length > 15 * units::cm && !sg->dir_weak() && !flag_start && medium_dqdx > dQ_dx_cut) {
+                        if (length > 15 * units::cm && !seg_dir_weak(sg) && !flag_start && medium_dqdx > dQ_dx_cut) {
                             num_bad++;
                         }
                         num_tracks++;

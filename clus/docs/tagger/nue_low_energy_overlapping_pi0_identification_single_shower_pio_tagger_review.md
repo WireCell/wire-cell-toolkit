@@ -123,7 +123,7 @@ Toolkit: `sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0` — same d
 | `lol_2_v_vtx_n_segs` | `map_vertex_segments[vtx].size()` | `n_vtx_segs_global` ✅ |
 | `lol_2_v_energy` | `Eshower/MeV` | same ✅ |
 | `lol_2_v_shower_main_length` | `shower->get_total_length(cluster)/cm` | `main_len/cm` ✅ |
-| `lol_2_v_flag_dir_weak` | `is_dir_weak()` | `dir_weak()` ✅ |
+| `lol_2_v_flag_dir_weak` | `is_dir_weak()` | `seg_dir_weak()` — NOTE: this row previously claimed `dir_weak()` ✅, which was WRONG: prototype `is_dir_weak()` adds particle-score thresholds (mu >0.07/0.15, p >0.13/0.27) on top of the raw flag, and the raw member is private in the prototype (no getter). Fixed 2026-07-30 behind `dir_weak_use_score` (see sbnd_xin docs/pr/6). |
 | `lol_3_flag` | `!flag_overlap_3` | same ✅ |
 | `lol_3_angle_beam` | `angle_beam` | same ✅ |
 | `lol_3_min_angle` | `min_angle` | `min_angle_vtx` ✅ |

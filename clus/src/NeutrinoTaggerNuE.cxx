@@ -35,7 +35,7 @@
 //   sg->get_direct_length(n1, n2)        → segment_track_direct_length(sg, n1, n2)
 //   sg->get_flag_avoid_muon_check()       → sg->flags_any(SegmentFlags::kAvoidMuonCheck)
 //   sg->get_flag_shower()                 → seg_is_shower(sg)
-//   sg->is_dir_weak()                     → sg->dir_weak()
+//   sg->is_dir_weak()                     → seg_dir_weak(sg)
 //   sg->get_particle_type()               → sg->particle_info()->pdg()
 //   sg->get_medium_dQ_dx()               → segment_median_dQ_dx(sg)
 //   shower->get_total_length(cluster_id) → shower->get_total_length(sg->cluster())
@@ -750,7 +750,7 @@ static bool single_shower(NuEContext& ctx, ShowerPtr shower,
 
             // 7022_110_5542: count non-shower-flagged segments with sufficient length/dQ_dx
             if (!seg_is_shower(sg1) &&
-                (!sg1->dir_weak() || (sg1->dir_weak() && length > 4.2*units::cm) ||
+                (!ctx.self.seg_dir_weak(sg1) || (ctx.self.seg_dir_weak(sg1) && length > 4.2*units::cm) ||
                  (length > 0.6*units::cm && medium_dQ_dx > 3) ||
                  (length > 1.6*units::cm && medium_dQ_dx > 2.2))) {
                 ++num_valid_tracks;
@@ -1162,7 +1162,7 @@ static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
                 if (!sg1 || sg1 == sg) continue;
                 Vector dir2    = segment_cal_dir_3vector(sg1, vertex_point, 15*units::cm);
                 double angle   = dir2.angle(dir1) / M_PI * 180.0;
-                if (!seg_is_shower(sg1) && !sg1->dir_weak()) ++num_good_tracks;
+                if (!seg_is_shower(sg1) && !ctx.self.seg_dir_weak(sg1)) ++num_good_tracks;
                 if (angle > max_angle && segment_track_length(sg1) > 1.0*units::cm) {
                     max_angle = angle;
                     max_sg = sg;    // prototype assigns sg (start seg), not sg1
@@ -1265,7 +1265,7 @@ static bool vertex_inside_shower(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
 
                     double norm_dQ_dx = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
                     double length     = segment_track_length(sg1);
-                    bool   is_weak    = sg1->dir_weak();
+                    bool   is_weak    = ctx.self.seg_dir_weak(sg1);
 
                     if (angle > max_angle) {
                         max_angle        = angle;
@@ -1823,7 +1823,7 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
             bool is_pdg11 = sg1->has_particle_info() && sg1->particle_info()->pdg() == 11;
             bool is_weak_muon = sg1->has_particle_info() &&
                                 sg1->particle_info()->pdg() == 13 &&
-                                sg1->dir_weak() &&
+                                ctx.self.seg_dir_weak(sg1) &&
                                 segment_track_length(sg1) < 6*units::cm;
             if (is_pdg11 || is_weak_muon) {
                 Point dir2_pt = vtx_point;
@@ -1836,7 +1836,7 @@ static bool high_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInf
             }
             double norm_dQ = segment_median_dQ_dx(sg1) / (43e3 / units::cm);
             bool   is_proton = sg1->has_particle_info() && sg1->particle_info()->pdg() == 2212;
-            if ((!sg1->dir_weak() || is_proton || segment_track_length(sg1) > 20*units::cm) &&
+            if ((!ctx.self.seg_dir_weak(sg1) || is_proton || segment_track_length(sg1) > 20*units::cm) &&
                 !seg_is_shower(sg1))
                 ++n_valid_tracks;
             else if (norm_dQ > 2.0 && segment_track_length(sg1) > 1.8*units::cm)
@@ -2016,7 +2016,7 @@ static bool low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo
             double tmp_angle = dir2.angle(dir1_stem) / M_PI * 180.0;
             if (tmp_angle < min_angle_vtx) min_angle_vtx = tmp_angle;
             bool is_proton = sg1->has_particle_info() && sg1->particle_info()->pdg() == 2212;
-            if ((!sg1->dir_weak() || is_proton || segment_track_length(sg1) > 20*units::cm) &&
+            if ((!ctx.self.seg_dir_weak(sg1) || is_proton || segment_track_length(sg1) > 20*units::cm) &&
                 !seg_is_shower(sg1))
                 ++n_valid_tracks;
         }
@@ -2106,7 +2106,7 @@ static bool low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo
                 n_vtx_segs_global > 1 && Eshower < 300*units::MeV && main_len < 20*units::cm)
                 flag_ov2 = true;
             // 7020_249_12479
-            if (sg1->dir_weak() && len1 < 8*units::cm && ang2 < 30 &&
+            if (ctx.self.seg_dir_weak(sg1) && len1 < 8*units::cm && ang2 < 30 &&
                 n_vtx_segs_global == 2 && Eshower < 400*units::MeV)
                 flag_ov2 = true;
 
@@ -2118,7 +2118,7 @@ static bool low_energy_overlapping(NuEContext& ctx, ShowerPtr shower, TaggerInfo
             ti.lol_2_v_vtx_n_segs.push_back(n_vtx_segs_global);
             ti.lol_2_v_energy.push_back(Eshower / units::MeV);
             ti.lol_2_v_shower_main_length.push_back(main_len / units::cm);
-            ti.lol_2_v_flag_dir_weak.push_back(sg1->dir_weak());
+            ti.lol_2_v_flag_dir_weak.push_back(ctx.self.seg_dir_weak(sg1));
 
             if (flag_ov2) flag_overlap_2_save = true;
         }
@@ -2387,7 +2387,7 @@ static bool shower_to_wall(NuEContext& ctx, ShowerPtr shower,
             SegmentPtr sg1 = ctx.graph[*eit].segment;
             if (!sg1 || sg1 == sg) continue;
             if (!seg_is_shower(sg1) &&
-                (!sg1->dir_weak() || segment_track_length(sg1) > 5*units::cm))
+                (!ctx.self.seg_dir_weak(sg1) || segment_track_length(sg1) > 5*units::cm))
                 ++num_valid_tracks;
         }
     }
@@ -3434,7 +3434,7 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
         bool flag_bad1 = false;
 
         int pdg = sg1->has_particle_info() ? sg1->particle_info()->pdg() : 0;
-        if (pdg != 11 && !sg1->dir_weak()) {
+        if (pdg != 11 && !ctx.self.seg_dir_weak(sg1)) {
             double len1 = segment_track_length(sg1);
             size_t max_deg = std::max(deg1, deg2);
             if (std::min(dis1, dis2) > 10*units::cm &&
@@ -3457,7 +3457,7 @@ static bool track_overclustering(NuEContext& ctx, ShowerPtr shower, TaggerInfo& 
             flag_bad1 = true;
 
         ti.tro_1_v_particle_type.push_back(pdg);
-        ti.tro_1_v_flag_dir_weak.push_back(sg1->dir_weak());
+        ti.tro_1_v_flag_dir_weak.push_back(ctx.self.seg_dir_weak(sg1));
         ti.tro_1_v_min_dis.push_back(std::min(dis1,dis2) / units::cm);
         ti.tro_1_v_sg1_length.push_back(tmp_length / units::cm);
         ti.tro_1_v_shower_main_length.push_back(total_length_main / units::cm);
@@ -3971,7 +3971,7 @@ static int mip_identification(NuEContext& ctx,
              eit != eend; ++eit) {
             SegmentPtr sg1 = ctx.graph[*eit].segment;
             if (!sg1 || sg1 == sg) continue;
-            if (!sg1->dir_weak() || segment_track_length(sg1) > 10*units::cm)
+            if (!ctx.self.seg_dir_weak(sg1) || segment_track_length(sg1) > 10*units::cm)
                 ++n_good_tracks;
         }
     }
@@ -4315,7 +4315,7 @@ bool PatternAlgorithms::nue_tagger(
         if (!sg1 || sg1 == sg) continue;
         double len1 = segment_track_length(sg1);
         if (!seg_is_shower(sg1) && (len1 > 8*units::cm ||
-            (!sg1->dir_weak() && len1 > 5*units::cm)))
+            (!seg_dir_weak(sg1) && len1 > 5*units::cm)))
             ++num_valid_tracks;
     }
 

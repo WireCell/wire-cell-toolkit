@@ -150,7 +150,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
                 "determine_direction: {} nfits={} nwcpts={} len={:.2f}cm dirsign={} dir_weak={}"
                 " start_n={} end_n={} pdg={}",
                 seg_type, seg->fits().size(), seg->wcpts().size(), length / units::cm,
-                seg->dirsign(), seg->dir_weak() ? 1 : 0,
+                seg->dirsign(), seg_dir_weak(seg) ? 1 : 0,
                 start_n, end_n, pdg);
         }
     }
@@ -342,7 +342,7 @@ void PatternAlgorithms::examine_good_tracks(Graph& graph, Facade::Cluster& clust
             (sg->has_particle_info() && std::abs(sg->particle_info()->pdg()) == 11)) continue;
 
         // Skip if no direction or weak direction
-        if (sg->dirsign() == 0 || sg->dir_weak()) continue;
+        if (sg->dirsign() == 0 || seg_dir_weak(sg)) continue;
 
         // Get the two vertices of this segment
         auto [vertex1, vertex2] = find_vertices(graph, sg);
@@ -558,7 +558,7 @@ void PatternAlgorithms::fix_maps_shower_in_track_out(Graph& graph, Facade::Clust
             // Check if this is an "outgoing" segment (pointing away from vertex)
             else if ((flag_start && sg->dirsign() == 1) || (!flag_start && sg->dirsign() == -1)) {
                 // If it's an outgoing non-shower track with strong direction
-                if (!is_shower && !sg->dir_weak()) {
+                if (!is_shower && !seg_dir_weak(sg)) {
                     flag_turn_shower_dir = true;
                 }
             }
@@ -628,14 +628,14 @@ void PatternAlgorithms::improve_maps_one_in(Graph& graph, Facade::Cluster& clust
                 if ((flag_start && sg->dirsign() == -1) || (!flag_start && sg->dirsign() == 1)) {
                     if (flag_strong_check) {
                         // Only count if direction is strong
-                        if (!sg->dir_weak()) n_in++;
+                        if (!seg_dir_weak(sg)) n_in++;
                     } else {
                         n_in++;
                     }
                 }
                 
                 // Collect segments with no or weak direction
-                if (sg->dirsign() == 0 || sg->dir_weak()) {
+                if (sg->dirsign() == 0 || seg_dir_weak(sg)) {
                     map_sg_dir.push_back({sg, flag_start});
                 }
             }
@@ -746,7 +746,7 @@ void PatternAlgorithms::improve_maps_shower_in_track_out(Graph& graph, Facade::C
                     if (!is_shower) {
                         // Check if it's weak or has no particle type
                         bool no_particle_type = !sg->has_particle_info() || sg->particle_info()->pdg() == 0;
-                        if (sg->dir_weak() || (no_particle_type && !flag_strong_check)) {
+                        if (seg_dir_weak(sg) || (no_particle_type && !flag_strong_check)) {
                             out_tracks.push_back(sg);
                         }
                     }
@@ -850,7 +850,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
 
             // Check if segment has no direction, weak direction, or is a proton
             int pdg = sg->has_particle_info() ? sg->particle_info()->pdg() : 0;
-            if (sg->dirsign() == 0 || sg->dir_weak() || std::abs(pdg) == 2212) {
+            if (sg->dirsign() == 0 || seg_dir_weak(sg) || std::abs(pdg) == 2212) {
                 
                 auto two_vertices = find_vertices(graph, sg);
                 if (!two_vertices.first || !two_vertices.second) continue;
@@ -1036,7 +1036,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                           (nprotons[1] >= 0 && nmuons[1] >= 1 && nshowers[0]+1 == nvtx1_segs && nshowers[0] >= 2) ||
                           (((nprotons[0] >= 0 && nmuons[0] >= 1 && nshowers[1]+1 == nvtx2_segs && nshowers[1] >= 1) ||
                            (nprotons[1] >= 0 && nmuons[1] >= 1 && nshowers[0]+1 == nvtx1_segs && nshowers[0] >= 1)) &&
-                          (sg->dirsign() == 0 || sg->dir_weak())))) {
+                          (sg->dirsign() == 0 || seg_dir_weak(sg))))) {
                     
                     double direct_length = segment_track_direct_length(sg);
                     
@@ -1121,7 +1121,7 @@ void PatternAlgorithms::improve_maps_no_dir_tracks(Graph& graph, Facade::Cluster
                     }
                 }
                 // Case G: Muon with specific vertex connectivity
-                else if (std::abs(pdg) == 13 && (sg->dirsign() == 0 || sg->dir_weak()) &&
+                else if (std::abs(pdg) == 13 && (sg->dirsign() == 0 || seg_dir_weak(sg)) &&
                          ((nmuons[0]+nprotons[0]+nshowers[0] == 1) || (nmuons[1]+nprotons[1]+nshowers[1] == 1)) &&
                          (nshowers[0] + nshowers[1] > 0 || segment_median_dQ_dx(sg) < 1.3*43e3/units::cm)) {
                     
@@ -1572,7 +1572,7 @@ void PatternAlgorithms::examine_all_showers(Graph& graph, Facade::Cluster& clust
             n_showers++;
             length_showers += length;
         } else {
-            if (sg->dirsign() != 0 && !sg->dir_weak()) {
+            if (sg->dirsign() != 0 && !seg_dir_weak(sg)) {
                 good_track = sg;
                 n_good_tracks++;
                 length_good_tracks += length;
@@ -1973,7 +1973,7 @@ void PatternAlgorithms::shower_determining_in_main_cluster(Graph& graph, Facade:
         //     SPDLOG_LOGGER_TRACE(s_log,
         //         "shower_determining_in_main_cluster: {} len={:.2f}cm dir={} weak={} pdg={} mass={:.2f}MeV KE={:.2f}MeV score={:.3f}",
         //         seg_type, length / units::cm,
-        //         seg->dirsign(), seg->dir_weak() ? 1 : 0,
+        //         seg->dirsign(), seg_dir_weak(seg) ? 1 : 0,
         //         pdg, mass, ke, score);
         // }
     }

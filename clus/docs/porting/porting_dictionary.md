@@ -297,3 +297,20 @@ arrays keep their old row order.  Before writing or porting ANY code that
 mutates a cluster's child set, read `clus/docs/perblob_invariant.md` (rules,
 safe patterns, audit table; doc 52 §12-§13 in wcp-porting-validation has the
 full bug history).
+
+## `ProtoSegment::is_dir_weak()` (WCP) vs `PatternAlgorithms::seg_dir_weak()` (WCT)
+
+WCP's raw `dir_weak` member is PRIVATE with no getter; the only public read
+accessor is `is_dir_weak()`, which ORs the raw flag with particle-score
+thresholds (mu: score>0.07 at >=5cm / >0.15 below; p: >0.13 / >0.27) — and the
+score defaults to (and is reset to) the sentinel 100, so a typed-but-unscored
+or PID-invalidated mu/p segment is ALWAYS weak in WCP.  The original port read
+a raw `dir_weak()` getter at all ~84 sites (silent substitution, no doc trail;
+even signed off as "equivalent" in a tagger review — corrected).  Since
+2026-07-30 every read goes through `PatternAlgorithms::seg_dir_weak()`, gated
+by the `TaggerCheckNeutrino` key `dir_weak_use_score` (C++ default false =
+legacy raw reads, byte-identical; SBND module default true).  The faithful
+predicate is `segment_is_dir_weak()` (`PRSegmentFunctions.cxx`).  Raw reads
+remain ONLY in: that predicate's fall-through, `break_segment()` flag
+propagation, and trace prints.  Full history: wcp-porting-validation
+`sbnd_xin/docs/pr/6_is-dir-weak-port-divergence.md`.
