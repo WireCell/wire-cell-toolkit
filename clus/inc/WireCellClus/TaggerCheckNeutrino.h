@@ -69,6 +69,18 @@ public:
         // (docs/pr/2 sec. 2e(i)).  See PatternAlgorithms::m_ssm_target_dir.
         std::vector<double> m_ssm_target_dir{0.46, 0.05, 0.885};
         std::vector<double> m_ssm_absorber_dir{0.33, 0.75, -0.59};
+        // Charge -> kinetic-energy calibration constants of NeutrinoEnergyReco
+        // (docs/pr/2 sec. 2e(iii)).  Defaults = the uBooNE literals they
+        // replaced => absent keys are byte-identical.  Dimensionless except
+        // m_kine_w_value (eV).  See PR::KineChargeOptions.
+        double m_kine_fudge_factor{0.95};
+        double m_kine_recom_factor{0.7};
+        double m_kine_shower_fudge_factor{0.8};
+        double m_kine_shower_recom_factor{0.5};
+        double m_kine_proton_recom_factor{0.35};
+        std::vector<double> m_kine_plane_weights{0.25, 0.25, 1.0};  // {U,V,W}
+        double m_kine_plane_asym_switch{0.04};
+        double m_kine_w_value{23.6};  // eV per electron-ion pair
         std::string m_dl_weights;              // path to SCN vertex .pth weights file (empty = DL disabled)
         double m_dl_vtx_cut{25.0};             // max distance (mm) from DL prediction to accept candidate vertex (default 2.5 cm)
         double m_dQdx_scale{0.1};              // scale factor applied to dQ before passing to SCN network

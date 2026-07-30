@@ -56,7 +56,8 @@ static double kine_charge_from_maps(
     const WireMap& map_apa_ch_plane_wires,
     Facade::Grouping* grouping,
     CorrFn&& corr_fn,
-    double dis_cut)
+    double dis_cut,
+    const KineChargeOptions& kopts)
 {
     const ChargeMap* maps[3] = {&charge_2d_u, &charge_2d_v, &charge_2d_w};
     double sums[3] = {0, 0, 0};
@@ -160,19 +161,31 @@ static double kine_charge_from_maps(
         min_idx = 0; med_idx = 1; max_idx = 2;
     }
 
-    const double weight[3] = {0.25, 0.25, 1.0};
+    // Per-plane weights, asymmetry switch and W-value are configurable
+    // (KineChargeOptions); the defaults are the uBooNE literals that used to sit
+    // here, so an unconfigured job is byte-identical.
+    const double weight[3] = {kopts.plane_weights[0], kopts.plane_weights[1], kopts.plane_weights[2]};
     const double weight_sum = weight[0] + weight[1] + weight[2];
 
     double max_asy = 0;
     if (sums[med_idx] + sums[max_idx] > 0)
         max_asy = std::abs(sums[med_idx] - sums[max_idx]) / (sums[med_idx] + sums[max_idx]);
 
-    double overall = (weight[0]*sums[0] + weight[1]*sums[1] + weight[2]*sums[2]) / weight_sum;
-    if (max_asy > 0.04)
-        overall = (weight[med_idx]*sums[med_idx] + weight[min_idx]*sums[min_idx])
-                  / (weight[med_idx] + weight[min_idx]);
+    // Denominator guards: only reachable with a configured all-zero (or
+    // two-zero) weight triple.  With the 0.25/0.25/1.0 defaults both are
+    // strictly positive, so the taken branch -- and the arithmetic -- is
+    // unchanged.
+    double overall = 0;
+    if (weight_sum > 0)
+        overall = (weight[0]*sums[0] + weight[1]*sums[1] + weight[2]*sums[2]) / weight_sum;
+    if (max_asy > kopts.plane_asym_switch) {
+        const double pair_sum = weight[med_idx] + weight[min_idx];
+        if (pair_sum > 0)
+            overall = (weight[med_idx]*sums[med_idx] + weight[min_idx]*sums[min_idx]) / pair_sum;
+        // else: both dropped planes carry zero weight -- keep the 3-plane average.
+    }
 
-    return overall / recom_factor / fudge_factor * 23.6 / 1e6 * units::MeV;
+    return overall / recom_factor / fudge_factor * kopts.w_value / 1e6 * units::MeV;
 }
 
 } // anonymous namespace
@@ -187,12 +200,12 @@ double PatternAlgorithms::cal_kine_charge(ShowerPtr shower,
     auto grouping = track_fitter.grouping();
     if (!grouping) return 0.0;
 
-    double fudge_factor = 0.95, recom_factor = 0.7;
+    double fudge_factor = m_kine_charge.fudge_factor, recom_factor = m_kine_charge.recom_factor;
     if (shower->get_flag_shower()) {
-        recom_factor = 0.5;
-        fudge_factor = 0.8;
+        recom_factor = m_kine_charge.shower_recom_factor;
+        fudge_factor = m_kine_charge.shower_fudge_factor;
     } else if (std::abs(shower->get_particle_type()) == 2212) {
-        recom_factor = 0.35;
+        recom_factor = m_kine_charge.proton_recom_factor;
     }
 
     auto pcloud1 = shower->get_pcloud("associate_points");
@@ -206,7 +219,7 @@ double PatternAlgorithms::cal_kine_charge(ShowerPtr shower,
         charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires,
         grouping,
         [&](WireCell::Point& pt) { return cal_corr_factor(pt, track_fitter, dv); },
-        0.6 * units::cm);
+        0.6 * units::cm, m_kine_charge);
 }
 
 
@@ -238,12 +251,12 @@ double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, Trac
     auto grouping = track_fitter.grouping();
     if (!grouping) return 0.0;
 
-    double fudge_factor = 0.95, recom_factor = 0.7;
+    double fudge_factor = m_kine_charge.fudge_factor, recom_factor = m_kine_charge.recom_factor;
     if (segment->flags_any(PR::SegmentFlags::kShowerTopology)) {
-        recom_factor = 0.5;
-        fudge_factor = 0.8;
+        recom_factor = m_kine_charge.shower_recom_factor;
+        fudge_factor = m_kine_charge.shower_fudge_factor;
     } else if (segment->has_particle_info() && std::abs(segment->particle_info()->pdg()) == 2212) {
-        recom_factor = 0.35;
+        recom_factor = m_kine_charge.proton_recom_factor;
     }
 
     ChargeMap charge_2d_u, charge_2d_v, charge_2d_w;
@@ -261,7 +274,7 @@ double PatternAlgorithms::cal_kine_charge(SegmentPtr segment, Graph& graph, Trac
         charge_2d_u, charge_2d_v, charge_2d_w, map_apa_ch_plane_wires,
         grouping,
         [&](WireCell::Point& pt) { return cal_corr_factor(pt, track_fitter, dv); },
-        0.6 * units::cm);
+        0.6 * units::cm, m_kine_charge);
 }
 
 
@@ -295,12 +308,12 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
             shower->calculate_kinematics_long_muon(segments_in_long_muon, particle_data, recomb_model);
         }
 
-        double fudge_factor = 0.95, recom_factor = 0.7;
+        double fudge_factor = m_kine_charge.fudge_factor, recom_factor = m_kine_charge.recom_factor;
         if (shower->get_flag_shower()) {
-            recom_factor = 0.5;
-            fudge_factor = 0.8;
+            recom_factor = m_kine_charge.shower_recom_factor;
+            fudge_factor = m_kine_charge.shower_fudge_factor;
         } else if (std::abs(shower->get_particle_type()) == 2212) {
-            recom_factor = 0.35;
+            recom_factor = m_kine_charge.proton_recom_factor;
         }
 
         auto pcloud1 = shower->get_pcloud("associate_points");
@@ -323,7 +336,7 @@ void PatternAlgorithms::calculate_shower_kinematics(IndexedShowerSet& showers, I
         double kine_charge = kine_charge_from_maps(
             pcloud1, pcloud2, fudge_factor, recom_factor,
             m_charge_2d_u, m_charge_2d_v, m_charge_2d_w, m_map_apa_ch_plane_wires,
-            grouping, corr_fn, dis_cut);
+            grouping, corr_fn, dis_cut, m_kine_charge);
 
         SPDLOG_LOGGER_TRACE(s_log,
             "calculate_shower_kinematics:   shower pdg={} nseg={} kine_charge={:.1f}MeV",

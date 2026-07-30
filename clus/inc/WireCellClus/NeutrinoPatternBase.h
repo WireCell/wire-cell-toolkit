@@ -6,6 +6,8 @@
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 
+#include <array>
+
 namespace WireCell::Clus::PR {
 
     /** BDT input features for the best pi0 candidate found by id_pi0_with_vertex (flag==1)
@@ -18,6 +20,48 @@ namespace WireCell::Clus::PR {
     /// and reuse across all showers/merges to avoid O(N_hits) re-collection per shower.
     using ChargeMap = std::map<TrackFitting::CoordReadout, TrackFitting::ChargeMeasurement>;
     using WireMap   = std::map<std::pair<int,int>, std::vector<std::tuple<int,int,int>>>;
+
+    /// Calibration constants of the charge -> kinetic-energy conversion in
+    /// NeutrinoEnergyReco.cxx (cal_kine_charge and calculate_shower_kinematics).
+    /// Every default below is the uBooNE-tuned number that used to be a literal
+    /// at the three duplicated fudge/recom blocks and inside
+    /// kine_charge_from_maps -- absent config keys are therefore byte-identical.
+    /// None of them has been re-derived for any other detector; they are exposed
+    /// so that a calibration can move them without a code change (see
+    /// wcp-porting-img sbnd_xin/docs/pr/2 sec. 2e(iii)).
+    ///
+    /// The conversion is
+    ///     E = sum_plane(w_p * Q_p) / sum(w) / recom / fudge * w_value[eV] * 1e-6 MeV
+    /// with the (med,max) plane-asymmetry switch described at plane_asym_switch.
+    struct KineChargeOptions {
+        /// Average recombination survival fraction and residual scale factor for
+        /// a track-like object.  uBooNE values; field- and calibration-dependent.
+        double fudge_factor{0.95};
+        double recom_factor{0.7};
+        /// Same pair for an object flagged shower-like (higher local dE/dx =>
+        /// more recombination, hence the smaller survival fraction).
+        double shower_fudge_factor{0.8};
+        double shower_recom_factor{0.5};
+        /// Recombination survival for |pdg| == 2212 (proton).  The fudge factor
+        /// deliberately stays at fudge_factor for protons -- only recombination
+        /// is specialised, as in the prototype.
+        double proton_recom_factor{0.35};
+        /// Per-plane weights {U, V, W} of the charge average.  The uBooNE
+        /// 0.25/0.25/1.0 encodes "induction planes are a quarter as trustworthy
+        /// as collection".  A zero weight is legitimate ("ignore this plane");
+        /// only an all-zero triple is rejected.
+        std::array<double, 3> plane_weights{{0.25, 0.25, 1.0}};
+        /// If the two largest per-plane charges disagree by more than this
+        /// relative asymmetry, the three-plane weighted average is replaced by
+        /// the (median, minimum) pair -- i.e. the largest plane is dropped as
+        /// likely contaminated.  Dimensionless, uBooNE-tuned.
+        double plane_asym_switch{0.04};
+        /// Argon W-value in eV per electron-ion pair.  Duplicated here rather
+        /// than read from the recombination model's Wi (docs/pr/2 sec. 2e(iii),
+        /// "low risk, note only") -- if the model's Wi is ever wired in, this
+        /// knob is what it replaces.
+        double w_value{23.6};
+    };
 
     struct Pi0KineFeatures {
         int    flag{0};      ///< 0=none, 1=with_vertex, 2=without_vertex
@@ -120,6 +164,11 @@ namespace WireCell::Clus::PR {
         // distributions to shift even at the same physical direction.
         WireCell::Vector m_ssm_target_dir{0.46, 0.05, 0.885};
         WireCell::Vector m_ssm_absorber_dir{0.33, 0.75, -0.59};
+
+        // Charge -> kinetic-energy calibration constants (NeutrinoEnergyReco.cxx).
+        // Defaults = the uBooNE literals they replaced => byte-identical when the
+        // config keys are absent.  See KineChargeOptions above.
+        KineChargeOptions m_kine_charge{};
 
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics

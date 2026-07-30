@@ -96,6 +96,32 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     };
     m_ssm_target_dir   = get_dir3("ssm_target_dir",   m_ssm_target_dir);
     m_ssm_absorber_dir = get_dir3("ssm_absorber_dir", m_ssm_absorber_dir);
+    // Charge -> energy calibration constants (docs/pr/2 sec. 2e(iii)).
+    m_kine_fudge_factor        = get(config, "kine_fudge_factor",        m_kine_fudge_factor);
+    m_kine_recom_factor        = get(config, "kine_recom_factor",        m_kine_recom_factor);
+    m_kine_shower_fudge_factor = get(config, "kine_shower_fudge_factor", m_kine_shower_fudge_factor);
+    m_kine_shower_recom_factor = get(config, "kine_shower_recom_factor", m_kine_shower_recom_factor);
+    m_kine_proton_recom_factor = get(config, "kine_proton_recom_factor", m_kine_proton_recom_factor);
+    m_kine_plane_asym_switch   = get(config, "kine_plane_asym_switch",   m_kine_plane_asym_switch);
+    m_kine_w_value             = get(config, "kine_w_value",             m_kine_w_value);
+    // Per-plane weights {U,V,W}.  Unlike the SSM directions a single zero entry
+    // is legitimate ("ignore this plane"); only a malformed array or an all-zero
+    // triple is rejected -- a zero sum would divide the plane average by zero.
+    if (config.isMember("kine_plane_weights")) {
+        const auto& jv = config["kine_plane_weights"];
+        if (!jv.isArray() || jv.size() != 3u) {
+            SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: kine_plane_weights must be a 3-element array; keeping default");
+        }
+        else {
+            std::vector<double> v{jv[0].asDouble(), jv[1].asDouble(), jv[2].asDouble()};
+            if (v[0] + v[1] + v[2] <= 0) {
+                SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: kine_plane_weights must sum to > 0; keeping default");
+            }
+            else {
+                m_kine_plane_weights = v;
+            }
+        }
+    }
     auto dl_weights_raw = get(config, "dl_weights", m_dl_weights);
     if (!dl_weights_raw.empty()) {
         m_dl_weights = Persist::resolve(dl_weights_raw);
@@ -152,6 +178,16 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["ssm_absorber_dir"] = Json::arrayValue;
     for (double c : m_ssm_target_dir)   cfg["ssm_target_dir"].append(c);
     for (double c : m_ssm_absorber_dir) cfg["ssm_absorber_dir"].append(c);
+    // Charge -> energy calibration (docs/pr/2 sec. 2e(iii)); defaults = uBooNE.
+    cfg["kine_fudge_factor"]        = m_kine_fudge_factor;         // track-like residual scale
+    cfg["kine_recom_factor"]        = m_kine_recom_factor;         // track-like recombination survival
+    cfg["kine_shower_fudge_factor"] = m_kine_shower_fudge_factor;  // shower-flagged counterpart
+    cfg["kine_shower_recom_factor"] = m_kine_shower_recom_factor;
+    cfg["kine_proton_recom_factor"] = m_kine_proton_recom_factor;  // |pdg|==2212 (fudge stays at kine_fudge_factor)
+    cfg["kine_plane_weights"] = Json::arrayValue;                  // {U,V,W} charge-average weights
+    for (double w : m_kine_plane_weights) cfg["kine_plane_weights"].append(w);
+    cfg["kine_plane_asym_switch"]   = m_kine_plane_asym_switch;    // (med,max) asymmetry above which the max plane is dropped
+    cfg["kine_w_value"]             = m_kine_w_value;              // eV per electron-ion pair
     cfg["dl_weights"] = "";       // empty = DL vertex disabled
     cfg["dl_vtx_cut"] = 25.0;    // mm (= 2.5 cm)
     cfg["dQdx_scale"]  = 0.1;    // dQ scale factor for SCN network input
@@ -330,6 +366,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
     pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
     pattern_algos.m_ssm_absorber_dir = WireCell::Vector(m_ssm_absorber_dir[0], m_ssm_absorber_dir[1], m_ssm_absorber_dir[2]);
+    // Charge -> energy calibration.  All dimensionless except w_value, which is
+    // consumed as eV inside kine_charge_from_maps -- no unit conversion here.
+    pattern_algos.m_kine_charge.fudge_factor        = m_kine_fudge_factor;
+    pattern_algos.m_kine_charge.recom_factor        = m_kine_recom_factor;
+    pattern_algos.m_kine_charge.shower_fudge_factor = m_kine_shower_fudge_factor;
+    pattern_algos.m_kine_charge.shower_recom_factor = m_kine_shower_recom_factor;
+    pattern_algos.m_kine_charge.proton_recom_factor = m_kine_proton_recom_factor;
+    pattern_algos.m_kine_charge.plane_weights       = {m_kine_plane_weights[0], m_kine_plane_weights[1], m_kine_plane_weights[2]};
+    pattern_algos.m_kine_charge.plane_asym_switch   = m_kine_plane_asym_switch;
+    pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
     m_track_fitter->set_perf(m_perf);
 
     int acc_segment_id = 0;

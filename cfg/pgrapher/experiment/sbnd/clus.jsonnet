@@ -693,7 +693,28 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // then the 8 ssm_*_angle_{target,absorber} features carry uBooNE
               // geometry -- they are only reachable now, not fixed.
               ssm_target_dir=null,
-              ssm_absorber_dir=null) = {
+              ssm_absorber_dir=null,
+              // kine_*: the charge -> kinetic-energy calibration constants of
+              // NeutrinoEnergyReco (docs/pr/2 sec 2e(iii)).  null = the C++
+              // defaults = the uBooNE-tuned literals they replaced, so the
+              // compiled config is unchanged.  SBND HAS NO VALUE FOR ANY OF
+              // THEM: the recombination survival fractions (0.7 track / 0.5
+              // shower / 0.35 proton) and their fudge factors (0.95 / 0.8) are
+              // field- and calibration-dependent, and the [U,V,W] plane
+              // weights [0.25,0.25,1.0] plus the 0.04 asymmetry switch encode
+              // uBooNE induction-plane quality.  kine_w_value (23.6 eV) is the
+              // argon W-value duplicated from the recombination model.  They
+              // are reachable now, not fixed -- reconstructed kine_charge
+              // energies remain on the uBooNE calibration until someone
+              // measures these.
+              kine_fudge_factor=null,
+              kine_recom_factor=null,
+              kine_shower_fudge_factor=null,
+              kine_shower_recom_factor=null,
+              kine_proton_recom_factor=null,
+              kine_plane_weights=null,
+              kine_plane_asym_switch=null,
+              kine_w_value=null) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -1015,7 +1036,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             endpoint_trim_retry=endpoint_trim_retry,
             fit_vertex_min_seg_length=fit_vertex_min_seg_length,
             ssm_target_dir=ssm_target_dir,
-            ssm_absorber_dir=ssm_absorber_dir),
+            ssm_absorber_dir=ssm_absorber_dir,
+            kine_fudge_factor=kine_fudge_factor,
+            kine_recom_factor=kine_recom_factor,
+            kine_shower_fudge_factor=kine_shower_fudge_factor,
+            kine_shower_recom_factor=kine_shower_recom_factor,
+            kine_proton_recom_factor=kine_proton_recom_factor,
+            kine_plane_weights=kine_plane_weights,
+            kine_plane_asym_switch=kine_plane_asym_switch,
+            kine_w_value=kine_w_value),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
         // geometry-free TaggerInfo consumers).  The weights are the
         // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -1323,7 +1352,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        fit_vertex_min_seg_length=1.0,
        // SSM beam-line references -- null = uBooNE defaults, see the clus_pr
        // arg comment.  No SBND value exists yet (docs/pr/2 sec 2e(i)).
-       ssm_target_dir=null, ssm_absorber_dir=null)::
+       ssm_target_dir=null, ssm_absorber_dir=null,
+       // Charge -> kinetic-energy calibration (docs/pr/2 sec 2e(iii)) -- null
+       // = the uBooNE C++ defaults, see the clus_pr arg comment.  No SBND
+       // value exists for any of them yet.
+       kine_fudge_factor=null, kine_recom_factor=null,
+       kine_shower_fudge_factor=null, kine_shower_recom_factor=null,
+       kine_proton_recom_factor=null, kine_plane_weights=null,
+       kine_plane_asym_switch=null, kine_w_value=null)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1367,6 +1403,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 endpoint_trim_retry=endpoint_trim_retry,
                 fit_vertex_min_seg_length=fit_vertex_min_seg_length,
                 ssm_target_dir=ssm_target_dir,
-                ssm_absorber_dir=ssm_absorber_dir),
+                ssm_absorber_dir=ssm_absorber_dir,
+                kine_fudge_factor=kine_fudge_factor,
+                kine_recom_factor=kine_recom_factor,
+                kine_shower_fudge_factor=kine_shower_fudge_factor,
+                kine_shower_recom_factor=kine_shower_recom_factor,
+                kine_proton_recom_factor=kine_proton_recom_factor,
+                kine_plane_weights=kine_plane_weights,
+                kine_plane_asym_switch=kine_plane_asym_switch,
+                kine_w_value=kine_w_value),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

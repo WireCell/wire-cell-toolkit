@@ -169,6 +169,34 @@ function(
     // ssm_*_angle_z, which is how the plumbing was verified.
     ssm_target_dir   = null,
     ssm_absorber_dir = null,
+    // Charge -> kinetic-energy calibration constants of NeutrinoEnergyReco
+    // (docs/pr/2 sec 2e(iii)), i.e. what turns the summed 2D charge of a shower
+    // or track into kine_charge [MeV]:
+    //   E = sum_p(w_p Q_p)/sum(w) / recom / fudge * kine_w_value * 1e-6 MeV
+    // null = the C++ defaults = the uBooNE-tuned literals these keys replaced,
+    // so the compiled config is unchanged.  NO SBND VALUE EXISTS FOR ANY OF
+    // THEM -- reachable, not calibrated:
+    //   kine_recom_factor        0.7   average recombination survival, track
+    //   kine_fudge_factor        0.95  residual scale, track
+    //   kine_shower_recom_factor 0.5   } same pair when the object is
+    //   kine_shower_fudge_factor 0.8   } flagged shower-like
+    //   kine_proton_recom_factor 0.35  |pdg|==2212 (fudge stays at the track one)
+    //   kine_plane_weights  [0.25,0.25,1.0]  [U,V,W] charge-average weights
+    //   kine_plane_asym_switch   0.04  drop the largest plane above this
+    //                                  (median,max) relative asymmetry
+    //   kine_w_value             23.6  argon W-value in eV
+    // The recombination/fudge pairs are field- and calibration-dependent; the
+    // plane weights and the asymmetry switch encode uBooNE induction-plane
+    // quality.  Sensitivity check: --tla-code 'kine_recom_factor=0.6' scales
+    // every kine_charge by 0.7/0.6.
+    kine_fudge_factor        = null,
+    kine_recom_factor        = null,
+    kine_shower_fudge_factor = null,
+    kine_shower_recom_factor = null,
+    kine_proton_recom_factor = null,
+    kine_plane_weights       = null,
+    kine_plane_asym_switch   = null,
+    kine_w_value             = null,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -353,8 +381,18 @@ function(
                              stm_deficit_guard=stm_deficit_guard,
                              stm_vertex_kink_guard=stm_vertex_kink_guard,
                              stm_d66_cuts=stm_d66_cuts,
+                             // Same offsets below the top face as clus.jsonnet's
+                             // pr() defaults, re-anchored to pr_y_top.
                              ssm_target_dir=ssm_target_dir,
-                             ssm_absorber_dir=ssm_absorber_dir);
+                             ssm_absorber_dir=ssm_absorber_dir,
+                             kine_fudge_factor=kine_fudge_factor,
+                             kine_recom_factor=kine_recom_factor,
+                             kine_shower_fudge_factor=kine_shower_fudge_factor,
+                             kine_shower_recom_factor=kine_shower_recom_factor,
+                             kine_proton_recom_factor=kine_proton_recom_factor,
+                             kine_plane_weights=kine_plane_weights,
+                             kine_plane_asym_switch=kine_plane_asym_switch,
+                             kine_w_value=kine_w_value);
 
     local graph = g.intern(
         innodes=[source],
