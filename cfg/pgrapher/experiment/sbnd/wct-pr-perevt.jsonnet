@@ -81,6 +81,11 @@ function(
     // single-tagger demo.  Production additionally appends 'stm_magnify' when
     // save_stm_fit=true (the -stm-fit ROOT dump); it is left out of the default
     // because save_stm_fit defaults false.
+    // Neutrino-PR chain (docs/pr/2-3): append
+    // ['tagger_check_neutrino','numu_bdt_scorer','nue_bdt_scorer',
+    //  'tracking_visitor','tagger_output'] -- ordering matters (BDTs after the
+    // neutrino stage, nue after numu, tagger_output after tracking_visitor
+    // because it opens tracking-pr.root in UPDATE mode).
     pipeline_names = ['switch_scope', 'unmerge_bundle', 'unmerge_assoc', 'steiner',
                       'fiducialutils', 'tagger_check_tgm', 'tagger_check_stm',
                       'tagger_check_fc'],
@@ -340,15 +345,22 @@ function(
         data: { edges: g.edges(graph) },
     };
 
+    // WireCellRoot hosts SbndMagnifyTrackingVisitor and the PR output
+    // components (SbndPrMagnifyTrackingVisitor, UbooneTaggerOutputVisitor,
+    // the Uboone BDT scorers); loaded only when something in the job needs it
+    // so the default compiled config stays byte-identical.
+    local needs_root = save_stm_fit
+        || std.member(pipeline_names, 'numu_bdt_scorer')
+        || std.member(pipeline_names, 'nue_bdt_scorer')
+        || std.member(pipeline_names, 'tracking_visitor')
+        || std.member(pipeline_names, 'tagger_output');
+
     local cmdline = {
         type: 'wire-cell',
         data: {
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
-                     // WireCellRoot hosts SbndMagnifyTrackingVisitor; loaded
-                     // only with the knob so the compiled config stays
-                     // byte-identical when off.
-                     + (if save_stm_fit then ['WireCellRoot'] else []),
+                     + (if needs_root then ['WireCellRoot'] else []),
             apps: ['Pgrapher'],
         },
     };

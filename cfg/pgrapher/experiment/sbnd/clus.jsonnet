@@ -610,7 +610,16 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // restore the evaluate-every-bundle behavior (C++ knobs default
               // off, keys omitted => compiled config byte-identical to the
               // pre-doc-56 one).  Inert if beam_window is empty.
-              beam_window_only=true) = {
+              beam_window_only=true,
+              // nu_skip_cosmic: tagger_check_neutrino skips in-window mains
+              // already tagged cosmic upstream (flag_TGM, flag_STM, or Q/L
+              // lm_flag>0), so neutrino PR runs only on untagged nu candidates.
+              // Per-main: a cosmic-tagged longest bundle does not veto a clean
+              // runner-up.  C++ default false (key omitted when off =>
+              // byte-identical uBooNE config).  DEFAULT TRUE for SBND (owner
+              // 2026-07-30, sbnd_xin/docs/pr/3); zero production impact while
+              // tagger_check_neutrino is not in pipeline_names.
+              nu_skip_cosmic=true) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -913,7 +922,83 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             perf=true,
             dl_weights=dl_weights,
             beam_window_low=beam_window[0],
-            beam_window_high=beam_window[1]),
+            beam_window_high=beam_window[1],
+            nu_skip_cosmic=nu_skip_cosmic),
+        // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
+        // geometry-free TaggerInfo consumers).  The weights are the
+        // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
+        // 35 files the qlport gate job books -- so on SBND the scores are
+        // UNCALIBRATED (availability + relative ranking only; SBND retraining
+        // is docs/pr/2 gap G1).  Must run after tagger_check_neutrino, nue
+        // after numu.  Only compiled in when named in pipeline_names.
+        local bdt_weights_dir = 'uboone/weights',
+        numu_bdt_scorer: cm.numu_bdt_scorer(
+            numu1_weights_xml=     bdt_weights_dir + '/numu_tagger1.weights.xml',
+            numu2_weights_xml=     bdt_weights_dir + '/numu_tagger2.weights.xml',
+            numu3_weights_xml=     bdt_weights_dir + '/numu_tagger3.weights.xml',
+            cosmict10_weights_xml= bdt_weights_dir + '/cos_tagger_10.weights.xml',
+            numu_xgboost_xml=      bdt_weights_dir + '/numu_scalars_scores_0923.xml'),
+        nue_bdt_scorer: cm.nue_bdt_scorer(
+            mipid_weights_xml=       bdt_weights_dir + '/mipid_BDT.weights.xml',
+            gap_weights_xml=         bdt_weights_dir + '/gap_BDT.weights.xml',
+            hol_lol_weights_xml=     bdt_weights_dir + '/hol_lol_BDT.weights.xml',
+            cme_anc_weights_xml=     bdt_weights_dir + '/cme_anc_BDT.weights.xml',
+            mgo_mgt_weights_xml=     bdt_weights_dir + '/mgo_mgt_BDT.weights.xml',
+            br1_weights_xml=         bdt_weights_dir + '/br1_BDT.weights.xml',
+            br3_weights_xml=         bdt_weights_dir + '/br3_BDT.weights.xml',
+            br3_3_weights_xml=       bdt_weights_dir + '/br3_3_BDT.weights.xml',
+            br3_5_weights_xml=       bdt_weights_dir + '/br3_5_BDT.weights.xml',
+            br3_6_weights_xml=       bdt_weights_dir + '/br3_6_BDT.weights.xml',
+            stemdir_br2_weights_xml= bdt_weights_dir + '/stem_dir_br2_BDT.weights.xml',
+            trimuon_weights_xml=     bdt_weights_dir + '/stl_lem_brm_BDT.weights.xml',
+            br4_tro_weights_xml=     bdt_weights_dir + '/br4_tro_BDT.weights.xml',
+            mipquality_weights_xml=  bdt_weights_dir + '/mipquality_BDT.weights.xml',
+            pio_1_weights_xml=       bdt_weights_dir + '/pio_1_BDT.weights.xml',
+            pio_2_weights_xml=       bdt_weights_dir + '/pio_2_BDT.weights.xml',
+            stw_spt_weights_xml=     bdt_weights_dir + '/stw_spt_BDT.weights.xml',
+            vis_1_weights_xml=       bdt_weights_dir + '/vis_1_BDT.weights.xml',
+            vis_2_weights_xml=       bdt_weights_dir + '/vis_2_BDT.weights.xml',
+            stw_2_weights_xml=       bdt_weights_dir + '/stw_2_BDT.weights.xml',
+            stw_3_weights_xml=       bdt_weights_dir + '/stw_3_BDT.weights.xml',
+            stw_4_weights_xml=       bdt_weights_dir + '/stw_4_BDT.weights.xml',
+            sig_1_weights_xml=       bdt_weights_dir + '/sig_1_BDT.weights.xml',
+            sig_2_weights_xml=       bdt_weights_dir + '/sig_2_BDT.weights.xml',
+            lol_1_weights_xml=       bdt_weights_dir + '/lol_1_BDT.weights.xml',
+            lol_2_weights_xml=       bdt_weights_dir + '/lol_2_BDT.weights.xml',
+            tro_1_weights_xml=       bdt_weights_dir + '/tro_1_BDT.weights.xml',
+            tro_2_weights_xml=       bdt_weights_dir + '/tro_2_BDT.weights.xml',
+            tro_4_weights_xml=       bdt_weights_dir + '/tro_4_BDT.weights.xml',
+            tro_5_weights_xml=       bdt_weights_dir + '/tro_5_BDT.weights.xml',
+            nue_xgboost_xml=         bdt_weights_dir + '/XGB_nue_seed2_0923.xml'),
+        // PR-stage Magnify-tracking ROOT dump (docs/pr/3): fork of the uBooNE
+        // writer reading the unnamed TrackFitting slot + PRGraph filled by
+        // tagger_check_neutrino, with the two-TPC channel convention and
+        // per-point APA from PR::Fit::paf.  Only active when named in
+        // pipeline_names (the WireCellRoot plugin must be loaded by the job).
+        local tracking_pr_root = (if output_dir == '' then '' else output_dir + '/') + 'tracking-pr.root',
+        tracking_visitor: {
+            type: 'SbndPrMagnifyTrackingVisitor',
+            name: 'pr',
+            data: {
+                grouping: 'live',
+                output_filename: tracking_pr_root,
+                runNo: runNo,
+                subRunNo: subRunNo,
+                eventNo: eventNo,
+                anodes: [wc.tn(a) for a in anodes],
+                detector_volumes: wc.tn(dv),
+                dQdx_scale: 0.1,
+                dQdx_offset: -1000.0,
+                flag_skip_vertex: false,
+                // Readout length in ticks; only clamps T_bad_ch time ranges.
+                nticks: 3427,
+            },
+        },
+        // T_tagger/T_kine writer (UbooneTaggerOutputVisitor, reused as-is: it
+        // is a pure TaggerInfo/KineInfo dump with no geometry).  Opens the
+        // tracking file in UPDATE mode, so it must be named AFTER
+        // tracking_visitor (and after both BDT scorers so the scores are set).
+        tagger_output: cm.tagger_output(output_filename=tracking_pr_root),
     },
     local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
     // The taggers' configs only name the recombination/particle-dataset
@@ -981,6 +1066,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     individual: false,
                     dQdx_scale: 0.1,
                     dQdx_offset: -1000.0,
+                    // C++ default false.  Append the PR-graph vertex fit points
+                    // (real_cluster_id=-1) like the prototype's
+                    // fill_skeleton_info_magnify rows (docs/pr/3).  Key present
+                    // only when the PR visitor is in the pipeline => default
+                    // production compiled config stays byte-identical.
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'include_vertex_points']: true,
                 },
                 {
                     name: 'shower_track',    // associated points: q=15000 shower, q=0 track
@@ -992,6 +1084,13 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     coords: ['x', 'y', 'z'],
                     individual: false,
                     use_associate_points: true,
+                    // C++ default false.  Prototype per-particle sub-clustering:
+                    // non-shower segments get real_cluster_id = cluster*1000+seg
+                    // (NeutrinoID::fill_point_info) so Bee can color by particle
+                    // (docs/pr/3).  Key present only when the PR visitor is in
+                    // the pipeline => default compiled config byte-identical.
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'particle_ids']: true,
                 },
                 {
                     name: 'vertices',        // PR graph vertices; main vertex q=15000
@@ -1029,6 +1128,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     name: 'mc',
                     visitor: 'TaggerCheckNeutrino:pr',
                     grouping: 'live',
+                    // C++ defaults false/0 (legacy).  Prototype mc.json parity
+                    // (docs/pr/3): TDatabasePDG-style names + integer MeV, and
+                    // the WCReader::KeepMC display floors (5 MeV em, 10 MeV
+                    // nucleon).  Keys present only when the PR visitor is in
+                    // the pipeline => default compiled config byte-identical.
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'prototype_names']: true,
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'em_ke_min']: 5 * wc.MeV,
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'np_ke_min']: 10 * wc.MeV,
                 },
             ],
             pipeline: wc.tns(cm_pipeline),
@@ -1106,7 +1216,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stm_deficit_guard=true, stm_vertex_kink_guard=true,
        stm_d66_cuts=true, stm_michel_res_cm=6.5, stm_proton_tm_max=1.05,
        stm_proton_b_ks2_max=0.055, stm_proton_c_peak_max=4.1,
-       beam_window_only=true)::
+       beam_window_only=true, nu_skip_cosmic=true)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1142,6 +1252,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_proton_tm_max=stm_proton_tm_max,
                 stm_proton_b_ks2_max=stm_proton_b_ks2_max,
                 stm_proton_c_peak_max=stm_proton_c_peak_max,
-                beam_window_only=beam_window_only),
+                beam_window_only=beam_window_only,
+                nu_skip_cosmic=nu_skip_cosmic),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
