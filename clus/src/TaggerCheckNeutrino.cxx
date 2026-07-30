@@ -75,6 +75,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_proton_dir_asym_min  = get(config, "proton_dir_asym_min",  m_proton_dir_asym_min);
     m_endpoint_trim_retry  = get(config, "endpoint_trim_retry",  m_endpoint_trim_retry);
     m_fit_vertex_min_seg_length = get(config, "fit_vertex_min_seg_length", m_fit_vertex_min_seg_length);  // cm
+    // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all cm.
+    m_cosmic_y_top_main    = get(config, "cosmic_y_top_main",    m_cosmic_y_top_main);
+    m_cosmic_y_top_strict  = get(config, "cosmic_y_top_strict",  m_cosmic_y_top_strict);
+    m_cosmic_y_top_loose   = get(config, "cosmic_y_top_loose",   m_cosmic_y_top_loose);
+    m_cosmic_y_small_piece = get(config, "cosmic_y_small_piece", m_cosmic_y_small_piece);
+    m_vertex_z_prior_scale = get(config, "vertex_z_prior_scale", m_vertex_z_prior_scale);
+    if (m_vertex_z_prior_scale <= 0) {
+        SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: vertex_z_prior_scale must be > 0; keeping 200 cm");
+        m_vertex_z_prior_scale = 200;
+    }
     // SSM beam-line reference directions, {x,y,z} in the detector frame.
     // Anything malformed keeps the default and warns rather than falling
     // through to (0,0,0): a zero reference makes every safe_acos(dot) return
@@ -170,6 +180,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["proton_dir_asym_min"]  = m_proton_dir_asym_min;
     cfg["endpoint_trim_retry"]  = m_endpoint_trim_retry;  // false = legacy (no endpoint-trim retry on abstention)
     cfg["fit_vertex_min_seg_length"] = m_fit_vertex_min_seg_length;  // cm; 0 = legacy (all segments enter the vertex fit)
+    // Detector-extent literals (docs/pr/2 sec. 2e(iv)); defaults = uBooNE prototype, cm.
+    cfg["cosmic_y_top_main"]    = m_cosmic_y_top_main;     // 100 = 17 cm below the uBooNE y=+117 top
+    cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
+    cfg["cosmic_y_top_loose"]   = m_cosmic_y_top_loose;    // 80  = 37 cm below
+    cfg["cosmic_y_small_piece"] = m_cosmic_y_small_piece;  // 50  = 67 cm below
+    cfg["vertex_z_prior_scale"] = m_vertex_z_prior_scale;  // cm; 200 = uBooNE (1037 cm detector)
     // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber.
     // Assign the array first: append() alone would accumulate rather than overwrite if
     // this ever ran against a reused Configuration, and a 6-element array would be
@@ -363,6 +379,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
     pattern_algos.m_endpoint_trim_retry  = m_endpoint_trim_retry;
     pattern_algos.m_fit_vertex_min_seg_length = m_fit_vertex_min_seg_length * units::cm;  // cm -> internal
+    // Detector-extent literals, cm -> internal (docs/pr/2 sec. 2e(iv)).
+    pattern_algos.m_cosmic_y_top_main    = m_cosmic_y_top_main    * units::cm;
+    pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;
+    pattern_algos.m_cosmic_y_top_loose   = m_cosmic_y_top_loose   * units::cm;
+    pattern_algos.m_cosmic_y_small_piece = m_cosmic_y_small_piece * units::cm;
+    pattern_algos.m_vertex_z_prior_scale = m_vertex_z_prior_scale * units::cm;
     // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
     pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
     pattern_algos.m_ssm_absorber_dir = WireCell::Vector(m_ssm_absorber_dir[0], m_ssm_absorber_dir[1], m_ssm_absorber_dir[2]);

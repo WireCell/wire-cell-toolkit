@@ -24,6 +24,15 @@ local bee_dir = 'data';
 
 local common_coords = ['x', 'y', 'z'];
 
+// SBND top face of the active volume, cm.  Used to re-anchor the PR chain's
+// uBooNE-calibrated cosmic_tagger y cuts (docs/pr/2 sec 2e(iv)): the uBooNE
+// prototype was written against y in [-116,+117] cm, z in [0,1037] cm
+// (prototype_base/pid/apps/wire-cell-prod-nue.cxx:417), while SBND's sensitive
+// box is |y| <= 199.965 cm, z in [0,501.0] cm (see the DetectorVolumes note in
+// clus_pr below).  Change THIS number, not the per-cut arithmetic in the
+// clus_pr defaults below.
+local sbnd_y_top = 200.0;
+
 // DIAGNOSTIC (default OFF): dump the Bee "clustering" layer once per pipeline
 // step, so the step that merged two pieces into one cluster can be named instead
 // of guessed.  MABC's bee_points_sets entries accept a "visitor" = the step's
@@ -683,6 +692,35 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // DEFAULT 1.0 cm for SBND (owner 2026-07-30, deliberate
               // prototype divergence).
               fit_vertex_min_seg_length=1.0,
+              // cosmic_y_* (cm): cosmic_tagger()'s four "reaches the top of the
+              // detector" tests, re-anchored from uBooNE's top face (y = +117 cm)
+              // to SBND's (y = +200 cm, sbnd_y_top above).  The uBooNE literals
+              // 100 / 102 / 80 / 50 cm are 17 / 15 / 37 / 67 cm below its top --
+              // an entry-point tolerance for a downward cosmic, which does not
+              // scale with detector height -- so SBND keeps the same offsets and
+              // gets 183 / 185 / 163 / 133 cm.  At the uBooNE values these cuts
+              // are near-meaningless on SBND (100 cm is mid-detector), which is
+              // what docs/pr/2 sec 2e(iv) flagged.  DEFAULT ON for SBND (owner
+              // 2026-07-30); null on any one of them restores that cut's uBooNE
+              // value.  NOT bit-identical: cosmic_tagger verdicts can change.
+              cosmic_y_top_main=sbnd_y_top - 17,     // main cluster's own top
+              cosmic_y_top_strict=sbnd_y_top - 15,   // event top, 1-cosmic branch
+              cosmic_y_top_loose=sbnd_y_top - 37,    // event top, global gate
+              cosmic_y_small_piece=sbnd_y_top - 67,  // <3 cm debris, PCA centre
+              // vertex_z_prior_scale (cm): denominator of the upstream-z penalty
+              // (z - min_z)/scale that ranks main-vertex candidates against the
+              // +0.25-per-track bonuses.  uBooNE's 200 cm spans ~5.2 penalty
+              // units over its 1037 cm detector; SBND is 501 cm long, so the
+              // same 200 cm halves the prior's dynamic range -- most visible in
+              // compare_main_vertices_global, which ranks candidates from
+              // DIFFERENT clusters of the beam bundle, where separations do run
+              // toward the full detector length.  DEFAULT = the length-scaled
+              // 200 x 501/1037 = 96.6 -> 100 cm (owner 2026-07-30).  The
+              // alternative reading -- that the prior is a per-cm trade-off
+              // against track bonuses and transfers unchanged -- keeps 200;
+              // pass null for that (docs/pr/2 sec 2e(iv)).
+              // NOT bit-identical: vertex ranking can change.
+              vertex_z_prior_scale=100.0,
               // ssm_target_dir / ssm_absorber_dir: the SSM tagger's beam-line
               // reference directions [x,y,z] in the detector frame (docs/pr/2
               // sec 2e(i)).  null = the C++ defaults = the prototype's uBooNE
@@ -1035,6 +1073,11 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             proton_dir_vote=proton_dir_vote,
             endpoint_trim_retry=endpoint_trim_retry,
             fit_vertex_min_seg_length=fit_vertex_min_seg_length,
+            cosmic_y_top_main=cosmic_y_top_main,
+            cosmic_y_top_strict=cosmic_y_top_strict,
+            cosmic_y_top_loose=cosmic_y_top_loose,
+            cosmic_y_small_piece=cosmic_y_small_piece,
+            vertex_z_prior_scale=vertex_z_prior_scale,
             ssm_target_dir=ssm_target_dir,
             ssm_absorber_dir=ssm_absorber_dir,
             kine_fudge_factor=kine_fudge_factor,
@@ -1350,6 +1393,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // fit_vertex short-segment exclusion (doc pr/9 sec 11 F3c), cm -- see
        // the clus_pr arg comment.  null would give the legacy include-all fit.
        fit_vertex_min_seg_length=1.0,
+       // Detector-extent literals re-anchored to SBND (docs/pr/2 sec 2e(iv)) --
+       // see the clus_pr arg comments.  cosmic_y_*: uBooNE's "reaches the top"
+       // offsets carried from its y=+117 cm top face to SBND's +200 cm.
+       // vertex_z_prior_scale: upstream-z prior scaled by the detector length
+       // (200 x 501/1037 -> 100 cm).  null on any of them restores uBooNE.
+       cosmic_y_top_main=sbnd_y_top - 17,
+       cosmic_y_top_strict=sbnd_y_top - 15,
+       cosmic_y_top_loose=sbnd_y_top - 37,
+       cosmic_y_small_piece=sbnd_y_top - 67,
+       vertex_z_prior_scale=100.0,
        // SSM beam-line references -- null = uBooNE defaults, see the clus_pr
        // arg comment.  No SBND value exists yet (docs/pr/2 sec 2e(i)).
        ssm_target_dir=null, ssm_absorber_dir=null,
@@ -1402,6 +1455,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 proton_dir_vote=proton_dir_vote,
                 endpoint_trim_retry=endpoint_trim_retry,
                 fit_vertex_min_seg_length=fit_vertex_min_seg_length,
+                cosmic_y_top_main=cosmic_y_top_main,
+                cosmic_y_top_strict=cosmic_y_top_strict,
+                cosmic_y_top_loose=cosmic_y_top_loose,
+                cosmic_y_small_piece=cosmic_y_small_piece,
+                vertex_z_prior_scale=vertex_z_prior_scale,
                 ssm_target_dir=ssm_target_dir,
                 ssm_absorber_dir=ssm_absorber_dir,
                 kine_fudge_factor=kine_fudge_factor,

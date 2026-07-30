@@ -871,8 +871,8 @@ VertexPtr PatternAlgorithms::compare_main_vertices(Graph& graph, Facade::Cluster
     for (auto vtx : vertex_candidates) {
         if (!vtx->descriptor_valid()) continue;
 
-        // Position penalty
-        map_vertex_num[vtx] -= (vtx_pt(vtx).z() - min_z) / (200 * units::cm);
+        // Position penalty (uBooNE 200 cm; m_vertex_z_prior_scale, doc pr/2 2e(iv))
+        map_vertex_num[vtx] -= (vtx_pt(vtx).z() - min_z) / m_vertex_z_prior_scale;
         
         // Score based on connected segments
         auto vd = vtx->get_descriptor();
@@ -2998,7 +2998,8 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
     
     for (auto vtx : vertex_candidates) {
         WireCell::Point vtx_pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
-        map_vertex_num[vtx] -= (vtx_pt.z() - min_z) / (200 * units::cm);
+        // uBooNE 200 cm; m_vertex_z_prior_scale, doc pr/2 2e(iv)
+        map_vertex_num[vtx] -= (vtx_pt.z() - min_z) / m_vertex_z_prior_scale;
         
         // Score based on segments connected to this vertex
         if (vtx->descriptor_valid()) {
@@ -3039,7 +3040,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_global(Graph& graph, std::vec
         
         SPDLOG_LOGGER_TRACE(s_log, "compare_main_vertices_global: cluster {} score_A={:.4f} z_norm={:.4f}",
             vtx->cluster() ? vtx->cluster()->get_cluster_id() : -1,
-            map_vertex_num[vtx], (vtx_pt.z() - min_z) / (200 * units::cm));
+            map_vertex_num[vtx], (vtx_pt.z() - min_z) / m_vertex_z_prior_scale);
     }
 
     // Score based on fiducial volume

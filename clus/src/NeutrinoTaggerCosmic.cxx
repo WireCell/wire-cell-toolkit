@@ -1068,9 +1068,10 @@ bool PatternAlgorithms::cosmic_tagger(
             if (len > 3 * units::cm) {
                 big_cluster_ids.insert(cl_id);
             } else {
-                // Check if top part of detector (y > 50cm)
+                // Check if top part of detector (uBooNE y > 50 cm = 67 cm below
+                // the y = +117 cm top face; m_cosmic_y_small_piece, doc pr/2 2e(iv))
                 const auto& pca = cl->get_pca();
-                if (pca.center.y() > 50 * units::cm) {
+                if (pca.center.y() > m_cosmic_y_small_piece) {
                     num_small_pieces++;
                     acc_small_length += len;
                 }
@@ -1172,7 +1173,7 @@ bool PatternAlgorithms::cosmic_tagger(
                     if (cl_len > max_length) max_length = cl_len;
                 }
             } else {
-                bool top_main = (cl_id == main_cl_id && highest_y_cl > 100 * units::cm);
+                bool top_main = (cl_id == main_cl_id && highest_y_cl > m_cosmic_y_top_main);
                 if (angle_cosmic < 20 || (angle_cosmic < 30 && top_main)) {
                     acc_cosmic_len += cl_len;
                     num_cosmic++;
@@ -1187,9 +1188,18 @@ bool PatternAlgorithms::cosmic_tagger(
         bool flagp_cosmic = false;
         if (((num_cosmic > 2  && acc_cosmic_len + acc_small_length > 0.55 * acc_total_len) ||
              (num_cosmic >= 2 && acc_cosmic_len + acc_small_length > 0.70 * acc_total_len) ||
-             (num_cosmic == 1 && acc_cosmic_len + acc_small_length > 0.625 * acc_total_len && highest_y > 102 * units::cm)) &&
-            mv_pt.y() > 0 && flag_main_cluster && highest_y > 80 * units::cm)
+             (num_cosmic == 1 && acc_cosmic_len + acc_small_length > 0.625 * acc_total_len && highest_y > m_cosmic_y_top_strict)) &&
+            mv_pt.y() > 0 && flag_main_cluster && highest_y > m_cosmic_y_top_loose)
             flagp_cosmic = true;
+        // mv_pt.y() > 0 above is the detector MID-PLANE, scale-free on both
+        // detectors (uBooNE y in [-116,+117], SBND y in [-200,+200]) -- no knob.
+        SPDLOG_LOGGER_TRACE(s_log,
+            "cosmic_tagger: part D num_cosmic={} highest_y={:.1f} cm acc_cosmic={:.1f} acc_small={:.1f} "
+            "acc_total={:.1f} cm flagp_cosmic={} (y cuts: top_main={:.1f} strict={:.1f} loose={:.1f} small={:.1f} cm)",
+            num_cosmic, highest_y / units::cm, acc_cosmic_len / units::cm, acc_small_length / units::cm,
+            acc_total_len / units::cm, flagp_cosmic, m_cosmic_y_top_main / units::cm,
+            m_cosmic_y_top_strict / units::cm, m_cosmic_y_top_loose / units::cm,
+            m_cosmic_y_small_piece / units::cm);
 
         if (num_cosmic == 1 && acc_cosmic_len > 100 * units::cm)
             flagp_cosmic = false;

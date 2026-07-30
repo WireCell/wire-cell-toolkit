@@ -63,6 +63,18 @@ public:
         // stubs from dragging the vertex: >=3 surviving legs => fit on the
         // survivors; <=2 => skip the fit (two-leg position already fit).
         double m_fit_vertex_min_seg_length{0};
+        // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
+        // Defaults = the uBooNE prototype values (active volume y in
+        // [-116,+117], z in [0,1037]) => absent keys are byte-identical.
+        // cosmic_tagger()'s four "reaches the top" cuts, quoted as a distance
+        // below the top face (117 - value): 17 / 15 / 37 / 67 cm.
+        double m_cosmic_y_top_main{100};
+        double m_cosmic_y_top_strict{102};
+        double m_cosmic_y_top_loose{80};
+        double m_cosmic_y_small_piece{50};
+        // Denominator of the upstream-z vertex-score penalty (z-min_z)/scale in
+        // compare_main_vertices{,_global}.  See PatternAlgorithms.
+        double m_vertex_z_prior_scale{200};
         // SSM beam-line reference directions in the detector frame, {x,y,z}.
         // Defaults = the prototype's uBooNE BNB-target / NuMI-absorber vectors
         // (absent keys => byte-identical).  SBND has no value for either yet

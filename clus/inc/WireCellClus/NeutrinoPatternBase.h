@@ -133,6 +133,43 @@ namespace WireCell::Clus::PR {
         // segments stay in the graph and the particle flow.
         // C++ default 0 => no filtering, legacy byte-identical.
         double m_fit_vertex_min_seg_length{0};
+
+        // ---- Detector-extent literals (doc sbnd_xin/docs/pr/2 sec. 2e(iv)) ----
+        // The uBooNE active volume the prototype was written against is
+        // y in [-116, +117] cm, z in [0, 1037] cm, x in [0, 256] cm
+        // (prototype_base/pid/apps/wire-cell-prod-nue.cxx:417).  Every default
+        // below is the prototype literal, so absent config keys are
+        // byte-identical.  Values are INTERNAL units.
+        //
+        // cosmic_tagger() "reaches the top of the detector" tests, part D
+        // (prototype NeutrinoID_cosmic_tagger.h:594-796).  Each is a fixed
+        // DISTANCE BELOW THE TOP FACE in uBooNE terms (117 - cut), which is
+        // what a downward cosmic entering the top satisfies regardless of
+        // detector height -- so a taller detector moves them up, it does not
+        // scale them.  SBND (top y = +200 cm) uses 183 / 185 / 163 / 133.
+        double m_cosmic_y_top_main{100 * units::cm};    // :1175, 17 cm below top:
+                                                        // the MAIN cluster's own highest
+                                                        // point, relaxing the vertical-angle
+                                                        // cut from 20 to 30 degrees.
+        double m_cosmic_y_top_strict{102 * units::cm};  // :1190, 15 cm below top: event
+                                                        // highest point, single-cosmic branch.
+        double m_cosmic_y_top_loose{80 * units::cm};    // :1191, 37 cm below top: event
+                                                        // highest point, global gate on the
+                                                        // whole flagp_cosmic decision.
+        double m_cosmic_y_small_piece{50 * units::cm};  // :1073, 67 cm below top: a <3 cm
+                                                        // cluster counts as cosmic debris
+                                                        // (acc_small_length) only if its PCA
+                                                        // centre sits in the upper region.
+        // Upstream-z preference in compare_main_vertices (:875) and
+        // compare_main_vertices_global (:3001): each candidate is penalised by
+        // (z - min_z) / m_vertex_z_prior_scale, competing with the +0.25-per-
+        // track bonuses.  The uBooNE 200 cm gives ~5.2 penalty units across the
+        // 1037 cm detector.  On a shorter detector the same 200 cm shrinks the
+        // prior's dynamic range, which matters most in the _global comparison
+        // (candidates from DIFFERENT clusters of the beam bundle, separations up
+        // to the full detector length).  SBND uses 100 cm ~ 200 x 501/1037.
+        double m_vertex_z_prior_scale{200 * units::cm};
+
         // Bundle the do_track_pid-related knobs for the free segment functions.
         TrackPidOptions track_pid_options() const {
             TrackPidOptions o;

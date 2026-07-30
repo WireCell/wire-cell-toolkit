@@ -159,6 +159,19 @@ function(
     // DEFAULT TRUE = SBND production as of doc 66 (owner 2026-07-27).
     // Runner flag: -no-stm-d66cuts / SBND_STM_D66CUTS=0.
     stm_d66_cuts = true,
+    // Detector-extent literals of the PR chain (docs/pr/2 sec 2e(iv)).  The
+    // uBooNE prototype's cosmic_tagger quotes its four "reaches the top" cuts as
+    // 17 / 15 / 37 / 67 cm below its y = +117 cm top face (100/102/80/50 cm);
+    // pr_y_top re-anchors the same offsets to a detector whose top is elsewhere.
+    // DEFAULT 200 = SBND (sensitive |y| <= 199.965 cm) => 183/185/163/133 cm.
+    // The uBooNE arm of an A/B is one flag: --tla-code 'pr_y_top=117'
+    // (reproduces 100/102/80/50 exactly), paired with vertex_z_prior_scale=200.
+    pr_y_top = 200.0,
+    // Denominator (cm) of the upstream-z main-vertex penalty (z-min_z)/scale.
+    // uBooNE 200 cm over a 1037 cm detector; DEFAULT 100 = SBND's 501 cm scaled
+    // (200 x 501/1037 = 96.6).  See the clus.jsonnet arg comment for the
+    // alternative reading that keeps 200.
+    vertex_z_prior_scale = 100.0,
     // SSM beam-line reference directions [x,y,z] in the detector frame, feeding
     // the 8 ssm_*_angle_{target,absorber} BDT features (docs/pr/2 sec 2e(i)).
     // null = the C++ defaults = the prototype's uBooNE BNB-target
@@ -383,6 +396,11 @@ function(
                              stm_d66_cuts=stm_d66_cuts,
                              // Same offsets below the top face as clus.jsonnet's
                              // pr() defaults, re-anchored to pr_y_top.
+                             cosmic_y_top_main=pr_y_top - 17,
+                             cosmic_y_top_strict=pr_y_top - 15,
+                             cosmic_y_top_loose=pr_y_top - 37,
+                             cosmic_y_small_piece=pr_y_top - 67,
+                             vertex_z_prior_scale=vertex_z_prior_scale,
                              ssm_target_dir=ssm_target_dir,
                              ssm_absorber_dir=ssm_absorber_dir,
                              kine_fudge_factor=kine_fudge_factor,

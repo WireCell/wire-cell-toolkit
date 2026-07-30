@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -426,6 +426,35 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // reproduces the drag).  SBND: 1.0 cm (owner 2026-07-30, deliberate
               // prototype divergence).
               + (if fit_vertex_min_seg_length != null then { fit_vertex_min_seg_length: fit_vertex_min_seg_length } else {})
+              // Detector-extent literals (docs/pr/2 sec 2e(iv)), all in cm.  C++
+              // defaults = the uBooNE prototype values, so keys omitted when null =>
+              // byte-identical pre-knob config.
+              //
+              // cosmic_y_*: cosmic_tagger()'s four "reaches the top of the detector"
+              // tests.  uBooNE's active volume tops out at y = +117 cm
+              // (prototype_base/pid/apps/wire-cell-prod-nue.cxx:417), so the legacy
+              // 100 / 102 / 80 / 50 cm are 17 / 15 / 37 / 67 cm BELOW THE TOP FACE --
+              // an offset a downward cosmic entering the top satisfies whatever the
+              // detector height is, hence a taller detector moves the cuts up rather
+              // than scaling them.  Roles: top_main = the MAIN cluster's own highest
+              // point (relaxes the vertical-angle cut 20 -> 30 deg); top_strict =
+              // event highest point in the single-cosmic branch; top_loose = event
+              // highest point, global gate on the whole decision; small_piece = PCA
+              // centre of a <3 cm cluster counted as cosmic debris.  SBND (top
+              // y = +200 cm): 183 / 185 / 163 / 133.
+              + (if cosmic_y_top_main != null then { cosmic_y_top_main: cosmic_y_top_main } else {})
+              + (if cosmic_y_top_strict != null then { cosmic_y_top_strict: cosmic_y_top_strict } else {})
+              + (if cosmic_y_top_loose != null then { cosmic_y_top_loose: cosmic_y_top_loose } else {})
+              + (if cosmic_y_small_piece != null then { cosmic_y_small_piece: cosmic_y_small_piece } else {})
+              // vertex_z_prior_scale (cm): denominator of the upstream-z penalty
+              // (z - min_z)/scale in compare_main_vertices and
+              // compare_main_vertices_global, competing with the +0.25-per-track
+              // bonuses.  uBooNE's 200 cm spans ~5.2 penalty units over its 1037 cm
+              // detector; a shorter detector keeps the same per-cm trade-off but
+              // loses dynamic range, which bites hardest in the _global comparison
+              // (candidates from DIFFERENT clusters of the beam bundle).  SBND:
+              // 100 cm ~ 200 x 501/1037.  Must be > 0.
+              + (if vertex_z_prior_scale != null then { vertex_z_prior_scale: vertex_z_prior_scale } else {})
               // SSM beam-line reference directions [x,y,z] in the detector frame,
               // feeding the 8 ssm_*_angle_{target,absorber} BDT features.  C++
               // defaults = the prototype's uBooNE BNB-target (0.46,0.05,0.885) and
