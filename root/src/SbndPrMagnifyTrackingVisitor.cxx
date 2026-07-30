@@ -17,6 +17,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRSegment.h"
+#include "WireCellClus/PRShower.h"   // PR::ClusterPtrCmp / ClusterPtrSet
 
 #include <boost/graph/graph_traits.hpp>
 
@@ -334,13 +335,23 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     // every view (evt 172230 seg 5030: median -0.5 ch, rms 0.27 = floor() of a
     // uniform fraction).  Same convention as UbooneMagnifyTrackingVisitor,
     // which writes fit.pu + kPlaneChOffset keeping the fraction.
+    // The (apa,face) fallback has to be used for the TICK divisor too: an
+    // unrecorded paf (-1,-1) misses nticks_map, nticks_for returns 1, and the
+    // point lands at its raw tick instead of its time slice -- a factor
+    // nticks_per_slice (4 on SBND) off the charge it was fitted to, while the
+    // channel silently falls back to APA 0.  Counted below; 0 occurrences on
+    // evt 172230/444187, so this is a guard, not a change of what is written.
+    int n_paf_fallback = 0;
     WCPointTree point_tree;
     auto project_fit = [&](const PR::Fit& fit) {
-        const int apa = fit.paf.first >= 0 ? fit.paf.first : 0;
+        const bool have_paf = fit.paf.first >= 0;
+        if (!have_paf) ++n_paf_fallback;
+        const std::pair<int, int> paf = have_paf ? fit.paf : std::make_pair(0, 0);
+        const int apa = paf.first;
         point_tree.reco_pu = cs.base[0] + apa * cs.nch[0] + fit.pu;
         point_tree.reco_pv = cs.base[1] + apa * cs.nch[1] + fit.pv;
         point_tree.reco_pw = cs.base[2] + apa * cs.nch[2] + fit.pw;
-        point_tree.reco_pt = fit.pt / nticks_for(fit.paf);
+        point_tree.reco_pt = fit.pt / nticks_for(paf);
     };
 
     // Create TTree with branches
@@ -379,8 +390,15 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     // Build per-cluster edge/vertex maps in a single pass (O(E+V) instead of O(C*(E+V)))
     using edge_desc = typename boost::graph_traits<PR::Graph>::edge_descriptor;
     using vertex_desc = typename boost::graph_traits<PR::Graph>::vertex_descriptor;
-    std::map<Facade::Cluster*, std::vector<edge_desc>> cluster_edges;
-    std::map<Facade::Cluster*, std::vector<vertex_desc>> cluster_vertices;
+    // Cluster-id ordered, NOT pointer ordered (CLAUDE.md determinism rule): these
+    // maps and the set below decide the order of the T_rec_charge rows, which is
+    // the order the convert app turns into track blocks and the GUI indexes as
+    // "cluster index".  With std::less<Cluster*> that index moved from run to run
+    // for the same cluster id (evt 172230 cluster 5 came out at block 1 in one run
+    // and block 5 in the next), even under `setarch -R`.  Row CONTENT is unchanged:
+    // the multiset of rows hashes the same before and after.
+    std::map<Facade::Cluster*, std::vector<edge_desc>, PR::ClusterPtrCmp> cluster_edges;
+    std::map<Facade::Cluster*, std::vector<vertex_desc>, PR::ClusterPtrCmp> cluster_vertices;
 
     auto edge_range = boost::edges(*graph);
     for (auto eit = edge_range.first; eit != edge_range.second; ++eit) {
@@ -396,6 +414,35 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
         if (vtx && vtx->cluster()) {
             cluster_vertices[vtx->cluster()].push_back(*vit);
         }
+    }
+
+    // Order the rows of each cluster by CONTENT, not by graph descriptor.  The PR
+    // graph's vertex descriptors are not reproducible run to run (evt 172230: the
+    // 87 vertex rows come out in a different order every run, even under
+    // `setarch -R`, while their multiset is identical), and that order is what the
+    // convert app turns into blocks and the GUI shows as "cluster index".
+    // Segments are keyed on their encoded proto id first so the id stays ascending.
+    auto point_key = [](const PR::Fit& f) {
+        return std::make_tuple(f.point.x(), f.point.y(), f.point.z());
+    };
+    for (auto& [cluster, vds] : cluster_vertices) {
+        (void)cluster;
+        std::sort(vds.begin(), vds.end(), [&](vertex_desc a, vertex_desc b) {
+            auto va = (*graph)[a].vertex, vb = (*graph)[b].vertex;
+            if (!va || !vb) return va < vb;
+            return point_key(va->fit()) < point_key(vb->fit());
+        });
+    }
+    for (auto& [cluster, eds] : cluster_edges) {
+        (void)cluster;
+        std::sort(eds.begin(), eds.end(), [&](edge_desc a, edge_desc b) {
+            auto sa = (*graph)[a].segment, sb = (*graph)[b].segment;
+            if (!sa || !sb) return sa < sb;
+            const auto ia = sa->get_graph_index(), ib = sb->get_graph_index();
+            if (ia != ib) return ia < ib;
+            if (sa->fits().empty() || sb->fits().empty()) return sa->fits().size() < sb->fits().size();
+            return point_key(sa->fits().front()) < point_key(sb->fits().front());
+        });
     }
 
     // Find the main cluster ID
@@ -416,7 +463,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
     }
 
     // Collect unique clusters
-    std::set<Facade::Cluster*> all_clusters;
+    PR::ClusterPtrSet all_clusters;
     for (const auto& [c, _] : cluster_edges) all_clusters.insert(c);
     for (const auto& [c, _] : cluster_vertices) all_clusters.insert(c);
 
@@ -544,7 +591,8 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
         }
     }
 
-    log->debug("SbndPrMagnifyTrackingVisitor: wrote {} entries to T_rec_charge", t_rec_charge->GetEntries());
+    log->debug("SbndPrMagnifyTrackingVisitor: wrote {} entries to T_rec_charge ({} with no recorded (apa,face))",
+               t_rec_charge->GetEntries(), n_paf_fallback);
 }
 
 // Local Variables:
