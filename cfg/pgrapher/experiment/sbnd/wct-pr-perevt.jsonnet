@@ -229,19 +229,22 @@ function(
     // [0.8866, 0.9533, 18, 0.4234] (byte-identical pre-knob config; also
     // bit-identical when passed explicitly -- verified, docs/pr/10 sec 7).
     muon_dqdx_curve          = [0.8826, 1.0587, 18, 0.4745],
-    // Recombination-model selection for BOTH taggers (STM + neutrino PR):
-    // false = sbnd_box_recomb (A=1.0, B=0.255 at 0.5 kV/cm), byte-identical;
-    // true = sbnd_power_recomb, the free-power Modified Box fitted to SBND
-    // stopping tracks (docs/55 sec 7g canonical; docs/pr/10).  Changes every
-    // model-driven dQ/dx -> dE/dx conversion (kinematics, PID energies).
-    use_power_recomb         = false,
-    // Single-photon stem dE/dx: false = the inline uBooNE-field (0.273 kV/cm)
-    // inverse Box, byte-identical; true = route shw_sp_vec_{median,mean}_dedx
-    // through the configured recombination model above.  sp_mean_dedx_cut
-    // (MeV/cm) is the hard mean-dedx cut coupled to that choice; null = the
-    // legacy 2.3 (docs/pr/2 sec 2e(i) third correctness item; docs/pr/10).
-    sp_dedx_use_recomb_model = false,
-    sp_mean_dedx_cut         = null,
+    // Recombination-model selection for BOTH taggers (STM + neutrino PR).
+    // DEFAULT ON (owner 2026-07-30, docs/pr/10 sec 7): sbnd_power_recomb,
+    // the free-power Modified Box fitted to SBND stopping tracks (docs/55
+    // sec 7g canonical) -- every model-driven dQ/dx -> dE/dx conversion
+    // (kinematics, PID energies) uses the measured SBND recombination.
+    // false restores sbnd_box_recomb (A=1.0, B=0.255 at 0.5 kV/cm), the
+    // byte-identical pre-pr/10 config.
+    use_power_recomb         = true,
+    // Single-photon stem dE/dx: DEFAULT ON (owner 2026-07-30) -- route
+    // shw_sp_vec_{median,mean}_dedx through the configured recombination
+    // model above, with sp_mean_dedx_cut = 2.23 MeV/cm, the physical-scale
+    // transfer of the legacy 2.3 (docs/pr/2 sec 2e(i) third correctness
+    // item; docs/pr/10 sec 5).  false/null restore the inline uBooNE-field
+    // (0.273 kV/cm) inverse Box and the 2.3 literal.
+    sp_dedx_use_recomb_model = true,
+    sp_mean_dedx_cut         = 2.23,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).

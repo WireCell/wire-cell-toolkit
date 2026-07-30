@@ -771,18 +771,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // use_power_recomb: hand the taggers (STM + neutrino PR) the
               // free-power Modified-Box recombination fitted to SBND stopping
               // tracks (docs/55 sec 7g canonical, PowerBoxRecombination
-              // defaults) instead of the plain sbnd_box_recomb above.  false =
-              // byte-identical legacy config; flipping it changes every
-              // model-driven dQ/dx -> dE/dx conversion (docs/pr/10).
-              use_power_recomb=false,
+              // defaults) instead of the plain sbnd_box_recomb above.
+              // DEFAULT ON for SBND (owner 2026-07-30, docs/pr/10 sec 7):
+              // every model-driven dQ/dx -> dE/dx conversion now uses the
+              // measured SBND recombination.  false restores sbnd_box_recomb
+              // (the byte-identical pre-pr/10 config).
+              use_power_recomb=true,
               // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
               // through the configured recombination model instead of the
-              // inline uBooNE-field (0.273 kV/cm) inverse Box; C++ default
-              // false, key omitted => byte-identical.  sp_mean_dedx_cut
-              // (MeV/cm): the hard mean-dedx cut coupled to that choice; null
-              // = the legacy 2.3 (docs/pr/2 sec 2e(i), docs/pr/10).
-              sp_dedx_use_recomb_model=false,
-              sp_mean_dedx_cut=null) = {
+              // inline uBooNE-field (0.273 kV/cm) inverse Box.  DEFAULT ON
+              // for SBND (owner 2026-07-30) with sp_mean_dedx_cut=2.23, the
+              // physical-scale transfer of the legacy 2.3 (docs/pr/10 sec 5).
+              // false/null restore the inline formula and the 2.3 literal.
+              sp_dedx_use_recomb_model=true,
+              sp_mean_dedx_cut=2.23) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -1463,11 +1465,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        kine_plane_asym_switch=null, kine_w_value=null,
        // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
        // (see the clus_pr arg comment; null restores the uBooNE refit).
-       // Recombination-model selection + single-photon dE/dx routing stay
-       // OFF (byte-identical) pending owner review of docs/pr/10 sec 7.
+       // Recombination-model selection + single-photon dE/dx routing:
+       // DEFAULT ON (owner 2026-07-30, docs/pr/10 sec 7) -- see the clus_pr
+       // arg comments; false/null restore the pre-pr/10 legacy behavior.
        muon_dqdx_curve=[0.8826, 1.0587, 18, 0.4745],
-       use_power_recomb=false,
-       sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null)::
+       use_power_recomb=true,
+       sp_dedx_use_recomb_model=true, sp_mean_dedx_cut=2.23)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
