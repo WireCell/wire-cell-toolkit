@@ -505,7 +505,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // '' selects the C++ preset defaults, which are uBooNE-hard-coded --
               // never right for SBND, which is why this no longer defaults to ''.
               trackfitting_config_file='pgrapher/experiment/sbnd/sbnd_track_fitting.json',
-              particle_dataset=null, extra_uses=[], dl_weights='',
+              particle_dataset=null, extra_uses=[],
+              // dl_weights: SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
+              // DEFAULT = the uBooNE-trained net, i.e. the DL vertex is ON for SBND
+              // (owner adopted 2026-07-30 on nueCC48 evt 18253/1/172230, where the
+              // geometric vertex sat at the far end of a proton track and the DL
+              // vertex moved it 9.7 cm onto the true interaction point -- docs/pr/4).
+              // '' restores the geometric-only vertex (still what every identity
+              // gate must pass, CLAUDE.md M4).  The weights remain uBooNE-TRAINED:
+              // SBND retraining is docs/pr/2 gap G3 and stays open.
+              // REQUIRES libpython preloaded in the job (LD_PRELOAD=libpython3.11.so.1.0);
+              // without it the SCN module import fails and the code falls back to the
+              // geometric vertex with a single WARN line -- grep the log for
+              // "DL vertex failed" (expect none).
+              dl_weights='uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
               // beam_window: internal-unit [low, high] on the matched flash time
               // (cluster_t0).  DEFAULT = the SBND BNB gate after the
               // frame_apply_at_caf correction, which is what production passes
@@ -914,13 +927,23 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // beam_window gate (on cluster_t0 = matched flash time) replaces
         // uBooNE's single-main + beam_flash selection; companions are the
         // associated clusters sharing the main's matched_flash_gid.
-        // dl_weights='' = geometric vertex (the SCN net is uBooNE-trained).
+        // dl_weights defaults to the uBooNE-trained SCN net = DL vertex ON
+        // (docs/pr/4); '' falls back to the geometric vertex.
         tagger_check_neutrino: cm.tagger_check_neutrino(
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
             recombination_model=wc.tn(sbnd_box_recomb),
             perf=true,
             dl_weights=dl_weights,
+            // The DL re-rank sub-knobs, pinned here rather than inherited: they
+            // were inert while dl_weights was '' and went LIVE with the doc-pr/4
+            // adoption, so SBND records the operating point it was validated at
+            // (= the common/clus.jsonnet defaults as of 2026-07-30, hence the
+            // compiled JSON is unchanged by this pinning).
+            dl_vtx_rerank=true,
+            dl_vtx_top_k=5,
+            dl_vtx_min_accept_score=4.0,
+            dl_vtx_score_scale=1000.0,
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
             nu_skip_cosmic=nu_skip_cosmic),
@@ -1202,7 +1225,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     pr(anodes, dump=true, pipeline_names=[], tensor_outname='',
        trackfitting_config_file='pgrapher/experiment/sbnd/sbnd_track_fitting.json',
        particle_dataset=null, extra_uses=[],
-       dl_weights='', beam_window=[0.2 * wc.us, 2.2 * wc.us],
+       // DL (SCN) vertex ON by default -- see the clus_pr arg comment.
+       dl_weights='uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth',
+       beam_window=[0.2 * wc.us, 2.2 * wc.us],
        tgm_neutrino_candidate=true,
        tgm_chord_charge=true, tgm_chord_mode='path',
        tgm_component_extremes=true, tgm_component_rescue=true,
