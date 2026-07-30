@@ -52,6 +52,12 @@ public:
         bool   m_proton_dir_vote{false};
         double m_proton_dir_score_max{0.25};
         double m_proton_dir_asym_min{1.3};
+        // SSM beam-line reference directions in the detector frame, {x,y,z}.
+        // Defaults = the prototype's uBooNE BNB-target / NuMI-absorber vectors
+        // (absent keys => byte-identical).  SBND has no value for either yet
+        // (docs/pr/2 sec. 2e(i)).  See PatternAlgorithms::m_ssm_target_dir.
+        std::vector<double> m_ssm_target_dir{0.46, 0.05, 0.885};
+        std::vector<double> m_ssm_absorber_dir{0.33, 0.75, -0.59};
         std::string m_dl_weights;              // path to SCN vertex .pth weights file (empty = DL disabled)
         double m_dl_vtx_cut{25.0};             // max distance (mm) from DL prediction to accept candidate vertex (default 2.5 cm)
         double m_dQdx_scale{0.1};              // scale factor applied to dQ before passing to SCN network

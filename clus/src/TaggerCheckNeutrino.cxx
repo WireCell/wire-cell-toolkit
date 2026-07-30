@@ -73,6 +73,27 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_proton_dir_vote      = get(config, "proton_dir_vote",      m_proton_dir_vote);
     m_proton_dir_score_max = get(config, "proton_dir_score_max", m_proton_dir_score_max);
     m_proton_dir_asym_min  = get(config, "proton_dir_asym_min",  m_proton_dir_asym_min);
+    // SSM beam-line reference directions, {x,y,z} in the detector frame.
+    // Anything malformed keeps the default and warns rather than falling
+    // through to (0,0,0): a zero reference makes every safe_acos(dot) return
+    // exactly pi/2 and silently pins all 8 ssm_*_angle_{target,absorber}
+    // features to 1.5708.
+    auto get_dir3 = [&](const char* key, std::vector<double> def) {
+        if (!config.isMember(key)) return def;
+        const auto& jv = config[key];
+        if (!jv.isArray() || jv.size() != 3u) {
+            SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: {} must be a 3-element array; keeping default", key);
+            return def;
+        }
+        std::vector<double> v{jv[0].asDouble(), jv[1].asDouble(), jv[2].asDouble()};
+        if (std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]) < 1e-9) {
+            SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: {} is the zero vector; keeping default", key);
+            return def;
+        }
+        return v;
+    };
+    m_ssm_target_dir   = get_dir3("ssm_target_dir",   m_ssm_target_dir);
+    m_ssm_absorber_dir = get_dir3("ssm_absorber_dir", m_ssm_absorber_dir);
     auto dl_weights_raw = get(config, "dl_weights", m_dl_weights);
     if (!dl_weights_raw.empty()) {
         m_dl_weights = Persist::resolve(dl_weights_raw);
@@ -119,6 +140,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["proton_dir_vote"]      = m_proton_dir_vote;      // false = legacy muon-vs-flat-only direction
     cfg["proton_dir_score_max"] = m_proton_dir_score_max;
     cfg["proton_dir_asym_min"]  = m_proton_dir_asym_min;
+    // SSM beam-line references, {x,y,z}; defaults = uBooNE BNB target / NuMI absorber
+    for (double c : m_ssm_target_dir)   cfg["ssm_target_dir"].append(c);
+    for (double c : m_ssm_absorber_dir) cfg["ssm_absorber_dir"].append(c);
     cfg["dl_weights"] = "";       // empty = DL vertex disabled
     cfg["dl_vtx_cut"] = 25.0;    // mm (= 2.5 cm)
     cfg["dQdx_scale"]  = 0.1;    // dQ scale factor for SCN network input
@@ -292,6 +316,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     pattern_algos.m_proton_dir_vote      = m_proton_dir_vote;
     pattern_algos.m_proton_dir_score_max = m_proton_dir_score_max;
     pattern_algos.m_proton_dir_asym_min  = m_proton_dir_asym_min;
+    // Dimensionless directions -- no unit conversion (unlike the dQ/dx scales).
+    pattern_algos.m_ssm_target_dir   = WireCell::Vector(m_ssm_target_dir[0],   m_ssm_target_dir[1],   m_ssm_target_dir[2]);
+    pattern_algos.m_ssm_absorber_dir = WireCell::Vector(m_ssm_absorber_dir[0], m_ssm_absorber_dir[1], m_ssm_absorber_dir[2]);
     m_track_fitter->set_perf(m_perf);
 
     int acc_segment_id = 0;

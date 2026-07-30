@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, ssm_target_dir=null, ssm_absorber_dir=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -410,7 +410,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // are initial values pending the pr/8 sec 6 calibration).
               + (if proton_dir_vote then { proton_dir_vote: true } else {})
               + (if proton_dir_score_max != null then { proton_dir_score_max: proton_dir_score_max } else {})
-              + (if proton_dir_asym_min != null then { proton_dir_asym_min: proton_dir_asym_min } else {}),
+              + (if proton_dir_asym_min != null then { proton_dir_asym_min: proton_dir_asym_min } else {})
+              // SSM beam-line reference directions [x,y,z] in the detector frame,
+              // feeding the 8 ssm_*_angle_{target,absorber} BDT features.  C++
+              // defaults = the prototype's uBooNE BNB-target (0.46,0.05,0.885) and
+              // NuMI-absorber (0.33,0.75,-0.59) vectors; keys omitted when null =>
+              // byte-identical pre-knob config.  SBND has no value for either yet
+              // (docs/pr/2 sec 2e(i)) -- the numbers are merely reachable now, not
+              // fixed.  Note they are deliberately NOT unit vectors.
+              + (if ssm_target_dir != null then { ssm_target_dir: ssm_target_dir } else {})
+              + (if ssm_absorber_dir != null then { ssm_absorber_dir: ssm_absorber_dir } else {}),
         },
 
         // Run pattern recognition (find_proto_vertex) on the main cluster.

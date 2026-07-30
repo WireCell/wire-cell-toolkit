@@ -660,7 +660,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // uBooNE config).  DEFAULT TRUE for SBND (owner 2026-07-30);
               // score/asym thresholds stay at the C++ defaults 0.25/1.3 pending
               // the pr/8 sec 6 calibration.
-              proton_dir_vote=true) = {
+              proton_dir_vote=true,
+              // ssm_target_dir / ssm_absorber_dir: the SSM tagger's beam-line
+              // reference directions [x,y,z] in the detector frame (docs/pr/2
+              // sec 2e(i)).  null = the C++ defaults = the prototype's uBooNE
+              // BNB-target / NuMI-absorber vectors, so the compiled config is
+              // unchanged.  SBND HAS NO VALUE FOR EITHER YET: the BNB-target
+              // direction must be re-derived in the SBND frame, and the
+              // NuMI-absorber features have no obvious SBND meaning.  Until
+              // then the 8 ssm_*_angle_{target,absorber} features carry uBooNE
+              // geometry -- they are only reachable now, not fixed.
+              ssm_target_dir=null,
+              ssm_absorber_dir=null) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -978,7 +989,9 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
             mip_dqdx_median=mip_dqdx_median,
-            proton_dir_vote=proton_dir_vote),
+            proton_dir_vote=proton_dir_vote,
+            ssm_target_dir=ssm_target_dir,
+            ssm_absorber_dir=ssm_absorber_dir),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
         // geometry-free TaggerInfo consumers).  The weights are the
         // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -1278,7 +1291,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        dir_weak_use_score=true,
        // PR-chain median-dQ/dx scale + proton direction vote -- see the
        // clus_pr arg comments (docs pr/7 sec 5, pr/8).
-       mip_dqdx_median=48000, proton_dir_vote=true)::
+       mip_dqdx_median=48000, proton_dir_vote=true,
+       // SSM beam-line references -- null = uBooNE defaults, see the clus_pr
+       // arg comment.  No SBND value exists yet (docs/pr/2 sec 2e(i)).
+       ssm_target_dir=null, ssm_absorber_dir=null)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1318,6 +1334,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 nu_skip_cosmic=nu_skip_cosmic,
                 dir_weak_use_score=dir_weak_use_score,
                 mip_dqdx_median=mip_dqdx_median,
-                proton_dir_vote=proton_dir_vote),
+                proton_dir_vote=proton_dir_vote,
+                ssm_target_dir=ssm_target_dir,
+                ssm_absorber_dir=ssm_absorber_dir),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }

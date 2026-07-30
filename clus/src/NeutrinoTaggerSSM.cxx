@@ -579,8 +579,12 @@ bool PatternAlgorithms::ssm_tagger(
     // Fixed reference directions (beam = z, drift = x, vertical = y)
     const Vector dir_beam(0,0,1);
     const Vector dir_vertical(0,1,0);
-    const Vector target_dir(0.46,0.05,0.885);
-    const Vector absorber_dir(0.33,0.75,-0.59);
+    // Beam-line references, config-fed via ssm_target_dir / ssm_absorber_dir.
+    // Defaults are the prototype's uBooNE BNB-target / NuMI-absorber vectors;
+    // see PatternAlgorithms::m_ssm_target_dir for the non-unit-magnitude note
+    // and the SBND gap (docs/pr/2 sec. 2e(i)).
+    const Vector target_dir   = m_ssm_target_dir;
+    const Vector absorber_dir = m_ssm_absorber_dir;
 
     int  Nsm = 0;
     int  Nsm_wivtx = 0;

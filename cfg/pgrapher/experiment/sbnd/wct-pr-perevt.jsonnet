@@ -159,6 +159,16 @@ function(
     // DEFAULT TRUE = SBND production as of doc 66 (owner 2026-07-27).
     // Runner flag: -no-stm-d66cuts / SBND_STM_D66CUTS=0.
     stm_d66_cuts = true,
+    // SSM beam-line reference directions [x,y,z] in the detector frame, feeding
+    // the 8 ssm_*_angle_{target,absorber} BDT features (docs/pr/2 sec 2e(i)).
+    // null = the C++ defaults = the prototype's uBooNE BNB-target
+    // (0.46,0.05,0.885) / NuMI-absorber (0.33,0.75,-0.59) vectors, so the
+    // compiled config is unchanged.  NO SBND VALUE EXISTS YET -- these are
+    // reachable, not calibrated.  Diagnostic use: --tla-code
+    // 'ssm_target_dir=[0,0,1]' makes ssm_*_angle_target identical to
+    // ssm_*_angle_z, which is how the plumbing was verified.
+    ssm_target_dir   = null,
+    ssm_absorber_dir = null,
     // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
     // round-trip gate (re-save with pipeline_names=[] and compare member hashes
     // against the input tarball).
@@ -342,7 +352,9 @@ function(
                              stm_second_track_guard=stm_second_track_guard,
                              stm_deficit_guard=stm_deficit_guard,
                              stm_vertex_kink_guard=stm_vertex_kink_guard,
-                             stm_d66_cuts=stm_d66_cuts);
+                             stm_d66_cuts=stm_d66_cuts,
+                             ssm_target_dir=ssm_target_dir,
+                             ssm_absorber_dir=ssm_absorber_dir);
 
     local graph = g.intern(
         innodes=[source],

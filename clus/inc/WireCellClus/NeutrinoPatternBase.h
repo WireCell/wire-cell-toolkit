@@ -83,6 +83,27 @@ namespace WireCell::Clus::PR {
             return o;
         }
 
+        // Beam-line reference directions used by ssm_tagger, in the DETECTOR
+        // frame.  They feed the 8 ssm_*_angle_{target,absorber} BDT features
+        // via safe_acos(dir.dot(ref)) at NeutrinoTaggerSSM.cxx:908-909 (the
+        // 10 cm initial-direction pair) and :1124-1125 (the nu/con_nu/prim_nu/
+        // track momentum pairs).
+        // Defaults = the prototype's hard-coded uBooNE numbers
+        // (NeutrinoID_ssm_tagger.h): BNB target and NuMI absorber as seen from
+        // MicroBooNE.  Absent config keys => byte-identical.  SBND needs its
+        // own BNB-target vector and the NuMI-absorber features have no obvious
+        // SBND meaning -- see wcp-porting-img sbnd_xin/docs/pr/2 sec. 2e(i);
+        // the value itself is still an open gap, only its location moved.
+        //
+        // NOTE these are NOT unit vectors: |target| = 0.99866,
+        // |absorber| = 1.00970.  safe_acos() clamps the dot product, so the
+        // absorber angle saturates at exactly 0 for true angles out to ~7.9
+        // deg.  Kept verbatim for prototype parity -- whoever supplies a
+        // properly normalized SBND vector should expect these feature
+        // distributions to shift even at the same physical direction.
+        WireCell::Vector m_ssm_target_dir{0.46, 0.05, 0.885};
+        WireCell::Vector m_ssm_absorber_dir{0.33, 0.75, -0.59};
+
         // 2D charge maps cached for the duration of shower_clustering_with_nv.
         // Populated once by collect_charge_maps(); reused by calculate_shower_kinematics
         // and all cal_kine_charge call sites to avoid O(N_hits) re-collection per shower.
