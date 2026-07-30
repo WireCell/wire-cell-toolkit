@@ -202,23 +202,33 @@ function(
     // plane weights and the asymmetry switch encode uBooNE induction-plane
     // quality.  Sensitivity check: --tla-code 'kine_recom_factor=0.6' scales
     // every kine_charge by 0.7/0.6.
+    // 2026-07-30 (docs/pr/10 sec 6): the three RECOMBINATION factors now
+    // default to the SBND transfer values -- the uBooNE empiricals scaled by
+    // the table-integrated survival ratio (official uBooNE Box at 0.273
+    // kV/cm -> doc-55 free-power SBND fit, C excluded).  The fudge factors
+    // stay uBooNE (they absorb gain/lifetime normalization, which the C of
+    // the fit carries -- keeping both would double-count).  Effect: Enu in
+    // the T_kine tree drops 12-14% on nuecc48 172230/235435/444187.
+    // null on any factor restores its uBooNE value.
     kine_fudge_factor        = null,
-    kine_recom_factor        = null,
+    kine_recom_factor        = 0.87,   // 0.70 x 1.249 (track)
     kine_shower_fudge_factor = null,
-    kine_shower_recom_factor = null,
-    kine_proton_recom_factor = null,
+    kine_shower_recom_factor = 0.58,   // 0.50 x 1.169 (shower)
+    kine_proton_recom_factor = 0.51,   // 0.35 x 1.453 (proton)
     kine_plane_weights       = null,
     kine_plane_asym_switch   = null,
     kine_w_value             = null,
     // Muon median-dQ/dx-vs-length envelope [c0, c1, pivot_cm, power]:
     //   dQ_dx_cut = c0 + c1*(pivot/L)^power   (a multiple of mip_dqdx_median)
     // used by nine tagger cuts (numu x2, vertex-finder, nue x4, ssm, cosmic).
-    // null = the C++ defaults = the prototype's empirical uBooNE stopping-muon
-    // refit [0.8866, 0.9533, 18, 0.4234], byte-identical (docs/pr/10, which
-    // also records the SBND table-derived fit).  Sensitivity check:
-    // --tla-code 'muon_dqdx_curve=[0.8866,0.9533,18,0.4234]' compiles the
-    // defaults explicitly and must not change any verdict.
-    muon_dqdx_curve          = null,
+    // DEFAULT = the docs/pr/10 sec 4 SBND fit (2026-07-30): SBND stopping-
+    // muon table median (0.5 kV/cm, / mip_dqdx_median=48000) times the
+    // uBooNE empirical/table margin g(L), same functional form.  Scales as
+    // 1/mip_dqdx_median -- re-derive when 48000 becomes a measurement.
+    // null = the C++ defaults = the prototype's empirical uBooNE refit
+    // [0.8866, 0.9533, 18, 0.4234] (byte-identical pre-knob config; also
+    // bit-identical when passed explicitly -- verified, docs/pr/10 sec 7).
+    muon_dqdx_curve          = [0.8826, 1.0587, 18, 0.4745],
     // Recombination-model selection for BOTH taggers (STM + neutrino PR):
     // false = sbnd_box_recomb (A=1.0, B=0.255 at 0.5 kV/cm), byte-identical;
     // true = sbnd_power_recomb, the free-power Modified Box fitted to SBND

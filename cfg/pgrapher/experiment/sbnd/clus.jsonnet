@@ -734,31 +734,40 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               ssm_absorber_dir=null,
               // kine_*: the charge -> kinetic-energy calibration constants of
               // NeutrinoEnergyReco (docs/pr/2 sec 2e(iii)).  null = the C++
-              // defaults = the uBooNE-tuned literals they replaced, so the
-              // compiled config is unchanged.  SBND HAS NO VALUE FOR ANY OF
-              // THEM: the recombination survival fractions (0.7 track / 0.5
-              // shower / 0.35 proton) and their fudge factors (0.95 / 0.8) are
-              // field- and calibration-dependent, and the [U,V,W] plane
-              // weights [0.25,0.25,1.0] plus the 0.04 asymmetry switch encode
-              // uBooNE induction-plane quality.  kine_w_value (23.6 eV) is the
-              // argon W-value duplicated from the recombination model.  They
-              // are reachable now, not fixed -- reconstructed kine_charge
-              // energies remain on the uBooNE calibration until someone
-              // measures these.
+              // defaults = the uBooNE-tuned literals they replaced.
+              // The three RECOMBINATION survival factors carry SBND values
+              // since 2026-07-30 (docs/pr/10 sec 6): the uBooNE empirical
+              // 0.7 / 0.5 / 0.35 scaled by the table-integrated survival
+              // ratio between the official uBooNE Box at 0.273 kV/cm and the
+              // doc-55 free-power SBND fit (C excluded -- degenerate with
+              // the fudge factors, which deliberately STAY uBooNE: they
+              // absorb gain/lifetime normalization, not field physics).
+              // NOT bit-identical: kine-derived BDT features move; the
+              // T_kine tree of the pr/3-style tracking-pr.root shows the
+              // effect (Enu -12..-14% on nuecc48 172230/235435/444187).
+              // null on any one restores that factor's uBooNE value.
+              // The plane weights [0.25,0.25,1.0], the 0.04 asymmetry
+              // switch and kine_w_value (23.6 eV) still have NO SBND value.
               kine_fudge_factor=null,
-              kine_recom_factor=null,
+              kine_recom_factor=0.87,         // 0.70 x 1.249 (track, docs/pr/10)
               kine_shower_fudge_factor=null,
-              kine_shower_recom_factor=null,
-              kine_proton_recom_factor=null,
+              kine_shower_recom_factor=0.58,  // 0.50 x 1.169 (shower)
+              kine_proton_recom_factor=0.51,  // 0.35 x 1.453 (proton)
               kine_plane_weights=null,
               kine_plane_asym_switch=null,
               kine_w_value=null,
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
-              // multiple of mip_dqdx_median.  null = the C++ defaults = the
-              // prototype's empirical uBooNE stopping-muon refit
-              // [0.8866, 0.9533, 18, 0.4234], byte-identical (docs/pr/10).
-              muon_dqdx_curve=null,
+              // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
+              // (2026-07-30, docs/pr/10 sec 4): the SBND stopping-muon table
+              // median (0.5 kV/cm, /48000) times the uBooNE empirical/table
+              // margin g(L), refit with the prototype's functional form.
+              // NOT bit-identical: nine tagger cuts move (looser at short L
+              // -- the higher field keeps more of the Bragg rise in dQ/dx).
+              // Scales as 1/mip_dqdx_median: re-derive when the 48000
+              // placeholder becomes a measurement.  null restores the uBooNE
+              // refit [0.8866, 0.9533, 18, 0.4234] (byte-identical pre-knob).
+              muon_dqdx_curve=[0.8826, 1.0587, 18, 0.4745],
               // use_power_recomb: hand the taggers (STM + neutrino PR) the
               // free-power Modified-Box recombination fitted to SBND stopping
               // tracks (docs/55 sec 7g canonical, PowerBoxRecombination
@@ -1443,17 +1452,20 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // SSM beam-line references -- null = uBooNE defaults, see the clus_pr
        // arg comment.  No SBND value exists yet (docs/pr/2 sec 2e(i)).
        ssm_target_dir=null, ssm_absorber_dir=null,
-       // Charge -> kinetic-energy calibration (docs/pr/2 sec 2e(iii)) -- null
-       // = the uBooNE C++ defaults, see the clus_pr arg comment.  No SBND
-       // value exists for any of them yet.
-       kine_fudge_factor=null, kine_recom_factor=null,
-       kine_shower_fudge_factor=null, kine_shower_recom_factor=null,
-       kine_proton_recom_factor=null, kine_plane_weights=null,
+       // Charge -> kinetic-energy calibration (docs/pr/2 sec 2e(iii)).  The
+       // three recombination survival factors carry the docs/pr/10 SBND
+       // values (table-integrated ratio transfer); fudge factors, plane
+       // weights, asymmetry switch and W-value remain uBooNE (null) -- see
+       // the clus_pr arg comment.
+       kine_fudge_factor=null, kine_recom_factor=0.87,
+       kine_shower_fudge_factor=null, kine_shower_recom_factor=0.58,
+       kine_proton_recom_factor=0.51, kine_plane_weights=null,
        kine_plane_asym_switch=null, kine_w_value=null,
-       // Muon dQ/dx-vs-length envelope + recombination-model selection +
-       // single-photon dE/dx routing (docs/pr/10) -- see the clus_pr arg
-       // comments.  All defaults = byte-identical legacy config.
-       muon_dqdx_curve=null,
+       // Muon dQ/dx-vs-length envelope: DEFAULT = the docs/pr/10 SBND fit
+       // (see the clus_pr arg comment; null restores the uBooNE refit).
+       // Recombination-model selection + single-photon dE/dx routing stay
+       // OFF (byte-identical) pending owner review of docs/pr/10 sec 7.
+       muon_dqdx_curve=[0.8826, 1.0587, 18, 0.4745],
        use_power_recomb=false,
        sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null)::
         clus_pr(anodes, dump=dump,
