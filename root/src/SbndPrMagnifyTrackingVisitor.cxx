@@ -328,12 +328,18 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
 
     // Per-point channel/tick projection from the fit's own (apa,face); a fit
     // with no recorded paf (-1,-1) falls back to APA 0.
+    // PR::Fit pu/pv/pw are FRACTIONAL wire coordinates (double) -- keep the
+    // fraction, do not truncate through ChanScheme::global (int wire), or the
+    // drawn track sits a systematic half-channel below the measured charge in
+    // every view (evt 172230 seg 5030: median -0.5 ch, rms 0.27 = floor() of a
+    // uniform fraction).  Same convention as UbooneMagnifyTrackingVisitor,
+    // which writes fit.pu + kPlaneChOffset keeping the fraction.
     WCPointTree point_tree;
     auto project_fit = [&](const PR::Fit& fit) {
         const int apa = fit.paf.first >= 0 ? fit.paf.first : 0;
-        point_tree.reco_pu = cs.global(0, apa, static_cast<int>(fit.pu));
-        point_tree.reco_pv = cs.global(1, apa, static_cast<int>(fit.pv));
-        point_tree.reco_pw = cs.global(2, apa, static_cast<int>(fit.pw));
+        point_tree.reco_pu = cs.base[0] + apa * cs.nch[0] + fit.pu;
+        point_tree.reco_pv = cs.base[1] + apa * cs.nch[1] + fit.pv;
+        point_tree.reco_pw = cs.base[2] + apa * cs.nch[2] + fit.pw;
         point_tree.reco_pt = fit.pt / nticks_for(fit.paf);
     };
 
