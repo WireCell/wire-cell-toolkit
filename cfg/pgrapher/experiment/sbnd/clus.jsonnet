@@ -661,6 +661,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // score/asym thresholds stay at the C++ defaults 0.25/1.3 pending
               // the pr/8 sec 6 calibration.
               proton_dir_vote=true,
+              // Endpoint-trim retry (doc pr/9 sec 6 F1): on double abstention,
+              // retry the dQ/dx PID once with exactly 1 sample excluded at the
+              // hypothesized stopping end -- an ill-defined endpoint dilutes or
+              // inflates the tip dQ/dx, which is compared against the template's
+              // Bragg maximum (evt 172230: tip -37% vetoed a clean proton;
+              // trimmed retry passes at score 0.077).  Dynamic: trims 0 samples
+              // when the untrimmed comparison already decides, never more than
+              // 1.  Runs before the proton_dir_vote fallback.  C++ default
+              // false (key omitted => byte-identical uBooNE config).  DEFAULT
+              // TRUE for SBND (owner 2026-07-30).
+              endpoint_trim_retry=true,
               // ssm_target_dir / ssm_absorber_dir: the SSM tagger's beam-line
               // reference directions [x,y,z] in the detector frame (docs/pr/2
               // sec 2e(i)).  null = the C++ defaults = the prototype's uBooNE
@@ -990,6 +1001,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             mip_dqdx=mip_dqdx,
             mip_dqdx_median=mip_dqdx_median,
             proton_dir_vote=proton_dir_vote,
+            endpoint_trim_retry=endpoint_trim_retry,
             ssm_target_dir=ssm_target_dir,
             ssm_absorber_dir=ssm_absorber_dir),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
@@ -1292,6 +1304,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // PR-chain median-dQ/dx scale + proton direction vote -- see the
        // clus_pr arg comments (docs pr/7 sec 5, pr/8).
        mip_dqdx_median=48000, proton_dir_vote=true,
+       // Endpoint-trim retry (doc pr/9 sec 6 F1) -- see the clus_pr arg comment.
+       endpoint_trim_retry=true,
        // SSM beam-line references -- null = uBooNE defaults, see the clus_pr
        // arg comment.  No SBND value exists yet (docs/pr/2 sec 2e(i)).
        ssm_target_dir=null, ssm_absorber_dir=null)::
@@ -1335,6 +1349,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 dir_weak_use_score=dir_weak_use_score,
                 mip_dqdx_median=mip_dqdx_median,
                 proton_dir_vote=proton_dir_vote,
+                endpoint_trim_retry=endpoint_trim_retry,
                 ssm_target_dir=ssm_target_dir,
                 ssm_absorber_dir=ssm_absorber_dir),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),

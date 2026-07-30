@@ -1288,14 +1288,14 @@ namespace WireCell::Clus::PR {
         return kine_energy;
     }
 
-    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx){
-        
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data,  double MIP_dQdx, int skip_stop_samples){
+
         double end_L = L.back() + 0.15*units::cm - offset_length;
-        
+
         int ncount = 0;
         std::vector<double> vec_x;
         std::vector<double> vec_y;
-        
+
         for (size_t i = 0; i != L.size(); i++) {
             if (end_L - L.at(i) < compare_range && end_L - L.at(i) > 0) { // check up to compared range
                 vec_x.push_back(end_L - L.at(i));
@@ -1303,7 +1303,17 @@ namespace WireCell::Clus::PR {
                 ncount++;
             }
         }
-        
+
+        // Endpoint-trim retry (pr/9 F1): samples were pushed in increasing-L
+        // order, so the last entries are the ones nearest the hypothesized
+        // stop.  Drop them without moving end_L (the template anchor).  Only
+        // trim when at least one sample would survive.
+        if (skip_stop_samples > 0 && ncount > skip_stop_samples) {
+            vec_x.resize(vec_x.size() - skip_stop_samples);
+            vec_y.resize(vec_y.size() - skip_stop_samples);
+            ncount -= skip_stop_samples;
+        }
+
         // If no points fall inside the comparison window, return "no direction signal" defaults.
         if (ncount == 0) {
             return {1.0, 1e9, 1e9, 1e9};
@@ -1489,6 +1499,56 @@ namespace WireCell::Clus::PR {
             return std::make_tuple(true, flag_dir, particle_type, particle_score);
         }
         
+        // Improvement beyond the prototype (doc sbnd_xin/docs/pr/9 sec. 6 F1):
+        // endpoint-trim retry.  Entered ONLY where the legacy logic abstains in
+        // both orientations (no flag_force), so every decision the prototype
+        // path makes is untouched.  The stopping tip's dQ/dx is unreliable when
+        // the endpoint is ill-defined (deposit ends mid-bin => diluted, or
+        // out-of-track charge piles into the last bin => inflated), yet it is
+        // compared against the template's Bragg maximum — one bad tip sample
+        // can veto an otherwise clean decision (SBND evt 172230: monotone
+        // Bragg rise 98k->193k e/cm, tip collapses to 121k, both orientations
+        // abstain; with the tip excluded the forward proton passes at score
+        // 0.077).  Dynamic by construction: trim happens only on abstention,
+        // exactly 1 sample, per-orientation at that orientation's hypothesized
+        // stop end, template anchor unchanged, value-agnostic.
+        if (pid_opts.endpoint_trim_retry && !flag_force) {
+            std::vector<double> retry_forward  = do_track_comp(L,  dQ_dx,  compare_range, offset_length, particle_data, MIP_dQdx, 1);
+            std::vector<double> retry_backward = do_track_comp(rL, rdQ_dx, compare_range, offset_length, particle_data, MIP_dQdx, 1);
+
+            const bool rf = static_cast<bool>(std::round(retry_forward.at(0)));
+            const bool rb = static_cast<bool>(std::round(retry_backward.at(0)));
+
+            if (rf || rb) {
+                // Same mu/p/e competition as the primary attempt (incl. the
+                // <20 cm electron rule), evaluated on the trimmed results.
+                int r_fwd_type = 13;
+                double r_fwd_val = retry_forward.at(1);
+                if (retry_forward.at(2) < r_fwd_val) { r_fwd_val = retry_forward.at(2); r_fwd_type = 2212; }
+                if (retry_forward.at(3) < r_fwd_val && length < 20*units::cm) { r_fwd_val = retry_forward.at(3); r_fwd_type = 11; }
+
+                int r_bwd_type = 13;
+                double r_bwd_val = retry_backward.at(1);
+                if (retry_backward.at(2) < r_bwd_val) { r_bwd_val = retry_backward.at(2); r_bwd_type = 2212; }
+                if (retry_backward.at(3) < r_bwd_val && length < 20*units::cm) { r_bwd_val = retry_backward.at(3); r_bwd_type = 11; }
+
+                if (rf && !rb) {
+                    return std::make_tuple(true, 1, r_fwd_type, r_fwd_val);
+                }
+                if (rb && !rf) {
+                    return std::make_tuple(true, -1, r_bwd_type, r_bwd_val);
+                }
+                // Both orientations pass on the trimmed data: pick the better
+                // score, mirroring the primary attempt's both-pass branch.
+                if (r_fwd_val < r_bwd_val) {
+                    return std::make_tuple(true, 1, r_fwd_type, r_fwd_val);
+                }
+                return std::make_tuple(true, -1, r_bwd_type, r_bwd_val);
+            }
+            // Retry also abstained: fall through to the proton_dir_vote (which
+            // votes on the UNTRIMMED results, unchanged pr/8 semantics).
+        }
+
         // Improvement beyond the prototype (doc sbnd_xin/docs/pr/8): proton-template
         // direction vote.  Entered ONLY where the legacy logic abstains (both
         // orientations failed the muon-vs-flat gate, no flag_force), so every

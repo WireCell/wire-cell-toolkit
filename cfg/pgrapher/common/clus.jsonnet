@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, ssm_target_dir=null, ssm_absorber_dir=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, ssm_target_dir=null, ssm_absorber_dir=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -411,6 +411,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if proton_dir_vote then { proton_dir_vote: true } else {})
               + (if proton_dir_score_max != null then { proton_dir_score_max: proton_dir_score_max } else {})
               + (if proton_dir_asym_min != null then { proton_dir_asym_min: proton_dir_asym_min } else {})
+              // Endpoint-trim retry (doc pr/9 sec 6 F1).  C++ default false = legacy
+              // abstention; key omitted when off => byte-identical.  When on: on
+              // double abstention, retry the dQ/dx PID once with exactly 1 sample
+              // excluded at each orientation's hypothesized stopping end (runs
+              // before the proton_dir_vote fallback).
+              + (if endpoint_trim_retry then { endpoint_trim_retry: true } else {})
               // SSM beam-line reference directions [x,y,z] in the detector frame,
               // feeding the 8 ssm_*_angle_{target,absorber} BDT features.  C++
               // defaults = the prototype's uBooNE BNB-target (0.46,0.05,0.885) and

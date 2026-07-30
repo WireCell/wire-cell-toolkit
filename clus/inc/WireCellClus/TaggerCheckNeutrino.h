@@ -52,6 +52,11 @@ public:
         bool   m_proton_dir_vote{false};
         double m_proton_dir_score_max{0.25};
         double m_proton_dir_asym_min{1.3};
+        // Endpoint-trim retry (doc sbnd_xin/docs/pr/9 sec. 6 F1; default false
+        // = legacy).  On abstention only, retry the dQ/dx PID once with 1
+        // sample excluded at the hypothesized stopping end (ill-defined
+        // endpoints dilute or inflate the tip dQ/dx).  Runs before the vote.
+        bool   m_endpoint_trim_retry{false};
         // SSM beam-line reference directions in the detector frame, {x,y,z}.
         // Defaults = the prototype's uBooNE BNB-target / NuMI-absorber vectors
         // (absent keys => byte-identical).  SBND has no value for either yet

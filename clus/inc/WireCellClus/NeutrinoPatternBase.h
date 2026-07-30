@@ -73,6 +73,9 @@ namespace WireCell::Clus::PR {
         bool   m_proton_dir_vote{false};
         double m_proton_dir_score_max{0.25};
         double m_proton_dir_asym_min{1.3};
+        // Endpoint-trim retry (doc sbnd_xin/docs/pr/9 sec. 6 F1).  C++ default
+        // false => legacy abstention path, byte-identical.
+        bool   m_endpoint_trim_retry{false};
         // Bundle the do_track_pid-related knobs for the free segment functions.
         TrackPidOptions track_pid_options() const {
             TrackPidOptions o;
@@ -80,6 +83,7 @@ namespace WireCell::Clus::PR {
             o.proton_dir_vote = m_proton_dir_vote;
             o.proton_dir_score_max = m_proton_dir_score_max;
             o.proton_dir_asym_min = m_proton_dir_asym_min;
+            o.endpoint_trim_retry = m_endpoint_trim_retry;
             return o;
         }
 

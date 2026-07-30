@@ -88,7 +88,14 @@ namespace WireCell::Clus::PR {
 
     // PID related
     bool eval_ks_ratio(double ks1, double ks2, double ratio1, double ratio2);
-    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm);
+    // skip_stop_samples: exclude that many samples nearest the hypothesized
+    // stopping end (largest L, smallest residual range) from the comparison,
+    // WITHOUT moving the template anchor (end_L).  0 = legacy, byte-identical.
+    // Used by the endpoint-trim retry (doc sbnd_xin/docs/pr/9 sec. 6 F1): the
+    // stopping tip's dQ/dx is unreliable when the endpoint is ill-defined
+    // (diluted OR piled-up), and it is compared against the template's Bragg
+    // maximum, so one bad tip sample can veto an otherwise clean decision.
+    std::vector<double> do_track_comp(std::vector<double>& L , std::vector<double>& dQ_dx, double compare_range, double offset_length, const Clus::ParticleDataSet::pointer& particle_data, double MIP_dQdx = 50000/units::cm, int skip_stop_samples = 0);
 
     // Options for segment_do_track_pid / segment_determine_dir_track.
     // Defaults reproduce legacy behavior byte-for-byte (uBooNE values, vote off).
@@ -102,11 +109,20 @@ namespace WireCell::Clus::PR {
     //   placeholders pending the pr/8 sec. 6 calibration.
     // - start_n/end_n: vertex connectivity, filled by
     //   segment_determine_dir_track (guard G4: stop end must be free).
+    // - endpoint_trim_retry: doc sbnd_xin/docs/pr/9 sec. 6 F1 (beyond
+    //   prototype, owner-approved 2026-07-30): when the legacy decision
+    //   abstains in both orientations, retry ONCE with exactly one sample
+    //   excluded at each orientation's hypothesized stopping end (template
+    //   anchor unchanged).  Dynamic by construction: a well-found endpoint
+    //   means the first attempt already decides and nothing is trimmed;
+    //   never trims more than 1 sample; value-agnostic (robust to diluted
+    //   AND piled-up tips).  Runs BEFORE the proton_dir_vote fallback.
     struct TrackPidOptions {
         double mip_dqdx{50000/units::cm};
         bool   proton_dir_vote{false};
         double proton_dir_score_max{0.25};
         double proton_dir_asym_min{1.3};
+        bool   endpoint_trim_retry{false};
         int    start_n{1};
         int    end_n{1};
     };
