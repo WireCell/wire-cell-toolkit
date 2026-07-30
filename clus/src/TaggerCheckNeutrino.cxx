@@ -558,8 +558,34 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                  m_recomb_model,
                                  tagger_info);
 
+        // Derive apa/face from the main-vertex position instead of assuming the
+        // single-drift-volume (0,0) geometry.  nue_tagger uses these for
+        // gap_identification's check_direction flags (wire_angles + drift sign
+        // => flag_prolong_u/v/w, flag_parallel; NeutrinoTaggerNuE.cxx:2725-2726)
+        // and for mip_quality's 2-D closest-distance queries (:1638).  In a
+        // multi-drift-volume detector such as SBND a vertex in APA 1 would
+        // otherwise be evaluated against APA 0's mirrored wire angles and
+        // opposite drift direction.  Same derivation as
+        // PatternAlgorithms::singlephoton_tagger (NeutrinoTaggerSinglePhoton.cxx).
+        int nue_apa = 0, nue_face = 0;
+        if (m_dv) {
+            const Point nue_vtx_pt = final_main_vertex->fit().valid()
+                                     ? final_main_vertex->fit().point
+                                     : final_main_vertex->wcpt().point;
+            const auto nue_wpid = m_dv->contained_by(nue_vtx_pt);
+            // Uncontained points give apa()==-1 (and face()==1); keep the legacy
+            // (0,0) rather than letting Grouping::wire_angles().at(-1) throw.
+            // Same guard idiom as NeutrinoTaggerNuE.cxx:2764.
+            if (nue_wpid.apa() >= 0) {
+                nue_apa  = nue_wpid.apa();
+                nue_face = nue_wpid.face();
+            }
+        }
+        SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino nue_tagger volume: apa={} face={}",
+                            nue_apa, nue_face);
+
         pattern_algos.nue_tagger(*pr_graph, main_cluster, final_main_vertex,
-                                 /*apa=*/0, /*face=*/0,
+                                 nue_apa, nue_face,
                                  showers, map_vertex_to_shower,
                                  pi0_showers, map_shower_pio_id,
                                  map_pio_id_showers, map_pio_id_mass,
