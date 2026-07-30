@@ -87,6 +87,16 @@ namespace WireCell::Clus {
             double dQdx_offset{0.0};
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
             bool use_graph_vertices{false};    // dump graph vertices; charge=15000 for main (kNeutrinoVertex), 0 otherwise
+            // Prototype-parity options (default false => legacy output, byte-identical):
+            // particle_ids: with use_associate_points, real_cluster_id follows the
+            // prototype per-particle convention (NeutrinoID::fill_point_info):
+            // every non-shower segment gets cluster_id*1000 + seg id instead of
+            // the plain cluster_id collapse.
+            bool particle_ids{false};
+            // include_vertex_points: PR-graph edge dumps (track_fit) also append
+            // each vertex fit point with real_cluster_id=-1 (prototype
+            // fill_skeleton_info_magnify vertex rows).
+            bool include_vertex_points{false};
 
             // Optional per-set drift-side / APA grouping (see ApaGroup above).
             // Non-empty -> route this set's clusters into group buckets.
@@ -147,6 +157,15 @@ namespace WireCell::Clus {
             std::string name{"mc"};          // Bee file name (default "mc")
             std::string visitor;             // dump after this visitor runs
             std::string grouping{"live"};    // grouping to read PR graph from
+            // Prototype-parity options (defaults => legacy output, byte-identical):
+            // prototype_names: node text uses the prototype's TDatabasePDG-style
+            // names ("proton" not "p") and integer MeV ("proton  76 MeV").
+            bool prototype_names{false};
+            // KeepMC-style kinetic-energy floors (system units; 0 = keep all):
+            // em_ke_min applies to gamma/e+-, np_ke_min to n/p/nuclei
+            // (prototype WCReader::KeepMC: 5 MeV / 10 MeV).
+            double em_ke_min{0.0};
+            double np_ke_min{0.0};
         };
         std::vector<BeePFConfig> m_bee_pf_configs;
 

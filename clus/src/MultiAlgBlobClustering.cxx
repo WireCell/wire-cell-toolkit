@@ -255,6 +255,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
+            // Prototype-parity options; absent => false => byte-identical legacy output.
+            bpc.particle_ids = get<bool>(bps, "particle_ids", false);
+            bpc.include_vertex_points = get<bool>(bps, "include_vertex_points", false);
             // Dump this set at the pre-clustering point (like the special "img"
             // set) even if its name isn't "img".  Absent => false => legacy
             // name-based routing => byte-identical.
@@ -319,6 +322,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             pfc.name     = get<std::string>(pf, "name",     "mc");
             pfc.visitor  = get<std::string>(pf, "visitor",  "");
             pfc.grouping = get<std::string>(pf, "grouping", "live");
+            // Prototype-parity options; absent => legacy output, byte-identical.
+            pfc.prototype_names = get<bool>(pf, "prototype_names", false);
+            pfc.em_ke_min = get<double>(pf, "em_ke_min", 0.0);
+            pfc.np_ke_min = get<double>(pf, "np_ke_min", 0.0);
             m_bee_pf_configs.push_back(pfc);
             m_bee_pf_trees[pfc.name] = Bee::ParticleTree(pfc.name);
             SPDLOG_LOGGER_DEBUG(log, "Configured bee_pf: name={} visitor={}", pfc.name, pfc.visitor);
@@ -861,7 +868,19 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
             // cluster_id * 1000 + seg_id), so all points from the same shower share
             // the same ID in Bee.
             const int shower_cluster_id = [&]() -> int {
-                if (shower_it == seg_to_shower.end()) return cluster_id;
+                if (shower_it == seg_to_shower.end()) {
+                    // particle_ids: prototype per-particle convention
+                    // (NeutrinoID::fill_point_info else-branch): a segment not
+                    // absorbed into a shower is its own particle,
+                    // cluster_id*1000 + seg id.  Legacy (off): collapse to the
+                    // plain cluster_id.
+                    if (config.particle_ids) {
+                        int sid = segment->id();
+                        if (sid < 0) sid = static_cast<int>(segment->get_graph_index());
+                        return cluster_id * 1000 + sid;
+                    }
+                    return cluster_id;
+                }
                 auto start_seg = shower_it->second->start_segment();
                 if (!start_seg) return cluster_id;
                 int sid = start_seg->id();
@@ -911,6 +930,40 @@ void MultiAlgBlobClustering::fill_bee_points_from_pr_graph(const std::string& na
         }
 
         segment_count++;
+    }
+
+    // include_vertex_points: append the PR-graph vertex fit points to the
+    // fitted-point (track_fit) dump, real_cluster_id = -1, matching the
+    // prototype's fill_skeleton_info_magnify vertex rows.
+    if (config.include_vertex_points && !config.use_associate_points) {
+        int vtx_count = 0;
+        for (auto node_desc : PR::ordered_nodes(*pr_graph)) {
+            const auto& node_bundle = (*pr_graph)[node_desc];
+            auto vertex = node_bundle.vertex;
+            if (!vertex) continue;
+            const auto& fit = vertex->fit();
+            if (!fit.valid()) continue;
+
+            const int cluster_id = vertex->cluster() ? vertex->cluster()->get_cluster_id() : 0;
+            double charge = fit.dQ * config.dQdx_scale + config.dQdx_offset;
+            if (charge < 0) charge = 0;
+
+            if (config.individual) {
+                if (fit.paf.first >= 0 && fit.paf.second >= 0) {
+                    auto it_apa = apa_bpts.by_apa_face.find(fit.paf.first);
+                    if (it_apa != apa_bpts.by_apa_face.end()) {
+                        auto it_face = it_apa->second.find(fit.paf.second);
+                        if (it_face != it_apa->second.end()) {
+                            it_face->second.append(fit.point, charge, cluster_id, -1);
+                        }
+                    }
+                }
+            } else {
+                apa_bpts.global.append(fit.point, charge, cluster_id, -1);
+            }
+            ++vtx_count;
+        }
+        SPDLOG_LOGGER_TRACE(log, "Appended {} vertex fit points to bee set '{}'", vtx_count, name);
     }
 
     SPDLOG_LOGGER_TRACE(log, "Filled bee points '{}' from {} segments", name, segment_count);
@@ -965,7 +1018,9 @@ void MultiAlgBlobClustering::fill_bee_vertices_from_pr_graph(const std::string& 
 
 
 // Helper: map PDG code to a short display name for the Bee particle tree.
-static std::string pf_pdg_to_name(int pdg)
+// prototype=true follows the prototype's TDatabasePDG naming
+// (bee/WCReader.cc PDGName: "proton"/"neutron", not "p"/"n").
+static std::string pf_pdg_to_name(int pdg, bool prototype = false)
 {
     switch (pdg) {
         case  11: return "e-";
@@ -975,8 +1030,8 @@ static std::string pf_pdg_to_name(int pdg)
         case  22: return "gamma";
         case  211: return "pi+";
         case -211: return "pi-";
-        case 2212: return "p";
-        case 2112: return "n";
+        case 2212: return prototype ? "proton" : "p";
+        case 2112: return prototype ? "neutron" : "n";
         case  321: return "K+";
         case -321: return "K-";
         default:   return "particle";
@@ -1008,8 +1063,11 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                                                const Facade::Grouping& grouping,
                                                bool flag_print)
 {
-    flag_print = true;
-    
+    // Debug dump of the PF-tree assembly.  Previously forced on (unconditional
+    // stdout spam); now opt-in via env var.  Log/stdout only -- no effect on
+    // the emitted mc.json bytes.
+    flag_print = flag_print || (std::getenv("WCT_BEE_PF_PRINT") != nullptr);
+
     auto map_it = m_bee_pf_trees.find(cfg.name);
     if (map_it == m_bee_pf_trees.end()) {
         SPDLOG_LOGGER_WARN(log, "bee_pf tree storage '{}' not found", cfg.name);
@@ -1374,10 +1432,28 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         return node;
     };
 
-    auto format_mev = [](double energy) -> std::string {
+    auto format_mev = [&cfg](double energy) -> std::string {
+        // prototype_names: integer MeV like the prototype's
+        // WCReader::MCJSON ("int e = KE(...)*1000").  Legacy: "%.2f".
+        if (cfg.prototype_names) {
+            return std::to_string(static_cast<int>(energy / units::MeV));
+        }
         char buf[32];
         std::snprintf(buf, sizeof(buf), "%.2f", energy / units::MeV);
         return std::string(buf);
+    };
+
+    // KeepMC-style pruning (prototype bee/WCReader.cc KeepMC): drop a LEAF
+    // node whose kinetic energy is below the configured floor.  Nodes with
+    // surviving children are always kept so the flow hierarchy stays intact.
+    // Thresholds default 0 => keep everything (byte-identical legacy output).
+    auto keep_node = [&cfg](int pdg, double ke, const Configuration& node) -> bool {
+        if (cfg.em_ke_min <= 0.0 && cfg.np_ke_min <= 0.0) return true;
+        if (!node["children"].empty()) return true;
+        const int apdg = std::abs(pdg);
+        if (apdg == 22 || apdg == 11) return ke >= cfg.em_ke_min;
+        if (apdg == 2112 || apdg == 2212 || apdg > 1000000000) return ke >= cfg.np_ke_min;
+        return true;
     };
 
     // Forward declare as std::function to handle mutual recursion with make_shower_leaf
@@ -1391,7 +1467,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         auto start_seg = shower->start_segment();
         int id = start_seg ? seg_display_id(start_seg) : (next_id++);
         auto node = make_node(id,
-                              pf_pdg_to_name(pdg) + "  " + ke + " MeV",
+                              pf_pdg_to_name(pdg, cfg.prototype_names) + "  " + ke + " MeV",
                               shower->get_start_point(), shower->get_end_point());
         if (flag_print) {
             const auto* cl = start_seg ? start_seg->cluster() : nullptr;
@@ -1425,7 +1501,7 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     auto append_pseudo_shower = [&](Configuration& parent_children, PR::ShowerPtr sh, PR::VertexPtr conn_vtx) {
         const int pdg = (std::abs(sh->get_particle_type()) == 11 ||
                          std::abs(sh->get_particle_type()) == 22) ? 22 : 2112;
-        const std::string pname = pf_pdg_to_name(pdg);
+        const std::string pname = pf_pdg_to_name(pdg, cfg.prototype_names);
         PR::VertexPtr cv = conn_vtx;
         WireCell::Point gstart = cv ? get_vtx_pt(cv) : sh->get_start_point();
         WireCell::Point gend   = sh->get_start_point();
@@ -1439,7 +1515,11 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                       << "  child_pdg=" << sh->get_particle_type()
                       << "\n";
         }
-        pseudo["children"].append(make_shower_leaf(sh));
+        auto leaf = make_shower_leaf(sh);
+        // KeepMC pruning: a pseudo carrier with its only shower dropped is
+        // itself dropped (nothing left to carry).
+        if (!keep_node(sh->get_particle_type(), sh->get_kine_best(), leaf)) return;
+        pseudo["children"].append(leaf);
         if (pseudo["children"].empty()) pseudo["icon"] = "jstree-file";
         parent_children.append(pseudo);
     };
@@ -1454,7 +1534,9 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         // --- Non-pi0 direct showers ---
         for (auto& [sh, _] : direct) {
             if (pi0_showers.count(sh)) continue;
-            children.append(make_shower_leaf(sh));
+            auto leaf = make_shower_leaf(sh);
+            if (!keep_node(sh->get_particle_type(), sh->get_kine_best(), leaf)) continue;
+            children.append(leaf);
         }
         // --- Non-pi0 indirect showers (pseudo-gamma) ---
         for (auto& [sh, conn_vtx] : indirect) {
@@ -1489,6 +1571,9 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
                 PR::VertexPtr gcv = cv ? cv : fallback_conn_vtx;
                 append_pseudo_shower(pi0_node["children"], sh, gcv);
             }
+            // KeepMC pruning: skip a pi0 whose daughter showers were all dropped.
+            if (pi0_node["children"].empty() &&
+                (cfg.em_ke_min > 0.0 || cfg.np_ke_min > 0.0)) continue;
             if (pi0_node["children"].empty()) pi0_node["icon"] = "jstree-file";
             children.append(pi0_node);
         }
@@ -1499,10 +1584,13 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         [&](PR::SegmentPtr seg) -> Configuration {
 
         std::string pname = "particle";
-        std::string ke_str = "0.00";
+        std::string ke_str = cfg.prototype_names ? "0" : "0.00";
         if (seg->has_particle_info()) {
             auto pi = seg->particle_info();
-            pname  = pi->name();
+            // prototype_names: TDatabasePDG-style short names ("mu-",
+            // "proton") like the prototype mc.json; legacy: the
+            // ParticleDataSet long name ("muon", "proton").
+            pname  = cfg.prototype_names ? pf_pdg_to_name(pi->pdg(), true) : pi->name();
             ke_str = format_mev(pi->kinetic_energy());
         }
 
@@ -1553,7 +1641,11 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         if (ch_it != seg_children.end()) {
             for (const auto& child : ch_it->second) {
                 if (conn4_skip_segs.count(child)) continue;
-                node["children"].append(build_seg_node(child));
+                auto child_node = build_seg_node(child);
+                const int cpdg = child->has_particle_info() ? child->particle_info()->pdg() : 0;
+                const double cke = child->has_particle_info() ? child->particle_info()->kinetic_energy() : 0.0;
+                if (!keep_node(cpdg, cke, child_node)) continue;
+                node["children"].append(child_node);
             }
         }
 
@@ -1573,7 +1665,11 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
     for (auto& [seg, parent] : seg_parent) {
         if (parent != nullptr) continue;   // skip non-roots
         if (conn4_skip_segs.count(seg)) continue;
-        particles.append(build_seg_node(seg));
+        auto root_node = build_seg_node(seg);
+        const int rpdg = seg->has_particle_info() ? seg->particle_info()->pdg() : 0;
+        const double rke = seg->has_particle_info() ? seg->particle_info()->kinetic_energy() : 0.0;
+        if (!keep_node(rpdg, rke, root_node)) continue;
+        particles.append(root_node);
     }
 
     tree.set_particles(particles);
