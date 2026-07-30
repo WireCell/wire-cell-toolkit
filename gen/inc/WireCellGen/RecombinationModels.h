@@ -60,6 +60,42 @@ namespace WireCell {
             virtual WireCell::Configuration default_configuration() const;
         };
 
+        /// Modified Box model with a free power on dE/dx:
+        ///     u = k * (dEdx/pivot)^p,  R = ln(A + u)/u,  dQ = C * (R/Wi) * dE
+        /// Fitted to SBND stopping-track dQ/dx vs residual range at 0.5 kV/cm
+        /// (wcp-porting-validation sbnd_xin/docs/55 sec 7g; canonical parameters in
+        /// nusel_display/stm_ref_dqdx.json).  The drift field is not an explicit
+        /// parameter: it is absorbed into the fitted (k, p).
+        ///
+        /// Unlike the classes above, the defaults follow the *practical-unit*
+        /// convention the jsonnet configs actually use (plain numbers: Wi in MeV,
+        /// pivot in MeV/cm), so an unconfigured instance is the canonical SBND fit
+        /// rather than silently broken (the unit-bearing ctor defaults above make an
+        /// unconfigured BoxRecombination::dE() return 0 for any input).
+        ///
+        /// There is no closed-form inverse.  dE() solves the forward relation by
+        /// fixed-count bisection on the monotone branch dEdx in (0, dedx_max]; the
+        /// forward peaks at ~77.4 MeV/cm at the canonical parameters, so dQ/dx above
+        /// the peak saturates the inverse at dedx_max.  Callers in clus/ clamp their
+        /// dE/dx to [0, 50] MeV/cm, well inside the branch.
+        class PowerBoxRecombination : public IRecombinationModel, public IConfigurable {
+            double m_a, m_k, m_p, m_c, m_pivot, m_wi, m_dedx_max;
+
+            double forward_dqdx(double dedx) const;  // e/cm from MeV/cm
+
+           public:
+            PowerBoxRecombination(double A = 0.93, double k = 0.282371, double p = 1.362179,
+                                  double C = 0.855175,
+                                  double pivot = 2.1,        // MeV/cm
+                                  double Wi = 23.6e-6,       // MeV per electron-ion pair
+                                  double dedx_max = 77.0);   // MeV/cm, end of the monotone branch
+            virtual ~PowerBoxRecombination();
+            virtual double operator()(double dE, double dX = 0.0);
+            virtual double dE(double dQ, double dX);
+            virtual void configure(const WireCell::Configuration& config);
+            virtual WireCell::Configuration default_configuration() const;
+        };
+
     }  // namespace Gen
 }  // namespace WireCell
 
