@@ -28,6 +28,8 @@ namespace WireCell::Clus::Facade {
         int m_ident{-1}, m_type{-1};
         std::vector<int> m_idents;                       // per-OpDet channel id
         std::vector<double> m_times, m_values, m_errors; // per-OpDet readouts
+        std::vector<int> m_cov_idents;                   // channels with coverage < 1
+        std::vector<double> m_covs;                      // their covered fractions
     public:
 
         /// A "false" means there was no "flash" PC array and all values
@@ -62,6 +64,14 @@ namespace WireCell::Clus::Facade {
         std::vector<double> values() const { return m_values; }
         /// Measurement uncertainty from optical detectors.
         std::vector<double> errors() const { return m_errors; }
+
+        /// Sparse per-flash readout-coverage rows (from the "flashcov" local
+        /// PC written by Aux::FlashTensorToOpticalPCs when the light chain
+        /// emitted coverage): channel ids with covered fraction < 1 of this
+        /// flash's window, and those fractions.  Empty when the PC is absent
+        /// (legacy archives) => everything fully covered.
+        std::vector<int> cov_idents() const { return m_cov_idents; }
+        std::vector<double> covs() const { return m_covs; }
 
         /// Per-channel measurement values indexed by OpDet id, zero-filled to
         /// `nchan` (a convenience for consumers needing a dense PE-by-channel

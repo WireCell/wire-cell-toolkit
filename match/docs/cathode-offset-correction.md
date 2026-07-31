@@ -49,7 +49,7 @@ uses the corrected position, where is the best place to inject it?"
 ## Background
 
 The cathode-crossing diagnostic (`dump_cathode_diag`, see
-`sbnd_xin/docs/cathode-crossing-diagnostic.md`) measured a small, data-specific transverse
+`sbnd_xin/docs/14_cathode-crossing-diagnostic.md`) measured a small, data-specific transverse
 gap between the TPC0 and TPC1 halves of a track where it crosses the central cathode:
 
 ```
@@ -326,13 +326,13 @@ unnecessary single-use abstraction under the scope approach, where the delta alr
    reflects the transverse shift directly.** The SBND Bee `clustering` point set now reads the same
    corrected coords as the scope (`common_corr_coords` → `{x_t0cor,y_cor,z_cor}` when on), so the
    transverse shift is materialized once, in the display too. **Do not also apply the separate
-   Bee-zip transverse shift** documented in `sbnd_xin/docs/cathode-crossing-diagnostic.md` — that
+   Bee-zip transverse shift** documented in `sbnd_xin/docs/14_cathode-crossing-diagnostic.md` — that
    would double-count. The original both-paths discussion is kept below for provenance.
 
    **Matching-only ≠ display — unless you take the transform route.** The §1 inline
    `corrected_point` is local to QLMatching's reads and never touches the stored point cloud, so
    the Bee output is unchanged by it; the display correction then remains the separate Bee-zip
-   shift documented in `sbnd_xin/docs/cathode-crossing-diagnostic.md`. If instead the transverse
+   shift documented in `sbnd_xin/docs/14_cathode-crossing-diagnostic.md`. If instead the transverse
    offset is carried by the `switch_scope` transform (the scope-machinery section above), it
    becomes the cluster's default scope (`clustering_switch_scope.cxx:77`) and the Bee dump reads
    it — so the display would then reflect the transverse shift directly and the separate Bee-zip

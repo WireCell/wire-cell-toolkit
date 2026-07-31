@@ -24,7 +24,7 @@ function(params) {
     // --- SBND matching constants (matching-only) ---
     local nchan = 312,
     // Dead PMT channels excluded from matching.  67/92/170/218/248 added after the
-    // sbnd_xin saturation-PE study (sbnd_xin/docs/saturation-pe.md): they read 0 PE in
+    // sbnd_xin saturation-PE study (sbnd_xin/docs/13_saturation-pe.md): they read 0 PE in
     // 100% of flashes in BOTH data and MC but were previously unmasked, so they only got
     // dropped in bright MC flashes by the (now-disabled) mc_saturation_pe gate.  Masking
     // them here handles them consistently in both modes and at all flash brightnesses.
@@ -116,7 +116,7 @@ function(params) {
             z_cushion: 0.0*wc.cm,
             // §D pre-selection / bad-match gates.
             // mc_saturation_pe DISABLED (set above any real flash PE).  The sbnd_xin
-            // saturation-PE study (sbnd_xin/docs/saturation-pe.md) found no genuine PMT
+            // saturation-PE study (sbnd_xin/docs/13_saturation-pe.md) found no genuine PMT
             // saturation in MC: the zero-PE PMTs in bright flashes are dead channels
             // (now in ch_mask above), identical in MC and data, not simulated saturation.
             // The gate is MC-only, so it just introduced an MC/data asymmetry; retired.
@@ -142,6 +142,30 @@ function(params) {
             // wrongly kill it). C++ default OFF (multiplier 1.0 => bit-identical); SBND-on.
             lasso_flag_weight: true,
             lasso_boundary_weight: 0.2,
+            // Beam-window flash preference (production operating point adopted
+            // 2026-07-21 after validation round 2; sbnd_xin/docs/
+            // 22_ql-beam-flash-preference.md). A flash inside the corrected BNB
+            // window -- C++ default (0.2, 2.2) us, beam_pref_tlow/thigh -- is
+            // preferred when it competes with a cosmic flash for a cluster:
+            // cull_inconsistent exemption + LASSO L1 down-weight + empty-rescue
+            // steal guard, but ONLY for bundles that could plausibly BE the beam
+            // match (ks <= max_ks AND pred >= min_pred_frac x flash PE; ungated,
+            // the beam flash sweeps up junk bundles and steals true matches).
+            // Validated: zero regression on the 20 hand-scan events, 48/48 sane
+            // beam budgets on the reco1 nueCC sample, ~1 pair/event churn.
+            // C++ defaults OFF/inert (false, 1.0, 1.0, 1e9, 0.0) = pre-adoption
+            // behavior; this block is the SBND-on adoption (NOT byte-identical
+            // to the pre-adoption output -- owner-approved operating point).
+            beam_pref: true,
+            // The window is the EXPERIMENT'S beam gate on corrected flash time
+            // (frame_apply_at_caf) -- set it here per experiment, do not rely
+            // on the C++ default (which happens to equal SBND's BNB window).
+            beam_pref_tlow: 0.2 * wc.us,
+            beam_pref_thigh: 2.2 * wc.us,
+            beam_pref_lasso_weight: 0.5,
+            beam_pref_rescue_scale: 0.2,
+            beam_pref_max_ks: 0.3,
+            beam_pref_min_pred_frac: 0.02,
             // §G per-PMT light-error model (Q/L PE-error study, match/docs): a constant
             // floor (PE) below the knee, fractional above -- larger fractional error at low
             // PE, ->frac at high PE. Applied to BOTH data and sim (conservative for sim, kept
@@ -281,18 +305,74 @@ function(params) {
             auto_mask: true,
     },
 
+    // LM (light-mismatch) tagger overlay (see QLMatching.h m_lm_tagger).  After
+    // the matching is final, each matched bundle is judged by per-drift-side KS
+    // shape distance + pred/meas normalization; the verdict (0 = pass, 1 = low
+    // energy, 2 = light mismatch) is stamped as cluster scalar "lm_flag" and
+    // dumped per bundle into the calib JSON.  C++ default false; key omitted
+    // when off => byte-identical pre-LM config.  `lm_params` overrides the C++
+    // cut defaults (lm_ks_max, lm_lograt_min, ... -- see QLMatching.h), merged
+    // only when the tagger is on.
+    local lm_on(lm_params) = { lm_tagger: true } + lm_params,
+
+    // --- Overlays promoted from the sbnd_xin qlmatching.jsonnet wrapper
+    // (2026-07-27, sbnd_xin/docs/64_cfg-sync.md).  These were the last pieces of
+    // SBND matching configuration living outside the toolkit. ---
+
+    // cathode_diag: output path ('' => off, production) for the cathode-crossing
+    // TPC0/TPC1 offset diagnostic -- QLMatching logs the three-vector
+    // decomposition per cross-TPC cathode-crossing pair.  Key omitted when off
+    // => byte-identical production config.
+    local diag_on(cathode_diag) = (if cathode_diag != '' then { cathode_diag: cathode_diag } else {}),
+
+    // flag_matched_mains: stamp flag_main_cluster on EVERY matched bundle main.
+    // Without it only the mains that decompose_cluster_groups actually SPLIT
+    // carry the flag, so a compact single-component match stays invisible to
+    // TaggerCheckTGM/STM/FC and to the nusel bundle table (SBND evt286021: the
+    // 1.158 us beam flash matched a 141-point cluster that no tagger ever
+    // evaluated).  C++ default false; SBND production has passed main_flag=true
+    // since doc 56, so it defaults TRUE here -- the PR taggers depend on it.
+    local mainflag_on(main_flag) = (if main_flag then { flag_matched_mains: true } else {}),
+
+    // Tri-state override helper: null => inherit whatever match_data set (key
+    // omitted, compiled config unchanged); a value => emit that key.  Used for
+    // the knobs match_data already fixes at the SBND production operating point
+    // (auto_mask, beam_pref and its two scales) so a scan can move them without
+    // editing this file, which is what the sbnd_xin wrapper existed for.
+    local override(key, val) = { [if val != null then key]: val },
+
     // Charge-light matching for APA n.  `dv` is the DetectorVolumes node for this
     // anode (clus_maker.detector_volumes([anode])); it is emitted by the clustering
     // graph, here we only reference it by type:name.
     // `pmt_nl` (default true) bakes the per-PMT predicted-PE non-linearity overlay
     // (nl_on) into the node; pass pmt_nl=false to disable it. `extra` is an optional
     // data overlay merged last (default {} => no-op) for other per-call tweaks.
-    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
+    // realign_perblob (C++ default TRUE since doc 52 §12.8; null here = inherit,
+    // key omitted): recompose_cluster_groups() reorders each split main's
+    // "perblob" dataset rows to the permuted post-merge blob order (doc 52 §12) --
+    // required for any consumer of per-blob provenance (assoc_cluster_*) and it
+    // also realigns "isolated" for the all-APA examine_bundles main-overlap vote.
+    // Pass false ONLY to reproduce the pre-fix (misaligned) behavior for A/B
+    // archaeology.
+    // lm (LM light-mismatch tagger) defaults TRUE: SBND production runs with
+    // -lm (run_full1k_nusel.sh).  cathode_diag / main_flag / auto_mask /
+    // beam_pref* are the overlays promoted from the sbnd_xin wrapper -- see the
+    // helpers above for their semantics.
+    matching(anode, dv, n, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=true, lm_params={}, realign_perblob=null,
+             cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching%d' % n,
         data: { anode: wc.tn(anode), calib_dump: calib_dump }
               + match_data(dv, reality, semimodel_file, cathode_fiducial)
               + (if pmt_nl then nl_on else {})
+              + (if lm then lm_on(lm_params) else {})
+              + { [if realign_perblob != null then 'realign_perblob']: realign_perblob }
+              + diag_on(cathode_diag)
+              + mainflag_on(main_flag)
+              + override('auto_mask', auto_mask)
+              + override('beam_pref', beam_pref)
+              + override('beam_pref_lasso_weight', beam_pref_weight)
+              + override('beam_pref_rescue_scale', beam_pref_rescue)
               + extra,
     }, nin=1, nout=1),
 
@@ -303,7 +383,8 @@ function(params) {
     // standalone clus_all_apa PointTreeMerging it replaces.  `dv` is the all-anode
     // DetectorVolumes (clus_maker.detector_volumes(anodes)).  Same tuning as
     // matching(); adds the anodes list and the opflash root-PC concatenation.
-    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, extra={}):: g.pnode({
+    matching_joint(anodes, dv, reality, semimodel_file, cathode_fiducial='', calib_dump='', pmt_nl=true, lm=true, lm_params={}, realign_perblob=null,
+                   cathode_diag='', main_flag=true, auto_mask=null, beam_pref=null, beam_pref_weight=null, beam_pref_rescue=null, extra={}):: g.pnode({
         type: 'QLMatching',
         name: 'matching_joint',
         data: {
@@ -317,6 +398,16 @@ function(params) {
             calib_dump: calib_dump,
         } + match_data(dv, reality, semimodel_file, cathode_fiducial)
           + (if pmt_nl then nl_on else {})  // PMT non-linearity ON by default for SBND (pmt_nl=false disables)
+          + (if lm then lm_on(lm_params) else {})  // LM tagger, C++ default false; key omitted when off => byte-identical
+          // C++ default TRUE (doc 52 §12.8); null = inherit (key omitted).
+          // See matching() above.
+          + { [if realign_perblob != null then 'realign_perblob']: realign_perblob }
+          + diag_on(cathode_diag)
+          + mainflag_on(main_flag)
+          + override('auto_mask', auto_mask)
+          + override('beam_pref', beam_pref)
+          + override('beam_pref_lasso_weight', beam_pref_weight)
+          + override('beam_pref_rescue_scale', beam_pref_rescue)
           + extra,  // optional overlay (default {} => no-op) for other per-call tweaks
         // The all-anode DetectorVolumes is referenced only here (the per-APA path's
         // clustering pulls in the per-APA DVs; this all-anode one would otherwise be

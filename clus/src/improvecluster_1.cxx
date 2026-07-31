@@ -198,12 +198,15 @@ namespace WireCell::Clus {
         if (default_scope.hash()!=raw_scope.hash()){
             t0 = Clock::now();
             auto correction_name = orig_cluster->get_scope_transform(default_scope);
-            // std::vector<int> filter_results = c
+            // add_corrected_points builds x_t0cor from get_cluster_t0(); a
+            // freshly-retiled cluster's T0 defaults to 0 until from() copies it
+            // below, so running the correction first produced an UNCORRECTED
+            // x_t0cor (raw drift-x, off by v_drift*T0).  Set the real T0 first.
+            // See clus/docs/tgm/fc_steiner_sp_bugfix.md (bug 1).
+            new_cluster.set_cluster_t0(orig_cluster->get_cluster_t0());
             new_cluster.add_corrected_points(m_pcts, correction_name);
-            // Set this as the default scope for viewing
-            new_cluster.from(*orig_cluster); // copy state from original cluster
+            new_cluster.from(*orig_cluster); // copy remaining state from original cluster
             SPDLOG_LOGGER_TRACE(log, "timing: add_corrected_points took {} ms", MS(Clock::now()-t0).count());
-            // std::cout << "Test: Same:" << default_scope.hash() << " " << raw_scope.hash() << std::endl; 
         }
 
 
@@ -595,9 +598,20 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
 std::vector<const WireCell::Clus::Facade::Blob*>
 ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
 {
-    // Get time-organized maps of original and new blobs
-    const auto& orig_time_blob_map = cluster.time_blob_map().at(apa).at(face);
-    const auto& new_time_blob_map = shad_cluster.time_blob_map().at(apa).at(face);
+    // Get time-organized maps of original and new blobs.  A multi-APA
+    // (cathode-crossing) cluster can retile to a shadow with blobs on only
+    // one APA -- a missing (apa,face) entry on either side means there is
+    // nothing to filter for this pair.
+    static const std::map<int, BlobSet> empty_tbm;
+    auto tbm_at = [](const auto& tbm, int apa, int face) -> const auto& {
+        auto ait = tbm.find(apa);
+        if (ait == tbm.end()) return empty_tbm;
+        auto fit = ait->second.find(face);
+        if (fit == ait->second.end()) return empty_tbm;
+        return fit->second;
+    };
+    const auto& orig_time_blob_map = tbm_at(cluster.time_blob_map(), apa, face);
+    const auto& new_time_blob_map = tbm_at(shad_cluster.time_blob_map(), apa, face);
 
     // Build index mappings for new blobs.  Sort by (time_slice, blob->ident())
     // so vertex IDs are deterministic across runs regardless of heap layout.

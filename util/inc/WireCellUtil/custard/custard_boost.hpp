@@ -28,6 +28,9 @@
 #endif
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/bzip2.hpp>
+// Requires boost >= 1.71 with zstd-enabled iostreams (this build:
+// boost 1.85 linking libzstd).
+#include <boost/iostreams/filter/zstd.hpp>
 
 #include <boost/filesystem.hpp>
 // Optional: boost-interal compiler warning
@@ -546,7 +549,7 @@ namespace custard {
             return std::regex_search(inname, std::regex("[_.]("+things+")\\b"));
         };
 
-        if (has("tar|tar.gz|tgz|tar.bz2|tbz|tbz2|tar.xz|txz|tar.pixz|tix|tpxz")) {
+        if (has("tar|tar.gz|tgz|tar.bz2|tbz|tbz2|tar.xz|txz|tar.pixz|tix|tpxz|tar.zst|tzst")) {
             in.push(custard::tar_reader());
         }
 
@@ -555,6 +558,9 @@ namespace custard {
         }
         else if (has("bz2|tbz|tbz2")) {
             in.push(boost::iostreams::bzip2_decompressor());
+        }
+        else if (has("zst|tzst")) {
+            in.push(boost::iostreams::zstd_decompressor());
         }
 #ifdef CUSTARD_BOOST_USE_LZMA
         else if (has("xz|txz|pixz|tix|tpxz")) {
@@ -590,7 +596,7 @@ namespace custard {
         assuredir(outname);
 
         // Add tar writer if we see tar at the end.
-        if (has("tar|tar.gz|tgz|tar.bz2|tbz|tbz2|tar.xz|txz|tar.pixz|tix|tpxz")) {
+        if (has("tar|tar.gz|tgz|tar.bz2|tbz|tbz2|tar.xz|txz|tar.pixz|tix|tpxz|tar.zst|tzst")) {
             out.push(custard::tar_writer());
         }
 
@@ -601,6 +607,10 @@ namespace custard {
         }
         else if (has("bz2|tbz|tbz2")) {
             out.push(boost::iostreams::bzip2_compressor(level));
+        }
+        else if (has("zst|tzst")) {
+            out.push(boost::iostreams::zstd_compressor(
+                boost::iostreams::zstd_params(level)));
         }
 #ifdef CUSTARD_BOOST_USE_LZMA
         else if (has("xz|txz")) {

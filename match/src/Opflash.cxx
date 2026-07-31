@@ -29,10 +29,26 @@ void Opflash::init(double time_, std::vector<double> pe, double threshold, int n
     }
 
     total_PE = 0;
-    for (int i = 0; i < nchan; ++i) {
-        PE_err[i] = (PE[i] < pe_err.knee) ? pe_err.floor : pe_err.frac * PE[i];
-        total_PE += PE[i];
-        if (PE[i] > threshold) fired_channels.push_back(i);
+    if (pe_err.ch_floor.empty() && pe_err.ch_frac.empty()) {
+        // legacy scalar rule (byte-identical default)
+        for (int i = 0; i < nchan; ++i) {
+            PE_err[i] = (PE[i] < pe_err.knee) ? pe_err.floor : pe_err.frac * PE[i];
+            total_PE += PE[i];
+            if (PE[i] > threshold) fired_channels.push_back(i);
+        }
+    }
+    else {
+        // per-channel family override (QLMatching pe_err_family_* knob);
+        // -1 / out-of-range entry falls back to the scalar value.
+        for (int i = 0; i < nchan; ++i) {
+            double fl = pe_err.floor;
+            double fr = pe_err.frac;
+            if (i < (int)pe_err.ch_floor.size() && pe_err.ch_floor[i] >= 0) fl = pe_err.ch_floor[i];
+            if (i < (int)pe_err.ch_frac.size() && pe_err.ch_frac[i] >= 0) fr = pe_err.ch_frac[i];
+            PE_err[i] = (PE[i] < pe_err.knee) ? fl : fr * PE[i];
+            total_PE += PE[i];
+            if (PE[i] > threshold) fired_channels.push_back(i);
+        }
     }
 }
 
@@ -47,6 +63,46 @@ Opflash::Opflash(const Clus::Facade::Flash& flash, double threshold, int nchan,
 {
     init(flash.time(), flash.pes(nchan), threshold, nchan, pe_err, pe_scale);
     flash_id = flash.ident();
+
+    // Per-channel saturation flags, carried on the light-PC "error" field
+    // (1 = the channel's hits overlap a DAPHNE rail in this flash; see
+    // FlashTensorToOpticalPCs).  All-zero (and unread) unless the light
+    // chain ran with flag_saturation and QLMatching enables
+    // use_saturation_flag.
+    const auto idents = flash.idents();
+    const auto errors = flash.errors();
+    for (size_t i = 0; i < idents.size() && i < errors.size(); ++i) {
+        if (errors[i] > 0.5) {
+            const int ch = idents[i];
+            if (ch >= 0 && ch < nchan) {
+                if (sat.empty()) sat.assign(nchan, 0);
+                sat[ch] = 1;
+            }
+        }
+    }
+
+    // Per-channel readout-coverage fractions (sparse "flashcov" PC rows,
+    // only channels with coverage < 1 of this flash's window; see
+    // FlashTensorToOpticalPCs).  Empty (and get_cov == 1.0) unless the
+    // light chain ran with emit_coverage; consumed by QLMatching
+    // use_coverage_flag.
+    const auto cov_idents = flash.cov_idents();
+    const auto covs = flash.covs();
+    for (size_t i = 0; i < cov_idents.size() && i < covs.size(); ++i) {
+        const int ch = cov_idents[i];
+        if (ch >= 0 && ch < nchan) {
+            if (cov.empty()) cov.assign(nchan, 1.0f);
+            cov[ch] = (float)covs[i];
+        }
+    }
+}
+
+void Opflash::inflate_nodata_err(double err, double cov_min)
+{
+    if (err <= 0 || cov.empty()) return;
+    for (int i = 0; i < m_nchan; ++i) {
+        if (get_cov(i) < cov_min) PE_err[i] = std::max(PE_err[i], err);
+    }
 }
 
 Opflash::~Opflash() = default;

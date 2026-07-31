@@ -68,6 +68,12 @@ namespace WireCell::Clus {
         // Replace the existing bee points structures with a more flexible approach
         struct BeePointsConfig {
             // special name "img" dumps "live" before clustering
+            // prepipeline=true dumps this set at that SAME pre-clustering point
+            // (the raw per-anode matched clusters) without needing name=="img",
+            // so a second raw set (e.g. per-drift-side img-side-* split by
+            // apa_groups) can coexist with img-global.  Default false =>
+            // set follows the legacy name=="img" pre/post routing (byte-identical).
+            bool prepipeline{false};
             std::string name;   // bee type name
             std::string detector;  // bee geom name
             std::string algorithm; // bee alg name, defaults to type
@@ -117,11 +123,16 @@ namespace WireCell::Clus {
         std::map<std::string, ApaBeePoints> m_bee_points;
 
         // New helper function to fill bee points
+        // doc 53: re-stamp "real_cluster_id" into ONE globally unique ident
+        // epoch.  Called once per event after the clustering pipeline and
+        // BEFORE the Bee fills, so the Bee per-blob labels and the saved pctree
+        // carry the same ids.
+        void restamp_real_cluster_id(Facade::Grouping& grouping) const;
         void fill_bee_points(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_points_from_cluster(
             Bee::Points& bpts, const Facade::Cluster& cluster,
             const std::string& pcname, const std::vector<std::string>& coords,
-            int filter);
+            int filter, double dQdx_scale = 1.0, double dQdx_offset = 0.0);
         void fill_bee_points_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
         void fill_bee_vertices_from_pr_graph(const std::string& name, const Facade::Grouping& grouping);
 
@@ -203,6 +214,66 @@ namespace WireCell::Clus {
         size_t write_obj(const WireCell::Bee::Object& obj);
 
         bool m_save_deadarea{false};
+        // save_real_cluster_id (default false = byte-identical legacy tarball):
+        // before serializing the point-cloud trees, give EVERY cluster that
+        // carries a "perblob" PC the "real_cluster_id" / "real_cluster_main"
+        // arrays (fill-in: own ident / own "main_cluster" flag).  The tensor
+        // serializer (TensorDM as_tensors) concatenates same-named local PCs
+        // across nodes and silently drops arrays whose key is absent from the
+        // first-seen node, so the flash-merge provenance written by
+        // examine_bundles (real_cluster_id on merged clusters only) never
+        // survived the tarball.  Homogenizing the key set at save time lets it
+        // through; the fill-in values reproduce exactly what a reader would
+        // assume for an unmerged cluster, so nothing downstream changes except
+        // that the arrays now exist after a load.
+        //
+        // SCOPE INVARIANT: "real_cluster_id" is meaningful only WITHIN one
+        // cluster -- see the merge_clusters() comment in ClusteringFuncs.h.
+        // The recorded values come from the ident numbering in force when
+        // examine_bundles ran; the fill-in below uses the CURRENT numbering
+        // (enumerate_idents re-runs after every visitor).  The two epochs
+        // overlap, so joining on this value across clusters is wrong.
+        bool m_save_real_cluster_id{false};
+        // real_cluster_id_global (default TRUE since doc 53, owner decision):
+        // re-stamp "real_cluster_id" at save time into ONE globally unique
+        // epoch -- the representative rows (real_cluster_main != 0) take the
+        // cluster's own current ident, every other pre-merge group takes a
+        // fresh id above the largest ident in the grouping.  Without it the
+        // array mixes the ident numbering merge_clusters recorded with the one
+        // enumerate_idents has installed since, and 31% of values name two
+        // clusters (SBND d52ron 30-event set).
+        //
+        // Group membership is untouched, so consumers that only compare rows
+        // within a cluster (ClusteringUnmergeBundle, TaggerCheckTGM
+        // main_component_mode="real") are behaviourally unchanged -- measured:
+        // partition and real_cluster_main byte-equal over 179 clusters, nusel
+        // verdict tables row-for-row identical.  What changes is that the value
+        // becomes a valid event-wide key.  A cluster that was never merged is
+        // rewritten to exactly the values it already had.
+        //
+        // SCOPE: restamp_real_cluster_id() runs once per event right after the
+        // clustering pipeline and BEFORE the Bee fills, so the Bee per-blob
+        // label and the saved pctree carry the SAME ids.  Per-visitor Bee dumps
+        // (trace_bee) are mid-pipeline snapshots and necessarily keep whatever
+        // ids existed at that step.
+        //
+        // NOT gated on save_real_cluster_id: examine_bundles writes the array in
+        // memory whether or not the tarball is saved, so the Bee labels are
+        // affected either way.  Detectors that never write it (PDHD, PDVD --
+        // their examine_bundles is disabled) see a structural no-op.
+        //
+        // Gated by save_real_cluster_id, so it is a STRUCTURAL no-op wherever
+        // that is off -- i.e. every detector but SBND.  Set false only to
+        // reproduce the two-epoch values for A/B archaeology.
+        bool m_real_cluster_id_global{true};
+        // save_assoc_cluster_id (default false = byte-identical legacy tarball):
+        // the same homogenization for the isolated grouping's provenance pair
+        // "assoc_cluster_id" / "assoc_cluster_main" (doc 52 Stage 1/2), written
+        // by clustering_isolated's save_assoc_id and carried across merges by
+        // merge_clusters.  Fill-in for a cluster the grouping never touched: own
+        // ident, and main=1 -- an ungrouped cluster IS a main, which is the
+        // sentinel the un-merge relies on to keep cathode crossers whole.
+        bool m_save_assoc_cluster_id{false};
         // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for
         //     single-TPC viewers like the original Bee).  2 = wire-cell-bee3 v2
         //     wrapper {"version":2,"tpc":<apa>,"polygons":[...]} that places the

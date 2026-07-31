@@ -38,6 +38,12 @@ WireCell::Configuration Flash::OpHitFinder::default_configuration() const
     cfg["robust_veto_sigma"] = m_robust_veto_sigma;
     cfg["fixed_ped_sigma"] = m_fixed_ped_sigma;
     cfg["veto_saturation"] = m_veto_saturation;
+    cfg["flag_saturation"] = m_flag_saturation;
+    cfg["emit_coverage"] = m_emit_coverage;
+    // Wide-hit handling (default "" -> one hit at peak time, bit-identical).
+    cfg["wide_hit_mode"] = m_wide_hit_mode;
+    cfg["wide_hit_min_width"] = m_wide_hit_min_width;
+    cfg["slice_width"] = m_slice_width;
     // AlgoSlidingWindow parameters, dune_ophit_finder_deco values.
     Configuration algo;
     algo["adc_threshold"] = 3.0;
@@ -73,6 +79,19 @@ void Flash::OpHitFinder::configure(const WireCell::Configuration& cfg)
     m_robust_veto_sigma = get(cfg, "robust_veto_sigma", m_robust_veto_sigma);
     m_fixed_ped_sigma = get(cfg, "fixed_ped_sigma", m_fixed_ped_sigma);
     m_veto_saturation = get(cfg, "veto_saturation", m_veto_saturation);
+    m_flag_saturation = get(cfg, "flag_saturation", m_flag_saturation);
+    m_emit_coverage = get(cfg, "emit_coverage", m_emit_coverage);
+    m_wide_hit_mode = get(cfg, "wide_hit_mode", m_wide_hit_mode);
+    m_wide_hit_min_width = get(cfg, "wide_hit_min_width", m_wide_hit_min_width);
+    m_slice_width = get(cfg, "slice_width", m_slice_width);
+    if (!m_wide_hit_mode.empty()) {
+        if (m_wide_hit_mode != "start" && m_wide_hit_mode != "slice") {
+            raise<ValueError>("OpHitFinder: unknown wide_hit_mode '%s' (want \"\", \"start\" or \"slice\")",
+                              m_wide_hit_mode);
+        }
+        log->debug("wide_hit_mode '{}' on: min_width={} ns, slice={} ns",
+                   m_wide_hit_mode, m_wide_hit_min_width, m_slice_width);
+    }
     m_algo = defs["algo"];
     if (cfg.isMember("algo")) {
         for (const auto& key : cfg["algo"].getMemberNames()) {
@@ -278,6 +297,35 @@ std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::split_pulse(
     return subs;
 }
 
+std::vector<Flash::OpHitFinder::Pulse> Flash::OpHitFinder::slice_pulse(
+    const std::vector<short>& wf, double ped_mean, const Pulse& pulse, int nticks_slice)
+{
+    // Degenerate request, or the pulse already fits in one slice: pass it
+    // through verbatim (caller gates on slice_max_width; this is a guard).
+    if (nticks_slice < 1 || (pulse.t_end - pulse.t_start + 1) <= nticks_slice) {
+        return {pulse};
+    }
+    auto v = [&](int i) { return double(wf[i]) - ped_mean; };
+    std::vector<Pulse> slices;
+    for (int s0 = pulse.t_start; s0 <= pulse.t_end; s0 += nticks_slice) {
+        const int s1 = std::min(s0 + nticks_slice - 1, pulse.t_end);
+        Pulse s{s0, s1, s0, v(s0), 0.0};
+        // Recompute fields the way operator() consumes them, mirroring
+        // split_pulse: unclamped baseline-subtracted area over the slice,
+        // t_max = first index reaching the max (strict-`<` tie-break).
+        for (int i = s0; i <= s1; ++i) {
+            const double val = v(i);
+            s.area += val;
+            if (s.peak < val) { s.peak = val; s.t_max = i; }
+        }
+        // A slice with no net light (baseline dip / zero pad) is not a hit.
+        if (s.area <= 0.0) continue;
+        slices.push_back(s);
+    }
+    if (slices.empty()) return {pulse};
+    return slices;
+}
+
 bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out)
 {
     out = nullptr;
@@ -291,27 +339,40 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
     const double tick = in->tick();
 
     auto traces = Aux::tagged_traces(in, m_intag);
-    const size_t ncol = 9;
+    // flag_saturation appends a 10th column (saturation-overlap flag);
+    // default 9 columns, bit-identical to every existing config.
+    const size_t ncol = m_flag_saturation ? 10 : 9;
     std::vector<double> hits;
     // Per-channel saturated tick ranges flagged by OpDecon (empty unless
-    // veto_saturation is on and the upstream detect_saturation produced them).
-    // in->masks() returns by value, so hold a local copy for the loop.
+    // veto_saturation/flag_saturation is on and the upstream
+    // detect_saturation produced them).  in->masks() returns by value, so
+    // hold a local copy for the loop.
     Waveform::ChannelMasks sat_masks;
-    if (m_veto_saturation) {
+    if (m_veto_saturation || m_flag_saturation) {
         const auto mm = in->masks();
         auto it = mm.find("saturation");
         if (it != mm.end()) sat_masks = it->second;
     }
-    int nvetoed = 0;
+    int nvetoed = 0, nflagged = 0;
+    // Per-trace live-time rows (channel, t_begin, t_end) in the ophit
+    // peak_time base; one row per input trace (self-trigger snippet or
+    // full stream).  Only filled when emit_coverage is on.
+    std::vector<double> coverage;
     for (const auto& trace : traces) {
         const auto& charge = trace->charge();
+        if (m_emit_coverage) {
+            coverage.push_back(trace->channel());
+            coverage.push_back(t0 + tick * trace->tbin());
+            coverage.push_back(t0 + tick * (trace->tbin() + (int) charge.size()));
+        }
 
         // Saturated tick sub-ranges for this channel (empty if none / off).  A
-        // hit overlapping one is dropped below: a clipped flat-top deconvolves
-        // into a broad over-integrated pulse that overlaps the rail, while real
-        // light on the rest of the (possibly full-stream-length) trace survives.
+        // hit overlapping one is dropped (veto_saturation) or flagged
+        // (flag_saturation) below: a clipped flat-top deconvolves into a broad
+        // over-integrated pulse that overlaps the rail, while real light on
+        // the rest of the (possibly full-stream-length) trace survives.
         const Waveform::BinRangeList* chan_sat = nullptr;
-        if (m_veto_saturation) {
+        if (m_veto_saturation || m_flag_saturation) {
             auto mit = sat_masks.find(trace->channel());
             if (mit != sat_masks.end()) chan_sat = &mit->second;
         }
@@ -368,22 +429,38 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
         for (const auto& pulse : sliding_window(wf, ped_mean, ped_sigma, algo)) {
           // Split each found pulse at prominent sub-peaks (no-op and
           // bit-identical when split_enable is false: one sub == pulse).
-          for (const auto& sub : split_pulse(wf, ped_mean, pulse, algo)) {
+          for (const auto& sub0 : split_pulse(wf, ped_mean, pulse, algo)) {
+           // Wide-hit handling (no-op and bit-identical when wide_hit_mode
+           // is "": subs == {sub0} and book time == peak time).
+           const bool wide = !m_wide_hit_mode.empty() &&
+                             (sub0.t_end - sub0.t_start) * tick > m_wide_hit_min_width;
+           const std::vector<Pulse> subs =
+               (wide && m_wide_hit_mode == "slice")
+                   ? slice_pulse(wf, ped_mean, sub0,
+                                 std::max(1, (int) std::lround(m_slice_width / tick)))
+                   : std::vector<Pulse>{sub0};
+           for (const auto& sub : subs) {
             if (sub.peak < m_hit_threshold) continue;
-            if (chan_sat) {  // drop hits overlapping a saturated tick sub-range
+            bool sat = false;
+            if (chan_sat) {  // hit overlaps a saturated tick sub-range?
                 const int hs = trace->tbin() + sub.t_start;
                 const int he = trace->tbin() + sub.t_end;
-                bool sat = false;
                 for (const auto& [a, b] : *chan_sat) {
                     if (a < he && hs < b) { sat = true; break; }
                 }
-                if (sat) { ++nvetoed; continue; }
+                if (sat && m_veto_saturation) { ++nvetoed; continue; }
+                if (sat) ++nflagged;
             }
             const double peak_time = t0 + tick * (trace->tbin() + sub.t_max);
             const double start_time = t0 + tick * (trace->tbin() + sub.t_start);
             const double width = (sub.t_end - sub.t_start) * tick;
+            // "start" mode: book the wide hit at its onset so the full
+            // integral lands on the flash that produced it (== peak_time
+            // when the mode is off -> bit-identical).
+            const double book_time =
+                (wide && m_wide_hit_mode == "start") ? start_time : peak_time;
             hits.push_back(trace->channel());
-            hits.push_back(peak_time);
+            hits.push_back(book_time);
             hits.push_back(width);
             hits.push_back(sub.area);
             hits.push_back(sub.peak);
@@ -391,6 +468,8 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
             hits.push_back(start_time);
             hits.push_back(-1);  // flash_id, assigned by OpFlashFinder
             hits.push_back(0);   // fast_to_total
+            if (m_flag_saturation) hits.push_back(sat ? 1.0 : 0.0);
+           }
           }
         }
     }
@@ -400,13 +479,19 @@ bool Flash::OpHitFinder::operator()(const input_pointer& in, output_pointer& out
     tmd["name"] = "ophits";
     tensors->push_back(std::make_shared<Aux::SimpleTensor>(
         ITensor::shape_t{hits.size() / ncol, ncol}, hits.data(), tmd));
+    if (m_emit_coverage) {
+        Configuration cmd;
+        cmd["name"] = "coverage";
+        tensors->push_back(std::make_shared<Aux::SimpleTensor>(
+            ITensor::shape_t{coverage.size() / 3, (size_t) 3}, coverage.data(), cmd));
+    }
 
     Configuration md;
     md["event"] = in->ident();
     md["producer"] = "wct-flash";
     out = std::make_shared<Aux::SimpleTensorSet>(in->ident(), md,
                                                  ITensor::shared_vector(tensors));
-    log->debug("frame {}: {} ophits from {} '{}' traces ({} saturated hits vetoed)",
-               in->ident(), hits.size() / ncol, traces.size(), m_intag, nvetoed);
+    log->debug("frame {}: {} ophits from {} '{}' traces ({} saturated hits vetoed, {} flagged)",
+               in->ident(), hits.size() / ncol, traces.size(), m_intag, nvetoed, nflagged);
     return true;
 }

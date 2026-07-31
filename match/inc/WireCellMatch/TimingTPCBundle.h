@@ -71,6 +71,22 @@ namespace WireCell::Match {
         double chi2_pmt_excess  = 350.0;   // measured-excess PE threshold (RE-TUNE for SBND)
         double chi2_pmt_ratio   = 1.3;     // measured/predicted ratio threshold
         double chi2_pmt_inflate = 0.5;     // fraction of pe added in quadrature to the denom
+        // Rail-saturated channel widening: denom += (pe*chi2_sat_inflate)^2 when the
+        // flash flags this channel saturated (Opflash::get_sat). Gated on the flag ALONE
+        // -- the close_to_PMT excess/ratio tests fire on measured >> predicted, the
+        // opposite regime from a clipped channel, so they would never fire here.
+        // Independent of chi2_relax. Reaches the chi2 only when QLMatching leaves the
+        // channel in the opdet mask (saturation_mask_fit false). 0 = off, bit-identical.
+        double chi2_sat_inflate = 0.0;
+        // Per-channel PE-error overrides resolved by QLMatching from its
+        // pe_err_family_* knob (length nchan; -1 entry => the scalar value
+        // above).  All empty (default) => scalar model, bit-identical.
+        // Appended AFTER the positionally brace-initialized members so the
+        // QLMatching run.qp initializer stays valid; assigned separately.
+        std::vector<double> pe_err_ch_floor;
+        std::vector<double> pe_err_ch_frac;
+        std::vector<double> pe_err_ch_lowpe_frac;
+        std::vector<double> pe_err_ch_lowpe_knee;
     };
 
     class TimingTPCBundle {
@@ -95,6 +111,14 @@ namespace WireCell::Match {
 
         std::vector<double>& get_pred_flash() { return pred_flash; }
         void set_pred_flash(const std::vector<double>& v) { pred_flash = v; }
+        // Full (per-flash rail-flag-unmasked) prediction for the calib dump /
+        // display. Empty unless QLMatching stores it (use_saturation_flag on);
+        // falls back to the fit vector so consumers can read unconditionally.
+        const std::vector<double>& get_pred_flash_full() const
+        {
+            return pred_flash_full.empty() ? pred_flash : pred_flash_full;
+        }
+        void set_pred_flash_full(const std::vector<double>& v) { pred_flash_full = v; }
 
         Opflash* get_flash() const { return flash; }
         void set_flash(Opflash* f) { flash = f; }
@@ -180,6 +204,30 @@ namespace WireCell::Match {
         // never sets it => bit-identical.
         void set_flag_xtpc_pin(bool v) { flag_xtpc_pin = v; }
         bool get_flag_xtpc_pin() const { return flag_xtpc_pin; }
+        // xtpc cathode rescue (QLMatching xtpc_cathode_tol knob, default 0 = off =>
+        // neither flag is ever set => bit-identical).
+        // cand: this bundle's cluster ends near/past the cathode within the widened
+        // window, so cull_cross_tpc admits it as a crosser-half candidate WITHOUT
+        // flag_at_x_boundary (which also feeds ladder/cross-side/LASSO-weight paths
+        // that must stay legacy).
+        void set_flag_xtpc_cathode_cand(bool v) { flag_xtpc_cathode_cand = v; }
+        bool get_flag_xtpc_cathode_cand() const { return flag_xtpc_cathode_cand; }
+        // provisional (subset of cand): the bundle FAILED containment, only by a
+        // cathode overshoot within the tolerance, and was kept provisionally so
+        // cull_cross_tpc can try to confirm it. QLMatching purges any provisional
+        // bundle that does not acquire flag_xtpc_scenario1, before
+        // cull_inconsistent/fit, so unconfirmed provisionals are unobservable
+        // downstream.
+        void set_flag_xtpc_cathode_provisional(bool v) { flag_xtpc_cathode_provisional = v; }
+        bool get_flag_xtpc_cathode_provisional() const { return flag_xtpc_cathode_provisional; }
+        // Relaxed second-chance cluster rescue (QLMatching cluster_rescue_relaxed
+        // knob, default off => never set => bit-identical). True = this bundle was
+        // adopted for a still-unmatched LONG cluster by the RELAXED accept() tier,
+        // i.e. it failed the tight cluster-rescue gates and is a lower-confidence
+        // match; the calib dump exposes it so downstream scans can distinguish
+        // relaxed adoptions from LASSO/tight-rescue matches.
+        void set_flag_cluster_rescue_relaxed(bool v) { flag_cluster_rescue_relaxed = v; }
+        bool get_flag_cluster_rescue_relaxed() const { return flag_cluster_rescue_relaxed; }
 
         double get_strength() const { return strength; }
         void set_strength(double v) { strength = v; }
@@ -207,6 +255,9 @@ namespace WireCell::Match {
         bool flag_xtpc_consistent{false};
         bool flag_xtpc_scenario1{false};
         bool flag_xtpc_pin{false};
+        bool flag_xtpc_cathode_cand{false};
+        bool flag_xtpc_cathode_provisional{false};
+        bool flag_cluster_rescue_relaxed{false};
 
         double ks_dis;
         double chi2;
@@ -219,6 +270,7 @@ namespace WireCell::Match {
         // all channels eligible (historical behavior, bit-identical).
         std::vector<uint8_t> relax_channels;
         std::vector<double> pred_flash;
+        std::vector<double> pred_flash_full;
         std::vector<Cluster*> other_clusters;
         std::vector<Cluster*> more_clusters;
     };

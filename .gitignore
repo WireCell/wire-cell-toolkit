@@ -3,6 +3,7 @@
 !cfg/pgrapher/experiment/pdhd/pdhd-opdet-geom.json
 !cfg/pgrapher/experiment/pdhd/pdhd-spe-templates-v1.json
 !cfg/pgrapher/experiment/pdhd/pdhd-spe-templates.json
+!cfg/pgrapher/experiment/sbnd/sbnd_track_fitting.json
 !sigproc/test/data/*.json
 *.aux
 *.bak

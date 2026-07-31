@@ -372,8 +372,13 @@ double Blob::estimate_total_charge() const {
         }
         
         // Iterate through time slices for this blob
-        int time_slice = slice_index_min(); 
+        int time_slice = slice_index_min();
         int num_dead_wire = 0;
+        // Charge row for this (apa, face, plane, time_slice), fetched once --
+        // the per-wire get_wire_charge() repeated the cache()/find(time_slice)
+        // chain for every wire (doc 54 round 2).  A missing row is the same
+        // as get_wire_charge()'s {0, 1e12} for every wire: no positive charge.
+        const auto* charge_row = grouping->wire_charge_row(apa, face, plane, time_slice);
         // Iterate through wires in this plane
         for (int wire_index = wire_min; wire_index < wire_max; wire_index++) {
             // Check if wire is dead
@@ -382,8 +387,11 @@ double Blob::estimate_total_charge() const {
             }
 
             // Get wire charge
-            auto charge_pair = grouping->get_wire_charge(apa, face, plane, wire_index, time_slice);
-            double charge = charge_pair.first;            
+            double charge = 0.0;
+            if (charge_row) {
+                auto wire_it = charge_row->find(wire_index);
+                if (wire_it != charge_row->end()) charge = wire_it->second.first;
+            }
             if (charge > 0) { // Only count positive charges
                 plane_charge += charge;
                 plane_has_data = true;

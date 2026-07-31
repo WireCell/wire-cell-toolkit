@@ -173,7 +173,7 @@ snapshot, no perturbation. `dump_calib()` reads finished state and writes via
 `WireCell::Persist::dump`; with the flag off it is never called.
 
 This feeds the off-line Bokeh hand-scan event display
-(`sbnd_xin/ql_scan/`, doc `sbnd_xin/docs/ql-scan-display.md`), where a human picks
+(`sbnd_xin/ql_scan/`, doc `sbnd_xin/docs/12_ql-scan-display.md`), where a human picks
 the correct flash↔cluster matches under the per-flash + ±80 ns coincidence rules
 and saves them as labels. Those labels are the ground-truth coincident pairings
 that will inform (a) the ±80 ns flash combination and (b) the χ²/`PE_err` tuning the
@@ -189,7 +189,7 @@ vehicle since it sees both TPCs in one `operator()` call.
   `cfg/pgrapher/experiment/sbnd/clus.jsonnet`
 - `sbnd_xin/wct-clus-matching-perevt.jsonnet`, `sbnd_xin/run_ql_evt.sh`,
   `sbnd_xin/ql_scan/{serve_ql_scan.sh,ql_scan_viewer.py}`,
-  `sbnd_xin/docs/ql-scan-display.md` (wcp-porting-img repo)
+  `sbnd_xin/docs/12_ql-scan-display.md` (wcp-porting-img repo)
 - Reference: `clus/src/PointTreeMerging.cxx` (the merge reproduced in-node),
   `aux/src/FlashTensorToOpticalPCs.cxx`, `match/src/SemiAnalyticalModel.cxx`
   (cathode optical cut), `iface/inc/WireCellIface/{INode,IFaninNode}.h`.

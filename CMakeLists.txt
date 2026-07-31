@@ -58,6 +58,12 @@ set_property(CACHE WCT_SPDLOG_ACTIVE_LEVEL PROPERTY STRINGS
 # Tests are off by default (mirrors waf's --tests opt-in); wired up in wct-ike.9.
 option(WCT_WITH_TESTS "Build and register the test suite (mirrors --tests)" OFF)
 
+# The experimental WireCellSpng package only builds against a recent libtorch
+# (where c10::optional is std::optional, ~torch 2.4+); it does not compile with
+# older libtorch.  Off by default; opt in with -DWCT_WITH_SPNG=ON (mirrors
+# --with-spng=yes in waf).  See https://github.com/WireCell/wire-cell-toolkit/issues/496
+option(WCT_WITH_SPNG "Build the experimental WireCellSpng package (needs recent libtorch)" OFF)
+
 # Comma-separated experiment names whose pgrapher/experiment configs to install
 # ("all" for every experiment); mirrors --install-config.  Empty installs only
 # the common/ui jsonnet.
@@ -196,7 +202,6 @@ set(WCT_OPTIONAL_PACKAGES
     "zio=ZMQ,CZMQ,ZYRE,ZIO"
     "triton=GRPC,PROTOBUF,TRITON"
     "pytorch=LIBTORCH"
-    "spng=LIBTORCH"
     "root=ROOTSYS"
     "cuda=CUDA")
 foreach(_entry IN LISTS WCT_OPTIONAL_PACKAGES)
@@ -218,6 +223,16 @@ foreach(_entry IN LISTS WCT_OPTIONAL_PACKAGES)
     message(STATUS "WCT package '${_pkg}' disabled (missing dependency: ${_miss})")
   endif()
 endforeach()
+
+# spng is experimental and off by default (opt in with -DWCT_WITH_SPNG=ON); it
+# only builds against a recent libtorch.  See issue #496.
+if(WCT_WITH_SPNG)
+  if(WCT_HAVE_LIBTORCH)
+    list(APPEND WCT_PACKAGES spng)
+  else()
+    message(STATUS "WCT package 'spng' requested (WCT_WITH_SPNG) but LIBTORCH not available")
+  endif()
+endif()
 
 # Pre-release packages are built only in development checkouts, never in a
 # release build (mirrors pre_release_packages in waft/wcb.py).

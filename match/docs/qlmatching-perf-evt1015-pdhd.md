@@ -397,6 +397,111 @@ levers left now genuinely change physics: Option D (coarsen the vis_loop point s
 blobs) or an AABB/k-d pre-filter for `cull_cross_tpc` (the remaining ~19 s) -- both toggle + validate,
 not byte-identical.
 
+## 11. Implemented — the two §10 "levers left": box-pruned `cull_cross_tpc` (exact) + Option D vis-loop coarsening (knob)
+
+Campaign Tier-2 (2026-07-10), picking up §10's closing status: after
+`crossside_skip_vis` the remaining costs on evt 1015 (charge idx 4) were the
+vis_loop (~109 s) and the `cull_cross_tpc` pairing loop (~19 s). Fresh HEAD
+baseline for this round (new binary reproduces the production matching zips
+byte-identically): **wall 167 s / RSS 1.07 GB, vis_loop 108.1 s, pairing 18.8 s**.
+
+### 11a. `cull_cross_tpc` AABB box pruning — exact, unconditional (no knob)
+
+The §9 note called the 1.1 ns/point-pair math "irreducible without an AABB/k-d
+pre-filter". Implemented as *bound-then-exact*, two levels, both preserving the
+result bit-for-bit:
+
+1. **Whole-box skip.** Per candidate pair (after the flash-coincidence test),
+   the axis-gap between the two T0-shifted cluster bounding boxes is a lower
+   bound on the true closest approach; if it exceeds the widest ceiling the
+   pair could pass (`xtpc_dmax`, widened to `xtpc_dmax2` when a
+   window-truncated half makes scenario 2 possible) the pair is skipped
+   outright — it could only have returned scenario 0. Raw-point boxes are
+   T0-independent and cached per cluster (`xtpc_boxes`); the per-candidate
+   `(off, dy, dz)` shifts move the box bounds at use.
+2. **Chunk pruning inside the exact loop.** Survivors run the closest-approach
+   loop pruned per 256-point chunk (`XtpcBoxes::chunks`) against the *running*
+   best distance: a whole m0-chunk is skipped when its box cannot beat `best`
+   vs m1's whole box, and a single m0 point skips each m1 chunk its
+   point-to-box gap cannot beat. A pruned block contains only pairs with
+   `d2 >= best`, which the legacy strict `<` update ignores anyway, and
+   surviving pairs keep the legacy row-major order — so `best/bi/bj`
+   (including FP-tie behavior, hence the closest points, the Hough directions,
+   scenario 2 angles and the joint-pin `d` sort) are bit-identical.
+
+**Measured (evt 1015):** pairing loop **18.8 s → 0.38 s (~50×)**; level 1 alone
+skips 863/1864 coincident pairs (46%, point_pairs 1.79e10 → 1.22e10 → 12.8 s),
+level 2 collapses the rest. Matching outputs byte-identical (14 zips,
+`cmp_matching.py`), and unchanged `pairs_coincident`/flag counts. This is a
+shared-code (SBND/PDHD) unconditional change, gated only by byte-identity —
+`xtpc_flag` events on any detector get it for free.
+
+### 11b. Option D — vis-loop coarsening knob (`vis_sample_stride` / `vis_sample_min_pts`)
+
+§3-D / §10's remaining physics-touching lever. In `build_bundles`, when
+`vis_sample_stride > 1` and a cluster group's total point count is `>=
+vis_sample_min_pts`, the per-point SemiAnalyticalModel evaluation samples every
+stride-th point of each blob, weighting the sampled point by the run of points
+it stands in for (`min(stride, npoints-i)`) so each blob's total charge in
+`pred_flash` is conserved exactly; the approximation is a piecewise-constant
+visibility over stride-long runs of the blob point order. **C++ default stride
+1 = OFF**: the loop body performs the identical FP operations (`qw == q`, same
+iteration) — verified byte-identical (§11c). Works for both the
+semi-analytical and gridded-library (`m_lib_model`) paths.
+
+Dose-response on evt 1015 (same binary, config-only, vs the knob-OFF run):
+
+| setting (stride/min_pts) | vis_loop (s) | process wall (s) | matching zips |
+|---|--:|--:|---|
+| OFF (this round's binary) | 108.9 | 149 | reference |
+| 2 / 10000 | 89.4 | 130 | byte-identical |
+| 4 / 10000 | 78.9 | 119 | byte-identical |
+| 4 / 1000 | 43.1 | **85** | byte-identical |
+| 8 / 1000 | 33.9 | 75 | byte-identical |
+
+Even stride 8 does not flip a single assignment on this event — the LASSO
+selection is far more robust to the ~1/stride-level pred_flash perturbation
+than feared (the per-group threshold keeps small/dim groups exact; with
+min_pts 10000 the coarsenable share saturates at ~37% of vis time, min_pts
+1000 reaches ~70%). RSS unchanged throughout (1.07 GB).
+
+### 11c. Validation (run 29107, all 30 events)
+
+- **Knob-OFF sweep (new binary, defaults): 30/30 matching byte-identical** to
+  the production zips (`cmp_matching.py` confound-free subset =
+  `mabc-group02/13` + per-APA; `mabc-all-apa` drifted on 28 events = the
+  documented cross-build `clus_all_tpc` relink nondeterminism, §10). This is
+  the population gate for the unconditional box pruning AND the Option D
+  off-path.
+- **Option D sweep at stride 4 / min_pts 1000 (same binary, config-only):
+  30/30 matching byte-identical to the knob-OFF sweep** — the coarsening did
+  not flip a single per-cluster flash assignment or annotation on the whole
+  run, while the knob was demonstrably live: per-event vis_loop dropped
+  2.4–2.6× everywhere (Σ vis 573 → 212 s, −63%; Σ wall 1162 → 801 s, −31%
+  under identical 6-way parallel load; evt 1015 158 → 89 s in-sweep).
+- Semantic movement check (`cmp_t0_semantic.py`, per-cluster mean-x from the
+  group zips) is moot at byte-identity, but the tool is kept with the A/B
+  snapshots for future, less-clean settings.
+
+### 11d. Status
+
+- Box pruning: shipped unconditionally (bit-identical; provably exact and
+  validated 30/30 on PDHD). SBND shares this code path (`xtpc_flag` on) and
+  gets the same exact speedup; the Tier-5 SBND profiling round will re-baseline
+  it there.
+- Option D: knob default OFF everywhere (C++ `vis_sample_stride:1`); PDHD
+  `qlmatching.jsonnet` documents the validated recommended setting
+  (stride 4 / min_pts 1000) in a comment — compiled config byte-identical.
+  Enabling in production is a physics decision (it is an approximation even
+  though it is output-identical on all 30 events of run 29107); the sweep
+  evidence above is the input to that decision.
+- Combined effect on evt 1015 (this round, knobs as recommended):
+  **167 s → 85 s wall (−49%)**; with everything since the campaign start
+  (dense-LASSO baseline 1148 s): **~13.5×**. RSS unchanged (1.07 GB; the
+  charge point clouds are the floor).
+- A/B artifacts: `/home/xqian/tmp/ql_tier2_ab/` ({prod,head,bvh_off,off30,
+  visd_*}/029107_*, cmp_t0_semantic.py, collect_walls.sh, sweep_logs/).
+
 ## Reproduce
 
 ```

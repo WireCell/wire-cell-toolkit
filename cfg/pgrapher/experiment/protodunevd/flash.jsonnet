@@ -81,7 +81,8 @@ local wc = import 'wirecell.jsonnet';
     // samples: 1024 for snippets; 468864 for the cathode full streams
     // (the 468800-sample records are zero-padded by OpDecon).
     // DAPHNE 14-bit rail saturation flags as in PDHD.
-    opdecon(name='', samples=1024, wi_sigma=1.0, detect_saturation=false, saturation_pad=0)::  g.pnode({
+    opdecon(name='', samples=1024, wi_sigma=1.0, detect_saturation=false, saturation_pad=0,
+            saturation_repair=false, overflow_to_rail=false)::  g.pnode({
         type: 'OpDecon',
         name: name,
         data: {
@@ -99,6 +100,20 @@ local wc = import 'wirecell.jsonnet';
             use_real_dft: true,
             [if detect_saturation then 'detect_saturation']: detect_saturation,
             [if detect_saturation && saturation_pad != 0 then 'saturation_pad']: saturation_pad,
+            // Two-sided exp bridge over railed runs before decon.  C++ default
+            // false.  Key omitted when off => byte-identical pre-fix config.
+            // See pdvd/docs/qlmatch/pdvd-saturation-recovery.md.
+            [if saturation_repair then 'saturation_repair']: true,
+            // Remap floor-pinned OVERFLOW runs to saturation_adc before the
+            // rail scan, so detect/flag/repair handle the membrane self-trigger
+            // snippets whose over-range pulses pin at ADC 0 instead of clamping
+            // at the ceiling (and are therefore invisible to detect_saturation).
+            // Requires detect_saturation.  C++ default false.  Key omitted when
+            // off => byte-identical pre-fix config.  NOT enabled in production:
+            // the encoding mechanism is still unconfirmed -- see
+            // pdvd/docs/qlmatch/14_pdvd-lightpattern-sp-investigation.md
+            // ("The zero-run").
+            [if overflow_to_rail then 'overflow_to_rail']: true,
         },
     }, nin=1, nout=1, uses=[dft]),
 
@@ -128,7 +143,7 @@ local wc = import 'wirecell.jsonnet';
     // units (100 = 1 PE/tick); starting values from the WI noise floors
     // (pdvd-light-filter.md): cathode ~3.7, membrane ~4 (top-wall 5
     // sigma), PMT ~2.2.
-    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false)::  g.pnode({
+    ophit(name='', hit_threshold=3.0, robust_baseline=false, intag='decon', fixed_ped_sigma=0, veto_saturation=false, flag_saturation=false, emit_coverage=false, wide_hit_mode='', wide_hit_min_width_us=2.0, slice_width_us=1.0)::  g.pnode({
         type: 'OpHitFinder',
         name: name,
         data: {
@@ -137,6 +152,25 @@ local wc = import 'wirecell.jsonnet';
             [if intag != 'decon' then 'intag']: intag,
             [if fixed_ped_sigma > 0 then 'fixed_ped_sigma']: fixed_ped_sigma,
             [if veto_saturation then 'veto_saturation']: veto_saturation,
+            // Wide-hit handling: a slow pulse spanning a self-trigger
+            // snippet otherwise books its whole PE at its PEAK time's flash
+            // bin (doc 25 §3/§7 wall-XA misbooking).  "start" books the
+            // full integral at the pulse onset (total-light convention);
+            // "slice" books per slice_width slice.  C++ default '' (off).
+            // Keys omitted when off => byte-identical pre-fix config.
+            [if wide_hit_mode != '' then 'wide_hit_mode']: wide_hit_mode,
+            [if wide_hit_mode != '' then 'wide_hit_min_width']: wide_hit_min_width_us * wc.us,
+            [if wide_hit_mode != '' then 'slice_width']: slice_width_us * wc.us,
+            // Keep-and-mark alternative to the veto: 10th ophit column ->
+            // OpFlashFinder flash_sat tensor -> QLMatching per-flash channel
+            // mask.  C++ default false.  Key omitted when off => byte-identical.
+            [if flag_saturation then 'flag_saturation']: true,
+            // Per-trace livetime rows -> OpFlashFinder flash_cov tensor ->
+            // QLMatching per-flash no-data mask (membrane XA / PMT channels
+            // are 16.4-us self-trigger snippets; without this an uncovered
+            // channel is scored measured = 0).  C++ default false.  Key
+            // omitted when off => byte-identical.
+            [if emit_coverage then 'emit_coverage']: true,
             algo: {
                 split_enable: true,
                 split_min_prominence: 0.4,
@@ -166,10 +200,26 @@ local wc = import 'wirecell.jsonnet';
     // (DAPHNE) are ganged to the 40 OpDet PE columns via the channel
     // map.  bin_width 1000 ns (PDHD parity, validated on data).
     // Quality cuts scaled to 40 PDs (PDHD: 5/20 on 160).
-    // offset_us: light<->charge offset, NOT yet established for PDVD --
-    // stamped 0 (provisional) until the charge chain association is
-    // calibrated.
-    opflash_finder(name='', offset_us=0, min_fired_pds=2, min_total_pe=10.0)::  g.pnode({
+    // offset_us: legacy scalar key, stays 0 for PDVD (inert).  The real
+    // per-event light<->charge offsets are PER CRATE (the TDE/BDE charge
+    // windows open up to ~32 us apart, each jittering vs the trigger):
+    //   offset_bot_us = light_chain_t0 - charge_bde_start  (bottom volume)
+    //   offset_top_us = light_chain_t0 - charge_tde_start  (top volume)
+    // (negative, ~-2.1..-2.5 ms; ADD to a flash time to land on that crate's
+    // charge time base).  Measured per event from the rawwf trigoff tree by
+    // run_light_evt.sh and stamped verbatim into the archive metadata for
+    // run_clus_evt.sh / QLMatching trigger_offsets.
+    // tail_merge: absorb the split-off LAr slow-tail flash (pdvd doc 23 §7d:
+    // one physical flash cut at the fast/slow boundary by the 1 us binning;
+    // late member = wide cathode-XA tail hits on the seed's own lit PDs).
+    // C++ default false; keys omitted when off => byte-identical pre-fix
+    // config.  On a tail merge the surviving flash keeps the seed's
+    // (fast-peak) time.  Sub-knob C++ defaults: window 3.0 us, min hit
+    // width 1.0 us, PE-dominance fraction 0.7, PE-ratio cap 1.0.
+    opflash_finder(name='', offset_us=0, min_fired_pds=2, min_total_pe=10.0,
+                   offset_bot_us=null, offset_top_us=null,
+                   tail_merge=false, tail_window_us=3.0, tail_min_width_us=1.0,
+                   tail_pe_frac=0.7, tail_pe_ratio=1.0)::  g.pnode({
         type: 'OpFlashFinder',
         name: name,
         data: {
@@ -182,6 +232,16 @@ local wc = import 'wirecell.jsonnet';
             min_fired_pds: min_fired_pds,
             min_total_pe: min_total_pe,
             min_fired_pe: 1.0,
+            [if tail_merge then 'flash_tail_merge']: true,
+            [if tail_merge then 'tail_window_us']: tail_window_us,
+            [if tail_merge then 'tail_min_width_us']: tail_min_width_us,
+            [if tail_merge then 'tail_pe_frac']: tail_pe_frac,
+            [if tail_merge then 'tail_pe_ratio']: tail_pe_ratio,
+        } + if offset_bot_us == null && offset_top_us == null then {} else {
+            metadata_extra: {
+                offset_bot_us: offset_bot_us,
+                offset_top_us: offset_top_us,
+            },
         },
     }, nin=1, nout=1),
 }

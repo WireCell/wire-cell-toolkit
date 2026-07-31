@@ -77,6 +77,33 @@ static void clustering_switch_scope(
         // raises RuntimeError for unrecognised correction names.
         const std::vector<int> filter_results = cluster->add_corrected_points(pcts, correction_name);
 
+        // Carry the flash-merge per-blob provenance across the rebuild:
+        // separate() -> from() copies scalars/flags/scopes but NOT node-local
+        // PCs, so the "perblob" real_cluster_id / real_cluster_main arrays
+        // (persisted through the pctree tarball by the QL job's
+        // save_real_cluster_id) would die here -- and they are what the Bee
+        // writer's colors and TaggerCheckTGM main_component_mode="real" read.
+        // Row-partition them by the same filter that partitions the blobs.
+        // Absent arrays (legacy tarballs) => no-op.
+        //
+        // The list is one place on purpose: doc 52 defect D3 was exactly this
+        // list being hardcoded to two names, so the isolated grouping's own
+        // provenance ("assoc_cluster_*", doc 52 Stage 1) silently failed to
+        // survive the rebuild.  Any future per-blob provenance array goes here
+        // and nowhere else.  Absent arrays => no-op, hence byte-identical when
+        // the writer knob is off.
+        static const char* const carry_anames[] = {
+            "real_cluster_id", "real_cluster_main",      // flash merge (doc 38)
+            "assoc_cluster_id", "assoc_cluster_main",    // isolated grouping (doc 52)
+        };
+        constexpr size_t n_carry = sizeof(carry_anames) / sizeof(carry_anames[0]);
+        std::vector<std::vector<int>> src_carry(n_carry);
+        for (size_t ic = 0; ic < n_carry; ++ic) {
+            if (!cluster->has_pcarray<int>(carry_anames[ic], "perblob")) continue;
+            auto sp = cluster->get_pcarray<int>(carry_anames[ic], "perblob");
+            src_carry[ic].assign(sp.begin(), sp.end());
+        }
+
         // Retrieve the correction scope registered by add_corrected_points().
         const auto correction_scope = cluster->get_scope(correction_name);
 
@@ -94,6 +121,33 @@ static void clustering_switch_scope(
         // scope_transform to each separated cluster. Only the scope_filter is new.
         for (auto& [id, new_cluster] : separated_clusters) {
             new_cluster->set_scope_filter(correction_scope, id == 1);
+            // Since doc 52 §13 (option 2) Grouping::separate() auto-carves the
+            // WHOLE "perblob" dataset onto each part -- including "isolated",
+            // which this visitor has always deliberately dropped (it is
+            // rewritten downstream by examine_bundles).  Erase the auto-carved
+            // dataset and re-attach exactly the carry list below, preserving
+            // this visitor's historical output byte-for-byte.
+            new_cluster->value().local_pcs().erase("perblob");
+            // Re-attach the provenance rows of the blobs that went to this
+            // part.  separate() keeps the blobs of each part in their source
+            // order, so filtering the source array by the same group id
+            // reproduces the parallel per-blob order.  Skip (fail open) on
+            // any size mismatch.
+            const int part_id = id;         // lambdas cannot capture a structured binding pre-C++20
+            Cluster* part = new_cluster;
+            auto carve = [&](const std::vector<int>& src, const char* aname) {
+                if (src.empty() || src.size() != filter_results.size()) return;
+                std::vector<int> sub;
+                sub.reserve(src.size());
+                for (size_t i = 0; i < src.size(); ++i) {
+                    if (filter_results[i] == part_id) sub.push_back(src[i]);
+                }
+                if (sub.size() != (size_t)part->nchildren()) return;
+                part->put_pcarray(sub, aname, "perblob");
+            };
+            for (size_t ic = 0; ic < n_carry; ++ic) {
+                carve(src_carry[ic], carry_anames[ic]);
+            }
         }
     }
 }

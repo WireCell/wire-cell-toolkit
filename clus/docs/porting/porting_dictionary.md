@@ -284,3 +284,16 @@ Full function-by-function table: `clus/docs/patternrecognition/prvertex_prsegmen
 
 
 ### [multi dQ/dx fitting](https://github.com/BNLIF/wire-cell-pid/blob/537a3fd17f8a7b3cf5412594267c14c4cc1775cb/docs/PR3DCluster_multi_dQ_dx_fit.md) (WCP)
+
+## Toolkit invariant: "perblob" node-local arrays are parallel to blob children order
+
+Not a WCP concept (WCP keeps per-cell state on the cells themselves).  In the
+toolkit, per-blob provenance (`isolated`, `assoc_cluster_id/main`,
+`real_cluster_id/main`) lives in a cluster-level N-row `"perblob"` Dataset
+where row *i* MUST describe blob child *i*.  The tree primitives
+(`separate()`, `merge()`, `take_children()`) do NOT maintain this — any
+separate-then-merge-back round trip silently permutes children while the
+arrays keep their old row order.  Before writing or porting ANY code that
+mutates a cluster's child set, read `clus/docs/perblob_invariant.md` (rules,
+safe patterns, audit table; doc 52 §12-§13 in wcp-porting-validation has the
+full bug history).

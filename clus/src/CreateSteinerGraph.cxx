@@ -2,7 +2,9 @@
 #include "SteinerGrapher.h"
 
 #include "WireCellClus/Graphs.h"
+#include <algorithm>
 #include <chrono>
+#include <unordered_set>
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellClus/ClusteringFuncs.h"
@@ -35,6 +37,15 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     NeedPCTS::configure(cfg);
 
     m_perf = get(cfg, "perf", m_perf);
+    m_require_beam_flash = get(cfg, "require_beam_flash", m_require_beam_flash);
+    m_beam_window_only = get(cfg, "beam_window_only", m_beam_window_only);
+    m_beam_window_low = get(cfg, "beam_window_low", m_beam_window_low);
+    m_beam_window_high = get(cfg, "beam_window_high", m_beam_window_high);
+    if (m_beam_window_only && !(m_beam_window_low < m_beam_window_high)) {
+        log->warn("configure: beam_window_only set but the window is empty "
+                  "([{}, {}) us) -- gate disabled, every cluster processed",
+                  m_beam_window_low/units::us, m_beam_window_high/units::us);
+    }
     m_grapher_config.dv = m_dv;
     m_grapher_config.pcts = m_pcts;
     m_grapher_config.perf = m_perf; // propagate perf flag into Grapher instances
@@ -54,6 +65,18 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["replace"] = m_replace;
     // If true, print per-step timing to stdout.
     cfg["perf"] = m_perf;
+    // If true (uBooNE) only beam_flash-flagged clusters are processed; false
+    // (post-QL-matching detectors without that flag) processes every
+    // scope-passing cluster, mains recognized by their main_cluster flag.
+    cfg["require_beam_flash"] = m_require_beam_flash;
+    // If true, process only the beam-coincident bundle: clusters whose
+    // matched flash time (cluster_t0) is in [beam_window_low,
+    // beam_window_high) plus the companions sharing their matched_flash_gid.
+    // Default false = every cluster, i.e. legacy behavior; the window is also
+    // ignored when low >= high.
+    cfg["beam_window_only"] = m_beam_window_only;
+    cfg["beam_window_low"] = m_beam_window_low;
+    cfg["beam_window_high"] = m_beam_window_high;
 
     return cfg;
 }
@@ -80,11 +103,58 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         // if scope is not raw, apply filter ...
         if (default_scope.hash()!=raw_scope.hash() && (!cluster->get_scope_filter(default_scope)) ) continue;
 
-        if (cluster->get_flag(Flags::beam_flash)){
-            filtered_clusters.push_back(cluster);
-            if (cluster->get_flag(Flags::main_cluster)) {
-                main_cluster = cluster;
+        if (m_require_beam_flash) {
+            if (cluster->get_flag(Flags::beam_flash)){
+                filtered_clusters.push_back(cluster);
+                if (cluster->get_flag(Flags::main_cluster)) {
+                    main_cluster = cluster;
+                }
             }
+        }
+        else {
+            filtered_clusters.push_back(cluster);
+        }
+    }
+
+    // Beam-window gate: keep only the beam-coincident bundle(s) -- the main
+    // clusters whose matched flash time (cluster_t0) lies in [low, high) plus
+    // the companions sharing their matched_flash_gid (the same pairing rule
+    // TaggerCheckSTM uses).  The downstream taggers carry the same gate, so
+    // the clusters dropped here are exactly the ones no tagger evaluates.
+    // The surviving vector is a subsequence of the ungated one, so the
+    // processing order of the kept clusters is unchanged; the gid set is keyed
+    // by int, never by pointer.
+    if (m_beam_window_only && m_beam_window_low < m_beam_window_high) {
+        auto in_window = [this](const Cluster* c) {
+            const double t0 = c->get_cluster_t0();
+            return t0 >= m_beam_window_low && t0 < m_beam_window_high;
+        };
+        std::unordered_set<int> beam_gids;
+        size_t n_main_in = 0;
+        for (auto* cluster : filtered_clusters) {
+            if (!cluster->get_flag(Flags::main_cluster)) continue;
+            if (!in_window(cluster)) continue;
+            ++n_main_in;
+            const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+            if (gid >= 0) beam_gids.insert(gid);
+        }
+        std::vector<Cluster*> beam_clusters;
+        for (auto* cluster : filtered_clusters) {
+            const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+            const bool companion = !cluster->get_flag(Flags::main_cluster)
+                && gid >= 0 && beam_gids.count(gid) > 0;
+            if (in_window(cluster) || companion) beam_clusters.push_back(cluster);
+        }
+        SPDLOG_LOGGER_INFO(log, "CreateSteinerGraph: beam_window_only [{:.3f}, {:.3f}) us: kept {} of {} cluster(s) ({} in-window main(s), {} flash group(s))",
+                           m_beam_window_low/units::us, m_beam_window_high/units::us,
+                           beam_clusters.size(), filtered_clusters.size(), n_main_in, beam_gids.size());
+        filtered_clusters.swap(beam_clusters);
+        // In require_beam_flash mode the single main is tracked separately; it
+        // must not survive the swap if the gate dropped it.
+        if (main_cluster
+            && std::find(filtered_clusters.begin(), filtered_clusters.end(), main_cluster)
+               == filtered_clusters.end()) {
+            main_cluster = nullptr;
         }
     }
 
@@ -160,6 +230,17 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
 
         const auto& steiner_point_cloud = sg.get_point_cloud("steiner_pc");
+        // A degenerate cluster can yield an EMPTY steiner point cloud (zero
+        // points; SBND MC evt 11).  Transferring it would hang a
+        // schema-deviant "steiner_pc" local PC on the real cluster, which the
+        // pctree serializer rejects (Dataset::append: missing keys) -- treat
+        // it like the no-steiner_graph case above: skip the transfer, leaving
+        // the cluster without steiner products (all consumers guard on that).
+        if (steiner_point_cloud.size_major() == 0) {
+            SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph: empty steiner_pc for {}, skipping transfer", tag);
+            grouping.destroy_child(new_cluster_ptr, true);
+            return false;
+        }
         const auto& steiner_graph       = sg.get_graph("steiner_graph");
         auto& flag_terminals = sg.get_flag_steiner_terminal();
         size_t num_true_terminals = std::count(flag_terminals.begin(), flag_terminals.end(), true);
@@ -174,10 +255,17 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] transfer_pc/graph took {} ms", tag, MS(Clock::now() - t0).count());
 
         if (is_main) {
-            // Extra probe done only for the main cluster.
-            (void)src->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
-            auto kd_results = src->kd_steiner_knn(1, pair_points.first);
-            (void)src->kd_steiner_points(kd_results);
+            // Extra probe done only for the main cluster.  Non-fatal: a main
+            // cluster yielding an EMPTY steiner point cloud (SBND MC evt 11)
+            // has nothing to probe -- warn and continue rather than letting
+            // the empty-cloud throw kill the job.
+            try {
+                (void)src->get_two_boundary_steiner_graph_idx("steiner_graph", "steiner_pc", false);
+                auto kd_results = src->kd_steiner_knn(1, pair_points.first);
+                (void)src->kd_steiner_points(kd_results);
+            } catch (const std::exception& e) {
+                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph [{}]: boundary probe skipped: {}", tag, e.what());
+            }
         }
 
         t0 = Clock::now();
@@ -187,14 +275,23 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     };
 
     if (m_grapher_config.retile) {
-        if (main_cluster != nullptr) {
-            process_cluster_steiner(main_cluster, /*is_main=*/true);
-        }
+        if (m_require_beam_flash) {
+            if (main_cluster != nullptr) {
+                process_cluster_steiner(main_cluster, /*is_main=*/true);
+            }
 
-        // Associated (non-main) beam_flash clusters.
-        for (auto* cluster : filtered_clusters) {
-            if (cluster == main_cluster) continue;
-            process_cluster_steiner(cluster, /*is_main=*/false);
+            // Associated (non-main) beam_flash clusters.
+            for (auto* cluster : filtered_clusters) {
+                if (cluster == main_cluster) continue;
+                process_cluster_steiner(cluster, /*is_main=*/false);
+            }
+        }
+        else {
+            // One matched main cluster per flash bundle: each gets the main
+            // treatment; associated/unflagged clusters the light one.
+            for (auto* cluster : filtered_clusters) {
+                process_cluster_steiner(cluster, cluster->get_flag(Flags::main_cluster));
+            }
         }
     }
 

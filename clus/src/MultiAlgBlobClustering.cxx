@@ -194,6 +194,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_grouping2file_prefix = get(cfg, "grouping2file_prefix", m_grouping2file_prefix);
 
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
+    m_save_real_cluster_id = get(cfg, "save_real_cluster_id", m_save_real_cluster_id);
+    m_save_assoc_cluster_id = get(cfg, "save_assoc_cluster_id", m_save_assoc_cluster_id);
+    m_real_cluster_id_global = get(cfg, "real_cluster_id_global", m_real_cluster_id_global);
     m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
 
     m_save_opflash = get(cfg, "save_opflash", m_save_opflash);
@@ -252,6 +255,10 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
+            // Dump this set at the pre-clustering point (like the special "img"
+            // set) even if its name isn't "img".  Absent => false => legacy
+            // name-based routing => byte-identical.
+            bpc.prepipeline = get<bool>(bps, "prepipeline", false);
 
             // Optional drift-side / APA grouping (additive; absent -> unchanged)
             if (bps.isMember("apa_groups")) {
@@ -386,6 +393,9 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     // cfg["bee_dir"] = m_bee_dir;
     cfg["bee_zip"] = "mabc.zip";
     cfg["save_deadarea"] = m_save_deadarea;
+    cfg["save_real_cluster_id"] = m_save_real_cluster_id;
+    cfg["save_assoc_cluster_id"] = m_save_assoc_cluster_id;
+    cfg["real_cluster_id_global"] = m_real_cluster_id_global;
 
     // Add the new parameter to default configuration
     cfg["initial_index"] = m_initial_index;
@@ -567,6 +577,83 @@ void MultiAlgBlobClustering::flush(int ident)
 
 // Helper function remains the same as in the previous response
 
+// real_cluster_id_global (doc 53): collapse the TWO ident numbering epochs the
+// "real_cluster_id" array mixes into one event-wide epoch.
+//
+// merge_clusters() records each member's ident() as of the moment it runs
+// (ClusteringFuncs.cxx), the save-time fill-in writes the CURRENT ident, and
+// Grouping::enumerate_idents() re-runs after every visitor -- so the two are
+// different dense 1..N numberings and nothing in the array says which one a row
+// belongs to.  Measured on the SBND d52ron 30-event set: 31% of distinct values
+// named two different clusters.
+//
+// Representative rows (real_cluster_main != 0) take the cluster's own current
+// ident; each other pre-merge group takes a fresh id above the largest ident in
+// the grouping.  So:
+//   - group MEMBERSHIP is untouched => every consumer that compares rows within
+//     one cluster (ClusteringUnmergeBundle's split, TaggerCheckTGM
+//     main_component_mode="real") is unchanged;
+//   - a cluster nothing merged is rewritten to exactly the values it had;
+//   - the value becomes a valid event-wide key, and a merged cluster's
+//     representative rows carry that cluster's own id.
+//
+// WHERE THIS RUNS MATTERS.  It is called once per event right after the
+// clustering pipeline and BEFORE the Bee fills, so the Bee per-blob label
+// (fill_bee_points_from_cluster's real_clid) and the saved pctree carry the SAME
+// ids.  It used to sit in the tensor-save block, which is after every
+// fill_bee_points() -- that fixed the tarball and left the Bee zips on the old
+// two-epoch labels.  Per-visitor Bee dumps (trace_bee) are snapshots taken
+// mid-pipeline and necessarily keep whatever ids existed at that step.
+//
+// Deliberately NOT gated on save_real_cluster_id: examine_bundles writes the
+// array in memory whether or not the tarball is saved, so the Bee labels are
+// wrong either way.  Detectors that never write it (PDHD, PDVD -- their
+// examine_bundles is disabled) see a structural no-op.
+//
+// Deterministic: clusters in children() (tree) order, ids handed out in
+// ascending old-value order.  No pointer-keyed iteration.  Fails open on a
+// row-count mismatch, as every other provenance carve does.
+void MultiAlgBlobClustering::restamp_real_cluster_id(Grouping& grouping) const
+{
+    int next = 0;
+    for (const Cluster* cluster : grouping.children()) {
+        next = std::max(next, cluster->ident());
+    }
+    ++next;
+    size_t nstamped = 0;
+    for (Cluster* cluster : grouping.children()) {
+        if (!cluster->has_pcarray<int>("real_cluster_id", "perblob")) continue;
+        if (!cluster->has_pcarray<int>("real_cluster_main", "perblob")) continue;
+        const size_t nb = cluster->nchildren();
+        auto rid = cluster->get_pcarray<int>("real_cluster_id", "perblob");
+        auto rmain = cluster->get_pcarray<int>("real_cluster_main", "perblob");
+        if (rid.size() != nb || rmain.size() != nb) {
+            log->warn("real_cluster_id_global: cluster {} has {}/{} rows for {} "
+                      "blobs, not re-stamped", cluster->ident(),
+                      rid.size(), rmain.size(), nb);
+            continue;
+        }
+        std::map<int, int> remap;          // old id -> fresh id, ascending
+        for (size_t i = 0; i < nb; ++i) {
+            if (rmain[i] == 0) remap.emplace(rid[i], 0);
+        }
+        for (auto& [old_id, fresh] : remap) {
+            (void) old_id;
+            fresh = next++;
+        }
+        std::vector<int> out(nb);
+        for (size_t i = 0; i < nb; ++i) {
+            out[i] = rmain[i] != 0 ? cluster->ident() : remap.at(rid[i]);
+        }
+        cluster->put_pcarray(out, "real_cluster_id", "perblob");
+        ++nstamped;
+    }
+    if (nstamped) {
+        log->debug("real_cluster_id_global: re-stamped {} cluster(s) into one epoch, "
+                   "ids 1..{}", nstamped, next - 1);
+    }
+}
+
 void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grouping& grouping)
 {
     // std::cout << "Test: " << name << " " << grouping.wpids().size() << std::endl;
@@ -631,7 +718,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 auto it2 = it->second.find(face);
                 if (it2 != it->second.end()) {
                     for (const auto* cluster : grouping.children()) {
-                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter);
+                        fill_bee_points_from_cluster(it2->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
                     }
                 }
             }
@@ -651,7 +738,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
                 if (!match) continue;
                 auto it = apa_bpts.by_group.find(grp.name);
                 if (it != apa_bpts.by_group.end()) {
-                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter);
+                    fill_bee_points_from_cluster(it->second, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
                 }
                 break;
             }
@@ -660,7 +747,7 @@ void MultiAlgBlobClustering::fill_bee_points(const std::string& name, const Grou
         // std::cout << "Test: " << name << " " << grouping.wpids().size() << " " << grouping.nchildren() << std::endl;
 
         for (const auto* cluster : grouping.children()) {
-            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter);
+            fill_bee_points_from_cluster(apa_bpts.global, *cluster, config.pcname, config.coords, config.filter, config.dQdx_scale, config.dQdx_offset);
         }
     }
 }
@@ -1497,12 +1584,33 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
 
 // Helper function to fill bee points from a single cluster
 void MultiAlgBlobClustering::fill_bee_points_from_cluster(
-    Bee::Points& bpts, const Cluster& cluster, 
-    const std::string& pcname, const std::vector<std::string>& coords, int filter)
+    Bee::Points& bpts, const Cluster& cluster,
+    const std::string& pcname, const std::vector<std::string>& coords, int filter,
+    double dQdx_scale, double dQdx_offset)
 {
     int clid = cluster.get_cluster_id(); //bpts.back_cluster_id() + 1;
 
     // std::cout << "Test: " << bpts.size() << " " << bpts.back_cluster_id() << " " <<  clid << std::endl;
+
+    if (pcname == "stm_fit"){
+        // STM fit-trajectory layer (TaggerCheckSTM save_stm_fit knob): the
+        // per-point fitted dQ is encoded into q with the same
+        // dQdx_scale/dQdx_offset convention as the PRGraph track_fit layer.
+        // Reachable only when a bee_points_sets entry names this PC, so
+        // existing configs are byte-identical.
+        auto& fit_pc = cluster.get_pc(pcname);
+        if (fit_pc.empty()) {
+            return;
+        }
+        const auto& fx = fit_pc.get(coords.at(0))->elements<double>();
+        const auto& fy = fit_pc.get(coords.at(1))->elements<double>();
+        const auto& fz = fit_pc.get(coords.at(2))->elements<double>();
+        const auto& fdQ = fit_pc.get("dQ")->elements<double>();
+        for (size_t i = 0; i < fx.size(); ++i) {
+            bpts.append(Point(fx[i], fy[i], fz[i]), fdQ[i]*dQdx_scale + dQdx_offset, clid, 0);
+        }
+        return;
+    }
 
     if (pcname == "steiner_pc"){
         // Export Steiner points ... 
@@ -1909,10 +2017,23 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         group_col.assign(gc.begin(), gc.end());
     }
 
+    // Optional per-side-clock flash time (QLMatching "time1": the flash time on
+    // input-1's/top charge clock, ns; "time" is input-0's/bottom).  Present only
+    // when per-input trigger_offsets are configured (PDVD BDE/TDE); absent =>
+    // op_t1 is not emitted and the op JSON stays bit-identical (PDHD/SBND).
+    auto a_time1 = ds.get("time1");
+    const bool have_time1 = (a_time1 != nullptr);
+    std::vector<double> time1_col;
+    if (have_time1) {
+        auto tc = a_time1->elements<double>();
+        time1_col.assign(tc.begin(), tc.end());
+    }
+
     // Group rows by global flash id (first-seen order) into per-flash time +
     // dense per-channel measured PE.
     std::vector<int> flash_order;
     std::map<int, double> flash_time;
+    std::map<int, double> flash_time1;               // gid -> input-1-clock time
     std::map<int, int> flash_group;                  // gid -> flash-group id
     std::map<int, int> flash_apa;                    // gid -> physical drift side
     std::map<int, std::map<int, double>> flash_pe;   // gid -> (ch -> pe)
@@ -1921,6 +2042,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
         if (flash_pe.find(g) == flash_pe.end()) {
             flash_order.push_back(g);
             flash_time[g] = time[i];
+            if (have_time1) flash_time1[g] = time1_col[i];
             if (have_group) flash_group[g] = group_col[i];
             if (have_apa) flash_apa[g] = apa_col[i];
         }
@@ -1960,9 +2082,11 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // so apa = gid / kFlashGidStride (correct only for single-face anodes).
     constexpr int kFlashGidStride = 1000000;
     std::vector<int> appended_groups;   // one per appended row, same order
+    std::vector<double> appended_t1;    // ditto, input-1-clock time (us)
     for (const int g : flash_order) {
         const int apa = have_apa ? flash_apa[g] : (g / kFlashGidStride);
         const int grp = have_group ? flash_group[g] : -1;
+        const double t1_us = have_time1 ? flash_time1[g] * 1e-3 : 0.0;   // ns -> us
         int maxch = -1;
         for (const auto& cv : flash_pe[g]) if (cv.first > maxch) maxch = cv.first;
         std::vector<double> pes(maxch + 1, 0.0);
@@ -1985,21 +2109,27 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                 }
                 m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
                 appended_groups.push_back(grp);
+                appended_t1.push_back(t1_us);
             } else {
                 for (const auto& cp : mit->second) {
                     m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
                     appended_groups.push_back(grp);
+                    appended_t1.push_back(t1_us);
                 }
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
             appended_groups.push_back(grp);
+            appended_t1.push_back(t1_us);
         }
     }
 
     // Attach the per-row flash-group array only when grouping was computed, so
     // the ungrouped output is unchanged.
     if (have_group) m_bee_flash.set_groups(appended_groups);
+    // Attach the per-row input-1-clock time only when the opflash PC carries it
+    // (per-input trigger_offsets, PDVD), so other detectors' op JSON is unchanged.
+    if (have_time1) m_bee_flash.set_t1(appended_t1);
 }
 
 struct Perf {
@@ -2105,6 +2235,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
     grouping->enumerate_idents();
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
+    check_perblob_provenance(*grouping->node(), "load:" + path);
     return *grouping;
 }
 
@@ -2179,7 +2310,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     perf.dump("pre clustering", ensemble);
 
     for (const auto& config : m_bee_points_configs) {
-        if (config.name != "img") {
+        if (config.name != "img" && !config.prepipeline) {
             continue;
         }
         auto gs = ensemble.with_name("live");
@@ -2216,10 +2347,14 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         for (auto* grouping : ensemble.children()) {
             grouping->enumerate_idents(m_clusters_id_order);
         }
+        {
+            auto gs = ensemble.with_name("live");
+            if (gs.size()) check_perblob_provenance(*gs[0]->node(), "post:" + cmeth.name);
+        }
 
         // Dump bee points right after specific visitor runs
         for (const auto& config : m_bee_points_configs) {
-            if (config.name == "img") continue;
+            if (config.name == "img" || config.prepipeline) continue;
             if (config.visitor.empty() || config.visitor != cmeth.name) continue;
 
             auto gs = ensemble.with_name(config.grouping);
@@ -2267,9 +2402,20 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     //
     
 
+    // Collapse real_cluster_id into one ident epoch BEFORE any Bee fill below and
+    // before the tensor save, so the Bee per-blob labels and the saved pctree
+    // agree (doc 53).  No-op where the array was never written.
+    if (m_real_cluster_id_global) {
+        for (const auto& gname : m_groupings) {
+            auto gs = ensemble.with_name(gname);
+            if (gs.empty()) continue;
+            restamp_real_cluster_id(*gs[0]);
+        }
+    }
+
     // Fill all configured bee points sets (except those with visitor-specific handling)
     for (const auto& config : m_bee_points_configs) {
-        if(config.name == "img") continue;
+        if(config.name == "img" || config.prepipeline) continue;
 
         // Skip configs with visitor specified - they were already handled in the visitor loop
         if (!config.visitor.empty()) continue;
@@ -2316,8 +2462,77 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         auto gs = ensemble.with_name(name);
         auto& grouping = *gs[0];
         normalize_cluster_flags(grouping, log, name, ident);
+        // Homogenize the "perblob" key set so the flash-merge provenance
+        // survives serialization (see m_save_real_cluster_id in the header).
+        // Done after normalize_cluster_flags so the fill-in "main_cluster"
+        // flag values are the final, normalized ones.
+        // The isolated grouping's pair (doc 52) must be homogenized FIRST, and it
+        // needs a wider gate than the flash pair's.  The invariant that
+        // Dataset::append enforces is "every cluster that has a 'perblob' PC has
+        // the SAME keys in it" -- it raises when an incoming per-blob dataset is
+        // missing a key the target already has
+        // (util/src/PointCloudDataset.cxx:261); a cluster with no "perblob" PC at
+        // all is simply absent and fine.  Gating on "isolated" the way the flash
+        // loop does is not sufficient here, because the assoc pair already exists
+        // when the all-APA switch_scope runs, so its carve puts it on the
+        // out-of-volume shards too -- and examine_bundles then skips those (not in
+        // scope), so they never receive "isolated".  Measured symptom: the whole
+        // per-APA -> all-APA handoff threw "missing keys in append: 3 missing:
+        // isolated real_cluster_id real_cluster_main".
+        // So: any cluster that has a "perblob" PC gets the full key set.  -1 in
+        // "isolated" is that array's documented "this blob is in the main
+        // sub-component" value, which is exactly what a cluster nothing merged is.
+        // Running before the flash loop lets that loop's "isolated" gate then
+        // cover these clusters too.
+        if (m_save_assoc_cluster_id) {
+            for (Cluster* cluster : grouping.children()) {
+                const auto& lpcs = cluster->value().local_pcs();
+                if (lpcs.find("perblob") == lpcs.end()) continue;
+                const size_t nb = cluster->nchildren();
+                if (!cluster->has_pcarray<int>("isolated", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, -1), "isolated", "perblob");
+                }
+                if (!cluster->has_pcarray<int>("assoc_cluster_id", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, cluster->ident()),
+                                         "assoc_cluster_id", "perblob");
+                }
+                // A cluster the isolated grouping never merged is a main, not an
+                // associated fragment: all 1.  This is the "absent provenance =>
+                // main" sentinel the un-merge needs to keep crossers whole.
+                if (!cluster->has_pcarray<int>("assoc_cluster_main", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, 1),
+                                         "assoc_cluster_main", "perblob");
+                }
+            }
+        }
+        if (m_save_real_cluster_id) {
+            for (Cluster* cluster : grouping.children()) {
+                if (!cluster->has_pcarray<int>("isolated", "perblob")) continue;
+                const size_t nb = cluster->nchildren();
+                if (!cluster->has_pcarray<int>("real_cluster_id", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, cluster->ident()),
+                                         "real_cluster_id", "perblob");
+                }
+                // An unmerged cluster is its own representative: all 1.
+                if (!cluster->has_pcarray<int>("real_cluster_main", "perblob")) {
+                    cluster->put_pcarray(std::vector<int>(nb, 1),
+                                         "real_cluster_main", "perblob");
+                }
+            }
+            // real_cluster_id_global's re-stamp is NOT here: it must run before
+            // the Bee fills so the pctree and the Bee zip carry the SAME ids
+            // (doc 53).  See restamp_real_cluster_id(), called right after the
+            // clustering pipeline.
+        }
         auto node = ensemble.remove_child(grouping);
+        check_perblob_provenance(*node, "save:" + outpath(name, ident));
         auto tens = as_tensors(*node, outpath(name, ident));
+        // Serialize -> deserialize self-test: if "save" is clean but "rtrip"
+        // is not, the corruption is inside the TensorDM round trip itself.
+        if (std::getenv("WCT_PROV_CHECK")) {
+            auto rt = Aux::TensorDM::as_pctree(tens, outpath(name, ident));
+            if (rt) check_perblob_provenance(*rt, "rtrip:" + outpath(name, ident));
+        }
         outtens.insert(outtens.end(), tens.begin(), tens.end());
         SPDLOG_LOGGER_DEBUG(log, "Produce {} tensors for grouping {}", tens.size(), name);
     }

@@ -95,10 +95,14 @@ std::vector<float> Flash::OpRoi::clean(const std::vector<float>& decon)
     std::vector<float> out(n, 0.0f);
     if (n == 0) return out;
 
-    // 1. High-pass filter -> "ROI-finding" waveform h.
+    // 1. High-pass filter -> "ROI-finding" waveform h.  Under use_real_dft the
+    // inverse ignores bins above Nyquist (IDFT.h contract: both the widening
+    // default and FftwDFT's native c2r enforce the Hermitian assumption), so
+    // multiplying them is dead work; bit-identical either way.
     auto D = m_use_real_dft ? Aux::DftTools::fwd_r2c_real(m_dft, decon)
                             : Aux::DftTools::fwd_r2c(m_dft, decon);
-    for (int k = 0; k < n; ++k) D[k] *= std::complex<float>((float) m_hpf[k], 0.0f);
+    const int khi = m_use_real_dft ? n / 2 + 1 : n;
+    for (int k = 0; k < khi; ++k) D[k] *= std::complex<float>((float) m_hpf[k], 0.0f);
     auto h = m_use_real_dft ? Aux::DftTools::inv_c2r_real(m_dft, D)
                             : Aux::DftTools::inv_c2r(m_dft, D);  // real, size n
 

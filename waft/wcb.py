@@ -82,6 +82,13 @@ def options(opt):
     opt.add_option('--build-debug', default='-O2 -ggdb3',
                    help="Build with debug symbols")
 
+    opt.add_option('--with-spng', type=str, default=None,
+                   help="Build the experimental WireCellSpng package.  Off by "
+                   "default: it requires a recent libtorch (where c10::optional "
+                   "is std::optional, ~torch 2.4+) and does not compile against "
+                   "older libtorch.  Use --with-spng=yes to enable.  See "
+                   "https://github.com/WireCell/wire-cell-toolkit/issues/496")
+
 
 def find_submodules(ctx):
     sms = list()
@@ -188,6 +195,13 @@ def configure(cfg):
             if pkg in submodules:
                 info('Removing package "%s" due to lack of external dependency "%s"'%(pkg,have))
                 submodules.remove(pkg)
+
+    # spng is experimental and only builds against a recent libtorch (needs
+    # c10::optional == std::optional, ~torch 2.4+).  Keep it off by default and
+    # opt in explicitly with --with-spng=yes.  See issue #496.
+    if "spng" in submodules and not with_p("spng"):
+        info('Removing package "spng" (experimental; enable with --with-spng=yes)')
+        submodules.remove("spng")
 
     cfg.env.SUBDIRS = submodules
     info ('Configured for submodules: %s' % (', '.join(submodules), ))
