@@ -12,6 +12,29 @@ static std::atomic<int> s_shower_id_counter{0};
 
 namespace WireCell::Clus::PR {
 
+    namespace {
+        /// Deep-copy a segment's dynamic point cloud so the shower owns its own.
+        ///
+        /// The seeding branches below used to hand the shower the segment's own
+        /// shared_ptr (dpcloud(name, ptr) stores it verbatim, PRCommon.h:78).
+        /// Every later merge into the shower then grew the *segment's* cloud:
+        /// instrumented on SBND nueCC evt 172230, shower 0's start segment saw
+        /// its own "fit" cloud go 44 -> 786 points via 67 merges, i.e. it ended
+        /// up holding the entire shower.  Consumers that read a segment's cloud
+        /// as a proximity mask (NeutrinoEnergyReco.cxx:266-267,
+        /// PRSegmentFunctions.cxx, MultiAlgBlobClustering.cxx:861) would then be
+        /// answering for the shower rather than the segment.  DynamicPointCloud
+        /// holds a unique_ptr k-d tree so it is not copy-constructible; rebuild
+        /// via the public API instead.
+        std::shared_ptr<Facade::DynamicPointCloud>
+        clone_dpc(const Facade::DynamicPointCloud& src)
+        {
+            auto out = std::make_shared<Facade::DynamicPointCloud>(src.get_wpid_params());
+            out->add_points(src);
+            return out;
+        }
+    }
+
  
     // Default initialization constructor following WCPPID WCShower logic
     Shower::Shower(Graph& graph)
@@ -109,10 +132,9 @@ namespace WireCell::Clus::PR {
             if (seg_dpc_fit) {
                 auto shower_dpc_fit = this->dpcloud(cloud_name_fit);
                 if (!shower_dpc_fit) {
-                    // First segment: seed the shower DPC from this segment's DPC.
-                    // Shared pointer is acceptable here; subsequent add_segment calls
-                    // merge additional wpid_params and add_points to this same object.
-                    this->dpcloud(cloud_name_fit, seg_dpc_fit);
+                    // First segment: seed the shower DPC with a COPY of this
+                    // segment's DPC -- never the segment's own object (clone_dpc).
+                    this->dpcloud(cloud_name_fit, clone_dpc(*seg_dpc_fit));
                 } else {
                     // F14: merge wpid_params so the shower DPC can answer queries for
                     // all (apa,face) pairs present in any constituent segment's DPC.
@@ -127,7 +149,7 @@ namespace WireCell::Clus::PR {
             if (seg_dpc_associate) {
                 auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
                 if (!shower_dpc_associate) {
-                    this->dpcloud(cloud_name_associate, seg_dpc_associate);
+                    this->dpcloud(cloud_name_associate, clone_dpc(*seg_dpc_associate));
                 } else {
                     shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);
                     shower_dpc_associate->add_points(*seg_dpc_associate);
@@ -160,14 +182,19 @@ namespace WireCell::Clus::PR {
             }
         }
 
-        // Merge dynamic point clouds from segment to shower with the provided names
+        // Merge dynamic point clouds from segment to shower with the provided names.
+        // The shower always owns its cloud (clone_dpc on the seeding branch), so a
+        // merge can never append a DPCBatch to itself -- which is what used to
+        // double the cloud on every pass and blow the heap to a 224 GB peak RSS
+        // (SBND MCP2025C evt 399118).  The `!= seg_dpc` tests remain as a cheap
+        // invariant guard for any future path that reintroduces sharing.
         if (!cloud_name_fit.empty()) {
             auto seg_dpc_fit = seg->dpcloud(cloud_name_fit);
             if (seg_dpc_fit) {
                 auto shower_dpc_fit = this->dpcloud(cloud_name_fit);
                 if (!shower_dpc_fit) {
-                    this->dpcloud(cloud_name_fit, seg_dpc_fit);
-                } else {
+                    this->dpcloud(cloud_name_fit, clone_dpc(*seg_dpc_fit));
+                } else if (shower_dpc_fit != seg_dpc_fit) {
                     shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);  // F14
                     shower_dpc_fit->add_points(*seg_dpc_fit);
                 }
@@ -179,8 +206,8 @@ namespace WireCell::Clus::PR {
             if (seg_dpc_associate) {
                 auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
                 if (!shower_dpc_associate) {
-                    this->dpcloud(cloud_name_associate, seg_dpc_associate);
-                } else {
+                    this->dpcloud(cloud_name_associate, clone_dpc(*seg_dpc_associate));
+                } else if (shower_dpc_associate != seg_dpc_associate) {
                     shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);  // F14
                     shower_dpc_associate->add_points(*seg_dpc_associate);
                 }
@@ -296,34 +323,18 @@ namespace WireCell::Clus::PR {
                     for (auto edesc : sorted_out_edges(vtx->get_descriptor(), m_full_graph)) {
                         SegmentPtr seg = m_full_graph[edesc].segment;
                         if (seg && seg->descriptor_valid() && used_segments.find(seg) == used_segments.end()) {
-                            this->add_segment(seg);
+                            // add_segment() already performs the fit/associate merge
+                            // (and merge_wpid_params, which the block that used to sit
+                            // here omitted).  It previously ran with the DEFAULT cloud
+                            // names while a second, hand-rolled copy of the same merge
+                            // followed for cloud_name_fit/cloud_name_associate -- so
+                            // every segment's points were added to the shower TWICE
+                            // (instrumented on SBND nueCC evt 172230: 22/22 second
+                            // merges duplicated a first one).  Thread the names through
+                            // and merge exactly once.
+                            this->add_segment(seg, false, cloud_name_fit, cloud_name_associate);
                             new_segments.push_back(seg);
                             used_segments.insert(seg);
-                            
-                            // Merge point clouds from this segment
-                            if (!cloud_name_fit.empty()) {
-                                auto seg_dpc_fit = seg->dpcloud(cloud_name_fit);
-                                if (seg_dpc_fit) {
-                                    auto shower_dpc_fit = this->dpcloud(cloud_name_fit);
-                                    if (!shower_dpc_fit) {
-                                        this->dpcloud(cloud_name_fit, seg_dpc_fit);
-                                    } else {
-                                        shower_dpc_fit->add_points(*seg_dpc_fit);
-                                    }
-                                }
-                            }
-                            
-                            if (!cloud_name_associate.empty()) {
-                                auto seg_dpc_associate = seg->dpcloud(cloud_name_associate);
-                                if (seg_dpc_associate) {
-                                    auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
-                                    if (!shower_dpc_associate) {
-                                        this->dpcloud(cloud_name_associate, seg_dpc_associate);
-                                    } else {
-                                        shower_dpc_associate->add_points(*seg_dpc_associate);
-                                    }
-                                }
-                            }
                         }
                     }
                 }

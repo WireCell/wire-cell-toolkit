@@ -8580,13 +8580,43 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
     std::vector<PR::Fit> segment_fits;
     segment_fits.reserve(fine_tracking_path.size());
     
-    // Check that all vectors have consistent sizes
+    // Check that all vectors have consistent sizes.
+    //
+    // This is reachable on well-formed input and must not kill the job.  The
+    // doc-60 guard above catches the degenerate case where the *input* is
+    // whittled to <=1 point, but the 2nd-pass projection loop also drops
+    // points on its own, via the `if (test_wpid.apa()==-1) continue;` at
+    // :8533 -- a fit point outside every detector volume.  That can leave
+    // ptss (hence fine_tracking_path) at <=1 entry even though pts.size() > 1,
+    // whereupon dQ_dx_fit/dQ_dx_fill bail at their own
+    // fine_tracking_path.size() <= 1 guard and leave dQ/dx/reduced_chi2
+    // empty against a non-empty pu..paf -- exactly this mismatch.  Seen on
+    // SBND MCP2025C evt 386354 (a 2.2 cm main cluster), which aborted the
+    // whole job with an uncaught std::runtime_error.
+    //
+    // Response follows the contract doc 60 already established for the
+    // sibling case (prototype PR3DCluster_pattern_recognition.h:262 carries
+    // the empty dQ and lets the caller drop the track): clear every output
+    // and return, so the callers' own `fine_path.size() > 1` /
+    // `fits().size() > 1` filters (NeutrinoPatternBase.cxx:449,
+    // TaggerCheckSTM.cxx) discard this segment.  Strictly scoped: this path
+    // is only entered where the old code threw, so every fit that used to
+    // succeed is untouched.
     size_t npoints = fine_tracking_path.size();
-    if (dQ.size() != npoints || dx.size() != npoints || 
-        pu.size() != npoints || pv.size() != npoints || 
-        pw.size() != npoints || pt.size() != npoints || 
+    if (dQ.size() != npoints || dx.size() != npoints ||
+        pu.size() != npoints || pv.size() != npoints ||
+        pw.size() != npoints || pt.size() != npoints ||
         reduced_chi2.size() != npoints) {
-        throw std::runtime_error("TrackFitting::do_single_tracking: inconsistent vector sizes for fit output!");
+        SPDLOG_LOGGER_WARN(s_log,
+            "TrackFitting::do_single_tracking: inconsistent fit-output sizes "
+            "(path={} dQ={} dx={} pu={} pv={} pw={} pt={} chi2={}); dropping this "
+            "segment's fit", npoints, dQ.size(), dx.size(), pu.size(), pv.size(),
+            pw.size(), pt.size(), reduced_chi2.size());
+        fine_tracking_path.clear();
+        dQ.clear(); dx.clear();
+        pu.clear(); pv.clear(); pw.clear(); pt.clear();
+        reduced_chi2.clear(); paf.clear();
+        return;
     }
     
     // Calculate cumulative range (distance along track)

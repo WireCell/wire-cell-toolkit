@@ -1302,6 +1302,12 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
                 // equals what pind=0 would return.  p_wire_ch is the plane-correct channel.
                 for (size_t i = 0; i < pts_2.size(); i++) {
                     auto test_wpid = dv->contained_by(pts_2[i].point);
+                    // Same guard the vertex points get at :1185 -- a fit point outside
+                    // every detector volume yields apa()/face() == -1, and fastgeom()
+                    // then does m_anodes.at(-1) (Facade_Grouping.cxx:741), aborting the
+                    // job with std::out_of_range "map::at" (SBND MCP2025C evt 49951).
+                    // Skip the point rather than the event.
+                    if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
                     auto [p_t_raw, p_wire_ch] = cluster.grouping()->convert_3Dpoint_time_ch(pts_2[i].point, test_wpid.apa(), test_wpid.face(), pind);
                     double p_t = double(p_t_raw) / ntime_ticks;
                     double p_wire = p_wire_ch;

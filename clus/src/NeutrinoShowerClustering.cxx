@@ -625,10 +625,27 @@ void PatternAlgorithms::shower_clustering_with_nv_from_main_cluster(Graph& graph
                     flag_continue = true;
                 }
             }
+            // Termination guard.  Shower::add_segment() -> TrajectoryView::add_segment()
+            // silently no-ops when the segment's descriptor is invalid
+            // (clus/src/PRTrajectoryView.cxx:52 returns false, and the Shower
+            // wrapper discards it), so seg1 never enters map_segment_in_shower,
+            // the next pass re-selects it, and flag_continue is set forever.
+            // map_segment_in_shower is rebuilt below purely from each shower's
+            // m_edges (Shower::fill_maps() is the identity), and showers only
+            // gain segments here, so its size grows by exactly one per genuine
+            // add: no growth across a pass == no progress == stop.
+            const size_t n_seg_mapped_before = map_segment_in_shower.size();
             update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters);
+            if (flag_continue && map_segment_in_shower.size() <= n_seg_mapped_before) {
+                SPDLOG_LOGGER_WARN(s_log,
+                    "shower_clustering_with_nv_from_main_cluster: a pass requested >=1 add_segment "
+                    "but registered none ({} segments mapped, unchanged); stopping to avoid an "
+                    "unbounded loop", map_segment_in_shower.size());
+                flag_continue = false;
+            }
         }
     }
-    
+
     if (map_shower_dir.empty()) return;
 
     // Step 4: Precompute shower direction info sorted by start_segment ID.
@@ -1173,7 +1190,20 @@ void PatternAlgorithms::shower_clustering_with_nv_from_vertices(Graph& graph, Ve
                         flag_continue = true;
                     }
                 }
+                // Termination guard -- see the identical guard in
+                // shower_clustering_with_nv_in_main_cluster above.  This is the
+                // site that hung for 8h17m on SBND MCP2025C evt 352365 (run
+                // 18255/1): 100% CPU, byte-flat RSS, no I/O, gdb caught it
+                // looping through segment_get_closest_point below.
+                const size_t n_seg_mapped_before = map_segment_in_shower.size();
                 update_shower_maps(showers, map_vertex_in_shower, map_segment_in_shower, map_vertex_to_shower, used_shower_clusters);
+                if (flag_continue && map_segment_in_shower.size() <= n_seg_mapped_before) {
+                    SPDLOG_LOGGER_WARN(s_log,
+                        "shower_clustering_with_nv_from_vertices: a pass requested >=1 add_segment "
+                        "but registered none ({} segments mapped, unchanged); stopping to avoid an "
+                        "unbounded loop", map_segment_in_shower.size());
+                    flag_continue = false;
+                }
             }
         }
     }

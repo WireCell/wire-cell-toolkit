@@ -2071,7 +2071,16 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                 
                 // Additional check for very short clusters
                 if (!flag_removed) {
-                    if (length < 5 * units::cm) {
+                    // CreateSteinerGraph legitimately leaves a cluster without steiner
+                    // products when create_steiner_tree finds <2 terminals ("only 0
+                    // steiner terminal(s) found (need >=2), returning empty graph" ->
+                    // "skipping transfer", clus/src/CreateSteinerGraph.cxx:226/241),
+                    // and kd_steiner_knn then *throws* rather than returning empty
+                    // (Facade_Cluster.cxx:3821).  The `if (!knn.empty())` blocks here
+                    // and below already treat "no steiner answer" as "skip the test",
+                    // so honour that intent instead of aborting the job: 67/1000
+                    // SBND MCP2025C events died exactly here.
+                    if (length < 5 * units::cm && main_cluster->has_pc("steiner_pc")) {
                         WireCell::Point vtx_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
                         auto knn = main_cluster->kd_steiner_knn(1, vtx_pt, "steiner_pc");
                         if (!knn.empty()) {
@@ -2086,7 +2095,7 @@ Facade::geo_vector_t PatternAlgorithms::calc_dir_cluster(Graph& graph, Facade::C
                 if (flag_removed) {
                     clusters_to_be_removed.push_back(cluster);
                 }
-            } else {
+            } else if (main_cluster->has_pc("steiner_pc")) {   // see the steiner guard above
                 // For longer clusters, check if very far from main cluster
                 WireCell::Point vtx_pt = vertex->fit().valid() ? vertex->fit().point : vertex->wcpt().point;
                 auto knn = main_cluster->kd_steiner_knn(1, vtx_pt, "steiner_pc");
