@@ -41,7 +41,8 @@ static inline double safe_acos(double x) {
 // get_scores: returns {mu_fwd, p_fwd, e_fwd, mu_bck, p_bck, e_bck}
 // Prototype: NeutrinoID::get_scores(ProtoSegment*)
 static std::array<double,6> get_scores(SegmentPtr sg,
-                                        const ParticleDataSet::pointer& particle_data)
+                                        const ParticleDataSet::pointer& particle_data,
+                                        double mip_dqdx)
 {
     auto& fits = sg->fits();
     int size = (int)fits.size();
@@ -50,7 +51,13 @@ static std::array<double,6> get_scores(SegmentPtr sg,
     std::vector<double> L(size,0), dQ_dx(size,0), rL(size,0), rdQ_dx(size,0);
     double dis = 0;
     for (int i = 0; i < size; ++i) {
-        double dq_dx_val = fits[i].dQ / (fits[i].dx / units::cm + 1e-9);
+        // do_track_comp's reference templates are internal-unit, so feed it
+        // internal-unit dQ/dx (the segment_median_dQ_dx convention).  The
+        // pre-fix e/cm form was a surface-port of prototype
+        // NeutrinoID_ssm_tagger.h:2306, whose templates were e/cm-consistent
+        // (ProtoSegment.cxx:1152) -- an x10 data/template mismatch here
+        // (docs/pr/2 sec 7.1b; owner-approved no-knob fix).
+        double dq_dx_val = fits[i].dQ / (fits[i].dx + 1e-9);
         dQ_dx[i] = dq_dx_val;
         rdQ_dx[size-1-i] = dq_dx_val;
         L[i] = dis;
@@ -61,15 +68,18 @@ static std::array<double,6> get_scores(SegmentPtr sg,
     }
     for (int i = 0; i < size; ++i) rL[i] = L.back() - L[size-1-i];
 
-    auto rf = do_track_comp(L,   dQ_dx,  15*units::cm, 0.0, particle_data);
-    auto rb = do_track_comp(rL,  rdQ_dx, 15*units::cm, 0.0, particle_data);
+    // mip_dqdx routes the m_mip_dqdx knob (the prototype's 50e3 template
+    // role); the uBooNE default is identical to the old header default.
+    auto rf = do_track_comp(L,   dQ_dx,  15*units::cm, 0.0, particle_data, mip_dqdx);
+    auto rb = do_track_comp(rL,  rdQ_dx, 15*units::cm, 0.0, particle_data, mip_dqdx);
     return { rf.at(1), rf.at(2), rf.at(3), rb.at(1), rb.at(2), rb.at(3) };
 }
 
 // Overload with break_point/dir — returns raw do_track_comp result (caller uses indices 1,2,3)
 // Prototype: NeutrinoID::get_scores(ProtoSegment*, int break_point, int dir)
 static std::vector<double> get_scores_bp(SegmentPtr sg, int break_point, int dir,
-                                          const ParticleDataSet::pointer& particle_data)
+                                          const ParticleDataSet::pointer& particle_data,
+                                          double mip_dqdx)
 {
     auto& fits = sg->fits();
     int full = (int)fits.size();
@@ -81,7 +91,8 @@ static std::vector<double> get_scores_bp(SegmentPtr sg, int break_point, int dir
     double dis = 0;
     for (int i = start; i < start+size; ++i) {
         int idx = i - start;
-        double dq_dx_val = fits[i].dQ / (fits[i].dx / units::cm + 1e-9);
+        // Internal-unit dQ/dx for the internal-unit templates; see get_scores.
+        double dq_dx_val = fits[i].dQ / (fits[i].dx + 1e-9);
         dQ_dx[idx] = dq_dx_val;
         rdQ_dx[size-1-idx] = dq_dx_val;
         L[idx] = dis;
@@ -93,9 +104,9 @@ static std::vector<double> get_scores_bp(SegmentPtr sg, int break_point, int dir
     for (int i = 0; i < size; ++i) rL[i] = L.back() - L[size-1-i];
 
     if (dir == -1)
-        return do_track_comp(rL, rdQ_dx, 15*units::cm, 0.0, particle_data);
+        return do_track_comp(rL, rdQ_dx, 15*units::cm, 0.0, particle_data, mip_dqdx);
     else
-        return do_track_comp(L,  dQ_dx,  15*units::cm, 0.0, particle_data);
+        return do_track_comp(L,  dQ_dx,  15*units::cm, 0.0, particle_data, mip_dqdx);
 }
 
 // get_containing_shower_info: {shower_start_seg_graph_index, ke, flag_shower}; id=-1 if none
@@ -534,7 +545,7 @@ static ParticleBlock fill_particle_block_at_vtx(
     // Compute PID scores for all filled slots.
     auto fill_scores = [&](ParticleSlot& ps) {
         if (!ps.sg) return;
-        auto sc = get_scores(ps.sg, particle_data);
+        auto sc = get_scores(ps.sg, particle_data, self.m_mip_dqdx);
         ps.score_mu_fwd=sc[0]; ps.score_p_fwd=sc[1]; ps.score_e_fwd=sc[2];
         ps.score_mu_bck=sc[3]; ps.score_p_bck=sc[4]; ps.score_e_bck=sc[5];
         if (ps.sg->dirsign() == -1) {
@@ -624,9 +635,14 @@ bool PatternAlgorithms::ssm_tagger(
             int nfits = (int)fits.size();
             std::vector<double> vec_d_dqdx;
             if (nfits > 1) {
-                double last = fits[0].dQ / (fits[0].dx/units::cm) / m_mip_dqdx_median;
+                // m_mip_dqdx_median is internal-unit, so the numerator must be
+                // too: prototype NeutrinoID_ssm_tagger.h:438-440 divides
+                // internal by internal, ~1 for a MIP.  The pre-fix e/cm
+                // numerator read ~10 (docs/pr/2 sec 7.1a; owner-approved
+                // no-knob fix).
+                double last = fits[0].dQ / (fits[0].dx + 1e-9) / m_mip_dqdx_median;
                 for (int i = 1; i < nfits; ++i) {
-                    double cur = fits[i].dQ / (fits[i].dx/units::cm) / m_mip_dqdx_median;
+                    double cur = fits[i].dQ / (fits[i].dx + 1e-9) / m_mip_dqdx_median;
                     vec_d_dqdx.push_back(cur - last);
                     last = cur;
                 }
@@ -919,10 +935,15 @@ bool PatternAlgorithms::ssm_tagger(
 
     std::vector<double> vec_dqdx, vec_d_dqdx, vec_abs_d_dqdx;
     if (nfits_ssm > 0) {
-        double last = fits_ssm[0].dQ / (fits_ssm[0].dx/units::cm) / m_mip_dqdx_median;
+        // Internal/internal ~ 1 MIP, matching prototype
+        // NeutrinoID_ssm_tagger.h:613-615.  The pre-fix e/cm numerator read
+        // ~10, inflating every ssm_*dq_dx* feature and the |d(dQ/dx)| > 0.7
+        // break-point/vertex-activity thresholds below (docs/pr/2 sec 7.1a;
+        // owner-approved no-knob fix).
+        double last = fits_ssm[0].dQ / (fits_ssm[0].dx + 1e-9) / m_mip_dqdx_median;
         vec_dqdx.push_back(last);
         for (int i = 1; i < nfits_ssm; ++i) {
-            double cur = fits_ssm[i].dQ / (fits_ssm[i].dx/units::cm) / m_mip_dqdx_median;
+            double cur = fits_ssm[i].dQ / (fits_ssm[i].dx + 1e-9) / m_mip_dqdx_median;
             vec_dqdx.push_back(cur);
             vec_d_dqdx.push_back(cur - last);
             vec_abs_d_dqdx.push_back(std::abs(cur - last));
@@ -1005,7 +1026,7 @@ bool PatternAlgorithms::ssm_tagger(
     }
 
     // PID scores (prototype lines 720-756)
-    auto sc = get_scores(ssm_sg, particle_data);
+    auto sc = get_scores(ssm_sg, particle_data, m_mip_dqdx);
     double score_mu_fwd = sc[0], score_p_fwd = sc[1], score_e_fwd = sc[2];
     double score_mu_bck = sc[3], score_p_bck = sc[4], score_e_bck = sc[5];
     if (dir == -1) {
@@ -1016,7 +1037,7 @@ bool PatternAlgorithms::ssm_tagger(
 
     double score_mu_fwd_bp = score_mu_fwd, score_p_fwd_bp = score_p_fwd, score_e_fwd_bp = score_e_fwd;
     if (vtx_activity) {
-        auto bp_sc = get_scores_bp(ssm_sg, break_point, dir, particle_data);
+        auto bp_sc = get_scores_bp(ssm_sg, break_point, dir, particle_data, m_mip_dqdx);
         score_mu_fwd_bp = bp_sc.at(1);
         score_p_fwd_bp  = bp_sc.at(2);
         score_e_fwd_bp  = bp_sc.at(3);
@@ -1216,7 +1237,7 @@ bool PatternAlgorithms::ssm_tagger(
 
         if (!is_shower_type && sg_len > len_ovt1) {
             len_ovt1 = sg_len;
-            auto sc2 = get_scores(sg, particle_data);
+            auto sc2 = get_scores(sg, particle_data, m_mip_dqdx);
             double smu_f=sc2[0], sp_f=sc2[1], se_f=sc2[2], smu_b=sc2[3], sp_b=sc2[4], se_b=sc2[5];
             if (sg->dirsign() == -1) { std::swap(smu_f,smu_b); std::swap(sp_f,sp_b); std::swap(se_f,se_b); }
             pdg_offvtx_track1=sg_pdg; score_mu_fwd_offvtx_track1=smu_f; score_p_fwd_offvtx_track1=sp_f; score_e_fwd_offvtx_track1=se_f;
@@ -1231,7 +1252,7 @@ bool PatternAlgorithms::ssm_tagger(
             x_dir_offvtx_track1=sg_dir.x(); y_dir_offvtx_track1=sg_dir.y(); z_dir_offvtx_track1=sg_dir.z();
         } else if (is_shower_type && sg_len > len_ovs1) {
             len_ovs1 = sg_len;
-            auto sc2 = get_scores(sg, particle_data);
+            auto sc2 = get_scores(sg, particle_data, m_mip_dqdx);
             double smu_f=sc2[0], sp_f=sc2[1], se_f=sc2[2], smu_b=sc2[3], sp_b=sc2[4], se_b=sc2[5];
             if (sg->dirsign() == -1) { std::swap(smu_f,smu_b); std::swap(sp_f,sp_b); std::swap(se_f,se_b); }
             pdg_offvtx_shw1=sg_pdg; score_mu_fwd_offvtx_shw1=smu_f; score_p_fwd_offvtx_shw1=sp_f; score_e_fwd_offvtx_shw1=se_f;
