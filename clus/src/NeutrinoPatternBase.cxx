@@ -80,11 +80,24 @@ bool PatternAlgorithms::clean_up_graph(Graph& graph, const Facade::Cluster& clus
     return modified;
 }
 
-std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::Cluster& cluster,Facade::geo_point_t& first_point, Facade::geo_point_t& last_point){  
+std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path(const Facade::Cluster& cluster,Facade::geo_point_t& first_point, Facade::geo_point_t& last_point){
+        // A present-but-empty steiner cloud is legal (SBND MC evt 11 --
+        // Dataset::size() counts arrays, not points): the kNN then returns an
+        // empty result and [0] below reads past the end.  Return the empty
+        // path early; every caller already treats an empty path as "no rough
+        // path" (the !has_pc branch below returns the same).
+        if (!cluster.has_pc("steiner_pc") ||
+            cluster.get_pc("steiner_pc").size_major() == 0) {
+            return {};
+        }
+
         // Find closest indices in the steiner point cloud
         auto first_knn_results = cluster.kd_steiner_knn(1, first_point, "steiner_pc");
         auto last_knn_results = cluster.kd_steiner_knn(1, last_point, "steiner_pc");
-        
+        if (first_knn_results.empty() || last_knn_results.empty()) {
+            return {};
+        }
+
         auto first_index = first_knn_results[0].first;  // Get the index from the first result
         auto last_index = last_knn_results[0].first;   // Get the index from the first result
  
@@ -136,7 +149,12 @@ std::vector<Facade::geo_point_t> PatternAlgorithms::do_rough_path_reg_pc(const F
     // Find closest indices in the regular point cloud using kd_knn
     auto first_knn_results = cluster.kd_knn(1, first_point);
     auto last_knn_results = cluster.kd_knn(1, last_point);
-    
+    // Empty kNN (zero-point cluster) -> [0] reads past the end; return the
+    // empty path instead, same contract as do_rough_path above.
+    if (first_knn_results.empty() || last_knn_results.empty()) {
+        return {};
+    }
+
     auto first_index = first_knn_results[0].first;  // Get the index from the first result
     auto last_index = last_knn_results[0].first;   // Get the index from the first result
     
@@ -518,9 +536,19 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
     // (saved_start_wcp and saved_dir removed: set but never used)
     if (walk_history) walk_history->push_back(curr_wcp);
 
-    // Forward search
-    while(flag_continue){
+    // Forward search.  Cycle backstop: each pass moves to a *different*
+    // point (mag != 0 is required) but nothing forbids a cycle on looping
+    // point-cloud topology, and this walk had no bound (its relative
+    // Facade_Cluster.cxx:343 caps at 400).  NOT 400 here: this walk can
+    // legitimately follow a track for its full length in ~1 cm steps, and
+    // the same cap on the TaggerCheckSTM copy of this walk was measured to
+    // truncate real crawls.  4000 is beyond any SBND geometry (~6.4 m
+    // diagonal = ~640 steps) while a genuine cycle still dies in
+    // milliseconds.
+    int walk_counter = 0;
+    while(flag_continue && walk_counter < 4000){
         flag_continue = false;
+        ++walk_counter;
 
         for (int i = 0; i != 3; i++){
             Facade::geo_point_t test_p(
@@ -586,6 +614,10 @@ std::pair<Facade::geo_point_t,  size_t> PatternAlgorithms::proto_extend_point(co
         }
     }
     
+    if (walk_counter >= 4000) {
+        SPDLOG_LOGGER_WARN(s_log, "proto_extend_point: walk did not settle after 4000 passes; stopping to avoid an unbounded loop (cluster {})", cluster.get_cluster_id());
+    }
+
     // Ensure we return the steiner point cloud position
     Facade::geo_point_t test_p(curr_wcp.x(), curr_wcp.y(), curr_wcp.z());
     auto final_knn = cluster.kd_steiner_knn(1, test_p, "steiner_pc");
@@ -906,9 +938,26 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             }
         }
         
-        // Search for kinks and extend the break point
+        // Search for kinks and extend the break point.
+        // kink_pass_counter: the visited-set progress guard below only applies
+        // when break_idx is a valid steiner index; the INVALID_STEINER_INDEX
+        // outcome (empty steiner kNN, or the no-steiner-pc {p, 0}-style return)
+        // bypasses it, and the loop then re-runs segment_search_kink from the
+        // same test_start_p with identical inputs -- a deterministic fixed
+        // point, i.e. an infinite loop (same silent-no-op shape as the fixed
+        // class-A hang, doc pr/11 sec 6.1).  Exact stationarity is detected
+        // below; the pass cap is a generous backstop for a valid-index cycle
+        // through the seen-before re-search branch.
+        int kink_pass_counter = 0;
+        bool have_prev_kink_pass = false;
+        Facade::geo_point_t prev_pass_test_start_p, prev_pass_break_wcp;
+        size_t prev_pass_break_idx = INVALID_STEINER_INDEX;
         while(ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
               ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
+            if (++kink_pass_counter > 1000) {
+                SPDLOG_LOGGER_WARN(s_log, "break_segments: kink loop passed 1000 iterations without leaving the start vertex (cluster {}); stopping to avoid an unbounded loop", cluster->get_cluster_id());
+                break;
+            }
             
             auto t_op = BS_Clock::now();
             auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median);
@@ -994,6 +1043,34 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm) {
                     test_start_p = kink_geo;
                 }
+
+                // Exact stationarity detector.  A pass is a function of
+                // (test_start_p, dir1_prev, saved_break_wcp_indices) only --
+                // segment_search_kink and proto_extend_point are pure in their
+                // arguments.  If two consecutive passes see the same
+                // test_start_p AND produce the same (break_wcp, break_idx),
+                // then the next pass's inputs are also identical (dir1_prev is
+                // at its fixed point and the visited set gained nothing new
+                // that changed the outcome): the loop is in a period-1 cycle
+                // and will never terminate.  This is the same
+                // silent-no-op-turned-infinite-loop shape as the fixed class-A
+                // hang (doc pr/11 sec 6.1); the INVALID_STEINER_INDEX outcome
+                // (empty steiner kNN) bypasses the visited-set guard entirely
+                // and is the easiest way to enter the cycle.
+                const bool loop_would_continue =
+                    ray_length(Ray{start_v->wcpt().point, break_wcp}) <= 1.0 * units::cm &&
+                    ray_length(Ray{end_v->wcpt().point, break_wcp}) > 1.0 * units::cm;
+                if (loop_would_continue && have_prev_kink_pass &&
+                    prev_pass_test_start_p == test_start_p &&
+                    prev_pass_break_wcp == break_wcp &&
+                    prev_pass_break_idx == break_idx) {
+                    SPDLOG_LOGGER_WARN(s_log, "break_segments: kink pass repeated exactly (break_idx={} valid={}) without leaving the start vertex (cluster {}); stopping to avoid an unbounded loop", break_idx == INVALID_STEINER_INDEX ? -1 : (long long)break_idx, break_idx != INVALID_STEINER_INDEX, cluster->get_cluster_id());
+                    break;
+                }
+                prev_pass_test_start_p = test_start_p;
+                prev_pass_break_wcp = break_wcp;
+                prev_pass_break_idx = break_idx;
+                have_prev_kink_pass = true;
             } else {
                 break;
             }

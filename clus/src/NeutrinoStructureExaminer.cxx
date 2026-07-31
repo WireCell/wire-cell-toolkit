@@ -1263,6 +1263,13 @@ bool PatternAlgorithms::examine_vertices_1p(Graph&graph, VertexPtr v1, VertexPtr
 
             for (size_t i = 0; i < seg_fits.size(); i++) {
                 auto test_wpid = dv->contained_by(seg_fits[i].point);
+                // Same guard as the pts_2 loop below (:~1330) and the vertex
+                // points at :1185: a fit point outside every detector volume
+                // yields apa()/face() == -1 and backward() is then
+                // m_trigger_offsets.at(-1) -> std::out_of_range, aborting the
+                // job (the class-C crash shape, doc pr/11 sec 6.3).  Skip the
+                // point rather than the event.
+                if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
                 auto p_raw = transform->backward(seg_fits[i].point, cluster_t0, test_wpid.face(), test_wpid.apa());
                 if (!cluster.grouping()->get_closest_dead_chs(p_raw, 1, test_wpid.apa(), test_wpid.face(), pind)) {
                     flag_dead = false;

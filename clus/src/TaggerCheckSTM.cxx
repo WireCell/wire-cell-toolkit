@@ -874,10 +874,24 @@ private:
         
         // 2. Find the closest point indices in the Steiner point cloud
   
+        // A present-but-empty steiner cloud is legal (SBND MC evt 11 --
+        // Dataset::size() counts arrays, not points): the kNN then returns an
+        // empty result and [0] below reads past the end.  Return the empty
+        // path early -- the caller falls back cleanly (check_stm_conditions
+        // gives up after a <=3-point fit).  Same guard as the
+        // NeutrinoPatternBase.cxx do_rough_path this was forked from.
+        if (!cluster.has_pc("steiner_pc") ||
+            cluster.get_pc("steiner_pc").size_major() == 0) {
+            return {};
+        }
+
         // Find closest indices in the steiner point cloud
         auto first_knn_results = cluster.kd_steiner_knn(1, first_point, "steiner_pc");
         auto last_knn_results = cluster.kd_steiner_knn(1, last_point, "steiner_pc");
-        
+        if (first_knn_results.empty() || last_knn_results.empty()) {
+            return {};
+        }
+
         auto first_index = first_knn_results[0].first;  // Get the index from the first result
         auto last_index = last_knn_results[0].first;   // Get the index from the first result
  
@@ -902,11 +916,20 @@ private:
     // return a vector of point, also the mid_p is also a return point ...
     std::vector<geo_point_t> adjust_rough_path(const Cluster& cluster, geo_point_t& mid_p) const{
 
-        const geo_point_t drift_dir_abs(1,0,0); 
+        const geo_point_t drift_dir_abs(1,0,0);
         // use the m_track_fitter ...
         auto fine_tracking_path = m_track_fitter.get_fine_tracking_path();
         auto dQ = m_track_fitter.get_dQ();
         auto dx = m_track_fitter.get_dx();
+
+        // do_single_tracking can now legally leave an empty fit on a
+        // degenerate path (the doc pr/11 class-E WARN-and-clear contract);
+        // .at(0) below would then throw the very out_of_range that fix
+        // removed.  Empty return is already handled by the caller
+        // (check_stm_conditions falls back to the un-adjusted rough path).
+        if (fine_tracking_path.empty()) {
+            return {};
+        }
 
         mid_p.at(0) = fine_tracking_path.at(0).first.x();
         mid_p.at(1) = fine_tracking_path.at(0).first.y();
@@ -1051,7 +1074,12 @@ private:
 
         // std::cout <<"flag crawl " << flag_crawl << std::endl;
 
-        if (flag_crawl && cluster.has_pc("steiner_pc")){
+        // size_major() term: a present-but-empty steiner cloud (zero-length
+        // arrays; Dataset::size() counts ARRAYS -- Clustering_Util.cxx:81)
+        // makes every kd_steiner_knn(1, ...) in this block return empty, and
+        // the unguarded [0]s below read past the end.  With a non-empty cloud
+        // knn(1) always returns one result, so this one gate covers them all.
+        if (flag_crawl && cluster.has_pc("steiner_pc") && cluster.get_pc("steiner_pc").size_major() > 0){
             // Start to Crawl
             const double step_dis = 1.0 * units::cm;
 
@@ -1093,9 +1121,19 @@ private:
             dir = dir.norm();
             
             bool flag_continue = true;
-            while (flag_continue) {
+            // Cycle backstop for this unbounded stepping walk (forked from
+            // NeutrinoPatternBase proto_extend_point, which had no bound
+            // either).  NOT 400 like Facade_Cluster.cxx:343: this crawl
+            // legitimately walks the full track length in ~1 cm steps, and a
+            // 400-pass cap was measured to truncate real crawls (nueCC48 A/B:
+            // 3/48 score rows moved, evt 469665 nue_score -0.44 -> +1.22).
+            // 4000 passes is beyond any SBND geometry (~6.4 m diagonal =
+            // ~640 steps) while a genuine cycle still dies in milliseconds.
+            int walk_counter = 0;
+            while (flag_continue && walk_counter < 4000) {
                 flag_continue = false;
-                
+                ++walk_counter;
+
                 for (int i = 0; i != 3; i++) {
                     // Calculate test point
                     geo_point_t test_p(curr_wcp.at(0) + dir.x() * step_dis * (i + 1),
@@ -1138,8 +1176,12 @@ private:
                 }
             }
             
+            if (walk_counter >= 4000) {
+                SPDLOG_LOGGER_WARN(s_log, "adjust_rough_path: crawl did not settle after 4000 passes; stopping to avoid an unbounded loop (cluster {})", cluster.ident());
+            }
+
             // Find first and last points in steiner point cloud
-            geo_point_t first_p(fine_tracking_path.front().first.x(), 
+            geo_point_t first_p(fine_tracking_path.front().first.x(),
                             fine_tracking_path.front().first.y(), 
                             fine_tracking_path.front().first.z());
             auto first_knn_results = cluster.kd_steiner_knn(1, first_p, "steiner_pc");
@@ -1390,6 +1432,14 @@ private:
                 // std::cout << i << " " << angle3 << " " << angle3p << " " << v10.magnitude()/units::cm << " " << v20.magnitude()/units::cm << std::endl;
 
                 
+                // PR::Fit::paf defaults to {-1, -1} (PRCommon.h) and stays
+                // there for fit points outside every detector volume
+                // (multi_trajectory_fit, Segment::clear_fit).  backward(-1,-1)
+                // is m_trigger_offsets.at(-1) -> std::out_of_range, the same
+                // abort as the fixed class-C crash (doc pr/11 sec 6.3).  Such
+                // a point cannot be a kink candidate; skip it.
+                if (paf.at(i).first < 0 || paf.at(i).second < 0) continue;
+
                 // need to calculate current_point_raw ...
                 WireCell::Point current_point_raw= transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
 
@@ -1472,6 +1522,9 @@ private:
                     angle3 = std::acos(v10.dot(v20) / (v10.magnitude() * v20.magnitude())) / 3.1415926 * 180.0;
                 }
                 
+                // Same {-1,-1}-sentinel skip as the first sweep above.
+                if (paf.at(i).first < 0 || paf.at(i).second < 0) continue;
+
                 // Convert to raw coordinates for dead region check
                 WireCell::Point current_point_raw = transform->backward(current_point, cluster_t0, paf.at(i).second, paf.at(i).first);
                 

@@ -114,6 +114,13 @@ namespace WireCell::Clus::PR {
         auto vtx1 = graph[vd1].vertex;
         auto vtx2 = graph[vd2].vertex;
 
+        // Every caller defends against null vertices in the returned pair
+        // (`if (!v1 || !v2) ...`), so a null graph vertex is an anticipated
+        // state -- but the wcpt() ordering distance below dereferenced them.
+        if (!vtx1 || !vtx2) {
+            return std::make_pair(vtx1, vtx2);
+        }
+
         // Use wcpts if available, fall back to fits, then return unordered pair.
         WireCell::Point ept;
         if (!seg->wcpts().empty()) {

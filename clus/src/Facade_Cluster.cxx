@@ -2028,6 +2028,27 @@ std::pair<geo_point_t, geo_point_t> Cluster::get_main_axis_points() const
         }
     }
 
+    if (!initialized && npoints() > 0) {
+        // Every point excluded is a legal state, not a programmer error:
+        // connect_graph.cxx marks should_exclude for any point >= 1 cm from
+        // its reference cluster and nothing guarantees a non-empty
+        // complement.  Fall back to the unfiltered extremes (real points of
+        // this cluster) instead of aborting the job -- the throw below now
+        // fires only for a truly point-less cluster.
+        SPDLOG_LOGGER_WARN(s_log, "get_main_axis_points: all {} points excluded; falling back to unfiltered extremes (cluster {})", npoints(), get_cluster_id());
+        for (int i = 0; i < npoints(); i++) {
+            geo_point_t current = point3d(i);
+            double value = current.dot(main_axis);
+            if (!initialized) {
+                highest_point = lowest_point = current;
+                high_value = low_value = value;
+                initialized = true;
+                continue;
+            }
+            if (value > high_value) { highest_point = current; high_value = value; }
+            if (value < low_value)  { lowest_point = current;  low_value = value; }
+        }
+    }
     if (!initialized) {
         throw std::runtime_error("No valid points available for get_main_axis_points");
     }
@@ -2066,7 +2087,26 @@ std::pair<geo_point_t,geo_point_t> Cluster::get_two_extreme_points() const
         if (current.z() < extreme_wcp[5].z()) extreme_wcp[5] = current;
     }
 
-     if (!initialized) {
+    if (!initialized && npoints() > 0) {
+        // Same all-points-excluded fallback (and reason) as
+        // get_main_axis_points above.
+        SPDLOG_LOGGER_WARN(s_log, "get_two_extreme_points: all {} points excluded; falling back to unfiltered extremes (cluster {})", npoints(), get_cluster_id());
+        for (int i = 0; i < npoints(); i++) {
+            geo_point_t current = point3d(i);
+            if (!initialized) {
+                for (int j = 0; j < 6; j++) extreme_wcp[j] = current;
+                initialized = true;
+                continue;
+            }
+            if (current.y() > extreme_wcp[0].y()) extreme_wcp[0] = current;
+            if (current.y() < extreme_wcp[1].y()) extreme_wcp[1] = current;
+            if (current.x() > extreme_wcp[2].x()) extreme_wcp[2] = current;
+            if (current.x() < extreme_wcp[3].x()) extreme_wcp[3] = current;
+            if (current.z() > extreme_wcp[4].z()) extreme_wcp[4] = current;
+            if (current.z() < extreme_wcp[5].z()) extreme_wcp[5] = current;
+        }
+    }
+    if (!initialized) {
         throw std::runtime_error("No valid points available for get_two_extreme_points");
     }
 

@@ -425,21 +425,29 @@ static void clustering_neutrino(
                         }
                     }
 
-                    temp_extreme_pts = largest_cluster->get_two_extreme_points();
-                    center = largest_cluster->get_pca().center;
-                    main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
-                                 largest_cluster->get_pca().axis.at(0).z());
-                    num_clusters = sep_clusters.size();
-                    // largest_cluster->Create_point_cloud();
+                    // largest_cluster stays null when Separate_2 yields no
+                    // clusters with points (max_num_points starts at 0, the
+                    // loop assigns only on npoints() > 0): dereferencing it
+                    // was a segfault.  Skip the temp refinement
+                    // (flag_enable_temp stays false, i.e. "no separation
+                    // result") but still merge back below.
+                    if (largest_cluster) {
+                        temp_extreme_pts = largest_cluster->get_two_extreme_points();
+                        center = largest_cluster->get_pca().center;
+                        main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
+                                     largest_cluster->get_pca().axis.at(0).z());
+                        num_clusters = sep_clusters.size();
+                        // largest_cluster->Create_point_cloud();
 
-                    if (orig_cluster_length > 25 * units::cm) {
-                        temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
-                        temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
+                        if (orig_cluster_length > 25 * units::cm) {
+                            temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
+                            temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
+                        }
+
+                        flag_enable_temp = true;
+                        temp_dir1 = largest_cluster->vhough_transform(temp_extreme_pts.first, 30 * units::cm);
+                        temp_dir2 = largest_cluster->vhough_transform(temp_extreme_pts.second, 30 * units::cm);
                     }
-
-                    flag_enable_temp = true;
-                    temp_dir1 = largest_cluster->vhough_transform(temp_extreme_pts.first, 30 * units::cm);
-                    temp_dir2 = largest_cluster->vhough_transform(temp_extreme_pts.second, 30 * units::cm);
 
                     // for (size_t j = 0; j != sep_clusters.size(); j++) {
                     //     delete sep_clusters.at(j);
@@ -602,22 +610,26 @@ static void clustering_neutrino(
                             largest_cluster = sep_cluster;
                         }
                     }
-                    temp_extreme_pts = largest_cluster->get_two_extreme_points();
-                    center = largest_cluster->get_pca().center;
-                    main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
-                                 largest_cluster->get_pca().axis.at(0).z());
-                    num_clusters = sep_clusters.size();
+                    // Same null-largest_cluster skip (and reason) as the
+                    // cluster1 block above.
+                    if (largest_cluster) {
+                        temp_extreme_pts = largest_cluster->get_two_extreme_points();
+                        center = largest_cluster->get_pca().center;
+                        main_dir.set(largest_cluster->get_pca().axis.at(0).x(), largest_cluster->get_pca().axis.at(0).y(),
+                                     largest_cluster->get_pca().axis.at(0).z());
+                        num_clusters = sep_clusters.size();
 
-                    // largest_cluster->Create_point_cloud();
+                        // largest_cluster->Create_point_cloud();
 
-                    if (orig_cluster_length > 25 * units::cm) {
-                        temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
-                        temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
+                        if (orig_cluster_length > 25 * units::cm) {
+                            temp_extreme_pts.first = largest_cluster->calc_ave_pos(temp_extreme_pts.first, 5 * units::cm);
+                            temp_extreme_pts.second = largest_cluster->calc_ave_pos(temp_extreme_pts.second, 5 * units::cm);
+                        }
+
+                        flag_enable_temp = true;
+                        temp_dir1 = largest_cluster->vhough_transform(temp_extreme_pts.first, 30 * units::cm);
+                        temp_dir2 = largest_cluster->vhough_transform(temp_extreme_pts.second, 30 * units::cm);
                     }
-
-                    flag_enable_temp = true;
-                    temp_dir1 = largest_cluster->vhough_transform(temp_extreme_pts.first, 30 * units::cm);
-                    temp_dir2 = largest_cluster->vhough_transform(temp_extreme_pts.second, 30 * units::cm);
 
                     // for (size_t j = 0; j != sep_clusters.size(); j++) {
                     //     delete sep_clusters.at(j);

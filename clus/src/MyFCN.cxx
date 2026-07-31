@@ -342,8 +342,14 @@ void MyFCN::UpdateInfo(Facade::geo_point_t fit_pos, Facade::Cluster& temp_cluste
             offset_t + slope_x * vtx_pos_raw.x());
     }
     
-    // Get steiner point cloud from cluster
-    if (!temp_cluster.has_pc("steiner_pc") || temp_cluster.get_pc("steiner_pc").size() == 0) {
+    // Get steiner point cloud from cluster.  size_major() term: Dataset::size()
+    // counts ARRAYS, not points (Clustering_Util.cxx:81) -- an empty steiner
+    // cloud with zero-length coordinate arrays passes the .size() test, the
+    // kNN calls below then return empty, and the unguarded [0]s read past the
+    // end.  Same predicate fix already applied at Clustering_Util.cxx:87 and
+    // NeutrinoPatternBase.cxx:212.
+    if (!temp_cluster.has_pc("steiner_pc") || temp_cluster.get_pc("steiner_pc").size() == 0
+        || temp_cluster.get_pc("steiner_pc").size_major() == 0) {
         SPDLOG_LOGGER_TRACE(s_log, "UpdateInfo: Warning: steiner_pc not found in cluster");
         return;
     }

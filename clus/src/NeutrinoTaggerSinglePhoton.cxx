@@ -2206,8 +2206,15 @@ bool PatternAlgorithms::singlephoton_tagger(
                        ? main_vertex->fit().point
                        : main_vertex->wcpt().point;
         auto wpid = dv->contained_by(vtx_pt);
-        apa  = wpid.apa();
-        face = wpid.face();
+        // Uncontained points give apa()/face() == -1; keep the legacy (0,0)
+        // rather than seeding SpContext with a sentinel that keyed lookups
+        // (wire_angles().at(-1) etc.) would abort on.  Same guard and reason
+        // as the sibling taggers (TaggerCheckNeutrino.cxx:683,
+        // NeutrinoTaggerNuE.cxx:2762).
+        if (wpid.apa() >= 0 && wpid.face() >= 0) {
+            apa  = wpid.apa();
+            face = wpid.face();
+        }
     }
 
     SpContext ctx{*this, graph, main_cluster, main_vertex, apa, face,

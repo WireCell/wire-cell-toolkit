@@ -2250,8 +2250,12 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
     // std::cout << "Pixels: " << temp_2dut.associated_2d_points.size() << " " << temp_2dvt.associated_2d_points.size() << " " << temp_2dwt.associated_2d_points.size() << std::endl;
 
     
-    // Steiner Tree ... 
-    if (cluster->has_graph("steiner_graph") && cluster->has_pc("steiner_pc")) {
+    // Steiner Tree ...  size_major() term: presence alone does not imply
+    // points (Clustering_Util.cxx:81 -- Dataset::size() counts arrays); a
+    // zero-point steiner cloud makes kd_steiner_knn return empty and the
+    // .front() calls below read past the end.
+    if (cluster->has_graph("steiner_graph") && cluster->has_pc("steiner_pc")
+        && cluster->get_pc("steiner_pc").size_major() > 0) {
         auto graph_name = "steiner_graph";
         auto pc_name = "steiner_pc";   
         const auto& steiner_pc = cluster->get_pc(pc_name);
@@ -3434,6 +3438,13 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
     Eigen::SparseMatrix<double> RW(n_2D_w, 3);
     
     auto test_wpid = m_dv->contained_by(init_p);
+    // Defense in depth: both current callers pre-check containment upstream,
+    // but that contract is unstated and backward()/forward() with apa==-1 is
+    // .at(-1) -> std::out_of_range (class-C, doc pr/11 sec 6.3).  Mirror the
+    // existing no-2D-associations early return above.
+    if (test_wpid.apa() == -1 || test_wpid.face() == -1) {
+        return init_p;
+    }
     auto cluster = segment->cluster();
     auto cluster_t0 = cluster->get_cluster_t0();
     const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
@@ -4184,8 +4195,17 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         Eigen::SparseMatrix<double> RW(n_2D_w, 3);
         
         auto test_wpid = m_dv->contained_by(pss_vec[i].first);
-        // Initialization with its raw position
-        auto p_raw = transform->backward(pss_vec[i].first, cluster_t0, test_wpid.face(), test_wpid.apa());
+        // Initialization with its raw position.  A point outside every
+        // detector volume gives apa()/face() == -1 and backward() is then
+        // m_trigger_offsets.at(-1) -> std::out_of_range (the class-C abort,
+        // doc pr/11 sec 6.3).  Cannot `continue` here: pos_3D rows are
+        // indexed by i and a skipped row would stay uninitialized.  Use the
+        // corrected point as its own raw seed instead -- such a point has no
+        // 2D associations, so the solve keeps (regularizes around) the seed.
+        WireCell::Point p_raw = pss_vec[i].first;
+        if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
+            p_raw = transform->backward(pss_vec[i].first, cluster_t0, test_wpid.face(), test_wpid.apa());
+        }
 
         temp_pos_3D_init(0) = p_raw.x();
         temp_pos_3D_init(1) = p_raw.y();
@@ -4483,6 +4503,12 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         const auto& transform = path_xform;
         double cluster_t0 = path_xform_t0;
         auto test_wpid = m_dv->contained_by(pss_vec[i].first);
+        // Point outside every detector volume: forward() would be
+        // .at(-1) -> std::out_of_range (class-C, doc pr/11 sec 6.3).  Skip
+        // the point, mirroring the do_single_tracking 2nd-pass guard at the
+        // organize_ps_path consumer (:8533); the three output vectors below
+        // are appended together so skipping keeps them consistent.
+        if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
 
         auto p = transform->forward(p_raw, cluster_t0, test_wpid.face(), test_wpid.apa());
         auto apa_face = std::make_pair(test_wpid.apa(), test_wpid.face());
@@ -4622,6 +4648,16 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         WirePlaneId wpid(kAllLayers, face, apa);
         auto offset_it = wpid_offsets.find(wpid);
         auto slope_it = wpid_slopes.find(wpid);
+        // Every sibling of this lookup checks the find (e.g. :6081, :6437,
+        // :7184); this one dereferenced end() on a miss -- undefined behavior,
+        // worse than the crash it sits behind.  A miss for a valid (apa,face)
+        // means missing geometry: WARN and skip; the resulting size mismatch
+        // vs fine_tracking_path is then caught by do_single_tracking's
+        // (now non-fatal) consistency check, which drops the segment's fit.
+        if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end()) {
+            SPDLOG_LOGGER_WARN(s_log, "trajectory_fit: no wpid offsets/slopes for apa={} face={}; skipping projection for path point {}", apa, face, i);
+            continue;
+        }
 
         auto offset_t = std::get<0>(offset_it->second);
         auto offset_u = std::get<1>(offset_it->second);

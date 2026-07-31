@@ -109,10 +109,29 @@ const std::unordered_map<size_t, std::vector<size_t> > &DynamicPointCloud::kd2d_
 }
 
 
+// Self-append guard, shared by every add_points overload.  Appending a
+// cloud's own batch to itself is undefined behavior, not a bounded 2x:
+// DPCBatch::append does vector::insert from iterators into the destination
+// vector, which a reallocation invalidates mid-copy.  This is exactly how the
+// doc pr/11 defect-D events blew the heap to a 224 GB bad_alloc once the
+// defect-F aliasing put the same object on both sides.  The call-site fixes
+// (PRShower.cxx clone_dpc + `!=` tests) make the known paths safe; this guard
+// makes the CLASS structurally impossible for every other caller -- loudly,
+// so a future aliasing defect is reported rather than masked (the reason the
+// pr/11 round deliberately left add_points unguarded is honored by WARNing).
+static bool warn_self_append(const void* dst, const void* src, const char* what)
+{
+    if (dst != src) return false;
+    static auto s_log = WireCell::Log::logger("clus");
+    SPDLOG_LOGGER_WARN(s_log, "DynamicPointCloud::add_points: refusing to append {} to itself (aliasing defect upstream? see doc pr/11 sec 6.7); points are already present, treating as a no-op", what);
+    return true;
+}
+
 void DynamicPointCloud::add_points(const DPCBatch &points) {
     if (points.empty()) {
         return;
     }
+    if (warn_self_append(&m_pts, &points, "its own batch")) return;
     size_t original_size = m_pts.size();
     m_pts.append(points);
     index_new_points(original_size);
@@ -122,6 +141,7 @@ void DynamicPointCloud::add_points(DPCBatch &&points) {
     if (points.empty()) {
         return;
     }
+    if (warn_self_append(&m_pts, &points, "its own batch")) return;
     size_t original_size = m_pts.size();
     if (original_size == 0) {
         // fresh cloud: take the whole storage in O(1)
@@ -134,6 +154,7 @@ void DynamicPointCloud::add_points(DPCBatch &&points) {
 }
 
 void DynamicPointCloud::add_points(const DynamicPointCloud &other) {
+    if (warn_self_append(this, &other, "another cloud that is itself")) return;
     add_points(other.m_pts);
 }
 
@@ -141,6 +162,7 @@ void DynamicPointCloud::add_points(const DynamicPointCloud &other, const std::ve
     if (rows.empty()) {
         return;
     }
+    if (warn_self_append(this, &other, "row selections of itself")) return;
     size_t original_size = m_pts.size();
     m_pts.append(other.m_pts, rows);
     index_new_points(original_size);

@@ -271,7 +271,10 @@ void clustering_connect1(
     for (size_t i = 0; i != live_clusters.size(); i++) {
         const Cluster *cluster = live_clusters.at(i);
         if(!cluster->get_scope_filter(scope)) continue;
+        // A zero-point cluster would throw in get_two_extreme_points(); the
+        // assert alone is compiled out under NDEBUG, so skip for real.
         assert (cluster->npoints() > 0); // preempt segfault in get_two_extreme_points()
+        if (cluster->npoints() == 0) continue;
 
         // if (cluster->get_length()/units::cm>5){
         //     std::cout << "Connect 0: " << cluster->get_length()/units::cm << " " << cluster->get_pca().center << std::endl;

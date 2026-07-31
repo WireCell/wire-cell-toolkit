@@ -34,6 +34,13 @@ namespace WireCell::Clus {
     
     bool FiducialUtils::inside_dead_region(const Point& p_raw, const int apa, const int face, const int minimal_views) const
     {
+        // A sentinel apa/face (contained_by() miss, or PR::Fit::paf left at
+        // its {-1,-1} default) would make convert_3Dpoint_time_ch abort via
+        // Grouping::fastgeom's m_anodes.at(-1) (the class-C crash shape,
+        // doc pr/11 sec 6.3).  A point without a detector volume has no dead
+        // region to be inside of.
+        if (apa < 0 || face < 0) return false;
+
          // Convert 3D point to time and wire indices
         const auto [tind_u, wind_u] = m_internal.live->convert_3Dpoint_time_ch(p_raw, apa, face,  0);
         const auto [tind_v, wind_v] = m_internal.live->convert_3Dpoint_time_ch(p_raw, apa, face,  1);
