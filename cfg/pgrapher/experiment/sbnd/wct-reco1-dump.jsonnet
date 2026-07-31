@@ -31,8 +31,20 @@
 //     --tla-str input=<reco1.root> --tla-str output_dir=<dir> \
 //     -c wct-reco1-dump.jsonnet
 
-function(input, output_dir='.', entry='-1', caf_offset_mode='none', caf_offset_override='0')
+function(input, output_dir='.', entry='-1', caf_offset_mode='none', caf_offset_override='0',
+         wire_product='', badmask_product='', summary_product='', flash_process='Reco1')
 // caf_offset_mode: none | product | auto | override (validated in C++)
+//
+// wire_product / badmask_product / summary_product: art branch names of the
+// three TPC products.  Empty ('') => key omitted => the C++ defaults, which are
+// the SBND *data* reco1 names (sptpc2d/dnnsp, process Reco1).  SBND *MC* reco1
+// files (detsim-g4-gen) carry the same products under the DetSim process and
+// the simtpc2d module label, so an MC extraction passes
+//   --tla-str wire_product='recob::Wires_simtpc2d_dnnsp_DetSim.'
+//   --tla-str badmask_product='ints_simtpc2d_badmasks_DetSim.'
+//   --tla-str summary_product='doubles_simtpc2d_wienersummary_DetSim.'
+// (see sbnd_xin/docs/67).  flash_process is the process name of the two
+// opflashtpc<N> products ('Reco1' in both data and MC to date).
 
 local g = import 'pgraph.jsonnet';
 
@@ -47,7 +59,11 @@ local frame_src = g.pnode({
         entry: entry_num,
         // wire/badmask/summary products, tag, scales, nticks, tick:
         // C++ defaults match the SBND data reco1 files (sptpc2d, dnnsp).
-    },
+        // Keys omitted when the TLA is '' => compiled config byte-identical
+        // to a pre-knob data extraction.
+    } + (if wire_product != '' then { wire_product: wire_product } else {})
+      + (if badmask_product != '' then { badmask_product: badmask_product } else {})
+      + (if summary_product != '' then { summary_product: summary_product } else {}),
 }, nin=0, nout=1);
 
 local frame_sink = g.pnode({
@@ -68,7 +84,7 @@ local flash_srcs = [
         data: {
             filename: input,
             entry: entry_num,
-            flash_product: 'recob::OpFlashs_opflashtpc%d__Reco1.' % n,
+            flash_product: 'recob::OpFlashs_opflashtpc%d__%s.' % [n, flash_process],
             caf_offset_mode: caf_offset_mode,
             // Only meaningful in override mode; C++ default 0.  Key omitted
             // otherwise => compiled config byte-identical to pre-override runs.
