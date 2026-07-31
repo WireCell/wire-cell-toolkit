@@ -1402,9 +1402,21 @@ static bool broken_muon_id(NuEContext& ctx, ShowerPtr shower, TaggerInfo& ti) {
         //         nearly collinearly (back-to-back, within 15°).
         if (curr_vtx && curr_vtx->descriptor_valid()) {
             auto vd = curr_vtx->get_descriptor();
+            // The graph stores descriptors with boost::setS, so out_edges
+            // iterates in pointer order, which varies run to run.  When two
+            // segments pass the collinearity cut the first-match walk was
+            // run-to-run bimodal (nueCC evt 469665: segs {27,29} both pass at
+            // one vertex — clus/docs/audits/pr11-latent-pattern-audit.md
+            // §5.10).  Iterate in stable graph-index order instead.  The
+            // prototype (NeutrinoID_nue_tagger.h:1048) iterates a pointer-
+            // keyed std::set — arbitrary order — so no parity is broken.
+            IndexedSegmentSet conn_segs;
             for (auto [eit, eend] = boost::out_edges(vd, ctx.graph); eit != eend; ++eit) {
                 SegmentPtr sg1 = ctx.graph[*eit].segment;
-                if (!sg1 || !shower_segs.count(sg1)) continue;
+                if (sg1) conn_segs.insert(sg1);
+            }
+            for (SegmentPtr sg1 : conn_segs) {
+                if (!shower_segs.count(sg1)) continue;
                 if (muon_segments.count(sg1)) continue;
                 Vector dir2 = segment_cal_dir_3vector(sg1, curr_vtx_pt, 15*units::cm);
                 // back-to-back: 180° - angle < 15° AND length > 6cm

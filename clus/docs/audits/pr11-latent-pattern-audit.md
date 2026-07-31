@@ -3,7 +3,10 @@
 **Status:** fixes shipped in two commits (bucket 1 gated byte-identical;
 bucket 2 flagged **NOT bit-identical — needs revalidation** on the pr/11
 F/G precedent, though no output change was observed on the 78 gated events —
-§4).  Gate labels and binary lineage in §4.
+§4).  Gate labels and binary lineage in §4.  Follow-up commit: the §5.10
+run-to-run bimodal `nue_score` was root-caused (pointer-ordered
+`boost::out_edges` in `broken_muon_id`) and fixed — evidence, gates, and the
+residual open layer in §5.10 and §4b.
 
 **What this is.** The 1071-event SBND PR-chain census
 (`sbnd_xin/docs/pr/11_pr-chain-population-scores-and-perf.md`, toolkit commit
@@ -44,6 +47,13 @@ cd sbnd_xin && PR_JOBS=6 ./run_pr_chain_batch.sh work-mcp1kall-d59k \
     work-mcp1kall-ab30audit1 data <30 evts of the pr/11 ab30 manifest>
 # ... same for work-mcp1kall-ab30audit2 with the bucket-2 binary, then
 # hash_archive.py member-hash comparison vs work-mcp1kall-pr11 (M2).
+
+# The §5.10 determinism repro (vertex pinned to geometric so the SCN layer
+# is out of the picture; inject dl_weights= into a COPY of the driver):
+cd sbnd_xin && sed 's|--tla-str  "reality=\$REALITY" \\|&\n            --tla-str  "dl_weights=" \\|' \
+    run_pr_chain_batch.sh > tmp_run_pr_chain_geovtx.sh && chmod +x tmp_run_pr_chain_geovtx.sh
+for i in 1 2 3 4 5 6; do ./tmp_run_pr_chain_geovtx.sh work-nuecc48-nuf \
+    work-detfixgeo$i-469665 sim 469665; done   # pre-fix: 5x brm=4 / 1x brm=5
 ```
 
 ## 1. Method
@@ -206,6 +216,8 @@ Binary lineage (`md5sum local/lib/libWireCellClus.so`):
 | `a71d0dfe` | + all bucket-1 fixes (everything except `PRShower.cxx`) |
 | `566ad005` | + bucket-2 (`PRShower.cxx`), walk caps at 400 — superseded, see the cap lesson below |
 | `8f66490a` | same with walk caps at 4000 — **the shipped binary** |
+| `582704e0` | shipped + TEMP-DETDIAG probes in `broken_muon_id` (log-only; since removed) — the §5.10 root-cause evidence |
+| `07a78447` | + the deterministic out-edge order fix in `broken_muon_id` (§5.10, follow-up commit) |
 
 `libWireCellRoot.so` `1e0908be` throughout (no `root/` file touched).
 `wcdoctest-clus`: 49 cases / 565 assertions pass on every build.  Freshness
@@ -249,9 +261,10 @@ WARN so a binding cap is observable.**
 on a single binary.**  (1) evt 469665: five same-driver runs across three
 binaries produce `nue_score` −0.443180 (`brm_n_mu_segs`=4) *and* +1.217744
 (=3), **including both values from two runs of the shipped binary** — the
-§5.10 finding.  (2) evt 422851: `kine_reco_Enu` 1455.9768 vs 1455.9769
-across two runs of the shipped binary (evt 138009 flickers identically at
-the same magnitude).  Neither is attributable to any audit fix.
+§5.10 finding, since root-caused and fixed (see §5.10 and §4b).  (2) evt
+422851: `kine_reco_Enu` 1455.9768 vs 1455.9769 across two runs of the
+shipped binary (evt 138009 flickers identically at the same magnitude).
+Neither is attributable to any audit fix.
 
 **Regression check** — the four named pr/11 crash events (352365 class A,
 49951 C, 399118 D, 386354 E) complete rc=0 on the shipped binary
@@ -266,6 +279,54 @@ than observed: on events where an `add_shower` alias or a re-merge feeds a
 shower-cloud consumer (the pr/11 defect-F mechanism that moved evt 166870's
 `nue_score`), outputs can move, and revalidation at the next population run
 should expect that.
+
+## 4b. Follow-up round: the §5.10 bimodality — root cause, fix, gates
+
+All on the fix binary `07a78447` (= `8f66490a` + the `broken_muon_id`
+out-edge-order fix, nothing else; committed together with this doc update)
+against baseline `8f66490a` rebuilt from clean committed HEAD.
+
+**Repeat-identity gate (the determinism claim).**  Six pinned-vertex runs
+(`dl_weights=` → geometric) `work-detfixgeo{1..6}-469665` and two
+production (DL-on) runs `work-detfixdl{1,2}-469665`: **every scalar
+`T_tagger` branch equal and `hash_archive.py`-member-identical
+`pctree`/`mabc` in all pairs**.  Pre-fix, the same six-run pinned-vertex
+protocol on probe binary `582704e0` split 5-vs-1 between the two walk modes
+(`work-detgeo{1..6}-469665`) with the §5.10 AMBIGUOUS probe line firing on
+the flip vertex.
+
+**A/B arms (the scope-of-change claim), current config both sides:**
+
+| comparison | archives | `T_tagger` scalar rows |
+|---|---|---|
+| `work-detfix-ab30` vs `work-detbase-ab30` (30 MCP data evts) | **60/60 identical** | 17 identical + 13 absent-in-both, **0 diffs** |
+| `work-detfix-nuecc48` vs `work-detbase-nuecc48` (48 nueCC evts) | **96/96 identical** | 45 identical + 1 absent-in-both, **2 diffs** (`brm_*` only): evts 389538, 52672 |
+
+**The two row diffs are pre-existing coin flips being pinned, proven on the
+baseline binary alone.**  Four baseline samples each
+(`work-detbase-nuecc48` + `work-detbaserep{1,2,3}-<evt>`): evt 389538 is
+run-to-run bimodal `nue_score` 2.935744 / `brm_acc_length` 67.79 ↔
+2.470848 / 82.09 (2-vs-2); evt 52672 flips `brm_acc_length` 67.05 ↔ 64.84
+(1-vs-3, `nue_score` unchanged).  The fix deterministically lands each on
+one mode (82.09; 64.84).  So across the 78-event population the fix's only
+output effect is pinning two latent coin-flip events — everything else is
+row- and archive-identical.  (Evt 469665 itself is unchanged in this arm
+pair: under the committed config its walk has no ambiguous vertex; its flip
+reproduces under the audit-era config and under the pinned geometric
+vertex, where the fix pins it.)
+
+**The cross-era config delta (why the audit-era tags are stale as
+baselines).**  `work-detbase-nuecc48` vs `work-auditfinal-nuecc48` — the
+*same* binary md5 `8f66490a` on both sides — differs on **47/48** events'
+`T_tagger` rows including `nu_x/y/z`, because the audit-era arms ran under
+then-present uncommitted WIP in the two SBND cfg jsonnets (since reverted).
+Two lessons: (1) clean rebuild of committed HEAD reproduces `8f66490a`
+byte-for-byte, so the audit *binaries* carried no uncommitted code — the
+era delta is cfg-only; (2) the delta is **invisible in the archives**
+(`pctree`/`mabc` were 96/96 identical even cross-era) — archive identity
+does NOT cover `T_tagger`; row comparison is mandatory in any PR-chain
+gate.  Future gates must re-run a fresh baseline arm rather than compare
+against `work-auditdiag-*`/`work-auditfinal-*`/`work-mcp1kall-ab30audit*`.
 
 ## 5. Documented-only: surfaced, not fixed
 
@@ -322,18 +383,68 @@ in dead code, or need an owner decision.  None of these were changed.
 9. **Producers of the `paf {-1,-1}` sentinel** (`multi_trajectory_fit`,
    `Segment::clear_fit`) are left as-is on purpose: consumers now guard, and
    the sentinel is the documented "no volume" encoding.
-10. **NEW — a scalar `nue_score` is run-to-run bimodal on ≥1/48 nueCC
-    events.**  Found while attributing the gates: nueCC evt 469665 flips
-    between `nue_score = −0.443180` (`brm_n_mu_segs = 4`,
+10. **The bimodal `nue_score` (evt 469665) — root-caused and FIXED in the
+    follow-up commit.**  Found while attributing the gates: nueCC evt 469665
+    flips between `nue_score = −0.443180` (`brm_n_mu_segs = 4`,
     `brm_acc_length = 143.3`) and `+1.217744` (3, 55.4) across repeated runs
-    of the *same* binary under the same `setarch -R` driver — five runs over
-    three binaries produced both values, including both values from one
-    binary.  Exactly 6 scalar `T_tagger` branches move, all in the `brm_*`
-    (bad-reconstruction-muon chain) family, so the long-muon chain
-    accumulation picks up a fourth segment or not depending on residual
-    pointer/iteration order (the M4 class; until now only *vector* T_tagger
-    branches were known to be noisy — doc pr/2 §8).  Not caused and not
-    fixed by this audit; needs its own determinism round.
+    of the *same* binary under the same `setarch -R` driver.  Exactly 6
+    scalar `T_tagger` branches move, all `brm_*` — the
+    `broken_muon_id` long-muon chain (`NeutrinoTaggerNuE.cxx:1370`,
+    prototype `NeutrinoID_nue_tagger.h:1010`).
+
+    **Root cause (probe-confirmed).**  The PR graph stores vertex and edge
+    descriptors with `boost::setS` (`PRGraphType.h:91-93`), so
+    `boost::out_edges` iterates a vertex's edges in *descriptor pointer
+    order*, which varies run to run (tcmalloc heap layout, even under
+    `setarch -R`).  `broken_muon_id`'s step A walks `out_edges` and takes the
+    **first** segment passing the back-to-back collinearity cut
+    (180°−angle < 15°, length > 6 cm) with a `break`.  On evt 469665 (vertex
+    pinned to geometric via `dl_weights=`), a TEMP-DETDIAG probe caught two
+    segments passing the cut at one vertex, and the out-edge order literally
+    flipping between runs:
+
+    ```
+    geo1: stepA AMBIGUOUS at vtx 16: 2 candidates [29 27], chosen 29 (12.39 cm)
+    geo4: stepA AMBIGUOUS at vtx 16: 2 candidates [27 29], chosen 27 (87.75 cm)
+    ```
+
+    Five of six probe runs walked seg 29 (`brm` = 4 / 55.9 cm), one walked
+    seg 27 (5 / 137.7 cm) — a physics-visible score resolved by heap
+    addresses.  The prototype iterates a pointer-keyed
+    `std::set<ProtoSegment*>` at the same spot, i.e. its order is equally
+    arbitrary — so no parity is broken by choosing a stable one.
+
+    **Fix (no knob — determinism bug):** collect the vertex's out-edge
+    segments into an `IndexedSegmentSet` (stable graph-index = insertion
+    order) and run the first-match scan on that.  Verification, all on fix
+    binary `07a78447`: 6/6 pinned-vertex repeats and 2/2 production (DL-on)
+    repeats **fully identical** — every scalar `T_tagger` branch equal and
+    `hash_archive.py` member-identical `pctree`/`mabc` archives
+    (`work-detfixgeo{1..6}-469665`, `work-detfixdl{1,2}-469665`); plus the
+    §4b arms.
+
+    **The apparent "second layer" resolved — a config delta, not SCN
+    instability.**  Mid-investigation the DL vertex seemed to sit in one of
+    two positions ~45 cm apart depending on the binary.  §4b proves the
+    real cause: the audit-era arms ran while the tree carried
+    *uncommitted* WIP in `cfg/pgrapher/common/clus.jsonnet` +
+    `cfg/pgrapher/experiment/sbnd/clus.jsonnet` (runtime inputs via
+    `WIRECELL_PATH`, not baked into the binary), since reverted by the
+    concurrent session.  Re-running the byte-identical binary `8f66490a`
+    under the committed config moves 47/48 nueCC rows (including
+    `nu_x/y/z`), while within any one config every repeat is fully
+    reproducible.  No SCN run-to-run instability was observed anywhere in
+    this round; the M4 caution stands on its own history, not on this
+    evidence.  The one residual: `kine_reco_Enu` flickers ±0.0001 MeV on
+    evts 422851/138009 within a fixed binary+config (FP-level,
+    unattributed).
+
+    **The residual class.**  `boost::out_edges` is iterated at 132 sites in
+    13 `clus/` files; most are order-insensitive (counting, any-match,
+    inserting into Indexed*Sets), but any *first-match-break*, tie-broken
+    min/max, or float-accumulation loop over raw `out_edges` shares this
+    hazard.  A dedicated sweep is a follow-up candidate; this commit fixes
+    the one site with observed physics impact.
 
 ## 6. Relation to the pr/11 fixes
 
