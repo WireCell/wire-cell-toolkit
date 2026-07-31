@@ -2194,7 +2194,7 @@ namespace WireCell::Clus::PR {
         // std::cout << "[clustering_points_segments] TOTAL took " << MS(Clock::now() - t_total).count() << " ms" << std::endl;
     }
 
-    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut){
+    bool segment_determine_shower_direction(SegmentPtr segment, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& cloud_name, double MIP_dQdx, double rms_cut, double mip_dqdx){
         segment->dirsign(0);
         const auto& fits = segment->fits();
         
@@ -2464,7 +2464,10 @@ namespace WireCell::Clus::PR {
         } else {
             // Not shower-like, use simpler direction determination
             if (total_length < 5*units::cm) {
-                if (!segment_is_shower_trajectory(segment)) segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model);
+                // docs/pr/2 sec 8.1a: forward the configured MIP scales instead of the
+                // uBooNE header defaults (50000/43000 e/cm).  uBooNE byte-identical:
+                // the forwarded values equal the old defaults there.
+                if (!segment_is_shower_trajectory(segment, 10*units::cm, mip_dqdx)) segment_determine_dir_track(segment, 0, fits.size(), particle_data, recomb_model, MIP_dQdx);
                 // For short segments, could call determine_dir_track here if needed
             } else {
                 // Count consistent directions at each end

@@ -120,7 +120,7 @@ void PatternAlgorithms::determine_direction(Graph& graph, Facade::Cluster& clust
             t_shower_traj += MS(Clock::now() - t0);
         } else if (seg->flags_any(SegmentFlags::kShowerTopology)) {
             // Topology shower: determine direction, then set electron particle info
-            segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median);
+            segment_determine_shower_direction(seg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
             {
                 const int pdg_code = 11; // electron
                 auto four_momentum = segment_cal_4mom(seg, pdg_code, particle_data, recomb_model, m_mip_dqdx_median);

@@ -342,3 +342,34 @@ projection pads with edges `lo-0.5 … hi-0.5` on both axes, so a bin is centred
 its index.  A port that "fixes" the writer to match WCP re-breaks that viewer by
 exactly half a channel and half a slice.  Measurement and full history:
 wcp-porting-validation `sbnd_xin/docs/pr/7_magnify-tracking-projection-alignment.md`.
+
+## TrackFitting T frame: WCP fits in TIME-SLICE units, WCT fits in TICK units
+
+INTENTIONAL divergence — do not "restore" the commented-out
+`nticks_live_slice` factor in `clus/src/TrackFitting.cxx` (`time_slice_width =
+md["tick_drift"]`).
+
+WCP's dQ/dx fit works in time-slice units end to end: the data T coordinate is
+`GetTimeSlice()` (one unit = nrebin = 4 ticks), the model uses `slope_xt =
+1/time_slice_width` with `time_slice_width = mp.get_ts_width()` (= 4 ticks of
+drift, 2.202 mm at uBooNE), and `sigma_L = hypot(diff_sigma_L,
+add_sigma_L)/time_slice_width`
+(`prototype_base/pid/src/PR3DCluster_dQ_dx_fit.h:303-305,435,612`).
+
+WCT re-expresses the same fit in tick units end to end: the data T coordinate
+is a tick index (`Grouping::convert_3Dpoint_time_ch`: `tind = round(time /
+tick)`), the model uses `slope_t = 1/(xsign*drift_speed*tick)`
+(`TrackFitting.cxx:517`), and sigma divides by the per-tick drift
+(`tick_drift`).  Both coordinate and sigma scale by the same factor of 4, so
+residual/sigma — the only thing the chi^2 sees — is identical.  The physical
+add_sigma_L also matches: WCP `1.428249*ts_width/nrebin/0.5` = WCT preset
+`1.428249*0.5505mm/0.5` = 1.5725 mm.
+
+Verified at runtime (2026-07-30, instrumented build): model `central_T`
+matches the data tick index to within rounding on both detectors (uBooNE
+7052.28 vs 7052 with mm/T-unit = 0.5505 = tick_drift, not 2.202; SBND 1793.09
+vs 1793 with 0.7815, not 3.126), and physical sigma_L is sane (2.22 mm uBooNE
+/ 2.60 mm SBND).  Multiplying `time_slice_width` by `nticks_live_slice`
+"for prototype parity" would inflate sigma 4x against tick-indexed data.
+Full record: wcp-porting-validation
+`sbnd_xin/docs/pr/2_uboone-chain-gap-analysis-and-validation-plan.md` sec 8.3a.

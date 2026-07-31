@@ -503,7 +503,7 @@ VertexPtr PatternAlgorithms::compare_main_vertices_all_showers(Graph& graph, Fac
     clustering_points_segments({tmp_sg}, dv, "associate_points", 0.5*units::cm, 3.0);
     
     // Determine shower direction
-    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median);
+    segment_determine_shower_direction(tmp_sg, particle_data, recomb_model, "associate_points", m_mip_dqdx_median, 0.4*units::cm, m_mip_dqdx);
     
     double tmp_sg_length = segment_track_length(tmp_sg);
     int tmp_sg_dir = tmp_sg->dirsign();
