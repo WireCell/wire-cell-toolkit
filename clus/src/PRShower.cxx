@@ -108,6 +108,16 @@ namespace WireCell::Clus::PR {
             m_start_segment = nullptr;
             return *this;
         }
+        // Membership gate: if the segment is already part of this shower's
+        // view its points are already in the shower clouds, and the merge
+        // below would duplicate them.  Instrumented on SBND nueCC evt 163543:
+        // set_start_segment() on an already-member segment re-added 9 "fit" /
+        // 85 "associate_points" points (the examine_showers
+        // add_segment-then-set_start_segment sequence), and the
+        // fresh-used_segments complete_structure pass re-added another
+        // 11 / 140 through add_segment().  Graph membership was always
+        // idempotent (std::set); the cloud merge now is too.
+        const bool was_member = this->has_edge(seg->get_descriptor());
         TrajectoryView::add_segment(seg);
         m_start_segment = seg;
         invalidate_segment_caches();
@@ -126,7 +136,9 @@ namespace WireCell::Clus::PR {
             }
         }
         
-        // Merge dynamic point clouds from segment to shower with the provided names
+        // Merge dynamic point clouds from segment to shower with the provided
+        // names.  Seeding an as-yet-cloudless shower is always safe (there is
+        // nothing to duplicate); the merge branch is gated on !was_member.
         if (!cloud_name_fit.empty()) {
             auto seg_dpc_fit = seg->dpcloud(cloud_name_fit);
             if (seg_dpc_fit) {
@@ -135,9 +147,11 @@ namespace WireCell::Clus::PR {
                     // First segment: seed the shower DPC with a COPY of this
                     // segment's DPC -- never the segment's own object (clone_dpc).
                     this->dpcloud(cloud_name_fit, clone_dpc(*seg_dpc_fit));
-                } else {
+                } else if (!was_member && shower_dpc_fit != seg_dpc_fit) {
                     // F14: merge wpid_params so the shower DPC can answer queries for
                     // all (apa,face) pairs present in any constituent segment's DPC.
+                    // The `!=` test mirrors add_segment(): a merge onto an aliased
+                    // cloud would be a self-append (doc pr/11 sec 6.4).
                     shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);
                     shower_dpc_fit->add_points(*seg_dpc_fit);
                 }
@@ -150,7 +164,7 @@ namespace WireCell::Clus::PR {
                 auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
                 if (!shower_dpc_associate) {
                     this->dpcloud(cloud_name_associate, clone_dpc(*seg_dpc_associate));
-                } else {
+                } else if (!was_member && shower_dpc_associate != seg_dpc_associate) {
                     shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);
                     shower_dpc_associate->add_points(*seg_dpc_associate);
                 }
@@ -165,6 +179,15 @@ namespace WireCell::Clus::PR {
         if (! seg->descriptor_valid()) {
             return;
         }
+        // Membership gate -- same rationale as set_start_segment() above:
+        // callers routinely re-add segments that are already in the shower
+        // (fresh used_segments sets handed to
+        // complete_structure_with_start_segment, the examine_showers merge
+        // loop), and the DPC merge below was unconditional while graph
+        // membership is a no-op-on-repeat std::set insert.  Instrumented on
+        // SBND nueCC evt 163543: a re-added segment put 11 "fit" / 140
+        // "associate_points" duplicate points into the shower cloud.
+        const bool was_member = this->has_edge(seg->get_descriptor());
         TrajectoryView::add_segment(seg);
         invalidate_segment_caches();
 
@@ -194,7 +217,7 @@ namespace WireCell::Clus::PR {
                 auto shower_dpc_fit = this->dpcloud(cloud_name_fit);
                 if (!shower_dpc_fit) {
                     this->dpcloud(cloud_name_fit, clone_dpc(*seg_dpc_fit));
-                } else if (shower_dpc_fit != seg_dpc_fit) {
+                } else if (!was_member && shower_dpc_fit != seg_dpc_fit) {
                     shower_dpc_fit->merge_wpid_params(*seg_dpc_fit);  // F14
                     shower_dpc_fit->add_points(*seg_dpc_fit);
                 }
@@ -207,7 +230,7 @@ namespace WireCell::Clus::PR {
                 auto shower_dpc_associate = this->dpcloud(cloud_name_associate);
                 if (!shower_dpc_associate) {
                     this->dpcloud(cloud_name_associate, clone_dpc(*seg_dpc_associate));
-                } else if (shower_dpc_associate != seg_dpc_associate) {
+                } else if (!was_member && shower_dpc_associate != seg_dpc_associate) {
                     shower_dpc_associate->merge_wpid_params(*seg_dpc_associate);  // F14
                     shower_dpc_associate->add_points(*seg_dpc_associate);
                 }
@@ -249,6 +272,12 @@ namespace WireCell::Clus::PR {
         for (auto edesc : shower.edges()) {
             SegmentPtr seg = m_full_graph[edesc].segment;
             if (!seg || !seg->descriptor_valid()) continue;
+            // Membership gate -- same rationale as add_segment(): a segment
+            // already in this shower's view has its points in the shower
+            // clouds already, and batching them again below would duplicate
+            // them (both showers holding the same segment is exactly the
+            // absorb-loop situation this function serves).
+            if (this->has_edge(edesc)) continue;
             // Graph-only add: DPCs are handled by the batch logic below to avoid
             // double-adding points (Shower::add_segment would also merge DPCs).
             TrajectoryView::add_segment(seg);
@@ -257,8 +286,16 @@ namespace WireCell::Clus::PR {
                 auto seg_dpc = seg->dpcloud(cloud_name_fit);
                 if (seg_dpc) {
                     if (!this->dpcloud(cloud_name_fit)) {
-                        this->dpcloud(cloud_name_fit, seg_dpc);  // seed from first segment
-                    } else {
+                        // Seed with a COPY (clone_dpc), never the segment's own
+                        // shared_ptr: dpcloud(name, ptr) stores the pointer
+                        // verbatim (PRCommon.h), so seeding by pointer ALIASES
+                        // the shower's cloud to the segment's -- the defect-F
+                        // shape (doc pr/11 sec 6.7) this file's other seeding
+                        // branches were already cured of.  With an aliased
+                        // cloud a later pass through this loop would append
+                        // the accumulated cloud to itself.
+                        this->dpcloud(cloud_name_fit, clone_dpc(*seg_dpc));
+                    } else if (this->dpcloud(cloud_name_fit) != seg_dpc) {
                         // F14: merge wpid_params before batching so the shower DPC
                         // serves queries for all (apa,face) pairs across all segments.
                         this->dpcloud(cloud_name_fit)->merge_wpid_params(*seg_dpc);
@@ -271,8 +308,8 @@ namespace WireCell::Clus::PR {
                 auto seg_dpc = seg->dpcloud(cloud_name_associate);
                 if (seg_dpc) {
                     if (!this->dpcloud(cloud_name_associate)) {
-                        this->dpcloud(cloud_name_associate, seg_dpc);
-                    } else {
+                        this->dpcloud(cloud_name_associate, clone_dpc(*seg_dpc));
+                    } else if (this->dpcloud(cloud_name_associate) != seg_dpc) {
                         this->dpcloud(cloud_name_associate)->merge_wpid_params(*seg_dpc);
                         batch_associate.append(seg_dpc->points());
                     }
@@ -544,7 +581,18 @@ namespace WireCell::Clus::PR {
         bool flag_continue = true;
         while (flag_continue) {
             flag_continue = false;
-            
+            // Progress guard: the s_vtx == m_start_vertex branch requests
+            // another pass without touching any state, and the only escape is
+            // find_vertices() moving s_vtx below.  find_vertices() returns
+            // {nullptr, nullptr} for an invalid segment descriptor
+            // (PRGraph.cxx), and a self-loop segment leaves s_vtx unchanged
+            // too -- either way the pass is an exact no-op and the loop never
+            // terminates (the same silent-no-op shape as the fixed class-A
+            // hang, doc pr/11 sec 6.1).  Detect "nothing moved" at the end of
+            // the pass and stop.
+            const SegmentPtr pass_start_seg = s_seg;
+            const VertexPtr pass_start_vtx = s_vtx;
+
             // If current vertex is start_vertex, continue
             if (s_vtx == m_start_vertex) {
                 flag_continue = true;
@@ -575,6 +623,10 @@ namespace WireCell::Clus::PR {
                     s_vtx = vertices.first;
                 } else if (vertices.second && vertices.second != s_vtx) {
                     s_vtx = vertices.second;
+                }
+                if (s_seg == pass_start_seg && s_vtx == pass_start_vtx) {
+                    SPDLOG_LOGGER_WARN(s_log, "get_last_segment_vertex_long_muon: a pass requested continuation but moved neither segment nor vertex (shower {}); stopping to avoid an unbounded loop", m_shower_id);
+                    break;
                 }
             }
         }
