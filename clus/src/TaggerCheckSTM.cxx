@@ -2886,7 +2886,6 @@ private:
         }
 
         // Per-face distance-to-anode helper: replaces hardcoded x < threshold comparisons.
-        // Falls back to |x| if the point is outside all known volumes (preserves UBoone behaviour).
         //
         // face_dirx (IAnodeFace::dirx) points from the anode INTO the drift
         // volume, and the sensitive-volume BoundingBox is component-wise
@@ -2897,10 +2896,28 @@ private:
         // productions, so the corrected form is the anode_dist_fix knob
         // (docs/63 round 4a) and the inverted form stays the byte-identical
         // default.
+        //
+        // Uncontained points (outside every sensitive volume -- exactly the
+        // anode-clipped endpoints this helper exists for): the legacy |x|
+        // fallback is uBooNE-frame (anode at x = 0; on SBND x = 0 is the
+        // cathode).  With anode_dist_fix ON it becomes the distance to the
+        // nearest anode plane across all faces (docs/pr/2 sec 7.2).
         auto dist_to_anode = [this](const WireCell::Point& pt) -> double {
             WirePlaneId wpid = m_dv->contained_by(pt);
             if (wpid.apa() < 0 || wpid.face() < 0) {
-                return std::abs(pt.x());
+                if (!m_anode_dist_fix) return std::abs(pt.x());
+                double best = -1;
+                for (const auto& [ident, aface] : m_dv->wpident_faces()) {
+                    (void)aface;
+                    WirePlaneId wid(ident);
+                    WirePlaneId wpid_u(kUlayer, wid.face(), wid.apa());
+                    const int fdx = m_dv->face_dirx(wpid_u);
+                    WireCell::BoundingBox bb = m_dv->inner_bounds(wpid_u);
+                    const double ax = (fdx > 0) ? bb.bounds().first.x() : bb.bounds().second.x();
+                    const double d = std::abs(pt.x() - ax);
+                    if (best < 0 || d < best) best = d;
+                }
+                return best < 0 ? std::abs(pt.x()) : best;
             }
             WirePlaneId wpid_u(kUlayer, wpid.face(), wpid.apa());
             int fdx = m_dv->face_dirx(wpid_u);

@@ -207,7 +207,13 @@ bool WireCell::Clus::PR::PatternAlgorithms::search_for_vertex_activities(Graph& 
                 }
                 if (ncount != 0) sum_charge /= ncount;
                 
-                if (min_dis + (min_dis_u + min_dis_v + min_dis_w) / std::sqrt(3.0) > max_dis && sum_charge > 20000) {
+                // prototype (NeutrinoID.h:1172): sum_charge > 20000 e = 20/43
+                // of the MIP-median dQ/dx integrated over 1 cm.  Expressed on
+                // m_mip_dqdx_median so it scales with the detector; exactly
+                // 20000 at the uBooNE default (43000*20 = 860000, /43 = 20000,
+                // FP-exact).  docs/pr/2 sec 7.3.
+                if (min_dis + (min_dis_u + min_dis_v + min_dis_w) / std::sqrt(3.0) > max_dis &&
+                    sum_charge > m_mip_dqdx_median * units::cm * 20.0 / 43.0) {
                     max_dis = min_dis + (min_dis_u + min_dis_v + min_dis_w) / std::sqrt(3.0);
                     max_idx = idx;
                     found = true;
@@ -1982,10 +1988,14 @@ bool PatternAlgorithms::fit_vertex(Facade::Cluster& cluster, VertexPtr vertex, V
         new_charge = grouping->get_ave_3d_charge(new_pos, new_wpid.apa(), new_wpid.face(), 0.6*units::cm);
     }
     
-    // Check charge conditions - if new position has much lower charge, keep old position
-    if (new_charge < 5000 && new_charge < 0.4*old_charge) {
+    // Check charge conditions - if new position has much lower charge, keep old position.
+    // prototype (NeutrinoID_improve_vertex.h:26,28): 5000 / 8000 e = 5/43 and
+    // 8/43 of the MIP-median dQ/dx integrated over 1 cm.  Expressed on
+    // m_mip_dqdx_median so they scale with the detector; exactly 5000 / 8000
+    // at the uBooNE default (215000/43 and 344000/43, FP-exact).  docs/pr/2 sec 7.3.
+    if (new_charge < m_mip_dqdx_median * units::cm * 5.0 / 43.0 && new_charge < 0.4*old_charge) {
         results.second = old_pos;
-    } else if (new_charge < 8000 && new_charge < 0.6*old_charge) {
+    } else if (new_charge < m_mip_dqdx_median * units::cm * 8.0 / 43.0 && new_charge < 0.6*old_charge) {
         // Reduce the strength - keep old position
         results.second = old_pos;
         new_charge = old_charge;

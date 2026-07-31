@@ -430,7 +430,12 @@ namespace WireCell::Clus::PR {
                 } else {
                     return std::make_tuple(p, dir, dir1, true);
                 }
-            } else if (local_dQdx > 25000/units::cm) { //not too low ...
+            // prototype (ProtoSegment.cxx:937): sum_dQ/sum_dx > 2500 e/mm =
+            // 25000 e/cm = 25/43 of the uBooNE MIP median.  Expressed on the
+            // routed dQ_dx_threshold (= m_mip_dqdx_median) so it scales with
+            // the detector; exactly 25000/units::cm at the uBooNE default
+            // (4300*25 = 107500, /43 = 2500, both FP-exact).  docs/pr/2 sec 7.3.
+            } else if (local_dQdx > dQ_dx_threshold * 25.0 / 43.0) { //not too low ...
                 if (flag_switch) {
                     return std::make_tuple(p, dir1, dir, false);
                 } else {

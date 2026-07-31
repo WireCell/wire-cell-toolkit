@@ -784,7 +784,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // physical-scale transfer of the legacy 2.3 (docs/pr/10 sec 5).
               // false/null restore the inline formula and the 2.3 literal.
               sp_dedx_use_recomb_model=true,
-              sp_mean_dedx_cut=2.23) = {
+              sp_mean_dedx_cut=2.23,
+              // dl_vtx_cut: max distance (mm; C++ default 25.0 = 2.5 cm) from
+              // the DL SCN prediction to accept a candidate vertex.  Threaded
+              // for configurability (docs/pr/2 sec 7.4); null keeps the C++
+              // default, which is coupled to the uBooNE-trained net (gap G3).
+              dl_vtx_cut=null) = {
     // Only gate when the caller actually supplied a window; beam_window=[0,0]
     // (the arg default, i.e. "no beam window") must not silently drop every
     // cluster's tagger evaluation.
@@ -1135,7 +1140,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             kine_w_value=kine_w_value,
             muon_dqdx_curve=muon_dqdx_curve,
             sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
-            sp_mean_dedx_cut=sp_mean_dedx_cut),
+            sp_mean_dedx_cut=sp_mean_dedx_cut,
+            dl_vtx_cut=dl_vtx_cut),
         // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
         // geometry-free TaggerInfo consumers).  The weights are the
         // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -1470,7 +1476,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // arg comments; false/null restore the pre-pr/10 legacy behavior.
        muon_dqdx_curve=[0.8826, 1.0587, 18, 0.4745],
        use_power_recomb=true,
-       sp_dedx_use_recomb_model=true, sp_mean_dedx_cut=2.23)::
+       sp_dedx_use_recomb_model=true, sp_mean_dedx_cut=2.23,
+       // dl_vtx_cut (mm) is threaded for configurability only (docs/pr/2
+       // sec 7.4); null keeps the C++ 25.0 (= 2.5 cm) default.
+       dl_vtx_cut=null)::
         clus_pr(anodes, dump=dump,
                 output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                 rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1531,6 +1540,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 muon_dqdx_curve=muon_dqdx_curve,
                 use_power_recomb=use_power_recomb,
                 sp_dedx_use_recomb_model=sp_dedx_use_recomb_model,
-                sp_mean_dedx_cut=sp_mean_dedx_cut),
+                sp_mean_dedx_cut=sp_mean_dedx_cut,
+                dl_vtx_cut=dl_vtx_cut),
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
 }
