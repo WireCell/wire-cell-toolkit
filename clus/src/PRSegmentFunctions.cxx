@@ -1657,12 +1657,18 @@ namespace WireCell::Clus::PR {
         std::vector<double> dQ_dx(npoints, 0);
         
         double dis = 0;
-        // Unit convention: fits[i].dx is stored in WireCell length units (cm), so
-        // dQ_dx[i] = dQ / dx has units of [charge / cm].  The reference tables used
-        // by segment_do_track_pid are also in [charge / cm], so the ratio is self-consistent.
-        // Do NOT divide by units::cm here — the prototype member function operated the
-        // same way (ProtoSegment.cxx: dQ_dx[i] = dQ_vec[i] / (dx_vec[i]/units::cm + 1e-9)
-        // where dx_vec carried raw WCP units == cm).
+        // Unit convention (docs/pr/2 sec 7.1c): fits[i].dx is INTERNAL length
+        // (mm = 1, cm = 10 -- WCP and WCT share this system), so dQ_dx[i] =
+        // dQ / dx is [charge / internal unit].  do_track_comp's reference
+        // templates are converted to the same scale (scalar_function(cm) /
+        // units::cm, MIP_dQdx = m_mip_dqdx), so data and templates are
+        // self-consistent; the KS and sum-ratio comparisons only need the two
+        // sides to share a scale.  Do NOT divide dx by units::cm here: that
+        // would make the data e/cm, 10x the templates -- exactly the SSM
+        // get_scores bug fixed in the sec 7.8 round.  (The prototype's
+        // do_track_pid path was also self-consistent, just in e/cm on both
+        // sides: ProtoSegment.cxx data dQ_vec/(dx_vec/units::cm + 1e-9)
+        // against e/cm TGraph tables and the 50e3 constant.)
         for (int i = start_n1; i <= end_n1; i++) {
             L.at(i - start_n1) = dis;
             if (fits[i].dx > 0) {
