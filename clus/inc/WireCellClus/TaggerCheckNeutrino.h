@@ -118,6 +118,10 @@ public:
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged
                                        // cosmic upstream: flag_TGM, flag_STM, or lm_flag > 0.
+        bool m_nu_skip_cosmic_bundle{false};  // if true, that verdict vetoes the whole flash bundle
+                                              // (every in-window main sharing matched_flash_gid with a
+                                              // cosmic-tagged main), not just the tagged main itself.
+                                              // Inert unless m_nu_skip_cosmic.
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

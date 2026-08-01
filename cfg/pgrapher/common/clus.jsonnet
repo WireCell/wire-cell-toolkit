@@ -371,7 +371,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -394,6 +394,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on (beam gate only): skip in-window mains with flag_TGM/flag_STM/lm_flag>0.
               + (if nu_skip_cosmic then { nu_skip_cosmic: true } else {})
+              // C++ default false.  Key omitted when off => byte-identical pre-knob config.
+              // When on (needs nu_skip_cosmic): the cosmic verdict vetoes the whole flash
+              // bundle -- every in-window main sharing matched_flash_gid with a tagged main
+              // is skipped, so no PR runs on a bundle that holds a cosmic (docs/pr/3 sec. 8).
+              + (if nu_skip_cosmic_bundle then { nu_skip_cosmic_bundle: true } else {})
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on: direction-weakness reads use segment_is_dir_weak() (score thresholds),
               // the faithful port of prototype ProtoSegment::is_dir_weak() -- see sbnd_xin/docs/pr/6.

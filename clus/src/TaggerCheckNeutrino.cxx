@@ -4,6 +4,7 @@
 
 #include "WireCellUtil/Persist.h"
 #include <chrono>
+#include <set>
 
 #include <cstdlib>
 
@@ -170,6 +171,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_beam_window_low         = get(config, "beam_window_low",         m_beam_window_low);
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
+    m_nu_skip_cosmic_bundle   = get(config, "nu_skip_cosmic_bundle",   m_nu_skip_cosmic_bundle);
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -241,6 +243,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["beam_window_low"] = m_beam_window_low;   // beam window on cluster_t0; low >= high disables the
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
     cfg["nu_skip_cosmic"] = m_nu_skip_cosmic;     // beam-gate only: skip in-window mains with flag_TGM/flag_STM/lm_flag>0
+    cfg["nu_skip_cosmic_bundle"] = m_nu_skip_cosmic_bundle;  // that verdict vetoes the whole matched_flash_gid bundle
 
 
     return cfg;
@@ -292,6 +295,31 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // clusters, neutrino PR runs on the one whose matched flash time
         // (cluster_t0) falls inside the beam window; ties broken by length.
         // Companions are the associated clusters sharing its matched_flash_gid.
+
+        // nu_skip_cosmic_bundle: hoist the cosmic verdicts to bundle
+        // granularity before selecting.  A flash bundle can hold more than one
+        // main (SBND evt 18255/52195: gid 6 holds the TGM-tagged 513 cm
+        // cathode-crosser 13 *and* a 5-point 1.7 cm shard 5); with the
+        // per-main rule the shard becomes the nu candidate and drags the
+        // bundle's untagged 400 cm associated muon through a full PR.  Keying
+        // on matched_flash_gid is the same bundle definition the companion
+        // loop below uses.  Empty set when the knob is off => no behavior
+        // change.  int-keyed, so the iteration order is stable.
+        std::set<int> cosmic_gids;
+        if (m_nu_skip_cosmic && m_nu_skip_cosmic_bundle) {
+            for (auto* cluster : grouping.children()) {
+                if (!cluster->get_flag(Flags::main_cluster)) continue;
+                const double t0c = cluster->get_cluster_t0();
+                if (t0c < m_beam_window_low || t0c >= m_beam_window_high) continue;
+                const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                if (gid < 0) continue;
+                if (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
+                    || cluster->get_scalar<int>("lm_flag", -1) > 0) {
+                    cosmic_gids.insert(gid);
+                }
+            }
+        }
+
         for (auto* cluster : grouping.children()) {
             if (!cluster->get_flag(Flags::main_cluster)) continue;
             n_main_clusters++;
@@ -312,6 +340,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                        cluster->get_cluster_id(), t0/units::us, cluster->get_length()/units::cm,
                                        tgm, stm, lm);
                     continue;
+                }
+                if (!cosmic_gids.empty()) {
+                    const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                    if (gid >= 0 && cosmic_gids.count(gid)) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window cluster {} (t0 {:.3f} us, L {:.1f} cm) shares flash bundle gid {} with a cosmic-tagged main; skipping (nu_skip_cosmic_bundle)",
+                                           cluster->get_cluster_id(), t0/units::us,
+                                           cluster->get_length()/units::cm, gid);
+                        continue;
+                    }
                 }
             }
             if (!main_cluster) {

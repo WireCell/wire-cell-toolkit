@@ -666,6 +666,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // 2026-07-30, sbnd_xin/docs/pr/3); zero production impact while
               // tagger_check_neutrino is not in pipeline_names.
               nu_skip_cosmic=true,
+              // nu_skip_cosmic_bundle: lift that verdict from the main to the
+              // whole flash bundle -- if ANY in-window main sharing a
+              // matched_flash_gid is cosmic-tagged, no main of that bundle is
+              // eligible, so neutrino PR does not run on the bundle at all.
+              // Needed because a bundle can hold a second main: SBND evt
+              // 18255/52195 gid 6 holds the TGM-tagged 513 cm cathode-crosser
+              // AND a 5-point 1.7 cm shard, and under the per-main rule the
+              // shard became the nu candidate and pulled the bundle's untagged
+              // 400 cm associated muon through a full PR + track fit.
+              // C++ default false (key omitted when off => byte-identical
+              // uBooNE config).  DEFAULT TRUE for SBND (owner 2026-08-01,
+              // sbnd_xin/docs/pr/3 sec. 8).  NOT bit-identical: it removes PR
+              // output on cosmic bundles that previously produced it.
+              nu_skip_cosmic_bundle=true,
               // dir_weak_use_score: route the PR chain's direction-weakness
               // reads through segment_is_dir_weak() -- the faithful port of the
               // prototype's ONLY public accessor ProtoSegment::is_dir_weak()
@@ -1139,6 +1153,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
             nu_skip_cosmic=nu_skip_cosmic,
+            nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
             mip_dqdx_median=mip_dqdx_median,
@@ -1459,6 +1474,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        stm_d66_cuts=true, stm_michel_res_cm=6.5, stm_proton_tm_max=1.05,
        stm_proton_b_ks2_max=0.055, stm_proton_c_peak_max=4.1,
        beam_window_only=true, nu_skip_cosmic=true,
+       // Bundle-level cosmic veto -- see the clus_pr arg comment
+       // (docs/pr/3 sec. 8).  NOT bit-identical when on.
+       nu_skip_cosmic_bundle=true,
        // prototype-faithful is_dir_weak() reads -- see the clus_pr arg comment.
        dir_weak_use_score=true,
        // PR-chain median-dQ/dx scale + proton direction vote -- see the
@@ -1539,6 +1557,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 stm_proton_c_peak_max=stm_proton_c_peak_max,
                 beam_window_only=beam_window_only,
                 nu_skip_cosmic=nu_skip_cosmic,
+                nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
                 dir_weak_use_score=dir_weak_use_score,
                 mip_dqdx_median=mip_dqdx_median,
                 proton_dir_vote=proton_dir_vote,
