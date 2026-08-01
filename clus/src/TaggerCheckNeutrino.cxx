@@ -172,6 +172,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_beam_window_high        = get(config, "beam_window_high",        m_beam_window_high);
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
     m_nu_skip_cosmic_bundle   = get(config, "nu_skip_cosmic_bundle",   m_nu_skip_cosmic_bundle);
+    m_nu_skip_cosmic_bundle_min_length = get(config, "nu_skip_cosmic_bundle_min_length", m_nu_skip_cosmic_bundle_min_length);  // cm
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -244,6 +245,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["beam_window_high"] = m_beam_window_high; // gate (uBooNE single-main selection).
     cfg["nu_skip_cosmic"] = m_nu_skip_cosmic;     // beam-gate only: skip in-window mains with flag_TGM/flag_STM/lm_flag>0
     cfg["nu_skip_cosmic_bundle"] = m_nu_skip_cosmic_bundle;  // that verdict vetoes the whole matched_flash_gid bundle
+    cfg["nu_skip_cosmic_bundle_min_length"] = m_nu_skip_cosmic_bundle_min_length;  // cm; > 0 spares untagged bundle-mates at least this long (docs/pr/16 design A); 0 = veto all
 
 
     return cfg;
@@ -344,10 +346,29 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 if (!cosmic_gids.empty()) {
                     const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
                     if (gid >= 0 && cosmic_gids.count(gid)) {
-                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window cluster {} (t0 {:.3f} us, L {:.1f} cm) shares flash bundle gid {} with a cosmic-tagged main; skipping (nu_skip_cosmic_bundle)",
-                                           cluster->get_cluster_id(), t0/units::us,
-                                           cluster->get_length()/units::cm, gid);
-                        continue;
+                        // min_length guard (docs/pr/16 design A): an untagged
+                        // in-window main at least this long survives the
+                        // bundle veto -- the taggers examined it and declined
+                        // to tag it, and its cosmic-tagged bundle-mate stays
+                        // out of the PR ensemble regardless (companions are
+                        // gathered from associated-only clusters below).  The
+                        // guard exists to keep vetoing unexamined shards
+                        // (out-of-scope mains carry no verdict; SBND evt
+                        // 18255/52195's 1.3 cm shard 5).  0 (default) = veto
+                        // every bundle-mate, byte-identical to pre-knob.
+                        const double min_len = m_nu_skip_cosmic_bundle_min_length * units::cm;
+                        if (min_len > 0 && cluster->get_length() >= min_len) {
+                            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window cluster {} (t0 {:.3f} us, L {:.1f} cm) shares flash bundle gid {} with a cosmic-tagged main but is untagged and >= {:.1f} cm; kept (nu_skip_cosmic_bundle_min_length)",
+                                               cluster->get_cluster_id(), t0/units::us,
+                                               cluster->get_length()/units::cm, gid,
+                                               m_nu_skip_cosmic_bundle_min_length);
+                        }
+                        else {
+                            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: in-window cluster {} (t0 {:.3f} us, L {:.1f} cm) shares flash bundle gid {} with a cosmic-tagged main; skipping (nu_skip_cosmic_bundle)",
+                                               cluster->get_cluster_id(), t0/units::us,
+                                               cluster->get_length()/units::cm, gid);
+                            continue;
+                        }
                     }
                 }
             }

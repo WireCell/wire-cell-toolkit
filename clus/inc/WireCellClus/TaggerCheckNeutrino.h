@@ -122,6 +122,13 @@ public:
                                               // (every in-window main sharing matched_flash_gid with a
                                               // cosmic-tagged main), not just the tagged main itself.
                                               // Inert unless m_nu_skip_cosmic.
+        double m_nu_skip_cosmic_bundle_min_length{0};  // cm.  > 0 spares an UNTAGGED in-window main at
+                                                       // least this long from the bundle veto (its
+                                                       // cosmic-tagged bundle-mate stays excluded --
+                                                       // companions are associated-only).  0 = legacy:
+                                                       // the veto removes every bundle-mate.
+                                                       // Inert unless m_nu_skip_cosmic_bundle.
+                                                       // docs/pr/16 design A (SBND 15).
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

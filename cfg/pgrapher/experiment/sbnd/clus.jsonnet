@@ -690,6 +690,17 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // sbnd_xin/docs/pr/3 sec. 8).  NOT bit-identical: it removes PR
               // output on cosmic bundles that previously produced it.
               nu_skip_cosmic_bundle=true,
+              // nu_skip_cosmic_bundle_min_length (cm): design-A guard on the
+              // bundle veto (docs/pr/16 sec. 7).  An UNTAGGED in-window main at
+              // least this long survives the veto: the TGM/STM taggers examined
+              // it and declined to tag it, and the cosmic-tagged bundle-mate
+              // stays out of the PR ensemble regardless (companions are
+              // associated-only).  Unexamined shards (out-of-scope mains carry
+              // no verdict; evt 52195's 1.3 cm shard) stay vetoed.  C++ default
+              // 0 = veto every bundle-mate (key omitted => byte-identical).
+              // DEFAULT 15 for SBND (owner 2026-08-01): restores evt 10550's
+              // 18.5 cm candidate, keeps 13 cm and below vetoed.
+              nu_skip_cosmic_bundle_min_length=15,
               // dir_weak_use_score: route the PR chain's direction-weakness
               // reads through segment_is_dir_weak() -- the faithful port of the
               // prototype's ONLY public accessor ProtoSegment::is_dir_weak()
@@ -1164,6 +1175,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             beam_window_high=beam_window[1],
             nu_skip_cosmic=nu_skip_cosmic,
             nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
+            nu_skip_cosmic_bundle_min_length=nu_skip_cosmic_bundle_min_length,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
             mip_dqdx_median=mip_dqdx_median,
@@ -1514,6 +1526,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // Bundle-level cosmic veto -- see the clus_pr arg comment
        // (docs/pr/3 sec. 8).  NOT bit-identical when on.
        nu_skip_cosmic_bundle=true,
+       // Design-A size guard on the veto -- see the clus_pr arg comment
+       // (docs/pr/16 sec. 7).  cm; SBND 15 (owner 2026-08-01).
+       nu_skip_cosmic_bundle_min_length=15,
        // prototype-faithful is_dir_weak() reads -- see the clus_pr arg comment.
        dir_weak_use_score=true,
        // PR-chain median-dQ/dx scale + proton direction vote -- see the
@@ -1595,6 +1610,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 beam_window_only=beam_window_only,
                 nu_skip_cosmic=nu_skip_cosmic,
                 nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
+                nu_skip_cosmic_bundle_min_length=nu_skip_cosmic_bundle_min_length,
                 dir_weak_use_score=dir_weak_use_score,
                 mip_dqdx_median=mip_dqdx_median,
                 proton_dir_vote=proton_dir_vote,
