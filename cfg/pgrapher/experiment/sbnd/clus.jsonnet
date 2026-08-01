@@ -1338,6 +1338,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // production compiled config stays byte-identical.
                     [if std.member(pipeline_names, 'tagger_check_neutrino')
                      then 'include_vertex_points']: true,
+                    // require_pr_graph: this layer is PR output.  Without it,
+                    // an event where TaggerCheckNeutrino selects no candidate
+                    // gets the WHOLE clustering dumped here in raw (un-T0-cor)
+                    // coordinates -- see docs/pr/3 sec. 9.  C++ default false
+                    // (the uBooNE steiner-bound sets rely on that fallback);
+                    // key present only when the PR visitor is in the pipeline
+                    // => default compiled config byte-identical.
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'require_pr_graph']: true,
                 },
                 {
                     name: 'shower_track',    // associated points: q=15000 shower, q=0 track
@@ -1356,6 +1365,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     // the pipeline => default compiled config byte-identical.
                     [if std.member(pipeline_names, 'tagger_check_neutrino')
                      then 'particle_ids']: true,
+                    // require_pr_graph: this layer is PR output.  Without it,
+                    // an event where TaggerCheckNeutrino selects no candidate
+                    // gets the WHOLE clustering dumped here in raw (un-T0-cor)
+                    // coordinates -- see docs/pr/3 sec. 9.  C++ default false
+                    // (the uBooNE steiner-bound sets rely on that fallback);
+                    // key present only when the PR visitor is in the pipeline
+                    // => default compiled config byte-identical.
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'require_pr_graph']: true,
                 },
                 {
                     name: 'vertices',        // PR graph vertices; main vertex q=15000
@@ -1367,6 +1385,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                     coords: ['x', 'y', 'z'],
                     individual: false,
                     use_graph_vertices: true,
+                    // require_pr_graph: this layer is PR output.  Without it,
+                    // an event where TaggerCheckNeutrino selects no candidate
+                    // gets the WHOLE clustering dumped here in raw (un-T0-cor)
+                    // coordinates -- see docs/pr/3 sec. 9.  C++ default false
+                    // (the uBooNE steiner-bound sets rely on that fallback);
+                    // key present only when the PR visitor is in the pipeline
+                    // => default compiled config byte-identical.
+                    [if std.member(pipeline_names, 'tagger_check_neutrino')
+                     then 'require_pr_graph']: true,
                 },
             ]
             // STM fit-trajectory layer, dumped after TaggerCheckSTM runs (doc

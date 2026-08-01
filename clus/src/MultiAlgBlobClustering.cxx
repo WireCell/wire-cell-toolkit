@@ -255,6 +255,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             bpc.dQdx_offset = get<double>(bps, "dQdx_offset", 0.0);
             bpc.use_associate_points = get<bool>(bps, "use_associate_points", false);
             bpc.use_graph_vertices = get<bool>(bps, "use_graph_vertices", false);
+            bpc.require_pr_graph   = get<bool>(bps, "require_pr_graph", false);
             // Prototype-parity options; absent => false => byte-identical legacy output.
             bpc.particle_ids = get<bool>(bps, "particle_ids", false);
             bpc.include_vertex_points = get<bool>(bps, "include_vertex_points", false);
@@ -2471,6 +2472,16 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                     fill_bee_points_from_pr_graph(config.name, *gs[0]);
                 }
                 // std::cout << "Filled bee points from PR graph for visitor: " << cmeth.name << " grouping: " << config.grouping << std::endl;
+            } else if (config.require_pr_graph) {
+                // PR-output set with no PR graph: leave it EMPTY.  The generic
+                // dump below would fill a track_fit/shower_track/vertices layer
+                // with the whole clustering point set -- and in RAW coordinates,
+                // since those sets declare coords x/y/z (PR fit points are
+                // already T0-corrected).  SBND evt 18255/52195 with the bundle
+                // veto on: 30127 points per layer, x out to -234 cm, three
+                // byte-identical copies (sbnd_xin/docs/pr/3 sec. 9).
+                SPDLOG_LOGGER_DEBUG(log, "bee points set '{}': visitor {} produced no PR graph; leaving the set empty (require_pr_graph)",
+                                    config.name, cmeth.name);
             } else {
                 // Fill bee points from clusters normally
                 fill_bee_points(config.name, *gs[0]);

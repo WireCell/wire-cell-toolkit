@@ -87,6 +87,13 @@ namespace WireCell::Clus {
             double dQdx_offset{0.0};
             bool use_associate_points{false};  // use dpcloud("associate_points") + shower-based charge
             bool use_graph_vertices{false};    // dump graph vertices; charge=15000 for main (kNeutrinoVertex), 0 otherwise
+            // This set is PR output only: when the bound visitor produced no PR
+            // graph (e.g. TaggerCheckNeutrino took its "no main cluster
+            // selected" exit) leave the set EMPTY instead of falling back to the
+            // generic cluster dump.  Default false = legacy fallback, which is
+            // what the uBooNE "regular"/"steiner" sets bound to CreateSteinerGraph
+            // rely on.  See sbnd_xin/docs/pr/3 sec. 9.
+            bool require_pr_graph{false};
             // Prototype-parity options (default false => legacy output, byte-identical):
             // particle_ids: with use_associate_points, real_cluster_id follows the
             // prototype per-particle convention (NeutrinoID::fill_point_info):
