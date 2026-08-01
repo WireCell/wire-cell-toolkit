@@ -179,6 +179,14 @@ function(
     // examine_bundles main-overlap vote inputs back to the old ones).
     // Runner flag: -no-realign / SBND_REALIGN=0.
     realign        = null,
+    // cathode_rescue (default false = off, production-identical: the all-APA
+    // pipeline list is unchanged, compiled config byte-identical).  true
+    // enables the cathode BUNDLE rescue between cathode_connect and
+    // examine_bundles -- the isolated patch for the flash-reco
+    // absorbing-window defect that leaves the two halves of a cathode
+    // crosser in different flash bundles (sbnd_xin/docs/pr/14).  Retire
+    // when the light reconstruction is fixed upstream.
+    cathode_rescue = false,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -271,7 +279,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -306,7 +314,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

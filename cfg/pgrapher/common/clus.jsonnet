@@ -767,6 +767,63 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + scope_cfg,
         },
 
+        // SBND cathode BUNDLE rescue (isolated patch for the flash-reco
+        // absorbing-window defect; sbnd_xin/docs/pr/14).  Joins a cathode
+        // crosser whose two halves sit in DIFFERENT flash bundles (which
+        // cathode_connect's flash gate correctly refuses): finds a beam-window
+        // half with a tip at the cathode plus an out-of-beam partner within
+        // [-rescue_t0_early, +rescue_t0_late], decides which flash the joined
+        // crosser belongs to from the bundle structure, merges the pair and
+        // re-stamps the merged cluster's flash identity.  Place AFTER
+        // cathode_connect and BEFORE examine_bundles.  Retire when the light
+        // reconstruction fixes the absorbing window.
+        //
+        // C++ defaults leave the beam window EMPTY (low == high == 0), so the
+        // component is a no-op unless beam_window_low/high are set.  The
+        // geometric knobs mirror cathode_connect (same names, same C++
+        // defaults; the PDVD-specific crosser_* relaxations are not offered).
+        cathode_bundle_rescue(name="", beam_window_low=0.0, beam_window_high=0.0,
+                              rescue_t0_early=8*wc.us, rescue_t0_late=13*wc.us,
+                              require_far_out_of_beam=true,
+                              drift_cut=5*wc.cm, dis_cut=5*wc.cm, max_dis=25*wc.cm,
+                              angle_cut=10.0, conn_far_cut=30.0, cathode_x=0.0,
+                              cathode_x_cut=3.5*wc.cm, hough_radius=20*wc.cm,
+                              min_length=10*wc.cm, min_length_short=null,
+                              short_dir_len=null, conn_short_cut=30.0,
+                              tip_touch_cut=null, tip_touch_angle_cut=null,
+                              cathode_band_dis=null) :: {
+            type: "ClusteringCathodeBundleRescue",
+            name: prefix+name,
+            data: dv_cfg + pcts_cfg + scope_cfg + {
+                beam_window_low: beam_window_low,
+                beam_window_high: beam_window_high,
+                rescue_t0_early: rescue_t0_early,
+                rescue_t0_late: rescue_t0_late,
+                require_far_out_of_beam: require_far_out_of_beam,
+                drift_cut: drift_cut,
+                dis_cut: dis_cut,
+                max_dis: max_dis,
+                angle_cut: angle_cut,
+                conn_far_cut: conn_far_cut,
+                cathode_x: cathode_x,
+                cathode_x_cut: cathode_x_cut,
+                hough_radius: hough_radius,
+                min_length: min_length,
+                // null => C++ defaults min_length_short to min_length (symmetric gate)
+                [if min_length_short != null then "min_length_short"]: min_length_short,
+                // null => C++ defaults short_dir_len to 0 (both-long/short-stub branches OFF)
+                [if short_dir_len != null then "short_dir_len"]: short_dir_len,
+                conn_short_cut: conn_short_cut,
+                // null => C++ defaults tip_touch_cut to 0 (tip-touch relaxation OFF)
+                [if tip_touch_cut != null then "tip_touch_cut"]: tip_touch_cut,
+                // null => C++ defaults tip_touch_angle_cut to angle_cut (local-Hough fallback OFF)
+                [if tip_touch_angle_cut != null then "tip_touch_angle_cut"]: tip_touch_angle_cut,
+                // null => C++ defaults cathode_band_dis to 0 (near-cathode retry OFF)
+                [if cathode_band_dis != null then "cathode_band_dis"]: cathode_band_dis,
+            },
+            uses: [detector_volumes, pc_transforms],
+        },
+
         extend_loop(name="", num_try=0, use_flash_t0=false, flash_t0_window=80*wc.ns) :: {
             type: "ClusteringExtendLoop",
             name: prefix+name,
