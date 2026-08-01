@@ -851,7 +851,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  drift_side_fv_x=false,
                  far_point_x_cut=null, far_point_mid_dis=null, track_recarve=false,
                  dec1_guard_main_angle=null, iso_slab_split=false, tag_family=false,
-                 collinear_global_merge=false) :: {
+                 collinear_global_merge=false, vertex_veto=false) :: {
             type: "ClusteringSeparate",
             name: prefix+name,
             data: {
@@ -918,6 +918,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // clusters (same gates as collinear_member_merge, applied
                 // beyond one separation family).  Key omitted when false.
                 [if collinear_global_merge then 'collinear_global_merge']: collinear_global_merge,
+                // Un-split a neutrino-vertex "V": both dominant separation
+                // pieces END at their mutual closest approach, so the cluster
+                // is one interaction, not two crossing cosmics (doc pr/15,
+                // SBND run 18255 evt 56463).  C++ default false.  Key omitted
+                // when false => byte-identical pre-fix config.
+                [if vertex_veto then 'vertex_veto']: vertex_veto,
             } + dv_cfg + pcts_cfg + scope_cfg,
             uses: [detector_volumes, pc_transforms],
         },

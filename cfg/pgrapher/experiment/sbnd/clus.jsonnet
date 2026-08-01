@@ -181,7 +181,12 @@ local bs_dead_face(apa, face) = {
 // standalone chain (pointed .. connect1).  The original cfg func_cfgs tail
 // (deghost -> examine_x_boundary -> isolated) is retained below as commented
 // lines so it can be re-enabled without re-deriving it.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false) = {
+// sep_vertex_veto (SBND default TRUE since doc pr/15, owner decision 2026-08-01):
+// separate() un-splits a neutrino-vertex "V" whose two dominant pieces both END
+// at their mutual closest approach (run 18255 evt 56463: the nu was cut in two
+// at its vertex by the top-cosmic angle ladder).  false omits the key => the
+// compiled config is byte-identical to before the knob existed.
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -221,7 +226,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // Raise the convex-hull point cap (default 10000) so full-detector
         // multi-track overclusters (>10k points) are still considered for
         // separation; otherwise get_hull returns empty and separation is skipped.
-        cm.separate(use_ctpc=true, max_hull_points=100000, sbnd_boundary_tag=true),
+        // vertex_veto: un-split a neutrino-vertex "V" (both dominant pieces END
+        // at their mutual closest approach) that the top-cosmic angle ladders
+        // mistook for a cosmic -- doc pr/15, run 18255 evt 56463 nu cut in two
+        // at its vertex.  C++ default false; SBND ON via sep_vertex_veto.
+        cm.separate(use_ctpc=true, max_hull_points=100000, sbnd_boundary_tag=true,
+                    vertex_veto=sep_vertex_veto),
         // SBND: cap the isochronous-relaxed connection on the real closest-point
         // distance.  Without it, connect1 merges two genuinely-separate isochronous
         // cosmics (e.g. evt 183888, ~7.3 cm apart in drift) on the misleadingly small
@@ -1431,11 +1441,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
-                      trace_bee=trace_bee, save_assoc_id=save_assoc_id),
+                      trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,

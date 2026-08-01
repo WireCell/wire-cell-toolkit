@@ -188,6 +188,13 @@ function(
     // to before the knob existed; runner: SBND_CATHODE_RESCUE=0).  Retire
     // when the light reconstruction is fixed upstream.
     cathode_rescue = true,
+    // sep_vertex_veto (SBND default TRUE since doc pr/15, owner decision
+    // 2026-08-01): per-APA separate() un-splits a neutrino-vertex "V" whose two
+    // dominant pieces both END at their mutual closest approach (run 18255 evt
+    // 56463: the nu was cut in two at its vertex by the top-cosmic angle
+    // ladder).  false omits the key => compiled config byte-identical to
+    // before the knob existed (runner: SBND_SEP_VVETO=0).
+    sep_vertex_veto = true,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -223,7 +230,7 @@ function(
         subRunNo=subrun,
         eventNo=event,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---

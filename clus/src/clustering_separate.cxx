@@ -1973,6 +1973,144 @@ static void split_iso_slabs(Grouping& live_grouping, const Tree::Scope& scope,
     }
 }
 
+// Vertex veto (vertex_veto knob, default OFF): un-split a neutrino-vertex "V".
+// The top-cosmic angle ladders fire on a long steep track whose companion arm
+// reaches a wall, but a neutrino interaction shows the same silhouette: a
+// muon-candidate track plus a second prong that both END at the interaction
+// vertex.  Two crossing cosmics always leave at least one piece whose junction
+// is MID-track (each track continues through the crossing), and two random
+// coincident cosmics whose tips meet at one interior point are geometrically
+// rare -- so "both dominant pieces end exactly at their mutual closest
+// approach" identifies a vertex, and the split is undone (family merged back).
+// Gates measured on SBND run 18255 evt 56463 (the founding neutrino, doc
+// pr/15): touch 0.36 cm, behind-fraction 0.000/0.000, opening angle 85.1 deg,
+// leftover fragments 0.8% of family points; the forced-X control on the same
+// event reads behind-fraction 0.47.
+static void veto_vertex_split(Grouping& live_grouping, const Tree::Scope& scope,
+                              std::vector<Cluster*>& family)
+{
+    const double TOUCH_MAX   = 5 * units::cm;   // arms of one vertex still touch (0.36 measured);
+                                                // 5 cm == Separate_2's relink scale, so pieces of
+                                                // one formerly-connected cluster pass
+    const double ARM_LONG_MIN = 60 * units::cm; // dominant arm floor (the carve's own "long
+                                                // piece" threshold); 56463 reads 234 cm
+    const double SHORT_MIN   = 30 * units::cm;  // second arm must be a substantial prong,
+                                                // not a crumb; 56463 reads ~90 cm
+    const double CEN_MIN     = SHORT_MIN / 4.;  // centroid-to-junction floor: orientation of
+                                                // an arm whose centroid sits ON the junction
+                                                // is undefined (and reads as an X anyway)
+    const double BEHIND_TOL  = 5 * units::cm;   // slack behind the junction before a point
+                                                // counts as "continuing through"
+    const double BEHIND_FRAC = 0.02;            // V arms read 0.000; an X's through-going
+                                                // arm reads ~0.47
+    const double ANG_MIN     = 15.;             // hugging-parallel arms are band topology,
+                                                // not a vertex
+    const double ANG_MAX     = 160.;            // near-collinear pair = one track cut in two
+                                                // (collinear_member_merge's job), not a vertex
+    const double FRAG_FRAC   = 0.05;            // all other family members together must be
+                                                // crumbs (56463: 0.8%)
+
+    // Surviving members, dominant arms first; ident tie-break for determinism.
+    std::vector<Cluster*> surv;
+    for (Cluster* m : family)
+        if (m) surv.push_back(m);
+    if (surv.size() < 2) return;
+    std::sort(surv.begin(), surv.end(), [](const Cluster* c1, const Cluster* c2) {
+        if (c1->get_length() != c2->get_length()) return c1->get_length() > c2->get_length();
+        return c1->ident() < c2->ident();
+    });
+    Cluster* A = surv.at(0);
+    Cluster* B = surv.at(1);
+    if (A->get_length() < ARM_LONG_MIN) return;
+    if (B->get_length() < SHORT_MIN) return;
+
+    double frag_pts = 0, arm_pts = 0;
+    for (Cluster* m : surv) {
+        double n = 0;
+        for (const Blob* blob : m->children()) n += blob->npoints();
+        if (m == A || m == B) arm_pts += n;
+        else frag_pts += n;
+    }
+    if (arm_pts <= 0 || frag_pts > FRAG_FRAC * arm_pts) return;
+
+    // Junction = midpoint of the arms' mutual closest approach.
+    // get_closest_points returns point INDICES (+ distance), not points.
+    const auto dis = A->get_closest_points(*B);
+    const double touch = std::get<2>(dis);
+    if (touch >= TOUCH_MAX) return;
+    const geo_point_t pa = A->point3d(std::get<0>(dis));
+    const geo_point_t pb = B->point3d(std::get<1>(dis));
+    const geo_point_t J((pa.x() + pb.x()) / 2., (pa.y() + pb.y()) / 2., (pa.z() + pb.z()) / 2.);
+
+    // Endpoint test: an arm that ENDS at J has (essentially) no charge behind
+    // J along its own junction-to-centroid direction; a track passing THROUGH
+    // J has roughly half.  npoints-weighted blob centers, as elsewhere here.
+    geo_point_t u_arm[2];
+    double behind_frac[2] = {0, 0};
+    for (int k = 0; k != 2; k++) {
+        Cluster* X = (k == 0) ? A : B;
+        double sw = 0, sm[3] = {0, 0, 0};
+        for (const Blob* blob : X->children()) {
+            const geo_point_t bc = blob->center_pos();
+            const double w = blob->npoints();
+            sw += w;
+            sm[0] += w * bc.x();
+            sm[1] += w * bc.y();
+            sm[2] += w * bc.z();
+        }
+        if (sw <= 0) return;
+        geo_point_t u(sm[0] / sw - J.x(), sm[1] / sw - J.y(), sm[2] / sw - J.z());
+        const double umag = u.magnitude();
+        if (umag < CEN_MIN) return;
+        u = u * (1. / umag);
+        u_arm[k] = u;
+        double wb = 0;
+        for (const Blob* blob : X->children()) {
+            const geo_point_t bc = blob->center_pos();
+            geo_point_t v(bc.x() - J.x(), bc.y() - J.y(), bc.z() - J.z());
+            if (v.dot(u) < -BEHIND_TOL) wb += blob->npoints();
+        }
+        behind_frac[k] = wb / sw;
+    }
+    const double open_ang = u_arm[0].angle(u_arm[1]) / 3.1415926 * 180.;
+
+    const bool pass = behind_frac[0] < BEHIND_FRAC && behind_frac[1] < BEHIND_FRAC &&
+                      open_ang > ANG_MIN && open_ang < ANG_MAX;
+
+    if (sep_debug())
+        std::cout << "SEPDBG vveto lens=" << A->get_length() / units::cm << "/" << B->get_length() / units::cm
+                  << " touch=" << touch / units::cm
+                  << " J=(" << J.x() / units::cm << "," << J.y() / units::cm << "," << J.z() / units::cm << ")"
+                  << " behind=" << behind_frac[0] << "/" << behind_frac[1]
+                  << " open=" << open_ang
+                  << " frag=" << (arm_pts > 0 ? frag_pts / arm_pts : -1.)
+                  << (pass ? " VETO" : " keep") << std::endl;
+    if (!pass) return;
+
+    // Merge every surviving member back into the dominant arm, restoring the
+    // pre-split cluster contents (same scope-restore idiom as the collinear
+    // rejoin above).
+    const auto tscope = A->get_default_scope();
+    const auto ttrans = A->get_scope_transform(tscope);
+    for (size_t fi = 0; fi != family.size(); fi++) {
+        Cluster* m = family.at(fi);
+        if (!m || m == A) continue;
+        A->take_children(*m, true);
+        family.at(fi) = nullptr;
+        live_grouping.destroy_child(m);
+        assert(m == nullptr);
+    }
+    A->set_default_scope(tscope);
+    A->set_scope_filter(tscope, true);
+    A->set_scope_transform(tscope, ttrans);
+
+    std::cout << "Separate vertex_veto: rejoined V at (" << J.x() / units::cm << ","
+              << J.y() / units::cm << "," << J.z() / units::cm << ") cm, arms "
+              << A->get_length() / units::cm << " cm total, touch " << touch / units::cm
+              << " cm, opening " << open_ang << " deg, behind " << behind_frac[0] << "/"
+              << behind_frac[1] << std::endl;
+}
+
 
 static void clustering_separate(Grouping& live_grouping,
                                 IDetectorVolumes::pointer dv,
@@ -1994,7 +2132,8 @@ static void clustering_separate(Grouping& live_grouping,
                                 const double dec1_guard_main_angle,
                                 const bool iso_slab_split,
                                 const bool tag_family,
-                                const bool collinear_global_merge);
+                                const bool collinear_global_merge,
+                                const bool vertex_veto);
 
 class ClusteringSeparate : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedPCTS, private NeedScope {
 public:
@@ -2062,6 +2201,10 @@ public:
         // Grouping-wide end-to-end stitch of two long thin collinear clusters
         // via merge_collinear_members (default OFF => bit-identical).
         collinear_global_merge_ = get(config, "collinear_global_merge", false);
+        // Un-split a neutrino-vertex "V": both dominant separation pieces end
+        // at their mutual closest approach (default OFF => bit-identical).
+        // See veto_vertex_split.
+        vertex_veto_ = get(config, "vertex_veto", false);
     }
 
     void visit(Ensemble& ensemble) const {
@@ -2071,7 +2214,7 @@ public:
                             track_repartition_, band_merge_back_,
                             band_recarve_, drift_side_fv_x_,
                             far_point_x_cut_, far_point_mid_dis_, track_recarve_, dec1_guard_main_angle_,
-                            iso_slab_split_, tag_family_, collinear_global_merge_);
+                            iso_slab_split_, tag_family_, collinear_global_merge_, vertex_veto_);
     }
 
 private:
@@ -2092,6 +2235,7 @@ private:
     bool iso_slab_split_{false};
     bool tag_family_{false};
     bool collinear_global_merge_{false};
+    bool vertex_veto_{false};
 };
 
 
@@ -2121,7 +2265,8 @@ static void clustering_separate(
     const double dec1_guard_main_angle,
     const bool iso_slab_split,
     const bool tag_family,
-    const bool collinear_global_merge)
+    const bool collinear_global_merge,
+    const bool vertex_veto)
 {
     // Check that live_grouping has exactly one wpid
 	// if (live_grouping.wpids().size() != 1 ) {
@@ -2421,6 +2566,11 @@ static void clustering_separate(
                 // family (PDVD 39252 evt 298637).
                 if (collinear_member_merge && iso_slab_split && family.size() >= 2)
                     merge_collinear_members(live_grouping, scope, family);
+                // Vertex veto LAST among the refinements: it judges the FINAL
+                // family shape (two dominant arms + crumbs) and un-splits a
+                // neutrino-vertex "V" the angle ladders mistook for a cosmic.
+                if (vertex_veto && family.size() >= 2)
+                    veto_vertex_split(live_grouping, scope, family);
                 // Stamp the surviving family members so a later same-stage
                 // pass can decline to re-merge what was just deliberately
                 // split (PDHD 27980 evt 24: connect1 re-glued a fat 80 cm
