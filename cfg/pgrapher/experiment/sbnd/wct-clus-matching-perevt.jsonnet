@@ -179,14 +179,15 @@ function(
     // examine_bundles main-overlap vote inputs back to the old ones).
     // Runner flag: -no-realign / SBND_REALIGN=0.
     realign        = null,
-    // cathode_rescue (default false = off, production-identical: the all-APA
-    // pipeline list is unchanged, compiled config byte-identical).  true
-    // enables the cathode BUNDLE rescue between cathode_connect and
-    // examine_bundles -- the isolated patch for the flash-reco
-    // absorbing-window defect that leaves the two halves of a cathode
-    // crosser in different flash bundles (sbnd_xin/docs/pr/14).  Retire
+    // cathode_rescue (SBND default TRUE since the doc pr/14 §7.4 validation,
+    // owner decision 2026-08-01): the cathode BUNDLE rescue between
+    // cathode_connect and examine_bundles -- the isolated patch for the
+    // flash-reco absorbing-window defect that leaves the two halves of a
+    // cathode crosser in different flash bundles (sbnd_xin/docs/pr/14).
+    // false restores the pre-pr/14 pipeline (compiled config byte-identical
+    // to before the knob existed; runner: SBND_CATHODE_RESCUE=0).  Retire
     // when the light reconstruction is fixed upstream.
-    cathode_rescue = false,
+    cathode_rescue = true,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),

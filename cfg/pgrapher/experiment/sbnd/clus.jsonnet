@@ -331,11 +331,13 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // 'clustering_') to that file -- the persistent intermediate format consumed by
 // the downstream pattern-recognition job (see sbnd/docs/sbnd-pattern-recognition.md).
 // Default '' keeps the historical dump_mode no-op sink (byte-identical).
-// cathode_rescue_on (default false => pipeline list unchanged => byte-identical
-// compiled config): enable the cathode BUNDLE rescue -- the isolated patch for
-// the flash-reco absorbing-window defect (sbnd_xin/docs/pr/14).  Retire the knob
-// (and its pipeline entry below) when the light reconstruction is fixed.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=false) = {
+// cathode_rescue_on (SBND default TRUE since doc pr/14 §7.4 validation, owner
+// decision 2026-08-01): the cathode BUNDLE rescue -- the isolated patch for
+// the flash-reco absorbing-window defect (sbnd_xin/docs/pr/14).  false restores
+// the pre-pr/14 pipeline (compiled config byte-identical to before the knob
+// existed).  Retire the knob (and its pipeline entry below) when the light
+// reconstruction is fixed.
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -1425,7 +1427,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
-            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=false)::
+            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
