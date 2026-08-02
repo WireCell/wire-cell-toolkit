@@ -355,7 +355,14 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // the pre-pr/14 pipeline (compiled config byte-identical to before the knob
 // existed).  Retire the knob (and its pipeline entry below) when the light
 // reconstruction is fixed.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true) = {
+// cathode_rescue_unmatched (SBND default TRUE since doc pr/17, needs
+// cathode_rescue_on): second rescue pass adopting NON-MATCHED clusters into
+// the beam bundle when they geometrically continue a beam-window cluster
+// across the cathode (the 56463 veto-ON mode: the whole far half is
+// flashless; sbnd_xin/docs/pr/17; fires 1/1000 mcp1k, 0/48 nueCC48).
+// false => rescue_unmatched key suppressed => compiled config byte-identical
+// to pre-knob.
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -413,7 +420,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         beam_window_low=0.2*wc.us, beam_window_high=2.2*wc.us,
         rescue_t0_early=8*wc.us, rescue_t0_late=13*wc.us,
         cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm,
-        min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0)] else [])
+        min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0,
+        // false => key suppressed => byte-identical (doc pr/17); floors stay
+        // at the C++ defaults (30 cm / 200 pts).
+        rescue_unmatched=cathode_rescue_unmatched)] else [])
     + [
         // flags_from_longest: the flash-time merge here collapses a bundle's
         // clusters into one; without this the merged cluster inherits its flags
@@ -1500,14 +1510,15 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
-            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true)::
+            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
                      save_assoc_cluster_id=save_assoc_cluster_id,
                      real_cluster_id_global=real_cluster_id_global,
-                     trace_bee=trace_bee, cathode_rescue_on=cathode_rescue_on),
+                     trace_bee=trace_bee, cathode_rescue_on=cathode_rescue_on,
+                     cathode_rescue_unmatched=cathode_rescue_unmatched),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
     // production operating point (see the comment block on clus_pr's arg list for

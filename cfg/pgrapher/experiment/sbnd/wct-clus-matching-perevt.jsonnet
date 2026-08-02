@@ -188,6 +188,15 @@ function(
     // to before the knob existed; runner: SBND_CATHODE_RESCUE=0).  Retire
     // when the light reconstruction is fixed upstream.
     cathode_rescue = true,
+    // cathode_rescue_unmatched (SBND default TRUE since doc pr/17, validated
+    // 2026-08-01): second rescue pass adopting a NON-MATCHED cluster into the
+    // beam bundle when it geometrically continues a beam-window cluster
+    // across the cathode (run 18255 evt 56463 with the vertex veto ON: the
+    // rejoined nu is flashless and invisible downstream).  Needs
+    // cathode_rescue.  Fires 1/1000 mcp1k, 0/48 nueCC48 (doc pr/17 sec 7).
+    // false omits the key => compiled config byte-identical to pre-pr/17
+    // (runner: SBND_RESCUE_UNMATCHED=0 to escape).
+    cathode_rescue_unmatched = true,
     // sep_vertex_veto (SBND default TRUE since doc pr/15, owner decision
     // 2026-08-01): per-APA separate() un-splits a neutrino-vertex "V" whose two
     // dominant pieces both END at their mutual closest approach (run 18255 evt
@@ -294,7 +303,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -329,7 +338,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

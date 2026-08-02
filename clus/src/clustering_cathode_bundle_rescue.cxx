@@ -31,6 +31,14 @@
 //      Merging BEFORE examine_bundles is what makes the crosser one
 //      flash-collapse member, so the PR job's unmerge_bundle keeps it whole
 //      (same invariant as cathode_connect; doc 53).
+//   4. (rescue_unmatched, default OFF; sbnd_xin/docs/pr/17) a second pass
+//      adopts NON-MATCHED clusters: when the far half is one whole cluster
+//      (e.g. after the pr/15 vertex veto), no wrong flash may claim it and
+//      Q/L matching leaves it flashless -- invisible downstream.  If it
+//      geometrically continues a beam-window cluster across the cathode it
+//      is merged into the beam bundle (forced direction: it has no flash of
+//      its own).  Its geometry is evaluated in the RAW scope (its x_t0cor
+//      carries the sentinel T0).
 //
 // Isolation: this file is self-contained (all helpers file-static); the
 // geometric pair test is DUPLICATED from clustering_cathode_connect.cxx
@@ -92,6 +100,14 @@ struct CbrParams {
     double tip_touch_cut{0.0};
     double tip_touch_angle_cut{10.0};
     double cathode_band_dis{0.0};
+    // unmatched-cluster adoption pass (default OFF; sbnd_xin/docs/pr/17).
+    // A cluster the Q/L matching left with NO flash at all (56463 veto-ON
+    // mode: the true flash was absorbed and no wrong flash claims the whole
+    // cluster) is invisible downstream.  If it geometrically continues a
+    // beam-window cluster across the cathode, adopt it into the beam bundle.
+    bool rescue_unmatched{false};
+    double unmatched_min_length{30*units::cm};
+    int unmatched_min_npts{200};
 };
 
 // Fold an angle (deg, 0..180) about 180 -> collinearity (0 = parallel or anti-parallel).
@@ -332,6 +348,12 @@ public:
         p_.tip_touch_cut   = get(config, "tip_touch_cut", p_.tip_touch_cut);
         p_.tip_touch_angle_cut = get(config, "tip_touch_angle_cut", p_.angle_cut);
         p_.cathode_band_dis= get(config, "cathode_band_dis", p_.cathode_band_dis);
+
+        // Unmatched-cluster adoption pass (C++ default false => the pass is
+        // absent and behavior is byte-identical to pre-knob builds).
+        p_.rescue_unmatched     = get(config, "rescue_unmatched", p_.rescue_unmatched);
+        p_.unmatched_min_length = get(config, "unmatched_min_length", p_.unmatched_min_length);
+        p_.unmatched_min_npts   = get(config, "unmatched_min_npts", p_.unmatched_min_npts);
     }
 
     virtual Configuration default_configuration() const {
@@ -536,8 +558,147 @@ private:
 
             ++nrounds;
         }
+
+        // ---- Pass 2 (rescue_unmatched; sbnd_xin/docs/pr/17): adopt NON-MATCHED
+        // clusters.  Same absorbing-window defect, different failure shape: when
+        // the whole far half is ONE cluster (e.g. after the pr/15 vertex veto
+        // rejoined it), no wrong flash may claim it at all and Q/L matching
+        // leaves it with no flash.  Such a cluster is invisible downstream (no
+        // bundle, no beam-window evaluation) AND its corrected coordinates were
+        // materialized with the sentinel T0 (56463: x_t0cor off by 1.5e6 m), so
+        // it must be evaluated in its RAW scope under the destination-T0
+        // hypothesis (raw x is the t0=0 frame; the shift for beam t0 is sub-mm).
+        // Direction is FORCED into the beam bundle -- an unmatched cluster has
+        // no flash to offer -- so this pass can only ADD charge to the beam
+        // bundle; a wrongly adopted cosmic crosser becomes a joined cathode
+        // crosser the TGM/STM taggers evaluate downstream (the self-correcting
+        // pattern of doc pr/14 sec 7.4, evts 288952/352365).  Runs AFTER the
+        // bundle pass, on the post-move state.
+        int nadopt = 0;
+        if (p_.rescue_unmatched) {
+            while (true) {
+                auto live_clusters = live_grouping.children();
+                // Matched clusters in the analysis scope; unmatched candidates
+                // in their raw scope (see above).  Restored after the pass.
+                for (auto* live : live_clusters) {
+                    const bool matched = live->get_scalar<int>("flash", -1) >= 0 &&
+                                         live->get_scalar<int>("matched_flash_gid", -1) >= 0;
+                    const auto& want = matched ? m_scope : live->get_raw_scope();
+                    if (live->get_default_scope().hash() != want.hash()) {
+                        live->set_default_scope(want);
+                    }
+                }
+
+                std::vector<Member> members;    // flash-matched, ident order
+                std::vector<Member> orphans;    // unmatched candidates, ident order
+                for (auto* c : live_clusters) {
+                    const int gid = c->get_scalar<int>("matched_flash_gid", -1);
+                    if (c->get_scalar<int>("flash", -1) >= 0 && gid >= 0) {
+                        members.push_back({c, (int)c->ident(), gid,
+                                           c->get_cluster_t0(), c->get_length()});
+                        continue;
+                    }
+                    // Size floors keep specks and debris out of the beam bundle.
+                    if (c->npoints() < p_.unmatched_min_npts) continue;
+                    const double len = c->get_length();
+                    if (len < p_.unmatched_min_length) continue;
+                    // No scope-filter gate here: the in/out-of-volume partition
+                    // needs a T0 the unmatched cluster does not have.  The
+                    // tip-at-the-cathode geometry below is the containment gate.
+                    orphans.push_back({c, (int)c->ident(), -1, 0.0, len});
+                }
+                std::sort(members.begin(), members.end(),
+                          [](const Member& a, const Member& b) { return a.ident < b.ident; });
+                std::sort(orphans.begin(), orphans.end(),
+                          [](const Member& a, const Member& b) { return a.ident < b.ident; });
+
+                const Member* best_beam = nullptr;
+                const Member* best_orphan = nullptr;
+                for (const auto& kb : members) {
+                    if (best_beam) break;
+                    if (!in_beam(kb.t0)) continue;
+                    if (!kb.cluster->get_scope_filter(m_scope)) continue;
+                    if (kb.length < p_.min_length_short) continue;
+                    for (const auto& ko : orphans) {
+                        if (std::max(kb.length, ko.length) < p_.min_length) continue;
+                        // Raw x is the t0=0 frame: dt0_dest = t0_beam - 0.
+                        const double xshift = far_xshift(live_grouping, *ko.cluster, kb.t0);
+                        if (!is_cathode_crossing_pair(*kb.cluster, *ko.cluster,
+                                                      kb.length, ko.length, xshift, p_)) continue;
+                        best_beam = &kb;
+                        best_orphan = &ko;
+                        break;
+                    }
+                }
+                if (!best_beam) break;
+
+                // Snapshot the (beam) destination identity by value.
+                const double dest_t0 = best_beam->t0;
+                const int dest_flash = best_beam->cluster->get_scalar<int>("flash", -1);
+                const int dest_gid = best_beam->gid;
+                const int dest_lm = best_beam->cluster->get_scalar<int>("lm_flag", -1);
+
+                log->info("unmatched rescue round {}: c{} (gid {}, t0 {:.3f} us, {:.1f} cm) + "
+                          "c{} (unmatched, {:.1f} cm, {} pts) -> gid {}",
+                          nadopt, best_beam->ident, best_beam->gid,
+                          best_beam->t0/units::us, best_beam->length/units::cm,
+                          best_orphan->ident, best_orphan->length/units::cm,
+                          best_orphan->cluster->npoints(), dest_gid);
+
+                typedef cluster_connectivity_graph_t Graph;
+                Graph g;
+                std::map<int, int> desc;
+                int idx_beam = -1, idx_orphan = -1;
+                for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+                    if (live_clusters[ilive] == best_beam->cluster) idx_beam = (int)ilive;
+                    if (live_clusters[ilive] == best_orphan->cluster) idx_orphan = (int)ilive;
+                }
+                for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+                    desc[(int)ilive] = boost::add_vertex((int)ilive, g);
+                }
+                boost::add_edge(desc[idx_beam], desc[idx_orphan], g);
+                auto fresh = merge_clusters(g, live_grouping);
+                if (fresh.size() != 1) {
+                    log->warn("unmatched rescue round {}: expected 1 merged cluster, got {} -- stopping",
+                              nadopt, fresh.size());
+                    break;
+                }
+                Cluster* merged = fresh.at(0);
+
+                // Beam identity, then corrected coordinates under the beam T0
+                // (this also replaces the orphan points' sentinel-T0 x_t0cor).
+                // The merge inputs had MIXED scopes (orphan raw), so pin the
+                // merged cluster's default scope explicitly before correcting.
+                merged->set_cluster_t0(dest_t0);
+                merged->set_scalar<int>("flash", dest_flash);
+                merged->set_scalar<int>("matched_flash_gid", dest_gid);
+                merged->set_scalar<int>("lm_flag", dest_lm);
+                merged->set_flag(Flags::main_cluster, 1);
+                merged->set_flag(Flags::associated_cluster, 0);
+                merged->set_default_scope(m_scope);
+                if (m_scope.hash() != merged->get_raw_scope().hash()) {
+                    auto correction_name = merged->get_scope_transform(m_scope);
+                    merged->add_corrected_points(m_pcts, correction_name);
+                }
+                // No source-bundle repair: the orphan belonged to no bundle.
+
+                ++nadopt;
+            }
+
+            // Leave every cluster in the analysis scope, as the bundle pass does
+            // (unaccepted orphans were parked in their raw scope above).
+            for (auto* live : live_grouping.children()) {
+                if (live->get_default_scope().hash() != m_scope.hash()) {
+                    live->set_default_scope(m_scope);
+                }
+            }
+        }
+
         if (nrounds) {
             log->info("cathode bundle rescue: {} move(s) applied", nrounds);
+        }
+        if (nadopt) {
+            log->info("unmatched rescue: {} adoption(s) applied", nadopt);
         }
     }
 };

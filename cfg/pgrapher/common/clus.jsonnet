@@ -802,7 +802,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                               min_length=10*wc.cm, min_length_short=null,
                               short_dir_len=null, conn_short_cut=30.0,
                               tip_touch_cut=null, tip_touch_angle_cut=null,
-                              cathode_band_dis=null) :: {
+                              cathode_band_dis=null,
+                              rescue_unmatched=false,
+                              unmatched_min_length=null, unmatched_min_npts=null) :: {
             type: "ClusteringCathodeBundleRescue",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
@@ -831,6 +833,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if tip_touch_angle_cut != null then "tip_touch_angle_cut"]: tip_touch_angle_cut,
                 // null => C++ defaults cathode_band_dis to 0 (near-cathode retry OFF)
                 [if cathode_band_dis != null then "cathode_band_dis"]: cathode_band_dis,
+                // Unmatched-cluster adoption pass (sbnd_xin/docs/pr/17): a
+                // flashless cluster that geometrically continues a beam-window
+                // cluster across the cathode is merged into the beam bundle.
+                // C++ default false.  Key omitted when off => byte-identical
+                // pre-knob config.
+                [if rescue_unmatched then "rescue_unmatched"]: true,
+                // null => C++ default floors (30 cm / 200 pts) on the adopted cluster.
+                [if unmatched_min_length != null then "unmatched_min_length"]: unmatched_min_length,
+                [if unmatched_min_npts != null then "unmatched_min_npts"]: unmatched_min_npts,
             },
             uses: [detector_volumes, pc_transforms],
         },
