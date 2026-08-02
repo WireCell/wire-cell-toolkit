@@ -122,8 +122,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // flag_associated_cluster and deliberately does NOT get
         // flag_main_cluster back -- nu_skip_cosmic_bundle builds its veto set
         // from main_cluster.  Doc pr/20 Part I P2.
+        // require_provenance (C++ default false; key omitted when null =>
+        // byte-identical pre-knob config): with restore_demoted_mains on, a
+        // pctree with NO wasmain array is a LEGACY tree (pre pr/20 Part I) and
+        // the C++ aborts instead of warn-and-skip -- the warn path runs to
+        // completion silently reproducing pre-pr/20 behaviour (doc pr/23
+        // sec 4.2).  Intentional legacy runs pass false explicitly.
         unmerge_bundle(name="", mode="real", graph_name="relaxed", require_in_scope=true,
-                       id_aname=null, main_aname=null, restore_demoted_mains=null) :: {
+                       id_aname=null, main_aname=null, restore_demoted_mains=null,
+                       require_provenance=null) :: {
             type: "ClusteringUnmergeBundle",
             name: prefix + name,
             data: dv_cfg + pcts_cfg + {
@@ -135,6 +142,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if id_aname != null then 'id_aname']: id_aname,
                 [if main_aname != null then 'main_aname']: main_aname,
                 [if restore_demoted_mains != null then 'restore_demoted_mains']: restore_demoted_mains,
+                [if require_provenance != null then 'require_provenance']: require_provenance,
             },
             uses: [detector_volumes, pc_transforms],
         },

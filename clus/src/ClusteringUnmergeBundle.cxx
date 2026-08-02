@@ -122,6 +122,16 @@ public:
         // why restoring main_cluster is the wrong shape.
         m_restore_demoted_mains =
             get<bool>(config, "restore_demoted_mains", m_restore_demoted_mains);
+        // require_provenance (default false = the historical fail-CLOSED warn):
+        // when restore_demoted_mains is on and the input pctree carries no
+        // wasmain array at all, abort instead of warn-and-skip.  An absent
+        // array means the whole tree predates save_bundle_main_provenance
+        // (doc pr/20 Part I) -- the chain would otherwise run to completion
+        // and silently reproduce the OLD behaviour (doc pr/23 sec 4.2).
+        // Intentional legacy-tree runs (e.g. valfast's pinned PR-tail hubs)
+        // opt out explicitly with require_provenance=false.
+        m_require_provenance =
+            get<bool>(config, "require_provenance", m_require_provenance);
         m_wasmain_aname = get<std::string>(config, "wasmain_aname", m_wasmain_aname);
         if (m_mode != "real" && m_mode != "component") {
             raise<ValueError>("ClusteringUnmergeBundle: unknown mode \"%s\" (want \"real\" or \"component\")",
@@ -144,6 +154,7 @@ public:
         cfg["id_aname"] = m_id_aname;
         cfg["main_aname"] = m_main_aname;
         cfg["restore_demoted_mains"] = m_restore_demoted_mains;
+        cfg["require_provenance"] = m_require_provenance;
         cfg["wasmain_aname"] = m_wasmain_aname;
         return cfg;
     }
@@ -195,6 +206,7 @@ private:
     std::string m_graph_name{"relaxed"};
     bool m_require_in_scope{true};
     bool m_restore_demoted_mains{false};
+    bool m_require_provenance{false};
     std::string m_wasmain_aname{"real_cluster_was_main"};
 
     /// Outcome of reading the flash-merge provenance.
@@ -410,6 +422,16 @@ private:
     /// standing "no usable provenance => skip, never guess" stance.
     void mark_demoted_main(Cluster* part) const {
         if (!part->has_pcarray<int>(m_wasmain_aname, m_pcarray_name)) {
+            if (m_require_provenance) {
+                raise<ValueError>(
+                    "ClusteringUnmergeBundle: restore_demoted_mains is on but the "
+                    "input pctree has no '%s' array -- this is a LEGACY tree "
+                    "(pre save_bundle_main_provenance, doc pr/20 Part I) and the "
+                    "chain would silently reproduce pre-pr/20 behaviour.  "
+                    "Regenerate the Q/L pctree at the production operating point, "
+                    "or declare the legacy input with require_provenance=false.",
+                    m_wasmain_aname.c_str());
+            }
             log->warn("cluster {}: restore_demoted_mains is on but '{}' is absent "
                       "(save the pctree with ClusteringExamineBundles "
                       "save_bundle_main_provenance); not flagged",

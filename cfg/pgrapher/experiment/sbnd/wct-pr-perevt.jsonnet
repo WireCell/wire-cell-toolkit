@@ -407,6 +407,14 @@ function(
     // Set false to restore the pre-flip behaviour (runner:
     // SBND_RESTORE_DEMOTED_MAINS=0).
     restore_demoted_mains = true,
+    // require_provenance (doc pr/23 sec 4.2; C++ default false = the historical
+    // warn-and-skip).  SBND DEFAULT TRUE: with restore_demoted_mains on, a
+    // pctree with NO 'real_cluster_was_main' array is a LEGACY pre-pr/20 tree
+    // and the job ABORTS loudly instead of silently reproducing pre-pr/20
+    // behaviour (the mistake documented in doc pr/23 sec 4.2).  Intentional
+    // legacy-tree runs (e.g. valfast's pinned PR-tail hubs) declare it:
+    // runner SBND_REQUIRE_WASMAIN=0.
+    require_provenance = true,
     // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false = OFF):
     // let TaggerCheckTGM / STM / FC evaluate a cluster carrying
     // flag_demoted_main.  Inert unless restore_demoted_mains above is on, since
@@ -501,6 +509,7 @@ function(
                              save_stm_fit=save_stm_fit,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
+                             require_provenance=require_provenance,
                              evaluate_demoted_mains=evaluate_demoted_mains,
                              skip_cosmic_companions=skip_cosmic_companions,
                              cosmic_companion_min_length=cosmic_companion_min_length,

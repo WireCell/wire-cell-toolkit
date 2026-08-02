@@ -665,6 +665,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // it -- unmerge_assoc undoes the isolated grouping, a different
               // question.
               restore_demoted_mains=null,
+              // require_provenance (doc pr/23 sec 4.2; C++ default false, key
+              // omitted when null => byte-identical pre-knob config): with
+              // restore_demoted_mains on, ABORT on a pctree with no wasmain
+              // array (a legacy pre-pr/20 tree) instead of warn-and-skip.
+              // Legacy-tree runs opt out with false explicitly.
+              require_provenance=null,
               // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false,
               // key omitted when false => byte-identical pre-knob config): let
               // TaggerCheckTGM / STM / FC evaluate a cluster carrying
@@ -1068,7 +1074,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // Not in pipeline_names => absent from the compiled config => no
         // behavior change.  Runner flag: -unmerge / -unmerge-comp.
         unmerge_bundle: cm.unmerge_bundle(mode=unmerge_bundle_mode,
-                                          restore_demoted_mains=restore_demoted_mains),
+                                          restore_demoted_mains=restore_demoted_mains,
+                                          require_provenance=require_provenance),
         // Second, INNER un-merge: undo the per-APA isolated GROUPING
         // (clustering_isolated save_assoc_id), which merges a main cluster with
         // the small clusters that are near it but NOT connected to it.  The
@@ -1666,6 +1673,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        save_stm_fit=false, unmerge_bundle_mode='real',
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
+       // doc pr/23 sec 4.2; null = C++ default false = warn-and-skip.  See clus_pr.
+       require_provenance=null,
        // doc pr/20 Part I P3; false = C++ default = OFF.  See clus_pr.
        evaluate_demoted_mains=false,
        // doc pr/20 Part I P4; false / null = C++ defaults = OFF.  See clus_pr.
@@ -1771,6 +1780,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 save_stm_fit=save_stm_fit,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
+                require_provenance=require_provenance,
                 evaluate_demoted_mains=evaluate_demoted_mains,
                 skip_cosmic_companions=skip_cosmic_companions,
                 cosmic_companion_min_length=cosmic_companion_min_length,
