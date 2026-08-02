@@ -46,9 +46,22 @@ using namespace WireCell::Clus::Facade;
  * vertex), and the track fitter interpolates fit points across genuinely
  * charge-free space (sbnd_xin doc pr/22 section 8, SBND evt 386948).
  *
- * Placement: after unmerge_assoc (bundle structure restored) and before the
- * steiner stage (separate() moves blob nodes; a pre-split steiner_pc would be
- * stale -- same constraint as ClusteringUnmergeBundle).
+ * Placement (doc pr/23 ordering decision): after the cosmic taggers
+ * (tagger_check_tgm/stm/fc) and before tagger_check_neutrino, with a second
+ * steiner pass in between.  This is the prototype-faithful order: uboone's
+ * cosmic verdicts were computed on the UNSPLIT clusters (the TGM flag prod-stm
+ * reads at wire-cell-prod-stm.cxx lines 806-810 comes from the Q/L-stage
+ * event_type) and Protect_Over_Clustering ran only in the nue executable
+ * immediately before NeutrinoID (wire-cell-prod-nue.cxx line 1322), with the
+ * point clouds recomputed right after (lines 1325-1330).  Running the split
+ * before the taggers instead defeats TGM (one boundary-touching end split off
+ * => both-ends test fails) -- measured at 5 cosmic->nu promotions + 3
+ * demotions per 572 data events (doc pr/23 section 6).  The visitor therefore
+ * (a) skips bundles whose in-window main already carries a cosmic conviction
+ * (skip_convicted, the TaggerCheckNeutrino nu_skip_cosmic condition), and
+ * (b) invalidates the retained cluster's pre-split steiner products so the
+ * follow-up steiner pass (replace=false) rebuilds exactly the touched
+ * clusters.
  *
  * The split/flag/ident idiom follows ClusteringUnmergeBundle mode
  * "component": connected_blobs() on the configured graph flavor, longest
@@ -92,6 +105,16 @@ public:
         m_beam_window_only = get<bool>(config, "beam_window_only", m_beam_window_only);
         m_beam_window_low = get<double>(config, "beam_window_low", m_beam_window_low);
         m_beam_window_high = get<double>(config, "beam_window_high", m_beam_window_high);
+        // Only meaningful with beam_window_only: a convicted in-window main
+        // (TaggerCheckTGM/STM flags or the Q/L LM tagger's lm_flag > 0 -- the
+        // exact TaggerCheckNeutrino nu_skip_cosmic condition) does not open
+        // its bundle for splitting.  Default true: at the post-tagger pipeline
+        // position, splitting a convicted cosmic bundle cannot change any
+        // verdict but churns the archives of cosmic-tagged events; skipping
+        // keeps them byte-identical to the stage-off chain.  An unconvicted
+        // in-window main sharing the gid (the doc pr/16 spared-mate case)
+        // still opens the bundle.
+        m_skip_convicted = get<bool>(config, "skip_convicted", m_skip_convicted);
         // Cathode re-join (SBND).  cathode_rejoin_xcut <= 0 (default) disables
         // the pass entirely => prototype-faithful behavior.  Internal units.
         m_cathode_x = get<double>(config, "cathode_x", m_cathode_x);
@@ -111,6 +134,7 @@ public:
         cfg["beam_window_only"] = m_beam_window_only;
         cfg["beam_window_low"] = m_beam_window_low;
         cfg["beam_window_high"] = m_beam_window_high;
+        cfg["skip_convicted"] = m_skip_convicted;
         cfg["cathode_x"] = m_cathode_x;
         cfg["cathode_rejoin_xcut"] = m_cathode_rejoin_xcut;
         cfg["cathode_rejoin_dyz"] = m_cathode_rejoin_dyz;
@@ -136,13 +160,25 @@ public:
         // bundle member is the main itself or a companion sharing its gid.
         std::unordered_set<int> beam_gids;
         const bool gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
+        size_t n_convicted = 0;
         if (gate) {
             for (const auto* cluster : clusters) {
                 if (!cluster->get_flag(Flags::main_cluster)) continue;
                 const double t0 = cluster->get_cluster_t0();
                 if (t0 < m_beam_window_low || t0 >= m_beam_window_high) continue;
                 const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
-                if (gid >= 0) beam_gids.insert(gid);
+                if (gid < 0) continue;
+                // skip_convicted: honor the upstream cosmic verdicts
+                // (TaggerCheckNeutrino nu_skip_cosmic condition, lines
+                // 339-350: TGM/STM flags, lm_flag 1=low-energy
+                // 2=light-mismatch, absent scalar never skips).
+                if (m_skip_convicted
+                    && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
+                        || cluster->get_scalar<int>("lm_flag", -1) > 0)) {
+                    ++n_convicted;
+                    continue;   // this main does not open its bundle
+                }
+                beam_gids.insert(gid);
             }
         }
 
@@ -154,6 +190,17 @@ public:
                 const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
                 if (gid < 0 || beam_gids.count(gid) == 0) continue;
             }
+            // A convicted cluster is never split, even as a member of a
+            // bundle an unconvicted mate opened (SBND evt 52195: gid 6 holds
+            // the TGM-tagged 513 cm crosser AND an untagged shard main --
+            // the shard opens the bundle, but splitting the convicted
+            // crosser would only churn the cosmic-tagged tree).
+            if (m_skip_convicted
+                && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)
+                    || cluster->get_scalar<int>("lm_flag", -1) > 0)) {
+                ++n_convicted;
+                continue;
+            }
             const size_t before = grouping.nchildren();
             if (process_cluster(grouping, cluster, taken, n_rejoin)) {
                 ++n_split;
@@ -161,8 +208,8 @@ public:
             }
         }
         log->debug("split {} bundle cluster(s) into {} extra cluster(s) "
-                   "({} cathode re-join(s), graph '{}')",
-                   n_split, n_parts, n_rejoin, m_graph_name);
+                   "({} cathode re-join(s), {} convicted main(s) skipped, graph '{}')",
+                   n_split, n_parts, n_rejoin, n_convicted, m_graph_name);
     }
 
 private:
@@ -171,6 +218,7 @@ private:
     std::string m_pcarray_name{"perblob"};
     bool m_require_in_scope{true};
     bool m_beam_window_only{false};
+    bool m_skip_convicted{true};
     double m_beam_window_low{0};
     double m_beam_window_high{0};
     double m_cathode_x{0};
@@ -313,9 +361,41 @@ private:
         };
 
         carve(cluster, -1);
+        // Invalidate the retained cluster's pre-split products.  At the
+        // production position (after the cosmic taggers, doc pr/23 ordering)
+        // the steiner stage and the taggers have already run on this facade:
+        // the node-local steiner_pc, the facade-owned steiner_graph, AND every
+        // other facade-owned graph (STM's track fit builds 'basic_pid', the
+        // taggers build ctpc flavors, connected_blobs above built
+        // m_graph_name) were all made on the pre-split blob set, so their
+        // vertex indices exceed the post-split point count
+        // (blob_with_point(3906) on 2738 points -- evt 386948 abort,
+        // TrackFitting::form_point_association via graph_algorithms
+        // 'basic_pid').  Named flavors rebuild lazily
+        // (Cluster::graph_algorithms), steiner_graph/steiner_pc by the
+        // follow-up steiner pass; fragments come out of separate() with fresh
+        // facades carrying none of these (the ClusteringUnmergeBundle lines
+        // 78-84 observation).
         if (cluster->value().local_pcs().erase("steiner_pc")) {
-            log->warn("cluster {}: erased a steiner_pc built before the split -- "
-                      "run this visitor BEFORE the steiner stage", main_ident);
+            log->debug("cluster {}: dropped the pre-split steiner_pc "
+                       "(follow-up steiner pass rebuilds it)", main_ident);
+        }
+        {
+            std::vector<std::string> gnames;
+            for (const auto& [gname, gr] : cluster->graph_store()) gnames.push_back(gname);
+            for (const auto& gname : gnames) {
+                cluster->take_graph(gname);                 // erases the store entry
+                cluster->remove_graph_algorithms(gname);
+            }
+            // A GraphAlgorithms cache can exist without a stored graph
+            // (reference-graph constructions) -- drop those too.
+            for (const auto& gname : cluster->get_cached_graph_algorithms()) {
+                cluster->remove_graph_algorithms(gname);
+            }
+            if (!gnames.empty()) {
+                log->debug("cluster {}: dropped {} pre-split graph(s)",
+                           main_ident, gnames.size());
+            }
         }
 
         // prototype: the largest component keeps the main cluster id and role

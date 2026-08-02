@@ -866,6 +866,10 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // one block up, which is cm); nulls => C++ defaults, i.e. the
               // re-join pass disabled (prototype-faithful).
               protect_graph_name=null,
+              // C++ default true (doc pr/23 ordering): convicted in-window
+              // mains (TGM/STM/lm) do not open their bundle.  null => key
+              // omitted => C++ default.
+              protect_skip_convicted=null,
               protect_cathode_x=null,
               protect_cathode_rejoin_xcut=null,
               protect_cathode_rejoin_dyz=null,
@@ -1104,8 +1108,15 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // split each beam-bundle cluster at graph-component boundaries so
         // vertex-proximate photon fragments merged by Clustering_neutrino are
         // fit as separate clusters instead of one MST-bridged trajectory
-        // (doc pr/22 sec 8, evt 386948).  Runs AFTER both un-merges (bundle
-        // structure restored first) and BEFORE steiner.  The cathode re-join
+        // (doc pr/22 sec 8, evt 386948).  Position (doc pr/23 ordering
+        // decision): AFTER the cosmic taggers (tagger_check_tgm/stm/fc) and
+        // BEFORE tagger_check_neutrino, with 'steiner' named a second time
+        // right after it so the split clusters' steiner products are rebuilt
+        // (the visitor drops the pre-split ones; CreateSteinerGraph
+        // replace=false touches nothing else).  This matches uboone -- cosmic
+        // verdicts on unsplit clusters (wire-cell-prod-stm.cxx:806-810),
+        // Protect_Over_Clustering only in the nue executable
+        // (wire-cell-prod-nue.cxx:1322).  The cathode re-join
         // knobs keep it from splitting cathode crossers, an SBND geometry
         // uboone did not have (doc pr/20).  Not in pipeline_names => absent
         // from the compiled config => no behavior change.
@@ -1114,6 +1125,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             beam_window_only=beam_gate,
             beam_window_low=beam_window[0],
             beam_window_high=beam_window[1],
+            skip_convicted=protect_skip_convicted,
             cathode_x=protect_cathode_x,
             cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
             cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
@@ -1721,6 +1733,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // crosser that cathode_connect/B0 preserved (doc pr/20).  nulls =
        // prototype-faithful (re-join pass disabled).
        protect_graph_name=null,
+       protect_skip_convicted=null,
        protect_cathode_x=0,
        protect_cathode_rejoin_xcut=5 * wc.cm,
        protect_cathode_rejoin_dyz=4 * wc.cm,
@@ -1810,6 +1823,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 cathode_x=cathode_x,
                 cathode_kink_xcut=cathode_kink_xcut,
                 protect_graph_name=protect_graph_name,
+                protect_skip_convicted=protect_skip_convicted,
                 protect_cathode_x=protect_cathode_x,
                 protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                 protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,

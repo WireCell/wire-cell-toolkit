@@ -169,6 +169,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // pr/23).  Internal units.
         protect_bundle(name="", graph_name="relaxed",
                        beam_window_only=null, beam_window_low=null, beam_window_high=null,
+                       skip_convicted=null,
                        cathode_x=null, cathode_rejoin_xcut=null,
                        cathode_rejoin_dyz=null, cathode_rejoin_dis=null) :: {
             type: "ClusteringProtectBundle",
@@ -180,6 +181,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if beam_window_only != null then 'beam_window_only']: beam_window_only,
                 [if beam_window_low != null then 'beam_window_low']: beam_window_low,
                 [if beam_window_high != null then 'beam_window_high']: beam_window_high,
+                // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted
+                // in-window main does not open its bundle.  Key omitted when
+                // null => C++ default.
+                [if skip_convicted != null then 'skip_convicted']: skip_convicted,
                 [if cathode_x != null then 'cathode_x']: cathode_x,
                 [if cathode_rejoin_xcut != null then 'cathode_rejoin_xcut']: cathode_rejoin_xcut,
                 [if cathode_rejoin_dyz != null then 'cathode_rejoin_dyz']: cathode_rejoin_dyz,

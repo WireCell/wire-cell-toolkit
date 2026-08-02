@@ -123,6 +123,9 @@ function(
     // defaults so a bare run is production; nulls = prototype-faithful
     // (re-join pass disabled -- would break cathode crossers, doc pr/20).
     protect_graph_name          = null,   // null => 'relaxed'
+    // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
+    // main does not open its bundle for splitting.  null => key omitted.
+    protect_skip_convicted      = null,
     protect_cathode_x           = 0,
     protect_cathode_rejoin_xcut = 5 * wc.cm,
     protect_cathode_rejoin_dyz  = 4 * wc.cm,
@@ -532,6 +535,7 @@ function(
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
                              protect_graph_name=protect_graph_name,
+                             protect_skip_convicted=protect_skip_convicted,
                              protect_cathode_x=protect_cathode_x,
                              protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
                              protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
