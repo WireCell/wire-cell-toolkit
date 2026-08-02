@@ -108,11 +108,13 @@ function(
     // while the ~2 cm transverse mismatch across the gap supplies the turn.
     // cathode_kink_xcut suppresses kink ACCEPT candidates within that distance
     // of x = cathode_x; the angle arithmetic itself is untouched.
-    // null on both = C++ default 0 = OFF = the legacy kink search, and the keys
-    // are omitted so the compiled JSON is byte-identical (gate B0-2).
-    // Pass -A cathode_kink_xcut=5 -A cathode_x=0 to exercise it.
-    cathode_x         = null,
-    cathode_kink_xcut = null,
+    // null on both = C++ default 0 = OFF = the legacy kink search, with the keys
+    // omitted (gate B0-2).  SBND DEFAULT ON (owner 2026-08-02 after the Part VI
+    // Bee scan): 5 cm around x = 0, matching clus.jsonnet's pr() default so a
+    // bare run is production.  NOT bit-identical -- doc pr/20 Part VI sec 1.
+    // Pass -A cathode_kink_xcut=null -A cathode_x=null for the legacy search.
+    cathode_x         = 0,
+    cathode_kink_xcut = 5,
     // TaggerCheckSTM's containment gate (cluster_fc_check) uses the same fiducial
     // + margins as tagger_check_tgm / tagger_check_fc, so "contained" means one
     // thing across all three verdicts.  true = SBND production (docs/49); false

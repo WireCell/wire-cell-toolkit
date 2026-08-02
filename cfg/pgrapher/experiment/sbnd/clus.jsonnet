@@ -1622,9 +1622,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // suppresses segment_search_kink accept candidates within that distance
        // of x = cathode_x, because the kink finder's para_angle guard is
        // inverted at the cathode and breaks crossing cosmics in two.
-       // C++ defaults are 0/0 = OFF; null here omits both keys, so the
-       // compiled JSON is byte-identical to the pre-B0 config.
-       cathode_x=null, cathode_kink_xcut=null,
+       // C++ defaults are 0/0 = OFF; null omits both keys.
+       // SBND DEFAULT ON (owner 2026-08-02 after the Part VI Bee scan):
+       // 5 cm around x = 0.  NOT bit-identical -- 21 of 1000 mcp1k events move,
+       // 10 of them relocating the neutrino vertex (doc pr/20 Part VI sec 1).
+       // Set both to null for the legacy kink search.
+       cathode_x=0, cathode_kink_xcut=5,
        // Detector-extent literals re-anchored to SBND (docs/pr/2 sec 2e(iv)) --
        // see the clus_pr arg comments.  cosmic_y_*: uBooNE's "reaches the top"
        // offsets carried from its y=+117 cm top face to SBND's +200 cm.
