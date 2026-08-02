@@ -425,7 +425,24 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
     // Cathode-crossing connector: after the generic merge passes (so it only ADDS
     // merges they missed) and before examine_bundles (so a connected crosser is one
     // cluster before the flash-bundle collapse).  SBND-on; off => list unchanged.
-    + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, flash_t0_window=800*wc.ns)] else [])
+    //
+    // tip_touch_cut / crosser_pca_angle (doc pr/20 Part II, A1 + A2).  Both are
+    // C++ default 0 = OFF; with the keys omitted the compiled config is what
+    // SBND shipped before pr/20.  They relax the two direction terms that were
+    // rejecting genuine cathode crossers:
+    //   tip_touch_cut=4cm -- when the two tips approach within 4 cm, drop the
+    //     cc_pca (connection-vector) term and accept on cluster-PCA collinearity
+    //     alone.  cc_pca measures the cathode gap, not the track, at that
+    //     separation: of the 183 pairs already accepted by the primary Hough
+    //     test 123 (67%) violate the 30 deg conn_far_cut bound.  PDHD ships the
+    //     same knob at 3 cm.  +10 edges / 500 SBND data events (evt 315497).
+    //   crosser_pca_angle=20 -- raise the tt_pca (cluster-PCA agreement) bound
+    //     from angle_cut=10 to 20 deg inside the near-cathode branch, for a
+    //     gently curving crosser whose two halves' global PCA axes differ.
+    //     +3 edges on the same sample (evt 406796 at 18.3 deg).
+    // NOT bit-identical for SBND -- this is a behaviour change delivered as
+    // config; gates in sbnd_xin/docs/pr/20.
+    + (if cathode_connect_on then [cm.cathode_connect(cathode_x_cut=5*wc.cm, drift_cut=8*wc.cm, min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0, tip_touch_cut=4*wc.cm, crosser_pca_angle=20.0, flash_t0_window=800*wc.ns)] else [])
     // Cathode BUNDLE rescue (default OFF => list unchanged => byte-identical):
     // joins a crosser whose two halves are in DIFFERENT flash bundles because
     // the flash reco's absorbing window hid the true flash on one side --
