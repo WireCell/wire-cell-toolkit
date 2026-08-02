@@ -1138,6 +1138,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                             beam_window_only=beam_gate,
                             beam_window_low=beam_window[0],
                             beam_window_high=beam_window[1]),
+        // The doc pr/23 second steiner pass, named right after protect_bundle:
+        // replace=false rebuilds ONLY the clusters protect_bundle purged
+        // (split retained + fragments).  A replace=true second pass would
+        // erase+emplace every in-window cluster's steiner_graph and dangle
+        // the GraphAlgorithms the STM fit cached in the tagger stage
+        // (bad_alloc from garbage num_vertices, SBND evt 54095).  Distinct
+        // component name => distinct instance; not in pipeline_names =>
+        // absent from the compiled config.
+        steiner_refresh: cm.steiner(name='refresh',
+                            retiler=improve2, perf=true, require_beam_flash=false,
+                            beam_window_only=beam_gate,
+                            beam_window_low=beam_window[0],
+                            beam_window_high=beam_window[1],
+                            replace=false),
         fiducialutils: cm.fiducialutils(),
         tagger_check_stm: cm.tagger_check_stm(
             evaluate_demoted_mains=evaluate_demoted_mains,

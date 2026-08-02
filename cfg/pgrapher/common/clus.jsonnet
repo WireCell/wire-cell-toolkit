@@ -1307,7 +1307,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // taggers get: with tagger_check_{tgm,stm,fc} gated the same way, the
         // clusters that lose their graph are exactly the ones no tagger reads.
         steiner(name="", retiler={}, grouping="live", graph="steiner", perf=true, require_beam_flash=true,
-                beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
+                beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1316,6 +1316,13 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 retiler: wc.tn(retiler),
                 perf: perf,
                 require_beam_flash: require_beam_flash,
+                // C++ default true.  false = keep existing steiner products
+                // (the doc pr/23 second pass rebuilds ONLY the clusters
+                // protect_bundle purged; replacing an existing graph
+                // erase+emplaces the store node and dangles any
+                // GraphAlgorithms made in the tagger stage).  Key omitted
+                // when null => byte-identical pre-knob config.
+                [if replace != null then 'replace']: replace,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,
