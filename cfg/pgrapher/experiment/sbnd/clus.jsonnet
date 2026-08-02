@@ -850,6 +850,20 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // angle arithmetic itself is untouched.
               // null = C++ default 0 = OFF (key omitted => byte-identical).
               cathode_x=null, cathode_kink_xcut=null,
+              // protect_bundle stage knobs (doc pr/23): the PR-stage
+              // overclustering protection (uboone's second graph examination,
+              // ProtectOverClustering.cxx).  The stage only acts when
+              // 'protect_bundle' is named in pipeline_names, so these are
+              // inert otherwise.  protect_graph_name: connected_blobs flavor
+              // (null => 'relaxed').  protect_cathode_*: the SBND cathode
+              // re-join divergence -- INTERNAL units (unlike cathode_kink_xcut
+              // one block up, which is cm); nulls => C++ defaults, i.e. the
+              // re-join pass disabled (prototype-faithful).
+              protect_graph_name=null,
+              protect_cathode_x=null,
+              protect_cathode_rejoin_xcut=null,
+              protect_cathode_rejoin_dyz=null,
+              protect_cathode_rejoin_dis=null,
               // cosmic_y_* (cm): cosmic_tagger()'s four "reaches the top of the
               // detector" tests, re-anchored from uBooNE's top face (y = +117 cm)
               // to SBND's (y = +200 cm, sbnd_y_top above).  The uBooNE literals
@@ -1077,6 +1091,26 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         unmerge_assoc: cm.unmerge_bundle(name='assoc', mode=unmerge_bundle_mode,
                                          id_aname='assoc_cluster_id',
                                          main_aname='assoc_cluster_main'),
+        // PR-stage overclustering protection (doc pr/23): uboone's SECOND
+        // graph-examination round (WCPPID::Protect_Over_Clustering ->
+        // Examine_graph, run after Q/L matching and before NeutrinoID) --
+        // split each beam-bundle cluster at graph-component boundaries so
+        // vertex-proximate photon fragments merged by Clustering_neutrino are
+        // fit as separate clusters instead of one MST-bridged trajectory
+        // (doc pr/22 sec 8, evt 386948).  Runs AFTER both un-merges (bundle
+        // structure restored first) and BEFORE steiner.  The cathode re-join
+        // knobs keep it from splitting cathode crossers, an SBND geometry
+        // uboone did not have (doc pr/20).  Not in pipeline_names => absent
+        // from the compiled config => no behavior change.
+        protect_bundle: cm.protect_bundle(
+            graph_name=if protect_graph_name == null then 'relaxed' else protect_graph_name,
+            beam_window_only=beam_gate,
+            beam_window_low=beam_window[0],
+            beam_window_high=beam_window[1],
+            cathode_x=protect_cathode_x,
+            cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
+            cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
+            cathode_rejoin_dis=protect_cathode_rejoin_dis),
         // SBND has no beam_flash flag (QLMatching sets main/associated_cluster
         // instead) -- process every scope-passing cluster, narrowed to the
         // beam-coincident bundle when beam_window_only is on (the default; see
@@ -1669,6 +1703,19 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // 10 of them relocating the neutrino vertex (doc pr/20 Part VI sec 1).
        // Set both to null for the legacy kink search.
        cathode_x=0, cathode_kink_xcut=5,
+       // protect_bundle (doc pr/23): PR-stage overclustering protection.
+       // Inert unless 'protect_bundle' is named in pipeline_names.  The
+       // cathode re-join values are the SBND operating point (INTERNAL units,
+       // unlike cathode_kink_xcut above): re-unite graph components whose
+       // closest points both sit within 5 cm of the cathode, within 8 cm in
+       // 3D and 4 cm transversely, so the stage never re-splits a cathode
+       // crosser that cathode_connect/B0 preserved (doc pr/20).  nulls =
+       // prototype-faithful (re-join pass disabled).
+       protect_graph_name=null,
+       protect_cathode_x=0,
+       protect_cathode_rejoin_xcut=5 * wc.cm,
+       protect_cathode_rejoin_dyz=4 * wc.cm,
+       protect_cathode_rejoin_dis=8 * wc.cm,
        // Detector-extent literals re-anchored to SBND (docs/pr/2 sec 2e(iv)) --
        // see the clus_pr arg comments.  cosmic_y_*: uBooNE's "reaches the top"
        // offsets carried from its y=+117 cm top face to SBND's +200 cm.
@@ -1752,6 +1799,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 fit_vertex_min_seg_length=fit_vertex_min_seg_length,
                 cathode_x=cathode_x,
                 cathode_kink_xcut=cathode_kink_xcut,
+                protect_graph_name=protect_graph_name,
+                protect_cathode_x=protect_cathode_x,
+                protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
+                protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
+                protect_cathode_rejoin_dis=protect_cathode_rejoin_dis,
                 cosmic_y_top_main=cosmic_y_top_main,
                 cosmic_y_top_strict=cosmic_y_top_strict,
                 cosmic_y_top_loose=cosmic_y_top_loose,

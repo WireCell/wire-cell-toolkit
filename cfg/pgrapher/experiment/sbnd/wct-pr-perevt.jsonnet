@@ -115,6 +115,18 @@ function(
     // Pass -A cathode_kink_xcut=null -A cathode_x=null for the legacy search.
     cathode_x         = 0,
     cathode_kink_xcut = 5,
+    // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
+    // protection (uboone's second graph examination).  Inert unless
+    // 'protect_bundle' is named in pipeline_names.  The cathode re-join
+    // values are the SBND operating point in INTERNAL units (unlike
+    // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
+    // defaults so a bare run is production; nulls = prototype-faithful
+    // (re-join pass disabled -- would break cathode crossers, doc pr/20).
+    protect_graph_name          = null,   // null => 'relaxed'
+    protect_cathode_x           = 0,
+    protect_cathode_rejoin_xcut = 5 * wc.cm,
+    protect_cathode_rejoin_dyz  = 4 * wc.cm,
+    protect_cathode_rejoin_dis  = 8 * wc.cm,
     // TaggerCheckSTM's containment gate (cluster_fc_check) uses the same fiducial
     // + margins as tagger_check_tgm / tagger_check_fc, so "contained" means one
     // thing across all three verdicts.  true = SBND production (docs/49); false
@@ -510,6 +522,11 @@ function(
                              cosmic_y_small_piece=pr_y_top - 67,
                              cathode_x=cathode_x,
                              cathode_kink_xcut=cathode_kink_xcut,
+                             protect_graph_name=protect_graph_name,
+                             protect_cathode_x=protect_cathode_x,
+                             protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
+                             protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
+                             protect_cathode_rejoin_dis=protect_cathode_rejoin_dis,
                              vertex_z_prior_scale=vertex_z_prior_scale,
                              ssm_target_dir=ssm_target_dir,
                              ssm_absorber_dir=ssm_absorber_dir,

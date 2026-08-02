@@ -139,6 +139,47 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms],
         },
 
+        // PR-stage overclustering protection: the toolkit counterpart of the
+        // prototype's second graph-examination round after Q/L matching
+        // (WCPPID::Protect_Over_Clustering -> PR3DCluster::Examine_graph,
+        // ProtectOverClustering.cxx:6-160, wire-cell-prod-nue.cxx:1322).
+        // Splits each bundle cluster at graph-component boundaries; the
+        // longest component keeps the retained cluster (and, for a bundle
+        // main, its main_cluster role), fragments become associated clusters
+        // fit separately downstream.  Place AFTER unmerge_assoc and BEFORE
+        // the steiner stage.  The stage only acts when named in
+        // pipeline_names, so existing pipelines are byte-identical.
+        // beam_window_only + beam_window_low/high (C++ defaults false/0/0):
+        // restrict to the beam-coincident bundle(s), the prototype's scope --
+        // same gate and key names as CreateSteinerGraph.
+        // cathode_x / cathode_rejoin_xcut / cathode_rejoin_dyz /
+        // cathode_rejoin_dis (C++ defaults 0 / 0 = pass disabled / 4 cm /
+        // 8 cm; keys omitted when null => prototype-faithful behavior):
+        // re-unite component pairs that meet across the cathode band before
+        // splitting -- the relaxed graph does not join the two halves of a
+        // cathode crosser (SBND geometry uboone did not have; doc pr/20,
+        // pr/23).  Internal units.
+        protect_bundle(name="", graph_name="relaxed",
+                       beam_window_only=null, beam_window_low=null, beam_window_high=null,
+                       cathode_x=null, cathode_rejoin_xcut=null,
+                       cathode_rejoin_dyz=null, cathode_rejoin_dis=null) :: {
+            type: "ClusteringProtectBundle",
+            name: prefix + name,
+            data: dv_cfg + pcts_cfg + {
+                grouping: "live",
+                graph_name: graph_name,
+                pcarray_name: "perblob",
+                [if beam_window_only != null then 'beam_window_only']: beam_window_only,
+                [if beam_window_low != null then 'beam_window_low']: beam_window_low,
+                [if beam_window_high != null then 'beam_window_high']: beam_window_high,
+                [if cathode_x != null then 'cathode_x']: cathode_x,
+                [if cathode_rejoin_xcut != null then 'cathode_rejoin_xcut']: cathode_rejoin_xcut,
+                [if cathode_rejoin_dyz != null then 'cathode_rejoin_dyz']: cathode_rejoin_dyz,
+                [if cathode_rejoin_dis != null then 'cathode_rejoin_dis']: cathode_rejoin_dis,
+            },
+            uses: [detector_volumes, pc_transforms],
+        },
+
         // require_in_scope (default false): also require each candidate main to
         // pass the default-scope filter set by switch_scope, i.e. to have blobs
         // whose T0-corrected points land in the active volume.  switch_scope
