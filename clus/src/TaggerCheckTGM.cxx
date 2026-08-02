@@ -89,6 +89,16 @@ public:
         // writer (filter:1) and clustering_examine_bundles already honor this
         // same flag; the taggers were the only consumers ignoring it.
         m_require_in_scope = get(config, "require_in_scope", m_require_in_scope);
+        // evaluate_demoted_mains (default false = historical behavior): also
+        // evaluate a cluster carrying Flags::demoted_main -- a split part that
+        // was ITSELF a matched Q/L bundle main before the flash-time merge
+        // demoted it (ClusteringUnmergeBundle restore_demoted_mains, doc pr/20
+        // Part I).  Such a cluster is not a fragment; it is exactly the
+        // population these cuts were tuned on, and today no cosmic tagger ever
+        // looks at it.  The scope filter and beam-window gate below apply to it
+        // unchanged.  Default false => no cluster is added => byte-identical.
+        m_evaluate_demoted_mains = get<bool>(config, "evaluate_demoted_mains", m_evaluate_demoted_mains);
+
         // check_neutrino_candidate (default false = v1 behavior): enable the
         // ported prototype neutrino-candidate veto in the beam-protected
         // branches.  OFF keeps the conservative never-tag-in-beam behavior
@@ -214,6 +224,7 @@ public:
         cfg["length_limit_frac"] = m_length_limit_frac;
         cfg["enable_case_b"] = m_enable_case_b;
         cfg["require_in_scope"] = m_require_in_scope;
+        cfg["evaluate_demoted_mains"] = m_evaluate_demoted_mains;
         cfg["check_neutrino_candidate"] = m_check_neutrino_candidate;
         cfg["require_chord_charge"] = m_require_chord_charge;
         cfg["chord_support_radius"] = m_chord_support_radius;
@@ -239,8 +250,12 @@ public:
         std::vector<Cluster*> main_clusters;
         int n_out_of_scope = 0;
         int n_out_of_window = 0;
+        int n_demoted = 0;
         for (auto* cluster : grouping.children()) {
-            if (!cluster->get_flag(Flags::main_cluster)) continue;
+            const bool demoted = m_evaluate_demoted_mains
+                && !cluster->get_flag(Flags::main_cluster)
+                && cluster->get_flag(Flags::demoted_main);
+            if (!cluster->get_flag(Flags::main_cluster) && !demoted) continue;
             if (m_require_in_scope && !cluster->get_scope_filter(cluster->get_default_scope())) {
                 ++n_out_of_scope;
                 continue;
@@ -253,6 +268,11 @@ public:
                 }
             }
             main_clusters.push_back(cluster);
+            if (demoted) ++n_demoted;
+        }
+        if (n_demoted) {
+            SPDLOG_LOGGER_INFO(t_log, "visit: TaggerCheckTGM: evaluate_demoted_mains: {} demoted main(s) added",
+                               n_demoted);
         }
         if (n_out_of_scope) {
             SPDLOG_LOGGER_INFO(t_log, "visit: TaggerCheckTGM: skipped {} out-of-scope main cluster(s)",
@@ -288,6 +308,7 @@ private:
     bool m_beam_window_only{false};
     double m_length_limit_frac{0.45};
     bool m_require_in_scope{false};
+    bool m_evaluate_demoted_mains{false};
     bool m_enable_case_b{true};
     bool m_check_neutrino_candidate{false};
     bool m_require_chord_charge{false};

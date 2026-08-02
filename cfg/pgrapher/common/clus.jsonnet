@@ -191,7 +191,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // detect_proton's end-proton branches -- an end region matching the
         // muon hypothesis in shape and normalization is not called a proton.
         tagger_check_stm(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
-                         require_in_scope=false, save_stm_fit=false, mip_dqdx=null,
+                         require_in_scope=false, evaluate_demoted_mains=false,
+                         save_stm_fit=false, mip_dqdx=null,
                          fiducial=null, fv_tolerance=[],
                          beam_window_only=false, beam_window_low=0, beam_window_high=0,
                          accept_guards=false, proton_muon_guard=false,
@@ -209,6 +210,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 recombination_model: recombination_model,
             } + dv_cfg + pcts_cfg
               + (if require_in_scope then { require_in_scope: true } else {})
+              + (if evaluate_demoted_mains then { evaluate_demoted_mains: true } else {})
               + (if save_stm_fit then { save_stm_fit: true } else {})
               + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
               + (if fiducial != null then { fiducial: fiducial } else {})
@@ -309,7 +311,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // SAME [beam_window_low, beam_window_high) window the in-beam
         // protection already uses.  Same gate as the steiner stage and
         // tagger_check_{stm,fc}; verdicts on surviving mains are unchanged.
-        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, beam_window_only=false, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[]) :: {
+        tagger_check_tgm(name="", fiducial="", fv_tolerance=[], beam_window_low=0, beam_window_high=0, beam_window_only=false, length_limit_frac=0.45, enable_case_b=true, require_in_scope=false, check_neutrino_candidate=false, require_chord_charge=false, chord_support_radius=null, chord_max_gap=null, chord_charge_mode="chord", component_extremes=false, component_min_length=null, component_rescue=false, rescue_chord_check=false, main_component_pairs=false, main_component_mode="path", interior_fv_tolerance=[], evaluate_demoted_mains=false) :: {
             type: "TaggerCheckTGM",
             name: prefix + name,
             data: {
@@ -322,6 +324,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg + (if fiducial == "" then {} else { fiducial: fiducial })
               + (if beam_window_only then { beam_window_only: true } else {})
               + (if require_in_scope then { require_in_scope: true } else {})
+              + (if evaluate_demoted_mains then { evaluate_demoted_mains: true } else {})
               + (if check_neutrino_candidate then { check_neutrino_candidate: true } else {})
               + (if require_chord_charge then { require_chord_charge: true } else {})
               + (if chord_support_radius == null then {} else { chord_support_radius: chord_support_radius })
@@ -365,8 +368,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // bundle, i.e. mains whose matched flash time (cluster_t0) is in
         // [beam_window_low, beam_window_high).  Same gate as the steiner stage
         // and tagger_check_{tgm,stm}.
+        // evaluate_demoted_mains (C++ default false; key omitted when off =>
+        // byte-identical pre-knob config): also evaluate a cluster carrying
+        // flag_demoted_main -- a split part that was ITSELF a matched Q/L bundle
+        // main before the flash-time merge demoted it (unmerge_bundle
+        // restore_demoted_mains, doc pr/20 Part I P2/P3).  Today no cosmic
+        // tagger ever looks at one.  Needs that knob upstream, or nothing
+        // carries the flag and this is inert.
         tagger_check_fc(name="", fiducial="", fv_tolerance=[], require_in_scope=false,
-                        beam_window_only=false, beam_window_low=0, beam_window_high=0) :: {
+                        beam_window_only=false, beam_window_low=0, beam_window_high=0,
+                        evaluate_demoted_mains=false) :: {
             type: "TaggerCheckFC",
             name: prefix + name,
             data: {
@@ -374,6 +385,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             } + dv_cfg + pcts_cfg
               + (if fiducial == "" then {} else { fiducial: fiducial, fv_tolerance: fv_tolerance })
               + (if require_in_scope then { require_in_scope: true } else {})
+              + (if evaluate_demoted_mains then { evaluate_demoted_mains: true } else {})
               + (if beam_window_only then {
                      beam_window_only: true,
                      beam_window_low: beam_window_low,

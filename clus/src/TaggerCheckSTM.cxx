@@ -56,6 +56,15 @@ public:
         m_grouping_name = get<std::string>(config, "grouping", "live");
         // See the visit() comment: default false = historical behavior.
         m_require_in_scope = get<bool>(config, "require_in_scope", m_require_in_scope);
+        // evaluate_demoted_mains (default false = historical behavior): also
+        // evaluate a cluster carrying Flags::demoted_main -- a split part that
+        // was ITSELF a matched Q/L bundle main before the flash-time merge
+        // demoted it (ClusteringUnmergeBundle restore_demoted_mains, doc pr/20
+        // Part I).  Such a cluster is not a fragment; it is exactly the
+        // population these cuts were tuned on, and today no cosmic tagger ever
+        // looks at it.  The scope filter and beam-window gate below apply to it
+        // unchanged.  Default false => no cluster is added => byte-identical.
+        m_evaluate_demoted_mains = get<bool>(config, "evaluate_demoted_mains", m_evaluate_demoted_mains);
 
         // Fiducial volume for the containment (cluster_fc_check) gate.
         //
@@ -321,6 +330,7 @@ public:
         // Set to [w_min, w_max] W-wire index range to enable. Example: [7135, 7264] for UBoone.
         cfg["shorted_y_w_range"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
+        cfg["evaluate_demoted_mains"] = m_evaluate_demoted_mains;
         // Evaluate only mains whose cluster_t0 is in [low, high); false (or an
         // empty window) = every main, i.e. legacy behavior.
         cfg["beam_window_only"] = m_beam_window_only;
@@ -397,13 +407,21 @@ public:
         int n_out_of_scope = 0;
         int n_out_of_window = 0;
         const bool beam_gate = m_beam_window_only && m_beam_window_low < m_beam_window_high;
+        int n_demoted = 0;
         for (auto* cluster : grouping.children()) {
             // See TaggerCheckTGM: switch_scope leaves out-of-volume shards in the
             // grouping carrying an inherited flag_main_cluster.  require_in_scope
             // (default false = historical) drops them.
             const bool in_scope = !m_require_in_scope
                 || cluster->get_scope_filter(cluster->get_default_scope());
-            if (cluster->get_flag(Flags::main_cluster)) {
+            // A demoted main carries BOTH flags: it is a main candidate here AND
+            // stays in the companion pool, because it is still a companion of
+            // the main that survived the merge.  The per-main loop below excludes
+            // it from its OWN companion list.
+            const bool demoted = m_evaluate_demoted_mains
+                && !cluster->get_flag(Flags::main_cluster)
+                && cluster->get_flag(Flags::demoted_main);
+            if (cluster->get_flag(Flags::main_cluster) || demoted) {
                 if (!in_scope) { ++n_out_of_scope; continue; }
                 if (beam_gate) {
                     const double t0 = cluster->get_cluster_t0();
@@ -413,12 +431,18 @@ public:
                     }
                 }
                 main_clusters.push_back(cluster);
-            } else if (cluster->get_flag(Flags::associated_cluster)) {
+                if (demoted) ++n_demoted;
+            }
+            if (cluster->get_flag(Flags::associated_cluster)) {
                 if (!in_scope) continue;
                 // Not gated: the per-main loop below already keeps only the
                 // companions carrying the surviving main's matched_flash_gid.
                 associated_all.push_back(cluster);
             }
+        }
+        if (n_demoted) {
+            SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: evaluate_demoted_mains: {} demoted main(s) added",
+                               n_demoted);
         }
         if (n_out_of_scope) {
             SPDLOG_LOGGER_INFO(s_log, "visit: TaggerCheckSTM: skipped {} out-of-scope main cluster(s)",
@@ -451,6 +475,12 @@ public:
             const int gid = main_cluster->get_scalar<int>("matched_flash_gid", -1);
             std::vector<Cluster*> associated_clusters;
             for (auto* oc : associated_all) {
+                // Self-exclusion.  A demoted main keeps flag_associated_cluster
+                // and shares its matched_flash_gid, so without this it would
+                // appear in its OWN companion list and check_other_clusters()
+                // would count it against itself.  Inert unless
+                // evaluate_demoted_mains put it in main_clusters.
+                if (oc == main_cluster) continue;
                 if (gid < 0 || oc->get_scalar<int>("matched_flash_gid", -1) == gid) {
                     associated_clusters.push_back(oc);
                 }
@@ -564,6 +594,7 @@ public:
 private:
     std::string m_grouping_name{"live"};
     bool m_require_in_scope{false};
+    bool m_evaluate_demoted_mains{false};
     // Beam-window gate on cluster_t0 (see configure()).  Off by default.
     bool m_beam_window_only{false};
     double m_beam_window_low{0};

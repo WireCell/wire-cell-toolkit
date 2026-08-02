@@ -97,6 +97,16 @@ public:
         // flag_main_cluster; those shards are non-physical and are excluded
         // from the label table, so evaluating them here only wastes time.
         m_require_in_scope = get(config, "require_in_scope", m_require_in_scope);
+        // evaluate_demoted_mains (default false = historical behavior): also
+        // evaluate a cluster carrying Flags::demoted_main -- a split part that
+        // was ITSELF a matched Q/L bundle main before the flash-time merge
+        // demoted it (ClusteringUnmergeBundle restore_demoted_mains, doc pr/20
+        // Part I).  Such a cluster is not a fragment; it is exactly the
+        // population these cuts were tuned on, and today no cosmic tagger ever
+        // looks at it.  The scope filter and beam-window gate below apply to it
+        // unchanged.  Default false => no cluster is added => byte-identical.
+        m_evaluate_demoted_mains = get<bool>(config, "evaluate_demoted_mains", m_evaluate_demoted_mains);
+
         // beam_window_only + beam_window_low/high (all C++-default off =>
         // byte-identical legacy behavior): evaluate only the beam-coincident
         // bundle, i.e. mains whose matched flash time (cluster_t0) lies in
@@ -122,6 +132,7 @@ public:
         cfg["fiducial"] = Json::Value();   // null = use FiducialUtils
         cfg["fv_tolerance"] = Json::Value(Json::arrayValue);
         cfg["require_in_scope"] = m_require_in_scope;
+        cfg["evaluate_demoted_mains"] = m_evaluate_demoted_mains;
         // Evaluate only mains whose cluster_t0 is in [low, high); false (or an
         // empty window) = every main, i.e. legacy behavior.
         cfg["beam_window_only"] = m_beam_window_only;
@@ -140,8 +151,12 @@ public:
         std::vector<Cluster*> main_clusters;
         int n_out_of_scope = 0;
         int n_out_of_window = 0;
+        int n_demoted = 0;
         for (auto* cluster : grouping.children()) {
-            if (!cluster->get_flag(Flags::main_cluster)) continue;
+            const bool demoted = m_evaluate_demoted_mains
+                && !cluster->get_flag(Flags::main_cluster)
+                && cluster->get_flag(Flags::demoted_main);
+            if (!cluster->get_flag(Flags::main_cluster) && !demoted) continue;
             if (m_require_in_scope && !cluster->get_scope_filter(cluster->get_default_scope())) {
                 ++n_out_of_scope;
                 continue;
@@ -154,6 +169,11 @@ public:
                 }
             }
             main_clusters.push_back(cluster);
+            if (demoted) ++n_demoted;
+        }
+        if (n_demoted) {
+            SPDLOG_LOGGER_INFO(f_log, "visit: TaggerCheckFC: evaluate_demoted_mains: {} demoted main(s) added",
+                               n_demoted);
         }
         if (n_out_of_scope) {
             SPDLOG_LOGGER_INFO(f_log, "visit: TaggerCheckFC: skipped {} out-of-scope main cluster(s)",
@@ -191,6 +211,7 @@ public:
 private:
     std::string m_grouping_name{"live"};
     bool m_require_in_scope{false};
+    bool m_evaluate_demoted_mains{false};
     // Off by default: with no "fiducial" key the containment tests stay on
     // FiducialUtils, i.e. identical to what TaggerCheckSTM/TaggerCheckNeutrino
     // see.  SBND sets both keys so FC and TGM share one fiducial (doc 27).

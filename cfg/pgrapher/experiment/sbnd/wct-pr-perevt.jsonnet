@@ -390,6 +390,12 @@ function(
     // null omits the key => compiled config byte-identical
     // (runner: SBND_RESTORE_DEMOTED_MAINS=1).
     restore_demoted_mains = null,
+    // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false = OFF):
+    // let TaggerCheckTGM / STM / FC evaluate a cluster carrying
+    // flag_demoted_main.  Inert unless restore_demoted_mains above is on, since
+    // nothing else sets that flag.  false omits the key => compiled config
+    // byte-identical (runner: SBND_EVAL_DEMOTED_MAINS=1).
+    evaluate_demoted_mains = false,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -447,6 +453,7 @@ function(
                              save_stm_fit=save_stm_fit,
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
+                             evaluate_demoted_mains=evaluate_demoted_mains,
                              mip_dqdx=mip_dqdx,
                              stm_consistent_fv=stm_consistent_fv,
                              stm_accept_guards=stm_accept_guards,

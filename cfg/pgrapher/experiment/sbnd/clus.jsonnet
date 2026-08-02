@@ -665,6 +665,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // it -- unmerge_assoc undoes the isolated grouping, a different
               // question.
               restore_demoted_mains=null,
+              // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false,
+              // key omitted when false => byte-identical pre-knob config): let
+              // TaggerCheckTGM / STM / FC evaluate a cluster carrying
+              // flag_demoted_main.  Inert unless restore_demoted_mains above put
+              // the flag there.
+              evaluate_demoted_mains=false,
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM AND (since docs pr/7-pr/8) to
               // tagger_check_neutrino as the PR chain's flat-template/cal_4mom
@@ -1075,6 +1081,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
                             beam_window_high=beam_window[1]),
         fiducialutils: cm.fiducialutils(),
         tagger_check_stm: cm.tagger_check_stm(
+            evaluate_demoted_mains=evaluate_demoted_mains,
             trackfitting_config_file=trackfitting_config_file,
             particle_dataset=wc.tn(particle_dataset),
             recombination_model=wc.tn(sbnd_recomb),
@@ -1185,6 +1192,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // flag_main_cluster) -- on the SBND 10-event reco1 sample those were 43%
         // of all evaluated mains and tagged TGM at 85% vs 44% for real clusters.
         tagger_check_tgm: cm.tagger_check_tgm(
+            evaluate_demoted_mains=evaluate_demoted_mains,
             fiducial=wc.tn(sbnd_pr_fv),
             fv_tolerance=sbnd_pr_fv_margins,
             // Key omitted when the knob is 0 (empty list) => byte-identical.
@@ -1231,6 +1239,7 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
         // which is both more permissive at every wall than TGM's inset box and
         // holed at the CPA slab -- see docs/27_fc-tgm-consistent-fv.md.
         tagger_check_fc: cm.tagger_check_fc(
+            evaluate_demoted_mains=evaluate_demoted_mains,
             fiducial=wc.tn(sbnd_pr_fv),
             fv_tolerance=sbnd_pr_fv_margins,
             require_in_scope=true,
@@ -1615,6 +1624,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        save_stm_fit=false, unmerge_bundle_mode='real',
        // doc pr/20 Part I P2; null = C++ default false = OFF.  See clus_pr.
        restore_demoted_mains=null,
+       // doc pr/20 Part I P3; false = C++ default = OFF.  See clus_pr.
+       evaluate_demoted_mains=false,
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
        stm_proton_muon_guard=true, stm_cathode_guard=true,
        stm_anode_dist_fix=true, stm_second_track_guard=true,
@@ -1703,6 +1714,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 save_stm_fit=save_stm_fit,
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
+                evaluate_demoted_mains=evaluate_demoted_mains,
                 mip_dqdx=mip_dqdx,
                 stm_consistent_fv=stm_consistent_fv,
                 stm_accept_guards=stm_accept_guards,
