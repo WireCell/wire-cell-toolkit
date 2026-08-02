@@ -396,6 +396,16 @@ function(
     // nothing else sets that flag.  false omits the key => compiled config
     // byte-identical (runner: SBND_EVAL_DEMOTED_MAINS=1).
     evaluate_demoted_mains = false,
+    // skip_cosmic_companions / cosmic_companion_min_length (doc pr/20 Part I
+    // P4; C++ defaults false / 0 = OFF): drop a TGM- or STM-tagged COMPANION
+    // from the neutrino's other_clusters, so its charge cannot reach the
+    // particle-flow tree or kine_reco_Enu.  A tagged companion SHORTER than the
+    // floor (cm) stays in regardless, so a mis-tagged neutrino daughter is
+    // never silently lost.  Inert without evaluate_demoted_mains above.
+    // Keys omitted when off => compiled config byte-identical
+    // (runner: SBND_SKIP_COSMIC_COMPANIONS=1 SBND_COSMIC_COMPANION_MIN_LEN=<cm>).
+    skip_cosmic_companions = false,
+    cosmic_companion_min_length = null,
 )
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
     local params = base {
@@ -454,6 +464,8 @@ function(
                              unmerge_bundle_mode=unmerge_bundle_mode,
                              restore_demoted_mains=restore_demoted_mains,
                              evaluate_demoted_mains=evaluate_demoted_mains,
+                             skip_cosmic_companions=skip_cosmic_companions,
+                             cosmic_companion_min_length=cosmic_companion_min_length,
                              mip_dqdx=mip_dqdx,
                              stm_consistent_fv=stm_consistent_fv,
                              stm_accept_guards=stm_accept_guards,

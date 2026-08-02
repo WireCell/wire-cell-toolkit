@@ -136,6 +136,21 @@ public:
                                                        // the veto removes every bundle-mate.
                                                        // Inert unless m_nu_skip_cosmic_bundle.
                                                        // docs/pr/16 design A (SBND 15).
+        bool m_skip_cosmic_companions{false};  // doc pr/20 Part I P4.  If true, a COMPANION
+                                               // (other_clusters member) that is TGM- or
+                                               // STM-tagged and at least
+                                               // m_cosmic_companion_min_length long is dropped
+                                               // from the neutrino's companion list.  Nothing
+                                               // tags a companion today unless the taggers run
+                                               // with evaluate_demoted_mains (P3), so this is
+                                               // inert without it.
+        double m_cosmic_companion_min_length{0};  // cm.  A tagged companion SHORTER than this
+                                                  // stays in regardless of verdict, so a
+                                                  // mis-tagged short neutrino daughter can never
+                                                  // be silently dropped.  0 = no floor: drop on
+                                                  // the verdict alone.  Own tuning, deliberately
+                                                  // NOT inheriting nu_skip_cosmic_bundle_min_length
+                                                  // -- a different question.
         mutable std::shared_ptr<TrackFitting> m_track_fitter;
 
         void load_trackfitting_config(const std::string& config_file);

@@ -175,6 +175,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_skip_cosmic          = get(config, "nu_skip_cosmic",          m_nu_skip_cosmic);
     m_nu_skip_cosmic_bundle   = get(config, "nu_skip_cosmic_bundle",   m_nu_skip_cosmic_bundle);
     m_nu_skip_cosmic_bundle_min_length = get(config, "nu_skip_cosmic_bundle_min_length", m_nu_skip_cosmic_bundle_min_length);  // cm
+    m_skip_cosmic_companions  = get(config, "skip_cosmic_companions",  m_skip_cosmic_companions);
+    m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
 
     if (!m_trackfitting_config_file.empty()) {
         load_trackfitting_config(m_trackfitting_config_file);
@@ -250,6 +252,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_skip_cosmic"] = m_nu_skip_cosmic;     // beam-gate only: skip in-window mains with flag_TGM/flag_STM/lm_flag>0
     cfg["nu_skip_cosmic_bundle"] = m_nu_skip_cosmic_bundle;  // that verdict vetoes the whole matched_flash_gid bundle
     cfg["nu_skip_cosmic_bundle_min_length"] = m_nu_skip_cosmic_bundle_min_length;  // cm; > 0 spares untagged bundle-mates at least this long (docs/pr/16 design A); 0 = veto all
+    cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
+    cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
 
 
     return cfg;
@@ -392,6 +396,25 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 if (cluster == main_cluster) continue;
                 if (!cluster->get_flag(Flags::associated_cluster)) continue;
                 if (gid < 0 || cluster->get_scalar<int>("matched_flash_gid", -1) == gid) {
+                    // P4 (doc pr/20 Part I): a companion the cosmic taggers
+                    // convicted is not neutrino charge.  Dropping it here keeps
+                    // it out of the pattern-recognition input, so it cannot
+                    // contribute a particle to the flow tree or its charge to
+                    // kine_reco_Enu.  The length floor is the safety valve: a
+                    // SHORT tagged companion stays in regardless of verdict, so
+                    // a mis-tagged neutrino daughter is never silently lost and
+                    // a bad tag on a fragment is bounded.  Nothing tags a
+                    // companion unless the taggers ran with
+                    // evaluate_demoted_mains, so this is inert without P3.
+                    if (m_skip_cosmic_companions
+                        && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM))
+                        && cluster->get_length() >= m_cosmic_companion_min_length * units::cm) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: companion cluster {} (L {:.1f} cm, TGM={} STM={}) dropped from other_clusters (skip_cosmic_companions, floor {:.1f} cm)",
+                                           cluster->get_cluster_id(), cluster->get_length()/units::cm,
+                                           cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                                           m_cosmic_companion_min_length);
+                        continue;
+                    }
                     other_clusters.push_back(cluster);
                 }
             }

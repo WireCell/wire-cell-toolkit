@@ -393,7 +393,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                  } else {}),
         },
 
-        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null) :: {
+        tagger_check_neutrino(name="", trackfitting_config_file="", particle_dataset="", recombination_model="", perf=false, dl_weights="", dQdx_scale=0.1, dQdx_offset=-1000.0, clus_geom_helper="", dl_vtx_rerank=true, dl_vtx_top_k=5, dl_vtx_min_accept_score=4.0, dl_vtx_score_scale=1000.0, beam_window_low=0, beam_window_high=0, nu_skip_cosmic=false, nu_skip_cosmic_bundle=false, nu_skip_cosmic_bundle_min_length=0, dir_weak_use_score=false, mip_dqdx=null, mip_dqdx_median=null, proton_dir_vote=false, proton_dir_score_max=null, proton_dir_asym_min=null, endpoint_trim_retry=false, fit_vertex_min_seg_length=null, cathode_x=null, cathode_kink_xcut=null, cosmic_y_top_main=null, cosmic_y_top_strict=null, cosmic_y_top_loose=null, cosmic_y_small_piece=null, vertex_z_prior_scale=null, ssm_target_dir=null, ssm_absorber_dir=null, kine_fudge_factor=null, kine_recom_factor=null, kine_shower_fudge_factor=null, kine_shower_recom_factor=null, kine_proton_recom_factor=null, kine_plane_weights=null, kine_plane_asym_switch=null, kine_w_value=null, muon_dqdx_curve=null, sp_dedx_use_recomb_model=false, sp_mean_dedx_cut=null, dl_vtx_cut=null, skip_cosmic_companions=false, cosmic_companion_min_length=null) :: {
             type: "TaggerCheckNeutrino",
             name: prefix + name,
             data: {
@@ -427,6 +427,16 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // tag it; its cosmic-tagged bundle-mate stays excluded regardless (docs/pr/16
               // design A: keeps vetoing unexamined shards like SBND evt 52195's 1.3 cm main).
               + (if nu_skip_cosmic_bundle_min_length > 0 then { nu_skip_cosmic_bundle_min_length: nu_skip_cosmic_bundle_min_length } else {})
+              // skip_cosmic_companions / cosmic_companion_min_length (cm):
+              // doc pr/20 Part I P4.  Drop a TGM- or STM-tagged COMPANION from
+              // the neutrino's other_clusters, so its charge cannot become a
+              // particle in the flow tree or enter kine_reco_Enu.  The length
+              // floor keeps a SHORT tagged companion in regardless of verdict.
+              // Nothing tags a companion unless the taggers run with
+              // evaluate_demoted_mains, so this is inert without P3.  C++
+              // defaults false / 0; keys omitted when off => byte-identical.
+              + (if skip_cosmic_companions then { skip_cosmic_companions: true } else {})
+              + (if cosmic_companion_min_length != null then { cosmic_companion_min_length: cosmic_companion_min_length } else {})
               // C++ default false.  Key omitted when off => byte-identical pre-knob config (uBooNE).
               // When on: direction-weakness reads use segment_is_dir_weak() (score thresholds),
               // the faithful port of prototype ProtoSegment::is_dir_weak() -- see sbnd_xin/docs/pr/6.

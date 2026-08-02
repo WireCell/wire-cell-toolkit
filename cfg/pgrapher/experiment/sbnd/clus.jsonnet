@@ -671,6 +671,12 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // flag_demoted_main.  Inert unless restore_demoted_mains above put
               // the flag there.
               evaluate_demoted_mains=false,
+              // skip_cosmic_companions / cosmic_companion_min_length (doc pr/20
+              // Part I P4; C++ defaults false / 0, keys omitted when off =>
+              // byte-identical): act on the verdict P3 produced -- drop a TGM/
+              // STM-tagged companion from the neutrino's other_clusters, unless
+              // it is shorter than the floor (cm).  Inert without P3.
+              skip_cosmic_companions=false, cosmic_companion_min_length=null,
               // mip_dqdx: SBND MIP dQ/dx scale in e/cm handed to
               // TaggerCheckSTM AND (since docs pr/7-pr/8) to
               // tagger_check_neutrino as the PR chain's flat-template/cal_4mom
@@ -1275,6 +1281,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             nu_skip_cosmic=nu_skip_cosmic,
             nu_skip_cosmic_bundle=nu_skip_cosmic_bundle,
             nu_skip_cosmic_bundle_min_length=nu_skip_cosmic_bundle_min_length,
+            skip_cosmic_companions=skip_cosmic_companions,
+            cosmic_companion_min_length=cosmic_companion_min_length,
             dir_weak_use_score=dir_weak_use_score,
             mip_dqdx=mip_dqdx,
             mip_dqdx_median=mip_dqdx_median,
@@ -1626,6 +1634,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        restore_demoted_mains=null,
        // doc pr/20 Part I P3; false = C++ default = OFF.  See clus_pr.
        evaluate_demoted_mains=false,
+       // doc pr/20 Part I P4; false / null = C++ defaults = OFF.  See clus_pr.
+       skip_cosmic_companions=false, cosmic_companion_min_length=null,
        mip_dqdx=56000, stm_consistent_fv=true, stm_accept_guards=true,
        stm_proton_muon_guard=true, stm_cathode_guard=true,
        stm_anode_dist_fix=true, stm_second_track_guard=true,
@@ -1715,6 +1725,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 unmerge_bundle_mode=unmerge_bundle_mode,
                 restore_demoted_mains=restore_demoted_mains,
                 evaluate_demoted_mains=evaluate_demoted_mains,
+                skip_cosmic_companions=skip_cosmic_companions,
+                cosmic_companion_min_length=cosmic_companion_min_length,
                 mip_dqdx=mip_dqdx,
                 stm_consistent_fv=stm_consistent_fv,
                 stm_accept_guards=stm_accept_guards,
