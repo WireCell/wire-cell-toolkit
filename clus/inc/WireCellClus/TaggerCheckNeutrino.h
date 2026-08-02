@@ -63,6 +63,13 @@ public:
         // stubs from dragging the vertex: >=3 surviving legs => fit on the
         // survivors; <=2 => skip the fit (two-leg position already fit).
         double m_fit_vertex_min_seg_length{0};
+        // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II B0), both in cm.
+        // cathode_kink_xcut = 0 => segment_search_kink sees every fit point =>
+        // byte-identical to the pre-pr/20 behavior.  cathode_x is the cathode
+        // plane in the T0-corrected frame (SBND 0; the same convention
+        // ClusteringCathodeConnect's cathode_x uses).
+        double m_cathode_x{0};
+        double m_cathode_kink_xcut{0};
         // Detector-extent literals (docs/pr/2 sec. 2e(iv)), all in cm.
         // Defaults = the uBooNE prototype values (active volume y in
         // [-116,+117], z in [0,1037]) => absent keys are byte-identical.

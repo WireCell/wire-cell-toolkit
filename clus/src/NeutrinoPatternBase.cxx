@@ -960,7 +960,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
             }
             
             auto t_op = BS_Clock::now();
-            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median);
+            auto kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median, m_cathode_x, m_cathode_kink_xcut);
             t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
             auto& [kink_point, dir1, dir2, flag_continue] = kink_tuple;
 
@@ -1022,7 +1022,7 @@ bool PatternAlgorithms::replace_segment_and_vertex(Graph& graph, SegmentPtr& seg
                     saved_break_wcp_indices.find(break_idx) != saved_break_wcp_indices.end()) {
                     test_start_p = kink_geo;
                     t_op = BS_Clock::now();
-                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median);
+                    kink_tuple = segment_search_kink(curr_sg, test_start_p, "fit", m_mip_dqdx_median, m_cathode_x, m_cathode_kink_xcut);
                     t_segment_search_kink += BS_MS(BS_Clock::now() - t_op);
                     auto& [kink_point2, dir1_2, dir2_2, flag_continue2] = kink_tuple;
                     Facade::geo_vector_t dir1_geo2(dir1_2.x(), dir1_2.y(), dir1_2.z());

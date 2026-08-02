@@ -113,6 +113,15 @@ namespace WireCell::Clus::PR {
         double m_mip_dqdx{50000/units::cm};
         double m_mip_dqdx_median{43000/units::cm};
 
+        // Cathode kink veto (doc sbnd_xin/docs/pr/20 Part II, B0).  Passed to
+        // segment_search_kink from break_segments: a candidate fit point within
+        // m_cathode_kink_xcut of the cathode plane at m_cathode_x is skipped, so
+        // the ~2 cm transverse cathode mismatch cannot invent a vertex that breaks
+        // a crossing cosmic into two particles.  C++ default 0 => no point is ever
+        // skipped => byte-identical to the pre-pr/20 behavior.
+        double m_cathode_x{0};
+        double m_cathode_kink_xcut{0};
+
         // Proton-template direction vote (doc pr/8; default false = legacy).
         // Thresholds are initial values pending the pr/8 sec. 6 calibration.
         bool   m_proton_dir_vote{false};

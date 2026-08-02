@@ -188,7 +188,7 @@ namespace WireCell::Clus::PR {
         return std::get<0>(dpc->get_closest_2d_point_info(point, plane, face, apa));
     }
 
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold){
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name, double dQ_dx_threshold, double cathode_x, double cathode_kink_xcut){
         auto tmp_results = segment_get_closest_point(seg, start_p, cloud_name);
         WireCell::Point test_p = tmp_results.second;
 
@@ -294,6 +294,16 @@ namespace WireCell::Clus::PR {
                 dist_to_start < 1*units::cm) continue;
 
             if (flag_check) {
+                // Cathode veto (doc pr/20 Part II, B0).  Gate ONLY the four accept
+                // tests below: refl_angles/para_angles and the windowed sum_angles
+                // are untouched, and the loop breaks at the first qualifying index,
+                // so skipping a cathode index simply lets the scan continue and a
+                // genuine kink elsewhere on the segment sees identical arithmetic.
+                // The `> 0` guard and the strict `<` are both load-bearing for
+                // byte-identicality when the knob is off.
+                if (cathode_kink_xcut > 0 &&
+                    std::abs(fits[i].point.x() - cathode_x) < cathode_kink_xcut) continue;
+
                 // Calculate average and max dQ/dx in local region
                 double ave_dQ_dx = 0;
                 int ave_count = 0;

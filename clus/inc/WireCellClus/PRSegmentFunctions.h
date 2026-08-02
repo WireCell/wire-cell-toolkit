@@ -24,7 +24,13 @@ namespace WireCell::Clus::PR {
     std::tuple<bool, std::pair<SegmentPtr, SegmentPtr>, VertexPtr> break_segment(Graph& graph, SegmentPtr seg, Point point, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const IDetectorVolumes::pointer& dv,
                        double max_dist=1e9*units::cm);
     // patter recognition
-    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm );
+    // cathode_kink_xcut > 0 makes the kink search skip candidate fit points within
+    // that distance of the cathode plane at cathode_x, where the transverse
+    // cathode mismatch fakes a turn and the para_angle guard (which exists to
+    // protect isochronous imaging artifacts) is wide open because the crossing is
+    // drift-x dominated -- see sbnd_xin/docs/pr/20 Part II.  Default 0 = no point
+    // is ever skipped = byte-identical to the pre-pr/20 behavior.
+    std::tuple<WireCell::Point, WireCell::Vector, WireCell::Vector, bool> segment_search_kink(SegmentPtr seg, WireCell::Point& start_p, const std::string& cloud_name = "fit", double dQ_dx_threshold = 43000/units::cm, double cathode_x = 0, double cathode_kink_xcut = 0 );
 
     /// Calculate track length from segment
     ///
