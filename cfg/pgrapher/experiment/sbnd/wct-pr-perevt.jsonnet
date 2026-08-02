@@ -101,6 +101,18 @@ function(
     // 50000 (the MicroBooNE value, and the C++ default) to isolate the
     // reference-table change from the MIP-scale change in an A/B.
     mip_dqdx       = 56000,
+    // Cathode kink veto (doc pr/20 Part II B0), both cm.  segment_search_kink's
+    // four accept criteria are each guarded by para_angle > 7.5-15 deg, a guard
+    // against isochronous imaging artifacts that is INVERTED at the cathode:
+    // the crossing is drift-x dominated so para_angle is 61-78 deg, wide open,
+    // while the ~2 cm transverse mismatch across the gap supplies the turn.
+    // cathode_kink_xcut suppresses kink ACCEPT candidates within that distance
+    // of x = cathode_x; the angle arithmetic itself is untouched.
+    // null on both = C++ default 0 = OFF = the legacy kink search, and the keys
+    // are omitted so the compiled JSON is byte-identical (gate B0-2).
+    // Pass -A cathode_kink_xcut=5 -A cathode_x=0 to exercise it.
+    cathode_x         = null,
+    cathode_kink_xcut = null,
     // TaggerCheckSTM's containment gate (cluster_fc_check) uses the same fiducial
     // + margins as tagger_check_tgm / tagger_check_fc, so "contained" means one
     // thing across all three verdicts.  true = SBND production (docs/49); false
@@ -438,6 +450,8 @@ function(
                              cosmic_y_top_strict=pr_y_top - 15,
                              cosmic_y_top_loose=pr_y_top - 37,
                              cosmic_y_small_piece=pr_y_top - 67,
+                             cathode_x=cathode_x,
+                             cathode_kink_xcut=cathode_kink_xcut,
                              vertex_z_prior_scale=vertex_z_prior_scale,
                              ssm_target_dir=ssm_target_dir,
                              ssm_absorber_dir=ssm_absorber_dir,

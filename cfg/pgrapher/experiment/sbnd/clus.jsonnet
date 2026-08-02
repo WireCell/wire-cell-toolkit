@@ -811,6 +811,18 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
               // DEFAULT 1.0 cm for SBND (owner 2026-07-30, deliberate
               // prototype divergence).
               fit_vertex_min_seg_length=1.0,
+              // cathode_x / cathode_kink_xcut (cm): the cathode kink veto,
+              // doc pr/20 Part II B0.  segment_search_kink's four accept
+              // criteria are each guarded by para_angle > 7.5-15 deg, a guard
+              // against isochronous imaging artifacts that is INVERTED at the
+              // cathode -- the crossing is drift-x dominated (para_angle
+              // 61-78 deg, wide open) while the ~2 cm transverse mismatch
+              // across the gap supplies the turn, so one cosmic leaves the PR
+              // graph as two segments.  cathode_kink_xcut suppresses kink
+              // ACCEPT candidates within that distance of x = cathode_x; the
+              // angle arithmetic itself is untouched.
+              // null = C++ default 0 = OFF (key omitted => byte-identical).
+              cathode_x=null, cathode_kink_xcut=null,
               // cosmic_y_* (cm): cosmic_tagger()'s four "reaches the top of the
               // detector" tests, re-anchored from uBooNE's top face (y = +117 cm)
               // to SBND's (y = +200 cm, sbnd_y_top above).  The uBooNE literals
@@ -1244,6 +1256,8 @@ local clus_pr(anodes, dump, output_dir, runNo, subRunNo, eventNo, rse_from_ident
             proton_dir_vote=proton_dir_vote,
             endpoint_trim_retry=endpoint_trim_retry,
             fit_vertex_min_seg_length=fit_vertex_min_seg_length,
+            cathode_x=cathode_x,
+            cathode_kink_xcut=cathode_kink_xcut,
             cosmic_y_top_main=cosmic_y_top_main,
             cosmic_y_top_strict=cosmic_y_top_strict,
             cosmic_y_top_loose=cosmic_y_top_loose,
@@ -1604,6 +1618,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // fit_vertex short-segment exclusion (doc pr/9 sec 11 F3c), cm -- see
        // the clus_pr arg comment.  null would give the legacy include-all fit.
        fit_vertex_min_seg_length=1.0,
+       // Cathode kink veto (doc pr/20 Part II B0), both cm.  cathode_kink_xcut
+       // suppresses segment_search_kink accept candidates within that distance
+       // of x = cathode_x, because the kink finder's para_angle guard is
+       // inverted at the cathode and breaks crossing cosmics in two.
+       // C++ defaults are 0/0 = OFF; null here omits both keys, so the
+       // compiled JSON is byte-identical to the pre-B0 config.
+       cathode_x=null, cathode_kink_xcut=null,
        // Detector-extent literals re-anchored to SBND (docs/pr/2 sec 2e(iv)) --
        // see the clus_pr arg comments.  cosmic_y_*: uBooNE's "reaches the top"
        // offsets carried from its y=+117 cm top face to SBND's +200 cm.
@@ -1681,6 +1702,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 proton_dir_vote=proton_dir_vote,
                 endpoint_trim_retry=endpoint_trim_retry,
                 fit_vertex_min_seg_length=fit_vertex_min_seg_length,
+                cathode_x=cathode_x,
+                cathode_kink_xcut=cathode_kink_xcut,
                 cosmic_y_top_main=cosmic_y_top_main,
                 cosmic_y_top_strict=cosmic_y_top_strict,
                 cosmic_y_top_loose=cosmic_y_top_loose,
