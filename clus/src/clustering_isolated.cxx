@@ -24,7 +24,10 @@ static void clustering_isolated(
     double flash_t0_window = 80*units::ns,
     double length_cut = 20*units::cm,
     int range_cut = 150,
-    bool save_assoc_id = false
+    bool save_assoc_id = false,
+    double cathode_guard_xcut = 0,
+    double cathode_x = 0,
+    double cathode_guard_dis_floor = 0
     );
 
 class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -58,12 +61,32 @@ public:
         // array is added, so the compiled config, the Bee dumps and the pctree
         // tarball are all byte-identical.
         save_assoc_id_ = get(config, "save_assoc_id", false);
+        // Cathode guard on the small->big absorb (sbnd_xin/docs/pr/19): a
+        // small cluster that reaches within cathode_guard_xcut of the cathode
+        // plane AND whose nearest big cluster is farther away than its own
+        // cathode distance is left unabsorbed -- it plausibly belongs to
+        // activity in the OTHER drift volume, which this per-APA pass cannot
+        // see (SBND run 18253 evt 444187: ~560 pts of near-cathode nueCC
+        // shower fragments absorbed by a cosmic 46-76 cm away while the true
+        // parent sat 1.9 cm across the cathode).  Default 0 => guard fully
+        // OFF => byte-identical to pre-knob builds.  cathode_x is the cathode
+        // plane position in this pass's (raw) frame; the SBND cathode is at
+        // x = +-0.45 cm, so the 0 default is correct there.
+        cathode_guard_xcut_ = get(config, "cathode_guard_xcut", cathode_guard_xcut_);
+        cathode_x_ = get(config, "cathode_x", cathode_x_);
+        // Floor on the big-cluster gap below which the guard never declines:
+        // a small cluster genuinely NEAR its big cluster (nu-vertex fragments,
+        // delta rays) keeps the legacy absorb; only the distant angle-less
+        // absorbs -- the 444187 pathology sat at 46-76 cm -- are declined.
+        // Default 0 = no floor (the pure comparative guard).
+        cathode_guard_dis_floor_ = get(config, "cathode_guard_dis_floor", cathode_guard_dis_floor_);
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_,
-                                   length_cut_, range_cut_, save_assoc_id_);
+                                   length_cut_, range_cut_, save_assoc_id_,
+                                   cathode_guard_xcut_, cathode_x_, cathode_guard_dis_floor_);
     }
 
 private:
@@ -72,6 +95,9 @@ private:
     double length_cut_{20*units::cm};
     int range_cut_{150};
     bool save_assoc_id_{false};
+    double cathode_guard_xcut_{0};
+    double cathode_x_{0};
+    double cathode_guard_dis_floor_{0};
 };
 
 
@@ -99,7 +125,10 @@ static void clustering_isolated(
     double flash_t0_window,
     double length_cut,
     int range_cut,
-    bool save_assoc_id
+    bool save_assoc_id,
+    double cathode_guard_xcut,
+    double cathode_x,
+    double cathode_guard_dis_floor
 )
 {
     // Get all the wire plane IDs from the grouping
@@ -267,6 +296,11 @@ static void clustering_isolated(
     // clustering small with big ones ...
     double small_big_dis_cut = 80 * units::cm;
     std::set<Cluster *, cluster_less_functor> used_small_clusters;
+    // Cathode guard (doc pr/19): smalls this pass declines to absorb.  They
+    // also may not be chained into an absorbed group by the 5 cm small-small
+    // pass below; they remain "remaining" smalls and may still merge among
+    // themselves (50 cm pass), staying separate from every big cluster.
+    std::set<Cluster *, cluster_less_functor> guarded_small_clusters;
     for (auto it = small_clusters.begin(); it != small_clusters.end(); it++) {
         Cluster *curr_cluster = (*it);
         // curr_cluster->Create_point_cloud();
@@ -288,7 +322,25 @@ static void clustering_isolated(
         }
         // std::cout << "SB: " << curr_cluster->get_length()/units::cm << " " << min_dis_cluster->get_length()/units::cm << " " << curr_cluster->get_pca().center) << " " << min_dis_cluster->get_pca().center) << " " << min_dis << " " << small_big_dis_cut << std::endl;
 
-        if (min_dis < small_big_dis_cut) {    
+        if (min_dis < small_big_dis_cut) {
+            if (cathode_guard_xcut > 0 && min_dis > cathode_guard_dis_floor) {
+                double dcath = 1e9;
+                const int N = curr_cluster->npoints();
+                for (int k = 0; k != N; k++) {
+                    double d = std::fabs(curr_cluster->point3d(k).x() - cathode_x);
+                    if (d < dcath) dcath = d;
+                }
+                if (dcath < cathode_guard_xcut && min_dis > dcath) {
+                    // Census marker (raw stdout, batch-log greppable like the
+                    // pr/15 separate() marker): one line per guarded small.
+                    std::cout << "[iso-cathode-guard] declined absorb: small "
+                              << curr_cluster->get_length()/units::cm << " cm / "
+                              << N << " pts, cathode " << dcath/units::cm
+                              << " cm < big " << min_dis/units::cm << " cm" << std::endl;
+                    guarded_small_clusters.insert(curr_cluster);
+                    continue;
+                }
+            }
 
             to_be_merged_pairs.insert(std::make_pair(min_dis_cluster, curr_cluster));
             used_small_clusters.insert(curr_cluster);
@@ -308,6 +360,12 @@ static void clustering_isolated(
             std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
             double dis = std::get<2>(results);
             if (dis < small_small_dis_cut) {
+                // Cathode guard (doc pr/19): a guarded small may not be chained
+                // into an absorbed (used) group either -- that would re-attach
+                // it to the big cluster the guard just declined.  The set is
+                // empty when the guard is off, so this line is then inert.
+                if (guarded_small_clusters.find(cluster1) != guarded_small_clusters.end() ||
+                    guarded_small_clusters.find(cluster2) != guarded_small_clusters.end()) continue;
                 if (used_small_clusters.find(cluster1) != used_small_clusters.end() &&
                         used_small_clusters.find(cluster2) == used_small_clusters.end() ||
                     used_small_clusters.find(cluster2) != used_small_clusters.end() &&

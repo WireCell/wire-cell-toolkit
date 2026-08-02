@@ -222,6 +222,22 @@ function(
     // cosmic band, neutrino re-merged them at 0.31 cm).  false omits the keys
     // => byte-identical pre-knob config (runner: SBND_NU_ISO_GUARD=0).
     nu_iso_band_guard = true,
+    // iso_cathode_guard (SBND default FALSE -- doc pr/19 campaign, pending
+    // validation): per-APA clustering_isolated declines the angle-less 80 cm
+    // small->big absorb for a small cluster within 30 cm of the cathode that
+    // is farther from every big cluster than from the cathode (run 18253 evt
+    // 444187: near-cathode nueCC shower fragments absorbed by a cosmic 46-76
+    // cm away; true parent 1.9 cm across the cathode).  false omits the key
+    // => compiled config byte-identical (runner: SBND_ISO_CATHODE_GUARD=1).
+    iso_cathode_guard = false,
+    // adopt_nu_fragments (SBND default FALSE -- doc pr/19 campaign, pending
+    // validation): all-APA rescue pass 3 adopting small flashless
+    // near-cathode fragments (the population iso_cathode_guard frees) into a
+    // beam-window cluster on raw proximity (13 cm) under the beam-T0
+    // hypothesis.  Needs cathode_rescue (shares its pipeline slot) and is
+    // designed to run WITH iso_cathode_guard.  false omits the keys =>
+    // compiled config byte-identical (runner: SBND_ADOPT_NU_FRAG=1).
+    adopt_nu_fragments = false,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -257,7 +273,7 @@ function(
         subRunNo=subrun,
         eventNo=event,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---
@@ -314,7 +330,7 @@ function(
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
-            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments);
             local per_apa_pre = [g.intern(
                 innodes=[active_clusters[n], masked_clusters[n], opflash_sources[n]],
                 centernodes=[clus_pipes[n]],
@@ -349,7 +365,7 @@ function(
                     g.edge(flash_attach[n], matching_pipes[n], 0, 0),
                 ]
             ) for n in std.range(0, nanodes - 1)];
-            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched);
+            local clus_all = clus_maker.all_apa(anodes, dump=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments);
             g.intern(
                 innodes=per_apa,
                 outnodes=[clus_all],

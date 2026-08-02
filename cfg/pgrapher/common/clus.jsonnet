@@ -804,7 +804,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                               tip_touch_cut=null, tip_touch_angle_cut=null,
                               cathode_band_dis=null,
                               rescue_unmatched=false,
-                              unmatched_min_length=null, unmatched_min_npts=null) :: {
+                              unmatched_min_length=null, unmatched_min_npts=null,
+                              adopt_nu_fragments=false, adopt_dis=null,
+                              adopt_xcut=null, adopt_frag_max_length=null,
+                              adopt_min_npts=null, adopt_beam_min_length=null) :: {
             type: "ClusteringCathodeBundleRescue",
             name: prefix+name,
             data: dv_cfg + pcts_cfg + scope_cfg + {
@@ -842,6 +845,20 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // null => C++ default floors (30 cm / 200 pts) on the adopted cluster.
                 [if unmatched_min_length != null then "unmatched_min_length"]: unmatched_min_length,
                 [if unmatched_min_npts != null then "unmatched_min_npts"]: unmatched_min_npts,
+                // Near-cathode fragment adoption pass (sbnd_xin/docs/pr/19):
+                // a small flashless fragment reaching within adopt_xcut of the
+                // cathode is merged into a beam-window cluster when its raw
+                // closest approach under the beam-T0 hypothesis is within
+                // adopt_dis.  Companion of clustering_isolated's
+                // cathode_guard_xcut.  C++ default false.  Key omitted when
+                // off => byte-identical pre-knob config.
+                [if adopt_nu_fragments then "adopt_nu_fragments"]: true,
+                // nulls => C++ defaults (10 cm / 30 cm / 60 cm / 5 pts / 10 cm).
+                [if adopt_dis != null then "adopt_dis"]: adopt_dis,
+                [if adopt_xcut != null then "adopt_xcut"]: adopt_xcut,
+                [if adopt_frag_max_length != null then "adopt_frag_max_length"]: adopt_frag_max_length,
+                [if adopt_min_npts != null then "adopt_min_npts"]: adopt_min_npts,
+                [if adopt_beam_min_length != null then "adopt_beam_min_length"]: adopt_beam_min_length,
             },
             uses: [detector_volumes, pc_transforms],
         },
@@ -1000,8 +1017,17 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // main_cluster + additional_clusters layout.  Needs
         // MultiAlgBlobClustering save_assoc_cluster_id=true to survive the pctree
         // tarball.  Doc 52.
+        // cathode_guard_xcut (default null => key omitted => guard OFF,
+        // byte-identical pre-knob config; sbnd_xin/docs/pr/19): decline the
+        // angle-less small->big absorb for a small cluster that reaches within
+        // this distance of the cathode plane AND is farther from every big
+        // cluster than from the cathode -- it plausibly belongs to activity in
+        // the other drift volume, invisible to this per-APA pass.  cathode_x
+        // (default null => C++ 0) is the cathode plane position in this
+        // pass's raw frame.
         isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null,
-                 save_assoc_id=false) :: {
+                 save_assoc_id=false, cathode_guard_xcut=null, cathode_x=null,
+                 cathode_guard_dis_floor=null) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
             data: {
@@ -1010,6 +1036,11 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 [if length_cut != null then 'length_cut']: length_cut,
                 [if range_cut != null then 'range_cut']: range_cut,
                 [if save_assoc_id then 'save_assoc_id']: true,
+                [if cathode_guard_xcut != null then 'cathode_guard_xcut']: cathode_guard_xcut,
+                [if cathode_x != null then 'cathode_x']: cathode_x,
+                // null => C++ 0 (no floor): the guard declines regardless of how
+                // close the big cluster is.  Set to keep nearby (< floor) absorbs.
+                [if cathode_guard_dis_floor != null then 'cathode_guard_dis_floor']: cathode_guard_dis_floor,
             } + dv_cfg + scope_cfg,
         },
 

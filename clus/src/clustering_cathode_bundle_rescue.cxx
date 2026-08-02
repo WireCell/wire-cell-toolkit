@@ -108,6 +108,23 @@ struct CbrParams {
     bool rescue_unmatched{false};
     double unmatched_min_length{30*units::cm};
     int unmatched_min_npts{200};
+    // near-cathode fragment adoption pass (default OFF; sbnd_xin/docs/pr/19).
+    // The per-APA clustering_isolated cathode guard leaves near-cathode shower
+    // fragments UNABSORBED (they plausibly belong to activity in the other
+    // drift volume); Q/L matching leaves them flashless.  Here, with cross-
+    // cathode context available, adopt such a fragment into a beam-window
+    // cluster when its raw closest approach (under the beam-T0 hypothesis) is
+    // within adopt_dis.  Iterates, so a chained fragment family is collected
+    // hop by hop as the beam cluster grows (444187: 1.9 cm first hop, up to
+    // ~12 cm between family members).  The length ceiling is the protection
+    // against swallowing a long flashless cosmic on mere proximity -- long
+    // orphans go through pass 2's strict crossing-pair geometry instead.
+    bool adopt_nu_fragments{false};
+    double adopt_dis{10*units::cm};
+    double adopt_xcut{30*units::cm};          // fragment must reach this close to the cathode
+    double adopt_frag_max_length{60*units::cm};
+    int adopt_min_npts{5};
+    double adopt_beam_min_length{10*units::cm};
 };
 
 // Fold an angle (deg, 0..180) about 180 -> collinearity (0 = parallel or anti-parallel).
@@ -354,6 +371,15 @@ public:
         p_.rescue_unmatched     = get(config, "rescue_unmatched", p_.rescue_unmatched);
         p_.unmatched_min_length = get(config, "unmatched_min_length", p_.unmatched_min_length);
         p_.unmatched_min_npts   = get(config, "unmatched_min_npts", p_.unmatched_min_npts);
+
+        // Near-cathode fragment adoption pass (C++ default false => the pass
+        // is absent and behavior is byte-identical to pre-knob builds).
+        p_.adopt_nu_fragments     = get(config, "adopt_nu_fragments", p_.adopt_nu_fragments);
+        p_.adopt_dis              = get(config, "adopt_dis", p_.adopt_dis);
+        p_.adopt_xcut             = get(config, "adopt_xcut", p_.adopt_xcut);
+        p_.adopt_frag_max_length  = get(config, "adopt_frag_max_length", p_.adopt_frag_max_length);
+        p_.adopt_min_npts         = get(config, "adopt_min_npts", p_.adopt_min_npts);
+        p_.adopt_beam_min_length  = get(config, "adopt_beam_min_length", p_.adopt_beam_min_length);
     }
 
     virtual Configuration default_configuration() const {
@@ -694,11 +720,155 @@ private:
             }
         }
 
+        // ---- Pass 3 (adopt_nu_fragments; sbnd_xin/docs/pr/19): adopt small
+        // flashless NEAR-CATHODE fragments into a beam-window cluster on raw
+        // proximity.  Companion of the per-APA clustering_isolated cathode
+        // guard, which leaves such fragments unabsorbed (444187: ~560 pts of
+        // nueCC shower fragments 1.9 cm across the cathode from the nu main).
+        // Same scope discipline as pass 2: the fragments' x_t0cor was
+        // materialized from the sentinel T0, so candidates are evaluated in
+        // RAW scope under the beam-T0 hypothesis (sub-mm shift in the beam
+        // window).  Pass 2's strict crossing-pair geometry is deliberately
+        // NOT used here -- shower fragments are not track tips; the
+        // protections are instead the length ceiling (a long flashless
+        // cosmic never qualifies), the cathode-reach requirement, and the
+        // beam-window destination.  One adoption per round, full
+        // re-enumeration, first qualifying (beam ident, fragment ident) pair.
+        int nfrag = 0;
+        if (p_.adopt_nu_fragments) {
+            while (true) {
+                auto live_clusters = live_grouping.children();
+                for (auto* live : live_clusters) {
+                    const bool matched = live->get_scalar<int>("flash", -1) >= 0 &&
+                                         live->get_scalar<int>("matched_flash_gid", -1) >= 0;
+                    const auto& want = matched ? m_scope : live->get_raw_scope();
+                    if (live->get_default_scope().hash() != want.hash()) {
+                        live->set_default_scope(want);
+                    }
+                }
+
+                std::vector<Member> members;      // flash-matched, ident order
+                std::vector<Member> fragments;    // flashless small candidates, ident order
+                for (auto* c : live_clusters) {
+                    const int gid = c->get_scalar<int>("matched_flash_gid", -1);
+                    if (c->get_scalar<int>("flash", -1) >= 0 && gid >= 0) {
+                        members.push_back({c, (int)c->ident(), gid,
+                                           c->get_cluster_t0(), c->get_length()});
+                        continue;
+                    }
+                    if (c->npoints() < p_.adopt_min_npts) continue;
+                    const double len = c->get_length();
+                    if (len >= p_.adopt_frag_max_length) continue;
+                    // Cathode reach, in the fragment's raw frame.
+                    double dcath = 1e9;
+                    const int N = c->npoints();
+                    for (int k = 0; k != N; ++k) {
+                        double d = std::fabs(c->point3d(k).x() - p_.cathode_x);
+                        if (d < dcath) dcath = d;
+                    }
+                    if (dcath >= p_.adopt_xcut) continue;
+                    fragments.push_back({c, (int)c->ident(), -1, 0.0, len});
+                }
+                std::sort(members.begin(), members.end(),
+                          [](const Member& a, const Member& b) { return a.ident < b.ident; });
+                std::sort(fragments.begin(), fragments.end(),
+                          [](const Member& a, const Member& b) { return a.ident < b.ident; });
+
+                const Member* best_beam = nullptr;
+                const Member* best_frag = nullptr;
+                double best_gap = -1;
+                for (const auto& kb : members) {
+                    if (best_beam) break;
+                    if (!in_beam(kb.t0)) continue;
+                    if (!kb.cluster->get_scope_filter(m_scope)) continue;
+                    if (kb.length < p_.adopt_beam_min_length) continue;
+                    for (const auto& kf : fragments) {
+                        // Raw x is the t0=0 frame: dt0_dest = t0_beam - 0.
+                        const double xshift = far_xshift(live_grouping, *kf.cluster, kb.t0);
+                        double gap = 1e9;
+                        const int N = kf.cluster->npoints();
+                        for (int k = 0; k != N; ++k) {
+                            geo_point_t p = kf.cluster->point3d(k);
+                            geo_point_t ps(p.x() + xshift, p.y(), p.z());
+                            double d = kb.cluster->get_closest_dis(ps);
+                            if (d < gap) gap = d;
+                        }
+                        if (gap >= p_.adopt_dis) continue;
+                        best_beam = &kb;
+                        best_frag = &kf;
+                        best_gap = gap;
+                        break;
+                    }
+                }
+                if (!best_beam) break;
+
+                const double dest_t0 = best_beam->t0;
+                const int dest_flash = best_beam->cluster->get_scalar<int>("flash", -1);
+                const int dest_gid = best_beam->gid;
+                const int dest_lm = best_beam->cluster->get_scalar<int>("lm_flag", -1);
+
+                log->info("fragment adopt round {}: c{} (gid {}, t0 {:.3f} us, {:.1f} cm) + "
+                          "c{} (flashless, {:.1f} cm, {} pts, gap {:.1f} cm) -> gid {}",
+                          nfrag, best_beam->ident, best_beam->gid,
+                          best_beam->t0/units::us, best_beam->length/units::cm,
+                          best_frag->ident, best_frag->length/units::cm,
+                          best_frag->cluster->npoints(), best_gap/units::cm, dest_gid);
+
+                typedef cluster_connectivity_graph_t Graph;
+                Graph g;
+                std::map<int, int> desc;
+                int idx_beam = -1, idx_frag = -1;
+                for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+                    if (live_clusters[ilive] == best_beam->cluster) idx_beam = (int)ilive;
+                    if (live_clusters[ilive] == best_frag->cluster) idx_frag = (int)ilive;
+                }
+                for (size_t ilive = 0; ilive < live_clusters.size(); ++ilive) {
+                    desc[(int)ilive] = boost::add_vertex((int)ilive, g);
+                }
+                boost::add_edge(desc[idx_beam], desc[idx_frag], g);
+                auto fresh = merge_clusters(g, live_grouping);
+                if (fresh.size() != 1) {
+                    log->warn("fragment adopt round {}: expected 1 merged cluster, got {} -- stopping",
+                              nfrag, fresh.size());
+                    break;
+                }
+                Cluster* merged = fresh.at(0);
+
+                // Beam identity, then corrected coordinates under the beam T0
+                // (replaces the fragment points' sentinel-T0 x_t0cor); mixed-
+                // scope inputs, so pin the default scope first (pass-2 idiom).
+                merged->set_cluster_t0(dest_t0);
+                merged->set_scalar<int>("flash", dest_flash);
+                merged->set_scalar<int>("matched_flash_gid", dest_gid);
+                merged->set_scalar<int>("lm_flag", dest_lm);
+                merged->set_flag(Flags::main_cluster, 1);
+                merged->set_flag(Flags::associated_cluster, 0);
+                merged->set_default_scope(m_scope);
+                if (m_scope.hash() != merged->get_raw_scope().hash()) {
+                    auto correction_name = merged->get_scope_transform(m_scope);
+                    merged->add_corrected_points(m_pcts, correction_name);
+                }
+                // No source-bundle repair: the fragment belonged to no bundle.
+
+                ++nfrag;
+            }
+
+            // Leave every cluster in the analysis scope (pass-2 idiom).
+            for (auto* live : live_grouping.children()) {
+                if (live->get_default_scope().hash() != m_scope.hash()) {
+                    live->set_default_scope(m_scope);
+                }
+            }
+        }
+
         if (nrounds) {
             log->info("cathode bundle rescue: {} move(s) applied", nrounds);
         }
         if (nadopt) {
             log->info("unmatched rescue: {} adoption(s) applied", nadopt);
+        }
+        if (nfrag) {
+            log->info("fragment adopt: {} adoption(s) applied", nfrag);
         }
     }
 };

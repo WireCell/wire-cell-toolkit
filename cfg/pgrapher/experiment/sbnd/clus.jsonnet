@@ -192,7 +192,14 @@ local bs_dead_face(apa, face) = {
 // even when they touch (run 18255 evt 10550: separate correctly splits the nu
 // candidate off the cosmic band, then neutrino re-merged them at 0.31 cm
 // touch).  false omits both keys => byte-identical pre-knob config.
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true) = {
+// iso_cathode_guard (SBND default FALSE, doc pr/19 campaign): clustering_isolated
+// declines the angle-less 80 cm small->big absorb for a small cluster that
+// reaches within 30 cm of the cathode and is farther from every big cluster
+// than from the cathode (run 18253 evt 444187: ~560 pts of near-cathode nueCC
+// shower fragments absorbed by a cosmic 46-76 cm away; the true parent sat
+// 1.9 cm across the cathode, invisible per-APA).  false omits the key =>
+// compiled config byte-identical to before the knob existed.
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, rse_from_ident=false, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -264,7 +271,16 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
         // into "assoc_cluster_id"/"assoc_cluster_main" so it can be undone before
         // the taggers (doc 52).  C++ default false; key omitted when off =>
         // byte-identical compiled config.
-        cm.isolated(length_cut=15 * wc.cm, save_assoc_id=save_assoc_id),
+        // iso_cathode_guard: see the clus_per_face header comment (doc pr/19).
+        // C++ default 0 (guard off); 30 cm covers the 444187 fragment family
+        // (cathode reach 0.3-24 cm) while leaving delta rays untouched (they
+        // hug their track: big-gap < cathode-distance fails the guard test).
+        // dis_floor 40 cm: a small cluster whose big absorber is within 40 cm
+        // keeps the legacy absorb (nu-vertex fragments, nearby debris); only
+        // DISTANT angle-less absorbs are declined (444187 family: 46-76 cm).
+        cm.isolated(length_cut=15 * wc.cm, save_assoc_id=save_assoc_id,
+                    cathode_guard_xcut=(if iso_cathode_guard then 30 * wc.cm else null),
+                    cathode_guard_dis_floor=(if iso_cathode_guard then 40 * wc.cm else null)),
         cm.examine_bundles(),
     ],
     local bee_zip_path = (if output_dir == '' then '' else output_dir + '/')
@@ -362,7 +378,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, bee
 // flashless; sbnd_xin/docs/pr/17; fires 1/1000 mcp1k, 0/48 nueCC48).
 // false => rescue_unmatched key suppressed => compiled config byte-identical
 // to pre-knob.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true) = {
+// adopt_nu_fragments (SBND default FALSE, doc pr/19 campaign): after the
+// cathode rescue passes, adopt small flashless near-cathode fragments (the
+// population iso_cathode_guard leaves unabsorbed) into a beam-window cluster
+// on raw proximity under the beam-T0 hypothesis.  false omits the keys =>
+// compiled config byte-identical to before the knob existed.
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=null, premerged=false, rse_from_ident=false, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -423,7 +444,13 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, bee_sink=
         min_length_short=2*wc.cm, short_dir_len=25*wc.cm, conn_short_cut=30.0,
         // false => key suppressed => byte-identical (doc pr/17); floors stay
         // at the C++ defaults (30 cm / 200 pts).
-        rescue_unmatched=cathode_rescue_unmatched)] else [])
+        rescue_unmatched=cathode_rescue_unmatched,
+        // Fragment adoption (doc pr/19).  false => keys suppressed =>
+        // byte-identical.  adopt_dis 13 cm covers the observed 444187 family
+        // hop spacing (up to 12.1 cm); other floors stay at the C++ defaults
+        // (adopt_xcut 30 cm, frag_max_length 60 cm, min 5 pts, beam >= 10 cm).
+        adopt_nu_fragments=adopt_nu_fragments,
+        adopt_dis=(if adopt_nu_fragments then 13*wc.cm else null))] else [])
     + [
         // flags_from_longest: the flash-time merge here collapses a bundle's
         // clusters into one; without this the merged cluster inherits its flags
@@ -1498,19 +1525,19 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true)::
+    per_apa(anode, dump=true, bee_sink=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, nu_iso_band_guard=true, iso_cathode_guard=false)::
         clus_per_face(anode, face=0, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
-                      nu_iso_band_guard=nu_iso_band_guard),
+                      nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on),
     all_apa(anodes, dump=true, bee_sink=null, premerged=false, tensor_outname='', save_real_cluster_id=false, save_assoc_cluster_id=false,
-            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true)::
+            trace_bee=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false)::
         clus_all_apa(anodes, dump=dump,
                      output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, pos_offset_on=pos_offset_on,
@@ -1518,7 +1545,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      save_assoc_cluster_id=save_assoc_cluster_id,
                      real_cluster_id_global=real_cluster_id_global,
                      trace_bee=trace_bee, cathode_rescue_on=cathode_rescue_on,
-                     cathode_rescue_unmatched=cathode_rescue_unmatched),
+                     cathode_rescue_unmatched=cathode_rescue_unmatched,
+                     adopt_nu_fragments=adopt_nu_fragments),
     // PR job: input is the reloaded post-QL tarball (see clus_pr above).
     // The TGM/FC and beam-window defaults here mirror clus_pr's -- i.e. the SBND
     // production operating point (see the comment block on clus_pr's arg list for
